@@ -34,7 +34,9 @@ const ROUTES: Record<(typeof LEGACY_SECTION_IDS)[number], string> = {
   patch: "/patch",
   automation: "/automation",
   // History and Baptisms were tabs whose standalone twins are the real pages now.
-  "service-history": "/history",
+  // The editable page, not the shared read-only one: this hash was the old
+  // Settings → History TAB, so a bookmark of it expects Edit times and Merge.
+  "service-history": "/history/manage",
   baptisms: "/baptism",
   // Configuration lives under /settings.
   integrations: "/settings/integrations",

@@ -33,7 +33,7 @@ follow the light/dark theme, unlike the always-dark display URLs above.
 
 | URL | What it is |
 | --- | --- |
-| `/history` | Service history, timing and attendance |
+| `/history` | Service history, timing and attendance — read-only |
 | `/patch` | This week's stage patch, for volunteers |
 | `/scriptview` | Rundown viewer |
 | `/baptism` | Baptism operator |
@@ -44,6 +44,11 @@ Moving between them does not reload the page, so the event stream and cached
 plan data survive a navigation.
 
 `/settings` remains its own page for now.
+
+`/history` is **read-only**: it is a link handed to people outside Production, so
+it shows the record without the controls that change it. The operator's own
+history — edit recorded times, merge a split service, delete one — is
+`/history/manage`, in the rail under Services.
 
 ## Tool links
 

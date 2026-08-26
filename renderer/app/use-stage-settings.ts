@@ -67,7 +67,35 @@ function patchOutput(outputs: readonly Output[], id: string, patch: Partial<Outp
   return outputs.map((o) => (o.id === id ? { ...o, ...patch } : o));
 }
 
-export function useStageSettings() {
+/**
+ * Which view a surface is editing.
+ *
+ * A pinned id -- the layout editor's URL parameter -- wins outright and is never
+ * defaulted away, even when it does not resolve: a caller that names a view it
+ * cannot find must render nothing rather than quietly edit a different one.
+ * Without this the editor's slot half defaulted to the first view while its
+ * alignment half used the URL's, so opening the second slots view showed the
+ * first view's slots and Save wrote them onto the first.
+ */
+export function selectViewId(pinned: string | undefined, own: string): string {
+  return pinned ?? own;
+}
+
+/**
+ * @param pinnedViewId The view this surface is editing, when it knows.
+ *
+ * This hook is per-component -- there is no shared context -- so every caller
+ * gets its OWN selectedViewId, and the resync below defaults it to the first
+ * view. The layout editor route resolved its view from the URL but never said
+ * so here, and the slot editor reads and WRITES through selectedViewId: opening
+ * the second slots view showed the first view's slots under the second's name,
+ * and Save wrote them onto the first. screens-route called setSelectedViewId on
+ * its own instance before navigating, which reached nothing.
+ *
+ * Pinning it is the fix rather than an effect, because an effect leaves one
+ * render where the slot state mirrors the wrong view.
+ */
+export function useStageSettings(pinnedViewId?: string) {
   const queryClient = useQueryClient();
 
   /**
@@ -135,19 +163,24 @@ export function useStageSettings() {
   const { data: updateStatus = null } = useUpdateStatus();
 
   // Selected View for the Views tab master-detail (default to the first view).
-  const [selectedViewId, setSelectedViewId] = useState<string>("");
+  const [ownSelectedViewId, setOwnSelectedViewId] = useState<string>("");
+  // A pinned id wins outright and is never defaulted away. No fallback to the
+  // first view when it does not resolve: a caller that names a view it cannot
+  // find must render nothing rather than quietly edit a different one.
+  const selectedViewId = selectViewId(pinnedViewId, ownSelectedViewId);
+  const setSelectedViewId = setOwnSelectedViewId;
 
-  useResyncOn([stageState, selectedViewId], () => {
-    if (!stageState) return;
+  useResyncOn([stageState, ownSelectedViewId, pinnedViewId], () => {
+    if (pinnedViewId || !stageState) return;
     // Home excluded: this picks a DEFAULT selection, and Home is not selectable
     // anywhere — it is edited in its own tab.
     const views = screensListViews(stageState.views ?? []);
     if (views.length === 0) {
-      if (selectedViewId) setSelectedViewId("");
+      if (ownSelectedViewId) setOwnSelectedViewId("");
       return;
     }
-    if (!selectedViewId || !views.find((v) => v.id === selectedViewId)) {
-      setSelectedViewId(views[0].id);
+    if (!ownSelectedViewId || !views.find((v) => v.id === ownSelectedViewId)) {
+      setOwnSelectedViewId(views[0].id);
     }
   });
 

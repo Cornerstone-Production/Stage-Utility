@@ -19,7 +19,10 @@ import { useStageSettings } from "../use-stage-settings";
 
 export function ViewEditorRoute() {
   const params = useParams({ strict: false }) as { viewId?: string };
-  const s = useStageSettings();
+  // PINNED to the view in the URL. Without it this hook instance defaults to
+  // the first view, and the slot editor below both reads and saves through that
+  // selection -- so editing the second slots view saved its slots onto the first.
+  const s = useStageSettings(params.viewId);
   const router = useRouter();
 
   // Home is not edited here. Phase 6 pointed at this route and Phase 7 replaced

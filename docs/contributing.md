@@ -176,7 +176,7 @@ crossing a toolbar. Anything an operator *must* read belongs in visible text or 
 The theme is `system` | `light` | `dark`, stored under `stage-utility-theme`.
 `system` follows `prefers-color-scheme` live via a `matchMedia` listener, and is the
 default when nothing is stored — so an install predating the option keeps the
-behaviour it had. The pre-paint script in `settings-window.html` reads the same key
+behaviour it had. The pre-paint script in `app.html` reads the same key
 and must stay in step with `useTheme`, or the page flashes the wrong theme on load.
 
 ## Dependencies
