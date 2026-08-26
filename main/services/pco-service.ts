@@ -33,13 +33,47 @@ const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
  * relative, or off-origin is rejected, and the caller falls back to a URL it
  * built itself.
  */
-function sameOrigin(candidate: unknown, base: string): candidate is string {
+export function sameOrigin(candidate: unknown, base: string): candidate is string {
   if (typeof candidate !== "string" || !candidate) return false;
   try {
     return new URL(candidate).origin === new URL(base).origin;
   } catch {
     return false;
   }
+}
+
+/**
+ * A URL that arrived in a PCO response body, REBUILT on our own origin.
+ *
+ * sameOrigin() checks and then hands the original string on. That is correct --
+ * a string whose origin equals PCO's cannot point anywhere else -- but the value
+ * reaching fetch() is still the one that came off the wire, and every request it
+ * makes carries the operator's App ID and secret in an Authorization header.
+ *
+ * This returns a URL whose HOST comes from the constant, and only the path and
+ * query from the candidate. So the host is not checked-and-trusted, it is never
+ * taken from the response at all: there is no string an upstream could return
+ * that sends the credentials somewhere else, including through a redirect chain
+ * or a URL parser disagreement.
+ *
+ * It also gives static analysis something it can see. CodeQL reads a
+ * user-defined type predicate as an ordinary boolean, so the guarded string
+ * stayed tainted and js/request-forgery fired at critical on the release PR;
+ * building on a hardcoded base is the documented remediation for that query.
+ *
+ * @returns the rebuilt URL, or null when the candidate is not PCO's.
+ */
+export function pcoUrlFrom(candidate: unknown, base: string): string | null {
+  if (!sameOrigin(candidate, base)) return null;
+  let path: string;
+  try {
+    const parsed = new URL(candidate);
+    path = `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return null;
+  }
+  // The origin is the CONSTANT's, never the candidate's.
+  return new URL(path, new URL(base).origin).toString();
 }
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
 // everything, which re-pulled it constantly (the live timer polls every 1–4s and
@@ -376,7 +410,7 @@ class PcoService {
     // over TLS, so this is defence in depth rather than a live hole — but the
     // safe answer already exists one line down, which makes the check free.
     const linkUrl = links[action];
-    const url = sameOrigin(linkUrl, PCO_BASE) ? linkUrl : `${base}/live/${action}`;
+    const url = pcoUrlFrom(linkUrl, PCO_BASE) ?? `${base}/live/${action}`;
     await this.postAction(url, appId, secret);
   }
 
@@ -476,7 +510,7 @@ class PcoService {
       // walk them to another host. The guard was written for exactly this and
       // was applied at one of three sites; these are the other two.
       const next = json.links?.next;
-      url = sameOrigin(next, PCO_BASE) ? next : null;
+      url = pcoUrlFrom(next, PCO_BASE);
     }
 
     this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
@@ -698,7 +732,7 @@ class PcoService {
       // walk them to another host. The guard was written for exactly this and
       // was applied at one of three sites; these are the other two.
       const next = json.links?.next;
-      url = sameOrigin(next, PCO_BASE) ? next : null;
+      url = pcoUrlFrom(next, PCO_BASE);
     }
 
     out.sort((a, b) => a.sequence - b.sequence);
