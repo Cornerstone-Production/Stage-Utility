@@ -9,7 +9,7 @@
 // hex box, and the palette the app is actually built from. It commits as you
 // drag, so the canvas behind it updates live rather than on close.
 
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
 
@@ -134,7 +134,6 @@ function ColorPanel({
   /** The swatch this panel belongs to, for placing it. */
   anchor: HTMLElement | null;
 }) {
-  const id = useId();
   const saved = useSavedColors();
   const [draft, setDraft] = useState<Hsva>(() => rgbaToHsva(initial));
   const [typed, setTyped] = useState<string | null>(null);
@@ -250,7 +249,6 @@ function ColorPanel({
       )}
 
       <input
-        id={id}
         value={typed ?? swatchCss}
         spellCheck={false}
         aria-label={`${label} value`}

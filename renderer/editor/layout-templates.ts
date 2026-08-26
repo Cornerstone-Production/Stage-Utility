@@ -16,6 +16,10 @@ export function uid(): string {
   return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// Build the built-in "Dashboard" starter layout as editable nested objects: a
+// 2×2 grid of glass tiles (clock / PCO timer / current + next item) plus SPL and
+// captions strips, mirroring renderer/main/dashboard-view.tsx. All coords are
+// canvas fractions, so it works on any canvas (designed for 16:9). Fresh ids.
 export function dashboardTemplate(): LayoutObject[] {
   let z = 0;
   const caption = (text: string): LayoutObject => ({

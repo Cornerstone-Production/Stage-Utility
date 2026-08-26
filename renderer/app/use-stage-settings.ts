@@ -483,24 +483,6 @@ export function useStageSettings() {
     }
   }
 
-  async function handleReorderViews(ids: string[]) {
-    // Optimistic: reorder the cached state immediately so the drag feels instant.
-    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
-    if (prev) {
-      const byId = new Map(prev.views.map((v) => [v.id, v]));
-      const reordered = ids.map((id) => byId.get(id)).filter(Boolean) as View[];
-      for (const v of prev.views) if (!ids.includes(v.id)) reordered.push(v);
-      queryClient.setQueryData(["stage:getState"], { ...prev, views: reordered });
-    }
-    try {
-      const next = await ipc<StageState>("views:reorder", { ids });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      if (prev) queryClient.setQueryData(["stage:getState"], prev);
-      toast.error(`Failed to reorder views: ${String(err)}`);
-    }
-  }
-
   const revOf = (s: StageState | undefined, id: string) =>
     s?.views?.find((v) => v.id === id)?.layoutRev ?? 0;
 
@@ -831,7 +813,6 @@ export function useStageSettings() {
     handleUpdateLayoutTemplate,
     handleDeleteLayoutTemplate,
     handleCopySlots,
-    handleReorderViews,
     handleSavePreset,
     handleApplyPreset,
     handleDeletePreset,

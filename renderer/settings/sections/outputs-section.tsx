@@ -35,30 +35,6 @@ import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useSortableRow } from "../../lib/use-sortable-row";
 
-/**
- * The Views a given screen may actually be pointed at.
- *
- * Convenience, NOT the safety property: the server refuses an invalid binding
- * regardless (stage-controller's setOutputView). This only stops the operator
- * reaching for something that will be refused.
- */
-/**
- * Every view a screen can be given.
- *
- * This used to hide console views from a display screen, which is what made
- * "use a control surface" a two-step job: you had to know to flip the screen's
- * mode FIRST, because until you did, the view you wanted was not in the list.
- * Nothing was unsafe about the hidden state — a display renders controls inert
- * either way — so hiding it only removed the obvious route to the thing you
- * were trying to do.
- *
- * Everything is offered now, and picking a console view for a display OFFERS to
- * switch the screen. The safety property is unchanged: making a screen live to
- * whoever stands at it is still an explicit yes.
- */
-export function bindableViews(views: readonly View[], _output: Pick<Output, "mode">): View[] {
-  return [...views];
-}
 
 const UNROUTED = "__none__";
 // A sentinel, never a stored value: picking it opens the new-view dialog.
@@ -409,7 +385,18 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={UNROUTED}>— Unrouted —</SelectItem>
-            {bindableViews(views, output).map((v) => (
+            {/* EVERY view, whatever the screen's mode. This used to filter out
+                console views on a display screen, which made "use a control
+                surface" a two-step job: the view you were reaching for was
+                missing until you had already found a different menu and flipped
+                the mode. Nothing was unsafe about showing it — a display renders
+                controls inert either way — so hiding it only removed the obvious
+                route to the thing you were trying to do. Picking a console view
+                for a display now OFFERS to switch the screen, and the switch is
+                awaited before the binding is sent so the server never sees the
+                pair in the order it refuses. The server refuses an invalid
+                binding regardless; this was never the safety property. */}
+            {views.map((v) => (
               <SelectItem key={v.id} value={v.id}>
                 {/* Say which ones are control surfaces, so choosing one is an
                     informed choice rather than a surprise confirm. */}

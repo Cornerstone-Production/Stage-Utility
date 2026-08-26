@@ -218,12 +218,6 @@ function Idle({ children }: { children: ReactNode }) {
 }
 
 /**
- * One item's contents. NEVER null: see the loop above.
- *
- * Exported for the guard that holds that promise — the idle branches are easy
- * to drop, and dropping one brings back a bar that rearranges itself.
- */
-/**
  * Which integrations the health item speaks for, and which of those are down.
  *
  * Exported because the rule is the whole item: two exclusions, each of which was
@@ -243,6 +237,12 @@ export function integrationHealth(states: readonly IntegrationState[] | undefine
   return { setUp, down: setUp.filter((i) => i.connection === "error" || i.connection === "disconnected") };
 }
 
+/**
+ * One item's contents. NEVER null: see the loop above.
+ *
+ * Exported for the guard that holds that promise — the idle branches are easy
+ * to drop, and dropping one brings back a bar that rearranges itself.
+ */
 export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
   const { state, bar, now, obs, reaper, integrations, resi, youtube } = ctx;
   switch (id) {

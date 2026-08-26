@@ -193,7 +193,6 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     // on a page of tiles rather than widgets on a wall.
     home: true,
     placed: undefined,
-    canvasBg: null,
   };
 }
 

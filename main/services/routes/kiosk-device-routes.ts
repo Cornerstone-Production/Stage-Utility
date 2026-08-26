@@ -22,11 +22,10 @@ const clean = (v: string | null): string | undefined =>
   v && v.length > 0 && v.length <= 128 ? v : undefined;
 
 export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
-  const { req, res, pathname, method } = c;
+  const { req, res, pathname, url, method } = c;
 
   // ── The device's own URL ────────────────────────────────────────────────
   if (method === "GET" && pathname === "/enroll") {
-    const url = new URL(req.url ?? "/", "http://localhost");
     const id = clean(url.searchParams.get("device"));
     // The device's own secret, generated at install. Over unicast HTTP, never in
     // the broadcast probe.
@@ -168,17 +167,15 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
         outputId = output.id;
         created = output.id;
       }
-      let issued = "";
       let displacedId: string | null = null;
       await updateDevices((current) => {
-        const { devices, token, displaced } = claim(current, id, outputId, {
+        const { devices, displaced } = claim(current, id, outputId, {
           secret: secretFor(id),
           macs: seen?.macs, hostname: seen?.hostname, os: seen?.os, ip: seen?.ip,
           screen: seen?.screen,
           label: typeof body.label === "string" ? body.label : undefined,
           now: Date.now(),
         });
-        issued = token;
         displacedId = displaced?.id ?? null;
         return devices;
       });
@@ -192,9 +189,8 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // targeting the output would refresh everything except the one screen
       // that needs it.
       stageController.refreshDisplays("all");
-      // The token is never returned: the device already holds it, and a
-      // response carrying it would put the secret in a browser and a log.
-      void issued;
+      // claim()'s `token` is deliberately not read: the device already holds the
+      // secret, and a response carrying it would put it in a browser and a log.
       json(res, { ok: true, displaced: displacedId });
     } catch (err) {
       if (created) {

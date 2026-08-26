@@ -125,6 +125,7 @@ describe("IPC channel wiring", () => {
       ["outputs:openWindow", "Electron-era window opener; the web build navigates directly"],
       ["window:closeSettings", "Escape closed the settings WINDOW; Settings is routes inside the app now, so there is nothing to close to"],
       ["app:getInfo", "version info comes from /api/version"],
+      ["views:reorder", "manual view ordering came out with the settings window; the route stays as the documented POST /api/views/reorder"],
     ]);
 
     // A deliberately LOOSER scan than invokedChannels(): any mention of the

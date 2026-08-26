@@ -1,11 +1,11 @@
 // The widget palette: every object as a card you can drag onto the canvas.
 //
-// A SECOND door, not a replacement. The Add-object dropdown in the toolbar keeps
-// working exactly as it did, and so do dragging, resizing and marquee selection.
-// The palette exists because a dropdown of 41 names in 13 groups is a list you
-// read, and a wall of cards with a line of description each is something you
-// browse — different jobs, and an operator who knows what they want should not
-// have to browse.
+// This REPLACED the toolbar's Add-object dropdown: the "Add object" button now
+// opens the palette, and dragging, resizing and marquee selection are unchanged.
+// It exists because a dropdown of 41 names in 13 groups is a list you read, and a
+// wall of cards with a line of description each is something you browse —
+// different jobs. The right-click menu still carries the flat list, for an
+// operator who knows what they want and should not have to browse for it.
 //
 // Icons and accents live here rather than on the object spec: they are how the
 // palette PRESENTS a type, not part of what the type is. The spec carries the

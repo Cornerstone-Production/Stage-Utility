@@ -86,30 +86,6 @@ export function defaultHomeLayout() {
 }
 
 /**
- * Seed Home, and keep an UNEDITED Home on this build's defaults.
- *
- * Two conditions, and the second is the subtle one:
- *
- *  • Home is absent → create it. Obvious.
- *  • Home exists but has never been saved by a human (`layoutRev` unset) → give
- *    it this build's default cards.
- *
- * The second exists because a build can add a card. Home was seeded with two
- * cards and now ships with four; keying purely off existence would leave every
- * install that ran the older build permanently missing the two new ones, with
- * nothing in the UI to explain why — a feature removed by upgrade, silently.
- *
- * `layoutRev` is the right gate because it is incremented by views:setLayout and
- * by nothing else, so it is exactly "a person has changed this". An operator who
- * switches the readiness card off must not find it back next launch — restoring
- * what someone deliberately removed is the same class of bug as deleting what
- * they made — and after their first toggle `layoutRev` is 1, so this never
- * touches their Home again.
- *
- * Returns the views unchanged when there is nothing to do, so callers can
- * compare by reference and skip a write.
- */
-/**
  * The stats that used to live INSIDE the live-status card, in the order they
  * appeared in it. Split out so each can be placed, sized and ordered on its own.
  */
@@ -148,6 +124,30 @@ function splitLiveStatus(view: View): View {
   return { ...view, layout: { ...view.layout!, objects: next } } as View;
 }
 
+/**
+ * Seed Home, and keep an UNEDITED Home on this build's defaults.
+ *
+ * Two conditions, and the second is the subtle one:
+ *
+ *  • Home is absent → create it. Obvious.
+ *  • Home exists but has never been saved by a human (`layoutRev` unset) → give
+ *    it this build's default cards.
+ *
+ * The second exists because a build can add a card. Home was seeded with two
+ * cards and now ships with four; keying purely off existence would leave every
+ * install that ran the older build permanently missing the two new ones, with
+ * nothing in the UI to explain why — a feature removed by upgrade, silently.
+ *
+ * `layoutRev` is the right gate because it is incremented by views:setLayout and
+ * by nothing else, so it is exactly "a person has changed this". An operator who
+ * switches the readiness card off must not find it back next launch — restoring
+ * what someone deliberately removed is the same class of bug as deleting what
+ * they made — and after their first toggle `layoutRev` is 1, so this never
+ * touches their Home again.
+ *
+ * Returns the views unchanged when there is nothing to do, so callers can
+ * compare by reference and skip a write.
+ */
 export function seedHomeView(views: readonly View[]): View[] {
   const existing = views.find((v) => v.id === HOME_VIEW_ID);
   if (existing) {

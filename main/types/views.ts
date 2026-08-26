@@ -755,10 +755,19 @@ export interface ResolvedOutput {
 /**
  * Is this a layout the renderer can actually draw?
  *
- * `canvas.width` is read unguarded in the renderer, so a layout without one
- * crashes the display it was saved to. Lives here rather than in a route
- * module because more than one writer needs it: the PATCH path has always
- * checked, and an imported bundle is a file off somebody's laptop.
+ * This used to be `typeof layout === "object"` followed by a cast, which let any
+ * object through. Two consequences, both real: `canvas.width` is read unguarded
+ * in the renderer, so a layout without one crashed the display it was saved to;
+ * and `objects.length` went straight into a log line, so an `objects` of
+ * `{ length: "…\n[stage-controller] …" }` forged entries on the LAN-visible
+ * /log page. Validating the shape closes both at the door.
+ *
+ * Deliberately shallow — it checks what the renderer and the log actually
+ * require, not every optional field of a LayoutObject.
+ *
+ * Lives here rather than in a route module because more than one writer needs
+ * it: the PATCH path has always checked, and an imported bundle is a file off
+ * somebody's laptop.
  */
 export function isLayoutShape(v: unknown): v is LayoutDTO {
   if (!v || typeof v !== "object") return false;

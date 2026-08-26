@@ -17,7 +17,6 @@
 // compact strip and a free-form canvas box are different presentations of the
 // same fact.
 
-import type { ReactNode } from "react";
 import {
   ClockIcon,
   CalendarIcon,
@@ -245,10 +244,3 @@ export function normalizeBarRows(rows: readonly BarRowId[]): BarRowId[] {
   const out = collapseSpacers(rows);
   return out.includes(BAR_SPACER) ? out : [...out, BAR_SPACER];
 }
-
-/** Type-safe helper so callers do not index BAR_ITEMS with a bare string. */
-export function barItem(id: BarItemId): BarItem {
-  return BAR_ITEMS[id];
-}
-
-export type { ReactNode };

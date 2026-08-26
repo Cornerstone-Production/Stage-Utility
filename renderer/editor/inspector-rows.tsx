@@ -285,7 +285,8 @@ export function RowSelect({ label, hint, value, options, onChange }: { label: st
   );
 }
 
-
+/** Thin wrappers over the shared themed NumberInput, kept so existing call sites
+ *  and PixelField do not change. */
 export function NumberField({ value, onChange, step = 1, min, max, suffix }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string }) {
   return <UiNumberInput value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} suffix={suffix} />;
 }

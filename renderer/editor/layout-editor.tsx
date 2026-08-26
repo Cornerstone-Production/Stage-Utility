@@ -11,10 +11,7 @@ import {
   CopyIcon,
   EyeIcon,
   EyeOffIcon,
-  
   ChevronDownIcon,
-  
-  
   Grid3x3Icon,
   AlignHorizontalDistributeCenterIcon,
   MonitorSmartphoneIcon,
@@ -23,18 +20,11 @@ import {
   PlusIcon,
   SaveIcon,
   DownloadIcon,
-  
-  
-  
-  
-  
-  
   CheckIcon,
   LayoutTemplateIcon,
   CornerLeftUpIcon,
   LockIcon,
   UnlockIcon,
-  
   FilePlusIcon,
 } from "lucide-react";
 import { DropdownMenu, Popover } from "radix-ui";
@@ -43,7 +33,6 @@ import {
   Button,
   Input,
   ButtonGroup,
-  
   Separator,
   Dialog,
   DialogContent,
@@ -51,7 +40,6 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-  
   UnsavedBanner,
 } from "../components/ui";
 import { ObjectContent, boxStyle, useLayoutData, type LayoutRenderCtx } from "../main/layout-renderer";
@@ -73,29 +61,21 @@ import {
 import {
   GRID,
   HANDLES,
-  
   applyResize,
   clamp,
   gridUnits,
   handleCursor,
-  
   snapRectToGrid,
   snapTo,
   type Handle,
 } from "../settings/sections/layout-geometry.js";
-import { useConfiguredIntegrations, } from "../main/use-integration-states";
+import { useConfiguredIntegrations } from "../main/use-integration-states";
 import {
-  
-  
-  
-  
   PALETTE_GROUPS,
   defaultConfig,
   defaultStyle,
-  
   objectIntegration,
   typeLabel,
-  
 } from "../main/layout-objects";
 import { invoke } from "../lib/api";
 import { fitFor } from "../main/console-fit";
@@ -116,7 +96,6 @@ const ALIGN_TOLERANCE_PX = 8;
 import { uid, dashboardTemplate, confidenceMonitorTemplate, CANVAS_PRESETS } from "./layout-templates";
 import { Inspector } from "./inspector";
 import {
-  
   NumberField, 
 } from "./inspector-rows";
 export { dashboardTemplate, confidenceMonitorTemplate };
@@ -133,13 +112,6 @@ const MAX_DEPTH = 2;
 // The canvas occupies the whole coordinate space; top-level objects are fractions of it.
 const CANVAS_FRAC: FracRect = { x: 0, y: 0, w: 1, h: 1 };
 
-// Dashboard "glass tile" look, expressed in the style fields every object shares.
-// Border/radius/padding are fractions of canvas HEIGHT (≈1px / 16px on a 1080 canvas).
-// Reused by the container default style and the Phase C preset buttons.
-// Surface/elevation presets — a "style type" picker. Orthogonal to the color
-// accents above: these set fill/border/elevation as a one-click "look" and leave
-// the text color alone. They write the shared style fields, so the Fill / Border /
-// Elevation controls still fine-tune afterward.
 function makeObject(
   type: LayoutObjectType,
   z: number,
@@ -158,10 +130,6 @@ function makeObject(
   };
 }
 
-// Build the built-in "Dashboard" starter layout as editable nested objects: a
-// 2×2 grid of glass tiles (clock / PCO timer / current + next item) plus SPL and
-// captions strips, mirroring renderer/main/dashboard-view.tsx. All coords are
-// canvas fractions, so it works on any canvas (designed for 16:9). Fresh ids.
 function EditorObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
   return (
@@ -990,9 +958,11 @@ export function LayoutEditor({
   // and dismissing the picker clears it WITHOUT creating anything, so a
   // cancelled draw costs neither an object nor an undo step.
   const [pendingRect, setPendingRect] = useState<FracRect | null>(null);
-  // Closed until asked for. The palette replaced the Add-object dropdown, so it
-  // is now the ONLY way in and behaves like the dropdown did: nothing on screen
-  // until you go looking for it, and the canvas gets the width in the meantime.
+  // Closed until asked for. The palette replaced the toolbar's Add-object
+  // dropdown -- the "Add object" button now toggles this -- and behaves the way
+  // the dropdown did: nothing on screen until you go looking for it, and the
+  // canvas gets the width in the meantime. The right-click menu offers the same
+  // set as a second route in.
   const [paletteOpen, setPaletteOpen] = useState(false);
   // The type mid-drag from the palette. A ref as well as state: the drop
   // handler runs from a DOM event and would otherwise read a stale closure.
@@ -1042,9 +1012,10 @@ export function LayoutEditor({
     () => localStorage.getItem(HIDE_UNCONFIGURED_KEY) === "1",
   );
 
-  // The palette and the Add-object dropdown offer the SAME set, filtered by the
-  // same rule. Two lists that could disagree about which objects exist is how an
-  // operator finds a widget in one place and not the other.
+  // The palette and the right-click menu's "Add object" submenu offer the SAME
+  // set, filtered by the same rule. Two lists that could disagree about which
+  // objects exist is how an operator finds a widget in one place and not the
+  // other.
   const paletteTypes = PALETTE_GROUPS.flatMap((g) =>
     g.types.filter((t) => {
       const need = objectIntegration(t);
@@ -1351,33 +1322,6 @@ export function LayoutEditor({
     const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, pAbs, editorBox.w || canvas.width, editorBox.h || canvas.height, true);
     pushHistory();
     update(id, sn);
-  }
-  function removeObject(id: string) {
-    if (isLockedInTree(objects, id)) return; // locked → must unlock before deleting
-    pushHistory();
-    setObjects((prev) => removeById(prev, id).tree);
-    setSelectedIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }
-  function duplicateObject(id: string) {
-    const src = findById(objects, id);
-    if (!src) return;
-    pushHistory();
-    const siblings = getSiblings(objects, id);
-    const z = siblings.reduce((m, o) => Math.max(m, o.z), 0) + 1;
-    const copy: LayoutObject = {
-      ...deepCloneFreshIds(src, uid),
-      x: clamp(src.x + 0.03, 0, 1 - src.w),
-      y: clamp(src.y + 0.03, 0, 1 - src.h),
-      z,
-    };
-    const parent = getParentOf(objects, id);
-    setObjects((prev) => (parent ? insertChild(prev, parent.id, copy) : [...prev, copy]));
-    setSelectedIds(new Set([copy.id]));
   }
   // Clone the given objects (fresh ids, offset) into a working tree; returns the
   // new tree + the fresh ids. Preserves each object's parent when duplicating.
@@ -1878,9 +1822,9 @@ export function LayoutEditor({
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
-        {/* Palette — a second door beside the Add-object dropdown, which is
-            unchanged. Hidden outside edit mode, and collapsible for anyone who
-            wants the canvas wider. */}
+        {/* Palette — what the toolbar's "Add object" button opens. Hidden
+            outside edit mode, and collapsible for anyone who wants the canvas
+            wider. */}
         {isEditing && paletteOpen && (
           <div
             className="w-56 shrink-0 overflow-y-auto rounded-xl border border-line bg-surface @max-4xl:w-full @max-4xl:max-h-64"
@@ -2133,8 +2077,8 @@ export function LayoutEditor({
                 onResetLook={withHistory(() => resetLook(selected.id))}
                 onConfig={withHistory((config: LayoutObjectConfig) => updateConfig(selected.id, config))}
                 onReorder={(d) => reorder(selected.id, d)}
-                onDuplicate={() => duplicateObject(selected.id)}
-                onRemove={() => removeObject(selected.id)}
+                onDuplicate={() => duplicateIds(new Set([selected.id]))}
+                onRemove={() => removeIds(new Set([selected.id]))}
                 onReparentOut={() => reparentToRoot(selected.id)}
                 onToggleLock={() => { pushHistory(); update(selected.id, { locked: !selected.locked }); }}
                 onSaveGroup={() => { setGroupName(""); setGroupDlgOpen(true); }}

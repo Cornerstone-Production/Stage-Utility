@@ -6,33 +6,23 @@
 
 import { useState, useEffect } from "react";
 import {
-  
   Trash2Icon,
   CopyIcon,
-  
-  
   ChevronUpIcon,
   ChevronDownIcon,
   ChevronsUpIcon,
   ChevronsDownIcon,
   Grid3x3Icon,
-  
-  
   AlignStartVertical,
   AlignCenterVertical,
   AlignEndVertical,
   AlignStartHorizontal,
   AlignCenterHorizontal,
   AlignEndHorizontal,
-  
-  
-  
   CornerLeftUpIcon,
   LockIcon,
   UnlockIcon,
   PackagePlusIcon,
-  
-  
 } from "lucide-react";
 import {
   Button,
@@ -41,20 +31,11 @@ import {
   SelectTrigger,
   SelectContent,
   SelectItem,
-  
-  
   SelectValue,
   ButtonGroup,
   Switch,
   Separator,
-  
-  
-  
-  
-  
-  
   InfoHint,
-  
 } from "../components/ui";
 import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT, obsModeText } from "../main/layout-renderer";
 import { MIN, clamp } from "../settings/sections/layout-geometry.js";
@@ -77,11 +58,8 @@ import {
   isKnownObjectType,
   isOfferableInEmbedPicker,
   objectRetired,
-  
-  
   defaultStyle,
   isStylingOnly,
-  
   typeLabel,
   usesPropInstance,
 } from "../main/layout-objects";
@@ -161,8 +139,6 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
   );
 }
 
-/** Thin wrappers over the shared themed NumberInput (kept so existing call sites
- *  and PixelField don't change). */
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 
 /**
