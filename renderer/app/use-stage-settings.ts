@@ -26,6 +26,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke, type ApiError } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
+import { writeOptimistic } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import type { SectionHandlers } from "../settings/types";
@@ -42,13 +43,87 @@ import {
 import { markUpdatePending } from "./update-lifecycle";
 import { screensListViews } from "@main/services/home-view";
 
-/** Matches settings-view.tsx's local helper, so the moved bodies are identical. */
 function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
 }
 
+/**
+ * `ids` in the order given, then anything not named, in its existing order.
+ *
+ * The tail matters: a reorder sends the ids the drag knew about, and a row added
+ * by somebody else between the fetch and the drop is not among them. Appending
+ * rather than dropping means a concurrent add survives a reorder instead of
+ * vanishing from the operator's list.
+ */
+function reorderById<T extends { id: string }>(rows: readonly T[], ids: readonly string[]): T[] {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const named = ids.map((id) => byId.get(id)).filter((r): r is T => r != null);
+  const seen = new Set(ids);
+  return [...named, ...rows.filter((r) => !seen.has(r.id))];
+}
+
+/** One output patched, the rest untouched. */
+function patchOutput(outputs: readonly Output[], id: string, patch: Partial<Output>): Output[] {
+  return outputs.map((o) => (o.id === id ? { ...o, ...patch } : o));
+}
+
 export function useStageSettings() {
   const queryClient = useQueryClient();
+
+  /**
+   * Send a state-changing command and install the StageState it returns.
+   *
+   * Twenty-one handlers were this same eight-line body -- try, ipc, setQueryData,
+   * catch, toast -- differing only in channel, payload and message. Twenty-one
+   * chances for one of them to forget the cache write and leave the UI showing
+   * the value the server just rejected.
+   *
+   * Three shapes, all preserved exactly:
+   *  - `fail` set: the toast reads "<fail>: <err>", as every one of them did.
+   *  - `fail` omitted: the server's own message, verbatim. Used where the refusal
+   *    is written FOR the operator ("that would strand two screens") and a prefix
+   *    would bury it.
+   *  - `ok` set: a success toast as well, for the two writes that confirm.
+   *
+   * Returns whether it succeeded, so a caller that has follow-up work -- one
+   * invalidates the plan list -- can do it only when the write actually landed.
+   *
+   * `writeTo` is the same over any query key: the layout-template and slot-preset
+   * lists are eight more copies of this body against their own caches.
+   */
+  async function writeTo<T>(
+    key: string[],
+    channel: string,
+    payload?: unknown,
+    opts: { fail?: string; ok?: string } = {},
+  ): Promise<T | null> {
+    try {
+      const next = await ipc<T>(channel, payload);
+      queryClient.setQueryData(key, next);
+      if (opts.ok) toast.success(opts.ok);
+      return next;
+    } catch (err) {
+      toast.error(opts.fail ? `${opts.fail}: ${String(err)}` : errorMessage(err));
+      return null;
+    }
+  }
+
+  /** The same, for the writes that return a fresh StageState. */
+  async function writeState(
+    channel: string,
+    payload?: unknown,
+    opts: { fail?: string; ok?: string } = {},
+  ): Promise<boolean> {
+    return (await writeTo<StageState>(["stage:getState"], channel, payload, opts)) != null;
+  }
+
+  /** The shared optimistic write, with this hook's queryClient bound in. */
+  const optimistic = <T,>(
+    key: string[],
+    project: (current: T) => T,
+    send: () => Promise<T>,
+    fail?: string,
+  ) => writeOptimistic<T>(queryClient, key, project, send, fail);
 
   const { data: stageState, isLoading: stageLoading } = useStageStateQuery();
   const { data: serviceTypes = [] } = useServiceTypes(stageState);
@@ -148,40 +223,21 @@ export function useStageSettings() {
   }
 
   async function handleServiceTypeChange(id: string) {
-    try {
-      const next = await ipc<StageState>("stage:setServiceType", { id });
-      queryClient.setQueryData(["stage:getState"], next);
+    if (await writeState("stage:setServiceType", { id }, { fail: "Failed to set service type" })) {
       queryClient.invalidateQueries({ queryKey: ["stage:listPlans"] });
-    } catch (err) {
-      toast.error(`Failed to set service type: ${String(err)}`);
     }
   }
 
   async function handlePlanModeChange(mode: "auto" | "manual") {
-    try {
-      const next = await ipc<StageState>("stage:setPlanMode", { mode });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to set plan mode: ${String(err)}`);
-    }
+    await writeState("stage:setPlanMode", { mode }, { fail: "Failed to set plan mode" });
   }
 
   async function handlePlanChange(id: string) {
-    try {
-      const next = await ipc<StageState>("stage:setPlan", { id });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to set plan: ${String(err)}`);
-    }
+    await writeState("stage:setPlan", { id }, { fail: "Failed to set plan" });
   }
 
   async function handleNextPlan() {
-    try {
-      const next = await ipc<StageState>("stage:selectNextPlan");
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to select next plan: ${String(err)}`);
-    }
+    await writeState("stage:selectNextPlan", undefined, { fail: "Failed to select next plan" });
   }
 
   async function handleRefresh() {
@@ -198,31 +254,18 @@ export function useStageSettings() {
   }
 
   async function handleShowQrChange(show: boolean) {
-    try {
-      const next = await ipc<StageState>("stage:setShowQr", { show });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to update QR setting: ${String(err)}`);
-    }
+    await writeState("stage:setShowQr", { show }, { fail: "Failed to update QR setting" });
   }
 
   async function handleDismissOnboarding() {
-    try {
-      const next = await ipc<StageState>("stage:setOnboardingDismissed", { dismissed: true });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to dismiss: ${String(err)}`);
-    }
+    await writeState("stage:setOnboardingDismissed", { dismissed: true }, { fail: "Failed to dismiss" });
   }
 
   async function handleSetPublicUrl(url: string | null) {
-    try {
-      const next = await ipc<StageState>("stage:setPublicUrl", { url });
-      queryClient.setQueryData(["stage:getState"], next);
-      toast.success(url ? "Public URL updated." : "Public URL cleared.");
-    } catch (err) {
-      toast.error(`Failed to update public URL: ${String(err)}`);
-    }
+    await writeState("stage:setPublicUrl", { url }, {
+      fail: "Failed to update public URL",
+      ok: url ? "Public URL updated." : "Public URL cleared.",
+    });
   }
 
   async function handleCheckUpdates() {
@@ -258,59 +301,29 @@ export function useStageSettings() {
   }
 
   async function handleSetAutoUpdate(partial: { mode?: "manual" | "auto-install" | "auto-full"; enabled?: boolean; dayOfWeek?: number | null; hour?: number }) {
-    try {
-      const next = await ipc<StageState>("update:setAuto", partial);
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to update auto-update settings: ${String(err)}`);
-    }
+    await writeState("update:setAuto", partial, { fail: "Failed to update auto-update settings" });
   }
 
   async function handleSetReconnectSchedule(partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) {
-    try {
-      const next = await ipc<StageState>("settings:setReconnectSchedule", partial);
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to update reconnect settings: ${String(err)}`);
-    }
+    await writeState("settings:setReconnectSchedule", partial, { fail: "Failed to update reconnect settings" });
   }
 
 
   async function handleSetTaperWindow(partial: { preMin?: number; postMin?: number }) {
-    try {
-      const next = await ipc<StageState>("settings:setTaperWindow", partial);
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to update taper settings: ${String(err)}`);
-    }
+    await writeState("settings:setTaperWindow", partial, { fail: "Failed to update taper settings" });
   }
 
   async function handleSetTimezone(tz: string | null) {
-    try {
-      const next = await ipc<StageState>("settings:setTimezone", { timezone: tz });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to set the time zone: ${String(err)}`);
-    }
+    await writeState("settings:setTimezone", { timezone: tz }, { fail: "Failed to set the time zone" });
   }
 
   /** How the app displays a time of day. Global, like the time zone. */
   async function handleSetHourCycle(cycle: "12h" | "24h") {
-    try {
-      const next = await ipc<StageState>("settings:setHourCycle", { hourCycle: cycle });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to set the clock format: ${String(err)}`);
-    }
+    await writeState("settings:setHourCycle", { hourCycle: cycle }, { fail: "Failed to set the clock format" });
   }
 
   async function handleSetAllowedServiceTypes(ids: string[]) {
-    try {
-      const next = await ipc<StageState>("stage:setAllowedServiceTypes", { ids });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to update allowed service types: ${String(err)}`);
-    }
+    await writeState("stage:setAllowedServiceTypes", { ids }, { fail: "Failed to update allowed service types" });
   }
 
   async function handleSetBranding(partial: {
@@ -327,13 +340,10 @@ export function useStageSettings() {
     avatarOriginal?: string | null;
     avatarCrop?: { scale: number; x: number; y: number } | null;
   }) {
-    try {
-      const next = await ipc<StageState>("stage:setBranding", partial);
-      queryClient.setQueryData(["stage:getState"], next);
-      toast.success("Branding updated.");
-    } catch (err) {
-      toast.error(`Failed to update branding: ${String(err)}`);
-    }
+    await writeState("stage:setBranding", partial, {
+      fail: "Failed to update branding",
+      ok: "Branding updated.",
+    });
   }
 
   function updateSlot(idx: number, updated: Slot) {
@@ -436,12 +446,7 @@ export function useStageSettings() {
   }
 
   async function handleRenameView(id: string, name: string) {
-    try {
-      const next = await ipc<StageState>("views:rename", { id, name });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to rename view: ${String(err)}`);
-    }
+    await writeState("views:rename", { id, name }, { fail: "Failed to rename view" });
   }
 
   async function handleDuplicateView(id: string) {
@@ -457,30 +462,15 @@ export function useStageSettings() {
   }
 
   async function handleRemoveView(id: string) {
-    try {
-      const next = await ipc<StageState>("views:remove", { id });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to remove view: ${String(err)}`);
-    }
+    await writeState("views:remove", { id }, { fail: "Failed to remove view" });
   }
 
   async function handleSetViewKind(id: string, kind: ViewKind) {
-    try {
-      const next = await ipc<StageState>("views:setKind", { id, kind });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to change view type: ${String(err)}`);
-    }
+    await writeState("views:setKind", { id, kind }, { fail: "Failed to change view type" });
   }
 
   async function handleSetViewSlotsLayout(id: string, slotsLayout: SlotsLayout | null) {
-    try {
-      const next = await ipc<StageState>("views:setSlotsLayout", { id, slotsLayout });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to update alignment: ${String(err)}`);
-    }
+    await writeState("views:setSlotsLayout", { id, slotsLayout }, { fail: "Failed to update alignment" });
   }
 
   const revOf = (s: StageState | undefined, id: string) =>
@@ -527,32 +517,23 @@ export function useStageSettings() {
   }
 
   async function handleSaveLayoutTemplate(name: string, layout: LayoutDTO) {
-    try {
-      const list = await ipc<LayoutTemplate[]>("layoutTemplates:save", { name, layout });
-      queryClient.setQueryData(["layoutTemplates:list"], list);
-      toast.success(`Saved layout "${name}".`);
-    } catch (err) {
-      toast.error(`Failed to save layout: ${String(err)}`);
-    }
+    await writeTo<LayoutTemplate[]>(["layoutTemplates:list"], "layoutTemplates:save", { name, layout }, {
+      fail: "Failed to save layout",
+      ok: `Saved layout "${name}".`,
+    });
   }
 
   async function handleUpdateLayoutTemplate(id: string, patch: { name?: string; layout?: LayoutDTO }) {
-    try {
-      const list = await ipc<LayoutTemplate[]>("layoutTemplates:update", { id, ...patch });
-      queryClient.setQueryData(["layoutTemplates:list"], list);
-      toast.success("Layout updated.");
-    } catch (err) {
-      toast.error(`Failed to update layout: ${String(err)}`);
-    }
+    await writeTo<LayoutTemplate[]>(["layoutTemplates:list"], "layoutTemplates:update", { id, ...patch }, {
+      fail: "Failed to update layout",
+      ok: "Layout updated.",
+    });
   }
 
   async function handleDeleteLayoutTemplate(id: string) {
-    try {
-      const list = await ipc<LayoutTemplate[]>("layoutTemplates:delete", { id });
-      queryClient.setQueryData(["layoutTemplates:list"], list);
-    } catch (err) {
-      toast.error(`Failed to delete layout: ${String(err)}`);
-    }
+    await writeTo<LayoutTemplate[]>(["layoutTemplates:list"], "layoutTemplates:delete", { id }, {
+      fail: "Failed to delete layout",
+    });
   }
 
   async function handleCopySlots(targetViewId: string, fromViewId: string) {
@@ -607,49 +588,31 @@ export function useStageSettings() {
   }
 
   async function handleDeletePreset(id: string) {
-    try {
-      const presets = await ipc<SlotPreset[]>("presets:delete", { id });
-      queryClient.setQueryData(["presets:list"], presets);
-    } catch (err) {
-      toast.error(`Failed to delete arrangement: ${String(err)}`);
-    }
+    await writeTo<SlotPreset[]>(["presets:list"], "presets:delete", { id }, {
+      fail: "Failed to delete arrangement",
+    });
   }
 
   async function handleImportPreset(name: string, slots: Slot[]) {
-    try {
-      const presets = await ipc<SlotPreset[]>("presets:import", { name, slots });
-      queryClient.setQueryData(["presets:list"], presets);
-      toast.success(`Imported arrangement "${name}".`);
-    } catch (err) {
-      toast.error(`Failed to import arrangement: ${String(err)}`);
-    }
+    await writeTo<SlotPreset[]>(["presets:list"], "presets:import", { name, slots }, {
+      fail: "Failed to import arrangement",
+      ok: `Imported arrangement "${name}".`,
+    });
   }
 
   async function handleReorderPresets(ids: string[]) {
-    // Optimistic: reorder the cached list immediately so the drag feels instant.
-    const prev = queryClient.getQueryData<SlotPreset[]>(["presets:list"]);
-    if (prev) {
-      const byId = new Map(prev.map((p) => [p.id, p]));
-      const reordered = ids.map((id) => byId.get(id)).filter(Boolean) as SlotPreset[];
-      for (const p of prev) if (!ids.includes(p.id)) reordered.push(p);
-      queryClient.setQueryData(["presets:list"], reordered);
-    }
-    try {
-      const presets = await ipc<SlotPreset[]>("presets:reorder", { ids });
-      queryClient.setQueryData(["presets:list"], presets);
-    } catch (err) {
-      if (prev) queryClient.setQueryData(["presets:list"], prev);
-      toast.error(`Failed to reorder arrangements: ${String(err)}`);
-    }
+    await optimistic<SlotPreset[]>(
+      ["presets:list"],
+      (cur) => reorderById(cur, ids),
+      () => ipc<SlotPreset[]>("presets:reorder", { ids }),
+      "Failed to reorder arrangements",
+    );
   }
 
   async function handleRenamePreset(id: string, name: string) {
-    try {
-      const presets = await ipc<SlotPreset[]>("presets:rename", { id, name });
-      queryClient.setQueryData(["presets:list"], presets);
-    } catch (err) {
-      toast.error(`Failed to rename arrangement: ${String(err)}`);
-    }
+    await writeTo<SlotPreset[]>(["presets:list"], "presets:rename", { id, name }, {
+      fail: "Failed to rename arrangement",
+    });
   }
 
   async function handleOverwritePreset(id: string) {
@@ -666,54 +629,32 @@ export function useStageSettings() {
 
   // ── Outputs (physical screens + routing) ─────────────────────────────
   async function handleAddOutput() {
-    try {
-      const next = await ipc<StageState>("outputs:add", {});
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to add display: ${String(err)}`);
-    }
+    await writeState("outputs:add", {}, { fail: "Failed to add display" });
   }
 
   async function handleRenameOutput(id: string, name: string) {
-    try {
-      const next = await ipc<StageState>("outputs:rename", { id, name });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to rename display: ${String(err)}`);
-    }
+    await writeState("outputs:rename", { id, name }, { fail: "Failed to rename display" });
   }
 
   async function handleSetOutputView(id: string, viewId: string | null) {
     // Optimistically update so the controlled <Select> reflects the new view
     // immediately instead of snapping back to the stale cached value while the
     // request is in flight; reconcile (or roll back) once the server responds.
-    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
-    if (prev) {
-      const outputs = prev.outputs.map((o) => (o.id === id ? { ...o, viewId } : o));
-      queryClient.setQueryData(["stage:getState"], { ...prev, outputs });
-    }
-    try {
-      const next = await ipc<StageState>("outputs:setView", { id, viewId });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      if (prev) queryClient.setQueryData(["stage:getState"], prev);
-      toast.error(`Failed to route display: ${String(err)}`);
-    }
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { viewId }) }),
+      () => ipc<StageState>("outputs:setView", { id, viewId }),
+      "Failed to route display",
+    );
   }
 
   async function handleSetOutputLocked(id: string, locked: boolean) {
-    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
-    if (prev) {
-      const outputs = prev.outputs.map((o) => (o.id === id ? { ...o, locked } : o));
-      queryClient.setQueryData(["stage:getState"], { ...prev, outputs });
-    }
-    try {
-      const next = await ipc<StageState>("outputs:setLocked", { id, locked });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      if (prev) queryClient.setQueryData(["stage:getState"], prev);
-      toast.error(`Failed to update display lock: ${String(err)}`);
-    }
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { locked }) }),
+      () => ipc<StageState>("outputs:setLocked", { id, locked }),
+      "Failed to update display lock",
+    );
   }
 
   /**
@@ -725,49 +666,26 @@ export function useStageSettings() {
    * part; it says what to do instead.
    */
   async function handleSetOutputMode(id: string, mode: "display" | "panel") {
-    try {
-      const next = await ipc<StageState>("outputs:setMode", { id, mode });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
+    await writeState("outputs:setMode", { id, mode });
   }
 
   /** Change what a View is for. Refused, with its reason, when screens would be
    *  stranded — so the message reaches the operator rather than the console. */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
-    try {
-      const next = await ipc<StageState>("views:setSurface", { id, surface });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
+    await writeState("views:setSurface", { id, surface });
   }
 
   async function handleRemoveOutput(id: string) {
-    try {
-      const next = await ipc<StageState>("outputs:remove", { id });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      toast.error(`Failed to remove display: ${String(err)}`);
-    }
+    await writeState("outputs:remove", { id }, { fail: "Failed to remove display" });
   }
 
   async function handleReorderOutputs(ids: string[]) {
-    const prev = queryClient.getQueryData<StageState>(["stage:getState"]);
-    if (prev) {
-      const byId = new Map(prev.outputs.map((o) => [o.id, o]));
-      const reordered = ids.map((id) => byId.get(id)).filter(Boolean) as Output[];
-      for (const o of prev.outputs) if (!ids.includes(o.id)) reordered.push(o);
-      queryClient.setQueryData(["stage:getState"], { ...prev, outputs: reordered });
-    }
-    try {
-      const next = await ipc<StageState>("outputs:reorder", { ids });
-      queryClient.setQueryData(["stage:getState"], next);
-    } catch (err) {
-      if (prev) queryClient.setQueryData(["stage:getState"], prev);
-      toast.error(`Failed to reorder displays: ${String(err)}`);
-    }
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: reorderById(cur.outputs, ids) }),
+      () => ipc<StageState>("outputs:reorder", { ids }),
+      "Failed to reorder displays",
+    );
   }
 
   async function handleRefreshDisplay(id: string | null) {

@@ -17,11 +17,25 @@ import { readFileSync } from "node:fs";
 
 const SRC = readFileSync(new URL("./cards.tsx", import.meta.url), "utf8");
 const READOUT = readFileSync(new URL("../../main/readout.tsx", import.meta.url), "utf8");
+const OVERVIEW = readFileSync(
+  new URL("../../settings/sections/overview-data.ts", import.meta.url),
+  "utf8",
+);
 
 /** Type-scale classes. Anything carrying one is rendering words. */
 const SCALE = /text-(large-title|title[1-3]|headline|subheadline|body|callout|footnote|caption[12])\b/;
 /** Anything that names a colour — a token, a semantic scale, or the accent. */
 const COLOUR = /text-(fg|fg-muted|fg-subtle|fg-faint|accent|danger-\d+|live-\d+|ok-\d+|warn-\d+|white)\b/;
+
+/**
+ * Helpers that RETURN a colour class, so a className built from one is covered.
+ *
+ * Allowed by name and then VERIFIED below — the point of this file is that a
+ * colour is really there, and "it is behind a function call" would be exactly
+ * the excuse that lets the next black-on-black span through. A name on this list
+ * without a body that only returns colours fails the test beneath it.
+ */
+const COLOUR_HELPERS = ["trendColor"];
 
 /** Every className string in the file, including the ones inside cn(). */
 function classAttrs(): string[] {
@@ -32,12 +46,35 @@ function classAttrs(): string[] {
 
 describe("Home's cards on the kiosk surface", () => {
   test("every text scale is paired with a colour", () => {
-    const orphans = classAttrs().filter((c) => SCALE.test(c) && !COLOUR.test(c));
+    const viaHelper = new RegExp(`\\b(${COLOUR_HELPERS.join("|")})\\(`);
+    const orphans = classAttrs().filter(
+      (c) => SCALE.test(c) && !COLOUR.test(c) && !viaHelper.test(c),
+    );
     assert.deepEqual(
       orphans,
       [],
       "a text class with no colour inherits — which is black on Home's kiosk surface",
     );
+  });
+
+  test("every colour helper really does return only colours", () => {
+    // The allowance above is only safe while this holds. trendColor lives in
+    // overview-data because Home and the history section had the same mapping
+    // written out twice; if its body ever grows a branch that returns something
+    // that is not a colour class, the allowance becomes the hole.
+    for (const name of COLOUR_HELPERS) {
+      const body = new RegExp(`export function ${name}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n\\}`).exec(OVERVIEW);
+      assert.ok(body, `${name} is not defined in overview-data.ts — has it moved?`);
+      const literals = [...body[1].matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+      // Only the class-like ones: the rest are the tone names it compares against.
+      const classes = literals.filter((c) => c.startsWith("text-"));
+      assert.ok(classes.length > 0, `${name} returns no class literals — cannot verify it`);
+      const notColours = classes.filter((c) => !COLOUR.test(c));
+      assert.deepEqual(notColours, [], `${name} can return a non-colour: ${notColours.join(", ")}`);
+      // A template or a concatenation could smuggle a class past the literal
+      // scan above, so the body has to be literals all the way down.
+      assert.doesNotMatch(body[1], /`|\+\s*["`]/, `${name} builds a class dynamically — cannot verify it`);
+    }
   });
 
   test("the live timer goes through the shared composition", () => {

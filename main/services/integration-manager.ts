@@ -18,6 +18,8 @@ import { propresenterService, propresenterManager, type PropInstanceConfig } fro
 import { secretsStore } from "./secrets.js";
 import { type SenSourceConfig, sensourceService } from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
+import type { ConnectionManagedId } from "./integration-ids.js";
+import type { ConnState } from "./integration-base.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
@@ -646,6 +648,79 @@ class IntegrationManager {
     this.broadcastStates();
   }
 
+  /**
+   * Re-apply one integration's connection after its config or its enabled flag
+   * changed.
+   *
+   * A map rather than a ladder because there were TWO ladders -- one in
+   * setConfig, one in setEnabled -- listing the same nine integrations in the
+   * same order. Adding Resi and YouTube meant remembering both, and an
+   * integration added to only one would save its config and never reconnect, or
+   * reconnect on a toggle and not on a save. Neither failure says which half was
+   * missed.
+   *
+   * planning-center and wireless are NOT here: they do different work in each
+   * caller, so they stay written out where that difference is visible.
+   *
+   * Typed as Record<ConnectionManagedId, …>, so leaving one out is a compile
+   * error rather than an integration that saves and never reconnects. See
+   * CONNECTION_MANAGED_IDS for why the other five are absent.
+   */
+  /**
+   * Wire one service's connection reporting, then start or stop it to match the
+   * integration's enabled + configured state.
+   *
+   * Nine appliers were this same body: attach a listener that forwards to
+   * setConnectionState and broadcasts, read `enabled`, read the config, then
+   * either announce "connecting" and configure, or stop and report disconnected.
+   * The pairing is the part worth having once -- an applier that stopped a
+   * service without reporting it disconnected leaves the UI showing a live badge
+   * for a service that is not running.
+   *
+   * `plan` is called whether or not the integration is enabled, matching what the
+   * appliers did: reading config has no side effects, and keeping the order
+   * means this is a pure extraction.
+   */
+  private async applyService(
+    id: ConnectionManagedId,
+    service: {
+      setConnectionListener(cb: (state: ConnState, message: string | null) => void): void;
+      stop(): void;
+    },
+    plan: () => { connecting: string; start: () => void } | null
+      | Promise<{ connecting: string; start: () => void } | null>,
+  ): Promise<void> {
+    service.setConnectionListener((state, message) => {
+      this.setConnectionState(id, state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get(id)?.enabled ?? false;
+    const ready = await plan();
+    if (enabled && ready) {
+      this.setConnectionState(id, "connecting", ready.connecting);
+      ready.start();
+    } else {
+      service.stop();
+      this.setConnectionState(id, "disconnected", null);
+    }
+  }
+
+  private async applyIntegration(id: string): Promise<void> {
+    const appliers: Record<ConnectionManagedId, () => void | Promise<void>> = {
+      propresenter: () => this.applyPropresenter(),
+      prodcom: () => this.applyProdcom(),
+      smaart: () => this.applySmaart(),
+      obs: () => this.applyObs(),
+      reaper: () => this.applyReaper(),
+      resi: () => this.applyResi(),
+      youtube: () => this.applyYouTube(),
+      sensource: () => this.applySensource(),
+      "ross-tsl": () => this.applyRossTsl(),
+    };
+    await appliers[id as ConnectionManagedId]?.();
+  }
+
   async setConfig(
     id: string,
     config: Record<string, unknown>,
@@ -721,41 +796,7 @@ class IntegrationManager {
         });
     }
 
-    if (id === "propresenter") {
-      this.applyPropresenter();
-    }
-
-    if (id === "prodcom") {
-      await this.applyProdcom();
-    }
-
-    if (id === "smaart") {
-      await this.applySmaart();
-    }
-
-    if (id === "obs") {
-      await this.applyObs();
-    }
-
-    if (id === "reaper") {
-      await this.applyReaper();
-    }
-
-    if (id === "resi") {
-      await this.applyResi();
-    }
-
-    if (id === "youtube") {
-      await this.applyYouTube();
-    }
-
-    if (id === "sensource") {
-      await this.applySensource();
-    }
-
-    if (id === "ross-tsl") {
-      await this.applyRossTsl();
-    }
+    await this.applyIntegration(id);
 
     this.broadcastStates();
     return this.states.get(id)!;
@@ -784,41 +825,7 @@ class IntegrationManager {
       this.setConnectionState("planning-center", "disconnected", null);
     }
 
-    if (id === "propresenter") {
-      this.applyPropresenter();
-    }
-
-    if (id === "prodcom") {
-      await this.applyProdcom();
-    }
-
-    if (id === "smaart") {
-      await this.applySmaart();
-    }
-
-    if (id === "obs") {
-      await this.applyObs();
-    }
-
-    if (id === "reaper") {
-      await this.applyReaper();
-    }
-
-    if (id === "resi") {
-      await this.applyResi();
-    }
-
-    if (id === "youtube") {
-      await this.applyYouTube();
-    }
-
-    if (id === "sensource") {
-      await this.applySensource();
-    }
-
-    if (id === "ross-tsl") {
-      await this.applyRossTsl();
-    }
+    await this.applyIntegration(id);
 
     this.broadcastStates();
     return this.states.get(id)!;
@@ -1114,8 +1121,18 @@ class IntegrationManager {
     }
   }
 
-  private getObsTarget(): { host: string | null; port: number | null } {
-    const cfg = this.states.get("obs")?.config ?? {};
+  /**
+   * A host/port target off an integration's config, defaulting the port.
+   *
+   * OBS and REAPER had a copy each, identical but for the default port and the
+   * id they read. Two copies of a parse is two chances for one to stop accepting
+   * a port typed as a string, which is what the settings form sends.
+   */
+  private hostPort(
+    id: ConnectionManagedId,
+    defaultPort: number,
+  ): { host: string | null; port: number | null } {
+    const cfg = this.states.get(id)?.config ?? {};
     const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
     const rawPort = cfg.port;
     const port =
@@ -1124,95 +1141,62 @@ class IntegrationManager {
         : typeof rawPort === "string" && rawPort.trim()
           ? parseInt(rawPort, 10)
           : NaN;
-    // Default to obs-websocket's standard port when only a host is given.
-    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 4455 : null };
+    // Only default the port when a host was given: no host is "not configured",
+    // and returning a port for it would read as configured.
+    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? defaultPort : null };
   }
 
-  private getReaperTarget(): { host: string | null; port: number | null } {
-    const cfg = this.states.get("reaper")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    // Default to REAPER's suggested web-interface port when only a host is given.
-    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 8080 : null };
+  /** obs-websocket's standard port. */
+  private getObsTarget() {
+    return this.hostPort("obs", 4455);
+  }
+
+  /** REAPER's suggested web-interface port. */
+  private getReaperTarget() {
+    return this.hostPort("reaper", 8080);
   }
 
   /** Start/stop the REAPER web-interface poll to match enabled + configured state. */
   private async applyReaper(): Promise<void> {
-    reaperService.setConnectionListener((state, message) => {
-      this.setConnectionState("reaper", state, message);
-      this.broadcastStates();
+    await this.applyService("reaper", reaperService, () => {
+      const { host, port } = this.getReaperTarget();
+      return host && port
+        ? { connecting: `Connecting ${host}:${port}`, start: () => reaperService.configure(host, port) }
+        : null;
     });
-
-    const enabled = this.states.get("reaper")?.enabled ?? false;
-    const { host, port } = this.getReaperTarget();
-    if (enabled && host && port) {
-      this.setConnectionState("reaper", "connecting", `Connecting ${host}:${port}`);
-      reaperService.configure(host, port);
-    } else {
-      reaperService.stop();
-      this.setConnectionState("reaper", "disconnected", null);
-    }
   }
 
   /** Start/stop the Resi encoder-status poll to match enabled + configured state. */
   private async applyResi(): Promise<void> {
-    resiService.setConnectionListener((state, message) => {
-      this.setConnectionState("resi", state, message);
-      this.broadcastStates();
+    await this.applyService("resi", resiService, async () => {
+      const { username, password, encoderIds } = await this.getResiConfig();
+      return username && password
+        ? { connecting: "Signing in to Resi", start: () => resiService.configure(username, password, encoderIds) }
+        : null;
     });
-
-    const enabled = this.states.get("resi")?.enabled ?? false;
-    const { username, password, encoderIds } = await this.getResiConfig();
-    if (enabled && username && password) {
-      this.setConnectionState("resi", "connecting", "Signing in to Resi");
-      resiService.configure(username, password, encoderIds);
-    } else {
-      resiService.stop();
-      this.setConnectionState("resi", "disconnected", null);
-    }
   }
 
   /** Start/stop the YouTube poll to match enabled + configured state. */
   private async applyYouTube(): Promise<void> {
-    youtubeService.setConnectionListener((state, message) => {
-      this.setConnectionState("youtube", state, message);
-      this.broadcastStates();
+    await this.applyService("youtube", youtubeService, async () => {
+      const cfg = await this.getYouTubeConfig();
+      return configComplete(cfg)
+        ? { connecting: "Connecting to YouTube", start: () => youtubeService.configure(cfg) }
+        : null;
     });
-
-    const enabled = this.states.get("youtube")?.enabled ?? false;
-    const cfg = await this.getYouTubeConfig();
-    if (enabled && configComplete(cfg)) {
-      this.setConnectionState("youtube", "connecting", "Connecting to YouTube");
-      youtubeService.configure(cfg);
-    } else {
-      youtubeService.stop();
-      this.setConnectionState("youtube", "disconnected", null);
-    }
   }
 
   /** Start/stop the OBS connection to match enabled + configured state. */
   private async applyObs(): Promise<void> {
-    obsService.setConnectionListener((state, message) => {
-      this.setConnectionState("obs", state, message);
-      this.broadcastStates();
-    });
-
-    const enabled = this.states.get("obs")?.enabled ?? false;
-    const { host, port } = this.getObsTarget();
-    if (enabled && host && port) {
+    await this.applyService("obs", obsService, async () => {
+      const { host, port } = this.getObsTarget();
+      if (!host || !port) return null;
       const secrets = await secretsStore.getSecrets("obs");
-      this.setConnectionState("obs", "connecting", `Connecting ${host}:${port}`);
-      obsService.configure(host, port, secrets.password ?? null);
-    } else {
-      obsService.stop();
-      this.setConnectionState("obs", "disconnected", null);
-    }
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => obsService.configure(host, port, secrets.password ?? null),
+      };
+    });
   }
 
   /** Resolve the SenSource config from non-secret state + the secrets store. */

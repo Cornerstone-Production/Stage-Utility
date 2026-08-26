@@ -533,6 +533,45 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
    * Home. Those went to Home's card composition on every surface for a release,
    * which put a small three-line mono tile in a row of large ALL-CAPS ones.
    */
+  /**
+   * A recorder's state as a readout: OBS, REAPER, and the generic recorder.
+   *
+   * The three of them ended in the same pair of Readouts -- active with the red
+   * fill-or-text rule, idle dimmed when nothing is reachable -- differing only in
+   * caption, words and sub-line. FILL_WHEN_ACTIVE was added this release to stop
+   * the fill DEFAULT drifting, but the expression consuming it was still written
+   * out three times, which is the same drift one level up.
+   *
+   * Red, not green: red is what a recorder means by "rolling", and a wall
+   * carrying recorders and streams wants exactly one red. streamingReadout stays
+   * separate for that reason -- its value and sub-line come from streamIndicator,
+   * so folding the two together would mean a colour parameter and a second value
+   * path for one caller.
+   */
+  const statusReadout = (s: {
+    caption: string;
+    active: boolean;
+    connected: boolean;
+    filled: boolean;
+    activeText: string;
+    idleText: string;
+    offlineText: string;
+    sub?: string | null;
+  }) => (
+    <Readout
+      caption={s.caption}
+      value={s.active ? s.activeText : s.connected ? s.idleText : s.offlineText}
+      sub={s.active ? (s.sub ?? null) : null}
+      upper
+      fill={s.active && s.filled ? "var(--red-9)" : null}
+      valueColor={s.active && !s.filled ? "var(--red-10)" : null}
+      // Dim only when nothing is reachable, so a neutral value is never mistaken
+      // for "not recording" when the recorder simply cannot be reached.
+      dim={!s.active && !s.connected}
+      align={o.style?.textAlign}
+    />
+  );
+
   const streamingReadout = (
     only: string | null,
     opts: { showElapsed?: boolean; hideWhenIdle?: boolean; fillWhenLive?: boolean },
@@ -945,33 +984,19 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // Which recorder this is watching becomes the caption; the state becomes
       // the value. "any" has no single source to name, so it says what it is.
       const caption = src === "obs" ? "OBS" : src === "reaper" ? "REAPER" : "Recorder";
-      if (active) {
-        return (
-          <Readout
-            caption={caption}
-            value={c.recordingText ?? "RECORDING"}
-            upper
-            // The fill stays — it is a see-it-across-the-room signal and it
-            // works. What changes is that it now carries the same composition as
-            // every other widget, so a filled widget is the same widget wearing
-            // a state rather than a second design language.
-            fill={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? "var(--red-9)" : null}
-            valueColor={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? null : "var(--red-10)"}
-            align={o.style?.textAlign}
-          />
-        );
-      }
-      // Idle: dim when offline so a neutral value is never mistaken for "not
-      // recording" when no recorder is reachable at all.
-      return (
-        <Readout
-          caption={caption}
-          value={connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
-          upper
-          dim={!connected}
-            align={o.style?.textAlign}
-        />
-      );
+      // The fill stays -- it is a see-it-across-the-room signal and it works.
+      // What changed is that it carries the same composition as every other
+      // widget, so a filled widget is the same widget wearing a state rather
+      // than a second design language.
+      return statusReadout({
+        caption,
+        active,
+        connected,
+        filled: c.fillWhenRecording ?? FILL_WHEN_ACTIVE,
+        activeText: c.recordingText ?? "RECORDING",
+        idleText: c.idleText ?? "STANDBY",
+        offlineText: c.offlineText ?? "NO RECORDER",
+      });
     }
     case "obs-status": {
       const obs = ctx.obs;
@@ -988,35 +1013,19 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // "OBS / OBS: RECORDING". A label an operator typed themselves is left
       // exactly as they typed it.
       const { active: activeDefault, idle: idleDefault } = obsModeText(mode);
-      if (active) {
-        // Timecode is the record duration — only meaningful in recording mode.
-        // It moves to the SUB-LINE: welded onto the end of the label it made the
-        // string long enough to shrink the state word it was qualifying.
-        const tc = mode === "recording" && c.showTimecode ? obs?.recordTimecode ?? null : null;
-        return (
-          <Readout
-            caption="OBS"
-            value={c.recordingText ?? activeDefault}
-            sub={tc}
-            upper
-            mono={false}
-            fill={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? "var(--red-9)" : null}
-            valueColor={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? null : "var(--red-10)"}
-            align={o.style?.textAlign}
-          />
-        );
-      }
-      // Idle: dim when offline so a neutral value is never mistaken for "not
-      // active" when OBS is merely unreachable.
-      return (
-        <Readout
-          caption="OBS"
-          value={connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? STATUS_TEXT.obs.offline)}
-          upper
-          dim={!connected}
-            align={o.style?.textAlign}
-        />
-      );
+      // Timecode is the record duration -- only meaningful in recording mode. It
+      // is the SUB-LINE: welded onto the end of the label it made the string long
+      // enough to shrink the state word it was qualifying.
+      return statusReadout({
+        caption: "OBS",
+        active,
+        connected,
+        filled: c.fillWhenRecording ?? FILL_WHEN_ACTIVE,
+        activeText: c.recordingText ?? activeDefault,
+        idleText: c.idleText ?? idleDefault,
+        offlineText: c.offlineText ?? STATUS_TEXT.obs.offline,
+        sub: mode === "recording" && c.showTimecode ? (obs?.recordTimecode ?? null) : null,
+      });
     }
     case "stream-status":
       return streamingReadout(
@@ -1030,36 +1039,22 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       const recording = reaper?.recording ?? false;
       // Pure tally-light mode: nothing on screen unless REAPER is recording.
       if (!recording && (c.hideWhenIdle ?? false)) return null;
-      if (recording) {
-        // Position ticks while recording — trim REAPER's ".mmm" to whole seconds.
-        // It is the sub-line, matching OBS's timecode: the two recorders say the
-        // same kind of thing and should say it in the same place.
-        const posRaw = reaper?.positionString ?? "";
-        const dot = posRaw.indexOf(".");
-        const pos = c.showPosition && posRaw ? (dot === -1 ? posRaw : posRaw.slice(0, dot)) : null;
-        return (
-          <Readout
-            caption="REAPER"
-            value={c.recordingText ?? STATUS_TEXT.reaper.recording}
-            sub={pos}
-            upper
-            fill={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? "var(--red-9)" : null}
-            valueColor={(c.fillWhenRecording ?? FILL_WHEN_ACTIVE) ? null : "var(--red-10)"}
-            align={o.style?.textAlign}
-          />
-        );
-      }
-      // Idle: dim when offline so a neutral value is never mistaken for "not
-      // recording" when REAPER is merely unreachable.
-      return (
-        <Readout
-          caption="REAPER"
-          value={connected ? (c.idleText ?? STATUS_TEXT.reaper.idle) : (c.offlineText ?? STATUS_TEXT.reaper.offline)}
-          upper
-          dim={!connected}
-            align={o.style?.textAlign}
-        />
-      );
+      // Position ticks while recording -- trim REAPER's ".mmm" to whole seconds.
+      // It is the sub-line, matching OBS's timecode: the two recorders say the
+      // same kind of thing and should say it in the same place.
+      const posRaw = reaper?.positionString ?? "";
+      const dot = posRaw.indexOf(".");
+      const pos = c.showPosition && posRaw ? (dot === -1 ? posRaw : posRaw.slice(0, dot)) : null;
+      return statusReadout({
+        caption: "REAPER",
+        active: recording,
+        connected,
+        filled: c.fillWhenRecording ?? FILL_WHEN_ACTIVE,
+        activeText: c.recordingText ?? STATUS_TEXT.reaper.recording,
+        idleText: c.idleText ?? STATUS_TEXT.reaper.idle,
+        offlineText: c.offlineText ?? STATUS_TEXT.reaper.offline,
+        sub: pos,
+      });
     }
     case "rosstalk-button":
       return (
@@ -1153,19 +1148,18 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       ].filter(Boolean);
       // With the count off, the tile is a single figure — battery if it is on,
       // otherwise runtime, so turning battery off does not leave a blank tile.
-      const headline =
-        showBattery || !showRuntime ? `${lowest ?? "—"}%`
-        : (runtimeText(soonest) ?? "—");
+      //
+      // ONE flag for the figure and its colour. The condition was written out
+      // twice, once for each, and two copies of "which figure is this" is how a
+      // tile ends up showing minutes coloured by battery thresholds.
+      const batteryLeads = showBattery || !showRuntime;
+      const headline = batteryLeads ? `${lowest ?? "—"}%` : (runtimeText(soonest) ?? "—");
       return (
         <Readout
           caption={(c.showLabel ?? false) && c.label ? c.label : null}
           value={showOnline ? `${online}/${ch.length}` : headline}
           sub={showOnline ? quals.join("  ") || null : quals.slice(1).join("  ") || null}
-          valueColor={
-            showOnline ? null
-            : showBattery || !showRuntime ? batteryColor(lowest)
-            : runtimeColor(soonest)
-          }
+          valueColor={showOnline ? null : batteryLeads ? batteryColor(lowest) : runtimeColor(soonest)}
           mono
             align={o.style?.textAlign}
         />

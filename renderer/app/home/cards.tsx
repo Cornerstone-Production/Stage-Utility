@@ -37,7 +37,7 @@ export type HomeCardType = Extract<LayoutObjectConfig, { type: `home-${string}` 
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
 import { invoke, onNotification } from "../../lib/api";
-import { computeOverview, type OverviewData, type Trend } from "../../settings/sections/overview-data";
+import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
 import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
 import { useReaperState } from "../../main/use-reaper-state";
@@ -122,12 +122,7 @@ function TrendArrow({ trend }: { trend: Trend | null }) {
   const Icon = trend.dir === "up" ? ArrowUpIcon : ArrowDownIcon;
   return (
     <span
-      className={cn(
-        "inline-flex items-center gap-0.5 text-caption1",
-        trend.tone === "good" && "text-ok-11",
-        trend.tone === "bad" && "text-warn-11",
-        trend.tone === "neutral" && "text-fg-subtle",
-      )}
+      className={cn("inline-flex items-center gap-0.5 text-caption1", trendColor(trend.tone))}
       title={`vs the previous ${trend.priorCount} service${trend.priorCount === 1 ? "" : "s"}`}
     >
       <Icon className="size-3" strokeWidth={2.5} />

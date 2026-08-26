@@ -6,6 +6,7 @@
 // view, not a name, not a target definition.
 
 import { randomUUID } from "node:crypto";
+import { errorMessage } from "./errors.js";
 
 import { remapBundle } from "./view-remap.js";
 import { collectRefs } from "./view-refs.js";
@@ -208,7 +209,7 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
       // Recorded and RETURNED, never swallowed. Nothing is rolled back either: a
       // layout missing one image is more useful than no layout, and the operator
       // is told which.
-      images.failed.push(`${ref}: ${err instanceof Error ? err.message : String(err)}`);
+      images.failed.push(`${ref}: ${errorMessage(err)}`);
     }
   }
 

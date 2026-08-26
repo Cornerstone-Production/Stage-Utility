@@ -19,6 +19,7 @@
 // tells the operator to update from the CLI).
 
 import { execFile, spawn } from "node:child_process";
+import { errorMessage } from "./errors.js";
 
 import { APP_ROOT } from "./app-root.js";
 import { summarizeChangelog } from "./changelog.js";
@@ -402,7 +403,7 @@ export class Updater {
         ...this.status,
         phase: "idle",
         lastCheckedAt: new Date().toISOString(),
-        error: String(err instanceof Error ? err.message : err),
+        error: errorMessage(err),
       };
     }
     this.broadcast();
@@ -462,7 +463,7 @@ export class Updater {
       } catch (err) {
         // Same contract as a failed `git fetch` on the git path: report it, keep
         // the last known numbers, stay idle.
-        error = String(err instanceof Error ? err.message : err);
+        error = errorMessage(err);
       }
     } else {
       error =
@@ -592,7 +593,7 @@ export class Updater {
       // installer lands on whatever is newest when IT runs, which may not be
       // what the operator was shown.
       this.logEvent(
-        `could not resolve the newest release on ${branch}; applying unpinned — ${String(err instanceof Error ? err.message : err)}`,
+        `could not resolve the newest release on ${branch}; applying unpinned — ${errorMessage(err)}`,
       );
       return null;
     }

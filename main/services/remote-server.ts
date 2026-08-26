@@ -776,7 +776,7 @@ export class RemoteServer {
       try {
         json(res, { url: await saveLayoutImage(body.dataUrl) });
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }

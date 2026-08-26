@@ -42,6 +42,25 @@ export default [
       // `interface Props extends React.XHTMLAttributes<…> {}` is an idiomatic
       // named-props pattern; allow the single-extends form.
       "@typescript-eslint/no-empty-object-type": ["error", { allowInterfaces: "with-single-extends" }],
+      // errorMessage() exists to hold this one expression. It was written to
+      // sweep 62 copies of it, and three more had already grown back by 1.11 --
+      // two in one file, beside a sibling that imports the helper correctly.
+      // A lint rule rather than a test, because it fires where the copy is typed
+      // rather than in a scan somebody has to go read.
+      "no-restricted-syntax": [
+        "error",
+        {
+          // Precisely the shape errorMessage() replaces: `x instanceof Error ?
+          // x.message : String(x)`. Deliberately NOT the near-misses -- a custom
+          // fallback ("Upload failed") or a bare `: err` says something else, and
+          // flagging those would push people to paper over the difference.
+          selector:
+            "ConditionalExpression[test.operator='instanceof'][test.right.name='Error']" +
+            "[consequent.property.name='message']" +
+            "[alternate.callee.name='String']",
+          message: "Use errorMessage(err) from @main/services/errors instead of re-writing the ternary.",
+        },
+      ],
     },
   },
 ];

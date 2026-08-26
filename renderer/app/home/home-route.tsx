@@ -93,22 +93,23 @@ export function HomeRoute() {
 
   // The server has caught up — stop preferring the optimistic copy, so an edit
   // made anywhere else (a restored snapshot, a second tab) is not masked forever.
-  const savedRev = s.stageState?.views?.find((v) => v.id === HOME_VIEW_ID)?.layoutRev ?? 0;
+  // ABOVE the loading return, because a hook cannot be called conditionally --
+  // eslint caught these sitting below it. Read straight off the (possibly
+  // absent) state rather than from the derived `home` further down, which does
+  // not exist yet at this point in the render.
+  //
+  // ONE lookup: the same find ran three times, for the revision, for presence
+  // and for the placed check.
+  const homeView = s.stageState?.views?.find((v) => v.id === HOME_VIEW_ID);
+  const savedRev = homeView?.layoutRev ?? 0;
   useResyncOn([savedRev], () => {
     setPending(null);
     editRef.current = null;
   });
 
-  // ABOVE the loading return, because a hook cannot be called conditionally —
-  // eslint caught this sitting below it. Presence of Home is read straight off
-  // the (possibly absent) state rather than from the derived `home` below, which
-  // does not exist yet at this point in the render.
-  const hasHome = !!s.stageState?.views?.some((v) => v.id === HOME_VIEW_ID);
-  // Has anything been placed by hand? Read off the state rather than the derived
-  // list below, which does not exist yet at this point in the render.
-  const arranged = (
-    s.stageState?.views?.find((v) => v.id === HOME_VIEW_ID)?.layout?.objects ?? []
-  ).some((o) => isPlaced(o));
+  const hasHome = homeView != null;
+  /** Has anything been placed by hand? */
+  const arranged = (homeView?.layout?.objects ?? []).some((o) => isPlaced(o));
   // The controls live in the page HEADER, not on a row of their own — that row
   // held one link and cost a whole band of the page that most wants the height.
   // Icon squares, matching the object controls in the custom-view editor.
