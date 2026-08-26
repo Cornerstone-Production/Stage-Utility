@@ -43,6 +43,47 @@ export function sameOrigin(candidate: unknown, base: string): candidate is strin
 }
 
 /**
+ * The offset of the next page, as a NUMBER.
+ *
+ * PCO's `links.next` is the same endpoint with `offset` advanced, so the only
+ * thing worth taking from it is that integer. Everything else -- host, path,
+ * every other query parameter -- we already have, because we built the request
+ * that produced this response.
+ *
+ * Taking a number rather than a URL is what makes following a page structurally
+ * safe. pcoUrlFrom rebuilt the host from a constant, which closed the hole, but
+ * the path and query still came off the wire; an integer cannot carry a host, a
+ * path, or anything else. There is no longer any string from a PCO response body
+ * that reaches fetch().
+ *
+ * @returns the offset, or null when there is no next page or it is not a number.
+ */
+export function nextOffset(candidate: unknown): number | null {
+  if (typeof candidate !== "string" || !candidate) return null;
+  let raw: string | null;
+  try {
+    raw = new URL(candidate).searchParams.get("offset");
+  } catch {
+    return null;
+  }
+  // An EMPTY offset is not zero. Number("") is 0, which would send the loop back
+  // to the first page and then round again for ever -- a hang on a live server,
+  // found by the test below rather than on a Sunday.
+  if (raw === null || raw.trim() === "") return null;
+  const n = Number(raw);
+  // Finite, non-negative, integral. Number() on anything else gives NaN, and a
+  // negative or fractional offset is not something PCO produces.
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
+/** The same URL with `offset` set. Built from OUR url, never from the response. */
+export function withOffset(url: string, offset: number): string {
+  const u = new URL(url);
+  u.searchParams.set("offset", String(offset));
+  return u.toString();
+}
+
+/**
  * A URL that arrived in a PCO response body, REBUILT on our own origin.
  *
  * sameOrigin() checks and then hands the original string on. That is correct --
@@ -403,14 +444,28 @@ class PcoService {
       PcoService.loggedLiveActions = true;
       console.log(`[pco] live actions offered: ${scrub(Object.keys(links).sort().join(", ") || "(none)")}`);
     }
-    // Only follow a link that still points at PCO. This URL comes out of a
-    // RESPONSE BODY and is then POSTed to with the operator's App ID and secret
-    // in an Authorization header, so anything that could put a different host in
-    // that field would be handed the credentials. The response arrives from PCO
-    // over TLS, so this is defence in depth rather than a live hole — but the
-    // safe answer already exists one line down, which makes the check free.
+    // BUILT, never followed.
+    //
+    // This URL is POSTed to with the operator's App ID and secret in an
+    // Authorization header, so a host from a response body would be handed the
+    // credentials. It used to take PCO's own link when that link's origin
+    // checked out, and fall back to this constructed URL otherwise -- which
+    // means the constructed URL was already the trusted answer.
+    //
+    // So it is the only answer now. No string from the body reaches fetch(), and
+    // there is nothing left to check. `links` still says which actions PCO is
+    // offering, which is what it is read for above.
+    //
+    // If PCO ever moves the endpoint, this says so rather than silently posting
+    // to the wrong place -- the one case where the old code would have differed.
     const linkUrl = links[action];
-    const url = pcoUrlFrom(linkUrl, PCO_BASE) ?? `${base}/live/${action}`;
+    const url = `${base}/live/${action}`;
+    const offered = pcoUrlFrom(linkUrl, PCO_BASE);
+    if (offered && new URL(offered).pathname !== new URL(url).pathname) {
+      console.warn(
+        `[pco] live "${scrub(action)}" link points somewhere unexpected; using the documented endpoint`,
+      );
+    }
     await this.postAction(url, appId, secret);
   }
 
@@ -492,6 +547,9 @@ class PcoService {
 
     const out: PcoAttachmentDTO[] = [];
     const seen = new Set<string>();
+    // Highest offset already requested, so a next-link that does not move forward
+    // ends the loop instead of repeating a page for ever.
+    let seenOffset = -1;
     let url: string | null =
       `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments?per_page=100`;
 
@@ -504,13 +562,17 @@ class PcoService {
           out.push(this.mapAttachment(n));
         }
       }
-      // sameOrigin, not a truthiness check. `links.next` arrives in a response
-      // BODY and is handed straight back to request(), which attaches the
-      // operator's PCO credentials — so a redirected or spoofed response could
-      // walk them to another host. The guard was written for exactly this and
-      // was applied at one of three sites; these are the other two.
-      const next = json.links?.next;
-      url = pcoUrlFrom(next, PCO_BASE);
+      // An OFFSET, not a URL. `links.next` arrives in a response BODY and used to
+      // be handed straight back to request(), which attaches the operator's PCO
+      // credentials -- so a redirected or spoofed response could walk them to
+      // another host. Taking only the integer means no string from the body
+      // reaches fetch() at all; the rest of the URL is the one we built.
+      // Strictly forward. A next-link that repeats or rewinds the offset would
+      // otherwise fetch the same page for ever; PCO does not do that, which is
+      // exactly why nothing would catch it if it started.
+      const offset = nextOffset(json.links?.next);
+      url = offset === null || offset <= seenOffset ? null : withOffset(url, offset);
+      seenOffset = offset ?? seenOffset;
     }
 
     this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
@@ -675,6 +737,9 @@ class PcoService {
     if (cached) return cached;
 
     const out: PlanItemDTO[] = [];
+    // Highest offset already requested, so a next-link that does not move forward
+    // ends the loop instead of repeating a page for ever.
+    let seenOffset = -1;
     let url: string | null =
       `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes,arrangement&per_page=100`;
 
@@ -726,13 +791,17 @@ class PcoService {
         });
       }
 
-      // sameOrigin, not a truthiness check. `links.next` arrives in a response
-      // BODY and is handed straight back to request(), which attaches the
-      // operator's PCO credentials — so a redirected or spoofed response could
-      // walk them to another host. The guard was written for exactly this and
-      // was applied at one of three sites; these are the other two.
-      const next = json.links?.next;
-      url = pcoUrlFrom(next, PCO_BASE);
+      // An OFFSET, not a URL. `links.next` arrives in a response BODY and used to
+      // be handed straight back to request(), which attaches the operator's PCO
+      // credentials -- so a redirected or spoofed response could walk them to
+      // another host. Taking only the integer means no string from the body
+      // reaches fetch() at all; the rest of the URL is the one we built.
+      // Strictly forward. A next-link that repeats or rewinds the offset would
+      // otherwise fetch the same page for ever; PCO does not do that, which is
+      // exactly why nothing would catch it if it started.
+      const offset = nextOffset(json.links?.next);
+      url = offset === null || offset <= seenOffset ? null : withOffset(url, offset);
+      seenOffset = offset ?? seenOffset;
     }
 
     out.sort((a, b) => a.sequence - b.sequence);

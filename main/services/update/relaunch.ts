@@ -37,8 +37,25 @@ export const TARBALL_DAEMON_LABEL = "com.cornerstone.stage-utility";
 export function relaunchPlan(kind: InstallKind, appRoot: string, platform: NodeJS.Platform): SpawnPlan | null {
   if (platform !== "darwin") return null;
 
-  const label = launchdLabel(kind, appRoot);
-  if (!label) return null;
+  // A DISCRIMINANT, not a string built from appRoot.
+  //
+  // The label has always been one of three module constants -- launchdLabel only
+  // ever used appRoot for `.includes()` checks and never put it in the result --
+  // but "the value is constant" was three functions away from where it mattered.
+  // Returning which-one and picking the literal here means the string that lands
+  // in a `bash -c` command is written in this file, at the point it is used.
+  //
+  // That is worth having on its own, and it is also what static analysis needs.
+  // appRoot comes from STAGE_UTILITY_ROOT, so CodeQL followed an environment
+  // value into a shell string and reported it at medium -- correctly, given what
+  // it could see. Types do not help: they are erased before it looks. Only the
+  // dataflow does.
+  const which = launchdKind(kind, appRoot);
+  if (!which) return null;
+  const label =
+    which === "tarball" ? TARBALL_DAEMON_LABEL
+    : which === "beta" ? serviceLabel(FORMULA.beta)
+    : serviceLabel(FORMULA.main);
 
   // kill:false — the old instance is exiting on its own. On a box where
   // KeepAlive is NOT parked, launchd may have already relaunched us by the
@@ -47,16 +64,21 @@ export function relaunchPlan(kind: InstallKind, appRoot: string, platform: NodeJ
   return { command: "bash", args: ["-c", `sleep 2; ${kickstartLabel(label, { kill: false })}`], env: {} };
 }
 
-/** Our own launchd label, or null when nothing here recognises the install. */
-function launchdLabel(kind: InstallKind, appRoot: string): string | null {
-  if (kind === "tarball") return TARBALL_DAEMON_LABEL;
+/**
+ * WHICH install this is, never its label.
+ *
+ * Returns a tag rather than a string so nothing derived from appRoot can reach a
+ * command line. The caller turns the tag into a literal.
+ */
+function launchdKind(kind: InstallKind, appRoot: string): "tarball" | "beta" | "main" | null {
+  if (kind === "tarball") return "tarball";
   if (kind !== "homebrew") return null;
   // The keg path names the formula, and the formula names the label. Matched on
   // a path segment so "stage-utility" inside "stage-utility-beta" cannot win by
   // being checked first.
   const segments = appRoot.split(/[\\/]+/);
-  if (segments.includes(FORMULA.beta)) return serviceLabel(FORMULA.beta);
-  if (segments.includes(FORMULA.main)) return serviceLabel(FORMULA.main);
+  if (segments.includes(FORMULA.beta)) return "beta";
+  if (segments.includes(FORMULA.main)) return "main";
   return null;
 }
 
