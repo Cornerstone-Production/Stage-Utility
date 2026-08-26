@@ -1,0 +1,223 @@
+// The attendance trend chart.
+//
+// Extracted from service-history-section.tsx so Home's widget and the History
+// tab draw the SAME chart rather than two that drift. "The same style as the
+// attendance tab" is only true if it is literally the same component — a second
+// implementation is a promise to keep them matching, and this repo has enough
+// evidence about how those go.
+
+import { useEffect, useId, useRef, useState } from "react";
+
+import { clamp } from "@main/services/clamp";
+import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
+
+/** Real attendance trend chart (SVG): a baseline, the per-service polyline, the
+ *  latest point marked, and first/last date labels. The hero of the blend — not
+ *  decorative. Falls back to a quiet note when there isn't enough to plot. */
+export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
+  /**
+   * The chart's own size, measured, and used as PLAIN PIXELS — see the svg
+   * below for why there is no viewBox to scale them.
+   *
+   * The width decides where the points sit; the height decides how much rise
+   * the line is given. Both come from the element rather than from a constant,
+   * so the same component draws the same chart on History's 640 and on Home's
+   * whole-tile width.
+   */
+  // Unique per instance: Home and History can both be mounted, and two <defs>
+  // sharing an id means the second chart paints with the first one's gradient.
+  const gradientId = useId();
+  const [W, setW] = useState(640);
+  /**
+   * And the HEIGHT, because a trend needs an aspect to be a shape.
+   *
+   * History caps the chart at 640px wide, where 130 tall is a reasonable band.
+   * Home hands it a whole XL tile — some 1900px — and at a fixed height that is
+   * fifteen to one: the line came out as a nearly flat wire pulled across the
+   * card, with the tile's remaining height empty underneath it. Taking the
+   * height it is actually given gives the curve room to be a curve.
+   *
+   * 130 is the floor and the fallback, so History — whose container is
+   * auto-height — draws exactly what it always drew.
+   */
+  const [H, setH] = useState(130);
+  /**
+   * The measured element, in STATE, and the observer keyed to it.
+   *
+   * It was a ref read once in a mount effect, and that is the bug behind every
+   * complaint about this chart. The component returns a different element while
+   * there are fewer than two services to plot — the "not enough yet" note, which
+   * carries no ref — so on any load where the history had not arrived by first
+   * paint, the effect ran with a null ref, returned, and never ran again. No
+   * observer was ever attached, and the width stayed at its initial 640 for the
+   * life of the page.
+   *
+   * With a viewBox that came out as 640 stretched across a 1500px card: labels
+   * two and a half times too wide, and an endpoint dot drawn as an oval. Without
+   * one it came out as a line that stops at a third of its own card. Both were
+   * reported; both were this.
+   *
+   * A callback ref binds whenever the node appears, however many renders later,
+   * and re-binds if it is ever replaced.
+   */
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!box) return;
+    const ro = new ResizeObserver(([entry]) => {
+      // Floors, so a card mid-mount at zero size cannot divide by nothing.
+      setW(Math.max(240, Math.round(entry.contentRect.width)));
+      setH(Math.max(130, Math.round(entry.contentRect.height)));
+    });
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [box]);
+  // Tighter than it was. A third of a 130px band spent on margin is a third the
+  // line does not get, and at the widths Home hands this thing the line needs
+  // every pixel of rise it can be given.
+  const padTop = 10;
+  const padBottom = 20;
+  const padX = 10;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [hover, setHover] = useState<number | null>(null);
+  if (points.length < 2) {
+    return (
+      <div className="flex h-full min-h-[130px] items-center justify-center text-caption1 text-fg-subtle">
+        Not enough services yet to chart a trend.
+      </div>
+    );
+  }
+  // The FULL width of whatever it is given.
+  //
+  // It was capped at 8:1 for a while, centred, so a wide tile did not render
+  // every weekend as the same near-horizontal wire. Asked for outright: a chart
+  // in a widget should fill the widget. The aspect is the tile's to decide — a
+  // Tall one gives the curve its shape back — and a chart that stops short of
+  // its own card reads as broken in a way a shallow slope does not.
+  const plotW = W;
+  const vals = points.map((p) => p.value);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const range = max - min || 1;
+  const x = (i: number) => padX + (i / (points.length - 1)) * (plotW - padX * 2);
+  const y = (v: number) => padTop + (1 - (v - min) / range) * (H - padTop - padBottom);
+  const poly = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  // The same points closed down to the baseline, for the fill.
+  //
+  // A line alone is a thread, and stretched across a metre of wall-width tile a
+  // thread is what it looks like — the shape stops registering at all. Weight
+  // under it is what makes a shallow slope read as a shape rather than as a
+  // scratch, and it costs one path.
+  const area = `${padX},${H - padBottom} ${poly} ${plotW - padX},${H - padBottom}`;
+  const lastX = x(points.length - 1);
+  const lastY = y(points[points.length - 1].value);
+  const latest = points[points.length - 1].value;
+  const hp = hover != null ? points[hover] : null;
+  const hx = hover != null ? x(hover) : 0;
+  const hy = hp ? y(hp.value) : 0;
+  return (
+    <div className="relative h-full min-h-[130px]" ref={setBox}>
+      <div className="relative h-full">
+      <svg
+        ref={svgRef}
+        /**
+         * NO viewBox, and that is the point.
+         *
+         * A viewBox is a scale factor between the drawing and the box, and this
+         * chart has been distorted by that factor twice now: once because the
+         * factor was fixed at 640 and stretched to fit, and again because the
+         * measured factor and the real width can disagree — during a resize, at
+         * a browser zoom, or on any frame where the observer has not caught up.
+         * Whenever they disagree, preserveAspectRatio="none" stretches the text
+         * and turns the endpoint dot into an oval. Reported both times.
+         *
+         * Without one, the SVG's user units ARE CSS pixels, always. A stale
+         * measurement then costs a line that stops a few pixels short for one
+         * frame, and nothing can ever be drawn out of shape.
+         */
+        width="100%"
+        height={H}
+        style={{ display: "block" }}
+        onPointerMove={(e) => {
+          const svg = svgRef.current;
+          if (!svg) return;
+          const r = svg.getBoundingClientRect();
+          const frac = (e.clientX - r.left) / r.width; // 0..1 across the plotted width
+          setHover(clamp(Math.round(frac * (points.length - 1)), 0, points.length - 1));
+        }}
+        onPointerLeave={() => setHover(null)}
+        role="img"
+        aria-label="Attendance trend across recent services"
+      >
+        <line x1={0} y1={H - padBottom} x2={plotW} y2={H - padBottom} stroke="var(--su-line)" />
+        <defs>
+          <linearGradient id={`${gradientId}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--su-accent)" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="var(--su-accent)" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <polygon points={area} fill={`url(#${gradientId})`} />
+        <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        {/* The newest point is hollow while its service is still recording — that
+            total is a partial and will keep climbing, so it must not read as a
+            settled weekend. */}
+        {points[points.length - 1].live ? (
+          <circle cx={lastX} cy={lastY} r={4} fill="var(--su-bg)" stroke="var(--su-accent)" strokeWidth={2} />
+        ) : (
+          <circle cx={lastX} cy={lastY} r={4} fill="var(--su-accent)" />
+        )}
+        {hp && (
+          <g pointerEvents="none">
+            <line x1={hx} y1={padTop} x2={hx} y2={H - padBottom} stroke="var(--su-line-strong)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            <circle cx={hx} cy={hy} r={4} fill="var(--su-accent)" stroke="var(--su-bg)" strokeWidth={1.5} />
+          </g>
+        )}
+        <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
+        <text x={plotW - padX} y={H - 8} textAnchor="end" fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[points.length - 1].day)}</text>
+      </svg>
+      {/* Hover tooltip — an HTML overlay rather than SVG text, so it takes the
+          app's own type and wraps like everything else. */}
+      {hp && (
+        <div
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl"
+          style={{ left: `${(hx / plotW) * 100}%`, top: `${Math.max(hy - 8, 4)}px` }}
+        >
+          <div className="font-mono text-caption2 tabular-nums text-fg-subtle whitespace-nowrap">
+            {shortDay(hp.day)}{hp.live ? " · recording" : ""}
+          </div>
+          <div className="font-mono text-caption1 font-medium tabular-nums text-fg text-center">{hp.value.toLocaleString()}</div>
+          {hp.parts && hp.parts.length > 1 && (
+            <div className="mt-1 flex flex-col gap-0.5 border-t border-line pt-1">
+              {hp.parts.map((p, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 font-mono text-caption2 tabular-nums text-fg-muted whitespace-nowrap">
+                  <span>{p.label}</span>
+                  <span>{p.value.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Latest attendance, pinned above the most recent point (hidden while
+          hovering so it doesn't collide with the tooltip). Only this one value —
+          labeling every point would clutter. */}
+      {!hp && (
+        <span
+          className="pointer-events-none absolute font-mono text-caption1 font-medium tabular-nums text-fg"
+          // Above the last point, or beside it when there is no room above —
+          // which is exactly the common case, because the newest weekend being
+          // the highest one is what puts the point at the top of the band. It
+          // used to clear the dot only because the line stopped short of the
+          // card; now that the line reaches the edge, the two share a corner.
+          //
+          // Stepping sideways rather than making room at the top keeps every
+          // pixel of rise the curve has.
+          style={{ top: `${Math.max(0, lastY - 20)}px`, right: lastY - 20 < 0 ? 18 : 4 }}
+        >
+          {latest.toLocaleString()}
+        </span>
+      )}
+      </div>
+    </div>
+  );
+}
+

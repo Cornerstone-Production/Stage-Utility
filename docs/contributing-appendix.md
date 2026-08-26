@@ -8,7 +8,7 @@ Orientation for working in the codebase.
 .
 ├── server.ts                  # Backend entry point
 ├── index.html                 # Kiosk display (Vite entry)
-├── settings-window.html       # Settings UI (Vite entry)
+├── app.html                   # Operator app (Vite entry)
 ├── vite.config.ts             # Multi-page build + dev proxy + React Compiler
 ├── main/                      # Backend
 │   ├── services/              # stage-controller, remote-server, pco-service,
@@ -22,8 +22,9 @@ Orientation for working in the codebase.
 │   ├── main/                  # Displays: stage-view (router/picker) → slot grid,
 │   │                          #   dashboard-view, stage-display-view, transcription-view,
 │   │                          #   layout-renderer (custom layouts); hooks + pco-timer
-│   ├── settings/              # Settings app (settings-view + sections/: views-section,
-│   │                          #   outputs-section, slots-section, layout-editor, …)
+│   ├── settings/              # Section components rendered by app/ routes
+│   │                          #   (outputs-section, view-detail, slots-section,
+│   │                          #   layout-editor, …)
 │   ├── components/            # Shared components + ui/ primitives
 │   ├── fonts/                 # Self-hosted Outfit (brand title)
 │   └── lib/api.ts             # REST + SSE client

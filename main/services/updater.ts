@@ -19,9 +19,11 @@
 // tells the operator to update from the CLI).
 
 import { execFile, spawn } from "node:child_process";
+import { errorMessage } from "./errors.js";
 
 import { APP_ROOT } from "./app-root.js";
 import { summarizeChangelog } from "./changelog.js";
+import { updateNoticesStore } from "./update-notices-store.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
@@ -35,7 +37,7 @@ import { fetchTapVersion, homebrewInstallable, tarballInstallable } from "./upda
 import { FORMULA } from "./update/homebrew-strategy.js";
 import { selectStrategy } from "./update/select-strategy.js";
 import { ApplyWatchdog } from "./update/apply-watchdog.js";
-import { exitForRestart } from "./update/relaunch.js";
+import { exitForRestart, selfRecovers } from "./update/relaunch.js";
 
 import { broadcast } from "./broadcaster.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
@@ -268,6 +270,10 @@ export class Updater {
     return {
       ...this.status,
       ...this.updatability(),
+      // Reported alongside the version because the UI has to warn BEFORE an
+      // action that exits, not after — by then the server is gone and there is
+      // nothing left to deliver a message with.
+      selfRecovers: selfRecovers(),
       version: this.version(),
       step: this.status.phase === "updating" ? this.status.step : null,
       restartPending: this.isRestartPending(),
@@ -397,7 +403,7 @@ export class Updater {
         ...this.status,
         phase: "idle",
         lastCheckedAt: new Date().toISOString(),
-        error: String(err instanceof Error ? err.message : err),
+        error: errorMessage(err),
       };
     }
     this.broadcast();
@@ -457,7 +463,7 @@ export class Updater {
       } catch (err) {
         // Same contract as a failed `git fetch` on the git path: report it, keep
         // the last known numbers, stay idle.
-        error = String(err instanceof Error ? err.message : err);
+        error = errorMessage(err);
       }
     } else {
       error =
@@ -501,6 +507,39 @@ export class Updater {
    * builds, and (on success) kills this process so the service manager restarts
    * it with the new build. Returns immediately; progress arrives via SSE.
    */
+  /**
+   * Record what this update is about to install, BEFORE it runs.
+   *
+   * After the restart the live status describes the NEXT pending release, not
+   * the one just installed — so a dialog reading it would confidently show the
+   * wrong notes. This is the only moment the answer is known.
+   *
+   * A failure here does not block the update. A box that cannot write a notice
+   * must still be able to install, and this is the one place a log-only catch is
+   * right: there is no caller left to tell, the operator is mid-update, and the
+   * cost is a missing dialog rather than a missing release.
+   */
+  private async captureJustUpdated(targetTag: string | null): Promise<void> {
+    try {
+      await updateNoticesStore.update((cur) => ({
+        ...cur,
+        justUpdated: {
+          version: targetTag ?? this.status.targetTag ?? "unknown",
+          fromVersion: this.status.version ?? null,
+          notes: this.status.changelogSections ?? [],
+          // The flat list is kept as well: a git checkout's changelog is commit
+          // subjects, which have no sections, and a dialog with neither would
+          // be a heading over nothing.
+          lines: this.status.changelogSections?.length ? [] : (this.status.changelog ?? []),
+          intro: this.status.changelogIntro ?? null,
+          at: new Date().toISOString(),
+        },
+      }));
+    } catch (err) {
+      console.warn("[updater] could not record the update notice:", err);
+    }
+  }
+
   async applyUpdate(opts: { deferRestart?: boolean } = {}): Promise<UpdateStatus> {
     if (this.status.phase === "updating") throw new Error("An update is already running.");
     // Can this install update at all? Asked of the strategy layer, not of
@@ -532,6 +571,7 @@ export class Updater {
           "Pick a track in Settings → Advanced, or re-run the installer with STAGE_TRACK set.",
       );
     }
+    await this.captureJustUpdated(this.status.targetTag ?? null);
     return this.launch(branch, false, opts.deferRestart === true, this.status.targetTag ?? null);
   }
 
@@ -553,7 +593,7 @@ export class Updater {
       // installer lands on whatever is newest when IT runs, which may not be
       // what the operator was shown.
       this.logEvent(
-        `could not resolve the newest release on ${branch}; applying unpinned — ${String(err instanceof Error ? err.message : err)}`,
+        `could not resolve the newest release on ${branch}; applying unpinned — ${errorMessage(err)}`,
       );
       return null;
     }

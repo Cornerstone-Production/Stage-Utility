@@ -49,6 +49,29 @@
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
+  /* ── Motion ──────────────────────────────────────────────────────────────
+     Three durations and two easings. A motion system with nine durations is
+     one nobody applies consistently, and the app was already near-uniform by
+     accident: 86 of 89 transition utilities ran on Tailwind's default, with
+     three one-off durations disagreeing.
+
+     --motion-quick is wired to Tailwind's DEFAULT below, so every bare
+     `transition-colors` inherits the token without 51 files being edited. That
+     is the point: a token nobody has to remember to use.
+
+     Motion here conveys state — a thing became hoverable, a panel arrived. It
+     never decorates. */
+  --motion-instant: 90ms;   /* hover, press: must feel like the pointer itself */
+  --motion-quick: 160ms;    /* toggles, tabs, toasts */
+  --motion-settled: 260ms;  /* dialogs, route changes, anything that travels */
+
+  --motion-ease: cubic-bezier(0.2, 0.6, 0.2, 1);      /* arrives and settles */
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);   /* leaves without lingering */
+
+  /* Tailwind's bare `transition-*` utilities resolve to these. */
+  --default-transition-duration: var(--motion-quick);
+  --default-transition-timing-function: var(--motion-ease);
+
   /* Gray scale (1–12 + alpha) */
   --color-gray-1:   var(--gray-1);
   --color-gray-2:   var(--gray-2);
@@ -341,7 +364,23 @@
     animation: su-flash-pulse 2s ease-in-out;
     border-radius: 0.875rem;
   }
+  /* One place that honours the operating system's reduced-motion setting, rather
+     than per-component motion-reduce: variants that each have to be remembered.
+     Not `animation: none` globally - a spinner that stops spinning reads as a
+     frozen app - so this collapses duration instead of removing the animation. */
   @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 1ms !important;
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+    }
+    /* The spinner is the exception: it means "still working", and one frame of
+       it means nothing. Kept turning, slowly. */
+    .animate-spin {
+      animation-duration: 1.4s !important;
+      animation-iteration-count: infinite !important;
+    }
     .su-flash {
       animation: none;
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent);
@@ -414,6 +453,7 @@
   --color-fg-subtle:      rgba(255, 255, 255, 0.45);
   --color-fg-faint:       rgba(255, 255, 255, 0.34);
 }
+
 
 /* Auto-hide scrollbar for the service-order object: no bar at rest, a thin subtle
    bar only while actively scrolling (the component toggles `.scrolling` and clears
@@ -489,4 +529,61 @@
   @page {
     margin: 12mm;
   }
+}
+
+
+/* The document's own ink.
+   Without this, `color` on <body> is the user agent's black, and anything that
+   does not set a colour of its own inherits it. Every component here happened
+   to set text-fg or text-fg-muted explicitly, which hid that completely — until
+   one did not, and a palette of icons rendered pure black on a near-black
+   dialog in dark mode. An icon's colour is currentColor by default, so the
+   default has to be right rather than merely always overridden.
+   Set on body rather than a component so it holds for portalled content too:
+   dialogs, menus and tooltips render outside the app's own tree. `--su-fg` is
+   scoped, so a stage display under `.kiosk` gets its own ink from the same rule.
+   Colour only: the operator shell and the stage root already paint their own
+   backgrounds, and this is a fix, not a redecoration. */
+body {
+  color: var(--su-fg);
+}
+
+/* A fixed Space in the context bar.
+   The strip lays out with a 12px column gap, so a bare element would separate
+   its neighbours by 12 + width + 12 — the number in the code would name nothing
+   anyone could measure on screen, which is what made it impossible to agree on
+   a size. The negative margins eat the gap either side, so the declared width
+   IS the whitespace between the items it sits between.
+   The sibling rule is load-bearing. Two in a row each cancel the ONE gap
+   between them, so it comes off twice and n spaces came to n×width − (n−1)×12
+   — two 24px spaces measured 36px, not 48. A Space that follows a Space keeps
+   its left margin, letting its predecessor's cancellation stand alone, and n
+   of them now come to exactly n × width. */
+.bar-space {
+  width: 24px;
+  margin-inline: -12px;
+  flex-shrink: 0;
+}
+.bar-space + .bar-space {
+  margin-left: 0;
+}
+
+/* A status strip that never collides.
+   The context bar is a flex row of independent readings. Letting its items
+   shrink squeezed them past their own content on a phone, so "3 disconnected"
+   and "REC stopped" printed on top of each other — the items overlapped rather
+   than overflowing, which reads as a broken layout rather than a full one.
+   Items keep their width now and the bar wraps on a phone; from sm up it is one
+   row again, and scrolls in the rare case that row still does not fit. Nothing
+   is ever dropped: every reading on it is one somebody put there on purpose. */
+.context-strip {
+  scrollbar-width: none; /* Firefox */
+}
+@media (min-width: 640px) {
+  .context-strip {
+    overflow-x: auto;
+  }
+}
+.context-strip::-webkit-scrollbar {
+  display: none;
 }

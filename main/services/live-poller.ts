@@ -7,6 +7,7 @@
 // error we keep the last state and fall back to the idle cadence.
 
 import type { PcoLiveDTO } from "../types/stage.js";
+import { errorMessage } from "./errors.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { broadcast } from "./broadcaster.js";
 import { splRecorder } from "./spl-recorder.js";
@@ -148,7 +149,7 @@ class LivePoller {
         return;
       }
       // Transient (e.g. 429 / network) — keep last client state, slow down.
-      const decision = this.errors.fail(err instanceof Error ? err.message : String(err), Date.now());
+      const decision = this.errors.fail(errorMessage(err), Date.now());
       if (decision.line) console.error(decision.line);
       this.schedule(serviceWindow.pollDelayMs(IDLE_INTERVAL_MS, DORMANT_INTERVAL_MS));
       return;

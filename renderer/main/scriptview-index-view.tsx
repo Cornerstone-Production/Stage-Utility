@@ -3,8 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../components/ui/tooltip";
 import { Loader2Icon, ListChecksIcon, ArrowRightIcon, ChevronDownIcon } from "lucide-react";
 
-import { BrandLogo } from "../components/brand-logo";
-import { QrHint } from "../components/qr-hint";
 import { useStageState } from "./use-stage-state";
 import { invoke } from "../lib/api";
 
@@ -28,7 +26,7 @@ export function scriptViewUrl(typeName: string, layoutId: string, layoutName?: s
 // dropdown + open arrow, deep-linking to /scriptview/{serviceTypeId}/{layoutId}.
 // Our own take on ScriptViewer's "Plans" page, in the kiosk design language.
 export function ScriptViewIndex() {
-  const { state, isLoading: stateLoading } = useStageState();
+  const { isLoading: stateLoading } = useStageState();
   const [types, setTypes] = useState<ServiceTypeDTO[] | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
   const [shownIds, setShownIds] = useState<string[]>([]);
@@ -65,54 +63,31 @@ export function ScriptViewIndex() {
   ];
   const selectedFor = (typeId: string) => sel[typeId] ?? globalLayouts[0]?.id ?? ALL_COLUMNS_LAYOUT_ID;
 
-  // Same centered brand mark the display picker shows above its list.
-  const centerLogo = state?.emptySlotLogo ?? state?.appLogo;
 
   return (
-    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      {/* Brand top bar — matches the display picker. */}
-      <div
-        className="relative flex items-center h-10 shrink-0"
-        style={{
-          background: "rgba(0,0,0,0.50)",
-          backdropFilter: "blur(20px)",
-          borderBottom: "1px solid rgba(255,255,255,0.09)",
-          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 8px rgba(0,0,0,0.40)",
-        }}
-      >
-        <div className="shrink-0 ml-3 flex items-center gap-2 text-fg-muted relative z-10">
-          {state?.appLogo && (
-            <BrandLogo logo={state.appLogo} monochrome className="size-5 rounded select-none text-fg" />
-          )}
-          <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
-            {state?.appName ?? "ScriptView"}
-          </span>
-        </div>
-        {state?.showQr && state.remoteUrl && (
-          <Tooltip label="Open settings in a new tab">
-            <a href="/settings" target="_blank" rel="noopener noreferrer" className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70" aria-label="Open settings in a new tab">
-              <QrHint url={state.remoteUrl} compact />
-            </a>
-          </Tooltip>
-        )}
-      </div>
-
+    // `h-full` rather than `h-[100dvh]`, and no `kiosk-surface` or safe-area
+    // padding: this renders inside the operator shell, below the rail and the
+    // context bar, and follows the light/dark toggle. All three were correct
+    // when it was served as a standalone chrome-free page.
+    //
+    // The brand top bar and its settings QR are gone too - the rail carries the
+    // logo, the app name and a Settings link, so repeating them here put two
+    // brand rows on one screen.
+    <div className="flex flex-col h-full overscroll-none">
       {/* Scroll container + inner min-h-full centering wrapper: centers when the
           list is short, scrolls without clipping the ends when it's long. */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-        <div className="min-h-full flex flex-col items-center justify-center gap-8 px-6 py-8">
-        {centerLogo && (
-          <BrandLogo
-            logo={centerLogo}
-            monochrome
-            className="text-fg-faint shrink-0"
-            style={{ width: "clamp(6rem,22vmin,16rem)", height: "clamp(6rem,22vmin,16rem)" }}
-          />
-        )}
-        <div className="flex flex-col gap-2 w-full max-w-md">
-          <span className="text-caption2 font-medium uppercase tracking-wider text-fg-subtle text-center select-none mb-1" style={{ letterSpacing: "0.08em" }}>
-            ScriptView · pick a service
-          </span>
+        {/* CENTRED, in both axes. This is a launcher — four rows and an arrow —
+            and left-aligned at the top of a page the width of a monitor it read
+            as something that had come loose in the corner, with the rest of the
+            screen empty behind it. The page's own title stays where the shell
+            puts it; this is the content, and the content is the picker.
+
+            `m-auto` rather than `justify-center`, because a flex child centred
+            by justify has its overflowing top cut off when the list grows past
+            the window — auto margins collapse instead of clipping. */}
+        <div className="flex min-h-full py-8 max-sm:py-4">
+        <div className="m-auto flex flex-col gap-2 w-full max-w-md">
 
           {error ? (
             <p className="text-body text-red-10 text-center px-4">{error}</p>
@@ -131,16 +106,16 @@ export function ScriptViewIndex() {
                     <select
                       value={cur}
                       onChange={(e) => setSel((s) => ({ ...s, [type.id]: e.target.value }))}
-                      className="appearance-none cursor-pointer rounded-lg bg-white/[0.06] py-1.5 pl-3 pr-8 text-caption1 font-medium text-fg-muted outline-none transition-colors hover:bg-white/10 hover:text-fg focus:text-fg"
+                      className="appearance-none cursor-pointer rounded-lg bg-fill py-1.5 pl-3 pr-8 text-caption1 font-medium text-fg-muted outline-none transition-colors hover:bg-fill-hover hover:text-fg focus:text-fg"
                     >
-                      {options.map((o) => <option key={o.value} value={o.value} className="bg-[var(--kiosk-surface-1)] font-medium">{o.label}</option>)}
+                      {options.map((o) => <option key={o.value} value={o.value} className="bg-surface font-medium">{o.label}</option>)}
                     </select>
                     <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
                   </div>
                   <Tooltip label={`Open ${type.name}`}>
                     <a
                       href={scriptViewUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name)}
-                      className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-white/15"
+                      className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-fill-hover"
                       aria-label={`Open ${type.name}`}
                     >
                       <ArrowRightIcon className="size-4 text-fg-muted" />
@@ -150,6 +125,12 @@ export function ScriptViewIndex() {
               );
             })
           )}
+          <a
+            href="/scriptview/presets"
+            className="mt-2 self-start text-caption1 text-accent hover:underline"
+          >
+            Edit column presets
+          </a>
         </div>
         </div>
       </div>

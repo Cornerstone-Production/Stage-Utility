@@ -29,6 +29,19 @@ export function SidebarChromeProvider({
   return <SidebarChromeContext value={value}>{children}</SidebarChromeContext>;
 }
 
+/**
+ * The chrome state SplitView decided on: whether this is the collapsed icon rail
+ * and whether we are on mobile.
+ *
+ * Sidebar content needs it to render its own footer — a collapse control and a
+ * width handle only make sense inline, never in the mobile drawer. Recomputing
+ * it from a media query instead would let the two disagree, which is how a
+ * drawer ends up rendering as an icon rail.
+ */
+export function useSidebarChrome(): SidebarChromeValue {
+  return React.use(SidebarChromeContext);
+}
+
 // ── Context ───────────────────────────────────────────────────────────────────
 
 interface SidebarListContextValue {
@@ -46,7 +59,13 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {}
 export function Sidebar({ className, children, ...props }: SidebarProps) {
   return (
     <div
-      className={cn("flex flex-col h-full bg-rail", className)}
+      // min-h-full, not h-full. Inside a SCROLLER — which is what the mobile
+      // drawer is — h-full sizes this box to the scroller's visible height, so
+      // the grey stopped exactly one viewport down and everything below it
+      // scrolled onto the drawer's own white. min-h-full still fills a short
+      // container (the footer's mt-auto keeps working) and grows to the content
+      // when there is more of it.
+      className={cn("flex flex-col min-h-full bg-rail", className)}
       {...props}
     >
       {children}
@@ -133,6 +152,21 @@ interface SidebarListItemProps extends Omit<React.ButtonHTMLAttributes<HTMLButto
   label?: string;
   /** Override active state (bypasses context). */
   isActive?: boolean;
+  /**
+   * Accessible name, when the visible label does not carry the whole meaning —
+   * a row with a badge reads as "Advanced, update available", because the dot
+   * itself is decoration a screen reader cannot describe.
+   */
+  ariaLabel?: string;
+  /**
+   * A status mark on the row, positioned BY the row.
+   *
+   * Where it belongs depends on the rail state, which only the row knows:
+   * centred on the right beside the label when expanded, and tucked into the
+   * corner when collapsed — where the row is 40x32 and anything centred on the
+   * right lands on top of the icon.
+   */
+  badge?: React.ReactNode;
 }
 
 export function SidebarListItem({
@@ -141,6 +175,8 @@ export function SidebarListItem({
   title,
   label,
   isActive: isActiveProp,
+  ariaLabel,
+  badge,
   className,
   onClick,
   children,
@@ -176,7 +212,7 @@ export function SidebarListItem({
     <button
       type="button"
       className={cn(
-        "flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left",
+        "relative flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left",
         "text-[13.5px] font-medium transition-colors",
         railed && "justify-center px-0",
         isActive
@@ -185,7 +221,7 @@ export function SidebarListItem({
         className,
       )}
       aria-current={isActive ? "page" : undefined}
-      aria-label={railed ? displayLabel : undefined}
+      aria-label={ariaLabel ?? (railed ? displayLabel : undefined)}
       onClick={handleClick}
       {...props}
     >
@@ -195,6 +231,17 @@ export function SidebarListItem({
         </span>
       )}
       {displayLabel && <span className={cn("truncate", railed && "sr-only")}>{displayLabel}</span>}
+      {badge && (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute",
+            railed ? "right-1 top-1" : "right-2 top-1/2 -translate-y-1/2",
+          )}
+        >
+          {badge}
+        </span>
+      )}
       {children}
     </button>
   );

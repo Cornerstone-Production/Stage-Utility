@@ -5,10 +5,12 @@ import { useStageState } from "../main/use-stage-state";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } from "react";
+import { useRevealNonce } from "../app/flash";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
 import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
+import { CompanionInfoPanel } from "./companion-info-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
 import {
   Button,
@@ -29,12 +31,14 @@ import {
   Collapsible,
   NumberInput,
   toast,
+  confirm,
   SkeletonRows,
   InfoHint,
   UnsavedBanner,
 } from "../components/ui";
-import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon, EraserIcon } from "lucide-react";
 import { cn } from "../lib/cn";
+import { formatClock } from "../lib/clock-format";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -100,7 +104,17 @@ function IpListField({ value, onChange, placeholder }: IpListFieldProps) {
 
 // ---- connection badge -------------------------------------------------------
 
-function ConnectionBadge({ connection, message }: { connection: ConnectionState; message?: string | null }) {
+function ConnectionBadge({
+  connection,
+  message,
+  inbound,
+}: {
+  connection: ConnectionState;
+  message?: string | null;
+  /** Nothing dials out, so "disconnected" would name a fault where there is
+   *  only an empty room. A listener with no client yet is waiting, not down. */
+  inbound?: boolean;
+}) {
   if (connection === "connected") {
     return (
       <span className="flex items-center gap-1">
@@ -132,8 +146,8 @@ function ConnectionBadge({ connection, message }: { connection: ConnectionState;
   // disconnected
   return (
     <span className="flex items-center gap-1">
-      <Status variant="warning" />
-      <span className="text-caption1 text-gray-9">Disconnected</span>
+      <Status variant={inbound ? "neutral" : "warning"} />
+      <span className="text-caption1 text-gray-9">{inbound ? "No clients yet" : "Disconnected"}</span>
     </span>
   );
 }
@@ -153,7 +167,7 @@ function fmtSynced(iso: string | null | undefined): string {
   if (!iso) return "Never synced";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Never synced";
-  return `Synced ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  return `Synced ${formatClock(d)}`;
 }
 
 /** The form's starting values for an integration — the saved config, with password
@@ -248,6 +262,33 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
     }
   }
 
+  const [isClearing, setIsClearing] = useState(false);
+  /**
+   * Empty the transcript on every display at once.
+   *
+   * Here because a line CAN get stuck with nothing an operator can do: a partial
+   * whose channel was renamed mid-service has no final coming to clear it, and
+   * before this the only way out was restarting the server. That case is fixed,
+   * but "the board is showing something I do not want on it, right now" deserves
+   * a control regardless.
+   */
+  async function handleClearTranscript() {
+    if (!(await confirm({
+      title: "Clear the transcript?",
+      message: "Every transcription display goes empty. New lines carry on arriving from ProdCom.",
+      confirmLabel: "Clear",
+    }))) return;
+    setIsClearing(true);
+    try {
+      await invoke("prodcom:clearTranscript");
+      toast.success("Transcript cleared.");
+    } catch (err) {
+      toast.error(`Could not clear the transcript: ${errorMessage(err)}`);
+    } finally {
+      setIsClearing(false);
+    }
+  }
+
   async function handleTest() {
     setIsTesting(true);
     setTestResult(null);
@@ -267,13 +308,19 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
     // Getting-started sends "Connect Planning Center" straight at this card's form.
     <div
       className="flex flex-col gap-3"
-      data-flash-id={descriptor.id === "planning-center" ? "pco-credentials" : undefined}
+      data-flash-id={integrationFlashId(descriptor.id)}
     >
       {/* Schema-driven form */}
       <FieldSet flat>
         <FieldGroup>
           {descriptor.configSchema.map((field) => {
             const value = localConfig[field.key];
+            // A field that belongs to the other way of connecting. Hidden rather
+            // than disabled: it is not a control you could use, it is one this
+            // setup has no question for. Its saved value is untouched.
+            if (field.showIf && String(localConfig[field.showIf.key] ?? "") !== field.showIf.equals) {
+              return null;
+            }
 
             return (
               <Field key={field.key} orientation="horizontal">
@@ -362,6 +409,14 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
           {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
           Test connection
         </Button>
+        {descriptor.id === "prodcom" && (
+          <Button variant="transparent" size="small" onClick={handleClearTranscript} disabled={isClearing}>
+            {isClearing
+              ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" />
+              : <EraserIcon className="size-3.5 text-gray-9" />}
+            Clear transcript
+          </Button>
+        )}
         {descriptor.id === "planning-center" && (
           <>
             <Button variant="transparent" size="small" onClick={handleRefresh} disabled={isRefreshing}>
@@ -899,12 +954,37 @@ function ProPresenterInstancesPanel({
 // ---- collapsible row + categories -------------------------------------------
 
 // Groups the growing integration list by purpose so the page stays scannable.
+/**
+ * Cards that Getting Started can point at, by integration id.
+ *
+ * Named here rather than inline so the reveal listener below and the attribute
+ * that emits it cannot drift — a flash id with no card, or a card whose id
+ * changed, would silently stop highlighting.
+ */
+const FLASH_IDS: Record<string, string | undefined> = {
+  "planning-center": "pco-credentials",
+};
+
+/**
+ * The `data-flash-id` for one integration's card.
+ *
+ * Every integration needs one, not just the two something happened to point at:
+ * the context bar's "N disconnected" now sends you straight at whichever is
+ * down, and that is any of them. Exported so the sender and the target derive
+ * the same string from the same function — a hand-written id on one side is how
+ * a highlight silently lands nowhere.
+ */
+export function integrationFlashId(id: string): string {
+  return FLASH_IDS[id] ?? `integration-${id}`;
+}
+
 const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "Service & plan", ids: ["planning-center", "prodcom"] },
   { title: "Presentation", ids: ["propresenter"] },
   { title: "Audio", ids: ["smaart"] },
   { title: "People", ids: ["sensource"] },
   { title: "Wireless", ids: ["wireless"] },
+  { title: "Streaming", ids: ["resi", "youtube"] },
   { title: "Control & output", ids: ["obs", "reaper", "osc", "rosstalk", "ross-tsl"] },
 ];
 
@@ -971,20 +1051,32 @@ function IntegrationEntry({
   toggling: boolean;
   onToggle: (enabled: boolean) => void;
 }) {
+  // A CONFIGURED integration is collapsed, so the card the context bar's
+  // "N disconnected" aims a highlight at is not in the DOM — the highlight had
+  // nothing to land on and did nothing at all. Remounting with defaultOpen
+  // reveals it, and the operator can still close it again afterwards.
+  const revealNonce = useRevealNonce((id) => id === integrationFlashId(descriptor.id));
   return (
     <Collapsible
-      defaultOpen={!state.configured}
+      key={revealNonce}
+      defaultOpen={!state.configured || revealNonce > 0}
       label={<span className="text-callout font-semibold text-fg truncate">{descriptor.label}</span>}
       afterLabel={descriptor.description ? <InfoHint>{descriptor.description}</InfoHint> : undefined}
       right={
         <div className="flex items-center gap-3 shrink-0">
-          <ConnectionBadge connection={state.connection} message={state.message} />
-          <Switch
-            checked={state.enabled}
-            onCheckedChange={onToggle}
-            disabled={toggling}
-            aria-label={`Enable ${descriptor.label}`}
-          />
+          <ConnectionBadge connection={state.connection} message={state.message} inbound={descriptor.inbound} />
+          {/* No switch for an integration that dials US. There was one, and
+              nothing was gated on it: turning Companion off left the module
+              connecting and controlling the app exactly as before, while the
+              row said it was disabled. */}
+          {!descriptor.inbound && (
+            <Switch
+              checked={state.enabled}
+              onCheckedChange={onToggle}
+              disabled={toggling}
+              aria-label={`Enable ${descriptor.label}`}
+            />
+          )}
         </div>
       }
     >
@@ -1044,6 +1136,19 @@ interface IntegrationsPanelProps {
 }
 
 export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
+  // Getting Started points at a specific card, and an unconfigured integration
+  // lives inside the collapsed "Not set up" group — which is exactly where a
+  // first-run operator's PCO card is, so the highlight had nothing to land on.
+  //
+  // A nonce rather than a boolean: it remounts the group with defaultOpen, so
+  // the operator can still close it afterwards, and there is no setState in an
+  // effect to cascade renders. Declared here, above every early return, because
+  // hooks must run in the same order on every render.
+  // The "Not set up" group opens when the target is one of the cards inside it.
+  // Same hook the rows use — this was the only copy of the pattern until the
+  // rows needed it too.
+  const revealNonce = useRevealNonce((flashId) => Object.values(FLASH_IDS).includes(flashId));
+
   const queryClient = useQueryClient();
   const { state: stageState } = useStageState();
 
@@ -1105,8 +1210,14 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
 
   const { descriptors: allDescriptors, states } = data;
   const stateMap = new Map(states.map((s) => [s.id, s]));
-  // Companion lives on the Advanced tab — there's nothing to configure here.
-  const descriptors = allDescriptors.filter((d) => d.id !== "companion");
+  // Companion is listed here like everything else.
+  //
+  // It used to be filtered OUT, on the grounds that there is nothing to
+  // configure — it dials in to us rather than the other way round. But "nothing
+  // to configure" is not the same as "should not appear": this is the one page
+  // whose job is to answer "what can this talk to", and the one integration
+  // people go looking for was the one it did not mention.
+  const descriptors = allDescriptors;
   const byId = new Map(descriptors.map((d) => [d.id, d]));
 
   // The body content for one integration: a bespoke panel (wireless/osc) or the
@@ -1115,6 +1226,9 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
     if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
     if (descriptor.id === "osc") return <OscTargetsPanel />;
     if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
+    // Its own panel: what Companion needs is an address to dial and the module
+    // to dial it with, not a form.
+    if (descriptor.id === "companion") return <CompanionInfoPanel state={state} />;
     return (
       <>
         <IntegrationCard
@@ -1215,7 +1329,12 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
       ))}
 
       {dormant.length > 0 && (
-        <Collapsible label={`Not set up (${dormant.length})`} summary="integrations you are not using">
+        <Collapsible
+          key={revealNonce}
+          defaultOpen={revealNonce > 0}
+          label={`Not set up (${dormant.length})`}
+          summary="integrations you are not using"
+        >
           <div className="flex flex-col gap-2 pt-2">
             {dormant.map((descriptor) => {
               const state = stateMap.get(descriptor.id);

@@ -91,6 +91,19 @@ export class SennheiserEwDx extends SennheiserSscBase {
         buildQuery(["mates", `tx${ch}`, "battery", "gauge"], null, mate);
         buildQuery(["mates", `tx${ch}`, "name"], null, mate);
         subs.push(mate);
+
+        // Runtime remaining, in its OWN subscription rather than beside the
+        // gauge. `battery/lifetime` is documented for EW-DX but has not been
+        // read off a device here, and SSC rejects a subscription containing an
+        // unknown address — bundled with the gauge, one wrong path would cost
+        // the battery percentage that already works.
+        //
+        // (The inner "lifetime" is Sennheiser's name for runtime minutes. The
+        // "#" lifetime above is how long the SUBSCRIPTION lives. Same word,
+        // unrelated meanings, and they sit four lines apart.)
+        const runtime: Record<string, unknown> = { "#": { lifetime: SUBSCRIBE_LIFETIME_S } };
+        buildQuery(["mates", `tx${ch}`, "battery", "lifetime"], null, runtime);
+        subs.push(runtime);
       }
     }
     this.send({ osc: { state: { subscribe: subs } } });
@@ -126,6 +139,14 @@ export class SennheiserEwDx extends SennheiserSscBase {
       const gauge = numOrNull(readPath(frame, ["mates", `tx${ch}`, "battery", "gauge"]));
       if (gauge != null) {
         st.battery = gauge;
+        touched = true;
+      }
+      // Runtime remaining, in minutes. Read only if the device sends it; a rack
+      // that answers nothing here keeps reporting null, which the widgets draw
+      // as a dash rather than a zero.
+      const runtime = numOrNull(readPath(frame, ["mates", `tx${ch}`, "battery", "lifetime"]));
+      if (runtime != null && runtime >= 0) {
+        st.batteryMinutes = Math.round(runtime);
         touched = true;
       }
       // Fall back to the transmitter's own name when the RX channel is unnamed.

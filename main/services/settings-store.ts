@@ -31,6 +31,27 @@ export interface SettingsData {
   wirelessMeterRateMs: number;
   /** Customizable brand name shown in the sidebar header and on the kiosk. */
   appName: string;
+  /**
+   * Kiosk device discovery — the UDP responder that lets a screen find this
+   * server and be claimed.
+   *
+   * OFF until switched on, deliberately. A fresh install answering discovery
+   * would let a test instance on the same LAN claim a screen meant for the real
+   * one; turning it on is a decision somebody makes once, on the server that
+   * runs the building.
+   *
+   * A device already bound to THIS server is answered either way — that is how a
+   * display re-finds its server after an IP change, and gating it here would
+   * leave a screen dark until somebody opened settings.
+   */
+  kioskDiscovery: boolean;
+  /** Port for the discovery exchange. Adjustable because AV gear is fond of odd
+   *  UDP ports and a collision should be a settings change, not a rebuild. */
+  kioskDiscoveryPort: number;
+  /** Stable per install; a device uses it to tell two servers apart. Generated
+   *  on first use and never rewritten — every binding on every device refers to
+   *  it, so changing it would orphan the lot. */
+  serverId: string | null;
   /** Themeable brand accent as a #rrggbb hex, or null to use the built-in default. */
   accentColor: string | null;
   /** Rendered (cropped) brand logo as a data URL, shown everywhere. */
@@ -79,12 +100,29 @@ export interface SettingsData {
    *  follow the host clock — fine on a machine set to local time, wrong on the
    *  UTC default most servers and containers ship with. */
   timezone?: string | null;
+  /** How a time of DAY is displayed — "12h" or "24h". Display only: it changes
+   *  nothing the server decides, because 12h and 24h are the same instant. */
+  hourCycle?: "12h" | "24h";
   /** Local UDP port the OSC integration listens on for device feedback. */
   oscFeedbackPort: number;
   /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */
   splVisibleMetrics: string[];
   /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
   onboardingDismissed: boolean;
+  /**
+   * The one-time strip of registry-written styling has run (see
+   * never-chosen-defaults.ts).
+   *
+   * It has to be recorded, because the data cannot say it: a readout wearing
+   * `textAlign: "center"` looks identical whether the registry wrote it at
+   * creation or the operator chose it in the inspector. Running the strip on
+   * every load therefore deleted the operator's choice every restart — reported
+   * as widgets un-centring themselves after each update.
+   *
+   * Absent means never run, so an install that upgrades into this still gets its
+   * one pass.
+   */
+  layoutDefaultsCleaned?: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -105,6 +143,9 @@ const DEFAULT_SETTINGS: SettingsData = {
   allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
   wirelessMeterRateMs: 1000,
   appName: "Stage Utility",
+  kioskDiscovery: false,
+  kioskDiscoveryPort: 8789,
+  serverId: null,
   accentColor: null,
   appLogo: null,
   appLogoMonochrome: true,

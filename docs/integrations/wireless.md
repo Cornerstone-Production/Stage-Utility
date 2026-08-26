@@ -39,10 +39,37 @@ TCP Port, and Number of Channels → enable it → **Test connection**. The glob
 meter rate is set once and applies to all wireless gear.
 
 **On a layout:** add object → wireless:
-- **Wireless summary** — online count (`online/total`) plus the lowest battery %.
-- **Wireless channel** — one channel's RF bars, battery %, frequency, audio level
-  (each toggleable).
+- **Wireless summary** — online count (`online/total`), the lowest battery %, and
+  optionally the shortest runtime left across the fleet.
+- **Wireless channel** — one channel's RF bars, battery %, runtime remaining,
+  frequency and audio level (each toggleable).
 - **Charger battery** — a charger bay's battery state.
+
+Charger bays are deliberately absent from the first two. A bay is not a mic: an
+empty one would drag "lowest battery" to zero, and a shelf of docked spares would
+pad the online count.
+
+### Battery percentage and time remaining
+
+Percentage answers "how full"; runtime answers "will it last the service", and the
+two do not track each other — the same 60% is three hours on one pack and forty
+minutes on another. Wireless Workbench leads with runtime for that reason, and the
+widgets can too: turn **Battery %** off and **Time remaining** on to make the
+runtime the headline figure.
+
+Runtime is reported by the receiver, not computed here, so it only appears where
+the gear provides one:
+
+| Provider | Runtime remaining |
+|---|---|
+| Shure Axient Digital | yes (`TX_BATT_MINS`) |
+| Shure ULX-D | yes (`BATT_RUN_TIME`) |
+| Sennheiser EW-DX | yes, where the rack reports `battery/lifetime` |
+| Shure PSM, Sennheiser ewG4, Spectera, SBC chargers | no — shows a dash |
+
+The reading is coloured against a service rather than a percentage: green past 90
+minutes, amber past 30, red below — enough for a service, enough for one that has
+started, and time to go and swap it.
 
 ## Reconnecting
 

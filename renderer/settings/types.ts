@@ -2,31 +2,18 @@
 
 import type { DragEndEvent } from "@dnd-kit/core";
 import type { useSensors } from "@dnd-kit/core";
+import type { DeviceChannel } from "@main/types/devices";
 
-export type SectionId =
-  | "plan"
-  | "views"
-  | "scriptview"
-  | "displays"
-  | "integrations"
-  | "connect"
-  | "branding"
-  | "service-history"
-  | "baptisms"
-  | "patch"
-  | "automation"
-  | "advanced";
-
-export interface SectionItem {
-  id: SectionId;
-  label: string;
-  icon: React.ReactNode;
-}
-
-export interface WirelessChannel {
-  id: string;
-  label: string;
-}
+/**
+ * One bindable wireless channel, as `/api/integrations/wireless/channels`
+ * returns it.
+ *
+ * An ALIAS, not a second declaration. This was a hand-copy of `DeviceChannel`
+ * that happened to match, so adding `deviceType` on the server left the client
+ * unable to see it — and a client type that silently lags the wire is what let
+ * the wireless widgets read fields the endpoint had never sent.
+ */
+export type WirelessChannel = DeviceChannel;
 
 // Action callbacks owned by SettingsView and threaded into each section.
 export interface SectionHandlers {
@@ -44,6 +31,7 @@ export interface SectionHandlers {
   handleSetReconnectSchedule: (partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) => Promise<void>;
   handleSetTaperWindow: (partial: { preMin?: number; postMin?: number }) => Promise<void>;
   handleSetTimezone: (tz: string | null) => Promise<void>;
+  handleSetHourCycle: (cycle: "12h" | "24h") => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
@@ -69,7 +57,7 @@ export interface SectionHandlers {
   discardSlots: () => void;
   handleSetViewSlotsLayout: (id: string, slotsLayout: SlotsLayout | null) => Promise<void>;
   // Views (content)
-  handleAddView: (name: string, kind: ViewKind) => Promise<string | null>;
+  handleAddView: (name: string, kind: ViewKind, surface?: "display" | "console") => Promise<string | null>;
   handleRenameView: (id: string, name: string) => Promise<void>;
   handleDuplicateView: (id: string) => Promise<void>;
   handleRemoveView: (id: string) => Promise<void>;
@@ -89,7 +77,6 @@ export interface SectionHandlers {
   handleUpdateLayoutTemplate: (id: string, patch: { name?: string; layout?: LayoutDTO }) => Promise<void>;
   handleDeleteLayoutTemplate: (id: string) => Promise<void>;
   handleCopySlots: (targetViewId: string, fromViewId: string) => Promise<void>;
-  handleReorderViews: (ids: string[]) => Promise<void>;
   // Presets (saved slot arrangements — global, recall into any view)
   handleSavePreset: (name: string) => Promise<void>;
   handleApplyPreset: (id: string) => Promise<void>;
@@ -103,9 +90,10 @@ export interface SectionHandlers {
   handleRenameOutput: (id: string, name: string) => Promise<void>;
   handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
+  handleSetOutputMode: (id: string, mode: "display" | "panel") => Promise<void>;
+  handleSetViewSurface: (id: string, surface: "display" | "console") => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;
   handleReorderOutputs: (ids: string[]) => Promise<void>;
-  handleOpenOutputWindow: (id: string) => Promise<void>;
   /** Remotely reload kiosk pages. Pass an output id, or null for all displays. */
   handleRefreshDisplay: (id: string | null) => Promise<void>;
   handleDragEnd: (event: DragEndEvent) => void;
@@ -119,8 +107,6 @@ export interface SectionProps {
   wirelessChannels: WirelessChannel[];
   teamPositions: TeamPositionDTO[];
   layoutTemplates: LayoutTemplate[];
-  selectedViewId: string;
-  setSelectedViewId: (id: string) => void;
   localSlots: Slot[];
   slotsDirty: boolean;
   isSavingSlots: boolean;

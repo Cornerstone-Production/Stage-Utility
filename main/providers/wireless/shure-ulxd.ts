@@ -5,8 +5,6 @@
 import type { ConfigField } from "../../types/integrations.js";
 import {
   ShureBaseProvider,
-  clamp,
-  formatFrequency,
   normalisedDb,
   rfBarsFromDbm,
   safeInt,
@@ -85,21 +83,6 @@ export class ShureUlxd extends ShureBaseProvider {
         break;
       }
 
-      case "BATT_CHARGE": {
-        const charge = safeInt(value);
-        if (!Number.isNaN(charge)) {
-          state.battery = charge === 255 ? null : clamp(charge, 0, 100);
-        }
-        console.debug(`[shure:${this.id}] ch${channel} BATT_CHARGE: ${value}`);
-        break;
-      }
-
-      case "FREQUENCY": {
-        state.frequencyLabel = formatFrequency(value);
-        console.debug(`[shure:${this.id}] ch${channel} freq: ${state.frequencyLabel ?? value}`);
-        break;
-      }
-
       case "MUTE_STATUS": {
         // Stored for completeness; does not affect online flag.
         console.debug(`[shure:${this.id}] ch${channel} MUTE_STATUS: ${value}`);
@@ -116,7 +99,11 @@ export class ShureUlxd extends ShureBaseProvider {
       }
 
       default:
-        console.debug(`[shure:${this.id}] ch${channel} unrecognized field: ${token}`);
+        // The tokens every family answers the same way live on the base. Only
+        // what neither the switch above nor that handler claims is unrecognised.
+        if (!this.handleCommonReport(channel, token, value, state)) {
+          console.debug(`[shure:${this.id}] ch${channel} unrecognized field: ${token}`);
+        }
         break;
     }
 

@@ -122,3 +122,46 @@ dependencies unchanged — skipping npm ci
 
 npm and vite's own output stays in `update.log` rather than filling `/log` with
 progress bars.
+
+## What you are told, and when
+
+Three things, each shown once:
+
+**A toast when a release becomes available.** Once per version, not once per
+check — and the version is only marked as announced when the toast actually
+reaches a connected browser. An update found overnight with nobody looking is
+not spent on an empty room; it waits until somebody opens the app.
+
+Pressing *Check now* still reports every time. That answers a button press, so
+it is not rationed.
+
+**A dot on Advanced** while an update is available. It follows availability, not
+whether the toast was seen: dismissing a toast leaves the dot until the update is
+actually installed.
+
+**A dialog after a successful update**, showing the version and what changed,
+grouped as Breaking, New, Changed, Improved and Fixed. Breaking is listed first
+and is never truncated away.
+
+It appears after **any** successful update, including one applied automatically,
+and stays until you press Dismiss. Closing the tab or reloading does not count —
+the notice is held by the server, so it is waiting next time. That is also why a
+second browser does not show it again once dismissed.
+
+A release with no usable notes shows the version alone. An install updating from
+a git checkout lists commit subjects without headings, since commit subjects
+carry no sections.
+
+**A stable release does not list the fixes that built its own new features.** It
+folds in thirty-odd betas, so Fixed would otherwise fill with the polish commits
+behind whatever is announced under New — of no use to somebody meeting the
+feature whole, and enough of them to push out the fixes to things they already
+had. A fix is held back only where its scope both shipped a feature in the same
+release and had never appeared before it; a fix to anything that was already
+released is always listed. The count held back is stated at the end of Fixed, so
+the filter is never silent. Prereleases list everything: on the beta track, the
+fix is the reason to update.
+
+Notes are captured **before** the update runs. Afterwards the update status
+describes the next pending release rather than the one just installed, so there
+is no later moment when the right answer is still knowable.

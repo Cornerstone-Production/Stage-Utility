@@ -23,6 +23,8 @@ import { signalStore } from "./signal-store.js";
 import { smaartService } from "./smaart-service.js";
 import { sensourceService } from "./sensource-service.js";
 import { obsService } from "./obs-service.js";
+import { resiService } from "./resi-service.js";
+import { youtubeService } from "./youtube-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
@@ -242,6 +244,8 @@ class AutomationEngine {
       integrations,
       obsRecording: obsService.getLatest().recording === true,
       reaperRecording: reaperService.getLatest().recording === true,
+      resiStreaming: resiService.getLatest().live === true,
+      youtubeStreaming: youtubeService.getLatest().live === true,
       baptismPhase: baptismTimerService.getState()?.phase ?? null,
     };
   }
@@ -280,3 +284,8 @@ export const automationEngine = new AutomationEngine();
 // tsl-service declare their own demand.
 smaartService.addDemandSource(() => automationEngine.wantsChannel("spl:metrics"));
 sensourceService.addDemandSource(() => automationEngine.wantsChannel("people:count"));
+// Same reasoning for the streaming polls: idle, Resi drops to two minutes and
+// YouTube to five, so "Resi goes live" on an unattended box would fire minutes
+// after the stream started. A rule reading the channel is a watcher.
+resiService.addDemandSource(() => automationEngine.wantsChannel("resi:status"));
+youtubeService.addDemandSource(() => automationEngine.wantsChannel("youtube:status"));

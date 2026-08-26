@@ -9,6 +9,7 @@ import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
+import { updateNoticesStore } from "../update-notices-store.js";
 import { exitForRestart } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
@@ -46,6 +47,20 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       json(res, updater.getStatus());
       return;
     }
+    // What the operator has not yet been shown about the version now running.
+    if (method === "GET" && pathname === "/api/update/notices") {
+      json(res, { justUpdated: (await updateNoticesStore.load()).justUpdated });
+      return;
+    }
+
+    // Dismissed. Nothing else clears it — not a reload, not navigating away —
+    // so a notice survives until somebody has actually seen it.
+    if (method === "POST" && pathname === "/api/update/notices/dismiss") {
+      await updateNoticesStore.update((cur) => ({ ...cur, justUpdated: null }));
+      json(res, { ok: true });
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/update/check") {
       json(res, await updater.checkForUpdate());
       return;
@@ -64,7 +79,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await updater.applyUpdate());
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -82,7 +97,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await updater.switchTrack(body.branch));
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -90,7 +105,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, updater.restart());
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -135,6 +150,16 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    if (method === "POST" && pathname === "/api/hour-cycle") {
+      const body = await readBody(req) as Record<string, unknown>;
+      try {
+        json(res, await stageController.setHourCycle(body.hourCycle as "12h" | "24h"));
+      } catch (err) {
+        json(res, { error: errorMessage(err) }, 400);
+      }
+      return;
+    }
+
     // ── Config snapshot (backup / restore) ──────────────────────────────────
     // Download the full config (secrets excluded) as a .json file.
     if (method === "GET" && pathname === "/api/config/export") {
@@ -158,7 +183,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
         json(res, { ok: true, applied, restarting: true });
         scheduleRestart();
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -203,7 +228,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
         json(res, { ok: true, applied, restarting: true });
         scheduleRestart();
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }

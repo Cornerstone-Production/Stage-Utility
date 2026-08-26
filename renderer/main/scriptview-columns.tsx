@@ -1,6 +1,7 @@
 import type { RundownColumn } from "./rundown-table";
 import type { CategoryRole } from "../../main/types/scriptview-roles.js";
 import { resolveRole, roleAppliesTo } from "./role-resolve";
+import { formatClock } from "../lib/clock-format";
 
 // Shared column/clock logic for ScriptView, used by both the standalone page and
 // the settings preview so they render identically. Resolves a layout's per-element
@@ -88,10 +89,7 @@ export function fmtTotal(sec: number): string {
 
 /** Format an epoch-ms clock in the plan's timezone (falls back to the viewer's). */
 export function fmtClock(ms: number, timeZone?: string | null): string {
-  return new Date(ms).toLocaleTimeString(undefined, {
-    hour: "numeric", minute: "2-digit", second: "2-digit",
-    ...(timeZone ? { timeZone } : {}),
-  });
+  return formatClock(ms, { seconds: true, timeZone });
 }
 
 export function totalLengthSec(items: PlanItemDTO[]): number {

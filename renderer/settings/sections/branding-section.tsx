@@ -1,4 +1,4 @@
-import { useState, useRef, type ChangeEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type ChangeEvent } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { UploadIcon, TrashIcon, CropIcon, UserRoundIcon } from "lucide-react";
 import {
@@ -18,6 +18,7 @@ import { BrandLogo } from "../../components/brand-logo";
 import type { SectionProps } from "../types";
 import { LogoCropper } from "./logo-cropper";
 import { cn } from "../../lib/cn";
+import { ColorField } from "../../components/ui/color-field";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 
 // Convenience presets for the brand accent (any org can also pick a custom hex).
@@ -63,6 +64,40 @@ export function BrandingSection({
   const fileRef = useRef<HTMLInputElement>(null);
   const pickTarget = useRef<Target>("app");
   const [accentDraft, setAccentDraft] = useState(stageState.accentColor ?? "#2e6691");
+  // The swatch follows the pointer; the SAVE does not.
+  //
+  // The old <input type="color"> committed on blur — once per edit. ColorField's
+  // panel commits from onPointerMove, unthrottled, and this handler wrote to the
+  // server inline: one drag across the saturation square fired dozens of
+  // stage:setBranding POSTs, each persisting to disk, recomputing and
+  // SSE-broadcasting the whole StageState to every display, and raising a toast.
+  //
+  // Trailing edge only, so the value that lands is where the pointer stopped.
+  // Flushed on unmount, or closing the panel mid-drag would drop the last write.
+  const accentSave = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const accentPending = useRef<string | null>(null);
+  const commitAccent = useCallback(
+    (v: string) => {
+      accentPending.current = v;
+      if (accentSave.current) clearTimeout(accentSave.current);
+      accentSave.current = setTimeout(() => {
+        accentSave.current = null;
+        const next = accentPending.current;
+        accentPending.current = null;
+        if (next != null) handlers.handleSetBranding({ accentColor: next });
+      }, 250);
+    },
+    [handlers],
+  );
+  useEffect(
+    () => () => {
+      if (!accentSave.current) return;
+      clearTimeout(accentSave.current);
+      const next = accentPending.current;
+      if (next != null) handlers.handleSetBranding({ accentColor: next });
+    },
+    [handlers],
+  );
 
   useResyncOn([stageState.accentColor], () => {
     setAccentDraft(stageState.accentColor ?? "#2e6691");
@@ -151,7 +186,7 @@ export function BrandingSection({
   }
 
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
+    <div className="flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       {/* Shared hidden file input (target chosen by whichever Upload was clicked). */}
       <input
         ref={fileRef}
@@ -164,6 +199,24 @@ export function BrandingSection({
 
       <FieldSet>
         <FieldGroup>
+          {/* Moved here when the Connect tab went. It is not a "connect"
+              setting — it decides whether a QR and the LAN URL appear in the
+              top bar of every stage display, which is a decision about how the
+              displays LOOK, and that is this page.
+              Kept rather than deleted with the rest of that tab: four view
+              renderers read it, so removing it would take a shipped display
+              feature with it. */}
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Show connect QR on displays</FieldLabel>
+              <FieldDescription>
+                Puts a QR code and this server&apos;s address in the top bar of every stage
+                display, so anyone on the network can scan it and open the app.
+              </FieldDescription>
+            </FieldContent>
+            <Switch checked={stageState.showQr ?? false} onCheckedChange={handlers.handleShowQrChange} />
+          </Field>
+
           <Field orientation="horizontal">
             <FieldContent>
               <FieldLabel>App name</FieldLabel>
@@ -214,25 +267,28 @@ export function BrandingSection({
                     Nested, it painted to the padding box while the preset swatches
                     paint to the border box — same 24px element, 22px of colour, and
                     it read as a smaller chip in the row. */}
-                <label
+                <span
                   className={cn(
-                    "relative size-6 cursor-pointer rounded-md border border-gray-a5 transition-transform hover:scale-110",
+                    "relative size-6 rounded-md border border-gray-a5 transition-transform hover:scale-110",
                     "bg-[conic-gradient(from_180deg,#c2410c,#0d9488,#5b9bd8,#6e56cf,#c2410c)]",
                   )}
-                  aria-label="Custom accent color"
                 >
-                  <input
-                    type="color"
+                  {/* The wheel stays the affordance; the app's picker is the
+                      panel behind it. An accent is a brand colour and opaque by
+                      definition, so no opacity slider. */}
+                  <ColorField
+                    label="Custom accent color"
+                    allowAlpha={false}
                     value={accentDraft}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setAccentDraft(e.target.value)}
-                    onBlur={() => {
-                      if (accentDraft.toLowerCase() !== (stageState.accentColor ?? "").toLowerCase()) {
-                        handlers.handleSetBranding({ accentColor: accentDraft });
+                    onChange={(v: string) => {
+                      setAccentDraft(v);
+                      if (v.toLowerCase() !== (stageState.accentColor ?? "").toLowerCase()) {
+                        commitAccent(v);
                       }
                     }}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    className="absolute inset-0 [&>button]:size-full [&>button]:rounded-md [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
                   />
-                </label>
+                </span>
               </Tooltip>
               <Button
                 variant="transparent"

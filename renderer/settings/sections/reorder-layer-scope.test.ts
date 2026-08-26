@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { reorderLayerScope } from "./layout-editor";
+import { reorderLayerScope } from "../../editor/layout-editor";
 
 /** Objects named by their z, so a display order reads as a list of names. */
 function scope(...zs: number[]): LayoutObject[] {

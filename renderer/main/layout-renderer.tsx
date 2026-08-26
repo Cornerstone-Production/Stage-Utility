@@ -1,5 +1,8 @@
 import { clamp } from "@main/services/clamp";
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { resolveLayout, type PlacedObject } from "./responsive-layout";
+import { HomeCard, isHomeCard, onlineFromState } from "../app/home/cards";
+import { fitFor } from "./console-fit";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
@@ -7,17 +10,23 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
+import { Readout } from "./readout";
+import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
+import { useResiState, useYouTubeState } from "./use-stream-state";
+import { streamers, streamIndicator } from "../app/recording-status";
 import { useReaperState } from "./use-reaper-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
-import { useWirelessChannels } from "./use-wireless-channels";
+import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
+import { ActionButton } from "./action-button";
+import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
 import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
@@ -29,6 +38,7 @@ import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
 import { Loader2Icon, ZapIcon } from "lucide-react";
+import { displayHourCycle, formatClock } from "../lib/clock-format";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
@@ -44,6 +54,8 @@ export interface LayoutRenderCtx {
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
   reaper: ReaperStatusDTO | null;
+  resi: StreamStatusDTO | null;
+  youtube: StreamStatusDTO | null;
   osc: OscFeedbackDTO | null;
   /** Global RossTalk simulate mode, so a button can show it is not really sending.
    *  Defaults to TRUE when unknown — the direction that cannot cause a stray send. */
@@ -77,14 +89,36 @@ export interface LayoutRenderCtx {
   /** True only on a real display route. Interactive objects (live controls)
    *  only fire their commands when true — never in the editor or preview iframe. */
   interactive: boolean;
+  /** Pixel placements when the layout is rendering responsively; absent when it
+   *  is letterboxed, in which case objects position by percentage as before. */
+  placed?: Map<string, PlacedObject>;
+  /**
+   * This is HOME, the operator's own page of tiles — not a console, a wall, or
+   * a preview of either.
+   *
+   * Required rather than optional, so every surface that builds a context has to
+   * say which it is. The three streaming cards read it: on Home they are cards
+   * like the tiles beside them, and anywhere else they are the wall widget that
+   * OBS status and REAPER status are.
+   */
+  home: boolean;
 }
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** Box-level CSS (position handled by caller): background, border, radius, padding,
- *  opacity, and flex alignment derived from text/vertical alignment. */
+/**
+ * Box-level CSS (position handled by caller): background, border, radius, and
+ * flex alignment derived from text/vertical alignment.
+ *
+ * NOT padding or opacity, which this doc claimed until 1.11 and which the
+ * function has not set for some time. The cull was deliberate — the readouts
+ * size themselves from their box now, so a hand-typed pad fights the thing that
+ * replaced it — but an object saved with either still carries the value, and it
+ * simply does nothing. Said plainly here rather than left as a doc describing
+ * code that is not there.
+ */
 export function boxStyle(o: LayoutObject, H: number): CSSProperties {
   const s = o.style ?? {};
   const css: CSSProperties = {
@@ -98,21 +132,46 @@ export function boxStyle(o: LayoutObject, H: number): CSSProperties {
     boxSizing: "border-box",
   };
   if (s.background) css.background = s.background;
-  if (s.opacity != null) css.opacity = s.opacity;
-  if (s.padding != null) css.padding = `${s.padding * H}px`;
+  // The object's own text colour, published for the readout idiom to pick up.
+  // A readout sets its value colour EXPLICITLY (an inherited one resolved to
+  // black-on-black on the kiosk surface once, measured at 1.06:1), so a colour
+  // chosen in the inspector never reached it — every readout ignored the Color
+  // control entirely. A custom property is read by the one place that wants it
+  // and inherited by nothing that does not.
+  if (s.color) (css as Record<string, unknown>)["--readout-value-color"] = s.color;
+  // And the vertical alignment, for the same reason: the readout idiom paints
+  // over this box absolutely, so the justifyContent above governs only the
+  // objects that do NOT use it. Every readout ignored the pad's top and bottom
+  // rows entirely — three of the nine cells did anything at all.
+  if (s.vAlign) {
+    (css as Record<string, unknown>)["--readout-v-align"] =
+      s.vAlign === "top" ? "flex-start" : s.vAlign === "bottom" ? "flex-end" : "center";
+  }
   if (s.cornerRadius != null) css.borderRadius = `${s.cornerRadius * H}px`;
   // Clamp so a stray/legacy width can't swell into a solid fill.
   if (s.borderColor && s.borderWidth) css.border = `${Math.min(s.borderWidth, 0.04) * H}px solid ${s.borderColor}`;
-  // Box elevation: a soft two-layer drop shadow scaled by strength + canvas height,
-  // so stacked cards read as layered. Mirrors the textShadow approach; drawn outside
-  // the border-box so it never affects layout.
-  if (s.boxShadow) {
-    const a = Math.min(1, s.boxShadow);
-    css.boxShadow = `0 ${0.006 * a * H}px ${0.02 * a * H}px rgba(0,0,0,${0.45 * a}), 0 ${0.02 * a * H}px ${0.05 * a * H}px rgba(0,0,0,${0.30 * a})`;
-  }
   if (o.config.type === "shape" && o.config.shape === "ellipse") css.borderRadius = "50%";
   return css;
 }
+
+/**
+ * Readouts whose content is a NUMBER that changes while you watch it.
+ *
+ * These get tabular figures in the mono face. Proportional digits are different
+ * widths, so a clock reflows every second and an SPL meter jitters ten times a
+ * second — the text physically moves, which is the one thing a readout on a wall
+ * must not do. Tabular digits all occupy the same width, so only the glyphs
+ * change.
+ *
+ * Decided per type here rather than offered as a switch: there is no version of
+ * "my clock should wobble" worth building a control for. Types whose content is
+ * words (status pills, wireless summaries) are deliberately absent — mono makes
+ * prose worse.
+ */
+const TABULAR_TYPES = new Set<string>([
+  "clock", "countdown-timer", "pp-timer", "baptism-timer",
+  "spl-meter", "people-counter", "service-pacing", "slide-progress", "charger-battery",
+]);
 
 /** Text-level CSS for the inner span. */
 function textStyle(o: LayoutObject, H: number): CSSProperties {
@@ -125,19 +184,13 @@ function textStyle(o: LayoutObject, H: number): CSSProperties {
     textAlign: s.textAlign ?? "center",
     width: "100%",
   };
+  if (TABULAR_TYPES.has(o.config.type)) {
+    css.fontFamily = "var(--font-mono)";
+    css.fontVariantNumeric = "tabular-nums";
+  }
   if (s.italic) css.fontStyle = "italic";
   if (s.uppercase) css.textTransform = "uppercase";
   if (s.letterSpacing != null) css.letterSpacing = `${s.letterSpacing}em`;
-  if (s.textShadow) {
-    const a = Math.min(1, s.textShadow);
-    css.textShadow = `0 ${0.004 * H}px ${0.012 * H}px rgba(0,0,0,${0.9 * a}), 0 ${0.01 * H}px ${0.03 * H}px rgba(0,0,0,${0.7 * a})`;
-  }
-  if (s.lineClamp) {
-    css.display = "-webkit-box";
-    css.WebkitBoxOrient = "vertical";
-    css.WebkitLineClamp = s.lineClamp;
-    css.overflow = "hidden";
-  }
   return css;
 }
 
@@ -154,62 +207,141 @@ function clockText(now: number, showSeconds: boolean, format: "12h" | "24h", sho
   return `${pad(h)}:${m}${showSeconds ? `:${s}` : ""}`;
 }
 
+/**
+ * A placed rect as CSS, relative to the box it is drawn inside.
+ *
+ * resolveLayout returns VIEWPORT-ABSOLUTE pixels -- responsive-layout.ts computes
+ * `left = box.left + o.x * box.w`, and its own test asserts a child of a
+ * container at 960 comes back as 960. But RenderObject draws children inside the
+ * parent's own `position:absolute` div, so applying those pixels there added the
+ * parent's offset a second time. With `overflow:hidden` on the parent, a nested
+ * object did not merely shift -- it disappeared.
+ *
+ * fitFor returns "responsive" by DEFAULT for every console surface, so this hit
+ * the release's new console pages, panels and the editor preview: every layout
+ * with a container in it.
+ *
+ * Subtracting the origin here rather than changing resolveLayout keeps that
+ * module's contract -- and its tests -- intact: absolute is the right answer for
+ * a layout engine that has to reason about anchors and stacking across the whole
+ * canvas. Only the drawing is relative.
+ */
+export function placedGeometry(
+  placed: { left: number; top: number; width: number; height: number },
+  origin: { left: number; top: number } | null,
+): { left: string; top: string; width: string; height: string } {
+  return {
+    left: `${placed.left - (origin?.left ?? 0)}px`,
+    top: `${placed.top - (origin?.top ?? 0)}px`,
+    width: `${placed.width}px`,
+    height: `${placed.height}px`,
+  };
+}
+
 /** Render one object (and, for containers, its children) as a positioned box.
  *  Position/size are PERCENT of the parent — because the wrapper is absolutely
  *  positioned, a child's % resolves against this box, so the same component
  *  renders correctly at any nesting depth. Font/radius/padding stay canvas-
  *  relative (boxStyle uses ctx.H = canvas height) regardless of depth. */
-export function RenderObject({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
+export function RenderObject({
+  o,
+  ctx,
+  origin,
+}: {
+  o: LayoutObject;
+  ctx: LayoutRenderCtx;
+  /** The placed rect of the box this is drawn inside, when there is one. */
+  origin?: { left: number; top: number } | null;
+}) {
   const kids = o.children?.length
     ? [...o.children].filter((c) => !c.hidden).sort((a, b) => a.z - b.z)
     : null;
-  return (
-    <div
-      style={{
-        position: "absolute",
+  // Responsive layouts are placed in absolute pixels by resolveLayout, which is
+  // where anchors, aspect, clamps and stacking are decided. Everything else keeps
+  // the percentage positioning it has always used — that is what makes the
+  // default a no-op rather than a re-implementation of it.
+  const placed = ctx.placed?.get(o.id);
+  const geometry = placed
+    ? placedGeometry(placed, origin ?? null)
+    : {
         left: `${o.x * 100}%`,
         top: `${o.y * 100}%`,
         width: `${o.w * 100}%`,
         height: `${o.h * 100}%`,
+      };
+  return (
+    <div
+      style={{
+        position: "absolute",
+        ...geometry,
         ...boxStyle(o, ctx.H),
       }}
     >
-      {kids ? kids.map((c) => <RenderObject key={c.id} o={c} ctx={ctx} />) : <ObjectContent o={o} ctx={ctx} />}
+      {kids
+        ? // Children are drawn INSIDE this box, so they measure from its origin.
+          kids.map((c) => <RenderObject key={c.id} o={c} ctx={ctx} origin={placed ?? origin} />)
+        : <ObjectContent o={o} ctx={ctx} />}
     </div>
   );
 }
 
 /**
- * The "recording" fill state — a solid red block covering the whole object.
+ * Shrink whatever is inside so it fits the box, instead of spilling out of it.
  *
- * ABSOLUTE, not width/height 100%. A normal child sized to 100% resolves against
- * the CONTENT box, so on an object with padding the red stopped short of its own
- * edges: the object's background and border went on drawing a ring around it, and
- * `borderRadius: inherit` gave the inner block the same absolute radius at a
- * smaller size, so the corners were not concentric either. How wrong it looked
- * therefore depended on the object's style, which is why a flat one looked right
- * and a padded one did not. Positioned this way it covers the padding too, and
- * the fill is the same shape as the object at any style.
+ * The measured sweep across every object type found eight that overflowed their
+ * box at a normal dashboard tile size (259x161) — the status objects by up to
+ * 48px, because a dot plus "OBS: Recording 00:12:34" is simply wider than a
+ * narrow tile and nothing was shrinking it. Clipping is not the fix either: a
+ * status the operator cannot read is the same as no status.
+ *
+ * Converges in a pass or two by back-deriving the natural size from the live
+ * scroll size at the current scale. Floor of 0.3 so it degrades to "small" and
+ * never to "invisible".
  */
-function RecordingFill({ label, ts }: { label: string; ts: CSSProperties }) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: "var(--red-9)",
-        borderRadius: "inherit",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        // A long label (a record timecode pushes it wider) clips rather than
-        // spilling past the object.
-        overflow: "hidden",
-      }}
-    >
-      <span style={{ ...ts, color: "#ffffff" }}>{label}</span>
-    </div>
-  );
+/** How far a readout may grow beyond its designed size to fill its box. */
+const FIT_MAX_GROWTH = 3;
+
+function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): {
+  wrapRef: React.RefObject<HTMLDivElement | null>;
+  elRef: React.RefObject<T | null>;
+  scale: number;
+} {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const elRef = useRef<T | null>(null);
+  const [scale, setScale] = useState(1);
+  // The observer is subscribed once per dep change, so its callback would
+  // otherwise close over a stale `scale`.
+  const scaleRef = useLatestRef(scale);
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const el = elRef.current;
+    if (!wrap || !el) return;
+    const measure = () => {
+      const availW = wrap.clientWidth;
+      const availH = wrap.clientHeight;
+      if (availW <= 1 || availH <= 1) return;
+      const cur = scaleRef.current;
+      const natW = el.scrollWidth / cur;
+      const natH = el.scrollHeight / cur;
+      if (natW <= 0 || natH <= 0) return;
+      // Grows as well as shrinks. The base size is a fraction of the CANVAS, so
+      // capping at 1 meant a widget made twice as tall kept the same text and an
+      // operator reached for the font-size field to fix it — which is precisely
+      // the field this phase removes. Sizing from the widget's own box is what
+      // makes that field unnecessary rather than merely unavailable.
+      //
+      // The ceiling stops a two-character readout in a large tile becoming
+      // absurd, and the floor keeps a long string legible rather than vanishing.
+      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, FIT_MAX_GROWTH);
+      if (Math.abs(desired - cur) > 0.01) setScale(desired);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, scaleRef]);
+  return { wrapRef, elRef, scale };
 }
 
 /** Render one object's inner content (the positioned box wraps this). */
@@ -226,78 +358,23 @@ function rfBarsGlyph(bars: number): string {
   return "▮".repeat(n) + "▯".repeat(5 - n);
 }
 
-/** The neutral dot: an integration that is not connected, a recorder that is idle. */
-const DOT_IDLE = "rgba(255,255,255,0.35)";
-
-/**
- * A status dot with its label, sized in em so it tracks the object's font.
- *
- * Shared so the connection objects and the recording objects cannot drift into
- * looking like two different conventions — a dot on a stage display means one
- * thing, and it should be the same shape and size wherever it appears.
- */
-function StatusDot({
-  color,
-  label,
-  ts,
-  dimmed = false,
-}: {
-  color: string;
-  label?: string | null;
-  ts: CSSProperties;
-  dimmed?: boolean;
-}) {
-  return (
-    <span
-      style={{
-        ...ts,
-        width: "auto",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.4em",
-        opacity: dimmed ? 0.4 : 1,
-      }}
-    >
-      <span
-        style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: color, flexShrink: 0 }}
-      />
-      {label ? <span>{label}</span> : null}
-    </span>
-  );
-}
+// The status DOT is gone, with StatusDot and DOT_IDLE.
+//
+// It was a coloured circle beside a name: it said what the widget was watching
+// but never what it found, so reading it meant knowing the colour code. The
+// replacement says more, not less — the state is spelled out as a word AND
+// carries the colour, so "PCO / ONLINE" in green reads at a glance and still
+// reads without the green.
 
 // Shrinks the font so `text` fits its box (width + height) instead of clipping —
 // used by single-value text objects (current/next item) where a long title would
 // otherwise overflow. Converges in a pass or two by back-deriving the natural size
 // from the live scroll size (same approach as ServiceOrderObject's auto-fit).
 function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign?: LayoutVAlign }) {
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const elRef = useRef<HTMLSpanElement | null>(null);
-  const [scale, setScale] = useState(1);
-  // The ResizeObserver below is subscribed once per text/size change, so its
-  // callback would otherwise close over a stale `scale`.
-  const scaleRef = useLatestRef(scale);
   const basePx = parseFloat(String(ts.fontSize)) || 16;
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    const el = elRef.current;
-    if (!wrap || !el) return;
-    const measure = () => {
-      const availW = wrap.clientWidth;
-      const availH = wrap.clientHeight;
-      if (availW <= 1 || availH <= 1) return;
-      const cur = scaleRef.current;
-      const natW = el.scrollWidth / cur;
-      const natH = el.scrollHeight / cur;
-      if (natW <= 0 || natH <= 0) return;
-      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, 1);
-      if (Math.abs(desired - cur) > 0.01) setScale(desired);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, [text, basePx, ts.fontWeight, scaleRef]);
+  // Same measurement as the status objects — one implementation, so a fix to how
+  // things fit their box cannot land in one of them and miss the others.
+  const { wrapRef, elRef, scale } = useFitScale([text, basePx, ts.fontWeight]);
   const justify = vAlign === "top" ? "flex-start" : vAlign === "bottom" ? "flex-end" : "center";
   const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
   return (
@@ -307,29 +384,343 @@ function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign
   );
 }
 
+
+/**
+ * A caption above a readout — "SERVICE STARTS IN" over a countdown.
+ *
+ * A bare 0:04:12 on a wall does not say what it is counting to, and the operator
+ * who built the layout is not the one reading it on Sunday morning. The caption
+ * is set on NEW objects by the registry and absent on ones that already exist,
+ * so nobody's layout grows a caption it did not ask for.
+ *
+ * Sized and dimmed against the value rather than set in pixels, so it stays in
+ * proportion at a dashboard tile and on a wall alike — the value keeps its own
+ * auto-fit, and the caption simply rides above it.
+ */
+function Captioned({ caption, ts, children }: { caption?: string | null; ts: CSSProperties; children: ReactNode }) {
+  if (!caption) return <>{children}</>;
+  const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
+  return (
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: align, overflow: "hidden", minHeight: 0 }}>
+      <span
+        style={{
+          color: ts.color,
+          // 0.32em at 55% was unreadable at a dashboard tile — reported off a
+          // real screen. A caption has to be legible or it is decoration.
+          opacity: 0.75,
+          fontSize: "0.46em",
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          lineHeight: 1.2,
+          // Its own font, not the value's: a caption is words, and the mono face
+          // a numeric readout uses makes words worse.
+          fontFamily: "inherit",
+          flexShrink: 0,
+        }}
+      >
+        {caption}
+      </span>
+      <span style={{ minHeight: 0, flex: "1 1 auto", width: "100%", display: "flex", flexDirection: "column", justifyContent: "center" }}>{children}</span>
+    </div>
+  );
+}
+
+/** Seconds until the next service, or null. Same source as the context bar. */
+function homeSecondsToStart(ctx: LayoutRenderCtx): number | null {
+  const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
+  return t && !t.over ? t.seconds : null;
+}
+
+/**
+ * One object's content, plus its caption if it has one.
+ *
+ * The caption is applied HERE rather than in each readout's case, so it is a
+ * property of the object instead of six near-identical edits inside a switch —
+ * and so a type that grows one later gets it without touching the renderer. Both
+ * call sites (the display renderer and the editor canvas) come through here, so
+ * the editor shows exactly what the wall will.
+ */
 export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
+  const caption = (o.config as { caption?: string | null }).caption;
+  if (!caption || IDIOM_TYPES.has(o.config.type)) return <ObjectBody o={o} ctx={ctx} />;
+  return (
+    <Captioned caption={caption} ts={textStyle(o, ctx.H)}>
+      <ObjectBody o={o} ctx={ctx} />
+    </Captioned>
+  );
+}
+
+/**
+ * Home cards that have a WALL twin, and which platform each asks about.
+ *
+ * These three are listed in the palette as "Resi status" and "YouTube status"
+ * under their own groups, so they are what an operator picks for a console as
+ * well as for Home — and on a console they sit beside OBS status and REAPER
+ * status, which are wall widgets. Same object, two presentations, chosen by the
+ * surface rather than by which of two near-identical types got picked.
+ *
+ * `null` means "every platform at once", which is what the caption "Streaming"
+ * says. An explicit record rather than a prefix test: the prefix would also
+ * catch a future home-streaming-* card that has no wall twin.
+ */
+/**
+ * Whether a status widget paints its whole box while the thing it watches is
+ * ACTIVE — recording, or live.
+ *
+ * One constant for all three because the bug it fixes was the two defaults
+ * disagreeing: `fillWhenRecording` was `?? true` and `fillWhenLive` was
+ * `?? false`, so OBS and REAPER were bold slabs on a wall and Resi and YouTube
+ * were quiet grey text beside them. Written out at each site, the pair drifted
+ * apart and stayed apart across two attempts to make these widgets match.
+ *
+ * A layout that has explicitly turned one off keeps it off — this is only what
+ * an object that never expressed a preference does.
+ */
+export const FILL_WHEN_ACTIVE = true;
+
+/**
+ * What a status widget shows when the operator has typed nothing of their own.
+ *
+ * Exported because the inspector has to promise what the renderer delivers. Its
+ * placeholders read "REAPER: Recording" and "OBS: Offline" while the renderer
+ * drew a bare "Recording" and "Offline" — the caption already says which box it
+ * is, so the prefix came out. An operator who left the field alone got something
+ * other than the greyed-out text the field showed them, in four places.
+ *
+ * OBS's active and idle words are not here: they depend on whether it is
+ * recording, streaming or running a virtual cam, so the inspector has no single
+ * value to promise and its placeholders stay generic.
+ */
+export const STATUS_TEXT = {
+  reaper: { recording: "Recording", idle: "Standby", offline: "Offline" },
+  obs: {
+    offline: "Offline",
+    // Per mode, because OBS's widget reflects whichever output the operator
+    // picked. Keyed by the same `mode` value both files already compute, so the
+    // inspector can promise the exact string the renderer will draw — the first
+    // pass at this left these two behind on the theory that mode-dependence made
+    // them unpromisable, which was wrong, and the two copies had already drifted
+    // on capitalisation ("Virtual cam" against "Virtual Cam").
+    recording: { active: "Recording", idle: "Standby" },
+    streaming: { active: "Streaming", idle: "Stream off" },
+    virtualcam: { active: "Virtual cam", idle: "Cam off" },
+  },
+} as const;
+
+/** The OBS mode words, falling back to recording for an unknown stored value. */
+export function obsModeText(mode: string): { active: string; idle: string } {
+  return mode === "streaming" ? STATUS_TEXT.obs.streaming
+    : mode === "virtualcam" ? STATUS_TEXT.obs.virtualcam
+    : STATUS_TEXT.obs.recording;
+}
+
+const WALL_TWIN = {
+  "home-streaming": null,
+  "home-streaming-resi": "Resi",
+  "home-streaming-youtube": "YouTube",
+} as const;
+
+function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
   const ts = textStyle(o, ctx.H);
-  const span = (text: string) => <span style={ts}>{text}</span>;
+  // Every readout fits its box. This helper backs the plain-text objects
+  // (text, slide text, slide notes), and routing it through FitText is what
+  // makes a per-object font size unnecessary rather than merely unfashionable.
+  const span = (text: string) => <FitText text={text} ts={ts} vAlign={o.style?.vAlign} />;
+  // The idiom: caption, value, sub — sized from the box. Every readout that has
+  // moved goes through here, so the composition has exactly one implementation
+  // and its caption comes from the object rather than from six edits in a switch.
+  const readout = (
+    value: ReactNode,
+    opts?: {
+      sub?: string | null;
+      valueColor?: string | null;
+      fill?: string | null;
+      /** Overrides the object's own caption — for a widget whose caption names
+       *  the source rather than being typed by the operator. */
+      caption?: string | null;
+      upper?: boolean;
+      dim?: boolean;
+    },
+  ) => (
+    <Readout
+      caption={(c as { caption?: string | null }).caption}
+      value={value}
+      mono={TABULAR_TYPES.has(c.type)}
+      // The object's own alignment, so a custom view can centre one widget
+      // without every other readout following it.
+      align={o.style?.textAlign}
+      // Home is a grid of same-height tiles, so its values share a size rather
+      // than each one filling whatever its own lines leave.
+      uniform={ctx.home}
+      {...opts}
+    />
+  );
+
+  /**
+   * The WALL composition for a streaming widget: caption, the state as a word,
+   * and the ticking number underneath.
+   *
+   * Deliberately the same one obs-status and reaper-status use. They answer the
+   * same kind of question on the same wall, and reading differently made the
+   * streaming ones look like a different app — a duration where its neighbour
+   * had a word.
+   *
+   * A function because TWO things need it: the `stream-status` object, and the
+   * three home-streaming cards when they are placed on something that is not
+   * Home. Those went to Home's card composition on every surface for a release,
+   * which put a small three-line mono tile in a row of large ALL-CAPS ones.
+   */
+  /**
+   * A recorder's state as a readout: OBS, REAPER, and the generic recorder.
+   *
+   * The three of them ended in the same pair of Readouts -- active with the red
+   * fill-or-text rule, idle dimmed when nothing is reachable -- differing only in
+   * caption, words and sub-line. FILL_WHEN_ACTIVE was added this release to stop
+   * the fill DEFAULT drifting, but the expression consuming it was still written
+   * out three times, which is the same drift one level up.
+   *
+   * Red, not green: red is what a recorder means by "rolling", and a wall
+   * carrying recorders and streams wants exactly one red. streamingReadout stays
+   * separate for that reason -- its value and sub-line come from streamIndicator,
+   * so folding the two together would mean a colour parameter and a second value
+   * path for one caller.
+   */
+  const statusReadout = (s: {
+    caption: string;
+    active: boolean;
+    connected: boolean;
+    filled: boolean;
+    activeText: string;
+    idleText: string;
+    offlineText: string;
+    sub?: string | null;
+  }) => (
+    <Readout
+      caption={s.caption}
+      value={s.active ? s.activeText : s.connected ? s.idleText : s.offlineText}
+      sub={s.active ? (s.sub ?? null) : null}
+      upper
+      fill={s.active && s.filled ? "var(--red-9)" : null}
+      valueColor={s.active && !s.filled ? "var(--red-10)" : null}
+      // Dim only when nothing is reachable, so a neutral value is never mistaken
+      // for "not recording" when the recorder simply cannot be reached.
+      dim={!s.active && !s.connected}
+      align={o.style?.textAlign}
+    />
+  );
+
+  const streamingReadout = (
+    only: string | null,
+    opts: { showElapsed?: boolean; hideWhenIdle?: boolean; fillWhenLive?: boolean },
+  ) => {
+    const all = streamers(ctx.resi, ctx.youtube, ctx.obs);
+    const chosen = only ? all.filter((x) => x.name === only) : all;
+    const ind = streamIndicator(chosen, ctx.now, { showElapsed: opts.showElapsed });
+    const live = ind.state === "live";
+    // Tally-light mode: nothing on screen unless something is going out.
+    if (!live && (opts.hideWhenIdle ?? false)) return null;
+
+    // FILLED BY DEFAULT, the same as obs-status and reaper-status.
+    //
+    // This is the whole of why the streaming widgets did not match the recorders
+    // on a wall. Every other choice was already shared — same composition, same
+    // caption, same word-then-number — but `fillWhenRecording` defaulted ON and
+    // `fillWhenLive` defaulted OFF, so a row of four read as two bold slabs and
+    // two lines of quiet text, and the two that mattered most were the quiet
+    // ones. Set them the same and the four are indistinguishable in weight; only
+    // the colour differs, which is the distinction that was meant to be visible.
+    const filled = opts.fillWhenLive ?? FILL_WHEN_ACTIVE;
+
+    // GREEN for live, grey for off air. Not the red a recorder uses: red is
+    // what OBS and REAPER mean by "rolling", and a wall carrying both wants
+    // one red. Off air takes the muted grey its neighbours wear rather than
+    // full-strength white — it is the resting state, not an announcement —
+    // while unreachable stays dimmed outright, so the two are still told apart
+    // by more than their word.
+    return readout(ind.value, {
+      caption: only ?? "Streaming",
+      // Only where there is a number to put underneath. On a wall the quiet
+      // states are one word; Home shows the connection line instead.
+      sub: ind.state === "live" ? ind.sub : null,
+      upper: true,
+      dim: ind.state === "offline",
+      fill: live && filled ? "var(--green-9)" : null,
+      valueColor: live && !filled ? "var(--green-10)" : ind.state === "idle" ? "var(--color-fg-muted)" : null,
+    });
+  };
+
+  // Home's cards, BEFORE the switch. They render the SAME components Home's
+  // fixed panel does, so the editable Home and the built-in one cannot drift
+  // into looking like two different products — and asking first is what keeps
+  // that true. As cases they sat below `stream-status`, which listed the three
+  // streaming home types alongside itself and drew them with the wall's
+  // composition: two ALL-CAPS lines in a row of three-line cards. isHomeCard is
+  // exhaustive by type, so no case can shadow one of these again.
+  //
+  // pointer-events-none, ALWAYS — not gated on ctx.interactive like
+  // live-controls is.
+  //
+  // Some of these cards contain in-app links (/screens, /history) put there for
+  // Home, which runs in the operator shell. Every OTHER surface that renders
+  // them — a wall display, a panel, the editor preview — is on the kiosk
+  // router, whose whole route table is "/". A touch on the SPL stat took a
+  // display to a "Route not found" page and left it there until somebody walked
+  // over and reloaded it.
+  //
+  // Their capability is ["readout"], with no drill-down, so a link that does
+  // nothing off the shell is what the model already says they are. Home renders
+  // them directly, not through here, and keeps its links.
+  if (isHomeCard(c)) {
+    // OFF HOME, the three streaming cards wear the wall composition instead.
+    //
+    // They are the only home types with a wall twin — the palette lists them as
+    // "Resi status" and "YouTube status" under their own groups, which is what
+    // an operator picks for a console, where they sit beside OBS status and
+    // REAPER status. One object, two presentations, chosen by the surface it is
+    // drawn on rather than by which of two near-identical types got picked.
+    const platform = WALL_TWIN[c.type as keyof typeof WALL_TWIN];
+    if (!ctx.home && platform !== undefined) return streamingReadout(platform, {});
+    return (
+      <div className="w-full h-full pointer-events-none">
+        <HomeCard
+          type={c.type}
+          state={ctx.state}
+          pcoLive={ctx.pcoLive}
+          now={ctx.now}
+          skewMs={ctx.skewMs}
+          // From the state snapshot, not a presence hook — see onlineFromState.
+          onlineOutputIds={onlineFromState(ctx.state)}
+          secondsToStart={homeSecondsToStart(ctx)}
+        />
+      </div>
+    );
+  }
 
   switch (c.type) {
     case "text":
       return span(c.text);
     case "clock":
-      return span(clockText(ctx.now, c.showSeconds ?? true, c.format ?? "12h", c.showMeridiem ?? true));
+      // The idiom, not FitText. The old path grew one string until it ran out of
+      // room, which made the size an accident of the box: "2:26:41 PM" is 4px
+      // wider than a 257px tile, so the same clock was huge on a wall and
+      // microscopic in a column. Readout sizes it from the height and shrinks it
+      // only when the width genuinely cannot take it.
+      // `format` unset means the object never expressed a preference, so it
+      // follows the app-wide setting. An object that DID set one keeps it — a
+      // clock deliberately put on a wall in 24h must not flip because someone
+      // changed a preference for the operator app.
+      return readout(clockText(ctx.now, c.showSeconds ?? true, c.format ?? displayHourCycle(), c.showMeridiem ?? true));
     case "countdown-timer": {
       const t = computePcoTimer(ctx.pcoLive, ctx.now, ctx.skewMs);
-      if (!t) return (c.hideWhenIdle ?? false) ? null : span("—");
+      if (!t) return (c.hideWhenIdle ?? false) ? null : readout("—");
       // Red once the timer goes negative (item or service ran over), like the
       // dashboard; amber once it drops to/below the configured warning; else keep
-      // the object's configured color.
+      // the idiom's own value colour.
       const warning = c.warnSeconds != null && !t.over && t.seconds <= c.warnSeconds;
       const color = t.over ? "var(--red-10)" : warning ? "var(--yellow-10)" : null;
-      return (
-        <span style={color ? { ...ts, color } : ts}>
-          {fmtDuration(t.seconds)}
-        </span>
-      );
+      return readout(fmtDuration(t.seconds), { valueColor: color });
     }
     case "service-pacing": {
       // Live cumulative drift: how far ahead/behind the whole schedule we are
@@ -362,17 +753,18 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           deltaSec = (serverNow - startMs) / 1000 - plannedElapsed;
         }
       }
-      if (deltaSec == null) return (c.hideWhenIdle ?? false) ? null : <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (deltaSec == null) return (c.hideWhenIdle ?? false) ? null : readout("—");
       const behind = deltaSec > tol;
       const ahead = deltaSec < -tol;
       const color = behind ? c.behindColor ?? "var(--red-10)" : ahead ? c.aheadColor ?? "var(--green-10)" : null;
       const text = !behind && !ahead ? "0:00" : fmtSignedDuration(deltaSec);
-      return (
-        <span style={color ? { ...ts, color } : ts}>
-          {text}
-          {(c.showLabel ?? false) && (behind || ahead) && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{behind ? " behind" : " ahead"}</span>}
-        </span>
-      );
+      // "behind" / "ahead" moves to the sub-line. It was an inline 0.6em span
+      // riding on the number, which is the composition the idiom replaces: a
+      // qualifier belongs under the value, not welded to the end of it.
+      return readout(text, {
+        valueColor: color,
+        sub: (c.showLabel ?? false) && (behind || ahead) ? (behind ? "behind" : "ahead") : null,
+      });
     }
     case "current-slide-text": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
@@ -410,36 +802,28 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
             ? pro?.nextArrangementSection
             : pro?.currentSection;
       if (!sec) return null;
-      return (
-        <span
-          style={{
-            ...ts,
-            width: "auto",
-            background: sec.colorHex,
-            color: "#fff",
-            padding: `${0.01 * ctx.H}px ${0.025 * ctx.H}px`,
-            borderRadius: `${0.5 * (o.style?.fontSize ?? 0.05) * ctx.H}px`,
-          }}
-        >
-          {sec.name}
-        </span>
-      );
+      // The section's own colour becomes the FILLED variant's ground rather than
+      // a pill floating inside the box. Same caption/value/sub composition,
+      // painted on a solid ground — a filled widget is the same widget wearing a
+      // state, not a second design language.
+      return readout(sec.name, { fill: sec.colorHex });
     }
     case "pp-timer": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       const timers = pro?.timers ?? [];
       const timer = c.timerName ? timers.find((t) => t.name === c.timerName) : timers[0];
-      if (!timer) return (c.hideWhenIdle ?? false) ? null : <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (!timer) return (c.hideWhenIdle ?? false) ? null : readout("—");
       // Color only on clearly-expired states; unknown/other states stay neutral.
       const state = (timer.state ?? "").toLowerCase();
       const danger = state.includes("over") || state.includes("expire");
       const color = (c.warnStates ?? true) && danger ? "var(--red-10)" : null;
-      return (
-        <span style={color ? { ...ts, color } : ts}>
-          {(c.showLabel ?? true) && timer.name && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{`${timer.name} `}</span>}
-          {timer.time}
-        </span>
-      );
+      // The timer's NAME goes on the sub-line. It was an inline 0.6em span in
+      // front of the time — so a timer called "Sermon" pushed the number off
+      // centre and shrank with it. Under the value it stays a label.
+      return readout(timer.time, {
+        valueColor: color,
+        sub: (c.showLabel ?? true) ? timer.name : null,
+      });
     }
     case "slide-progress": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
@@ -463,12 +847,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
       else if (display === "percent") text = count && count > 0 && idx != null ? `${Math.round((idx / count) * 100)}%` : "—";
       else text = idx != null && count != null ? `${idx} / ${count}` : "—";
       const dim = text === "—";
-      return (
-        <span style={dim ? { ...ts, opacity: 0.4 } : ts}>
-          {text}
-          {(c.showLabel ?? false) && !dim && <span style={{ opacity: 0.6, fontSize: "0.6em" }}> slides</span>}
-        </span>
-      );
+      return readout(text, { sub: (c.showLabel ?? false) && !dim ? "slides" : null });
     }
     case "slide-thumbnail": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
@@ -601,7 +980,7 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "charger-battery":
       return <ChargerBattery config={c} all={ctx.state.chargerBays ?? []} H={ctx.H} baseStyle={ts} />;
     case "spl-meter":
-      return <SplMeterValue config={c} spl={ctx.spl} ts={ts} />;
+      return <SplMeterValue config={c} spl={ctx.spl} align={o.style?.textAlign} />;
     case "people-counter": {
       const metric = c.metric ?? "attendance";
       // "min" = lowest in-room during the live service; "serviceAttendance" = entered
@@ -613,26 +992,19 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         : metric === "servicePeak" ? ctx.servicePeak
         : metric === "servicePeakAttendance" ? ctx.servicePeakAttendance
         : resolvePeopleValue(ctx.peopleCount, metric, c.zoneId);
-      if (value == null) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (value == null) return readout("—");
       const fallbackLabel =
         metric === "occupancy" ? "in room" : metric === "peak" ? "peak att." : metric === "min" ? "low" : metric === "avg" ? "avg att." : metric === "serviceAttendance" ? "svc entries" : metric === "servicePeak" ? "svc peak" : metric === "servicePeakAttendance" ? "svc peak att." : "entries";
-      return (
-        <span style={ts}>
-          {value.toLocaleString()}
-          {c.showLabel && (
-            <span style={{ opacity: 0.6, fontSize: "0.6em" }}>
-              {` ${c.label ?? fallbackLabel}`}
-            </span>
-          )}
-        </span>
-      );
+      return readout(value.toLocaleString(), {
+        sub: c.showLabel ? c.label ?? fallbackLabel : null,
+      });
     }
     case "people-graph":
       return <PeopleGraphObject ctx={ctx} config={c} ts={ts} />;
     case "people-panel":
       return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} servicePeak={ctx.servicePeak} servicePeakAttendance={ctx.servicePeakAttendance} ts={ts} H={ctx.H} />;
     case "baptism-timer":
-      return <BaptismTimer state={ctx.baptism} config={c} ts={ts} now={ctx.now} />;
+      return <BaptismTimer state={ctx.baptism} config={c} now={ctx.now} align={o.style?.textAlign} />;
     case "record-status": {
       // "Is anything recording?" — one indicator regardless of which recorder the
       // campus uses, so a layout survives a switch from OBS to REAPER unchanged.
@@ -648,26 +1020,22 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
 
       if (!active && (c.hideWhenIdle ?? false)) return null;
 
-      if (active) {
-        const label = c.recordingText ?? "RECORDING";
-        // Same fill as the OBS and REAPER objects — a child sized 100% resolves
-        // against the content box, so on a padded object the red stopped short of
-        // its own edges.
-        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
-        // Not filling the box: same dot convention as the connection objects, so
-        // a red dot always means the same thing wherever it appears on a display.
-        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
-      }
-      // Idle: dim when offline so a neutral badge is never mistaken for "not
-      // recording" when no recorder is reachable at all.
-      return (
-        <StatusDot
-          color={DOT_IDLE}
-          label={connected ? (c.idleText ?? "STANDBY") : (c.offlineText ?? "NO RECORDER")}
-          ts={ts}
-          dimmed={!connected}
-        />
-      );
+      // Which recorder this is watching becomes the caption; the state becomes
+      // the value. "any" has no single source to name, so it says what it is.
+      const caption = src === "obs" ? "OBS" : src === "reaper" ? "REAPER" : "Recorder";
+      // The fill stays -- it is a see-it-across-the-room signal and it works.
+      // What changed is that it carries the same composition as every other
+      // widget, so a filled widget is the same widget wearing a state rather
+      // than a second design language.
+      return statusReadout({
+        caption,
+        active,
+        connected,
+        filled: c.fillWhenRecording ?? FILL_WHEN_ACTIVE,
+        activeText: c.recordingText ?? "RECORDING",
+        idleText: c.idleText ?? "STANDBY",
+        offlineText: c.offlineText ?? "NO RECORDER",
+      });
     }
     case "obs-status": {
       const obs = ctx.obs;
@@ -679,58 +1047,53 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
         : (obs?.recording ?? false);
       // Pure tally-light mode: nothing on screen unless the chosen output is active.
       if (!active && (c.hideWhenIdle ?? false)) return null;
-      // Per-mode default labels (overridable via the *Text fields).
-      const activeDefault = mode === "streaming" ? "OBS: Streaming" : mode === "virtualcam" ? "OBS: Virtual Cam" : "OBS: Recording";
-      const idleDefault = mode === "streaming" ? "OBS: Stream off" : mode === "virtualcam" ? "OBS: Cam off" : "OBS: Standby";
-      if (active) {
-        // Timecode is the record duration — only meaningful in recording mode.
-        const tc = mode === "recording" && c.showTimecode && obs?.recordTimecode ? ` ${obs.recordTimecode}` : "";
-        const label = `${c.recordingText ?? activeDefault}${tc}`;
-        // Fill the whole box red (a strong room cue) or just color the text.
-        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
-        // Not filling the box: same dot convention as the connection objects, so
-        // a red dot always means the same thing wherever it appears on a display.
-        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
-      }
-      // Idle: dim when offline so a neutral badge is never mistaken for "not
-      // active" when OBS is merely unreachable.
-      return (
-        <StatusDot
-          color={DOT_IDLE}
-          label={connected ? (c.idleText ?? idleDefault) : (c.offlineText ?? "OBS: Offline")}
-          ts={ts}
-          dimmed={!connected}
-        />
-      );
+      // Per-mode default labels (overridable via the *Text fields). BARE now —
+      // "OBS" is the caption, so the old "OBS: Recording" would have read
+      // "OBS / OBS: RECORDING". A label an operator typed themselves is left
+      // exactly as they typed it.
+      const { active: activeDefault, idle: idleDefault } = obsModeText(mode);
+      // Timecode is the record duration -- only meaningful in recording mode. It
+      // is the SUB-LINE: welded onto the end of the label it made the string long
+      // enough to shrink the state word it was qualifying.
+      return statusReadout({
+        caption: "OBS",
+        active,
+        connected,
+        filled: c.fillWhenRecording ?? FILL_WHEN_ACTIVE,
+        activeText: c.recordingText ?? activeDefault,
+        idleText: c.idleText ?? idleDefault,
+        offlineText: c.offlineText ?? STATUS_TEXT.obs.offline,
+        sub: mode === "recording" && c.showTimecode ? (obs?.recordTimecode ?? null) : null,
+      });
     }
+    case "stream-status":
+      return streamingReadout(
+        c.platform && c.platform !== "any" ? (c.platform === "resi" ? "Resi" : "YouTube") : null,
+        { showElapsed: c.showElapsed, hideWhenIdle: c.hideWhenIdle, fillWhenLive: c.fillWhenLive },
+      );
+
     case "reaper-status": {
       const reaper = ctx.reaper;
       const connected = reaper?.connected ?? false;
       const recording = reaper?.recording ?? false;
       // Pure tally-light mode: nothing on screen unless REAPER is recording.
       if (!recording && (c.hideWhenIdle ?? false)) return null;
-      if (recording) {
-        // Position ticks while recording — trim REAPER's ".mmm" to whole seconds.
-        const posRaw = reaper?.positionString ?? "";
-        const dot = posRaw.indexOf(".");
-        const pos = c.showPosition && posRaw ? ` ${dot === -1 ? posRaw : posRaw.slice(0, dot)}` : "";
-        const label = `${c.recordingText ?? "REAPER: Recording"}${pos}`;
-        // Fill the whole box red (a strong room cue) or just color the text.
-        if (c.fillWhenRecording ?? true) return <RecordingFill label={label} ts={ts} />;
-        // Not filling the box: same dot convention as the connection objects, so
-        // a red dot always means the same thing wherever it appears on a display.
-        return <StatusDot color="var(--red-10)" label={label} ts={ts} />;
-      }
-      // Idle: dim when offline so a neutral badge is never mistaken for "not
-      // recording" when REAPER is merely unreachable.
-      return (
-        <StatusDot
-          color={DOT_IDLE}
-          label={connected ? (c.idleText ?? "REAPER: Standby") : (c.offlineText ?? "REAPER: Offline")}
-          ts={ts}
-          dimmed={!connected}
-        />
-      );
+      // Position ticks while recording -- trim REAPER's ".mmm" to whole seconds.
+      // It is the sub-line, matching OBS's timecode: the two recorders say the
+      // same kind of thing and should say it in the same place.
+      const posRaw = reaper?.positionString ?? "";
+      const dot = posRaw.indexOf(".");
+      const pos = c.showPosition && posRaw ? (dot === -1 ? posRaw : posRaw.slice(0, dot)) : null;
+      return statusReadout({
+        caption: "REAPER",
+        active: recording,
+        connected,
+        filled: c.fillWhenRecording ?? FILL_WHEN_ACTIVE,
+        activeText: c.recordingText ?? STATUS_TEXT.reaper.recording,
+        idleText: c.idleText ?? STATUS_TEXT.reaper.idle,
+        offlineText: c.offlineText ?? STATUS_TEXT.reaper.offline,
+        sub: pos,
+      });
     }
     case "rosstalk-button":
       return (
@@ -741,6 +1104,28 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
           ts={ts}
         />
       );
+    case "notes":
+      return (
+        <NotesObject
+          objectId={o.id}
+          config={c}
+          editable={ctx.interactive}
+          all={ctx.state?.notesByObject}
+          ts={ts}
+        />
+      );
+    case "checklist":
+      return (
+        <ChecklistObject
+          objectId={o.id}
+          config={c}
+          editable={ctx.interactive}
+          all={ctx.state?.notesByObject}
+          ts={ts}
+        />
+      );
+    case "action-button":
+      return <ActionButton config={c} interactive={ctx.interactive} ts={ts} />;
     case "osc-button":
       return (
         <OscButton
@@ -753,47 +1138,108 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
     case "integration-status": {
       const st = c.integrationId ? ctx.integrations.find((i) => i.id === c.integrationId) : ctx.integrations[0];
       const conn = st?.connection ?? "disconnected";
-      const dot =
+      const color =
         conn === "connected" ? "var(--green-10)"
         : conn === "error" ? "var(--red-10)"
         : conn === "connecting" ? "var(--yellow-10)"
-        : DOT_IDLE;
+        : null;
       const name = c.label ?? (st ? (ctx.integrationLabels[st.id] ?? st.id) : "—");
-      return <StatusDot color={dot} label={(c.showLabel ?? true) ? name : null} ts={ts} />;
+      // WHICH integration is the caption; whether it is up is the value. The old
+      // shape was a coloured dot beside a name, which said what it was watching
+      // but never what it found — you had to know the colour code to read it.
+      const word =
+        conn === "connected" ? "Online"
+        : conn === "error" ? "Error"
+        : conn === "connecting" ? "Connecting"
+        : "Offline";
+      return (
+        <Readout
+          caption={(c.showLabel ?? true) ? name : null}
+          value={word}
+          upper
+          valueColor={color}
+          dim={conn === "disconnected"}
+            align={o.style?.textAlign}
+        />
+      );
     }
     case "wireless-summary": {
       const ch = ctx.wireless;
-      if (ch.length === 0) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (ch.length === 0) return <Readout value="—" dim />;
       const online = ch.filter((d) => d.online).length;
-      const batteries = ch.filter((d) => d.online && d.battery != null).map((d) => d.battery as number);
+      const live = ch.filter((d) => d.online);
+      const batteries = live.filter((d) => d.battery != null).map((d) => d.battery as number);
       const lowest = batteries.length ? Math.min(...batteries) : null;
+      // The pack that runs out FIRST is the one that decides whether anybody has
+      // to move mid-service, so the fleet figure is the minimum, exactly as the
+      // battery figure is.
+      const runtimes = live.filter((d) => d.batteryMinutes != null).map((d) => d.batteryMinutes as number);
+      const soonest = runtimes.length ? Math.min(...runtimes) : null;
       const showOnline = c.showOnline ?? true;
       const showBattery = c.showBattery ?? true;
-      const prefix = (c.showLabel ?? false) && c.label ? `${c.label} ` : "";
+      const showRuntime = c.showRuntime ?? false;
+      // The count is the value; the lowest battery is what qualifies it. They
+      // were two figures side by side in different colours, which reads as two
+      // separate readouts sharing a box.
+      const quals = [
+        showBattery && lowest != null ? `${lowest}% lowest` : null,
+        showRuntime && soonest != null ? `${runtimeText(soonest)} left` : null,
+      ].filter(Boolean);
+      // With the count off, the tile is a single figure — battery if it is on,
+      // otherwise runtime, so turning battery off does not leave a blank tile.
+      //
+      // ONE flag for the figure and its colour. The condition was written out
+      // twice, once for each, and two copies of "which figure is this" is how a
+      // tile ends up showing minutes coloured by battery thresholds.
+      const batteryLeads = showBattery || !showRuntime;
+      const headline = batteryLeads ? `${lowest ?? "—"}%` : (runtimeText(soonest) ?? "—");
       return (
-        <span style={{ ...ts, width: "auto", display: "inline-flex", alignItems: "baseline", gap: "0.4em" }}>
-          {prefix && <span>{prefix.trim()}</span>}
-          {showOnline && <span>{online}/{ch.length}</span>}
-          {showBattery && lowest != null && (
-            <span style={{ color: batteryColor(lowest) }}>{lowest}%</span>
-          )}
-        </span>
+        <Readout
+          caption={(c.showLabel ?? false) && c.label ? c.label : null}
+          value={showOnline ? `${online}/${ch.length}` : headline}
+          sub={showOnline ? quals.join("  ") || null : quals.slice(1).join("  ") || null}
+          valueColor={showOnline ? null : batteryLeads ? batteryColor(lowest) : runtimeColor(soonest)}
+          mono
+            align={o.style?.textAlign}
+        />
       );
     }
     case "wireless-channel": {
       const d = c.channelId ? ctx.wireless.find((x) => x.channelId === c.channelId) : ctx.wireless[0];
-      if (!d) return <span style={{ ...ts, opacity: 0.4 }}>—</span>;
+      if (!d) return <Readout value="—" dim />;
       const show = c.show ?? { rf: true, battery: true, frequency: true };
+      // The channel already had this composition — a small dim name over a row of
+      // figures — hand-rolled at 0.55em. It is the idiom, so it uses the idiom:
+      // the mic's name is the caption, its battery the value it is checked for,
+      // and RF and frequency the qualifiers under it.
+      const battery = show.battery && d.battery != null ? `${d.battery}%` : null;
+      const runtime = show.runtime ? runtimeText(d.batteryMinutes) : null;
+      // Percentage wins the headline when both are on, because it is the figure
+      // that has always been there and a wall people have learned should not
+      // rearrange itself. With percentage OFF, runtime takes the headline — which
+      // is what asking for "time remaining instead" means.
+      const headline = battery ?? runtime;
+      const quals = [
+        // The one that did not get the headline still gets said.
+        battery && runtime ? runtime : null,
+        show.rf && d.rfBars != null ? rfBarsGlyph(d.rfBars) : null,
+        show.frequency && d.frequencyLabel ? d.frequencyLabel : null,
+        show.audio && d.audioLevel != null ? `${Math.round(d.audioLevel * 100)}%` : null,
+      ].filter(Boolean);
       return (
-        <div style={{ ...ts, opacity: d.online ? 1 : 0.4, display: "flex", flexDirection: "column", justifyContent: "center", width: "100%", height: "100%" }}>
-          {(c.showLabel ?? true) && <span style={{ fontSize: "0.55em", opacity: 0.65 }}>{d.name ?? d.channelId}</span>}
-          <span style={{ display: "inline-flex", gap: "0.5em", alignItems: "baseline", flexWrap: "wrap" }}>
-            {show.rf && d.rfBars != null && <span>{rfBarsGlyph(d.rfBars)}</span>}
-            {show.battery && d.battery != null && <span style={{ color: batteryColor(d.battery) }}>{d.battery}%</span>}
-            {show.frequency && d.frequencyLabel && <span style={{ opacity: 0.7 }}>{d.frequencyLabel}</span>}
-            {show.audio && d.audioLevel != null && <span style={{ opacity: 0.7 }}>{Math.round(d.audioLevel * 100)}%</span>}
-          </span>
-        </div>
+        <Readout
+          caption={(c.showLabel ?? true) ? d.name ?? d.channelId : null}
+          value={headline ?? quals[0] ?? "—"}
+          sub={(headline ? quals : quals.slice(1)).join("  ") || null}
+          valueColor={
+            battery && d.battery != null ? batteryColor(d.battery)
+            : runtime ? runtimeColor(d.batteryMinutes)
+            : null
+          }
+          mono
+          dim={!d.online}
+            align={o.style?.textAlign}
+        />
       );
     }
     default: {
@@ -815,11 +1261,11 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
 function SplMeterValue({
   config,
   spl,
-  ts,
+  align,
 }: {
   config: Extract<LayoutObjectConfig, { type: "spl-meter" }>;
   spl: SplMetricsDTO | null;
-  ts: CSSProperties;
+  align: LayoutHAlign | undefined;
 }) {
   const r = resolveSplValue(spl, config.meterId, config.metricKey);
   // Peak hold is a running max over samples, so it has to survive renders — but it
@@ -832,20 +1278,26 @@ function SplMeterValue({
   if (nextHold !== hold) setHold(nextHold);
 
   const shown = config.peakHold ? nextHold.peak : (r?.value ?? null);
-  if (shown == null) return <span style={{ ...ts, opacity: 0.4 }}>— dB</span>;
+  if (shown == null) return <Readout caption={config.caption} value="— dB" dim mono align={align} />;
   const color = splThresholdColor(shown, config.thresholds);
+  // "pk" and the metric name were two inline 0.6em spans trailing the number, so
+  // a meter with both read "97 dB pk SPL-A" as one run of text at three sizes.
+  // They are one sub-line now, which is what they always were.
+  const quals = [config.peakHold ? "peak hold" : null, config.showLabel && r ? r.metricKey : null].filter(Boolean);
   return (
-    <span style={color ? { ...ts, color } : ts}>
-      {`${Math.round(shown)} dB`}
-      {config.peakHold && <span style={{ opacity: 0.6, fontSize: "0.6em" }}> pk</span>}
-      {config.showLabel && r && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${r.metricKey}`}</span>}
-    </span>
+    <Readout
+      caption={config.caption}
+      value={`${Math.round(shown)} dB`}
+      sub={quals.join(" · ") || null}
+      valueColor={color}
+      mono
+            align={align}
+    />
   );
 }
 
 function hhmm(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return formatClock(iso);
 }
 
 /** A "nice" integer axis step (1 / 2 / 5 × 10ⁿ, minimum 1) for a target interval
@@ -1219,6 +1671,11 @@ function PeoplePanel({
   const t = people?.total;
   const valuePx = parseFloat(String(ts.fontSize)) || 0.12 * H;
   const labelPx = Math.max(8, valuePx * 0.34);
+  const {
+    wrapRef: fitWrapRef,
+    elRef: fitElRef,
+    scale: fitScale,
+  } = useFitScale<HTMLDivElement>([metrics.join(","), showLabels, col, valuePx, H]);
   // Each tile resolves to a display string + optional color override (vs-average
   // goes green/red). "—" when the underlying value isn't available.
   const tile = (k: string): { text: string; color: string } => {
@@ -1246,7 +1703,14 @@ function PeoplePanel({
     return { text: v == null ? "—" : v.toLocaleString(), color: base };
   };
   return (
+    // Scaled to fit like every other object: the measured sweep found this one
+    // overflowing its box by 386px at a dashboard tile size, because the metrics
+    // wrap onto new rows and the wrapped block is simply taller than the tile.
+    // Gaps and fonts here are fractions of the CANVAS height, so they do not
+    // shrink with the object - scaling the whole block is what makes them.
+    <div ref={fitWrapRef} style={{ width: "100%", height: "100%", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
     <div
+      ref={fitElRef}
       style={{
         display: "flex",
         flexDirection: col ? "column" : "row",
@@ -1256,6 +1720,8 @@ function PeoplePanel({
         height: "100%",
         justifyContent: "space-evenly",
         alignItems: "center",
+        transform: `scale(${fitScale})`,
+        transformOrigin: "center center",
       }}
     >
       {metrics.map((k) => {
@@ -1272,6 +1738,7 @@ function PeoplePanel({
         );
       })}
     </div>
+    </div>
   );
 }
 
@@ -1280,13 +1747,13 @@ function PeoplePanel({
 function BaptismTimer({
   state,
   config,
-  ts,
   now,
+  align,
 }: {
   state: BaptismState | null;
   config: Extract<LayoutObjectConfig, { type: "baptism-timer" }>;
-  ts: CSSProperties;
   now: number;
+  align: LayoutHAlign | undefined;
 }) {
   const field = config.field ?? "live";
   const sum = summarizeBaptism(state);
@@ -1317,11 +1784,19 @@ function BaptismTimer({
     value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
     fallback = "last person";
   }
+  // "0:00 avg per person" on a narrow tile was 49px wider than the tile in the
+  // measured sweep, because the label rode on the end of the value and the pair
+  // was fitted as one string. Under the value it is a line of its own, and the
+  // value is sized from the box rather than from how long the label happens
+  // to be.
   return (
-    <span style={ts}>
-      {value}
-      {config.showLabel && <span style={{ opacity: 0.6, fontSize: "0.6em" }}>{` ${config.label ?? fallback}`}</span>}
-    </span>
+    <Readout
+      caption={config.caption}
+      value={value}
+      sub={config.showLabel ? config.label ?? fallback : null}
+      mono
+            align={align}
+    />
   );
 }
 
@@ -1340,6 +1815,30 @@ function batteryColor(pct: number | null): string {
   if (pct === null) return "rgba(255,255,255,0.4)";
   if (pct >= 50) return "var(--green-10)";
   if (pct >= 20) return "var(--yellow-10)";
+  return "var(--red-10)";
+}
+
+/** Runtime remaining as `H:MM`, the way Wireless Workbench writes it. Always
+ *  with the hour, so a column of packs stays a column and 0:45 cannot be
+ *  misread as 45 hours. */
+export function runtimeText(minutes: number | null | undefined): string | null {
+  if (minutes == null || !Number.isFinite(minutes) || minutes < 0) return null;
+  const whole = Math.floor(minutes);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Runtime remaining, coloured by whether it survives what is in front of it.
+ *
+ * The thresholds are a service, not a percentage: 90 minutes covers a service
+ * with a margin, an hour covers one that has already started, and under half an
+ * hour is a pack somebody has to go and swap. A percentage cannot say this — the
+ * same 60% is three hours on one pack and forty minutes on another.
+ */
+export function runtimeColor(minutes: number | null): string | null {
+  if (minutes == null) return null;
+  if (minutes >= 90) return "var(--green-10)";
+  if (minutes >= 30) return "var(--yellow-10)";
   return "var(--red-10)";
 }
 
@@ -1885,12 +2384,17 @@ export function useLayoutData(layout?: LayoutDTO) {
   const spl = useSplState(want(["spl-meter"]));
   const obs = useObsState(want(["obs-status"]));
   const reaper = useReaperState(want(["reaper-status"]));
+  // Both gated on the streaming objects: a clock-only wall screen must not hold
+  // a poll open against two cloud APIs, one of which has a daily quota.
+  const streamWanted = want(["stream-status", "home-streaming", "home-streaming-resi", "home-streaming-youtube"]);
+  const resi = useResiState(streamWanted);
+  const youtube = useYouTubeState(streamWanted);
   const osc = useOscState(want(["osc-button"]));
   const peopleCount = usePeopleCountState(peopleWanted);
   const serviceLow = useLiveServiceLow(peopleWanted);
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
   const servicePeaks = useLiveServicePeaks(peopleWanted);
-  const wireless = useWirelessChannels(want(["wireless-summary", "wireless-channel"]));
+  const wireless = useWirelessTelemetry(want(["wireless-summary", "wireless-channel"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
@@ -1907,15 +2411,27 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
  * Renders a custom-layout View: a fixed design canvas scaled to fit the viewport,
  * with absolutely-positioned, live-data-bound objects.
  */
-export function LayoutRenderer({ layout, ndiSource, interactive = false }: { layout: LayoutDTO; ndiSource: string | null; interactive?: boolean }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+export function LayoutRenderer({
+  layout,
+  ndiSource,
+  interactive = false,
+  surface,
+}: {
+  layout: LayoutDTO;
+  ndiSource: string | null;
+  interactive?: boolean;
+  /** The View's surface, so a console can respond to the window while a display
+   *  honours its design. Absent behaves as a display — the safe default. */
+  surface?: "display" | "console";
+}) {
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -1957,25 +2473,70 @@ export function LayoutRenderer({ layout, ndiSource, interactive = false }: { lay
   // "fill": objects (fractional) reflow to fill the whole window — no letterbox.
   // Fonts (fractions of canvas HEIGHT) scale by the live window height so they grow
   // with the window instead of the design canvas.
-  const fill = canvas.fit === "fill";
-  const H = fill ? dims.h || canvas.height : canvas.height;
-  const ctx: LayoutRenderCtx = { state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive };
-  const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
-
+  // A console responds to the window; a display honours its design exactly. An
+  // explicit fit on the layout wins over both.
+  const fit = fitFor({ surface } as View, canvas.fit);
+  const responsive = fit === "responsive";
+  const H = responsive ? dims.h || canvas.height : canvas.height;
+  // Placements are computed once per render, from the live viewport. Absent when
+  // letterboxed, so that path is untouched.
+  const placed = responsive && dims.w && dims.h
+    ? new Map(resolveLayout(layout.objects.filter((o) => !o.hidden), canvas, { w: dims.w, h: dims.h }).map((p) => [p.id, p]))
+    : undefined;
+  // How far the placed objects actually reach. When stacking gives every object
+  // the 24px floor - many objects on a tall narrow window - the column is taller
+  // than the viewport, and with the container clipped the overflow was simply
+  // gone: no scrollbar, no indication, content the operator could not reach.
+  const contentBottom = placed
+    ? [...placed.values()].reduce((m, o) => Math.max(m, o.top + o.height), 0)
+    : 0;
+  const overflows = responsive && dims.h > 0 && contentBottom > dims.h + 1;
   // Default/legacy canvas backgrounds inherit the shared kiosk surface so custom
   // layouts match every other view; only an explicit non-default solid overrides.
   const bg = canvas.background;
   const inheritSurface =
     bg == null || bg === "#000" || bg === "#000000" || bg === "#080810" || bg === "#0a0a0a";
 
+  // NOT Home: Home draws its own grid with ObjectContent directly (see
+  // home-grid), and /consoles/home redirects to it. Anything reaching this
+  // renderer is a console, a display, or a preview of one.
+  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
+  const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
+
   return (
-    <div ref={setBox} className="relative w-full h-full kiosk-surface overflow-hidden flex items-center justify-center">
+    <div
+      ref={setBox}
+      // ALWAYS the kiosk surface, never the app's theme background.
+      //
+      // A console used to be drawn on `bg-bg` so it read as part of the page
+      // rather than a slab of stage-black bolted into it. That reasoning held
+      // while the app was dark: measured, `--color-bg` is #0e0e0e against the
+      // kiosk's #0a0a0a, four points apart and indistinguishable.
+      //
+      // In LIGHT mode the same token is #f7f8fa, and a layout's objects carry
+      // colours somebody authored against a dark canvas — white text, most of
+      // it. The ground inverted and the text stayed white, so a console on a
+      // phone in daylight was white-on-white. The editor never showed this,
+      // because it draws on the kiosk surface: what you designed was not what
+      // you got.
+      //
+      // A layout brings its own ground with it. `canvas.background` is where an
+      // operator says what that is; the app's theme does not get a vote.
+      className={`relative w-full h-full flex items-center justify-center kiosk-surface ${
+        overflows ? "overflow-y-auto overflow-x-hidden" : "overflow-hidden"
+      }`}
+    >
       <div
         style={
-          fill
+          responsive
             ? {
                 position: "absolute",
                 inset: 0,
+                // Grown to the content when the stacked column is taller than the
+                // window, so the container above has something to scroll. Stacking
+                // only happens on a responsive surface, which is a control surface
+                // - something with a touchscreen, not a wall nobody can scroll.
+                ...(overflows ? { bottom: "auto", minHeight: contentBottom } : null),
                 background: inheritSurface ? "transparent" : bg,
               }
             : {

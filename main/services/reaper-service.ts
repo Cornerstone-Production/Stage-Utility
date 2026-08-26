@@ -91,15 +91,14 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
   }
 
   private async fetchTransport(host: string, port: number): Promise<string> {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(`http://${host}:${port}/_/TRANSPORT`, { signal: ctrl.signal });
-      if (!res.ok) throw new Error(`REAPER returned HTTP ${res.status}`);
-      return await res.text();
-    } finally {
-      clearTimeout(t);
-    }
+    // AbortSignal.timeout rather than a hand-rolled controller-plus-clearTimeout:
+    // the timer cannot be leaked, because there is no timer to forget. Every
+    // other fetch in this codebase already does it this way.
+    const res = await fetch(`http://${host}:${port}/_/TRANSPORT`, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`REAPER returned HTTP ${res.status}`);
+    return await res.text();
   }
 
   protected async connect(): Promise<void> {
@@ -123,10 +122,9 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
     }
   }
 
-  // Broadcast on any meaningful state change; while recording, also tick each
-  // poll so a timecode display advances. Otherwise keep `last` current silently
-  // (fresh for hydration) without spending an SSE frame.
-  private emitIfChanged(next: ReaperStatusDTO): void {
+  // Overrides the base's shallow compare: while recording, tick EVERY poll so a
+  // timecode display advances, which a change-only broadcast would freeze.
+  protected override emitIfChanged(next: ReaperStatusDTO): void {
     const p = this.last;
     const stateChanged =
       p.connected !== next.connected ||

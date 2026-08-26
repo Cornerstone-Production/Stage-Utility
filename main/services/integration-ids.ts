@@ -16,11 +16,44 @@ export const INTEGRATION_IDS = [
   "prodcom",
   "propresenter",
   "reaper",
+  "resi",
   "ross-tsl",
   "rosstalk",
   "sensource",
   "smaart",
+  "youtube",
   "wireless",
 ] as const;
 
 export type IntegrationId = (typeof INTEGRATION_IDS)[number];
+
+/**
+ * The integrations whose connection is re-applied when their config or their
+ * enabled flag changes.
+ *
+ * Separate from INTEGRATION_IDS because not every integration has a connection
+ * to re-apply. The five that are absent are absent for a reason:
+ *
+ *  - `companion` and `rosstalk` are INBOUND. Something else connects to us, so
+ *    there is nothing to dial on a config change.
+ *  - `osc` is fire-and-forget UDP with no session to rebuild.
+ *  - `planning-center` and `wireless` do different work in setConfig than in
+ *    setEnabled, so they stay written out where that difference is visible.
+ *
+ * integration-manager types its applier map as `Record<ConnectionManagedId, …>`,
+ * so adding an id here without an applier is a compile error rather than an
+ * integration that silently never reconnects.
+ */
+export const CONNECTION_MANAGED_IDS = [
+  "obs",
+  "prodcom",
+  "propresenter",
+  "reaper",
+  "resi",
+  "ross-tsl",
+  "sensource",
+  "smaart",
+  "youtube",
+] as const;
+
+export type ConnectionManagedId = (typeof CONNECTION_MANAGED_IDS)[number];

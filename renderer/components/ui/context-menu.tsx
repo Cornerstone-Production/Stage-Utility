@@ -7,6 +7,7 @@
 // rather than running off the screen.
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { CheckIcon } from "lucide-react";
 
 import { cn } from "../../lib/cn";
 
@@ -20,6 +21,14 @@ export interface ContextMenuItem {
   disabled?: boolean;
   danger?: boolean;
   onSelect?: () => void;
+  /**
+   * A checkable item, showing a tick when on.
+   *
+   * The menu STAYS OPEN when one is picked, the way a platform menu of view
+   * options does — turning three things off is three right-clicks otherwise.
+   * `onSelect` must therefore be safe to call repeatedly.
+   */
+  checked?: boolean;
   /** Nested items. A submenu opens on hover, like the platform menus do. */
   items?: ContextMenuItem[];
 }
@@ -80,19 +89,38 @@ function MenuList({
           <button
             key={item.label ?? i}
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={item.checked}
             disabled={item.disabled}
             className={cn(
               ITEM_CLS,
-              !item.disabled && (item.danger ? "hover:bg-warn-9 hover:text-white" : "hover:bg-fill-active"),
+              // danger → red, not amber. `warn` is caution ("unsaved changes");
+              // `danger` is destructive ("this deletes something"). Delete was
+              // highlighting amber, which reads as a warning you can proceed
+              // through rather than the last step before losing work.
+              !item.disabled && (item.danger ? "hover:bg-danger-9 hover:text-white" : "hover:bg-fill-active"),
             )}
             onClick={() => {
               if (item.disabled) return;
               item.onSelect?.();
-              onClose();
+              // A checkable item leaves the menu open — see `checked`.
+              if (item.checked === undefined) onClose();
             }}
           >
-            {item.icon}
+            {item.checked === undefined ? (
+              item.icon
+            ) : (
+              // A fixed-width gutter rather than a conditional tick, so the
+              // labels in a list of toggles line up whatever is on.
+              //
+              // CheckIcon, not a literal ✓. Every other tick in the app is that
+              // icon; a text glyph renders at the font's own weight and sits on
+              // its own baseline, so it read lighter and lower than the ticks
+              // next to it.
+              <span className="flex w-3 shrink-0 items-center justify-center text-accent" aria-hidden>
+                {item.checked ? <CheckIcon className="size-3" strokeWidth={3} /> : null}
+              </span>
+            )}
             <span className="flex-1 truncate">{item.label}</span>
             {item.shortcut && <span className="ml-3 tabular-nums text-fg-subtle">{item.shortcut}</span>}
           </button>
@@ -130,7 +158,18 @@ export function ContextMenu({
   }, [x, y, items]);
 
   useEffect(() => {
-    const close = () => onClose();
+    // Dismiss on a pointerdown OUTSIDE the menu.
+    //
+    // The `contains` check is the whole fix: this listener runs in the capture
+    // phase, so an unfiltered close() fired on the pointerdown of a click on a
+    // menu ITEM, unmounting the menu before the click could reach the button.
+    // Every item — Delete, Copy, Duplicate, Add object — looked normal, hovered
+    // normally, and did nothing at all.
+    const close = (e: Event) => {
+      const target = e.target as Node | null;
+      if (target && ref.current?.contains(target)) return;
+      onClose();
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();

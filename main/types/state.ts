@@ -1,3 +1,4 @@
+import type { ReleaseSection } from "../services/update/release-notes.js";
 // state.ts — StageState and the settings that shape it.
 //
 // The single object every display and panel renders from, and the operator
@@ -27,6 +28,14 @@ export interface StageState {
   /** Resolved slots keyed by View id (for slots-kind Views). Drives both the
    *  kiosk (via the output's routed view) and the settings editor/preview. */
   slotsByView: Record<string, Slot[]>;
+  /** Context-bar item ids in display order. Empty = the renderer's default. */
+  barItems: string[];
+  /** Colours the operator has kept, newest first. Global, like the bar: the same
+   *  person mixes a colour on a laptop and reaches for it on a tablet. */
+  savedColors: string[];
+  /** Content of notes/checklist objects, keyed by layout object id. The layout
+   *  holds the design; this holds what the operator typed into it. */
+  notesByObject: Record<string, { text?: string; items?: { id: string; text: string; done: boolean }[] }>;
   /** Resolved slots for inline mic-slots objects, keyed by the layout object's id
    *  (a custom-layout `slots-grid` with `source: "inline"`). */
   slotsByLayoutObject: Record<string, Slot[]>;
@@ -42,6 +51,9 @@ export interface StageState {
    *  resolve DNS, so this is shown regardless of publicUrl. */
   lanUrl: string | null;
   showQr: boolean;
+  /** Answer kiosk devices looking for a server. Off until switched on, so a test
+   *  instance on the same LAN cannot claim a screen meant for the real one. */
+  kioskDiscovery: boolean;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];
   /** Customizable brand name shown in the sidebar header and on the kiosk. */
@@ -77,6 +89,9 @@ export interface StageState {
   /** IANA zone the server makes wall-clock decisions in, or null to follow its
    *  own clock. See `hostTimezone` for what that clock currently reads. */
   timezone: string | null;
+  /** How every clock in the app renders a time of day. Display only — see
+   *  `timezone` for the zone the server actually reasons in. */
+  hourCycle: "12h" | "24h";
   /** The zone the SERVER's clock is set to — shown so an operator can see when it
    *  is UTC (the default on most servers) and override it. */
   hostTimezone: string;
@@ -168,6 +183,17 @@ export interface UpdateStatus {
   canUpdate?: boolean;
   /** Why in-app updates are unavailable, when `canUpdate` is false. */
   updateBlockedReason?: string | null;
+  /**
+   * Whether anything will start the server again after it deliberately exits.
+   *
+   * False on a checkout somebody runs by hand, which has no service manager
+   * behind it. Every "restart" in this app is really `exit(0)` plus a supervisor
+   * — so where there is no supervisor, restarting a config restore, a recall, an
+   * update or the Restart button shuts the server OFF. Surfaced so the UI can
+   * say that in the confirm dialog rather than promising a restart it cannot
+   * deliver. See main/services/update/relaunch.ts.
+   */
+  selfRecovers?: boolean;
   branch: string | null;
   /**
    * Where `branch` came from. A packaged install has no branch to read, so the
@@ -215,6 +241,12 @@ export interface UpdateStatus {
   latestDate: string | null;
   /** Commit subjects between current and latest (newest first), capped. */
   changelog: string[];
+  /** The same changes, grouped. Empty on a git checkout, whose changelog is
+   *  commit subjects and has no sections to preserve. */
+  changelogSections?: ReleaseSection[];
+  /** The prose the newest release opens with, above its first heading — the
+   *  sentence no commit range could produce. Null when there is none. */
+  changelogIntro?: string | null;
   lastCheckedAt: string | null;
   /** "idle" normally; "checking" during a fetch; "updating" while the script runs. */
   phase: "idle" | "checking" | "updating";

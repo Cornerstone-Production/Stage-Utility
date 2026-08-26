@@ -6,6 +6,8 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
+import { buildViewBundle } from "../view-export.js";
+import { applyViewBundle } from "../view-import.js";
 import {
   listLayoutTemplates,
   saveLayoutTemplate,
@@ -15,34 +17,26 @@ import {
   saveLayoutGroup,
   deleteLayoutGroup,
 } from "../layout-library.js";
+import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, json, error, readBody, isDisplayKind } from "./context.js";
+import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
+import { isLayoutShape } from "../../types/views.js";
+import { oscManager } from "../osc-manager.js";
+import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { LayoutConflictError, stageController } from "../stage-controller.js";
 
 /**
- * The minimum shape a layout must have to be stored and rendered.
+ * `stage-utility-view-left-mic-display-2026-08-17.json`.
  *
- * This used to be `typeof layout === "object"` followed by a cast, which let any
- * object through. Two consequences, both real: the renderer reads
- * `canvas.width` unguarded, so a layout without one crashed the display it was
- * saved to; and `objects.length` went straight into a log line, so an `objects`
- * of `{ length: "…\n[stage-controller] …" }` forged entries on the LAN-visible
- * /log page. Validating the shape closes both at the door.
- *
- * Deliberately shallow — it checks what the renderer and the log actually
- * require, not every optional field of a LayoutObject.
+ * The name is operator-supplied text going into a quoted header value, so the
+ * slug keeps only [a-z0-9-] — a quote or a path separator surviving here would
+ * be a header injection, not a cosmetic problem. Bounded because some
+ * filesystems cap a path component at 255 bytes.
  */
-function isLayoutShape(v: unknown): v is LayoutDTO {
-  if (!v || typeof v !== "object") return false;
-  const l = v as { objects?: unknown; canvas?: unknown };
-  if (!Array.isArray(l.objects)) return false;
-  if (!l.canvas || typeof l.canvas !== "object") return false;
-  const c = l.canvas as { width?: unknown; height?: unknown };
-  return (
-    typeof c.width === "number" && Number.isFinite(c.width) &&
-    typeof c.height === "number" && Number.isFinite(c.height)
-  );
+export function exportFilename(name: string, now: Date): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return `stage-utility-view-${slug ? `${slug}-` : ""}${now.toISOString().slice(0, 10)}.json`;
 }
 
 export async function viewRoutes(c: RouteCtx): Promise<void> {
@@ -63,11 +57,29 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // POST /api/notes — { objectId, content }
+    // What an operator typed into a notes/checklist object. Awaited before the
+    // response, so a failed write is a failed request rather than a silent loss.
+    if (method === "POST" && pathname === "/api/notes") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.objectId !== "string" || typeof body.content !== "object" || body.content === null) {
+        error(res, "body.objectId (string) and body.content (object) required");
+        return;
+      }
+      try {
+        json(res, await stageController.setNotes(body.objectId, body.content as NotesContent));
+      } catch (err) {
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/views") {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
       const kind = isDisplayKind(body.kind) ? body.kind : "slots";
-      const state = await stageController.createView(name ?? "", kind);
+      const surface = body.surface === "console" ? "console" : "display";
+      const state = await stageController.createView(name ?? "", kind, surface);
       json(res, state, 201);
       return;
     }
@@ -124,6 +136,91 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // POST /api/views/import — merge a bundle in and report what happened.
+    if (method === "POST" && pathname === "/api/views/import") {
+      try {
+        // A bundle carries base64 images, so the ordinary JSON ceiling would
+        // refuse a file this app exported — the same reason /api/config/import
+        // uses this limit.
+        const report = await applyViewBundle(await readBody(req, MAX_CONFIG_BODY_BYTES));
+
+        // Telling the managers is the ROUTE's job, not the merge service's.
+        // Both hold their targets in memory and write that array back on the
+        // next edit, so a store written without telling them leaves the imported
+        // target not live AND erased the first time any target is touched.
+        //
+        // It lives here because reloadTargets opens sockets, and a service whose
+        // job is "merge this data" must not: doing it inside applyViewBundle
+        // left three UDP handles open in every unit test that imported a target,
+        // which hung the whole suite on CI while passing locally, where
+        // something already held the port.
+        //
+        // A reload that fails does not fail the import — the data is already
+        // correct on disk — but it is reported rather than logged.
+        for (const [kind, reload] of [
+          ["osc", () => oscManager.reloadTargets()],
+          ["rosstalk", () => rosstalkManager.reloadTargets()],
+        ] as const) {
+          if (!report.targetsAdded.some((t) => t.kind === kind)) continue;
+          try {
+            await reload();
+          } catch (reloadErr) {
+            report.skipped.push(
+              `${kind.toUpperCase()} targets were saved but are not live until a restart: ` +
+              `${errorMessage(reloadErr)}`,
+            );
+          }
+        }
+
+        // BEFORE the reply, not in a finally after it. The importer writes to
+        // several stores directly, so the controller's in-memory views are stale
+        // either way — and a stale list is not merely wrong on screen, it is what
+        // the next rename or delete writes back, erasing whatever did land.
+        //
+        // It used to be `finally { await reloadViews() }`, which ran after the
+        // response was already written. A rejection there escaped to the catch
+        // below, which called error() → json() → writeHead() on a finished
+        // response: ERR_HTTP_HEADERS_SENT thrown from inside an async catch, an
+        // unhandled rejection, and the process gone. Doing it here means a
+        // failure is something the operator READS, in the same shape
+        // reloadTargets uses twelve lines above.
+        await stageController.reloadViews().catch((reloadErr: unknown) => {
+          report.skipped.push(
+            `Everything was imported, but the running server did not pick the views up: ` +
+            `${errorMessage(reloadErr)} — restart it before editing them.`,
+          );
+        });
+        json(res, report);
+      } catch (err) {
+        // Still always, even on the failure path, and still unable to take the
+        // process down: the reply has not been sent yet here.
+        await stageController.reloadViews().catch(() => {});
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+
+    // GET /api/views/:id/export — the whole view as one file.
+    const viewExportMatch = pathname.match(/^\/api\/views\/([^/]+)\/export$/);
+    if (method === "GET" && viewExportMatch) {
+      try {
+        const bundle = await buildViewBundle(decodeURIComponent(viewExportMatch[1]));
+        const filename = exportFilename(bundle.views[0].name, new Date());
+        res.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "content-disposition": `attachment; filename="${filename}"`,
+          "cache-control": "no-store",
+        });
+        res.end(JSON.stringify(bundle, null, 2));
+      } catch (err) {
+        // 404 only for an unknown view. A read error is not "not found", and
+        // answering 404 for it sends somebody looking for a missing view.
+        const msg = errorMessage(err);
+        error(res, msg, /unknown view/.test(msg) ? 404 : 500);
+      }
+      return;
+    }
+
     // POST /api/views/:id/duplicate — { name? }
     const viewDuplicateMatch = pathname.match(/^\/api\/views\/([^/]+)\/duplicate$/);
     if (method === "POST" && viewDuplicateMatch) {
@@ -167,12 +264,27 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
       const hasScriptViewLayout = "scriptViewLayoutId" in body
         && (body.scriptViewLayoutId === null || typeof body.scriptViewLayoutId === "string");
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), or body.scriptViewLayoutId (string|null) required");
+      // Narrowed to a literal rather than cast: `as` asserts a type without
+      // proving it, so the value handed on is still the caller's string as far
+      // as anything reading the code — or analysing it — can tell.
+      const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
+      const hasSurface = surface !== null;
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), or body.scriptViewLayoutId (string|null) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameView(id, body.name as string);
+      // Refused with its reason: converting a bound View names the screens it
+      // would strand rather than silently unbinding them.
+      if (hasSurface) {
+        try {
+          state = await stageController.setViewSurface(id, surface);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       if (hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasLayout) {
@@ -286,7 +398,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
       const viewId = typeof body.viewId === "string" ? body.viewId : null;
-      const state = await stageController.addOutput(name, viewId);
+      const { state } = await stageController.addOutput(name, viewId);
       json(res, state, 201);
       return;
     }
@@ -316,13 +428,34 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasBlackout = typeof body.blackout === "boolean";
       const hasLocked = typeof body.locked === "boolean";
       const hasSlug = typeof body.slug === "string";
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), or body.slug (string) required");
+      const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
+      const hasMode = mode !== null;
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameOutput(id, body.name as string);
-      if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
+      // Mode BEFORE viewId, so a single request can turn a screen into a panel
+      // and point it at a console. The other order refuses its own second half.
+      if (hasMode) {
+        try {
+          state = await stageController.setOutputMode(id, mode);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
+      // A refused binding is a 400 with the reason, not a 500 stack trace: the
+      // operator has to see WHY a console will not go on a wall screen.
+      if (hasViewId) {
+        try {
+          state = await stageController.setOutputView(id, body.viewId as string | null);
+        } catch (err) {
+          error(res, errorMessage(err));
+          return;
+        }
+      }
       if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
       if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
       // A rejected slug is a 400 with the reason, not a silent no-op — the operator

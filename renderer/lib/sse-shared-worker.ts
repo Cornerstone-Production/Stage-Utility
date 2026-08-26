@@ -153,6 +153,17 @@ ctx.onconnect = (e: MessageEvent) => {
         ensureEs();
         report();
       }
+    } else if (m.type === "ping") {
+      // Liveness, answered with the stream's ACTUAL state rather than a bare
+      // ack. A worker that is alive but whose EventSource died is exactly the
+      // failure that kept this off by default: every tab on the machine went
+      // quietly stale, and none of them could tell. A pong that carries
+      // `streamOpen: false` lets a tab give up on the worker and reconnect
+      // directly instead of waiting for news that is never coming.
+      port.postMessage({
+        type: "pong",
+        streamOpen: !!es && es.readyState !== EventSource.CLOSED,
+      });
     } else if (m.type === "bye") {
       // Best-effort cleanup when a tab unloads (ports have no reliable close event).
       portChannels.delete(port);

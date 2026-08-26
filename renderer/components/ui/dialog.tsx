@@ -6,6 +6,14 @@ import { Button } from "./button";
 
 // ── Low-level Radix primitives (re-exported for advanced use) ─────────────────
 
+/** The raw Root, for a dialog that owns its own footer.
+ *
+ * The `Dialog` wrapper below always closes on confirm. That suits a
+ * confirmation and nothing else, so two dialogs compose Root + DialogContent
+ * themselves: the screen-URL editor, whose save the server may refuse and whose
+ * refusal has to stay on screen, and the release notice, whose only button is a
+ * dismissal. */
+export const DialogRoot = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogPortal = DialogPrimitive.Portal;
 export const DialogClose = DialogPrimitive.Close;
@@ -108,7 +116,8 @@ export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLD
 
 interface DialogProps {
   /** Element that opens the dialog when clicked. */
-  trigger: React.ReactNode;
+  /** Optional: a controlled dialog opened from a menu item has no trigger. */
+  trigger?: React.ReactNode;
   title: string;
   description?: string;
   /** Label on the primary action button. Defaults to "Confirm". */
@@ -144,9 +153,11 @@ export function Dialog({
 
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={setOpen}>
-      <DialogPrimitive.Trigger asChild>
-        {trigger}
-      </DialogPrimitive.Trigger>
+      {trigger && (
+        <DialogPrimitive.Trigger asChild>
+          {trigger}
+        </DialogPrimitive.Trigger>
+      )}
 
       <DialogPortal>
         <DialogOverlay />

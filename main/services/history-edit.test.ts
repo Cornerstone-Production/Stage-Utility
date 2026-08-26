@@ -295,9 +295,23 @@ describe("editServiceWindow and recalcAttendance", () => {
     assert.equal(att.persistTimer, null, "a persist is still queued over the edit");
   });
 
-  it("actually trims the samples outside the window", async () => {
+  it("re-tags a sample past the new end rather than deleting it", async () => {
+    // This asserted the sample was GONE, which was the data-loss bug: the 12:30
+    // reading is the room emptying, half an hour into a 60-minute taper window,
+    // and trimming the end to 12:00 is exactly when you want to keep looking at
+    // it. It is kept and tagged `post`, which is what excludes it from
+    // Peak/Lowest without excluding it from the curve.
     await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T12:00:00.000Z" });
-    assert.equal((await attendanceStore.get(LIVE_KEY))?.samples.length, 1, "the 12:30 sample is outside");
+    const after = await attendanceStore.get(LIVE_KEY);
+    assert.equal(after?.samples.length, 2, "a taper sample was deleted by a window edit");
+    assert.equal(after?.samples.find((x) => x.t.startsWith("2026-07-26T12:30"))?.phase, "post");
+  });
+
+  it("still drops a sample beyond the taper window entirely", async () => {
+    // Trimming a bad capture has to actually trim. 12:30 is 90 minutes past an
+    // 11:00 end, well outside the 60-minute taper.
+    await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:00:00.000Z" });
+    assert.equal((await attendanceStore.get(LIVE_KEY))?.samples.length, 1, "a sample past the taper survived");
   });
 
   it("refuses a window edit while the service is recording", async () => {
@@ -405,5 +419,98 @@ describe("merging when only one side has a record in a store", () => {
       "merging into nothing must fail loudly, not move an archive under a record that is not there",
     );
     assert.ok(await attendanceStore.get("src"), "the source must be untouched");
+  });
+});
+
+describe("editing a service window keeps the ramp and the taper", () => {
+  // The bug this exists for: `att.samples` was filtered to the service window
+  // and then upserted, so the FIRST timing correction deleted every pre-service
+  // and post-service sample from the stored record. The arrival ramp and the
+  // emptying-room fade an operator was looking at vanished because they nudged
+  // an end time by a minute — and the write is destructive, so they do not come
+  // back.
+  const KEY = "taper-key";
+
+  /** A record with 10 in-service minutes, a 20-minute ramp before it and a
+   *  20-minute taper after — the shape the recorder actually writes. */
+  async function seed(): Promise<void> {
+    const startMs = T0 + 30 * 60_000;
+    const endMs = startMs + 10 * 60_000;
+    const at = (ms: number, phase?: "pre" | "post") => ({
+      t: new Date(ms).toISOString(),
+      attendance: 10,
+      occupancy: 10,
+      ...(phase ? { phase } : {}),
+    });
+    await attendanceStore.upsert({
+      serviceKey: KEY,
+      serviceTypeId: "st1", serviceTypeName: null, planId: "p1", planTitle: "Sunday",
+      seriesTitle: null, serviceDate: "2026-08-09", serviceTimeId: KEY,
+      serviceTimeStartsAt: new Date(T0).toISOString(),
+      startedAt: new Date(startMs).toISOString(),
+      serviceStartedAt: new Date(startMs).toISOString(),
+      endedAt: new Date(endMs).toISOString(),
+      samples: [
+        at(startMs - 20 * 60_000, "pre"),
+        at(startMs - 10 * 60_000, "pre"),
+        at(startMs + 2 * 60_000),
+        at(startMs + 8 * 60_000),
+        at(endMs + 5 * 60_000, "post"),
+        at(endMs + 15 * 60_000, "post"),
+      ],
+      attendanceBaseline: 0, totalAttendance: 10,
+      peakAttendance: 10, peakOccupancy: 10, minOccupancy: 10,
+      lastAttendance: 10, lastOccupancy: 10,
+    } as unknown as ServiceAttendance);
+  }
+
+  beforeEach(seed);
+
+  it("keeps the post-service taper when the end time is corrected", async () => {
+    const before = await attendanceStore.get(KEY);
+    const startMs = Date.parse(before!.startedAt);
+    // Nudge the end by one minute — the smallest correction there is.
+    await editServiceWindow(KEY, { endedAt: new Date(startMs + 11 * 60_000).toISOString() });
+
+    const after = await attendanceStore.get(KEY);
+    const post = after!.samples.filter((s) => s.phase === "post");
+    assert.ok(post.length > 0, "the taper was deleted by a one-minute timing fix");
+  });
+
+  it("keeps the pre-service ramp too", async () => {
+    const before = await attendanceStore.get(KEY);
+    await editServiceWindow(KEY, { startedAt: new Date(Date.parse(before!.startedAt) + 60_000).toISOString() });
+
+    const after = await attendanceStore.get(KEY);
+    assert.ok(after!.samples.some((s) => s.phase === "pre"), "the arrival ramp was deleted");
+  });
+
+  it("re-tags a sample the new window swallowed", async () => {
+    // Pull the start EARLIER than the first ramp sample: what was "pre" is now
+    // inside the service, so it must stop being tagged — otherwise it goes on
+    // being excluded from Peak/Lowest for a service it is now part of.
+    const before = await attendanceStore.get(KEY);
+    const startMs = Date.parse(before!.startedAt);
+    await editServiceWindow(KEY, { startedAt: new Date(startMs - 25 * 60_000).toISOString() });
+
+    const after = await attendanceStore.get(KEY);
+    const wasRamp = after!.samples.find((s) => Date.parse(s.t) === startMs - 20 * 60_000);
+    assert.ok(wasRamp, "the sample went missing entirely");
+    assert.equal(wasRamp!.phase, undefined, "a sample now inside the service is still tagged as ramp");
+  });
+
+  it("still drops what falls outside even the ramp and taper", async () => {
+    // Trimming a bad capture has to actually trim. The default taper window is
+    // 60 minutes either side, so move the end two hours earlier and the late
+    // taper samples fall outside it.
+    const before = await attendanceStore.get(KEY);
+    const startMs = Date.parse(before!.startedAt);
+    await editServiceWindow(KEY, { endedAt: new Date(startMs + 3 * 60_000).toISOString() });
+
+    const after = await attendanceStore.get(KEY);
+    assert.ok(
+      after!.samples.every((s) => Date.parse(s.t) <= startMs + 3 * 60_000 + 61 * 60_000),
+      "a sample well past the taper window survived a trim",
+    );
   });
 });

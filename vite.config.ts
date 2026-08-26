@@ -4,20 +4,24 @@ import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { isOperatorPath } from "./main/services/routes/operator-paths";
 
 // Dev-only: map clean URLs to their entry HTML so the dev server matches what
 // the production Node server serves (see remote-server.ts tryServeStatic).
-//   /settings        → settings-window.html
+//   /settings, /history, /patch → app.html (operator app; see operator-paths.ts)
 //   /display-1, …    → index.html (kiosk; the slug is read client-side)
 //   /preview-<view>  → index.html (settings live preview of a View)
+//
+// The operator-path test lives in operator-paths.ts rather than here so dev and
+// prod cannot answer the same URL with different documents.
 function cleanUrls(): PluginOption {
   return {
     name: "clean-urls",
     configureServer(server) {
       server.middlewares.use((req, _res, next) => {
         const pathname = (req.url ?? "").split("?")[0];
-        if (pathname === "/settings" || pathname === "/settings/") {
-          req.url = "/settings-window.html";
+        if (isOperatorPath(pathname)) {
+          req.url = "/app.html";
         } else if (/^\/(display|preview)-[^/]+\/?$/.test(pathname)) {
           req.url = "/index.html";
         }
@@ -63,7 +67,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        settings: resolve(__dirname, "settings-window.html"),
+        app: resolve(__dirname, "app.html"),
       },
     },
     outDir: "build/renderer",

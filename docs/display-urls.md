@@ -25,9 +25,34 @@ display slugged `history` would render the History page rather than the display.
 Where both exist, the id wins, so a display is always reachable at its permanent
 address.
 
+## Operator surfaces
+
+These render in the operator app: one page with navigation and a live service
+context bar, rather than the separate chrome-free pages they used to be. They
+follow the light/dark theme, unlike the always-dark display URLs above.
+
+| URL | What it is |
+| --- | --- |
+| `/history` | Service history, timing and attendance — read-only |
+| `/patch` | This week's stage patch, for volunteers |
+| `/scriptview` | Rundown viewer |
+| `/baptism` | Baptism operator |
+| `/automation` | Automation rules |
+| `/integrations` | Connected devices and services |
+
+Moving between them does not reload the page, so the event stream and cached
+plan data survive a navigation.
+
+`/settings` remains its own page for now.
+
+`/history` is **read-only**: it is a link handed to people outside Production, so
+it shows the record without the controls that change it. The operator's own
+history — edit recorded times, merge a split service, delete one — is
+`/history/manage`, in the rail under Services.
+
 ## Tool links
 
-The standalone pages — `/baptism`, `/patch`, `/scriptview`, `/history`, `/log` — are
+The tool pages — `/baptism`, `/patch`, `/scriptview`, `/history`, `/log` — are
 listed under **Settings → Connect → Tools**, with the same copy-to-clipboard
 treatment display links get.
 
@@ -44,8 +69,8 @@ physical screen shows.
 
 ## Icon colors
 
-Every display and tool icon can be retinted by clicking it, on either the Displays
-or Connect tab. Colors are keyed to the display id or tool path, so a color set on
-one tab shows everywhere including the picker.
+Every display icon can be retinted by clicking it on the Screens page. Colors are
+keyed to the display id, so a colour set in one place shows everywhere including
+the picker.
 
 Untinted icons use the theme accent. Clearing a color returns it to that default.

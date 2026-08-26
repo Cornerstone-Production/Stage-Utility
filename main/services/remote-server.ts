@@ -22,12 +22,15 @@ import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
 import { getLogLines } from "./log-buffer.js";
+import { isOperatorPath } from "./routes/operator-paths.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { readImage } from "./image-files.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
+import { resiService } from "./resi-service.js";
+import { youtubeService } from "./youtube-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { signalStore } from "./signal-store.js";
@@ -39,6 +42,7 @@ import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { stageController } from "./stage-controller.js";
+import { WIRELESS_STATUS_CHANNEL } from "../types/devices.js";
 import { updater } from "./updater.js";
 import { SERVER_VERSION } from "./server-version.js";
 
@@ -54,6 +58,11 @@ import { integrationRoutes } from "./routes/integration-routes.js";
 import { rosstalkRoutes } from "./routes/rosstalk-routes.js";
 import { automationRoutes } from "./routes/automation-routes.js";
 import { displaySettingsRoutes } from "./routes/display-settings-routes.js";
+import { kioskDeviceRoutes } from "./routes/kiosk-device-routes.js";
+import { startKioskResponder, stopKioskResponder } from "./kiosk-responder.js";
+import { settingsStore } from "./settings-store.js";
+import { recordDisplayScreen } from "./kiosk-devices-store.js";
+import { randomUUID } from "node:crypto";
 import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
@@ -81,6 +90,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   rosstalkRoutes,
   automationRoutes,
   displaySettingsRoutes,
+  kioskDeviceRoutes,
   systemRoutes,
   brandingRoutes,
   presetRoutes,
@@ -321,13 +331,16 @@ export class RemoteServer {
   private async tryServeStatic(pathname: string, res: http.ServerResponse, acceptEncoding?: string): Promise<boolean> {
     // Clean-URL entry points → built HTML files:
     //   /                     → kiosk (index.html)
-    //   /settings             → settings panel (settings-window.html)
+    //   /settings, /history, … → operator app (app.html); see operator-paths.ts
     //   /display-1, /foo, …   → fall through to the SPA fallback (kiosk)
     let urlPath: string;
-    if (pathname === "/" || pathname === "/index.html") {
+    if (pathname === "/index.html") {
       urlPath = "/index.html";
-    } else if (pathname === "/settings" || pathname === "/settings/") {
-      urlPath = "/settings-window.html";
+    } else if (isOperatorPath(pathname)) {
+      // Checked before the generic fall-through so a nested route like
+      // /scriptview/sunday/full reaches app.html rather than the kiosk SPA
+      // fallback. The dev server applies the same test (vite.config.ts).
+      urlPath = "/app.html";
     } else {
       urlPath = pathname;
     }
@@ -405,6 +418,36 @@ export class RemoteServer {
   }
 
   /**
+   * Bring up the kiosk discovery responder, if it is switched on.
+   *
+   * Off by default — see kioskDiscovery in settings-store.ts for why a fresh
+   * install must not answer. The server id is minted on first use and then never
+   * rewritten: every binding on every device refers to it, so changing it would
+   * orphan the lot.
+   */
+  private async startDiscovery(): Promise<void> {
+    try {
+      const settings = await settingsStore.load();
+      if (!settings.kioskDiscovery) return;
+      let serverId = settings.serverId;
+      if (!serverId) {
+        serverId = randomUUID();
+        await settingsStore.patch({ serverId });
+      }
+      startKioskResponder({
+        serverId,
+        serverName: settings.appName || "Stage Utility",
+        url: () => this.getLanUrl(),
+        port: settings.kioskDiscoveryPort,
+      });
+    } catch (err) {
+      // Reported, never fatal: a server that cannot answer discovery still runs
+      // every display already bound to it.
+      console.warn("[remote-server] kiosk discovery did not start:", err);
+    }
+  }
+
+  /**
    * Best-effort "who is holding this port", for the log only.
    *
    * Fixed argument vectors, no shell, no interpolation of anything a request can
@@ -459,6 +502,7 @@ export class RemoteServer {
           const onListening = () => {
             this.server!.removeListener("error", onError);
             console.log(`[remote-server] listening on 0.0.0.0:${PORT} (LAN: ${this.getLanUrl()})`);
+            void this.startDiscovery();
             resolve();
           };
           const onError = (err: NodeJS.ErrnoException) => {
@@ -649,6 +693,7 @@ export class RemoteServer {
 
   async stop(): Promise<void> {
     console.log("[remote-server] stopping");
+    stopKioskResponder();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
@@ -731,7 +776,7 @@ export class RemoteServer {
       try {
         json(res, { url: await saveLayoutImage(body.dataUrl) });
       } catch (err) {
-        error(res, String(err instanceof Error ? err.message : err));
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -759,7 +804,16 @@ export class RemoteServer {
 
     // ── Serve renderer static build (standalone mode) ─────────────────────
     // Serves the Vite-built renderer from build/renderer/ when it exists.
-    if (method === "GET" && !pathname.startsWith("/api/") && pathname !== "/photos") {
+    // /enroll is excluded for the same reason /api is: static runs BEFORE the
+    // route modules, and an unknown path falls through to the kiosk shell — so
+    // without this, every unclaimed device was served the display picker instead
+    // of the holding screen, and the route below never ran.
+    if (
+      method === "GET" &&
+      !pathname.startsWith("/api/") &&
+      pathname !== "/photos" &&
+      pathname !== "/enroll"
+    ) {
       const staticServed = await this.tryServeStatic(pathname, res, req.headers["accept-encoding"] as string | undefined);
       if (staticServed) return;
       // Fall through to the phone control page.
@@ -817,6 +871,11 @@ export class RemoteServer {
       sseWrite(res, "baptism:state", baptismTimerService.getState());
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "reaper:status", reaperService.getLatest());
+      // Streaming state hydrates for the same reason recording does: a display
+      // that loads mid-service must show the truth immediately, not wait for
+      // the next poll to notice nothing has changed.
+      sseWrite(res, "resi:status", resiService.getLatest());
+      sseWrite(res, "youtube:status", youtubeService.getLatest());
       // Update status must hydrate on (re)connect: every update ends by restarting
       // the server, which drops+reconnects this socket. Without this, the settings
       // Updates panel never learns the post-restart state and stays stuck on its
@@ -827,6 +886,20 @@ export class RemoteServer {
       sseWrite(res, "companion:signals", signalStore.all());
       sseWrite(res, "osc:feedback", oscManager.getFeedback());
       sseWrite(res, "people:count", sensourceService.getLatest());
+      // Wireless telemetry only broadcasts when a reading changes, and a pack
+      // sitting in a drawer changes nothing for days — so a display opening
+      // mid-week would show dashes until somebody keyed a mic.
+      // The LITERAL, not the constant: hydrated-channels.test.ts reads this file
+      // as text to check the hydrate list against the replay list, and its regex
+      // can only see a quoted channel name — passing the constant failed it,
+      // correctly, because as far as the scan could tell nothing hydrated this
+      // channel at all. `satisfies` keeps the two in step: change the constant
+      // and this line stops compiling.
+      //
+      // Do not write an example of that regex's shape in a comment here. Doing
+      // so once made the scan find a channel named by prose, which is the same
+      // trap from the other side.
+      sseWrite(res, "wireless:channels" satisfies typeof WIRELESS_STATUS_CHANNEL, stageController.wirelessChannelStatuses());
       sseWrite(res, "displays:presence", presenceSnapshot());
       sseClients.add(res);
       // Correlate this stream to its client id so POST /api/events/subscribe can set
@@ -870,7 +943,15 @@ export class RemoteServer {
       const outputId = typeof body.outputId === "string" ? body.outputId : null;
       if (outputId) {
         if (body.leaving === true) displayLeaving(outputId);
-        else displayHeartbeat(outputId);
+        else {
+          displayHeartbeat(outputId);
+          // Deliberately discarded, with a log: the heartbeat itself succeeded
+          // and a display that could not record its size is still a display
+          // showing the right thing. Nothing reads the size to decide anything.
+          void recordDisplayScreen(outputId, body.deviceId, body.screen).then((failed) => {
+            if (failed) console.warn("[displays] could not record screen size:", failed);
+          });
+        }
       }
       json(res, { ok: outputId != null });
       return;

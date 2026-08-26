@@ -42,6 +42,25 @@ export interface RouteCtx {
 export type RouteModule = (c: RouteCtx) => Promise<void>;
 
 export function json(res: http.ServerResponse, data: unknown, status = 200): void {
+  // A second reply is a BUG, but it must not be a fatal one.
+  //
+  // The rule above says a route replies exactly once. When one does not -- an
+  // await after the response, a handler whose catch fires late -- writeHead on a
+  // finished response throws ERR_HTTP_HEADERS_SENT, and thrown from inside an
+  // async handler's catch that is an unhandled rejection, which takes the process
+  // down and blanks every display. A view import whose post-response
+  // reloadViews() rejected did exactly that.
+  //
+  // Losing the second reply is the right trade: the first one already reached the
+  // client. It is logged rather than swallowed, because a route replying twice is
+  // something to go and fix.
+  if (res.headersSent || res.writableEnded) {
+    // Not interpolated: this file is request-facing, and log-injection.test.ts
+    // holds every interpolation in it to scrub(). `status` is our own number, but
+    // the rule exists so nobody has to judge that case by case.
+    console.warn("[routes] ignored a second reply — the response was already sent; status:", status);
+    return;
+  }
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
 }

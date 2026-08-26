@@ -6,12 +6,22 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
     />
-    <!-- Tint the mobile browser chrome dark to match the kiosk UI. -->
+    <!-- ONE value, dark, on purpose: the kiosk is always dark regardless of
+         system appearance (see the theme script below). The operator app in
+         app.html is the one that follows the theme and declares both.
+         #0a0a0a is --kiosk-bg, and is strictly R=G=B. -->
     <meta name="theme-color" content="#0a0a0a" />
-    <!-- Add to Home Screen → standalone (no browser bars), edge-to-edge. -->
+    <!-- Add to Home Screen → standalone (no browser bars). -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- `default`, not `black-translucent`.
+         black-translucent puts the web view UNDER the status bar and leaves iOS
+         to keep the clock legible over whatever is there — which it does with a
+         translucent scrim, and that scrim is the blur across the top of the app
+         on a home-screen install. `default` gives an opaque status bar tinted by
+         theme-color above the web view: no scrim, no guessing, and the space it
+         occupies stops being ours to pad around. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Stage Utility" />
     <link rel="icon" type="image/png" href="/app-icon.png" />
     <link rel="apple-touch-icon" href="/app-icon.png" />

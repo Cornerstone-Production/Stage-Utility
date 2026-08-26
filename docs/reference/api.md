@@ -35,18 +35,23 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/views` | List views |
-| POST | `/api/views` | Create a view (`{name, kind}`) |
-| PATCH | `/api/views/:id` | Update name / kind / `ndiSource` / `layout` |
+| POST | `/api/views` | Create a view (`{name, kind, surface?}`) |
+| PATCH | `/api/views/:id` | Update name / kind / `ndiSource` / `layout` / `surface`. Converting a bound view is refused, naming the screens |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots |
 | POST | `/api/views/:id/duplicate` | Duplicate a view |
+| GET | `/api/views/:id/export` | Download the view and anything it embeds as one file |
+| POST | `/api/views/import` | Merge an exported view in; returns what landed and what needs rebinding |
 | POST | `/api/views/:id/copy-slots` | Copy slots from another view |
 | POST | `/api/views/reorder` | Reorder views |
 | DELETE | `/api/views/:id` | Delete a view |
 | GET | `/api/outputs` | List physical displays |
 | POST | `/api/outputs` | Add a display |
-| PATCH | `/api/outputs/:id` | Rename / route to a view (`{viewId}`) |
+| PATCH | `/api/outputs/:id` | Rename / route to a view (`{viewId}`) / set `{mode}` (`display`\|`panel`). A console view on a display screen is refused |
 | POST | `/api/outputs/reorder` | Reorder displays |
 | DELETE | `/api/outputs/:id` | Remove a display |
+| POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does |
+| POST | `/api/notes` | Save a notes/checklist object's content (`{objectId, content}`) |
+| POST | `/api/bar-items` | Set the context bar's items and order (`{items}`) |
 | GET / POST | `/api/layout-templates` | List / save a custom-layout template |
 | PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
 
@@ -65,7 +70,8 @@ screens.
 | GET / POST | `/api/wireless/connections` | List / add a device connection |
 | PATCH / DELETE | `/api/wireless/connections/:id` | Update / remove a connection |
 | POST | `/api/wireless/connections/:id/test` | Test a device connection |
-| GET | `/api/integrations/wireless/channels` | Bindable channels |
+| GET | `/api/integrations/wireless/channels` | Bindable channels — `{id, label, deviceType}` per configured channel, whether or not it has ever reported. For pickers; `deviceType` is what lets one offer mics without charger bays |
+| GET | `/api/integrations/wireless/statuses` | Live telemetry — full `DeviceStatus` per RF channel (RF, battery, runtime, frequency, audio). Chargers excluded. For widgets |
 | GET / POST | `/api/wireless/meter-rate` | Get / set the polling interval |
 
 **ProPresenter & ProdCom**
@@ -91,6 +97,7 @@ screens.
 | GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record |
 | GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record |
 | GET | `/api/obs/status` | OBS streaming / recording / scene state |
+| GET | `/api/resi/status` \| `/api/youtube/status` | Whether that platform is live, and since when |
 | GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
 
 **Correcting a recording**
@@ -131,6 +138,6 @@ Two things to know:
 |--------|------|---------|
 | GET | `/api/branding/source?target=app\|empty` | Original (un-cropped) brand/empty logo source |
 | POST | `/api/branding` | Update app name + logos |
-| GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed` |
+| GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed`, `wireless:channels` |
 | POST | `/api/events/subscribe` | Set the channels a connection wants (channel filtering) |
 | GET | `/photos?u=…` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy |

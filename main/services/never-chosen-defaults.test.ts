@@ -1,0 +1,172 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+
+import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
+import { IDIOM_TYPES, LEGACY_TRANSLUCENT_GROUNDS } from "../types/readout-types.js";
+import type { View } from "../types/views.js";
+
+// This edits the operator's layouts, so the tests are as much about what it must
+// NOT touch as what it must — and the biggest of those is the ALIGNMENT, which
+// this pass used to strip and no longer does at all. A centre the registry wrote
+// and a centre somebody picked are the same characters in the file, so stripping
+// it deleted a real choice on every restart. Those cases are still here, the
+// other way up.
+
+const obj = (type: string, style: Record<string, unknown> | undefined, children?: unknown[]) =>
+  ({ id: `${type}-1`, x: 0, y: 0, w: 0.2, h: 0.2, z: 0, config: { type }, style, children }) as never;
+
+const view = (objects: unknown[]): View =>
+  ({ id: "v", name: "v", kind: "custom", layout: { version: 1, canvas: {}, objects } }) as never;
+
+const alignOf = (views: View[], i = 0, j = 0) =>
+  (views[i].layout!.objects[j] as { style?: { textAlign?: string } }).style?.textAlign;
+
+describe("the alignment, which it must never touch", () => {
+  test("a readout's centre stays put", () => {
+    // This is the reported bug, at the unit: it used to come off here, and the
+    // operator re-centred the same widgets after every update.
+    const out = migrateNeverChosenDefaults([view([obj("clock", { textAlign: "center", fontSize: 0.09 })])]);
+    assert.equal(alignOf(out), "center", "the alignment was stripped again");
+  });
+
+  test("nor a nested one", () => {
+    // Layouts nest — a container of status pills is the normal shape — and a
+    // walk that reached into containers is how the grouped ones lost theirs too.
+    const out = migrateNeverChosenDefaults([
+      view([obj("container", undefined, [obj("obs-status", { textAlign: "center" })])]),
+    ]);
+    const kid = (out[0].layout!.objects[0] as { children: { style?: { textAlign?: string } }[] }).children[0];
+    assert.equal(kid.style?.textAlign, "center", "a nested readout lost its centre");
+  });
+
+  test("no readout type is an exception", () => {
+    // An EXACT walk of the set. One type still being stripped is one widget that
+    // will not stay where it was put.
+    for (const type of IDIOM_TYPES) {
+      const out = migrateNeverChosenDefaults([view([obj(type, { textAlign: "center" })])]);
+      assert.equal(alignOf(out), "center", `${type} lost its alignment`);
+    }
+  });
+
+  test("and a view whose only styling is an alignment comes back BY REFERENCE", () => {
+    // Which is how the caller knows there is nothing to write.
+    const views = [view([obj("clock", { textAlign: "center" })])];
+    assert.equal(migrateNeverChosenDefaults(views), views);
+  });
+});
+
+const bgOf = (views: View[], i = 0, j = 0) =>
+  (views[i].layout!.objects[j] as { style?: { background?: string } }).style?.background;
+
+describe("the translucent card ground", () => {
+  test("every preset ground becomes its opaque twin", () => {
+    // An EXACT walk of the map. A preset left out is one card that goes on
+    // letting the page read through it while its neighbours stop.
+    for (const [translucent, opaque] of Object.entries(LEGACY_TRANSLUCENT_GROUNDS)) {
+      const out = migrateNeverChosenDefaults([view([obj("text", { background: translucent })])]);
+      assert.equal(bgOf(out), opaque, `${translucent} was not replaced`);
+    }
+  });
+
+  test("it applies to any object type, not just readouts", () => {
+    // The ground is on every card the registry ever made — a notes object and a
+    // people panel bleed exactly as badly as a status pill.
+    const out = migrateNeverChosenDefaults([view([obj("notes", { background: "rgba(255,255,255,0.04)" })])]);
+    assert.equal(bgOf(out), "#141414");
+  });
+
+  test("whitespace in the stored value still matches", () => {
+    // JSON written by a different code path may carry spaces after the commas.
+    // Matching the literal string alone would silently skip those objects.
+    const out = migrateNeverChosenDefaults([view([obj("text", { background: "rgba(255, 255, 255, 0.04)" })])]);
+    assert.equal(bgOf(out), "#141414", "a spaced rgba was not recognised");
+  });
+
+  test("a background the operator chose is left alone", () => {
+    for (const chosen of ["#ff0000", "rgba(0,0,0,0.5)", "rgba(255,255,255,0.20)"]) {
+      const out = migrateNeverChosenDefaults([view([obj("text", { background: chosen })])]);
+      assert.equal(bgOf(out), chosen, `${chosen} was overwritten`);
+    }
+  });
+
+  test("the ground moves and the alignment beside it does not", () => {
+    const out = migrateNeverChosenDefaults([
+      view([obj("clock", { textAlign: "center", background: "rgba(255,255,255,0.04)" })]),
+    ]);
+    assert.equal(bgOf(out), "#141414", "the ground survived");
+    assert.equal(alignOf(out), "center", "the alignment went with it");
+  });
+});
+
+describe("what it must not touch", () => {
+  test("an object with no style at all is left alone", () => {
+    const out = migrateNeverChosenDefaults([view([obj("clock", undefined)])]);
+    assert.equal(alignOf(out), undefined);
+  });
+});
+
+describe("running it twice", () => {
+  test("the array comes back BY REFERENCE when there is nothing to do", () => {
+    // So the caller skips the write. It runs beside two other migrations over
+    // the same file; a fresh array is a rewrite for nothing, and three writers
+    // racing is how one of them loses.
+    const views = [view([obj("clock", { textAlign: "right" }), obj("text", { background: "#141414" })])];
+    assert.equal(migrateNeverChosenDefaults(views), views);
+  });
+
+  test("a second run changes nothing", () => {
+    const once = migrateNeverChosenDefaults([view([obj("clock", { background: "rgba(255,255,255,0.04)" })])]);
+    assert.equal(migrateNeverChosenDefaults(once), once);
+  });
+});
+
+describe("the count that gets logged", () => {
+  test("it matches what was actually cleared", () => {
+    // The log line is how an operator whose layouts moved finds out why. A count
+    // that disagreed with the migration would send them looking for a bug that
+    // is not there.
+    const views = [
+      view([
+        obj("clock", { background: "rgba(255,255,255,0.04)" }),
+        obj("text", { textAlign: "center" }),
+        obj("obs-status", { background: "#0f0f0f" }),
+        obj("container", undefined, [obj("spl-meter", { background: "rgba(45,212,150,0.08)" })]),
+      ]),
+    ];
+    assert.equal(countNeverChosen(views), 2);
+  });
+
+  test("it is zero once the migration has run", () => {
+    const views = [view([obj("clock", { background: "rgba(255,255,255,0.04)" })])];
+    assert.equal(countNeverChosen(migrateNeverChosenDefaults(views)), 0);
+  });
+});
+
+// ── The older card ───────────────────────────────────────────────────────────
+// Two eras of card in one layout is what "some objects have a slight border and
+// others don't" turned out to be, measured on a real console: #191919 with a 10%
+// hairline beside #141414 with an 8% one.
+
+test("the older card is folded into the current one", () => {
+  const out = migrateNeverChosenDefaults([
+    view([obj("clock", { background: "#191919", borderColor: "rgba(255,255,255,0.10)", borderWidth: 0.001 })]),
+  ]);
+  const style = out[0].layout!.objects[0].style!;
+  assert.equal(style.background, "#141414");
+  assert.equal(style.borderColor, "rgba(255,255,255,0.08)");
+  assert.equal(style.borderWidth, 0.001, "the width was not part of the difference and must not move");
+});
+
+test("only the PAIR counts — a ground somebody picked is left alone", () => {
+  // #191919 on its own is a colour, not the old card. Rewriting it would be
+  // taking a decision away from whoever made it.
+  const picked = view([obj("clock", { background: "#191919", borderColor: "#ff0000" })]);
+  const out = migrateNeverChosenDefaults([picked]);
+  assert.equal(out[0].layout!.objects[0].style!.background, "#191919");
+  assert.equal(out[0], picked, "an untouched view should come back by reference");
+});
+
+test("the count includes them, so the log is not silent about it", () => {
+  const views = [view([obj("clock", { background: "#191919", borderColor: "rgba(255,255,255,0.10)" })])];
+  assert.equal(countNeverChosen(views), 1);
+});

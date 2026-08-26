@@ -62,6 +62,7 @@ declare global {
   type ProSection = Stage.ProSection;
   type ProTimer = Stage.ProTimer;
   type ReaperStatusDTO = Stage.ReaperStatusDTO;
+  type StreamStatusDTO = Stage.StreamStatusDTO;
   type ReconnectSchedule = Stage.ReconnectSchedule;
   type ResolvedOutput = Stage.ResolvedOutput;
   type ScriptViewConfig = Stage.ScriptViewConfig;

@@ -89,6 +89,9 @@ export interface View {
   ndiSource?: string | null;
   /** ISO creation timestamp (for stable ordering). */
   createdAt: string;
+  /** What this View is for. Absent = "display" — read through {@link viewSurface},
+   *  never directly, so the default stays in one place. */
+  surface?: ViewSurface;
   /** Free-form layout for kind === "custom"; null/absent for the built-in kinds. */
   layout?: LayoutDTO | null;
   /**
@@ -148,7 +151,7 @@ export interface LayoutCanvas {
    * - "fill": fill the whole window — objects (fractional) reflow to the window's
    *   shape, fonts scale by window height; no bars, no distortion.
    */
-  fit?: "contain" | "fill";
+  fit?: "contain" | "fill" | "responsive";
 }
 
 export type LayoutHAlign = "left" | "center" | "right";
@@ -166,18 +169,26 @@ export interface LayoutStyle {
   textAlign?: LayoutHAlign;
   vAlign?: LayoutVAlign;
   background?: string | null;
-  opacity?: number; // 0..1
   cornerRadius?: number; // fraction of canvas height
-  padding?: number; // fraction of canvas height
   borderColor?: string | null;
   borderWidth?: number; // fraction of canvas height
-  /** Drop-shadow strength 0..1 for legibility over video/photos. */
-  textShadow?: number;
-  /** Box elevation 0..1 — a soft drop shadow under the object's box, so stacked
-   *  cards read as layered. 0 = none. */
-  boxShadow?: number;
-  lineClamp?: number | null;
+  /**
+   * The material this object is wearing: Glass, Solid, Outline or none.
+   *
+   * STORED, not inferred. It used to be worked out by comparing every style
+   * field against a table of presets, which meant tinting a Glass object — or
+   * nudging its radius — stopped it matching anything and the dropdown read
+   * "Custom" for a look the operator had picked from that same dropdown two
+   * clicks earlier. A surface is a choice; choices are recorded.
+   *
+   * Absent on everything made before this, so `surfaceOf` classifies those from
+   * what they draw. It never answers "custom": every style is one of the four.
+   */
+  surface?: LayoutSurface;
 }
+
+/** The four materials offered in the inspector's Look section. */
+export type LayoutSurface = "flat" | "glass" | "solid" | "outline";
 
 /** Per-type configuration. The discriminant is `type`. */
 export type LayoutObjectConfig =
@@ -186,12 +197,34 @@ export type LayoutObjectConfig =
   // PCO Live countdown. `hideWhenIdle` renders nothing (instead of "—") when no
   // timer is live; `warnSeconds` turns the readout amber once the remaining time
   // drops to/below that many seconds (it still goes red on overtime).
-  | { type: "countdown-timer"; hideWhenIdle?: boolean; warnSeconds?: number }
+  | {
+      type: "countdown-timer";
+      hideWhenIdle?: boolean;
+      warnSeconds?: number;
+      /**
+       * A caption above the value — "SERVICE STARTS IN" over a countdown.
+       *
+       * A bare 0:04:12 on a wall does not say what it is counting to, and the
+       * operator who built the layout is not the one reading it at 9am on Sunday.
+       * Set on new objects by the registry; ABSENT on objects that already exist, so
+       * no layout anybody built gains a caption it did not ask for. Empty or null
+       * means no caption.
+       */
+      caption?: string | null;
+    }
   // Service pacing — how far ahead/behind the plan we are right now. `scope: "item"`
   // compares the current live item's elapsed time to its planned length (from
   // pco:live); `scope: "service"` sums actual-vs-planned across the recorded service
   // timeline for a running whole-service total. Over plan reads red, under reads green.
-  | { type: "service-pacing"; scope?: "item" | "service"; hideWhenIdle?: boolean; showLabel?: boolean; aheadColor?: string | null; behindColor?: string | null }
+  | {
+      type: "service-pacing";
+      scope?: "item" | "service";
+      hideWhenIdle?: boolean;
+      showLabel?: boolean;
+      aheadColor?: string | null;
+      behindColor?: string | null;
+      caption?: string | null;
+    }
   // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
   // instance to read (omitted / "default" = the primary) — lets separate custom
   // views per auditorium point at different ProPresenter machines.
@@ -202,10 +235,52 @@ export type LayoutObjectConfig =
   | { type: "current-slide-notes"; propresenterInstanceId?: string | null }
   | { type: "slide-thumbnail"; propresenterInstanceId?: string | null }
   | { type: "section-chip"; which: "current" | "next" | "nextArrangement"; propresenterInstanceId?: string | null }
+  // Home's own cards, so Home is built from the same widget set as every other
+  // surface rather than being a bespoke page. Neither takes options: what they
+  // show is the state of this install, and there is nothing to choose.
+  | { type: "home-readiness" }
+  | { type: "home-next-service" }
+  | { type: "home-live-status" }
+  // The stats that used to live INSIDE the live card. Split out so each can be
+  // placed, sized and ordered on its own — the card's look is kept exactly, it
+  // is only the container that goes. Each is integration-agnostic: the recording
+  // one answers "are we getting this?" across every recorder at once.
+  /**
+   * Recording, as three widgets rather than one with a picker.
+   *
+   * `home-recording` answers it across every recorder at once — "are we getting
+   * this?", which is the mid-service question. The other two watch one each, so
+   * they are found by NAME in the palette instead of behind a control somebody
+   * has to know to look for. A new recording integration adds one entry to
+   * `recorders()` (which the combined one picks up for free) and one type here.
+   */
+  | { type: "home-recording" }
+  | { type: "home-recording-obs" }
+  | { type: "home-recording-reaper" }
+  /**
+   * Streaming, the twin of the recording trio above. "home-streaming" answers
+   * every platform at once through `streamers()`; the per-platform ones exist
+   * for the same reason the per-recorder ones do — a combined widget reading
+   * LIVE while one destination sits off air is reassurance nobody asked for.
+   */
+  | { type: "home-streaming"; hideWhenIdle?: boolean; fillWhenLive?: boolean; showElapsed?: boolean }
+  | { type: "home-streaming-resi"; hideWhenIdle?: boolean; fillWhenLive?: boolean; showElapsed?: boolean }
+  | { type: "home-streaming-youtube"; hideWhenIdle?: boolean; fillWhenLive?: boolean; showElapsed?: boolean }
+  | { type: "home-spl" }
+  | { type: "home-screens" }
+  | { type: "home-recent-services" }
   // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from
   // the PCO countdown. `timerName` picks one by name (blank = the first reported);
   // `warnStates` colors the readout when the timer's state reads as overrun/expired.
-  | { type: "pp-timer"; timerName?: string | null; propresenterInstanceId?: string | null; warnStates?: boolean; hideWhenIdle?: boolean; showLabel?: boolean }
+  | {
+      type: "pp-timer";
+      timerName?: string | null;
+      propresenterInstanceId?: string | null;
+      warnStates?: boolean;
+      hideWhenIdle?: boolean;
+      showLabel?: boolean;
+      caption?: string | null;
+    }
   // ProPresenter slide position within the current presentation. `display`: "fraction"
   // ("3 / 12"), "remaining" ("9 left"), "percent", or a progress "bar".
   | { type: "slide-progress"; propresenterInstanceId?: string | null; display?: "fraction" | "remaining" | "percent" | "bar"; showLabel?: boolean }
@@ -219,6 +294,16 @@ export type LayoutObjectConfig =
   // so a strip can show only the channels you care about.
   | { type: "transcript-strip"; mode: "latest" | "rolling"; maxLines?: number; hideChannels?: string[] }
   | { type: "live-controls" } // PCO Services Live Prev/Next buttons (interactive)
+  // The operator's own work product, stored per object id in notes.json (a
+  // "config" store, so it rides along in every backup). `placeholder` is the
+  // prompt shown while empty; the content itself is never in the layout.
+  | { type: "notes"; placeholder?: string }
+  | { type: "checklist"; title?: string; resetDaily?: boolean }
+  // A button bound to an entry in the automation action registry. The general
+  // form of osc-button/rosstalk-button, which stay as they are so existing
+  // layouts keep working — this is for everything else the registry can already
+  // do, including advancing PCO Live.
+  | { type: "action-button"; actionId: string; params?: Record<string, unknown>; label?: string }
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
   // ChargerBay id) with an optional custom label; `show` toggles each metric.
   | {
@@ -250,6 +335,7 @@ export type LayoutObjectConfig =
   // color the readout amber/red above the given dB levels.
   | {
       type: "spl-meter";
+      caption?: string | null;
       meterId?: string | null;
       metricKey?: string | null;
       showLabel?: boolean;
@@ -261,7 +347,8 @@ export type LayoutObjectConfig =
   // `obs:status` channel). `mode` picks which output to reflect — recording
   // (default, back-compat), streaming, or virtual camera. Turns red while that
   // output is active. The label texts override the per-mode defaults
-  // ("OBS: Recording" / "OBS: Standby" / "OBS: Offline" for recording, etc.).
+  // ("Recording" / "Standby" / "Offline" for recording, etc. — bare, because the
+  // caption already says OBS; see STATUS_TEXT in layout-renderer).
   // `hideWhenIdle` makes it a pure tally light (render nothing unless active);
   // `fillWhenRecording` fills the whole box red instead of just coloring the
   // text; `showTimecode` appends the record duration (recording mode only).
@@ -288,9 +375,22 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  /** Live streaming indicator. `platform` "any" answers every platform at once
+   *  through streamers(); a named one reports just that platform. */
+  | {
+      type: "stream-status";
+      platform?: "any" | "resi" | "youtube";
+      showElapsed?: boolean;
+      hideWhenIdle?: boolean;
+      /** Paint the whole widget green while live, rather than colouring the
+       *  word. Off by default: red is what a recorder means by rolling, and a
+       *  wall carrying both wants one of them shouting, not two. */
+      fillWhenLive?: boolean;
+    }
   // Live REAPER recording indicator (from the REAPER integration, `reaper:status`
   // channel). Turns red while REAPER is recording. Label texts override the
-  // defaults ("REAPER: Recording" / "REAPER: Standby" / "REAPER: Offline");
+  // defaults ("Recording" / "Standby" / "Offline" — bare, because the caption
+  // already says REAPER; see STATUS_TEXT in layout-renderer);
   // `hideWhenIdle` makes it a pure tally light (render nothing unless recording);
   // `fillWhenRecording` fills the whole box red instead of just coloring the text;
   // `showPosition` appends REAPER's transport position while recording.
@@ -339,11 +439,13 @@ export type LayoutObjectConfig =
     }
   // A compact wireless fleet summary computed from all configured connections'
   // channels: `showOnline` → "online/total", `showBattery` → the lowest live
-  // battery % (colored). Optional `label` prefix when `showLabel`.
+  // battery % (colored), `showRuntime` → the shortest runtime remaining across
+  // the fleet. Optional `label` prefix when `showLabel`.
   | {
       type: "wireless-summary";
       showOnline?: boolean;
       showBattery?: boolean;
+      showRuntime?: boolean;
       label?: string;
       showLabel?: boolean;
     }
@@ -353,7 +455,11 @@ export type LayoutObjectConfig =
   | {
       type: "wireless-channel";
       channelId?: string | null;
-      show?: { rf?: boolean; battery?: boolean; frequency?: boolean; audio?: boolean };
+      // `runtime` is the pack's time remaining, the figure Wireless Workbench
+      // leads with. Independent of `battery` on purpose: a 60% pack with 40
+      // minutes left and a 60% pack with three hours left are the same
+      // percentage and a different decision.
+      show?: { rf?: boolean; battery?: boolean; runtime?: boolean; frequency?: boolean; audio?: boolean };
       showLabel?: boolean;
     }
   // A live people count from the SenSource Vea integration ("people:count"
@@ -362,6 +468,7 @@ export type LayoutObjectConfig =
   // when `showLabel`.
   | {
       type: "people-counter";
+      caption?: string | null;
       // attendance (Σins) / occupancy (in-room now) resolve per-zone or building;
       // peak/min/avg (today, from the space endpoint) are building-only.
       /** "peak"/"avg"/"attendance" are TODAY's building figures, so a second
@@ -422,6 +529,7 @@ export type LayoutObjectConfig =
   // integration required.
   | {
       type: "baptism-timer";
+      caption?: string | null;
       field?: "live" | "count" | "total" | "average" | "last";
       label?: string;
       showLabel?: boolean;
@@ -457,8 +565,62 @@ export type LayoutObjectConfig =
 
 export type LayoutObjectType = LayoutObjectConfig["type"];
 
+/**
+ * Which tile a widget fills on Home's grid — columns × rows.
+ *
+ * Five preset shapes on a three-column grid, chosen so they tile: `S 1×1`,
+ * `M 2×1`, `L 2×2`, `XL 3×2`, `Tall 3×4`. `S + M`, `S + L` and `S + S + S` each fill a row,
+ * and a Large leaves a 1-wide, 2-tall gap that two stacked Smalls complete
+ * exactly. Small is 1×1, so every leftover slot is fillable and nothing can
+ * strand a gap.
+ *
+ * Deliberately NOT a width and a height: a size is a choice from four, which is
+ * what keeps Home free of a canvas.
+ */
+export type HomeCardSize = "s" | "m" | "l" | "xl" | "tall";
+
+/**
+ * When a Home card is on the page.
+ *
+ * Home has two moods — a service is running, or it is the rest of the week — and
+ * this used to be a rule hidden in the code: the timer simply belonged to "live"
+ * and vanished for six days. Once an operator places widgets themselves, a card
+ * that disappears without being asked to looks broken, so the rule becomes a
+ * setting they can see and change.
+ */
+export type HomeVisibility = "always" | "live" | "idle";
+
+/** Where a widget sits on Home. Absent on objects that live on a canvas. */
+export interface HomePlacement {
+  size?: HomeCardSize;
+  when?: HomeVisibility;
+  /**
+   * Where the operator put this card, as 1-based grid cells.
+   *
+   * Absent means "flow" — the packed behaviour Home has always had, and what
+   * every card on disk carries until somebody drags one. Present means exactly
+   * here, gaps included: leaving space between two widgets is a thing you can
+   * ask for, and a packing grid has no way to express it.
+   *
+   * Dropped below about 520px, where the grid narrows to two columns and then
+   * one. A column chosen on a three-wide page is not a column on a phone, and
+   * honouring it there would leave holes down a screen that has no room for
+   * them.
+   */
+  col?: number;
+  row?: number;
+}
+
 export interface LayoutObject {
   id: string;
+  /**
+   * Home only: the grid tile and when to show it.
+   *
+   * Home reads this INSTEAD of x/y/w/h — it has no canvas, so the geometry below
+   * is filler the type requires. On every other surface this is absent and the
+   * geometry is the real thing. See main/services/home-view.ts.
+   */
+  home?: HomePlacement;
   /** Position/size as fractions of the PARENT (the canvas for top-level objects,
    *  or the containing container's box for nested children) — all 0..1. */
   x: number;
@@ -473,6 +635,21 @@ export interface LayoutObject {
   locked?: boolean;
   style?: LayoutStyle;
   config: LayoutObjectConfig;
+  /**
+   * Responsive behaviour. All optional and all OFF by default, so an object that
+   * sets none of them lays out exactly as it always has — see
+   * renderer/main/responsive-layout.ts.
+   */
+  /** Pin an edge instead of drifting proportionally. The pinned distance is held
+   *  in DESIGN pixels, which is what makes it an anchor rather than a fraction. */
+  anchor?: { x?: "left" | "right" | "center"; y?: "top" | "bottom" | "center" };
+  /** Scale evenly inside the space given rather than stretching. For logos,
+   *  thumbnails, video — anything with a natural shape. */
+  keepAspect?: boolean;
+  /** Floor in real pixels, so a control cannot shrink below a tappable size. */
+  minPx?: { w?: number; h?: number };
+  /** Ceiling in real pixels, so an object cannot balloon on a 4K wall. */
+  maxPx?: { w?: number; h?: number };
   /** Nested objects, positioned relative to this object's box. Only meaningful
    *  for `container` objects; absent/empty for leaf objects. */
   children?: LayoutObject[];
@@ -502,6 +679,39 @@ export interface LayoutGroup {
   createdAt: string;
 }
 
+/**
+ * What a View is FOR.
+ *
+ * A layout is designed for one context, not both: a display View is read from
+ * across a room and carries no controls; a console View is laid out for arm's
+ * length and can carry controls, drill-down targets and editable fields. A
+ * single layout forced to serve both is worse at each.
+ */
+export type ViewSurface = "display" | "console";
+
+/**
+ * How an Output renders.
+ *
+ * `display` is a read-only wall screen. `panel` is a console pinned chrome-free
+ * to a physical screen — which is how a control surface is built. An Output is a
+ * display unless deliberately changed, so nothing becomes interactive by
+ * accident.
+ */
+export type OutputMode = "display" | "panel";
+
+/** A View's surface. Absent means "display": a View written before this field
+ *  existed was rendering on a wall screen, and anything unrecognised (a hand
+ *  edit, a downgrade) must read as the read-only one rather than the live one. */
+export function viewSurface(v: Pick<View, "surface">): ViewSurface {
+  return v.surface === "console" ? "console" : "display";
+}
+
+/** An Output's mode. Absent — or unrecognised — means "display". The safety
+ *  property is an explicit opt-in, never an inference. */
+export function outputMode(o: Pick<Output, "mode">): OutputMode {
+  return o.mode === "panel" ? "panel" : "display";
+}
+
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
 export interface Output {
   /** Permanent. Never rewritten after creation — slots.json and every other store
@@ -520,6 +730,10 @@ export interface Output {
   /** When true, this display's top bar hides its nav escape hatches (QR/settings +
    *  home logo) so a handed-out link can't navigate away from the display. */
   locked?: boolean;
+  /** How this screen renders. Absent = "display" — read through {@link outputMode}.
+   *  Only a "panel" may be bound to a console View, enforced server-side in
+   *  stage-controller's setOutputView. */
+  mode?: OutputMode;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -537,3 +751,32 @@ export interface ResolvedOutput {
  * always counts DOWN: to the service start before service ("preservice"), then
  * each item's length while live ("item"). "none" = nothing to count down to.
  */
+
+/**
+ * Is this a layout the renderer can actually draw?
+ *
+ * This used to be `typeof layout === "object"` followed by a cast, which let any
+ * object through. Two consequences, both real: `canvas.width` is read unguarded
+ * in the renderer, so a layout without one crashed the display it was saved to;
+ * and `objects.length` went straight into a log line, so an `objects` of
+ * `{ length: "…\n[stage-controller] …" }` forged entries on the LAN-visible
+ * /log page. Validating the shape closes both at the door.
+ *
+ * Deliberately shallow — it checks what the renderer and the log actually
+ * require, not every optional field of a LayoutObject.
+ *
+ * Lives here rather than in a route module because more than one writer needs
+ * it: the PATCH path has always checked, and an imported bundle is a file off
+ * somebody's laptop.
+ */
+export function isLayoutShape(v: unknown): v is LayoutDTO {
+  if (!v || typeof v !== "object") return false;
+  const l = v as { objects?: unknown; canvas?: unknown };
+  if (!Array.isArray(l.objects)) return false;
+  if (!l.canvas || typeof l.canvas !== "object") return false;
+  const c = l.canvas as { width?: unknown; height?: unknown };
+  return (
+    typeof c.width === "number" && Number.isFinite(c.width) &&
+    typeof c.height === "number" && Number.isFinite(c.height)
+  );
+}

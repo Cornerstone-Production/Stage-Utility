@@ -85,6 +85,12 @@ async function loadNormalised(): Promise<SlotsMap> {
 }
 
 export const slotsStore = {
+  /** The whole map, normalised. For export, which needs every key and every
+   *  service type rather than one display's rows. */
+  async all(): Promise<SlotsMap> {
+    return loadNormalised();
+  },
+
   async getSlots(displayId: string, serviceTypeId: string): Promise<Slot[]> {
     const map = await loadNormalised();
     return map[displayId]?.[serviceTypeId] ?? [];

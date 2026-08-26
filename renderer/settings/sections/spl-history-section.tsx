@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { ChipToggle, ChipToggleRow } from "../../components/ui";
 
 import { invoke } from "../../lib/api";
 
@@ -140,24 +141,11 @@ function MetricPicker({
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-caption2 text-gray-9">Show metrics</span>
-      <div className="flex flex-wrap gap-1.5">
-        {allKeys.map((k) => {
-          const on = shown.includes(k);
-          return (
-            <button
-              key={k}
-              onClick={() => onToggle(k)}
-              className={`rounded-full border px-2.5 py-1 text-caption2 transition-colors ${
-                on
-                  ? "border-accent/50 bg-accent/12 text-accent"
-                  : "border-gray-5 bg-gray-2 text-gray-10 hover:bg-gray-3"
-              }`}
-            >
-              {k}
-            </button>
-          );
-        })}
-      </div>
+      <ChipToggleRow>
+        {allKeys.map((k) => (
+          <ChipToggle key={k} label={k} on={shown.includes(k)} onToggle={() => onToggle(k)} />
+        ))}
+      </ChipToggleRow>
     </div>
   );
 }

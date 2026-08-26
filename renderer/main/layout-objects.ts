@@ -14,6 +14,9 @@
 // bodies with their own hooks and context, not data. That switch has an
 // exhaustiveness check so a type without a renderer is also a compile error.
 
+import type { HomeCardSize, HomeVisibility } from "@main/types/views";
+import { IDIOM_TYPES } from "@main/types/readout-types";
+
 /** Palette sections, in the order the add-object dropdown shows them. */
 export const PALETTE_GROUP_ORDER = [
   "Layout",
@@ -27,6 +30,8 @@ export const PALETTE_GROUP_ORDER = [
   "Baptisms",
   "OBS",
   "REAPER",
+  "Resi",
+  "YouTube",
   "Control",
   "Status",
 ] as const;
@@ -35,6 +40,16 @@ export type PaletteGroup = (typeof PALETTE_GROUP_ORDER)[number];
 export interface LayoutObjectSpec {
   /** Shown in the palette, the layer list and the inspector header. */
   label: string;
+  /**
+   * One line saying what this SHOWS, for the palette card.
+   *
+   * Required, so a new object type cannot join the palette as a bare name with
+   * no explanation — `tsc` refuses. Written for someone who has not met the
+   * object before: "Red while OBS is recording", not "OBS status indicator".
+   *
+   * Keep under 60 characters; the palette card gives it one line.
+   */
+  blurb: string;
   /** Which palette section this appears under, or null to keep it OUT of the
    *  add-object palette (NDI is placed by the native client, not by hand). */
   group: PaletteGroup | null;
@@ -55,6 +70,17 @@ export interface LayoutObjectSpec {
    *  more than one is configured. */
   propInstance?: boolean;
   /**
+   * The tile this widget arrives at on HOME's grid. Medium when absent.
+   *
+   * A judgement about the widget, not about a layout: a clock wants a small
+   * square, a rundown wants the width. The operator changes it per card; this is
+   * only where it starts.
+   */
+  homeSize?: HomeCardSize;
+  /** When this widget is on Home. "always" unless it only makes sense in one of
+   *  Home's two moods — a live timer is noise for six days a week. */
+  homeWhen?: HomeVisibility;
+  /**
    * Superseded. Kept renderable, out of the palette, and offered a one-click
    * conversion in the inspector.
    *
@@ -72,16 +98,33 @@ export interface LayoutObjectSpec {
 
 type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
 
-/** One-click card accents. Also used by the inspector's style-preset picker. */
+/**
+ * One-click card accents. Also used by the inspector's style-preset picker.
+ *
+ * The grounds are OPAQUE, and each is the exact blend of the translucent value
+ * it replaces over the kiosk black — so a card looks the same as it always did
+ * on a bare canvas, and now actually covers what is behind it.
+ *
+ * The translucent versions made layering unreadable. A card at 4% white does not
+ * occlude: put a status widget over a transcript and the transcript reads
+ * straight through it, which looks exactly like the widget being drawn
+ * underneath. Paint order was verified correct while this was happening — the
+ * card was on top and 96% see-through.
+ *
+ * Deliberately not a blur or a lower alpha: a widget is a card, and a card that
+ * you can read the page through is a tint. An operator who wants the canvas to
+ * show through still has Fill and Opacity in the inspector.
+ */
 export const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
-  neutral: { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  green: { background: "rgba(45,212,150,0.08)", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  red: { background: "rgba(229,72,77,0.10)", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  amber: { background: "rgba(255,197,61,0.08)", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148 },
-  flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0, padding: 0 },
+  neutral: { background: "#141414", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148 },
+  green: { background: "#0d1a15", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148 },
+  red: { background: "#201011", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148 },
+  amber: { background: "#1e190e", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148 },
+  flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0 },
 };
 
-/** The default look: centerd white text at body size. */
+
+/** The default look: centerd white text at body size, on nothing. */
 const TEXT = (over: LayoutStyle = {}): LayoutStyle => ({
   fontSize: 0.06,
   fontWeight: 500,
@@ -90,11 +133,37 @@ const TEXT = (over: LayoutStyle = {}): LayoutStyle => ({
   vAlign: "middle",
   ...over,
 });
-/** A big bold tabular readout (clock, countdown, timers, counters). */
-const READOUT = (fontSize: number): LayoutStyle => TEXT({ fontSize, fontWeight: 700 });
+
+/**
+ * A readout in a card — the default for anything that shows a VALUE in a box.
+ *
+ * Read out of the operator's own config rather than designed from scratch.
+ * Across four real layouts, `CARD_PRESETS.neutral` had been applied BY HAND to
+ * thirteen different object types — clock, countdown, plan file, people panel,
+ * pacing, people counter, transcript strip, embedded view, live controls and
+ * more — every one carrying the identical background, hairline and radius.
+ *
+ * That is a missing default, not a preference. Half the readouts already shipped
+ * with this card (status chips, buttons, wireless, OBS, REAPER) and half did
+ * not, for no reason anyone could state — so the operator dressed the second
+ * half by hand, once per object, on every layout they built.
+ *
+ * Only new objects are affected: a stored object carries its own style, so no
+ * existing layout moves.
+ */
+const CARD = (over: LayoutStyle = {}): LayoutStyle => ({ ...CARD_PRESETS.neutral, ...TEXT(over) });
+/** A big bold tabular readout in a card (clock, countdown, timers, counters). */
+const READOUT = (fontSize: number): LayoutStyle => CARD({ fontSize, fontWeight: 700 });
 /** A compact glass pill (status chips, buttons, single mic tiles). */
-const PILL = (over: LayoutStyle = {}): LayoutStyle => TEXT({ fontSize: 0.05, fontWeight: 600, ...CARD_PRESETS.neutral, ...over });
-/** Media that paints its own content — no type styling at all. */
+const PILL = (over: LayoutStyle = {}): LayoutStyle => CARD({ fontSize: 0.05, fontWeight: 600, ...over });
+/**
+ * No styling at all.
+ *
+ * For content that paints its own box — media, a shape whose fill IS the object,
+ * a grid of its own tiles, a Home card that draws its own frame — and for
+ * full-bleed text on a stage display, where a card around every line is chrome
+ * nobody asked for. The operator's own layouts leave exactly these bare.
+ */
 const BARE = (): LayoutStyle => ({});
 
 /**
@@ -114,75 +183,96 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   // Layout
   container: {
     label: "Container",
+    blurb: "Groups other objects so they move and scale together",
     group: "Layout",
     config: () => ({ type: "container" }),
     style: () => ({ ...CARD_PRESETS.neutral }),
   },
   shape: {
     label: "Shape",
+    blurb: "A plain rectangle or circle, for dividing up a screen",
     group: "Layout",
     config: () => ({ type: "shape", shape: "rect" }),
-    style: () => ({ background: "#3b82f6", opacity: 1 }),
+    style: () => ({ background: "#3b82f6" }),
+    homeSize: "s",
   },
   image: {
     label: "Image",
+    blurb: "A picture from a file or URL",
     group: "Layout",
     config: () => ({ type: "image", src: "" }),
     style: BARE,
   },
   "brand-logo": {
     label: "Logo",
+    blurb: "Your church logo, from Branding",
     group: "Layout",
     config: () => ({ type: "brand-logo", useEmptySlotLogo: false }),
     style: BARE,
+    homeSize: "s",
   },
 
   // Text & time
   text: {
     label: "Text",
+    blurb: "Words you type, that do not change",
     group: "Text & time",
     config: () => ({ type: "text", text: "Text" }),
     style: () => TEXT(),
+    homeSize: "s",
   },
   clock: {
     label: "Clock",
+    blurb: "The wall clock, 12 or 24 hour",
     group: "Text & time",
     config: () => ({ type: "clock", showSeconds: true, format: "12h" }),
-    style: () => TEXT(),
+    style: () => CARD({ fontWeight: 600 }),
+    homeSize: "s",
   },
   "countdown-timer": {
     label: "PCO countdown",
+    blurb: "Time until the service starts, from Planning Center",
     group: "Text & time",
-    config: () => ({ type: "countdown-timer" }) as LayoutObjectConfig,
-    style: () => TEXT(),
+    config: () => ({ type: "countdown-timer", caption: "Service starts in" }) as LayoutObjectConfig,
+    style: () => READOUT(0.085),
   },
 
   // PCO / service
   "live-controls": {
     label: "PCO Prev/Next",
+    blurb: "Previous and next buttons for the service",
     group: "PCO / service",
     config: () => ({ type: "live-controls" }) as LayoutObjectConfig,
-    style: BARE,
+    style: () => CARD({ fontSize: 0.05, fontWeight: 600 }),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
   },
   "current-service-item": {
     label: "Current item",
+    blurb: "What the plan is on right now",
     group: "PCO / service",
     config: () => ({ type: "current-service-item" }) as LayoutObjectConfig,
     style: () => TEXT(),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
   "next-service-item": {
     label: "Next item",
+    blurb: "What comes after the current item",
     group: "PCO / service",
     config: () => ({ type: "next-service-item" }) as LayoutObjectConfig,
     style: () => TEXT(),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
   "service-order": {
     label: "Service order (legacy)",
+    blurb: "The plan as a running list, with the live item marked",
     group: null,
     retired: {
       replacedBy: "view-embed",
@@ -190,9 +280,11 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     },
     config: () => ({ type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto", autoFit: true }),
     style: () => TEXT({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
+    homeSize: "l",
   },
   "view-embed": {
     label: "Embedded view",
+    blurb: "Another view, shown inside this one",
     group: "PCO / service",
     config: () => ({ type: "view-embed", viewId: null }),
     // The size the ScriptView PAGE actually renders at, expressed as a fraction
@@ -206,48 +298,100 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     // at 1.85× the page breaks exactly that, showing about half the rundown.
     // Someone who does want it bigger has the font-size field; someone who wants
     // it to match the page had no way to get there by eye.
-    style: () => TEXT({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
+    style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
+    homeSize: "l",
+  },
+  "home-readiness": {
+    label: "Readiness",
+    blurb: "What still needs doing before the next service",
+    group: "PCO / service",
+    config: () => ({ type: "home-readiness" }),
+    style: BARE,
+    homeSize: "l",
+    homeWhen: "idle",
+  },
+  "home-next-service": {
+    label: "Next service",
+    blurb: "The next plan, its series and when it starts",
+    group: "PCO / service",
+    config: () => ({ type: "home-next-service" }),
+    style: BARE,
+    homeSize: "m",
+    homeWhen: "idle",
+  },
+  "home-live-status": {
+    label: "Service timer",
+    blurb: "The running item's clock, and what comes next",
+    group: "PCO / service",
+    config: () => ({ type: "home-live-status" }),
+    style: BARE,
+    homeSize: "xl",
+    homeWhen: "live",
+  },
+  "home-recent-services": {
+    label: "Recent services",
+    blurb: "Attendance, length and start time, recently averaged",
+    group: "PCO / service",
+    config: () => ({ type: "home-recent-services" }),
+    style: BARE,
+    homeSize: "xl",
+    homeWhen: "idle",
   },
   "service-pacing": {
     label: "Service pacing",
+    blurb: "How far ahead or behind the plan the service is",
     group: "PCO / service",
-    config: () => ({ type: "service-pacing", hideWhenIdle: false, showLabel: false }),
+    config: () => ({ type: "service-pacing", hideWhenIdle: false, showLabel: false, caption: "Pacing" }),
     style: () => READOUT(0.1),
+    homeSize: "s",
+    homeWhen: "live",
   },
   "plan-attachment": {
     label: "Plan file",
+    blurb: "A page from a file attached to the plan",
     group: "PCO / service",
     config: () => ({ type: "plan-attachment", match: "stage plot", page: 1 }),
-    style: BARE,
+    style: () => ({ ...CARD_PRESETS.neutral }),
+    homeSize: "l",
   },
 
   // ProPresenter
   "current-slide-text": {
     label: "Current slide",
+    blurb: "The words on the slide showing now",
     group: "ProPresenter",
     config: () => ({ type: "current-slide-text" }) as LayoutObjectConfig,
-    style: () => TEXT(),
+    style: () => TEXT({ uppercase: true }),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
   "next-slide-text": {
     label: "Next slide",
+    blurb: "The words on the slide coming next",
     group: "ProPresenter",
     config: () => ({ type: "next-slide-text" }) as LayoutObjectConfig,
-    style: () => TEXT(),
+    style: () => TEXT({ uppercase: true }),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
   "current-slide-notes": {
     label: "Slide notes",
+    blurb: "The speaker notes on the slide showing now",
     group: "ProPresenter",
     config: () => ({ type: "current-slide-notes" }) as LayoutObjectConfig,
-    style: () => TEXT(),
+    style: () => TEXT({ uppercase: true }),
+    homeSize: "m",
+    homeWhen: "live",
     stylingOnly: true,
     propInstance: true,
   },
   "slide-thumbnail": {
     label: "Slide image",
+    blurb: "A picture of the slide showing now",
     group: "ProPresenter",
     config: () => ({ type: "slide-thumbnail" }) as LayoutObjectConfig,
     style: BARE,
@@ -256,131 +400,174 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "section-chip": {
     label: "Section chip",
+    blurb: "The part of the service running now, as a label",
     group: "ProPresenter",
     config: () => ({ type: "section-chip", which: "current" }),
-    style: () => TEXT(),
+    style: () => PILL({ uppercase: true, letterSpacing: 0.04 }),
+    homeSize: "s",
     propInstance: true,
   },
   "pp-timer": {
     label: "ProPresenter timer",
+    blurb: "A timer from ProPresenter, by name",
     group: "ProPresenter",
-    config: () => ({ type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true }),
+    config: () => ({ type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true, caption: "Stage timer" }),
     style: () => READOUT(0.1),
+    homeSize: "s",
+    homeWhen: "live",
     propInstance: true,
   },
   "slide-progress": {
     label: "Slide progress",
+    blurb: "How far through the current presentation",
     group: "ProPresenter",
     config: () => ({ type: "slide-progress", propresenterInstanceId: null, display: "fraction", showLabel: false }),
-    style: () => TEXT(),
+    style: () => CARD({ fontWeight: 600 }),
+    homeSize: "s",
     propInstance: true,
   },
 
   // Mics & RF
   "slots-grid": {
     label: "Mic slots",
+    blurb: "Who is on which mic, as a grid of cards",
     group: "Mics & RF",
     config: () => ({ type: "slots-grid", source: "inline", sourceViewId: null }),
     style: () => TEXT(),
+    homeSize: "xl",
   },
   "charger-battery": {
     label: "Charger battery",
+    blurb: "Battery levels in the charger bays",
     group: "Mics & RF",
     config: () => ({ type: "charger-battery", bays: [], show: { battery: true, charging: true } }),
-    style: () => TEXT({ fontSize: 0.045, textAlign: "left" }),
+    style: () => CARD({ fontSize: 0.045, textAlign: "left" }),
+    homeSize: "s",
     integration: { id: "wireless", label: "wireless" },
   },
   "wireless-summary": {
     label: "Wireless summary",
+    blurb: "How many packs are online, and their batteries",
     group: "Mics & RF",
-    config: () => ({ type: "wireless-summary", showOnline: true, showBattery: true, showLabel: false, label: "Mics" }),
+    config: () => ({ type: "wireless-summary", showOnline: true, showBattery: true, showRuntime: false, showLabel: false, label: "Mics" }),
     style: () => PILL(),
+    homeSize: "s",
     integration: { id: "wireless", label: "wireless" },
   },
   "wireless-channel": {
     label: "Mic channel",
+    blurb: "RF and battery for one wireless pack",
     group: "Mics & RF",
-    config: () => ({ type: "wireless-channel", channelId: null, show: { rf: true, battery: true, frequency: true, audio: false }, showLabel: true }),
+    config: () => ({ type: "wireless-channel", channelId: null, show: { rf: true, battery: true, runtime: false, frequency: true, audio: false }, showLabel: true }),
     style: () => PILL(),
+    homeSize: "s",
     integration: { id: "wireless", label: "wireless" },
   },
 
   // Audio (SPL)
   "spl-meter": {
     label: "SPL meter",
+    blurb: "The live sound level from Smaart",
     group: "Audio (SPL)",
-    config: () => ({ type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null }),
-    style: () => TEXT(),
+    config: () => ({ type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null, caption: "SPL dB(A)" }),
+    style: () => READOUT(0.085),
+    homeSize: "s",
     integration: { id: "smaart", label: "Smaart SPL" },
   },
 
   // Transcription
+  "home-spl": {
+    label: "Sound level",
+    blurb: "The loudest meter right now, and which one",
+    group: "Audio (SPL)",
+    config: () => ({ type: "home-spl" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+  },
   "transcript-strip": {
     label: "Transcription",
+    blurb: "Live captions of what is being said",
     group: "Transcription",
     config: () => ({ type: "transcript-strip", mode: "rolling" }),
     style: () => TEXT({ fontSize: 0.045, textAlign: "left", vAlign: "bottom" }),
+    homeSize: "xl",
     integration: { id: "prodcom", label: "transcription" },
   },
 
   // People
   "people-counter": {
     label: "People counter",
+    blurb: "How many people are in the room",
     group: "People",
-    config: () => ({ type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true }),
+    config: () => ({ type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true, caption: "Attendance" }),
     style: () => READOUT(0.12),
+    homeSize: "s",
     integration: { id: "sensource", label: "SenSource" },
   },
   "people-panel": {
     label: "People summary",
+    blurb: "Several attendance numbers side by side",
     group: "People",
     config: () => ({ type: "people-panel", metrics: ["occupancy", "peak", "attendance"], showLabels: true, orientation: "row" }),
     style: () => READOUT(0.1),
   },
   "people-graph": {
     label: "People graph",
+    blurb: "How the room has filled over time",
     group: "People",
     config: () => ({ type: "people-graph", metric: "occupancy", showLabel: true, label: "In room" }),
     style: () => ({ color: "#5b9cff", ...CARD_PRESETS.neutral }),
+    homeSize: "l",
     integration: { id: "sensource", label: "SenSource" },
   },
 
   // Baptisms
   "baptism-timer": {
     label: "Baptism timer",
+    blurb: "The running baptism clock, or the session's totals",
     group: "Baptisms",
-    config: () => ({ type: "baptism-timer", field: "live", showLabel: true, label: "" }),
+    config: () => ({ type: "baptism-timer", field: "live", showLabel: true, label: "", caption: "Baptisms" }),
     style: () => READOUT(0.14),
+    homeSize: "s",
+    homeWhen: "live",
   },
 
   // Recording state. `record-status` answers "is anything recording?" across both
   // recorders; the two device-specific objects below are for when you want one.
   "record-status": {
     label: "Record status",
+    blurb: "Red while anything is recording",
     group: "Status",
     config: () => ({ type: "record-status", source: "any", hideWhenIdle: false, fillWhenRecording: true }),
     style: () => PILL({ fontWeight: 700, uppercase: true }),
+    homeSize: "s",
   },
 
   // OBS / REAPER — bold pills that fill red while recording.
   "obs-status": {
     label: "OBS status",
+    blurb: "Red while OBS is recording or streaming",
     group: "OBS",
     config: () => ({ type: "obs-status", mode: "recording", showTimecode: false, hideWhenIdle: false, fillWhenRecording: true }),
     style: () => PILL({ fontWeight: 700, uppercase: true }),
+    homeSize: "s",
     integration: { id: "obs", label: "OBS" },
   },
   "reaper-status": {
     label: "REAPER status",
+    blurb: "Red while REAPER is recording",
     group: "REAPER",
     config: () => ({ type: "reaper-status", showPosition: false, hideWhenIdle: false, fillWhenRecording: true }),
     style: () => PILL({ fontWeight: 700, uppercase: true }),
+    homeSize: "s",
     integration: { id: "reaper", label: "REAPER" },
   },
 
   // Control
   "osc-button": {
     label: "OSC button",
+    blurb: "Sends an OSC message to gear on the network",
     group: "Control",
     config: () => ({ type: "osc-button", targetId: null, label: "Button", address: "/", args: [], feedback: null }),
     style: () => PILL({ fontSize: 0.045 }),
@@ -389,26 +576,135 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
 
   "rosstalk-button": {
     label: "RossTalk button",
+    blurb: "Fires a RossTalk command at a switcher",
     group: "Control",
     config: () => ({ type: "rosstalk-button", targetId: null, commandId: null, params: {}, label: "RossTalk" }),
     style: () => PILL({ fontSize: 0.045 }),
     integration: { id: "rosstalk", label: "RossTalk" },
   },
 
+  "action-button": {
+    label: "Action button",
+    blurb: "Runs one of the app's own actions",
+    group: "Control",
+    config: () => ({ type: "action-button", actionId: "", params: {}, label: "Action" }),
+    style: () => PILL({ fontSize: 0.045 }),
+  },
+
+  notes: {
+    label: "Notes",
+    blurb: "A shared note anyone can type into",
+    group: "Control",
+    config: () => ({ type: "notes", placeholder: "Notes for this service" }),
+    style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
+  },
+
+  checklist: {
+    label: "Checklist",
+    blurb: "A list of things to tick off",
+    group: "Control",
+    config: () => ({ type: "checklist", title: "Pre-service" }),
+    style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
+  },
+
   // Status
   "integration-status": {
     label: "Integration status",
+    blurb: "Whether one integration is connected",
     group: "Status",
     config: () => ({ type: "integration-status", integrationId: null, showLabel: true }),
     style: () => PILL(),
+    homeSize: "s",
+  },
+  "home-recording": {
+    label: "Recording",
+    blurb: "Is anything rolling — every recorder answered at once",
+    group: "Status",
+    config: () => ({ type: "home-recording" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+  },
+  "home-recording-obs": {
+    label: "OBS recording",
+    blurb: "Rolling or stopped, with the elapsed time",
+    group: "OBS",
+    config: () => ({ type: "home-recording-obs" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+    integration: { id: "obs", label: "OBS" },
+  },
+  "home-recording-reaper": {
+    label: "REAPER recording",
+    blurb: "Rolling or stopped, with the elapsed time",
+    group: "REAPER",
+    config: () => ({ type: "home-recording-reaper" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+    integration: { id: "reaper", label: "REAPER" },
+  },
+  "home-screens": {
+    label: "Screens online",
+    blurb: "How many displays are connected, of how many",
+    group: "Status",
+    config: () => ({ type: "home-screens" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+  },
+  "home-streaming": {
+    label: "Streaming",
+    blurb: "Live or off air, across every platform at once",
+    group: "Status",
+    config: () => ({ type: "home-streaming" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+  },
+  "home-streaming-resi": {
+    label: "Resi status",
+    blurb: "Live or off air, with the elapsed time",
+    group: "Resi",
+    config: () => ({ type: "home-streaming-resi" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+    integration: { id: "resi", label: "Resi" },
+  },
+  "home-streaming-youtube": {
+    label: "YouTube status",
+    blurb: "Live or off air, with the elapsed time",
+    group: "YouTube",
+    config: () => ({ type: "home-streaming-youtube" }),
+    style: BARE,
+    homeSize: "s",
+    stylingOnly: true,
+    integration: { id: "youtube", label: "YouTube" },
+  },
+  "stream-status": {
+    label: "Streaming status",
+    blurb: "Whether anything is going out, and for how long",
+    group: "Status",
+    // fillWhenLive stated rather than left to the default, exactly as obs-status
+    // states fillWhenRecording — the two sit beside each other on a wall and the
+    // pair of defaults disagreeing is what made them look like different widgets.
+    config: () => ({ type: "stream-status", platform: "any", showElapsed: true, fillWhenLive: true }),
+    // A pill like obs-status: this one goes on a WALL, where a bare number has
+    // nothing to say what it is. The three Home ones stay bare, because Home's
+    // grid draws their frame.
+    style: () => PILL({ fontWeight: 700, uppercase: true }),
   },
 
   // Video layer — native client only; the web build ignores it.
   "ndi-video": {
     label: "NDI video",
+    blurb: "An NDI video source from the network",
     group: null,
     config: () => ({ type: "ndi-video" }) as LayoutObjectConfig,
     style: BARE,
+    homeSize: "l",
     stylingOnly: true,
   },
 };
@@ -481,7 +777,25 @@ export function isKnownObjectType(t: LayoutObjectType): boolean {
 // answers "no" so nothing tries to configure something it cannot describe.
 export const typeLabel = (t: LayoutObjectType): string => findLayoutObjectSpec(t)?.label ?? `Unsupported object (${t})`;
 export const defaultConfig = (t: LayoutObjectType): LayoutObjectConfig => findLayoutObjectSpec(t)?.config() ?? ({ type: t } as LayoutObjectConfig);
-export const defaultStyle = (t: LayoutObjectType): LayoutStyle => findLayoutObjectSpec(t)?.style() ?? {};
+/**
+ * The style a NEW object of this type starts with.
+ *
+ * Readouts come out with no `textAlign` at all. Every style preset here spreads
+ * TEXT(), which writes `textAlign: "center"` — so every readout ever created
+ * stored a centre alignment nobody chose, and the idiom's left-aligned
+ * composition could not be the default without ignoring the field entirely.
+ *
+ * Stripped HERE because this is the single funnel: adding an object, resetting
+ * an object's style and seeding a Home card all come through it, so a readout
+ * cannot acquire the value by some other door. `readout-align.test.ts` walks
+ * every readout type rather than trusting that.
+ */
+export const defaultStyle = (t: LayoutObjectType): LayoutStyle => {
+  const s = findLayoutObjectSpec(t)?.style() ?? {};
+  if (!IDIOM_TYPES.has(t)) return s;
+  const { textAlign: _neverChosen, ...rest } = s;
+  return rest;
+};
 export const objectIntegration = (t: LayoutObjectType) => findLayoutObjectSpec(t)?.integration;
 export const isStylingOnly = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.stylingOnly === true;
 export const usesPropInstance = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.propInstance === true;

@@ -5,11 +5,13 @@
 // All three records (timeline, attendance, SPL) share a serviceKey, so editing the
 // service window applies to each: the raw samples are kept, so aggregates re-derive.
 
+import type { AttendanceSample } from "../types/history.js";
 import type { ServiceAttendance, ServiceTimeline } from "../types/stage.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { scrub } from "./scrub.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
+import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { splHistoryStore } from "./spl-history-store.js";
 import { broadcast } from "./broadcaster.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
@@ -126,6 +128,55 @@ function recomputeAttendance(att: ServiceAttendance): void {
 /** Adjust a service's start/end window across all three records: trim the timeline's
  *  trailing items, drop attendance samples / SPL items outside the window, and
  *  recompute derived values. Any of start/end may be omitted to leave it unchanged. */
+/** The ramp/taper windows the recorder samples with, in ms. */
+async function taperMs(): Promise<{ pre: number; post: number }> {
+  const tw = (await settingsStore.get()).taperWindow ?? DEFAULT_TAPER_WINDOW;
+  return { pre: Math.max(0, tw.preMin) * 60_000, post: Math.max(0, tw.postMin) * 60_000 };
+}
+
+/**
+ * Re-window a record's samples WITHOUT throwing the ramp and taper away.
+ *
+ * A sample is an observation; the window is metadata about it. The arrival ramp
+ * and the emptying-room taper live OUTSIDE the window on purpose — the recorder
+ * tags them `pre`/`post` for exactly that reason, and `recomputeAttendance`
+ * already keeps tagged samples out of Peak/Lowest/Last while leaving them in
+ * the curve.
+ *
+ * This used to be a filter to the window itself, followed by an upsert. So the
+ * first time anyone corrected an end time by a minute, every ramp and taper
+ * sample was deleted from the stored record — the fade they were looking at
+ * vanished, permanently, as a side effect of a timing fix.
+ *
+ * What survives is anything inside the ramp/taper windows, re-tagged against
+ * the NEW window. A genuine trim still drops what falls outside those, which is
+ * what trimming a bad capture is for.
+ */
+function rewindowSamples(att: ServiceAttendance, taper: { pre: number; post: number }): AttendanceSample[] {
+  const start = Date.parse(att.startedAt);
+  const end = att.endedAt ? Date.parse(att.endedAt) : Number.NaN;
+  const lo = Number.isFinite(start) ? start - taper.pre : -Infinity;
+  const hi = Number.isFinite(end) ? end + taper.post : Infinity;
+
+  const out: AttendanceSample[] = [];
+  for (const s of att.samples) {
+    const t = Date.parse(s.t);
+    // An unparseable stamp is not evidence the sample is unwanted, and dropping
+    // it would be the same silent deletion in a smaller coat.
+    if (!Number.isFinite(t)) { out.push(s); continue; }
+    if (t < lo || t > hi) continue;
+    const phase = Number.isFinite(start) && t < start ? "pre"
+      : Number.isFinite(end) && t > end ? "post"
+      : undefined;
+    // Rebuilt rather than mutated: phase has to be ABSENT in-service, and
+    // assigning undefined leaves the key present for anything reading `in`.
+    const next: AttendanceSample = { t: s.t, attendance: s.attendance, occupancy: s.occupancy };
+    if (phase) next.phase = phase;
+    out.push(next);
+  }
+  return out;
+}
+
 export async function editServiceWindow(
   serviceKey: string,
   opts: { startedAt?: string; endedAt?: string },
@@ -137,14 +188,7 @@ export async function editServiceWindow(
   // back over it.
   forgetAll(serviceKey);
 
-  const startMs = opts.startedAt ? Date.parse(opts.startedAt) : null;
   const endMs = opts.endedAt ? Date.parse(opts.endedAt) : null;
-  const inWindow = (iso: string | null | undefined): boolean => {
-    if (!iso) return true;
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t)) return true;
-    return (startMs == null || t >= startMs) && (endMs == null || t <= endMs);
-  };
 
   const tl = await serviceTimelineStore.get(serviceKey);
   if (tl) {
@@ -168,7 +212,7 @@ export async function editServiceWindow(
   if (att) {
     if (opts.startedAt) att.startedAt = opts.startedAt;
     if (opts.endedAt) att.endedAt = opts.endedAt;
-    att.samples = att.samples.filter((s) => inWindow(s.t));
+    att.samples = rewindowSamples(att, await taperMs());
     recomputeAttendance(att);
     await attendanceStore.upsert(att);
     broadcast("attendance:history", att);

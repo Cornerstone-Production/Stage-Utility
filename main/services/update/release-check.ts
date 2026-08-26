@@ -13,6 +13,7 @@
 
 import type { UpdateStatus } from "../../types/stage.js";
 import { compareTags, latestOnTrack, newerThan, parseTag, type ParsedTag } from "../release-tags.js";
+import { parseReleaseIntro, parseReleaseSections, mergeReleaseSections, type ReleaseSection } from "./release-notes.js";
 
 const REPO = "Cornerstone-Production/Stage-Utility";
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
@@ -93,6 +94,8 @@ export type PackagedAvailability = Required<
   | "latestSha"
     | "latestDate"
     | "changelog"
+    | "changelogSections"
+    | "changelogIntro"
     | "awaitingPackage"
   >
 >;
@@ -101,48 +104,25 @@ export type PackagedAvailability = Required<
  *  and packaged paths cannot drift apart. */
 export const CHANGELOG_CAP = 20;
 
+/** The dialog after an update is read once, not glanced at, so it is allowed
+ *  more than the status panel's twenty lines. */
+export const NOTES_CAP = 60;
+
 /** Availability for a packaged install: current version vs the published releases. */
 /**
- * Sections of the generated release notes that list what changed. Everything
- * else in the body is prose an operator does not need in a status panel: the
- * upgrade notice (a blockquote), the Highlights paragraphs, and the Install
- * section's commands.
- */
-const CHANGE_SECTIONS = /^##\s+(new|fixed|changed|improved|breaking)\b/i;
-
-/** "…and 12 more", the notes generator's own truncation marker. */
-const TRUNCATION_MARKER = /^(?:…|\.\.\.)and \d+ more$/;
-
-/**
- * The change lines out of a release's notes.
+ * The change lines out of a release's notes, flattened.
  *
- * scripts/release-notes.mjs writes `- **scope** — subject` under `## New` and
- * `## Fixed`, so the subject is recoverable without re-deriving it from git —
- * which a packaged install cannot do, having no repository.
+ * Delegates to parseReleaseSections so there is ONE definition of what counts
+ * as a change and how a line is cleaned up. The status panel wants a flat list;
+ * the post-update dialog wants the sections. Two parsers would eventually
+ * disagree about which is which.
  *
  * The commit TYPE is deliberately not reconstructed. `## Fixed` holds both
  * `fix` and `perf`, so labelling every line `fix(...)` to match a checkout's
- * display exactly would mean stating something false about perf commits. The
- * scope lead-in carries the useful part either way.
+ * display exactly would mean stating something false about perf commits.
  */
 export function changeLinesFrom(body: string | null): string[] {
-  if (!body) return [];
-  const out: string[] = [];
-  let inChangeSection = false;
-  for (const raw of body.split("\n")) {
-    const line = raw.trim();
-    if (line.startsWith("##")) {
-      inChangeSection = CHANGE_SECTIONS.test(line);
-      continue;
-    }
-    // A blockquote is the upgrade notice, which is prose and often long.
-    if (!inChangeSection || !line.startsWith("- ")) continue;
-    const text = line.slice(2).trim();
-    if (!text || TRUNCATION_MARKER.test(text)) continue;
-    // Markdown emphasis and code ticks are noise in a plain-text panel.
-    out.push(text.replace(/\*\*/g, "").replace(/`/g, ""));
-  }
-  return out;
+  return parseReleaseSections(body, CHANGELOG_CAP).flatMap((s) => s.lines);
 }
 
 export function packagedUpdateStatus(
@@ -190,9 +170,14 @@ export function packagedUpdateStatus(
   // sibling showed the real subjects. The release notes carry those lines, so
   // read them from there and the two panels say the same thing.
   const changelog: string[] = [];
+  // The same changes, grouped. A box three releases behind installs all three,
+  // so the dialog afterwards has to describe all three.
+  const sectionLists: ReleaseSection[][] = [];
   for (const t of newer) {
     if (changelog.length >= CHANGELOG_CAP) break;
     const rel = byTag.get(t.tag);
+    const sections = parseReleaseSections(rel?.body ?? null, NOTES_CAP);
+    if (sections.length) sectionLists.push(sections);
     const lines = changeLinesFrom(rel?.body ?? null);
     if (lines.length) changelog.push(...lines);
     // No notes, or notes with no change list (a hand-written release): the tag
@@ -203,6 +188,11 @@ export function packagedUpdateStatus(
 
   return {
     tagBased: true,
+    changelogSections: mergeReleaseSections(sectionLists, NOTES_CAP),
+    // The NEWEST release's opening prose only. Three releases at once would
+    // otherwise stack three "nothing to do to install this" paragraphs, and the
+    // one that matters is the version actually being installed.
+    changelogIntro: parseReleaseIntro(byTag.get(newer[0]?.tag ?? "")?.body ?? null),
     currentTag,
     targetTag: target?.tag ?? null,
     releasesBehind: newer.length,

@@ -14,7 +14,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 
 function serverHydratedChannels(): string[] {
   const src = readFileSync(path.join(ROOT, "main/services/remote-server.ts"), "utf8");
-  return [...src.matchAll(/sseWrite\(res,\s*"([^"]+)"/g)].map((m) => m[1]);
+  // Whitespace-tolerant. The tight version could not see a call the formatter
+  // had wrapped across lines, and a hydrate the scan cannot see is the WORSE
+  // direction: the "everything hydrated is replayed" check below then passes for
+  // that channel by never considering it.
+  return [...src.matchAll(/sseWrite\(\s*res\s*,\s*"([^"]+)"/g)].map((m) => m[1]);
 }
 
 test("the scan finds the server's hydrates at all", () => {

@@ -20,5 +20,6 @@
  * whoever is reading the log than "unknown error" would be.
  */
 export function errorMessage(err: unknown): string {
+  // eslint-disable-next-line no-restricted-syntax -- this IS the one copy.
   return err instanceof Error ? err.message : String(err);
 }

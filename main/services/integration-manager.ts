@@ -8,6 +8,8 @@ import { scrub } from "./scrub.js";
 import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
+import { resiService } from "./resi-service.js";
+import { youtubeService, configComplete, type YouTubeConfig } from "./youtube-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
@@ -16,6 +18,8 @@ import { propresenterService, propresenterManager, type PropInstanceConfig } fro
 import { secretsStore } from "./secrets.js";
 import { type SenSourceConfig, sensourceService } from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
+import type { ConnectionManagedId } from "./integration-ids.js";
+import type { ConnState } from "./integration-base.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
@@ -91,7 +95,8 @@ const COMPANION_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "Bitfocus Companion",
   description:
-    "Lets a Bitfocus Companion (Stream Deck) surface control and read Stage. The Companion module connects to this app, so there's nothing to configure here — just point the module at this server's IP and port, shown below. This row reflects how many Companion clients are connected.",
+    "Lets a Bitfocus Companion (Stream Deck) surface control and read Stage. The Companion module connects to this app, so there's nothing to configure here — and nothing to switch on: just point the module at this server's IP and port, shown below. This row reflects how many Companion clients are connected.",
+  inbound: true,
   configSchema: [],
 };
 
@@ -273,6 +278,81 @@ const REAPER_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+/**
+ * Resi — is the encoder streaming, and since when.
+ *
+ * Account credentials rather than a scoped key because the endpoint that can
+ * answer this is Resi's INTERNAL one. Their published Go Live API cannot see a
+ * stream it did not start, which rules it out for anyone whose Resi goes live
+ * on a schedule. The description says so plainly: an operator handing over a
+ * full login deserves to know why, and that it may stop working.
+ */
+const RESI_DESCRIPTOR: IntegrationDescriptor = {
+  id: "resi",
+  kind: "control",
+  label: "Resi",
+  description:
+    "Shows whether Resi is streaming, wherever the recording widgets appear. Uses your Resi account sign-in, because Resi's published API can only report on streams it started itself — it cannot see one that began on a Resi schedule. That means this rides an endpoint Resi does not document and could change without notice; if it stops working, nothing else is affected.",
+  configSchema: [
+    { key: "username", label: "Resi Email", type: "text", placeholder: "you@church.org" },
+    { key: "password", label: "Resi Password", type: "password" },
+    {
+      key: "encoderIds",
+      label: "Encoders to watch",
+      type: "text",
+      placeholder: "leave blank for all",
+    },
+  ],
+};
+
+/**
+ * YouTube — two ways to ask, because setup burden should match what is asked.
+ *
+ * The default reads the channel the way a viewer's client would: an API key and
+ * a channel, no consent flow, and it answers the question worth asking when
+ * Resi restreams here — is it actually reaching viewers. OAuth is the second
+ * mode, for a channel whose broadcasts are private or unlisted, and it costs a
+ * consent round-trip and a refresh token to look after.
+ */
+const YOUTUBE_DESCRIPTOR: IntegrationDescriptor = {
+  id: "youtube",
+  kind: "control",
+  label: "YouTube",
+  description:
+    "Shows whether you are live on YouTube and for how long, with the real start time YouTube reports. Public channel is the easy setup: make a project at console.cloud.google.com, enable the YouTube Data API v3, create an API key, and paste it below with your channel. Private broadcasts need OAuth instead — the same project, but an OAuth client (Desktop app) authorised once for the youtube.readonly scope, and its refresh token pasted here. If Resi restreams to YouTube, this reports that same broadcast.",
+  configSchema: [
+    {
+      key: "mode",
+      label: "How to check",
+      type: "select",
+      default: "key",
+      options: [
+        { value: "key", label: "Public channel" },
+        { value: "oauth", label: "My broadcasts" },
+      ],
+      help:
+        "Public channel needs an API key and your channel, and sees anything a viewer could — including whether a Resi restream actually arrived. My broadcasts also sees private and unlisted streams, but needs an OAuth client and a refresh token to look after.",
+    },
+    {
+      key: "apiKey",
+      label: "API key",
+      type: "password",
+      showIf: { key: "mode", equals: "key" },
+    },
+    {
+      key: "channel",
+      label: "Channel",
+      type: "text",
+      placeholder: "@yourchurch or UC…",
+      showIf: { key: "mode", equals: "key" },
+      help: "The channel handle or id. Found in your channel's URL.",
+    },
+    { key: "clientId", label: "OAuth Client ID", type: "text", showIf: { key: "mode", equals: "oauth" } },
+    { key: "clientSecret", label: "OAuth Client Secret", type: "password", showIf: { key: "mode", equals: "oauth" } },
+    { key: "refreshToken", label: "Refresh Token", type: "password", showIf: { key: "mode", equals: "oauth" } },
+  ],
+};
+
 // OSC integration — sends OSC to LAN gear from custom-layout buttons and reflects
 // device state back. Targets are managed as a separate list (like wireless), so
 // the descriptor itself carries no config fields.
@@ -374,11 +454,40 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   SMAART_DESCRIPTOR,
   OBS_DESCRIPTOR,
   REAPER_DESCRIPTOR,
+  RESI_DESCRIPTOR,
+  YOUTUBE_DESCRIPTOR,
   OSC_DESCRIPTOR,
   ROSSTALK_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
   ROSS_TSL_DESCRIPTOR,
 ];
+
+/** Derived from the descriptors rather than listed again, so an integration
+ *  cannot be inbound in one place and dialable in another. */
+const inboundIds = new Set(DESCRIPTORS.filter((d) => d.inbound).map((d) => d.id));
+
+/**
+ * Is this integration on, at load?
+ *
+ * An INBOUND one always is: the server listens whether or not anything is
+ * stored, so honouring a saved false would put the app's own record out of step
+ * with what it is actually doing. That false exists on real installs — the row
+ * used to carry a switch, and nothing was ever gated on it, so flicking it off
+ * left Companion connecting and controlling the app while the app filed it as
+ * disabled. It is ignored rather than migrated: there is nothing to migrate to.
+ *
+ * Exported for the guard, which is the only way to state this without booting
+ * the whole manager.
+ */
+export function enabledFor(
+  descriptor: Pick<IntegrationDescriptor, "id" | "inbound">,
+  stored: Record<string, boolean> | undefined,
+): boolean {
+  return descriptor.inbound === true || (stored?.[descriptor.id] ?? false);
+}
+
+/** The registered descriptors, for a guard that needs the real ones. */
+export const INTEGRATION_DESCRIPTORS: readonly IntegrationDescriptor[] = DESCRIPTORS;
 
 // Keys that are secrets for each integration id.
 const SECRET_KEYS: Record<string, string[]> = {
@@ -390,6 +499,8 @@ const SECRET_KEYS: Record<string, string[]> = {
   smaart: ["password"],
   obs: ["password"],
   reaper: [],
+  resi: ["password"],
+  youtube: ["apiKey", "clientSecret", "refreshToken"],
   sensource: ["clientSecret", "apiToken"],
   "ross-tsl": [],
 };
@@ -410,7 +521,7 @@ class IntegrationManager {
       // config snapshot restored over a newer build can arrive without keys added
       // since. Crashing init over it takes every display down.
       const savedConfig = settings.integrationConfigs?.[descriptor.id] ?? {};
-      const enabled = settings.integrationEnabled?.[descriptor.id] ?? false;
+      const enabled = enabledFor(descriptor, settings.integrationEnabled);
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
       // Merge saved non-secret config with any secret keys (masked).
@@ -454,6 +565,8 @@ class IntegrationManager {
     await this.applyObs();
     // Start the REAPER web-interface poller if enabled + configured.
     await this.applyReaper();
+    await this.applyResi();
+    await this.applyYouTube();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
     await oscManager.init();
     this.refreshOscSummary();
@@ -488,7 +601,11 @@ class IntegrationManager {
   }
 
   getStates(): IntegrationState[] {
-    return Array.from(this.states.values()).map((s) => ({ ...s, configured: this.isConfigured(s) }));
+    return Array.from(this.states.values()).map((s) => ({
+      ...s,
+      configured: this.isConfigured(s),
+      ...(inboundIds.has(s.id) ? { inbound: true as const } : null),
+    }));
   }
 
   /** Whether the operator has set an integration up — independent of the live
@@ -497,8 +614,24 @@ class IntegrationManager {
    *  config/secret value is saved; wireless/OSC (no config schema, set up via
    *  their own connection/target lists) use the master enable toggle. */
   private isConfigured(state: IntegrationState): boolean {
-    if (state.id === "companion") return true; // inbound — nothing to set up
+    if (inboundIds.has(state.id)) return true; // the other end dials us — nothing to set up
     if (state.id === "wireless" || state.id === "osc") return state.enabled;
+    // YouTube asks for one of two sets of fields depending on how it is set to
+    // check, so "any value present" would call it configured the moment the mode
+    // select alone was saved — and the page would stop listing the one thing
+    // still needed. The masked secrets read as present here, which is right:
+    // a mask means a secret is stored.
+    if (state.id === "youtube") {
+      const c = state.config;
+      return configComplete({
+        mode: c.mode === "oauth" ? "oauth" : "key",
+        apiKey: String(c.apiKey ?? ""),
+        channel: String(c.channel ?? ""),
+        clientId: String(c.clientId ?? ""),
+        clientSecret: String(c.clientSecret ?? ""),
+        refreshToken: String(c.refreshToken ?? ""),
+      });
+    }
     return Object.values(state.config).some((v) => v !== "" && v != null);
   }
 
@@ -513,6 +646,79 @@ class IntegrationManager {
       count > 0 ? `${count} Companion client(s) connected` : null,
     );
     this.broadcastStates();
+  }
+
+  /**
+   * Re-apply one integration's connection after its config or its enabled flag
+   * changed.
+   *
+   * A map rather than a ladder because there were TWO ladders -- one in
+   * setConfig, one in setEnabled -- listing the same nine integrations in the
+   * same order. Adding Resi and YouTube meant remembering both, and an
+   * integration added to only one would save its config and never reconnect, or
+   * reconnect on a toggle and not on a save. Neither failure says which half was
+   * missed.
+   *
+   * planning-center and wireless are NOT here: they do different work in each
+   * caller, so they stay written out where that difference is visible.
+   *
+   * Typed as Record<ConnectionManagedId, …>, so leaving one out is a compile
+   * error rather than an integration that saves and never reconnects. See
+   * CONNECTION_MANAGED_IDS for why the other five are absent.
+   */
+  /**
+   * Wire one service's connection reporting, then start or stop it to match the
+   * integration's enabled + configured state.
+   *
+   * Nine appliers were this same body: attach a listener that forwards to
+   * setConnectionState and broadcasts, read `enabled`, read the config, then
+   * either announce "connecting" and configure, or stop and report disconnected.
+   * The pairing is the part worth having once -- an applier that stopped a
+   * service without reporting it disconnected leaves the UI showing a live badge
+   * for a service that is not running.
+   *
+   * `plan` is called whether or not the integration is enabled, matching what the
+   * appliers did: reading config has no side effects, and keeping the order
+   * means this is a pure extraction.
+   */
+  private async applyService(
+    id: ConnectionManagedId,
+    service: {
+      setConnectionListener(cb: (state: ConnState, message: string | null) => void): void;
+      stop(): void;
+    },
+    plan: () => { connecting: string; start: () => void } | null
+      | Promise<{ connecting: string; start: () => void } | null>,
+  ): Promise<void> {
+    service.setConnectionListener((state, message) => {
+      this.setConnectionState(id, state, message);
+      this.broadcastStates();
+    });
+
+    const enabled = this.states.get(id)?.enabled ?? false;
+    const ready = await plan();
+    if (enabled && ready) {
+      this.setConnectionState(id, "connecting", ready.connecting);
+      ready.start();
+    } else {
+      service.stop();
+      this.setConnectionState(id, "disconnected", null);
+    }
+  }
+
+  private async applyIntegration(id: string): Promise<void> {
+    const appliers: Record<ConnectionManagedId, () => void | Promise<void>> = {
+      propresenter: () => this.applyPropresenter(),
+      prodcom: () => this.applyProdcom(),
+      smaart: () => this.applySmaart(),
+      obs: () => this.applyObs(),
+      reaper: () => this.applyReaper(),
+      resi: () => this.applyResi(),
+      youtube: () => this.applyYouTube(),
+      sensource: () => this.applySensource(),
+      "ross-tsl": () => this.applyRossTsl(),
+    };
+    await appliers[id as ConnectionManagedId]?.();
   }
 
   async setConfig(
@@ -590,33 +796,7 @@ class IntegrationManager {
         });
     }
 
-    if (id === "propresenter") {
-      this.applyPropresenter();
-    }
-
-    if (id === "prodcom") {
-      await this.applyProdcom();
-    }
-
-    if (id === "smaart") {
-      await this.applySmaart();
-    }
-
-    if (id === "obs") {
-      await this.applyObs();
-    }
-
-    if (id === "reaper") {
-      await this.applyReaper();
-    }
-
-    if (id === "sensource") {
-      await this.applySensource();
-    }
-
-    if (id === "ross-tsl") {
-      await this.applyRossTsl();
-    }
+    await this.applyIntegration(id);
 
     this.broadcastStates();
     return this.states.get(id)!;
@@ -645,33 +825,7 @@ class IntegrationManager {
       this.setConnectionState("planning-center", "disconnected", null);
     }
 
-    if (id === "propresenter") {
-      this.applyPropresenter();
-    }
-
-    if (id === "prodcom") {
-      await this.applyProdcom();
-    }
-
-    if (id === "smaart") {
-      await this.applySmaart();
-    }
-
-    if (id === "obs") {
-      await this.applyObs();
-    }
-
-    if (id === "reaper") {
-      await this.applyReaper();
-    }
-
-    if (id === "sensource") {
-      await this.applySensource();
-    }
-
-    if (id === "ross-tsl") {
-      await this.applyRossTsl();
-    }
+    await this.applyIntegration(id);
 
     this.broadcastStates();
     return this.states.get(id)!;
@@ -778,6 +932,24 @@ class IntegrationManager {
         }
         const result = await reaperService.test(host, port);
         this.setConnectionState("reaper", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "resi") {
+        const { username, password } = await this.getResiConfig();
+        if (!username || !password) {
+          return { ok: false, message: "Resi email and password are required" };
+        }
+        const result = await resiService.test(username, password);
+        this.setConnectionState("resi", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "youtube") {
+        const result = await youtubeService.test(await this.getYouTubeConfig());
+        this.setConnectionState("youtube", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -949,8 +1121,18 @@ class IntegrationManager {
     }
   }
 
-  private getObsTarget(): { host: string | null; port: number | null } {
-    const cfg = this.states.get("obs")?.config ?? {};
+  /**
+   * A host/port target off an integration's config, defaulting the port.
+   *
+   * OBS and REAPER had a copy each, identical but for the default port and the
+   * id they read. Two copies of a parse is two chances for one to stop accepting
+   * a port typed as a string, which is what the settings form sends.
+   */
+  private hostPort(
+    id: ConnectionManagedId,
+    defaultPort: number,
+  ): { host: string | null; port: number | null } {
+    const cfg = this.states.get(id)?.config ?? {};
     const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
     const rawPort = cfg.port;
     const port =
@@ -959,62 +1141,101 @@ class IntegrationManager {
         : typeof rawPort === "string" && rawPort.trim()
           ? parseInt(rawPort, 10)
           : NaN;
-    // Default to obs-websocket's standard port when only a host is given.
-    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 4455 : null };
+    // Only default the port when a host was given: no host is "not configured",
+    // and returning a port for it would read as configured.
+    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? defaultPort : null };
   }
 
-  private getReaperTarget(): { host: string | null; port: number | null } {
-    const cfg = this.states.get("reaper")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    // Default to REAPER's suggested web-interface port when only a host is given.
-    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 8080 : null };
+  /** obs-websocket's standard port. */
+  private getObsTarget() {
+    return this.hostPort("obs", 4455);
+  }
+
+  /** REAPER's suggested web-interface port. */
+  private getReaperTarget() {
+    return this.hostPort("reaper", 8080);
   }
 
   /** Start/stop the REAPER web-interface poll to match enabled + configured state. */
   private async applyReaper(): Promise<void> {
-    reaperService.setConnectionListener((state, message) => {
-      this.setConnectionState("reaper", state, message);
-      this.broadcastStates();
+    await this.applyService("reaper", reaperService, () => {
+      const { host, port } = this.getReaperTarget();
+      return host && port
+        ? { connecting: `Connecting ${host}:${port}`, start: () => reaperService.configure(host, port) }
+        : null;
     });
+  }
 
-    const enabled = this.states.get("reaper")?.enabled ?? false;
-    const { host, port } = this.getReaperTarget();
-    if (enabled && host && port) {
-      this.setConnectionState("reaper", "connecting", `Connecting ${host}:${port}`);
-      reaperService.configure(host, port);
-    } else {
-      reaperService.stop();
-      this.setConnectionState("reaper", "disconnected", null);
-    }
+  /** Start/stop the Resi encoder-status poll to match enabled + configured state. */
+  private async applyResi(): Promise<void> {
+    await this.applyService("resi", resiService, async () => {
+      const { username, password, encoderIds } = await this.getResiConfig();
+      return username && password
+        ? { connecting: "Signing in to Resi", start: () => resiService.configure(username, password, encoderIds) }
+        : null;
+    });
+  }
+
+  /** Start/stop the YouTube poll to match enabled + configured state. */
+  private async applyYouTube(): Promise<void> {
+    await this.applyService("youtube", youtubeService, async () => {
+      const cfg = await this.getYouTubeConfig();
+      return configComplete(cfg)
+        ? { connecting: "Connecting to YouTube", start: () => youtubeService.configure(cfg) }
+        : null;
+    });
   }
 
   /** Start/stop the OBS connection to match enabled + configured state. */
   private async applyObs(): Promise<void> {
-    obsService.setConnectionListener((state, message) => {
-      this.setConnectionState("obs", state, message);
-      this.broadcastStates();
-    });
-
-    const enabled = this.states.get("obs")?.enabled ?? false;
-    const { host, port } = this.getObsTarget();
-    if (enabled && host && port) {
+    await this.applyService("obs", obsService, async () => {
+      const { host, port } = this.getObsTarget();
+      if (!host || !port) return null;
       const secrets = await secretsStore.getSecrets("obs");
-      this.setConnectionState("obs", "connecting", `Connecting ${host}:${port}`);
-      obsService.configure(host, port, secrets.password ?? null);
-    } else {
-      obsService.stop();
-      this.setConnectionState("obs", "disconnected", null);
-    }
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => obsService.configure(host, port, secrets.password ?? null),
+      };
+    });
   }
 
   /** Resolve the SenSource config from non-secret state + the secrets store. */
+  /**
+   * Resi's credentials, with the real password.
+   *
+   * The state map holds secrets MASKED — `password` there is literally "••••" —
+   * so anything that talks to Resi must merge in secretsStore. Reading the state
+   * value shipped once and could not fail a stub, because a stub accepts any
+   * password; the real API answers 401.
+   */
+  private async getResiConfig(): Promise<{ username: string; password: string; encoderIds: string[] }> {
+    const cfg = this.states.get("resi")?.config ?? {};
+    const secrets = await secretsStore.getSecrets("resi");
+    return {
+      username: String(cfg.username ?? "").trim(),
+      password: secrets.password ?? "",
+      // Comma or whitespace separated, because it is a text field an operator
+      // pastes ids into, not a picker.
+      encoderIds: String(cfg.encoderIds ?? "").split(/[\s,]+/).filter(Boolean),
+    };
+  }
+
+  /** YouTube's config, with the real key and OAuth secrets. Same masking rule as
+   *  Resi above. */
+  private async getYouTubeConfig(): Promise<YouTubeConfig> {
+    const cfg = this.states.get("youtube")?.config ?? {};
+    const secrets = await secretsStore.getSecrets("youtube");
+    const mode = cfg.mode === "oauth" ? "oauth" : "key";
+    return {
+      mode,
+      apiKey: secrets.apiKey ?? "",
+      channel: String(cfg.channel ?? "").trim(),
+      clientId: String(cfg.clientId ?? "").trim(),
+      clientSecret: secrets.clientSecret ?? "",
+      refreshToken: secrets.refreshToken ?? "",
+    };
+  }
+
   private async getSensourceConfig(): Promise<SenSourceConfig> {
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- Installed-app metadata. THIS is the page that gets added to a home
+         screen — the manifest's start_url is "/", which serves this file, not
+         index.html. index.html is the wall-display kiosk and had all of this
+         while the operator app had none of it, so a phone install ran with
+         `viewport-fit=cover` and no status-bar declaration at all: iOS put the
+         web view under the status bar and painted its own translucent treatment
+         over the top ~60px, which is the blur across the header. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- `default`, not `black-translucent`: an opaque status bar ABOVE the web
+         view, tinted by theme-color. No scrim, and the space it occupies stops
+         being ours to pad around. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Stage Utility" />
+    <!-- Per scheme, because unlike the kiosk this app follows the theme. One
+         fixed value tells the browser the app is near-black while it renders
+         light, which casts the wrong colour across the top of the page. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8fa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0e0e" />
+
+    <link rel="icon" type="image/png" href="/app-icon.png" />
+    <link rel="apple-touch-icon" href="/app-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>Stage Utility</title>
+    <script>
+      // Apply the saved theme before paint (no flash). Mirrors THEME_STORAGE_KEY
+      // in renderer/lib/use-theme.ts. The operator app follows the toggle; the
+      // kiosk (index.html) is deliberately always dark and does NOT share this.
+      (function () {
+        var saved = null;
+        try { saved = localStorage.getItem("stage-utility-theme"); } catch (e) {}
+        var dark =
+          saved === "dark" || saved === "light"
+            ? saved === "dark"
+            : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (dark) document.documentElement.classList.add("dark");
+      })();
+    </script>
+    <style>
+      /* Opaque backgrounds: a normal browser page with no window vibrancy
+         behind it, so a translucent bg washes out text contrast. */
+      :root {
+        --background: #f7f8fa;
+      }
+      .dark {
+        --background: #0e0e0e; /* pure neutral — R=G=B, no cool/purple cast */
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      body {
+        background: var(--background);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./renderer/app/index.tsx"></script>
+  </body>
+</html>

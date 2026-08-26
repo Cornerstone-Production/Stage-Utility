@@ -1,4 +1,5 @@
 import { errorMessage } from "@main/services/errors";
+import { availableCount } from "@main/services/update/availability";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
@@ -26,8 +27,13 @@ import {
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { DataArchivePanel } from "./data-archive-panel";
+import { BarConfigurator } from "../../app/bar-configurator";
+import { visibleBarItems } from "../../app/bar-items";
+import { clockOptions, formatClock } from "../../lib/clock-format";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
+import { restartConsequence, restartOutcome } from "../../lib/restart-warning";
+import { useUpdateStatus } from "../../app/queries";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ANY_DAY = "any";
@@ -68,7 +74,7 @@ function UpdateProgress({ step }: { step: UpdateStatus["step"] }) {
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-a4">
         <div
-          className="h-full rounded-full bg-accent transition-[width] duration-700 ease-out"
+          className="h-full rounded-full bg-accent transition-[width] duration-(--motion-settled) ease-out"
           style={{ width: `${meta.pct}%` }}
         />
       </div>
@@ -100,10 +106,8 @@ function UpdatesPanel({
   // ignore the banner. Falls back to `behind` for a server too old to send the
   // narrower count.
   const behindNews = s?.behindUserFacing ?? behind;
-  // Releases, not commits, once the server follows tags. A release is the unit an
-  // operator acts on; the commit count behind it is detail.
-  const releasesBehind = s?.tagBased ? (s.releasesBehind ?? 0) : 0;
-  const available = s?.tagBased ? releasesBehind : behindNews;
+  // One definition, shared with the toast and the nav dot.
+  const available = availableCount(s);
   // Merged but not yet released — CI still running, or red. Only worth saying when
   // there is nothing to install, otherwise it competes with the update itself.
   const unreleased = s?.tagBased ? (s.unreleasedCommits ?? 0) : 0;
@@ -171,7 +175,7 @@ function UpdatesPanel({
       }
       return;
     }
-    if (await confirm({ title: "Restart the server?", message: "The displays will go blank and reload for a few seconds while the server restarts. No update is installed.", confirmLabel: "Restart" })) {
+    if (await confirm({ title: "Restart the server?", message: `${restartConsequence(s?.selfRecovers)} No update is installed.`, confirmLabel: "Restart" })) {
       doRestart();
     }
   }
@@ -650,6 +654,9 @@ function AutoBackupPanel() {
 
 function ConfigSnapshotPanel() {
   const queryClient = useQueryClient();
+  // Read here rather than threaded down: the warning belongs beside the button
+  // that causes it, and this is the same query the update panel already polls.
+  const selfRecovers = useUpdateStatus().data?.selfRecovers;
   const { data: snapshots } = useQuery({
     queryKey: ["config:listSnapshots"],
     queryFn: () => invoke<SnapshotMeta[]>("config:listSnapshots"),
@@ -682,10 +689,14 @@ function ConfigSnapshotPanel() {
   }
 
   async function recall(id: string, label: string) {
-    if (!(await confirm({ title: `Recall "${label}"?`, message: "This overwrites the current config (views, integrations, branding, etc.) and restarts the server — displays go blank for a few seconds. Secrets (API keys/passwords) are kept as-is.", confirmLabel: "Recall" }))) return;
+    if (!(await confirm({
+      title: `Recall "${label}"?`,
+      message: `This overwrites the current config (views, integrations, branding, etc.). ${restartConsequence(selfRecovers)} Secrets (API keys/passwords) are kept as-is.`,
+      confirmLabel: "Recall",
+    }))) return;
     try {
       await invoke("config:recallSnapshot", { id });
-      toast.success("Restoring… the server is restarting.");
+      toast.success(restartOutcome(selfRecovers, "Restored."));
     } catch (e) {
       toast.error(`Recall failed: ${errorMessage(e)}`);
     }
@@ -706,9 +717,13 @@ function ConfigSnapshotPanel() {
     if (!file) return;
     try {
       const bundle = JSON.parse(await file.text());
-      if (await confirm({ title: `Restore from "${file.name}"?`, message: "This overwrites the current config and restarts the server. Secrets aren't included — you'll re-enter API keys/passwords after.", confirmLabel: "Restore" })) {
+      if (await confirm({
+        title: `Restore from "${file.name}"?`,
+        message: `This overwrites the current config. ${restartConsequence(selfRecovers)} Secrets aren't included — you'll re-enter API keys/passwords after.`,
+        confirmLabel: "Restore",
+      })) {
         await invoke("config:import", { bundle });
-        toast.success("Restoring… the server is restarting.");
+        toast.success(restartOutcome(selfRecovers, "Restored."));
       }
     } catch (err) {
       toast.error(`Import failed: ${errorMessage(err)}`);
@@ -828,10 +843,7 @@ function TimezoneField({
       return new Intl.DateTimeFormat(undefined, {
         timeZone: effective,
         weekday: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
+        ...clockOptions({ seconds: true }),
       }).format(new Date(now));
     } catch {
       return "—";
@@ -876,6 +888,47 @@ function TimezoneField({
   );
 }
 
+/**
+ * 12-hour or 24-hour, everywhere the app shows a time of day.
+ *
+ * Beside the time zone because they are the same question asked twice — which
+ * clock am I reading — and because this one changes nothing else. The zone
+ * moves what the server DECIDES; this moves only what it prints.
+ */
+function HourCycleField({
+  hourCycle,
+  onChange,
+}: {
+  hourCycle: "12h" | "24h";
+  onChange: (cycle: "12h" | "24h") => Promise<void>;
+}) {
+  return (
+    <Field orientation="horizontal">
+      <FieldContent>
+        <FieldLabel>Clock format</FieldLabel>
+        <FieldDescription>
+          How every clock in the app reads — the context bar, service times, the rundown and
+          stage displays. A clock object in a custom layout that has been set to one or the
+          other keeps its own choice.
+        </FieldDescription>
+      </FieldContent>
+      <Select value={hourCycle} onValueChange={(v: string) => void onChange(v as "12h" | "24h")}>
+        <SelectTrigger className="w-64" aria-label="Clock format">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="24h">24-hour ({formatClock(SAMPLE_EVENING, { seconds: true, hourCycle: "24h" })})</SelectItem>
+          <SelectItem value="12h">12-hour ({formatClock(SAMPLE_EVENING, { seconds: true, hourCycle: "12h" })})</SelectItem>
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+/** A fixed evening instant, so each option shows the difference rather than
+ *  describing it. Evening because that is where 12h and 24h diverge. */
+const SAMPLE_EVENING = new Date(2026, 0, 1, 20, 45, 30).getTime();
+
 export function AdvancedSection({
   stageState,
   updateStatus,
@@ -888,6 +941,7 @@ export function AdvancedSection({
 }) {
   // Local field state so typing doesn't fight the live store; commit on blur.
   const [publicUrl, setPublicUrl] = useState(stageState.publicUrl ?? "");
+  const [configuringBar, setConfiguringBar] = useState(false);
 
   function commitPublicUrl() {
     const trimmed = publicUrl.trim();
@@ -901,7 +955,7 @@ export function AdvancedSection({
   const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
 
   return (
-    <div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
+    <div className="flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       <UpdatesPanel
         updateStatus={updateStatus}
         autoUpdate={stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE}
@@ -909,6 +963,96 @@ export function AdvancedSection({
         justUpdated={justUpdated ?? null}
         onDismissJustUpdated={onDismissJustUpdated}
       />
+
+      <FieldSet>
+        <FieldGroup>
+          {/* The one thing worth keeping from the Connect tab's Tools list.
+              Every other entry there — ScriptView, Patch, History, Baptisms —
+              is in the rail; the raw log is not, and it was the only route to
+              it. Advanced is where the rest of the diagnostics already live. */}
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Server log</FieldLabel>
+              <FieldDescription>
+                The raw log, for diagnosing a problem. Not something to hand to a volunteer.
+              </FieldDescription>
+            </FieldContent>
+            <Button
+              variant="filled"
+              size="small"
+              onClick={() => window.open("/log", "_blank", "noreferrer")}
+            >
+              Open log
+            </Button>
+          </Field>
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel>Context bar</FieldLabel>
+              <FieldDescription>
+                Which readings appear above every page, and where they sit. Right-clicking the bar
+                itself opens the same thing.
+              </FieldDescription>
+            </FieldContent>
+            <Button variant="filled" size="small" onClick={() => setConfiguringBar(true)}>
+              Configure…
+            </Button>
+          </Field>
+        </FieldGroup>
+      </FieldSet>
+
+      <BarConfigurator
+        open={configuringBar}
+        onOpenChange={setConfiguringBar}
+        rows={visibleBarItems(stageState.barItems)}
+      />
+
+      <FieldSet>
+        <Collapsible label="Kiosk devices" summary="Let screens find this server and be claimed" headerClassName="px-4 py-2.5">
+          <FieldSet flat>
+            <FieldGroup>
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>Answer devices looking for a server</FieldLabel>
+                  <FieldDescription>
+                    Off by default so a test instance on the same network cannot claim a screen
+                    meant for this one. Screens already claimed keep working either way — this only
+                    controls whether NEW ones can find you. Takes effect when the server restarts.
+                  </FieldDescription>
+                </FieldContent>
+                <Switch
+                  checked={stageState.kioskDiscovery ?? false}
+                  onCheckedChange={(on: boolean) => void invoke("stage:setKioskDiscovery", { enabled: on })}
+                  aria-label="Answer kiosk devices looking for a server"
+                />
+              </Field>
+              <Field orientation="vertical">
+                <FieldContent>
+                  <FieldLabel>Setting up a screen</FieldLabel>
+                  <FieldDescription>
+                    On the machine that will show the display, run this once. It finds this server
+                    on its own — there is no address to type, and nothing to change if the server
+                    moves.
+                  </FieldDescription>
+                </FieldContent>
+                <div className="flex flex-col gap-1.5">
+                  {[
+                    ["Linux / Raspberry Pi", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-linux.sh | sudo sh`],
+                    ["macOS", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-macos.sh | sudo sh`],
+                    ["Windows (elevated)", `irm ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-windows.ps1 | iex`],
+                  ].map(([os, cmd]) => (
+                    <div key={os}>
+                      <div className="text-caption2 text-fg-subtle">{os}</div>
+                      <code className="block select-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-caption1 text-fg">
+                        {cmd}
+                      </code>
+                    </div>
+                  ))}
+                </div>
+              </Field>
+            </FieldGroup>
+          </FieldSet>
+        </Collapsible>
+      </FieldSet>
 
       <FieldSet>
         <Collapsible label="Network & behavior" summary="Public address, reconnects, attendance" headerClassName="px-4 py-2.5">
@@ -1004,6 +1148,10 @@ export function AdvancedSection({
             timezone={stageState.timezone ?? null}
             hostTimezone={stageState.hostTimezone ?? "UTC"}
             onChange={handlers.handleSetTimezone}
+          />
+          <HourCycleField
+            hourCycle={stageState.hourCycle ?? "24h"}
+            onChange={handlers.handleSetHourCycle}
           />
         </FieldGroup>
       </FieldSet>

@@ -15,6 +15,7 @@ import {
   Switch,
   toast,
 } from "../../components/ui";
+import { formatClock } from "../../lib/clock-format";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
@@ -288,7 +289,7 @@ function ActivityLog() {
           entries.slice(0, 60).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex items-baseline gap-2 text-caption1">
               <span className="shrink-0 font-mono text-caption2 text-fg-subtle">
-                {new Date(e.at).toLocaleTimeString()}
+                {formatClock(e.at, { seconds: true })}
               </span>
               <span className="shrink-0 font-medium text-fg-muted">{e.ruleName}</span>
               <span className={`min-w-0 flex-1 truncate ${OUTCOME_STYLE[e.outcome]}`}>
@@ -596,8 +597,8 @@ export function AutomationSection() {
     // The same wrapper every other section uses. This one had no horizontal or
     // vertical padding at all, so its cards ran to the pane edges while every
     // neighbouring tab inset them.
-    <div className="px-5 max-sm:px-3 flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-      {/* No title here — settings-view renders the page heading and its blurb from
+    <div className="flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
+      {/* No title here — the shell renders the page heading and its blurb from
           SECTION_DESC, same as every other section. A local h1 duplicated it. */}
 
       {/* Safety first: these are the controls that decide whether anything real happens. */}

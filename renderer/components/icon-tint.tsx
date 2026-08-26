@@ -1,6 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import { Tooltip } from "./ui/tooltip";
 import { invoke } from "../lib/api";
+import { ColorField } from "./ui/color-field";
+import { cn } from "../lib/cn";
 
 /** The theme accent, used when an item has no color of its own. Kept as a CSS
  *  var so a tinted and an untinted icon still agree with the rest of the theme. */
@@ -14,9 +16,9 @@ const DEFAULT_TINT = "var(--su-accent)";
  * the picker at "/" — the icon belongs to the thing, not to the screen it happens
  * to be rendered on.
  *
- * Built on a native <input type="color"> (as the static-slot color field already
- * is) so it uses the OS picker rather than a bespoke palette: no new component to
- * maintain, and it works the same on a laptop and a phone.
+ * Built on the app's own ColorField, like every other colour control here — the
+ * OS picker it used to open could not be themed, could not express an opacity,
+ * and on a wall-mounted touch screen put a system window over a live dashboard.
  */
 export function IconTint({
   itemKey,
@@ -39,31 +41,33 @@ export function IconTint({
   const tint = color || DEFAULT_TINT;
   return (
     <Tooltip label={`Change the ${label} icon color`}>
-      <label
-        className={
+      <span
+        className={cn(
+          // RELATIVE, and that is load-bearing. The picker below covers this box
+          // absolutely; without a positioned ancestor it resolved against the
+          // document instead, so every tinted icon on a page sat at a fixed
+          // point and stayed there while the page scrolled underneath it.
+          "relative",
           className ??
-          "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors hover:brightness-125"
-        }
+            "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:brightness-125",
+        )}
         style={{
           backgroundColor: `color-mix(in srgb, ${tint} 12%, transparent)`,
         }}
       >
-        <Icon className={iconClassName ?? "size-4"} style={{ color: tint }} />
-        <input
-          type="color"
-          // Native color inputs need a concrete value; the CSS var can't be one, so
-          // fall back to a neutral when untinted rather than showing black.
+        {/* An ordinary centred child — it is the picker that overlays it, not
+            the other way round. */}
+        <Icon className={cn("pointer-events-none", iconClassName ?? "size-4")} style={{ color: tint }} />
+        <ColorField
+          label={`${label} icon color`}
+          allowAlpha={false}
+          // The stored value may be absent — the icon is then on the theme's own
+          // colour, which is a token with no numbers to put on a slider.
           value={color || "#3b82f6"}
-          onChange={(e) =>
-            void invoke("icons:setColor", {
-              key: itemKey,
-              color: e.target.value,
-            })
-          }
-          className="sr-only"
-          aria-label={`${label} icon color`}
+          onChange={(v: string) => void invoke("icons:setColor", { key: itemKey, color: v })}
+          className="absolute inset-0 [&>button]:size-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
         />
-      </label>
+      </span>
     </Tooltip>
   );
 }

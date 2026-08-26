@@ -3,7 +3,7 @@
 // `${connectionId}::${providerChannelId}` before reaching StageController.
 
 import { errorMessage } from "./errors.js";
-import type { DeviceProvider } from "../types/devices.js";
+import type { DeviceChannel, DeviceProvider } from "../types/devices.js";
 import type { WirelessConnection } from "../types/devices.js";
 import type { ConnectionState } from "../types/integrations.js";
 import { providerRegistry } from "../providers/registry.js";
@@ -158,8 +158,8 @@ export class DeviceManager {
   }
 
   /** Aggregate channels from all connected real-driver providers. */
-  async listChannels(): Promise<{ id: string; label: string }[]> {
-    const results: { id: string; label: string }[] = [];
+  async listChannels(): Promise<DeviceChannel[]> {
+    const results: DeviceChannel[] = [];
     for (const entry of this.entries.values()) {
       try {
         const channels = await entry.provider.listChannels();
@@ -167,6 +167,9 @@ export class DeviceManager {
           results.push({
             id: `${entry.connectionId}::${ch.id}`,
             label: `${entry.connectionName} — ${ch.label}`,
+            // Carried through, not re-derived. A picker needs to know a charger
+            // bay from a mic, and the provider is the only thing that does.
+            deviceType: ch.deviceType,
           });
         }
       } catch (err) {

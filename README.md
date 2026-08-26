@@ -23,8 +23,12 @@ screens, the settings UI and a phone remote from one port.
 | [Install, deploy and configure](docs/ops/install-and-config.md) | putting it on a machine, running it in development |
 | [Integrations](docs/integrations/README.md) | every device and service it talks to |
 | [Data model](docs/reference/data-model.md) | Views, Outputs and Slots — the nouns |
+| [Layout editor](docs/reference/layout-editor.md) | placing objects, other window shapes, motion |
+| [Widget reference](docs/reference/widgets.md) | every widget, what it shows and where the data comes from |
 | [Display URLs](docs/display-urls.md) | addressing screens |
+| [The context bar](docs/features/context-bar.md) | the live strip above every operator page |
 | [Slots](docs/slots.md) | matching people and devices to positions |
+| [Moving a view](docs/moving-a-view.md) | taking one layout to another install |
 | [Attendance and service history](docs/features/attendance-and-history.md) | what a service records, and reading it back |
 | [ScriptView and Baptisms](docs/features/scriptview-and-baptisms.md) | two operator surfaces on the plan |
 | [Patch sheet](docs/patch-sheet/README.md) | the stage patch sheet |
@@ -37,6 +41,7 @@ screens, the settings UI and a phone remote from one port.
 | [API reference](docs/reference/api.md) | the HTTP surface |
 | [Contributing](docs/contributing.md) | commit convention, branching, releases |
 | [Project structure](docs/contributing-appendix.md) | orientation in the codebase |
+| [App shell redesign](docs/design/app-shell-redesign.md) | design for the operator shell, consoles and in-place editing (not yet built) |
 
 ---
 
@@ -119,7 +124,8 @@ people, their photos and the live service countdown.
 
 Everything else is optional and independently enabled: Shure and Sennheiser
 wireless, ProPresenter, Smaart (SPL), SenSource (people counting), OBS, REAPER,
-OSC, RossTalk, Ross TSL, ProdCom transcription, and Bitfocus Companion.
+Resi, YouTube, OSC, RossTalk, Ross TSL, ProdCom transcription, and Bitfocus
+Companion.
 
 Setup and behaviour for each is in [integrations](docs/integrations/README.md).
 

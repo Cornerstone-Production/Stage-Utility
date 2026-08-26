@@ -77,6 +77,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
       result.push({
         id: String(n),
         label: state?.name ?? `Ch ${n}`,
+        deviceType: state?.deviceType ?? this.defaultDeviceType,
       });
     }
     return result;
@@ -99,6 +100,60 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
    *  @param tokens   Full token array (including SAMPLE and channel tokens).
    */
   protected abstract handleSample(channel: number, tokens: string[]): void;
+
+  /**
+   * The report tokens every Shure receiver family answers identically.
+   *
+   * BATT_CHARGE, the runtime pair and FREQUENCY were written out per driver, and
+   * the runtime pair was added to BOTH in the same release -- the shape this repo
+   * gets bitten by, caught the second time rather than the fifth. Call this from
+   * a driver's `default:` before it logs an unrecognised field; anything family
+   * -specific (BATT_BARS thresholds, CHAN_NAME lengths, what a TX_MODEL implies)
+   * stays in the driver, where the difference is visible.
+   *
+   * Both spellings of the runtime token are accepted here rather than in each
+   * driver: TX_BATT_MINS is what an AD4Q sends, BATT_RUN_TIME is the name in
+   * Shure's docs and what ULX-D uses, and a mixed rack is not the place to
+   * discover which spelling a given receiver picked.
+   *
+   * @returns whether the token was handled.
+   */
+  protected handleCommonReport(
+    channel: number,
+    token: string,
+    value: string,
+    state: ChannelState,
+  ): boolean {
+    switch (token) {
+      case "BATT_CHARGE": {
+        const charge = safeInt(value);
+        if (!Number.isNaN(charge)) {
+          state.battery = charge === 255 ? null : clamp(charge, 0, 100);
+        }
+        console.debug(`[shure:${this.id}] ch${channel} BATT_CHARGE: ${value}`);
+        return true;
+      }
+
+      case "TX_BATT_MINS":
+      case "BATT_RUN_TIME": {
+        state.batteryMinutes = batteryMinutesFrom(value);
+        console.debug(
+          `[shure:${this.id}] ch${channel} ${token}: ${state.batteryMinutes ?? "unknown/calculating"}`,
+        );
+        return true;
+      }
+
+      case "FREQUENCY": {
+        state.frequencyLabel = formatFrequency(value);
+        console.debug(`[shure:${this.id}] ch${channel} freq: ${state.frequencyLabel ?? value}`);
+        return true;
+      }
+
+      default:
+        return false;
+    }
+  }
+
 
   // ââ Protected helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
@@ -351,6 +406,22 @@ export function safeInt(s: string | undefined): number {
   if (s === undefined) return NaN;
   const n = parseInt(s, 10);
   return n;
+}
+
+/**
+ * Battery runtime remaining, in whole minutes, from a Shure runtime field.
+ *
+ * Shure sends whole minutes with three sentinels at the top of the 16-bit range:
+ * 65535 unknown, 65534 calculating, 65533 error. Read naively those become a
+ * battery with forty-five days left on it, which is why this lives in one place
+ * rather than in each driver that reads a runtime field — Axient calls the field
+ * TX_BATT_MINS and ULX-D calls it BATT_RUN_TIME, but the encoding is identical
+ * and the sentinels are the part that is easy to get wrong.
+ */
+export function batteryMinutesFrom(value: string | undefined): number | null {
+  const minutes = safeInt(value);
+  if (Number.isNaN(minutes) || minutes < 0 || minutes >= 65533) return null;
+  return minutes;
 }
 
 // Re-exported, not redefined. There were three copies of clamp in this repo —

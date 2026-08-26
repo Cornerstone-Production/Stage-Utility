@@ -15,8 +15,16 @@ interface SplitViewProps {
   collapsed?: boolean;
   /** Shown in the mobile top bar next to the hamburger (e.g. active section). */
   mobileTitle?: React.ReactNode;
+  /** Right-aligned controls for the mobile top bar. On a phone that bar is the
+   *  page header, so the active page's own actions belong on it. Passed in as an
+   *  element rather than read from a context: this is a layout primitive, and it
+   *  should not know what a page action is. */
+  mobileActions?: React.ReactNode;
   expandedWidth?: number;
   railWidth?: number;
+  /** Suppress the collapse width animation — set while the sidebar is being
+   *  dragged, where a 150ms transition turns direct manipulation into lag. */
+  resizing?: boolean;
   className?: string;
 }
 
@@ -37,8 +45,10 @@ export function SplitView({
   children,
   collapsed = false,
   mobileTitle,
+  mobileActions,
   expandedWidth = 200,
   railWidth = 56,
+  resizing = false,
   className,
 }: SplitViewProps) {
   const isMobile = useIsMobile();
@@ -80,6 +90,7 @@ export function SplitView({
               <MenuIcon className="size-5 text-fg-muted" />
             </Button>
             {mobileTitle && <span className="text-[14px] font-semibold text-fg truncate">{mobileTitle}</span>}
+            {mobileActions && <div className="ml-auto flex items-center gap-1.5 shrink-0">{mobileActions}</div>}
           </div>
         </div>
 
@@ -101,7 +112,10 @@ export function SplitView({
               aria-describedby={undefined}
               onTouchStart={onTouchStart}
               onTouchEnd={onSwipeEnd((dx) => { if (dx < 0) closeDrawer(); })}
-              className="fixed left-0 top-0 z-50 flex h-full w-64 max-w-[82vw] flex-col overflow-hidden bg-surface pt-[env(safe-area-inset-top)] shadow-xl focus:outline-none"
+              // bg-rail, not bg-surface: on mobile this drawer IS the rail, so
+              // anything showing through it — an overscroll bounce, a rounding
+              // gap — should be the rail's colour rather than the content's.
+              className="fixed left-0 top-0 z-50 flex h-full w-64 max-w-[82vw] flex-col overflow-hidden bg-rail pt-[env(safe-area-inset-top)] shadow-xl focus:outline-none"
             >
               <DialogPrimitive.Title className="sr-only">Settings navigation</DialogPrimitive.Title>
               <SidebarChromeProvider value={chrome}>
@@ -117,7 +131,12 @@ export function SplitView({
   return (
     <div className={cn("flex h-full w-full overflow-hidden", className)}>
       <div
-        className="shrink-0 h-full overflow-hidden transition-[width] duration-150"
+        className={cn(
+          "shrink-0 h-full overflow-hidden",
+          // Animate the collapse, but never while dragging: a width transition
+          // mid-drag rubber-bands behind the pointer.
+          !resizing && "transition-[width] duration-(--motion-quick)",
+        )}
         style={{ width: `${railed ? railWidth : expandedWidth}px` }}
       >
         <SidebarChromeProvider value={chrome}>{sidebar}</SidebarChromeProvider>

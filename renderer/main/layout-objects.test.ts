@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import type { LayoutObjectType } from "../../main/types/stage.js";
+import { LEGACY_TRANSLUCENT_GROUNDS } from "../../main/types/readout-types.js";
 import {
   EMBED_FONT_FRACTION,
   LAYOUT_OBJECTS,
@@ -78,32 +79,182 @@ const OBJECT_INTEGRATION: Record<string, { id: string; label: string }> = {
   "wireless-channel": { id: "wireless", label: "wireless" },
 };
 
-const CARD_NEUTRAL = {
+/** The card as it was ORIGINALLY, translucent ground and all. Pinned so the
+ *  originals below stay the originals; the current ground is CARD_NEUTRAL. */
+const CARD_NEUTRAL_ORIGINAL = {
   background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)",
   borderWidth: 0.001, cornerRadius: 0.0148, padding: 0.0148,
 };
+
+/**
+ * The card as it is NOW: the same thing with an OPAQUE ground.
+ *
+ * #141414 is the exact blend of rgba(255,255,255,0.04) over the kiosk black, so
+ * a card looks identical on a bare canvas. What changed is that it now occludes:
+ * at 4% white it did not, so a status widget over a transcript let the text read
+ * straight through and looked for all the world like a broken layer order. Paint
+ * order was measured and was correct the whole time.
+ */
+const CARD_NEUTRAL = { ...CARD_NEUTRAL_ORIGINAL, background: "#141414" };
+
+/**
+ * The ground swap, applied to a pinned original.
+ *
+ * Every card preset went opaque at once, on every type that carries one — about
+ * twenty of them, and the change is ONE field with the same value everywhere.
+ * Hand-copying twenty full styles into RESTYLED to record a single uniform swap
+ * would be twenty chances to fat-finger an unrelated field into the "expected"
+ * column, which is how a golden test starts agreeing with the bug.
+ *
+ * So the swap is expressed as the rule it is, using the SAME map the load-time
+ * migration uses — so the test cannot drift from the product. Every other
+ * difference still has to be recorded in RESTYLED by hand.
+ */
+function withCurrentGround(style: Record<string, unknown>): Record<string, unknown> {
+  const bg = typeof style.background === "string" ? style.background : null;
+  const opaque = bg ? LEGACY_TRANSLUCENT_GROUNDS[bg.replace(/\s+/g, "")] : undefined;
+  return opaque ? { ...style, background: opaque } : style;
+}
 const BASE_TEXT = { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
+
+/**
+ * Style fields that no longer exist ANYWHERE.
+ *
+ * Elevation, opacity, padding, text shadow and line clamp were removed from the
+ * model, not just from the inspector — so every recorded style that carried one
+ * differs from the registry by exactly those keys and nothing else. Stripping
+ * them from both sides of the comparison keeps this guard's whole point: any
+ * OTHER drift in a default style still fails.
+ */
+const REMOVED_FIELDS = ["padding", "opacity", "boxShadow", "textShadow", "lineClamp"];
+function withoutRemoved(style: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...style };
+  for (const k of REMOVED_FIELDS) delete out[k];
+  return out;
+}
 
 /** defaultStyle() as it was, branch for branch. */
 function originalStyle(type: string): Record<string, unknown> {
   if (type === "shape") return { background: "#3b82f6", opacity: 1 };
-  if (type === "container") return { ...CARD_NEUTRAL };
+  if (type === "container") return { ...CARD_NEUTRAL_ORIGINAL };
   if (["ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "live-controls"].includes(type)) return {};
   if (type === "transcript-strip") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "bottom" };
   if (type === "charger-battery") return { fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" };
   if (type === "service-order") return { fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" };
-  if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_NEUTRAL };
-  if (type === "reaper-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_NEUTRAL };
-  if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL };
+  if (type === "obs-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_NEUTRAL_ORIGINAL };
+  if (type === "reaper-status") return { fontSize: 0.05, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true, ...CARD_NEUTRAL_ORIGINAL };
+  if (type === "osc-button") return { fontSize: 0.045, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL_ORIGINAL };
   if (type === "people-counter") return { fontSize: 0.12, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   if (type === "baptism-timer") return { fontSize: 0.14, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
   if (type === "pp-timer" || type === "service-pacing") return { fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
-  if (type === "wireless-channel") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL };
+  if (type === "wireless-channel") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL_ORIGINAL };
   if (type === "people-panel") return { fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" };
-  if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL };
-  if (type === "people-graph") return { color: "#5b9cff", ...CARD_NEUTRAL };
+  if (type === "integration-status" || type === "wireless-summary") return { fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle", ...CARD_NEUTRAL_ORIGINAL };
+  if (type === "people-graph") return { color: "#5b9cff", ...CARD_NEUTRAL_ORIGINAL };
   return { ...BASE_TEXT };
 }
+
+
+
+/**
+ * Types whose default CONFIG deliberately changed, and what it became.
+ *
+ * Same bar as RESTYLED below: the originals stay pinned so an accident is still
+ * caught, and a deliberate change is recorded here.
+ *
+ * Six readouts gained a `caption` — the line above the value that says what the
+ * number is. A bare 0:04:12 on a wall does not say what it is counting to, and
+ * the person who built the layout is not the one reading it on Sunday morning.
+ *
+ * Set on NEW objects only: a stored object carries its own config, so no
+ * existing layout grows a caption nobody asked for.
+ */
+const RECONFIGURED: Record<string, Record<string, unknown>> = {
+  "countdown-timer": { type: "countdown-timer", caption: "Service starts in" },
+  "service-pacing": { type: "service-pacing", hideWhenIdle: false, showLabel: false, caption: "Pacing" },
+  "pp-timer": { type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true, caption: "Stage timer" },
+  "spl-meter": { type: "spl-meter", meterId: null, metricKey: null, showLabel: false, thresholds: null, caption: "SPL dB(A)" },
+  "people-counter": { type: "people-counter", metric: "attendance", zoneId: null, label: "People", showLabel: true, caption: "Attendance" },
+  "baptism-timer": { type: "baptism-timer", field: "live", showLabel: true, label: "", caption: "Baptisms" },
+};
+
+/**
+ * Types whose default config gained a SETTING since the consolidation.
+ *
+ * Separate from RECONFIGURED, which records the six that gained a caption and
+ * asserts a caption is the only thing that moved. Folding these in there would
+ * have meant loosening that assertion, and it is the assertion that makes the
+ * record mean something.
+ *
+ * Both entries are the wireless widgets gaining runtime remaining — the figure
+ * Wireless Workbench leads with. Off by default in both, so nothing anyone has
+ * already placed changes; they are listed only so the new key is a deliberate,
+ * recorded change rather than drift.
+ */
+const RETUNED: Record<string, Record<string, unknown>> = {
+  "wireless-summary": { type: "wireless-summary", showOnline: true, showBattery: true, showRuntime: false, showLabel: false, label: "Mics" },
+  "wireless-channel": { type: "wireless-channel", channelId: null, show: { rf: true, battery: true, runtime: false, frequency: true, audio: false }, showLabel: true },
+};
+
+/**
+ * Types deliberately RESTYLED since the consolidation, and what they became.
+ *
+ * The originals above stay pinned so an accidental change is still caught; a
+ * deliberate one is recorded here, at the same bar as adding or retiring a type.
+ *
+ * Nineteen defaults changed at once, for one reason. Across four real layouts the
+ * operator had applied CARD_NEUTRAL BY HAND to thirteen different object types —
+ * the same background, hairline and radius every time — because half the readouts
+ * shipped with a card and half did not. That is a missing default, so the readouts
+ * that lacked it got it. Three ProPresenter text objects went all-caps in the same
+ * pass, which is legibility from the back of a room, not decoration.
+ *
+ * A stored object carries its own style, so no existing layout moved.
+ */
+const RESTYLED: Record<string, Record<string, unknown>> = {
+  "clock": { ...CARD_NEUTRAL, fontSize: 0.06, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
+  "countdown-timer": { ...CARD_NEUTRAL, fontSize: 0.085, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
+  "live-controls": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "view-embed": { ...CARD_NEUTRAL, fontSize: 0.016, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
+  "plan-attachment": { ...CARD_NEUTRAL },
+  "current-slide-text": { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true },
+  "next-slide-text": { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true },
+  "current-slide-notes": { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle", uppercase: true },
+  "section-chip": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", vAlign: "middle", uppercase: true, letterSpacing: 0.04 },
+  "pp-timer": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
+  "slide-progress": { ...CARD_NEUTRAL, fontSize: 0.06, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
+  "charger-battery": { ...CARD_NEUTRAL, fontSize: 0.045, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "middle" },
+  "spl-meter": { ...CARD_NEUTRAL, fontSize: 0.085, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
+  "service-pacing": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
+  "people-counter": { ...CARD_NEUTRAL, fontSize: 0.12, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
+  "people-panel": { ...CARD_NEUTRAL, fontSize: 0.1, fontWeight: 700, color: "#ffffff", textAlign: "center", vAlign: "middle" },
+  "baptism-timer": { ...CARD_NEUTRAL, fontSize: 0.14, fontWeight: 700, color: "#ffffff", vAlign: "middle" },
+  "notes": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
+  "checklist": { ...CARD_NEUTRAL, fontSize: 0.035, fontWeight: 500, color: "#ffffff", textAlign: "left", vAlign: "top" },
+
+  // ── The readouts stop shipping an alignment (Phase 7 Task 9) ───────────────
+  //
+  // Every preset above spreads TEXT(), which writes `textAlign: "center"`. So
+  // every readout ever created stored a centre alignment as a side effect of
+  // being created — nobody chose it — and the widget idiom's left-aligned
+  // composition could not be the DEFAULT without ignoring the field entirely.
+  // Ignoring it is what the first cut did, and it broke the alignment control
+  // for every readout on every custom view.
+  //
+  // So readouts ship with no alignment: absent means the idiom's default (left),
+  // and anything stored is a real choice the editor can still make. The entries
+  // above lost their `textAlign` for the same reason; these six had no recorded
+  // restyle before, so the removal is their first.
+  //
+  // readout-align.test.tsx holds the precise version of this: an EXACT walk
+  // asserting no readout type ships one and every non-readout still does.
+  "wireless-summary": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
+  "wireless-channel": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
+  "record-status": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 700, color: "#ffffff", vAlign: "middle", uppercase: true },
+  "obs-status": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 700, color: "#ffffff", vAlign: "middle", uppercase: true },
+  "reaper-status": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 700, color: "#ffffff", vAlign: "middle", uppercase: true },
+  "integration-status": { ...CARD_NEUTRAL, fontSize: 0.05, fontWeight: 600, color: "#ffffff", vAlign: "middle" },
+};
 
 /** defaultConfig() as it was, case for case. */
 const ORIGINAL_CONFIG: Record<string, unknown> = {
@@ -156,6 +307,43 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "rosstalk-button", label: "RossTalk button", group: "Control", after: "osc-button" },
   { type: "record-status", label: "Record status", group: "Status", after: null },
   { type: "view-embed", label: "Embedded view", group: "PCO / service", after: "next-service-item" },
+  // The general form of the two buttons above: bound to any entry in the
+  // automation action registry rather than one integration.
+  { type: "action-button", label: "Action button", group: "Control", after: "rosstalk-button" },
+  // The operator's own work product, stored outside the layout in notes.json.
+  { type: "notes", label: "Notes", group: "Control", after: "action-button" },
+  { type: "checklist", label: "Checklist", group: "Control", after: "notes" },
+  // Home's own cards, so Home is built from the same widget set as every other
+  // surface rather than being a bespoke page (Phase 6, carrying a Phase 4 debt).
+  { type: "home-readiness", label: "Readiness", group: "PCO / service", after: "view-embed" },
+  { type: "home-next-service", label: "Next service", group: "PCO / service", after: "home-readiness" },
+  // The other two things Home draws. They existed as bespoke panels; making them
+  // objects is what lets the Home tab's own editor govern the whole page with
+  // one mechanism (Phase 7, Task 6).
+  // Renamed when it was split: it drew recording and SPL too, and does not any
+  // more. The type id stays so no stored layout has to move.
+  { type: "home-live-status", label: "Service timer", group: "PCO / service", after: "home-next-service" },
+  { type: "home-recent-services", label: "Recent services", group: "PCO / service", after: "home-live-status" },
+  // The live card's insides, split out so each can be placed on its own once
+  // Home became a grid. The card kept the timer; these three kept their look.
+  // Each sits beside the widgets it belongs with rather than with the other Home
+  // cards, so none of them displaces the first entry of a group.
+  { type: "home-spl", label: "Sound level", group: "Audio (SPL)", after: "spl-meter" },
+  { type: "home-recording", label: "Recording", group: "Status", after: "integration-status" },
+  // One per recorder, so each is found by NAME in the palette rather than behind
+  // a control. The combined one above still answers "are we getting this?".
+  { type: "home-recording-obs", label: "OBS recording", group: "OBS", after: "obs-status" },
+  { type: "home-recording-reaper", label: "REAPER recording", group: "REAPER", after: "reaper-status" },
+  { type: "home-screens", label: "Screens online", group: "Status", after: "home-recording" },
+  // Streaming, added alongside the Resi and YouTube integrations. Same shape as
+  // the recording trio: one combined answer plus a per-platform each, because a
+  // widget reading LIVE while one destination sits off air is reassurance
+  // nobody asked for.
+  { type: "home-streaming", label: "Streaming", group: "Status", after: "home-screens" },
+  { type: "stream-status", label: "Streaming status", group: "Status", after: "home-streaming" },
+  // `after: null` — each leads its own group, because each platform gets one.
+  { type: "home-streaming-resi", label: "Resi status", group: "Resi", after: null },
+  { type: "home-streaming-youtube", label: "YouTube status", group: "YouTube", after: null },
 ];
 
 /**
@@ -261,15 +449,89 @@ describe("layout-object registry vs. the structures it replaced", () => {
     }
   });
 
-  test("default config is unchanged for every type", () => {
+  test("default config is the original, or a recorded change", () => {
     for (const t of ALL) {
-      assert.deepEqual(defaultConfig(t as never), ORIGINAL_CONFIG[t], `defaultConfig("${t}")`);
+      assert.deepEqual(
+        defaultConfig(t as never),
+        RETUNED[t] ?? RECONFIGURED[t] ?? ORIGINAL_CONFIG[t],
+        `defaultConfig("${t}")`,
+      );
     }
   });
 
-  test("default style is unchanged for every type", () => {
+  test("every retuned type is real, still matches, and only ADDED settings", () => {
+    for (const t of Object.keys(RETUNED)) {
+      assert.ok(t in LAYOUT_OBJECTS, `RETUNED names "${t}", which is not an object type`);
+      assert.deepEqual(RETUNED[t], defaultConfig(t as never), `RETUNED["${t}"] no longer matches the registry`);
+      assert.notDeepEqual(RETUNED[t], ORIGINAL_CONFIG[t], `RETUNED["${t}"] matches the original`);
+
+      // Every setting the original had must still be there with the SAME value.
+      // A new one is a recorded addition; a CHANGED one would silently alter how
+      // every screen already in the field draws, and belongs in a change that
+      // says so rather than in a list called "retuned".
+      //
+      // Recursive, because `wireless-channel` keeps its toggles in a nested
+      // `show` object and a flat comparison reports the whole object as changed
+      // the moment a key is added to it — which is exactly the addition being
+      // recorded.
+      const survives = (before: unknown, after: unknown, at: string): void => {
+        if (before === null || typeof before !== "object" || Array.isArray(before)) {
+          assert.deepEqual(after, before, `RETUNED["${t}"] changed the existing setting "${at}"`);
+          return;
+        }
+        assert.ok(after && typeof after === "object", `RETUNED["${t}"] dropped the "${at}" group`);
+        for (const [key, value] of Object.entries(before as Record<string, unknown>)) {
+          survives(value, (after as Record<string, unknown>)[key], at ? `${at}.${key}` : key);
+        }
+      };
+      survives(ORIGINAL_CONFIG[t], RETUNED[t], "");
+    }
+  });
+
+  test("every reconfigured type is real, still matches, and actually differs", () => {
+    for (const t of Object.keys(RECONFIGURED)) {
+      assert.ok(t in LAYOUT_OBJECTS, `RECONFIGURED names "${t}", which is not an object type`);
+      assert.deepEqual(RECONFIGURED[t], defaultConfig(t as never), `RECONFIGURED["${t}"] no longer matches the registry`);
+      assert.notDeepEqual(RECONFIGURED[t], ORIGINAL_CONFIG[t], `RECONFIGURED["${t}"] matches the original`);
+    }
+  });
+
+  test("a caption is the ONLY thing those six gained", () => {
+    // The point of the change is one added key. If anything else moved, this is
+    // a different change wearing its name.
+    for (const t of Object.keys(RECONFIGURED)) {
+      const before = { ...(ORIGINAL_CONFIG[t] as Record<string, unknown>) };
+      const after = { ...RECONFIGURED[t] };
+      delete after.caption;
+      assert.deepEqual(after, before, `defaultConfig("${t}") changed more than the caption`);
+      assert.equal(typeof RECONFIGURED[t].caption, "string", `${t} has no caption`);
+    }
+  });
+
+  test("default style is the original, or a recorded restyle", () => {
     for (const t of ALL) {
-      assert.deepEqual(defaultStyle(t as never), originalStyle(t), `defaultStyle("${t}")`);
+      assert.deepEqual(
+        defaultStyle(t as never),
+        withoutRemoved(RESTYLED[t] ?? withCurrentGround(originalStyle(t))),
+        `defaultStyle("${t}")`,
+      );
+    }
+  });
+
+  test("every restyled type is a real type, and actually differs", () => {
+    // A name that no longer exists would silently stop guarding anything, and an
+    // entry identical to the original is a change somebody backed out without
+    // removing the record of it.
+    // Against the whole registry, not ALL: three of the restyled types
+    // (view-embed, notes, checklist) arrived after the consolidation and so have
+    // no entry in the originals.
+    const registry = Object.keys(LAYOUT_OBJECTS);
+    for (const t of Object.keys(RESTYLED)) {
+      assert.ok(registry.includes(t), `RESTYLED names "${t}", which is not an object type`);
+      assert.deepEqual(withoutRemoved(RESTYLED[t]), defaultStyle(t as never), `RESTYLED["${t}"] no longer matches the registry`);
+      if (ALL.includes(t)) {
+        assert.notDeepEqual(withoutRemoved(RESTYLED[t]), withoutRemoved(originalStyle(t)), `RESTYLED["${t}"] matches the original`);
+      }
     }
   });
 

@@ -147,7 +147,19 @@ export function Select({
       aria-label={ariaLabel}
       className={cn(BASE, triggerClassName)}
     >
-      {placeholder != null && !hasEmpty && <option value="">{textOf(placeholder)}</option>}
+      {/* The placeholder is NOT selectable. As a plain option it could be
+          chosen, and choosing it fired onValueChange("") — which every caller
+          treats as a real value. On Screens that sent viewId:"" to the server
+          and came back as "outputs:setView — view not found", with no way for
+          the operator to tell what they had done wrong.
+          `disabled` keeps it visible as a prompt while making it unpickable;
+          `hidden` additionally drops it from the open list on most browsers
+          once a real value is set. */}
+      {placeholder != null && !hasEmpty && (
+        <option value="" disabled hidden>
+          {textOf(placeholder)}
+        </option>
+      )}
       {options}
     </select>
   );

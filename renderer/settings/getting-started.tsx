@@ -1,14 +1,15 @@
 import { CheckCircle2Icon, CircleIcon, XIcon, RocketIcon } from "lucide-react";
 
 import { Button } from "../components/ui";
+import { screensListViews } from "@main/services/home-view";
 
 interface Step {
   label: string;
   hint: string;
   done: boolean;
-  /** Settings section to jump to when the step is clicked. */
-  section: string;
-  /** `data-flash-id` of the control in that section to outline on arrival. */
+  /** Route to jump to when the step is clicked. */
+  path: string;
+  /** `data-flash-id` of the control on that route to outline on arrival. */
   flash?: string;
 }
 
@@ -23,42 +24,45 @@ export function GettingStarted({
   onDismiss,
 }: {
   stageState: StageState;
-  onNavigate: (sectionId: string, flash?: string) => void;
+  onNavigate: (path: string, flash?: string) => void;
   onDismiss: () => void;
 }) {
   // A fresh install already ships one View and one routed Output, so "is anything
   // routed?" was true before the operator had done anything — the step arrived
   // pre-ticked and taught nothing. Both view steps therefore measure going BEYOND
   // that default: a View you made, and a screen pointed at it.
-  const madeOwnView = stageState.views.length > 1;
+  // Home is excluded from the count. It is seeded on every install, so counting
+  // it made this step read "done" on a fresh box — exactly the pre-ticked step
+  // the comment above was written to stop.
+  const madeOwnView = screensListViews(stageState.views).length > 1;
   const routedOwnView = madeOwnView && stageState.outputs.some((o) => o.viewId);
   const steps: Step[] = [
     {
       label: "Connect Planning Center",
       hint: "Enter your PCO app credentials so plans, items, and the live countdown flow in.",
       done: stageState.pcoConfigured,
-      section: "integrations",
+      path: "/settings/integrations",
       flash: "pco-credentials",
     },
     {
       label: "Select a service & plan",
       hint: "Pick the service type and the plan this machine should follow.",
       done: !!stageState.planId,
-      section: "plan",
+      path: "/plan",
       flash: "plan-selection",
     },
     {
       label: "Create a view",
       hint: "Build what a screen shows — mic slots, a dashboard, transcription, or a custom layout.",
       done: madeOwnView,
-      section: "views",
+      path: "/views",
       flash: "views-list",
     },
     {
       label: "Route a display",
       hint: "Point a screen at the View you built.",
       done: routedOwnView,
-      section: "displays",
+      path: "/displays",
       flash: "displays-list",
     },
   ];
@@ -67,7 +71,7 @@ export function GettingStarted({
   if (steps.every((s) => s.done)) return null;
 
   return (
-    <div className="px-5 max-sm:px-3 pt-5 max-sm:pt-4">
+    <div className="pt-5 max-sm:pt-4">
       <div className="rounded-xl border border-gray-a5 bg-gray-2 p-4">
         <div className="flex items-start gap-2">
           <RocketIcon className="size-4 text-accent mt-0.5 shrink-0" />
@@ -88,7 +92,7 @@ export function GettingStarted({
             <button
               key={step.label}
               type="button"
-              onClick={() => onNavigate(step.section, step.flash)}
+              onClick={() => onNavigate(step.path, step.flash)}
               className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-gray-a3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               {step.done ? (

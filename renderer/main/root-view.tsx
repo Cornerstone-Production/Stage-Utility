@@ -1,35 +1,19 @@
 import { Outlet } from "@tanstack/react-router";
-import { DisplayPickerView } from "./display-picker-view";
-import { BaptismOperatorView } from "./baptism-operator-view";
-import { ScriptViewIndex } from "./scriptview-index-view";
-import { ScriptViewPlan } from "./scriptview-plan-view";
-import { HistoryView } from "./history-view";
-import { PatchView } from "./patch-view";
 
 export function RootView() {
-  // The router uses memory history (ignores the URL), so branch on the real
-  // path: "/" → display picker; "/baptism" → the standalone baptism operator
-  // page; "/scriptview[/type/layout]" → the ScriptView dashboard; otherwise
-  // "/display-N" → the kiosk StageView (Outlet).
-  const slug = window.location.pathname.replace(/^\/+|\/+$/g, "");
-  const parts = slug.split("/").map(decodeURIComponent);
-
-  let content: React.ReactNode;
-  if (slug === "") content = <DisplayPickerView />;
-  else if (slug === "baptism") content = <BaptismOperatorView />;
-  else if (slug === "history") content = <HistoryView />;
-  else if (slug === "patch") content = <PatchView />;
-  else if (parts[0] === "scriptview") {
-    content = parts.length >= 3
-      ? <ScriptViewPlan serviceTypeParam={parts[1]} layoutParam={parts[2]} />
-      : <ScriptViewIndex />;
-  } else content = <Outlet />;
-
+  // The kiosk serves exactly one thing now: a display at "/display-N", rendered
+  // through the Outlet.
+  //
+  // It used to branch on window.location for the operator surfaces (/history,
+  // /patch, /baptism, /scriptview) and for the display picker at "/". All of
+  // those belong to the operator app (app.html), which the server routes them
+  // to — see main/services/routes/operator-paths.ts. The picker's job is now
+  // "Use this screen as a display" on Home.
   return (
     // Kiosk root: no window chrome, edge-to-edge, on the shared kiosk surface so
     // a bg-transparent view (slots) shows the exact same color as kiosk-surface views.
     <div className="h-full w-full overflow-hidden kiosk-surface">
-      {content}
+      <Outlet />
     </div>
   );
 }

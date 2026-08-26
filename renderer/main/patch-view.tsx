@@ -3,7 +3,6 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { CableIcon, ChevronRightIcon, TriangleAlertIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../lib/api";
-import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
 import { resolvePatch, endpointKey } from "../lib/patch-resolve";
 
@@ -111,16 +110,17 @@ export function PatchView() {
   const hasPatch = sheets.length > 0;
 
   return (
-    <div className="dark h-full overflow-y-auto bg-bg text-fg">
+    // No `dark` class: this renders inside the operator shell, which follows the
+    // user's light/dark toggle. It used to force dark because it was served as a
+    // standalone chrome-free page alongside the always-dark kiosk.
+    <div className="h-full overflow-y-auto bg-bg text-fg">
       <div className="mx-auto max-w-3xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        {/* Header */}
-        <div className="flex items-center gap-2">
-          {state?.appLogo && <BrandLogo logo={state.appLogo} monochrome className="size-5 rounded text-fg" />}
-          <span className="text-caption1 font-title text-fg">{state?.appName ?? "Stage Utility"}</span>
+        {/* No brand row here - the shell's rail carries the logo and app name.
+            The read-only pill stays: it is information about this page, not
+            chrome. */}
+        <div className="flex items-center">
           <span className="ml-auto rounded-full border border-line px-2 py-0.5 text-caption2 text-fg-subtle">Read-only</span>
         </div>
-        <h1 className="mt-4 text-title2 font-semibold tracking-tight">Patch</h1>
-        <p className="mt-1 text-footnote text-fg-muted">This week's inputs &amp; outputs — what's set, and what changed.</p>
 
         {/* Context */}
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-line bg-surface px-4 py-3">
@@ -263,8 +263,14 @@ export function PatchView() {
           </>
         )}
 
+        {/* The editor is the back of this page. Without this link it is a route
+            nobody can find — which is exactly what happened when Settings
+            dissolved and only the viewer was routed. "Settings → Patch" is also
+            no longer where it lives. */}
         <div className="mt-6 flex items-center justify-center gap-2 text-caption2 text-fg-faint">
-          <CableIcon className="size-3.5" /> Read-only · updates live · edited in Settings → Patch
+          <CableIcon className="size-3.5" />
+          <span>Read-only · updates live ·</span>
+          <a href="/patch/edit" className="text-accent hover:underline">Edit the patch</a>
         </div>
       </div>
     </div>

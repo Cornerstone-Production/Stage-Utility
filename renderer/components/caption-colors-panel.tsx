@@ -4,6 +4,7 @@ import { useStageState } from "../main/use-stage-state";
 import { useTranscript } from "../main/use-transcript";
 import { channelColor } from "../main/channel-color";
 import { Button, InfoHint, toast } from "./ui";
+import { ColorField } from "./ui/color-field";
 import { ChevronRightIcon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -67,12 +68,12 @@ export function CaptionColorsPanel() {
               const value = custom ?? channelColor(channel);
               return (
                 <div key={label} className="flex items-center gap-2">
-                  <input
-                    type="color"
+                  <ColorField
+                    label={`Color for ${label}`}
+                    allowAlpha={false}
                     value={value}
-                    onChange={(e) => save(label, e.target.value)}
-                    aria-label={`Color for ${label}`}
-                    className="size-6 shrink-0 cursor-pointer rounded border border-gray-a6 bg-transparent p-0"
+                    onChange={(v: string) => save(label, v)}
+                    className="shrink-0"
                   />
                   <span className="text-caption1 text-gray-12 flex-1 min-w-0 truncate">{label}</span>
                   {custom ? (
