@@ -136,12 +136,17 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
   const svAfter = await scriptViewLayoutsStore.load();
   const svHave = new Set(svAfter.map((l) => l.id));
   if (svIncoming.length) {
-    const add = svIncoming.filter((l) => !svHave.has(l.id));
+    // One pass, in the same shape as mergeTargets below: `svHave` has to grow as
+    // we go. Filtering the add-list up front instead let two incoming presets
+    // sharing an id both pass the check and both get appended, leaving a
+    // duplicate id in the store — the exact case mergeTargets guards against and
+    // explains, re-implemented here without the guard.
+    const add: typeof svIncoming = [];
     for (const l of svIncoming) {
       // A local preset of the same id wins, like a target does — but say so,
       // because the imported view then renders with the LOCAL columns.
       if (svHave.has(l.id)) skipped.push(`ScriptView preset "${l.name ?? l.id}" — kept the one already here`);
-      else svHave.add(l.id);
+      else { svHave.add(l.id); add.push(l); }
     }
     if (add.length) await scriptViewLayoutsStore.save([...svAfter, ...add]);
   }

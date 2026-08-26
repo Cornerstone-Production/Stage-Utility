@@ -84,7 +84,6 @@ interface OutputRowProps {
   /** Awaited: switching a screen to a panel must LAND before a console view
    *  is assigned to it, because the server refuses the pair in the wrong order. */
   onSetMode: (mode: "display" | "panel") => Promise<void>;
-  onOpenWindow: () => void;
   onRefresh: () => void;
   onRemove: () => void;
   /** Open the layout editor for this display's view. Absent when it has no
@@ -96,7 +95,7 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onOpenWindow, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
@@ -241,7 +240,17 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content align="end" sideOffset={4} className={MENU_CONTENT}>
-              <DropdownMenu.Item onSelect={onOpenWindow} className={MENU_ITEM}>
+              {/* Opens the SAME address the "Open" link below does. This used
+                  to go through a handler that built the URL from
+                  window.location.origin, while the link used `baseUrl` —
+                  publicUrl when one is set. Two controls for one action, landing
+                  on two different hosts the moment a friendly URL was
+                  configured. The window is still named, so clicking twice
+                  reuses the tab rather than stacking them up. */}
+              <DropdownMenu.Item
+                onSelect={() => window.open(outputUrl, `display-${output.id}`)}
+                className={MENU_ITEM}
+              >
                 <ExternalLinkIcon className="size-3.5 text-fg-subtle" />
                 Open display
               </DropdownMenu.Item>
@@ -644,7 +653,6 @@ export function OutputsSection({
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
                 onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
-                onOpenWindow={() => handlers.handleOpenOutputWindow(output.id)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
                 onRequestNewView={() => setCreatingFor(output.id)}

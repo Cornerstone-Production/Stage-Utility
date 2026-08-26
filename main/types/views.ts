@@ -347,7 +347,8 @@ export type LayoutObjectConfig =
   // `obs:status` channel). `mode` picks which output to reflect — recording
   // (default, back-compat), streaming, or virtual camera. Turns red while that
   // output is active. The label texts override the per-mode defaults
-  // ("OBS: Recording" / "OBS: Standby" / "OBS: Offline" for recording, etc.).
+  // ("Recording" / "Standby" / "Offline" for recording, etc. — bare, because the
+  // caption already says OBS; see STATUS_TEXT in layout-renderer).
   // `hideWhenIdle` makes it a pure tally light (render nothing unless active);
   // `fillWhenRecording` fills the whole box red instead of just coloring the
   // text; `showTimecode` appends the record duration (recording mode only).
@@ -388,7 +389,8 @@ export type LayoutObjectConfig =
     }
   // Live REAPER recording indicator (from the REAPER integration, `reaper:status`
   // channel). Turns red while REAPER is recording. Label texts override the
-  // defaults ("REAPER: Recording" / "REAPER: Standby" / "REAPER: Offline");
+  // defaults ("Recording" / "Standby" / "Offline" — bare, because the caption
+  // already says REAPER; see STATUS_TEXT in layout-renderer);
   // `hideWhenIdle` makes it a pure tally light (render nothing unless recording);
   // `fillWhenRecording` fills the whole box red instead of just coloring the text;
   // `showPosition` appends REAPER's transport position while recording.

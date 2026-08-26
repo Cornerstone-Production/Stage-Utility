@@ -788,11 +788,6 @@ export function useStageSettings() {
     }
   }
 
-  async function handleOpenOutputWindow(id: string) {
-    const url = `${window.location.origin}/${encodeURIComponent(id)}`;
-    window.open(url, `display-${id}`);
-  }
-
   async function handleRefreshDisplay(id: string | null) {
     try {
       await ipc("displays:refresh", { id: id ?? "" });
@@ -852,7 +847,6 @@ export function useStageSettings() {
     handleSetViewSurface,
     handleRemoveOutput,
     handleReorderOutputs,
-    handleOpenOutputWindow,
     handleRefreshDisplay,
     handleDragEnd,
     sensors,

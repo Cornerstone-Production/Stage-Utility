@@ -301,6 +301,19 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
     );
     if (battery != null) st.battery = battery;
 
+    // Runtime remaining, in minutes. Same candidate-path style as everything
+    // else in this file, and carrying the same caveat noted at the top: the leaf
+    // names are NOT confirmed against hardware. Nothing breaks if none of them
+    // land — the field stays null and the widgets draw a dash, which is what
+    // Spectera did for runtime before this line existed.
+    const lifetime = firstNum(
+      readDeep(v, ["battery", "lifetime"]),
+      readDeep(v, ["battery", "runtime"]),
+      v.batteryLifetime,
+      v.bat_lifetime,
+    );
+    if (lifetime != null && lifetime >= 0) st.batteryMinutes = Math.round(lifetime);
+
     const rf = firstNum(readDeep(v, ["rf", "quality"]), v.rsqi, v.link_quality, v.rfQuality);
     if (rf != null) st.rfBars = clamp(Math.round((rf / 100) * 5), 0, 5);
 

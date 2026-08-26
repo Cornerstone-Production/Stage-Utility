@@ -115,7 +115,6 @@ export interface SectionHandlers {
   handleSetViewSurface: (id: string, surface: "display" | "console") => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;
   handleReorderOutputs: (ids: string[]) => Promise<void>;
-  handleOpenOutputWindow: (id: string) => Promise<void>;
   /** Remotely reload kiosk pages. Pass an output id, or null for all displays. */
   handleRefreshDisplay: (id: string | null) => Promise<void>;
   handleDragEnd: (event: DragEndEvent) => void;

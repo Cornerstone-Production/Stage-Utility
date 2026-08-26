@@ -154,3 +154,62 @@ describe("DataStore", () => {
     assert.ok(st.isDirectory(), "the store must create its data dir recursively");
   });
 });
+
+describe("update() skips the write when the mutator changed nothing", () => {
+  // The kiosk device store is built on this contract and says so three times in
+  // prose: recordScreen, touch and pinSecret each return the IDENTICAL array
+  // when nothing changed, and kiosk-devices-store.ts:265 states outright that
+  // "the store skips the write for an unchanged value".
+  //
+  // It did not. update() called writeRaw() unconditionally, so a device probing
+  // every two seconds and heartbeating every twenty was an atomic write plus
+  // fsync each time, per device, onto the SD card a Pi boots from. The comments
+  // described a guard that was never written.
+  //
+  // Every other caller spreads into a fresh object ({...cur}, {...file}) and so
+  // can never hit this path — checked across all thirteen update() call sites in
+  // main/. Only the kiosk mutators return the same reference, deliberately.
+
+  // Proven by CONTENT, not by mtime. An earlier version of these compared
+  // stat().mtimeMs before and after, which needed a 25ms sleep to outrun the
+  // timestamp granularity -- a sleep in a test is a hint that the signal is a
+  // proxy -- and CodeQL read the stat-then-read as a TOCTOU race, correctly, in
+  // the sense that a file checked and then read is two different moments.
+  //
+  // Writing a sentinel out-of-band is both race-free and a STRICTER test: the
+  // store's cache means update() never re-reads the file, so if it writes at all
+  // it writes its cached value over the sentinel. The sentinel surviving is
+  // direct evidence that nothing was written, rather than evidence that nothing
+  // was written within a timestamp tick.
+
+  test("an unchanged mutator does not touch the file", async () => {
+    const { store, file } = freshStore();
+    await store.save({ count: 1, items: ["a"] });
+
+    // Out-of-band, behind the store's back. It never reads this -- load() serves
+    // the cache -- so only a WRITE can destroy it.
+    await fs.writeFile(file, '{"sentinel":true}', "utf8");
+
+    const returned = await store.update((current) => current);
+
+    assert.equal(
+      await fs.readFile(file, "utf8"),
+      '{"sentinel":true}',
+      "returning the same reference must not rewrite the file",
+    );
+    assert.deepEqual(returned, { count: 1, items: ["a"] }, "the current value is still returned");
+  });
+
+  test("a changed mutator still writes", async () => {
+    // The other half: the skip must not swallow a real edit.
+    const { store, file } = freshStore();
+    await store.save({ count: 1, items: ["a"] });
+    await fs.writeFile(file, '{"sentinel":true}', "utf8");
+
+    await store.update((current) => ({ ...current, count: 2 }));
+
+    const written = JSON.parse(await fs.readFile(file, "utf8")) as Doc;
+    assert.equal(written.count, 2, "a real change must reach the disk");
+    assert.deepEqual(written.items, ["a"], "and must carry the rest of the record with it");
+  });
+});

@@ -122,6 +122,17 @@ export class DataStore<T> {
     return this.enqueue(async () => {
       const current = await this.load();
       const next = mutate(current);
+      // A mutator that returns the value it was handed is saying "nothing
+      // changed". Several callers depend on that meaning no disk write —
+      // kiosk-devices-store's recordScreen/touch/pinSecret each return the same
+      // array on purpose, because a probe every two seconds and a heartbeat
+      // every twenty must not be an atomic write plus fsync onto a Pi's SD card
+      // that often. Those comments described this guard before it existed.
+      //
+      // Reference equality, not deep equality: every other caller spreads into a
+      // fresh object and so is unaffected, and a deep compare would cost more
+      // than the write it saves on the large stores.
+      if (next === current) return current;
       await this.writeRaw(next);
       return next;
     });
