@@ -10,9 +10,10 @@
 // inheriting whichever helper was nearest.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { HOST_FRAMED_TYPES, LAYOUT_OBJECTS, defaultStyleFor } from "./layout-objects.js";
+import { HOST_FRAMED_TYPES, LAYOUT_OBJECTS, defaultStyle, defaultStyleFor } from "./layout-objects.js";
 
 /** Content whose box is drawn for it, or that is deliberately full-bleed. */
 const BARE = [
@@ -178,6 +179,74 @@ describe("the card ground against the canvas it sits on", () => {
       const l = luminance(bg);
       assert.ok(l != null, `${t}: unreadable ground ${bg}`);
       assert.ok(l > floor, `${t}: ${bg} is not lighter than the #0a0a0a canvas — it will read as a hole`);
+    }
+  });
+});
+
+// ── The two lists that have to agree ───────────────────────────────────────
+// HOST_FRAMED_TYPES (source) and the home-* half of BARE (this file) describe
+// the same set from two directions: BARE says these ship with no card, and
+// HOST_FRAMED_TYPES says the reason is that Home frames them itself.
+//
+// BARE has an exact-count guard, so a new Home widget has to be listed there.
+// Nothing forced adding it to HOST_FRAMED_TYPES, and the one that got missed
+// would land naked on a wall again — the exact bug that set exists to fix.
+
+describe("HOST_FRAMED_TYPES and BARE", () => {
+  test("name the same Home widgets, so neither can be updated alone", () => {
+    const bareHome = new Set([...BARE].filter((t) => t.startsWith("home-")));
+    assert.deepEqual(
+      [...HOST_FRAMED_TYPES].sort(),
+      [...bareHome].sort(),
+      "a Home widget is in one list and not the other",
+    );
+  });
+});
+
+// ── defaultStyleFor is defaultStyle plus a destination ─────────────────────
+// It read the registry directly for one release and quietly dropped both of the
+// jobs defaultStyle does: stripping the `textAlign` that TEXT() writes but
+// nobody chose, and surviving a type this build does not know. makeObject and
+// resetLook had both moved onto it, so every readout added in the editor stored
+// textAlign:"center" permanently, and Reset look on an object from a newer
+// build threw inside setObjects and white-screened the page.
+
+describe("defaultStyleFor", () => {
+  test("strips the alignment nobody chose, exactly as defaultStyle does", () => {
+    for (const t of Object.keys(LAYOUT_OBJECTS)) {
+      const via = defaultStyleFor(t as never, { hostDrawsFrame: false }) as Record<string, unknown>;
+      const plain = defaultStyle(t as never) as Record<string, unknown>;
+      assert.equal(via.textAlign, plain.textAlign, `${t}: alignment differs from defaultStyle`);
+    }
+  });
+
+  test("returns a style for a type this build has never heard of", () => {
+    // A views.json written by a newer build, restored onto this one.
+    assert.doesNotThrow(() => defaultStyleFor("a-type-from-the-future" as never, { hostDrawsFrame: false }));
+    assert.doesNotThrow(() => defaultStyleFor("a-type-from-the-future" as never, { hostDrawsFrame: true }));
+  });
+});
+
+// ── Every add path, not three of four ──────────────────────────────────────
+// The destination argument reached three of the four makeObject call sites. The
+// one it missed is the draw-a-rectangle palette, which on Home offers the
+// host-framed types — so a widget added that way got a card inside Home's own
+// tile frame. Fixing a repeated shape in all but one of its places is the
+// mistake CLAUDE.md names as this repo's most expensive.
+//
+// Source text, because the alternative is mounting the editor, and what has to
+// hold is a property of the CALL SITES rather than of any one render.
+
+describe("the editor's add paths", () => {
+  test("every makeObject call passes the destination", () => {
+    const src = readFileSync(new URL("../editor/layout-editor.tsx", import.meta.url), "utf8");
+    const calls = [...src.matchAll(/\bmakeObject\((?!\s*$)[^;]*?\)/gs)]
+      .map((m) => m[0].replace(/\s+/g, " "))
+      // the declaration itself is `function makeObject(`, not a call
+      .filter((c) => !/^makeObject\(\s*type: /.test(c));
+    assert.ok(calls.length >= 4, `expected every add path, found ${calls.length}`);
+    for (const c of calls) {
+      assert.match(c, /HOME_VIEW_ID/, `a makeObject call decides the frame by default: ${c}`);
     }
   });
 });

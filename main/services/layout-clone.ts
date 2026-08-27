@@ -65,6 +65,33 @@ export function forEachInlineSlotsGrid(views: View[], cb: (objectId: string) => 
   for (const v of views) if (v.kind === "custom" && v.layout) walk(v.layout.objects);
 }
 
+/**
+ * Every slots-grid object that draws ANOTHER view's slots, with the view it
+ * draws.
+ *
+ * Its slots come from the source view, but its BOX does not: it is a free-dragged
+ * rectangle on a custom layout, the same as an inline grid, so nothing
+ * server-side knows the shape its photos will be drawn at. Only a standalone
+ * slots display knows that. Resolving these separately is what lets them ask for
+ * the whole image while the display keeps its column crop.
+ *
+ * `source` is optional and predates the inline option, so anything that is not
+ * explicitly "inline" is a view-sourced grid — the same test the renderer makes.
+ */
+export function forEachViewSourcedSlotsGrid(
+  views: View[],
+  cb: (objectId: string, sourceViewId: string) => void,
+): void {
+  const walk = (objs: LayoutObject[]): void => {
+    for (const o of objs) {
+      const c = o.config;
+      if (c.type === "slots-grid" && c.source !== "inline" && c.sourceViewId) cb(o.id, c.sourceViewId);
+      if (o.children?.length) walk(o.children);
+    }
+  };
+  for (const v of views) if (v.kind === "custom" && v.layout) walk(v.layout.objects);
+}
+
 export function defaultViewName(kind: ViewKind): string {
   switch (kind) {
     case "dashboard": return "Dashboard";

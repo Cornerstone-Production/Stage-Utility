@@ -125,8 +125,14 @@ export const CARD_RADIUS = 0.0148;
  * The frame is a property of the DESTINATION, not of the widget, so the widget
  * cannot answer it alone — `defaultStyleFor` takes the destination and answers
  * it in one place rather than each caller guessing.
+ *
+ * This is the same set as the `home-*` half of object-look.test.ts's BARE list,
+ * and object-look.test.ts asserts the two are equal — a new Home widget added to
+ * one and not the other would otherwise land naked on a wall again, which is the
+ * bug this set exists to fix. Typed, not `Set<string>`: a misspelling has to
+ * fail the build rather than silently never match.
  */
-export const HOST_FRAMED_TYPES = new Set<string>([
+export const HOST_FRAMED_TYPES = new Set<LayoutObjectType>([
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl",
   "home-screens", "home-streaming", "home-streaming-resi", "home-streaming-youtube",
@@ -859,7 +865,15 @@ export function defaultStyleFor(
   type: keyof typeof LAYOUT_OBJECTS,
   opts: { hostDrawsFrame: boolean },
 ): LayoutStyle {
-  const base = LAYOUT_OBJECTS[type].style();
+  // THROUGH defaultStyle, never the registry directly. It does two jobs this
+  // must not skip: it strips the `textAlign` that TEXT() writes but nobody
+  // chose, so DEFAULT_READOUT_ALIGN can still decide; and it reads through
+  // findLayoutObjectSpec, so a type this build does not know returns {} instead
+  // of throwing. Both were lost when makeObject and resetLook moved onto this
+  // function -- a readout added in the editor stored textAlign:"center"
+  // permanently, and Reset look on an object from a newer build white-screened
+  // the page.
+  const base = defaultStyle(type);
   if (opts.hostDrawsFrame || !HOST_FRAMED_TYPES.has(type)) return base;
   return { ...CARD_PRESETS.neutral, ...base };
 }
