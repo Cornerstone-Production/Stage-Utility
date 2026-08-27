@@ -1,0 +1,146 @@
+{
+  "capturedAt": "2026-08-27T03:02:00.272Z",
+  "results": {
+    "encoders_status_wide": {
+      "path": "https://central.resi.io/api/v3/customers/{customerId}/encoders/status?wide=true",
+      "httpStatus": 200,
+      "shape": {
+        "__array": 2,
+        "sample": {
+          "uuid": "5a905d3b-2071-4812-a454-447805c4c8fb",
+          "lastUpdate": "2026-08-27T03:01:58.458Z",
+          "status": "stopped",
+          "operationalState": "stop",
+          "preferredVersion": "",
+          "updateRequired": false
+        }
+      }
+    },
+    "schedules": {
+      "path": "https://central.resi.io/api/v3/customers/{customerId}/schedules",
+      "httpStatus": 400,
+      "error": {
+        "message": "No valid filtering field was provided",
+        "errors": {
+          "__array": 1,
+          "sample": {
+            "message": "No valid filtering field was provided"
+          }
+        }
+      }
+    },
+    "events": {
+      "path": "https://central.resi.io/api/v3/customers/{customerId}/events",
+      "httpStatus": 200,
+      "shape": {
+        "__array": 11,
+        "sample": {
+          "uuid": "6d08082f-ec41-4c07-bb87-d4922790a03b",
+          "name": "Cornerstone Youth",
+          "eventProfileId": "fd4828c6-3324-4a63-a54e-27619a71e4d6",
+          "scheduleId": "5efc5de9-e941-497d-a3e4-04ce6f474820",
+          "customerName": "Cornerstone Church of Ames - Ames, IA",
+          "format": "<string len=115>",
+          "codec": "H264",
+          "folderPath": "6d08082f-ec41-4c07-bb87-d4922790a03b",
+          "bucket": "resi-fd4828c6-us-sub",
+          "url": "<string len=121>",
+          "hlsUrl": "<string len=97>",
+          "stopAfter": "2026-08-27T01:30:11.000+00:00",
+          "startTime": "2026-08-26T23:20:11Z",
+          "removeTime": "2026-09-25T23:20:11Z",
+          "cloudUrl": "<string len=96>",
+          "encoderId": "5a905d3b-2071-4812-a454-447805c4c8fb",
+          "encoderName": "Cornerstone Prism Encoder - Primary",
+          "eventOptions": null
+        }
+      }
+    },
+    "webstreams": {
+      "path": "https://central.resi.io/api/v3/customers/{customerId}/webstreams",
+      "httpStatus": 404,
+      "error": {
+        "message": "Not Found: HTTP 404 Not Found",
+        "errors": {
+          "__array": 1,
+          "sample": {
+            "message": "Not Found: HTTP 404 Not Found"
+          }
+        }
+      }
+    },
+    "destinations": {
+      "path": "https://central.resi.io/api/v3/customers/{customerId}/destinations",
+      "httpStatus": 404,
+      "error": {
+        "message": "Not Found: HTTP 404 Not Found",
+        "errors": {
+          "__array": 1,
+          "sample": {
+            "message": "Not Found: HTTP 404 Not Found"
+          }
+        }
+      }
+    },
+    "destination_groups": {
+      "path": "https://central.resi.io/api/v3/customers/{customerId}/destinationgroups",
+      "httpStatus": 200,
+      "shape": {
+        "__array": 0,
+        "sample": null
+      }
+    },
+    "live": {
+      "path": "https://central.resi.io/api/v3/customers/{customerId}/live",
+      "httpStatus": 404,
+      "error": {
+        "message": "Not Found: HTTP 404 Not Found",
+        "errors": {
+          "__array": 1,
+          "sample": {
+            "message": "Not Found: HTTP 404 Not Found"
+          }
+        }
+      }
+    },
+    "v2_schedules": {
+      "path": "https://central.resi.io/api_v2.svc/customers/{customerId}/schedules",
+      "httpStatus": 404,
+      "error": {
+        "message": "Not Found: HTTP 404 Not Found",
+        "errors": {
+          "__array": 1,
+          "sample": {
+            "message": "Not Found: HTTP 404 Not Found"
+          }
+        }
+      }
+    },
+    "v2_events": {
+      "path": "https://central.resi.io/api_v2.svc/customers/{customerId}/events",
+      "httpStatus": 404,
+      "error": {
+        "message": "Not Found: HTTP 404 Not Found",
+        "errors": {
+          "__array": 1,
+          "sample": {
+            "message": "Not Found: HTTP 404 Not Found"
+          }
+        }
+      }
+    },
+    "v2_webstreams": {
+      "path": "https://central.resi.io/api_v2.svc/customers/{customerId}/webstreams",
+      "httpStatus": 404,
+      "error": {
+        "message": "Not Found: HTTP 404 Not Found",
+        "errors": {
+          "__array": 1,
+          "sample": {
+            "message": "Not Found: HTTP 404 Not Found"
+          }
+        }
+      }
+    }
+  }
+}
