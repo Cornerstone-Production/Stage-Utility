@@ -102,6 +102,7 @@ import {
 } from "./inspector-rows";
 export { dashboardTemplate, confidenceMonitorTemplate };
 import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
+import { canvasRowFlexClass } from "./canvas-row-fit";
 
 // ── object metadata ──────────────────────────────────────────────────────────
 
@@ -1088,7 +1089,16 @@ export function LayoutEditor({
     const ro = new ResizeObserver(measure);
     if (el.parentElement) ro.observe(el.parentElement);
     return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
-  }, [isEditing, canvas.width, canvas.height, canvas.fit]);
+    // selectedIds is in here because SELECTING an inline slots-grid changes this
+    // row's layout -- it drops `flex-1` so the row stays preview-tall and the
+    // editor below stays reachable. A layout change with no re-measure leaves
+    // canvasH describing the previous arrangement, and the canvas then paints to
+    // a height the row is not reserving.
+    //
+    // The selection rather than `inlineGrid` itself, which is derived further
+    // down the component. Re-measuring on any selection is cheap: it reads two
+    // layout properties, and setState with an unchanged number does not render.
+  }, [isEditing, selectedIds, canvas.width, canvas.height, canvas.fit]);
 
   const currentLayout = (): LayoutDTO => ({ version: 1, canvas, objects });
 
@@ -1819,8 +1829,10 @@ export function LayoutEditor({
 
       {/* Fill the editor height so the side panel can use the full window height —
           except while editing an inline slots-grid, where the row stays preview-tall
-          so the InlineSlotsEditor below it stays reachable without a huge gap. */}
-      <div className={`flex gap-3 @max-4xl:flex-col min-h-0 ${!inlineGrid ? "flex-1" : ""}`}>
+          so the InlineSlotsEditor below it stays reachable without a huge gap, and
+          must be told not to shrink. See canvas-row-fit.ts for what happens when
+          it is not. */}
+      <div className={`flex gap-3 @max-4xl:flex-col min-h-0 ${canvasRowFlexClass(!!inlineGrid)}`}>
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}

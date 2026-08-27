@@ -51,3 +51,10 @@ scripts/survival/.survival-*.log
 # Playwright screenshots taken while driving the app during development.
 *.playwright.png
 .playwright-mcp/
+
+# Probe captures. These are live pulls off a real account -- encoder and
+# schedule uuids, service names, the church's own name. One reached beta in
+# 52e8d9c before anyone noticed. The fixtures a test needs get typed into the
+# test, redacted; the raw capture never gets committed.
+resi-capture.json
+*-capture.json

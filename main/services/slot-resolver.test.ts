@@ -8,7 +8,9 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { resolveSlots, fitAvatarToColumn, normaliseAudioLevel } from "./slot-resolver.js";
+import { readFileSync } from "node:fs";
+
+import { resolveSlots, fitAvatarToColumn, normaliseAudioLevel, MIN_FACE_ASPECT } from "./slot-resolver.js";
 import type { Slot, SlotLink, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
@@ -380,5 +382,93 @@ describe("avatar crop matches the shape the slot is drawn at", () => {
     const heights = resolved.map((s) => Number(geom(s.photoUrl ?? null)?.split("x")[1] ?? 0));
     assert.ok(heights[0] < heights[2], "a stacked slot gets a shorter crop than a lone one");
     assert.equal(heights[0], heights[1], "both halves of a stack match");
+  });
+});
+
+// ── The face the crop throws away ──────────────────────────────────────────
+// An inline slots-grid on a custom layout draws a far squarer cell than a
+// display column of the same slot count: measured 71x143 in a browser, an
+// aspect of 0.50, against the 0.16 the column model assumes for 14 slots.
+//
+// PCO's crop is centred and irreversible. Asking it for 0.16 and then drawing
+// 0.50 does not show more of the face, it shows a stretched sliver of the
+// middle of it. Measured end to end against a 600x800 headshot whose face spans
+// columns 170..430: PCO returned 126x800, keeping columns 237..363 — 51% of the
+// face's width, gone before the browser saw the file.
+//
+// The floor is expressed against the requested HEIGHT rather than as a pixel
+// count, because a stacked slot asks for a shorter crop and a fixed width would
+// mean a different shape at every depth.
+
+describe("the crop an inline slots-grid asks for", () => {
+  const geometry = (url: string | null) => {
+    const m = /[?&]g=(\d+)x(\d+)/.exec(url!);
+    return { w: Number(m![1]), h: Number(m![2]), aspect: Number(m![1]) / Number(m![2]) };
+  };
+
+  test("keeps the whole of a face, where the column alone would not", () => {
+    const g = geometry(fitAvatarToColumn("http://x/a.jpg", 14, 1, MIN_FACE_ASPECT));
+    // A face spans the middle ~43% of a 3:4 frame; below (0.43 x 3)/4 the crop
+    // starts eating it. The column model alone asks for 0.158 here.
+    assert.ok(g.aspect >= 0.32, `aspect ${g.aspect.toFixed(3)} cuts into the face`);
+  });
+
+  test("is the SHAPE that is floored, not the pixel width", () => {
+    // Same rule, two stack depths. A pixel floor would give the shorter crop a
+    // different shape and re-introduce the bug for stacked slots only.
+    for (const depth of [1, 2, 3]) {
+      const g = geometry(fitAvatarToColumn("http://x/a.jpg", 30, depth, MIN_FACE_ASPECT));
+      assert.ok(g.aspect >= 0.32, `depth ${depth}: aspect ${g.aspect.toFixed(3)}`);
+    }
+  });
+
+  test("costs a display nothing, because a display does not ask for it", () => {
+    // The column model is right for a display column, and a floor there would
+    // only ship pixels the browser crops off again.
+    //
+    // EXACT geometries, not a comparison against another call of this function:
+    // written that way, moving the DEFAULT moves both sides together and the
+    // regression this test is named for sails straight through. It did, once.
+    const expected: Record<number, string> = {
+      4: "550x1000",
+      9: "245x1000",
+      13: "170x1000",
+      14: "158x1000",
+    };
+    for (const [columns, want] of Object.entries(expected)) {
+      const got = /[?&]g=(\d+x\d+)/.exec(fitAvatarToColumn("http://x/a.jpg", Number(columns))!)![1];
+      assert.equal(got, want, `columns=${columns}`);
+    }
+  });
+
+  test("never asks for more than the source has", () => {
+    const g = geometry(fitAvatarToColumn("http://x/a.jpg", 1, 1, MIN_FACE_ASPECT));
+    assert.ok(g.w <= 1000, `got ${g.w}`);
+  });
+
+  test("a wide-enough column is left alone — the floor only ever raises", () => {
+    for (const columns of [1, 2, 3, 4, 5, 6]) {
+      const floored = geometry(fitAvatarToColumn("http://x/a.jpg", columns, 1, MIN_FACE_ASPECT));
+      const plain = geometry(fitAvatarToColumn("http://x/a.jpg", columns));
+      assert.equal(floored.w, plain.w, `columns=${columns} should be untouched`);
+    }
+  });
+});
+
+describe("the inline-grid path is actually wired to it", () => {
+  // Without this, deleting the argument at the call site leaves every test above
+  // green while every inline grid goes back to cutting faces.
+  test("stage-controller resolves inline slots with the face floor", () => {
+    const src = readFileSync(new URL("./stage-controller.ts", import.meta.url), "utf8");
+    const call = /slotsByLayoutObject\[oid\]\s*=\s*resolveSlots\(([^;]*)\)/.exec(src);
+    assert.ok(call, "could not find the inline slots resolution in stage-controller.ts");
+    assert.match(call[1], /MIN_FACE_ASPECT/, "inline grids are resolved without the face floor");
+  });
+
+  test("and the display path is still left without one", () => {
+    const src = readFileSync(new URL("./stage-controller.ts", import.meta.url), "utf8");
+    const call = /slotsByView\[view\.id\]\s*=\s*resolveSlots\(([^;]*)\)/.exec(src);
+    assert.ok(call, "could not find the view slots resolution in stage-controller.ts");
+    assert.doesNotMatch(call[1], /MIN_FACE_ASPECT/, "a display should not pay for the floor");
   });
 });

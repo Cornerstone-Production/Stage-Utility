@@ -5,7 +5,7 @@
 // Resi's published "Go Live API" (api.resi.io) cannot answer the question this
 // integration exists for. It has no way to list active schedules — the only
 // source of a scheduleId is the POST that starts a stream — so it can report
-// only on streams this app itself started. Cornerstone's Resi goes live on
+// only on streams this app itself started. Many operators' Resi goes live on
 // Resi's own schedule, which that API cannot see at all. There are no webhooks:
 // the words do not appear in its OpenAPI spec, and /v1/schedules and /v1/events
 // both 404. Bitfocus's own resi-studio module confirms the shape by persisting
@@ -24,6 +24,7 @@
 //     username and password. There is no scoped credential for this API.
 
 import { errorMessage } from "./errors.js";
+import { scrub } from "./scrub.js";
 import type { StreamStatusDTO } from "../types/stage.js";
 import { StatusIntegration } from "./integration-base.js";
 import { streamStartStore } from "./stream-start-store.js";
@@ -32,6 +33,22 @@ const API = "https://central.resi.io/api/v3";
 const API_V2 = "https://central.resi.io/api_v2.svc";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * RESI_DEBUG=1 logs one encoder object, once per connection, in full.
+ *
+ * This integration reads exactly one field -- `status` -- because that is the
+ * only one whose meaning was ever confirmed. The payload carries far more, and
+ * the question that keeps coming up is whether one of those other fields
+ * distinguishes "the encoder is running" from "the stream is live to viewers".
+ * Those are different moments: an encoder started for a soundcheck an hour early
+ * is `started` while nothing is going out.
+ *
+ * Naming a guess in code would be worse than not guessing -- see the header on
+ * why this file only reads what it has seen. So this prints the real shape once,
+ * scrubbed, and the field is chosen afterwards from evidence.
+ */
+const RESI_DEBUG = process.env.RESI_DEBUG === "1";
 /** While something is watching. Resi's own status is ~20s fresh, so faster than
  *  this buys nothing but requests. */
 const POLL_MS = 15_000;
@@ -52,6 +69,8 @@ export interface ResiEncoder {
   name?: string | null;
   status?: string | null;
   videoInputSource?: unknown;
+  /** "stop" while the encoder is not running. Contradicts a stale `status`. */
+  operationalState?: string | null;
   lastUpdate?: string | null;
   /** Resi has not been observed to send a start time. If a payload turns out to
    *  carry one, prefer it over our own first-observed moment — see
@@ -61,15 +80,59 @@ export interface ResiEncoder {
 }
 
 /**
+ * How long an encoder record may go unrefreshed before it stops being evidence.
+ *
+ * A running encoder reports constantly -- the one that was genuinely idle in the
+ * capture had checked in 30 seconds earlier. Ten minutes is far past any normal
+ * gap and well short of the 25 HOURS the stale record had been sitting.
+ */
+const ENCODER_STALE_AFTER_MS = 10 * 60_000;
+
+/**
  * Is this encoder streaming?
  *
- * `started` is the value Resi uses and the one Bitfocus's module keys its live
- * feedback on. Compared case-insensitively because an undocumented API is free
- * to change the casing without telling anybody, and a live indicator that goes
- * dark over a capital letter is the worst possible failure here.
+ * `status === "started"` alone is not evidence, and this is what that cost: the
+ * widget read LIVE at 10pm on a Wednesday with nothing going out. A capture off
+ * the real account showed why.
+ *
+ *   encoder A  status "stopped"  operationalState "stop"  lastUpdate 30s ago
+ *   encoder B  status "started"  operationalState "stop"  lastUpdate 25h ago
+ *
+ * B had finished a stream the previous evening and stopped reporting at 02:25,
+ * minutes before that event's scheduled end. Its `status`
+ * has been frozen on the last thing it said ever since. Resi does not clear it,
+ * so a field that means "what this encoder was doing when it last spoke" was
+ * being read as "what it is doing now".
+ *
+ * Two independent disqualifiers, both already in the payload we fetch:
+ *
+ *   operationalState -- said "stop" on BOTH encoders. A record whose own two
+ *     fields disagree is not describing a live stream.
+ *   lastUpdate -- nothing has refreshed it. A stale record is not evidence of
+ *     anything, which is the same rule the wireless drivers apply to a battery
+ *     sentinel and prodcom applies to an orphaned partial.
+ *
+ * Either alone would have caught this one. Both are checked because they fail
+ * independently: an encoder yanked off the network goes stale with a plausible
+ * operationalState, and a clean stop updates operationalState while staying
+ * fresh.
+ *
+ * `status` is still compared case-insensitively -- an undocumented API is free to
+ * change casing without telling anybody, and a live indicator that goes dark over
+ * a capital letter is the worst possible failure here.
  */
-export function encoderIsLive(e: ResiEncoder): boolean {
-  return (e.status ?? "").trim().toLowerCase() === "started";
+export function encoderIsLive(e: ResiEncoder, now: number = Date.now()): boolean {
+  if ((e.status ?? "").trim().toLowerCase() !== "started") return false;
+
+  // Only a stop-ish value disqualifies. An unknown word is not treated as proof
+  // of anything either way, because this field is undocumented too.
+  const op = (e.operationalState ?? "").trim().toLowerCase();
+  if (op.startsWith("stop")) return false;
+
+  const seen = Date.parse(e.lastUpdate ?? "");
+  if (Number.isFinite(seen) && now - seen > ENCODER_STALE_AFTER_MS) return false;
+
+  return true;
 }
 
 /**
@@ -105,6 +168,9 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
   private token: string | null = null;
   private tokenExpiresAt = 0;
   private customerId: string | null = null;
+
+  /** RESI_DEBUG: whether the one-off payload dump has already gone out. */
+  private loggedShape = false;
 
   /** Encoder id -> name, for the sub-line. Refreshed with the status poll. */
   private names = new Map<string, string>();
@@ -145,6 +211,12 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
       const { token } = await this.fetchToken(username, password);
       const customerId = await this.fetchCustomerId(token);
       const encoders = await this.fetchEncoderStatus(token, customerId);
+      if (RESI_DEBUG && encoders[0] && !this.loggedShape) {
+        this.loggedShape = true;
+        // One encoder, once. The status poll runs every few seconds and this is
+        // for identifying a field, not for watching one.
+        console.log(`[resi] encoder payload shape: ${scrub(JSON.stringify(encoders[0]))}`);
+      }
       const live = encoders.filter(encoderIsLive).length;
       return {
         ok: true,
