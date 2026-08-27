@@ -153,6 +153,40 @@ export class LayoutConflictError extends Error {
   }
 }
 
+/**
+ * Write one operator-keyed entry into an icon map, safely.
+ *
+ * The key comes off an HTTP body, and `map[key] = value` with a key like
+ * `__proto__` writes the OBJECT PROTOTYPE rather than an entry — every object in
+ * the process then carries the property. CodeQL calls it js/remote-property-
+ * injection and it is right to: both icon setters had the same three lines, and
+ * both were reachable from an unauthenticated POST on the LAN.
+ *
+ * Two defences, because either alone is thinner than it looks. The key SHAPE is
+ * checked — real keys are display ids ("display-1"), tool paths ("/baptism") and
+ * view ids, none of which need anything outside this class. And the map is
+ * rebuilt with a null prototype, so an assignment has no prototype to reach even
+ * if a future caller skips the check.
+ */
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function writeIconEntry(
+  current: Record<string, string> | undefined,
+  key: string,
+  value: string,
+  label: string,
+): Record<string, string> {
+  if (!/^[A-Za-z0-9/_-]{1,64}$/.test(key) || FORBIDDEN_KEYS.has(key)) {
+    throw new Error(`${label} — key must be an id or a tool path`);
+  }
+  const next: Record<string, string> = Object.assign(Object.create(null), current ?? {});
+  if (value === "") delete next[key];
+  else next[key] = value;
+  // Back to an ordinary object for JSON.stringify, which skips a null-prototype
+  // object's entries in some serialisers and is not worth the risk here.
+  return { ...next };
+}
+
 export class StageController {
   private state: StageState = {
     serviceTypeId: null,
@@ -481,9 +515,7 @@ export class StageController {
     if (c !== "" && !/^#[0-9a-f]{6}$/.test(c)) {
       throw new Error('icon-color — color must be "#rrggbb" or "" to clear');
     }
-    const next = { ...(this.state.iconColors ?? {}) };
-    if (c === "") delete next[k];
-    else next[k] = c;
+    const next = writeIconEntry(this.state.iconColors, k, c, "icon-color");
     console.log(`[stage-controller] setIconColor ${scrub(k)} → ${scrub(c || "(cleared)")}`);
     this.state = { ...this.state, iconColors: next };
     await settingsStore.patch({ iconColors: next });
@@ -509,9 +541,7 @@ export class StageController {
     if (g !== "" && !/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(g)) {
       throw new Error('icon-glyph — glyph must be an icon name or "" to clear');
     }
-    const next = { ...(this.state.iconGlyphs ?? {}) };
-    if (g === "") delete next[k];
-    else next[k] = g;
+    const next = writeIconEntry(this.state.iconGlyphs, k, g, "icon-glyph");
     console.log(`[stage-controller] setIconGlyph ${scrub(k)} → ${scrub(g || "(cleared)")}`);
     this.state = { ...this.state, iconGlyphs: next };
     await settingsStore.patch({ iconGlyphs: next });

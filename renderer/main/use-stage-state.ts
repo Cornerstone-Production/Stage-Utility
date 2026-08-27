@@ -132,6 +132,12 @@ export function useStageState(): UseStageStateResult {
   // A null accent from a HYDRATED state still clears it -- that is the operator
   // choosing no brand colour, and it has to be honoured. What must not clear it
   // is an instance that simply has not loaded yet.
+  //
+  // Measured both ways on one build, Screens page, one click on an icon:
+  //   without this line  --brand-accent went "#3b82f6" -> (REMOVED), and every
+  //                      icon on the accent flashed #3b82f6 -> #2e6691 (the CSS
+  //                      default) and back
+  //   with it            the variable never moves and no icon changes at all
   useEffect(() => {
     if (!state) return;
     applyAccentVar(state.accentColor);
