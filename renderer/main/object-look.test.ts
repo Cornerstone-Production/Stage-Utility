@@ -138,9 +138,46 @@ describe("a Home tile added somewhere that is not Home", () => {
       if (!chrome(s)) continue;
       grounds.add(s.background); borders.add(s.borderColor); widths.add(s.borderWidth); radii.add(s.cornerRadius);
     }
-    assert.deepEqual([...grounds], ["#000000"], "more than one card ground");
+    // #141414, not #000000: the canvas grounds at #0a0a0a, so a pure-black card
+    // is darker than the surface it sits on and stops reading as a card at all.
+    assert.deepEqual([...grounds], ["#141414"], "more than one card ground");
     assert.deepEqual([...borders], ["rgba(255,255,255,0.1)"], "more than one border colour");
     assert.deepEqual([...widths], [1 / 1080], "more than one hairline width");
     assert.deepEqual([...radii], [0.0148], "more than one corner radius");
+  });
+});
+
+// ── A card has to be lighter than the ground it sits on ────────────────────
+// "Default should be fill with black" was asked for and taken literally, and it
+// made the editor look blank. The stage canvas grounds at #0a0a0a, so a #000000
+// card is DARKER than the surface under it: it stops reading as a card and
+// starts reading as a hole cut in the canvas, and a layout full of them reads as
+// nothing at all. Measured in a browser on a real layout -- every card ground
+// now lands +10 or more against the canvas's luminance of 10.0.
+//
+// #141414 IS the black a card can be here. The rule is not "not black", it is
+// "lighter than what is behind it", so this compares rather than pins.
+
+describe("the card ground against the canvas it sits on", () => {
+  /** What a bare stage canvas grounds at — see KIOSK_SURFACE in styles.css. */
+  const CANVAS = 0x0a;
+  const luminance = (hex: string) => {
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    if (!m) return null;
+    const [r, g, b] = [1, 2, 3].map((i) => parseInt(m[i], 16));
+    return r * 0.299 + g * 0.587 + b * 0.114;
+  };
+
+  test("is lighter than the canvas, or it is a hole and not a card", () => {
+    const floor = CANVAS * 0.299 + CANVAS * 0.587 + CANVAS * 0.114;
+    for (const t of Object.keys(LAYOUT_OBJECTS)) {
+      if (t === "shape") continue; // a shape's fill IS the object
+      const s = defaultStyleFor(t as never, { hostDrawsFrame: false }) as Record<string, unknown>;
+      const bg = typeof s.background === "string" ? s.background : null;
+      if (!bg || !bg.startsWith("#")) continue;
+      const l = luminance(bg);
+      assert.ok(l != null, `${t}: unreadable ground ${bg}`);
+      assert.ok(l > floor, `${t}: ${bg} is not lighter than the #0a0a0a canvas — it will read as a hole`);
+    }
   });
 });

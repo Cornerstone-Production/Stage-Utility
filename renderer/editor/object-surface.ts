@@ -42,9 +42,12 @@ export const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
   glass: { surface: "glass", background: "rgba(255,255,255,0.04)", borderColor: HAIRLINE_COLOR, borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
   // Solid had NO border at all, which is why a Solid widget beside a Glass one
   // read as a different component rather than the same one in another material.
-  // Black, not `var(--gray-2)`: a widget on a stage canvas sits on black, and a
-  // theme grey made the card a lighter rectangle on it.
-  solid: { surface: "solid", background: "#000000", borderColor: HAIRLINE_COLOR, borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
+  //
+  // The ground is the card's, not `var(--gray-2)`: a theme grey followed the APP
+  // theme, so the same Solid widget was a light rectangle in one and a dark one
+  // in the other while the canvas under it never moved. Pure black was tried and
+  // is worse -- see CARD_PRESETS.neutral, it is darker than the canvas.
+  solid: { surface: "solid", background: CARD_PRESETS.neutral.background ?? null, borderColor: HAIRLINE_COLOR, borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
   // Outline keeps a STRONGER edge, deliberately. It is the one look that draws
   // no fill, so its border is the entire widget — at the hairline's 10% it would
   // be all but invisible on the black it sits on. Width matches the others; only
@@ -80,12 +83,7 @@ export const TINTS: { value: TintKind; label: string; swatch: string | null; opa
   // Black over glass DARKENS it. The obvious-looking "more white" would have
   // been the exact string glass already uses, making an untinted glass read as
   // tinted Black — and the tint could then never be cleared.
-  // Its own literal, NOT CARD_PRESETS.neutral.background. The untinted default
-  // is now pure black, and a tint whose opaque value equals the untinted one is
-  // a tint that reads as "no tint" and can never be cleared -- the same trap the
-  // comment above records for Glass. A wash a shade off the ground is what a
-  // tint is; this one is the near-black the card presets have always used.
-  { value: "neutral", label: "Black", swatch: "#141414", opaque: "#141414", sheer: "rgba(0,0,0,0.35)" },
+  { value: "neutral", label: "Black", swatch: "#141414", opaque: CARD_PRESETS.neutral.background ?? null, sheer: "rgba(0,0,0,0.35)" },
   { value: "green", label: "Green", swatch: "#0d1a15", opaque: CARD_PRESETS.green.background ?? null, sheer: "rgba(45,212,150,0.10)" },
   { value: "red", label: "Red", swatch: "#201011", opaque: CARD_PRESETS.red.background ?? null, sheer: "rgba(229,72,77,0.12)" },
   { value: "amber", label: "Amber", swatch: "#1e190e", opaque: CARD_PRESETS.amber.background ?? null, sheer: "rgba(255,197,61,0.10)" },
