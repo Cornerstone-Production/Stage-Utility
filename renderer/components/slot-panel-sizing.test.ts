@@ -74,22 +74,36 @@ describe("slot card sizing", () => {
     );
   });
 
-  it("lets the box shape choose the fit", () => {
-    // Cover crops on whichever axis has to give. In a short WIDE slot that is the
-    // top and bottom, and with the name card below it the visible band was
-    // forehead-to-mouth -- chins cut off. That is geometry: a 440x432 photo
-    // covering a 260x175 box leaves ~66% of it visible however it is positioned,
-    // and a face needs about 60% starting near the top. Only changing the fit
-    // helps, so a landscape box switches to contain.
+  it("fills the cell at every box shape, from one rule", () => {
+    // This used to assert the opposite -- a landscape box switched to contain --
+    // and it was right about the geometry it was given: a 440x432 photo covering
+    // a 260x175 box leaves ~66% visible however it is positioned, and a face
+    // needs about 60% starting near the top. Chins were cut off.
+    //
+    // Note the SOURCE. 440x432 is nearly square because PCO had already cropped
+    // it to a shape the server guessed. The fit was the symptom. Once a landscape
+    // cell was handed that crop as a narrow PORTRAIT strip, contain drew it
+    // letterboxed with black bars either side -- reported as the photos looking
+    // horrible, and worse than the problem it was added for.
+    //
+    // An inline grid now receives the WHOLE 3:4 headshot (AvatarFit in
+    // slot-resolver.ts), and a tall source has height to spare. Measured in a
+    // browser across five cell shapes with the face at source rows 120..380:
+    // cover fills 100% of the cell at all of them, and cuts nothing off the face
+    // out to an aspect of 1.18. Past that it trims the top of the HEAD, never
+    // the chin.
     const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+    // Still required, though the container QUERY that used to read it is gone:
+    // the avatar bubble sizes itself in cqi and must resolve against the photo
+    // box, not the whole card.
     assert.match(css, /\.slot-photo\s*\{[^}]*container-type:\s*size/, "the photo box must be a size container");
-    assert.match(
+    assert.match(css, /\.slot-photo img\s*\{[^}]*object-fit:\s*cover/s, "the photo fills the cell");
+    assert.match(css, /object-position:\s*center 28%/, "the crop window starts below the very top");
+    assert.doesNotMatch(
       css,
-      /@container\s*\(min-aspect-ratio:\s*1\/1\)\s*\{[^}]*object-fit:\s*contain/s,
-      "a landscape photo box must use contain, or a face cannot fit in it",
+      /@container[^{]*\{[^}]*object-fit:\s*contain/s,
+      "a shape-dependent fit is back, and a landscape cell will letterbox again",
     );
-    assert.match(css, /\.slot-photo img\s*\{[^}]*object-fit:\s*cover/s, "a tall box keeps cover");
-    assert.match(css, /object-position:\s*center 28%/, "the cover crop starts below the very top");
     // And the component has to opt in, or none of the above applies.
     assert.match(SRC, /className="slot-photo /, "the photo wrapper must carry the class");
   });

@@ -32,7 +32,8 @@ import type { UpdateStatus } from "../types/stage.js";
 import { getUserDataPath } from "./app-paths.js";
 import { detectInstallKind } from "./update/install-kind.js";
 import { detectTrack } from "./update/detect-track.js";
-import { CHANGELOG_CAP, fetchReleases, packagedUpdateStatus, type ReleaseInfo } from "./update/release-check.js";
+import { CHANGELOG_CAP, NOTES_CAP, fetchReleases, packagedUpdateStatus, type ReleaseInfo } from "./update/release-check.js";
+import { mergeReleaseSections, parseReleaseIntro, parseReleaseSections, type ReleaseSection } from "./update/release-notes.js";
 import { fetchTapVersion, homebrewInstallable, tarballInstallable } from "./update/package-availability.js";
 import { FORMULA } from "./update/homebrew-strategy.js";
 import { selectStrategy } from "./update/select-strategy.js";
@@ -376,6 +377,49 @@ export class Updater {
       const behindUserFacing = pending.length;
       const changelog = pending.slice(0, CHANGELOG_CAP);
 
+      // The same changes, GROUPED — what the "Updated to vX" dialog renders.
+      //
+      // A checkout has history, so the flat list above is commit subjects and
+      // carries no sections. A packaged install has none, so it parses the
+      // release notes and gets Breaking/New/Fixed. The two installs therefore
+      // showed DIFFERENT dialogs for the same release: 1.12.0 arrived on a
+      // checkout as eight bare `fix(scope): subject` lines under no headings.
+      // That is the same parity gap release-check.ts already closed in the other
+      // direction for the update panel, and it closes the same way — the notes
+      // are the only place the grouping exists, so a checkout reads them too.
+      //
+      // A failure here costs the grouping, not the update. The flat list above
+      // still stands and the dialog still says what changed, which is exactly
+      // what the notice store's `lines` fallback is for — so this logs and
+      // carries on rather than failing a check that otherwise succeeded.
+      // Conditional requests make a repeat free against the quota; see
+      // release-check.ts.
+      let changelogSections: ReleaseSection[] = [];
+      let changelogIntro: string | null = null;
+      if (tagBased && behindUserFacing > 0) {
+        try {
+          const byTag = new Map((await this.fetchReleases()).map((r) => [r.tag, r]));
+          // Same anchor question as the version calculation: everything newer
+          // than what is installed, or just the target when this box is on no
+          // tag at all.
+          const newer = currentTag ? newerThan(tags, branch, currentTag) : target ? [target] : [];
+          changelogSections = mergeReleaseSections(
+            newer
+              .map((t) => parseReleaseSections(byTag.get(t.tag)?.body ?? null, NOTES_CAP))
+              .filter((sections) => sections.length > 0),
+            NOTES_CAP,
+          );
+          // The NEWEST release's prose only — three releases at once would
+          // otherwise stack three intros.
+          changelogIntro = parseReleaseIntro(byTag.get(newer[0]?.tag ?? "")?.body ?? null);
+        } catch (err) {
+          console.warn(
+            "[updater] could not read release notes; the update dialog falls back to commit subjects:",
+            errorMessage(err),
+          );
+        }
+      }
+
       this.status = {
         ...this.status,
         isGitRepo: true,
@@ -394,6 +438,8 @@ export class Updater {
         latestSha,
         latestDate,
         changelog,
+        changelogSections,
+        changelogIntro,
         lastCheckedAt: new Date().toISOString(),
         phase: "idle",
         error: null,

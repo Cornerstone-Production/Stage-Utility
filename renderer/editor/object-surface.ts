@@ -21,7 +21,7 @@
 // the surface: translucent over Glass, opaque everywhere else.
 
 import type { LayoutSurface } from "@main/types/views";
-import { CARD_PRESETS } from "../main/layout-objects";
+import { CARD_PRESETS, CARD_RADIUS, HAIRLINE, HAIRLINE_COLOR } from "../main/layout-objects";
 
 export type SurfaceKind = LayoutSurface;
 export type TintKind = "none" | "neutral" | "green" | "red" | "amber";
@@ -39,9 +39,20 @@ export const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
   // GLASS STAYS TRANSLUCENT. It is the one look whose whole point is that the
   // canvas shows through, so making it opaque would leave no way to ask for
   // that at all. Everything else went opaque because nothing else was asking.
-  glass: { surface: "glass", background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148 },
-  solid: { surface: "solid", background: "var(--gray-2)", borderColor: null, borderWidth: 0, cornerRadius: 0.0148 },
-  outline: { surface: "outline", background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: 0.0015, cornerRadius: 0.0148 },
+  glass: { surface: "glass", background: "rgba(255,255,255,0.04)", borderColor: HAIRLINE_COLOR, borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
+  // Solid had NO border at all, which is why a Solid widget beside a Glass one
+  // read as a different component rather than the same one in another material.
+  //
+  // The ground is the card's, not `var(--gray-2)`: a theme grey followed the APP
+  // theme, so the same Solid widget was a light rectangle in one and a dark one
+  // in the other while the canvas under it never moved. Pure black was tried and
+  // is worse -- see CARD_PRESETS.neutral, it is darker than the canvas.
+  solid: { surface: "solid", background: CARD_PRESETS.neutral.background ?? null, borderColor: HAIRLINE_COLOR, borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
+  // Outline keeps a STRONGER edge, deliberately. It is the one look that draws
+  // no fill, so its border is the entire widget — at the hairline's 10% it would
+  // be all but invisible on the black it sits on. Width matches the others; only
+  // the colour is louder, because it is doing a different job.
+  outline: { surface: "outline", background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
 };
 
 export const SURFACES: { value: SurfaceKind; label: string; hint: string }[] = [

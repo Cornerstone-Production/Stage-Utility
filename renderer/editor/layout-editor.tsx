@@ -75,7 +75,7 @@ import { useConfiguredIntegrations } from "../main/use-integration-states";
 import {
   PALETTE_GROUPS,
   defaultConfig,
-  defaultStyle,
+  defaultStyleFor,
   objectIntegration,
   typeLabel,
 } from "../main/layout-objects";
@@ -119,6 +119,8 @@ function makeObject(
   type: LayoutObjectType,
   z: number,
   geom?: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>,
+  /** True only on Home, whose grid frames every tile. See defaultStyleFor. */
+  hostDrawsFrame = false,
 ): LayoutObject {
   // Containers default to a card-sized box; everything else keeps the old default.
   // (Top-level adds are snapped to the square grid by the caller via snapRectToGrid.)
@@ -129,7 +131,7 @@ function makeObject(
     ...geom,
     z,
     config: defaultConfig(type),
-    style: defaultStyle(type),
+    style: defaultStyleFor(type, { hostDrawsFrame }),
   };
 }
 
@@ -1246,7 +1248,7 @@ export function LayoutEditor({
    * operator's separate decisions and are not this button's business.
    */
   function resetLook(id: string) {
-    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: defaultStyle(o.config.type) })));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: defaultStyleFor(o.config.type, { hostDrawsFrame: view.id === HOME_VIEW_ID }) })));
   }
   function updateConfig(id: string, config: LayoutObjectConfig) {
     setObjects((prev) => mapById(prev, id, (o) => ({ ...o, config })));
@@ -1288,7 +1290,7 @@ export function LayoutEditor({
 
     pushHistory();
     const geom = into ? localiseToParent(abs, into.abs) : abs;
-    const o = makeObject(type, zTop + 1, geom);
+    const o = makeObject(type, zTop + 1, geom, view.id === HOME_VIEW_ID);
     if (into) {
       setObjects((prev) => insertChild(prev, into.id, o));
     } else {
@@ -1310,11 +1312,11 @@ export function LayoutEditor({
       const siblingMaxZ = (selected?.children ?? []).reduce((m, o) => Math.max(m, o.z), 0);
       // Default a new child to a centered box inside the container's local space.
       const geom = type === "container" ? { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } : { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
-      const child = makeObject(type, siblingMaxZ + 1, geom);
+      const child = makeObject(type, siblingMaxZ + 1, geom, view.id === HOME_VIEW_ID);
       setObjects((prev) => insertChild(prev, intoId, child));
       setSelectedIds(new Set([child.id]));
     } else {
-      const o = makeObject(type, zTop + 1);
+      const o = makeObject(type, zTop + 1, undefined, view.id === HOME_VIEW_ID);
       // Snap a new top-level object onto the square grid so its edges land on lines.
       const sn = snapRectToGrid({ x: o.x, y: o.y, w: o.w, h: o.h }, CANVAS_FRAC, editorBox.w || canvas.width, editorBox.h || canvas.height, true);
       setObjects((prev) => [...prev, { ...o, ...sn }]);
@@ -1928,7 +1930,7 @@ export function LayoutEditor({
                   const rect = pendingRect;
                   setPendingRect(null);
                   pushHistory();
-                  const o = makeObject(t, zTop + 1, rect);
+                  const o = makeObject(t, zTop + 1, rect, view.id === HOME_VIEW_ID);
                   setObjects((prev) => [...prev, o]);
                   setSelectedIds(new Set([o.id]));
                   setDirty(true);

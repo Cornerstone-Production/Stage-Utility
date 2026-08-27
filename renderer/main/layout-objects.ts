@@ -96,6 +96,48 @@ export interface LayoutObjectSpec {
 
 // ── Shared style fragments ────────────────────────────────────────────────────
 
+/**
+ * One hairline, one radius, for every widget that wears a card.
+ *
+ * These were written out per preset and had drifted: Glass and the neutral card
+ * carried 8% white, Solid carried NO border, and Outline was half again as
+ * thick. Three widgets side by side on a wall therefore had three different
+ * edges, which is what "the greys look different" was.
+ *
+ * WIDTH IS A FRACTION OF THE CANVAS HEIGHT, as every length in a layout is. On
+ * the 1080-tall design canvas this resolves to exactly 1px, which is what a
+ * hairline means; a layout drawn at another size scales it with everything else
+ * rather than going spindly against type that grew.
+ */
+export const HAIRLINE_COLOR = "rgba(255,255,255,0.1)";
+export const HAIRLINE = 1 / 1080;
+export const CARD_RADIUS = 0.0148;
+
+/**
+ * Widgets whose frame is drawn FOR them, and only on Home.
+ *
+ * These default to no card because Home's grid draws one tile frame around
+ * everything on it, and a card inside that tile is a second box. That is right
+ * on Home and wrong everywhere else: the palette offers them on a wall layout
+ * too, where nothing draws a frame, so a Resi status landed naked beside a
+ * REAPER status wearing a card and the two read as different components.
+ *
+ * The frame is a property of the DESTINATION, not of the widget, so the widget
+ * cannot answer it alone — `defaultStyleFor` takes the destination and answers
+ * it in one place rather than each caller guessing.
+ *
+ * This is the same set as the `home-*` half of object-look.test.ts's BARE list,
+ * and object-look.test.ts asserts the two are equal — a new Home widget added to
+ * one and not the other would otherwise land naked on a wall again, which is the
+ * bug this set exists to fix. Typed, not `Set<string>`: a misspelling has to
+ * fail the build rather than silently never match.
+ */
+export const HOST_FRAMED_TYPES = new Set<LayoutObjectType>([
+  "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
+  "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl",
+  "home-screens", "home-streaming", "home-streaming-resi", "home-streaming-youtube",
+]);
+
 type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
 
 /**
@@ -116,10 +158,21 @@ type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
  * show through still has Fill and Opacity in the inspector.
  */
 export const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
-  neutral: { background: "#141414", borderColor: "rgba(255,255,255,0.08)", borderWidth: 0.001, cornerRadius: 0.0148 },
-  green: { background: "#0d1a15", borderColor: "rgba(45,212,150,0.13)", borderWidth: 0.001, cornerRadius: 0.0148 },
-  red: { background: "#201011", borderColor: "rgba(229,72,77,0.25)", borderWidth: 0.001, cornerRadius: 0.0148 },
-  amber: { background: "#1e190e", borderColor: "rgba(255,197,61,0.20)", borderWidth: 0.001, cornerRadius: 0.0148 },
+  // #141414, and the shared hairline. This is the "black" a card can actually be.
+  //
+  // Pure black was tried and is wrong here, measured: the stage canvas grounds at
+  // #0a0a0a, so a #000000 card is DARKER than the surface it sits on. It stops
+  // reading as a card and starts reading as a hole cut in the canvas -- an editor
+  // full of them looks blank. #141414 is two steps up from the canvas, which is
+  // what makes it a surface rather than an absence, and it is what the presets
+  // have always used.
+  //
+  // A TINTED card keeps its own coloured edge -- that is an accent the operator
+  // asked for, not a default.
+  neutral: { background: "#141414", borderColor: HAIRLINE_COLOR, borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
+  green: { background: "#0d1a15", borderColor: "rgba(45,212,150,0.13)", borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
+  red: { background: "#201011", borderColor: "rgba(229,72,77,0.25)", borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
+  amber: { background: "#1e190e", borderColor: "rgba(255,197,61,0.20)", borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
   flat: { background: null, borderColor: null, borderWidth: 0, cornerRadius: 0 },
 };
 
@@ -800,3 +853,27 @@ export const objectIntegration = (t: LayoutObjectType) => findLayoutObjectSpec(t
 export const isStylingOnly = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.stylingOnly === true;
 export const usesPropInstance = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.propInstance === true;
 export const objectRetired = (t: LayoutObjectType) => findLayoutObjectSpec(t)?.retired;
+
+/**
+ * The style a newly added widget starts with, for the surface it is added to.
+ *
+ * `hostDrawsFrame` is true only for Home, whose grid frames every tile. Anywhere
+ * else a host-framed widget gets the ordinary card, so it matches the widget
+ * beside it instead of sitting on the canvas with no edge at all.
+ */
+export function defaultStyleFor(
+  type: keyof typeof LAYOUT_OBJECTS,
+  opts: { hostDrawsFrame: boolean },
+): LayoutStyle {
+  // THROUGH defaultStyle, never the registry directly. It does two jobs this
+  // must not skip: it strips the `textAlign` that TEXT() writes but nobody
+  // chose, so DEFAULT_READOUT_ALIGN can still decide; and it reads through
+  // findLayoutObjectSpec, so a type this build does not know returns {} instead
+  // of throwing. Both were lost when makeObject and resetLook moved onto this
+  // function -- a readout added in the editor stored textAlign:"center"
+  // permanently, and Reset look on an object from a newer build white-screened
+  // the page.
+  const base = defaultStyle(type);
+  if (opts.hostDrawsFrame || !HOST_FRAMED_TYPES.has(type)) return base;
+  return { ...CARD_PRESETS.neutral, ...base };
+}
