@@ -119,9 +119,23 @@ export function useStageState(): UseStageStateResult {
   }, []);
 
   // Push the themeable brand accent into --brand-accent whenever it changes.
+  //
+  // ONLY ONCE HYDRATED. `--brand-accent` is one variable on the document root and
+  // seventeen components call this hook, each with its own `state`. Every one of
+  // them starts null, and calling applyAccentVar(undefined) REMOVES the override
+  // -- so any component mounting mid-session tore the accent off the whole page
+  // until its own fetch came back, and everything on the accent snapped to the
+  // CSS default and back. Opening a colour picker did exactly that: the panel's
+  // saved-colours list calls this hook, so the click that opened it flashed every
+  // accent-coloured thing on the page.
+  //
+  // A null accent from a HYDRATED state still clears it -- that is the operator
+  // choosing no brand colour, and it has to be honoured. What must not clear it
+  // is an instance that simply has not loaded yet.
   useEffect(() => {
-    applyAccentVar(state?.accentColor);
-  }, [state?.accentColor]);
+    if (!state) return;
+    applyAccentVar(state.accentColor);
+  }, [state, state?.accentColor]);
 
   return { state, isLoading, error };
 }

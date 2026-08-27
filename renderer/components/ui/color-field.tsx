@@ -9,7 +9,27 @@
 // hex box, and the palette the app is actually built from. It commits as you
 // drag, so the canvas behind it updates live rather than on close.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createElement, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import type { LucideIcon } from "lucide-react";
+import { IconGrid } from "../icon-grid";
+
+/**
+ * What a colour field needs in order to also own the icon it is colouring.
+ *
+ * The two were separate popups on the same object — click for the colour,
+ * right-click for the glyph — which meant one thing with two menus and a gesture
+ * nobody discovers. One panel: a preview in the colour being dragged, and a
+ * button that swaps the body for the grid.
+ */
+export interface IconEditing {
+  /** The icon as it is drawn right now, for the preview. */
+  glyph: LucideIcon;
+  /** The stored name, so the grid can mark it. */
+  current?: string | null;
+  onPick: (name: string) => void;
+  /** Back to the item's built-in icon. */
+  onClear: () => void;
+}
 import { createPortal } from "react-dom";
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
 
@@ -126,6 +146,7 @@ function ColorPanel({
   label,
   onChange,
   anchor,
+  icon,
 }: {
   initial: Rgba;
   allowAlpha: boolean;
@@ -133,8 +154,15 @@ function ColorPanel({
   onChange: (css: string) => void;
   /** The swatch this panel belongs to, for placing it. */
   anchor: HTMLElement | null;
+  /**
+   * When the thing being coloured is an ICON, the panel also owns which icon it
+   * is — one popup with a preview, not two menus for one object. Absent for
+   * every other colour field, which colours something that is not an icon.
+   */
+  icon?: IconEditing;
 }) {
   const saved = useSavedColors();
+  const [pickingIcon, setPickingIcon] = useState(false);
   const [draft, setDraft] = useState<Hsva>(() => rgbaToHsva(initial));
   const [typed, setTyped] = useState<string | null>(null);
 
@@ -208,6 +236,40 @@ function ColorPanel({
         "flex flex-col gap-2.5",
       )}
     >
+      {icon && (
+        <div className="flex items-center gap-2 border-b border-line pb-2.5">
+          {/* The icon, in the colour being dragged. A preview that did not follow
+              the draft would be showing the colour you just left. */}
+          <span
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg"
+            style={{ backgroundColor: `color-mix(in srgb, ${swatchCss} 12%, transparent)` }}
+          >
+            {createElement(icon.glyph, { className: "size-4", style: { color: swatchCss } })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPickingIcon((v) => !v)}
+            aria-pressed={pickingIcon}
+            className={cn(
+              "flex-1 rounded-md border border-line px-2 py-1 text-caption1 transition-colors",
+              "hover:bg-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+              pickingIcon ? "bg-fill text-fg" : "text-fg-muted",
+            )}
+          >
+            {pickingIcon ? "Back to colour" : "Change icon"}
+          </button>
+        </div>
+      )}
+
+      {icon && pickingIcon ? (
+        <IconGrid
+          current={icon.current}
+          tint={swatchCss}
+          onPick={(name) => { icon.onPick(name); setPickingIcon(false); }}
+          onClear={() => { icon.onClear(); setPickingIcon(false); }}
+        />
+      ) : (
+      <>
       {/* Saturation and value. The two gradients over a pure hue are the
           standard construction, and they cost nothing to draw. */}
       <div
@@ -357,9 +419,35 @@ function ColorPanel({
           </div>
         )}
       </div>
+      </>
+      )}
     </div>,
     document.body,
   );
+}
+
+/**
+ * One open colour panel in the document, whichever component owns it.
+ *
+ * A module-level subscriber list rather than context: these fields are rendered
+ * from a dozen unrelated places — the inspector, the Screens cards, the caption
+ * table, the saved-colour row — and threading a provider through all of them to
+ * enforce one rule would be a larger change than the rule is worth. There is one
+ * document, so there is one register.
+ */
+const closers = new Set<() => void>();
+
+function useOnlyOnePanel(open: boolean, setOpen: (v: boolean) => void): void {
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    // Close everyone else FIRST, then join — otherwise this one closes itself.
+    for (const other of [...closers]) other();
+    closers.add(close);
+    return () => {
+      closers.delete(close);
+    };
+  }, [open, setOpen]);
 }
 
 export function ColorField({
@@ -369,6 +457,7 @@ export function ColorField({
   fallback = "#ffffff",
   label = "Colour",
   className,
+  icon,
 }: {
   value: string | null | undefined;
   onChange: (css: string) => void;
@@ -380,8 +469,16 @@ export function ColorField({
   fallback?: string;
   label?: string;
   className?: string;
+  /** See IconEditing — present only when the thing being coloured is an icon. */
+  icon?: IconEditing;
 }) {
   const [open, setOpen] = useState(false);
+  // Opening THIS one closes whichever was open. `open` is per-instance state,
+  // so nothing coordinated them: three swatches on the Screens page opened three
+  // panels at once, each anchored to its own trigger and each editing something
+  // different. Measured before the fix — clicking three in a row left 1, 2, then
+  // 3 panels on screen.
+  useOnlyOnePanel(open, setOpen);
   const wrap = useRef<HTMLDivElement>(null);
   // In STATE, not a ref: the panel is placed from this element, so the render
   // that opens it has to be the render that knows where it is.
@@ -432,7 +529,14 @@ export function ColorField({
       />
 
       {open && (
-        <ColorPanel initial={parsed} allowAlpha={allowAlpha} label={label} onChange={onChange} anchor={trigger} />
+        <ColorPanel
+          initial={parsed}
+          allowAlpha={allowAlpha}
+          label={label}
+          onChange={onChange}
+          anchor={trigger}
+          icon={icon}
+        />
       )}
     </div>
   );
