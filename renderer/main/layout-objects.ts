@@ -152,12 +152,18 @@ type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
  * show through still has Fill and Opacity in the inspector.
  */
 export const CARD_PRESETS: Record<CardAccent, LayoutStyle> = {
-  // Black, and the shared hairline. It was #141414 at 8% white, a shade lighter
-  // and a shade fainter than the Solid surface beside it, so the same widget
-  // looked like two different components depending on which control had dressed
-  // it. A TINTED card keeps its own coloured edge -- that is an accent the
-  // operator asked for, not a default.
-  neutral: { background: "#000000", borderColor: HAIRLINE_COLOR, borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
+  // #141414, and the shared hairline. This is the "black" a card can actually be.
+  //
+  // Pure black was tried and is wrong here, measured: the stage canvas grounds at
+  // #0a0a0a, so a #000000 card is DARKER than the surface it sits on. It stops
+  // reading as a card and starts reading as a hole cut in the canvas -- an editor
+  // full of them looks blank. #141414 is two steps up from the canvas, which is
+  // what makes it a surface rather than an absence, and it is what the presets
+  // have always used.
+  //
+  // A TINTED card keeps its own coloured edge -- that is an accent the operator
+  // asked for, not a default.
+  neutral: { background: "#141414", borderColor: HAIRLINE_COLOR, borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
   green: { background: "#0d1a15", borderColor: "rgba(45,212,150,0.13)", borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
   red: { background: "#201011", borderColor: "rgba(229,72,77,0.25)", borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
   amber: { background: "#1e190e", borderColor: "rgba(255,197,61,0.20)", borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },

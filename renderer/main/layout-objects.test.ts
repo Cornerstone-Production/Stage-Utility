@@ -120,8 +120,9 @@ function withCurrentGround(style: Record<string, unknown>): Record<string, unkno
  *
  * Three widgets side by side on a wall had three different edges: the neutral
  * card and Glass carried 8% white, Solid carried NO border at all, and Outline
- * was half again as thick. One hairline and one ground now, so every carded type
- * moved at once — and again it is ONE rule with the same values everywhere, not
+ * was half again as thick. One hairline now, so every carded type moved at once.
+ * The GROUND did not move: #141414 stayed, because the canvas under it is
+ * #0a0a0a and a darker card reads as a hole — and again it is ONE rule with the same values everywhere, not
  * twenty hand-copied styles.
  *
  * Field by field, and only these fields: a type that changed anything ELSE still
@@ -129,7 +130,6 @@ function withCurrentGround(style: Record<string, unknown>): Record<string, unkno
  */
 function withCurrentChrome(style: Record<string, unknown>): Record<string, unknown> {
   const out = { ...style };
-  if (out.background === "#141414") out.background = "#000000";
   if (out.borderColor === "rgba(255,255,255,0.08)") out.borderColor = "rgba(255,255,255,0.1)";
   // Every preset's hairline, whatever it used to be — the neutral card and Glass
   // at 0.001, Outline at 0.0015.
