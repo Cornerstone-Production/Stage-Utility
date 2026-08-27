@@ -19,7 +19,7 @@ import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js"
 import { broadcast, channelHasSubscribers } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
-import { resolveSlots } from "./slot-resolver.js";
+import { resolveSlots, MIN_FACE_ASPECT } from "./slot-resolver.js";
 import { migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
@@ -2657,7 +2657,12 @@ export class StageController {
     const slotsByLayoutObject: Record<string, Slot[]> = {};
     const resolveObjectSlots = (oid: string) => {
       const raw = this.rawSlotsByObject.get(oid) ?? [];
-      slotsByLayoutObject[oid] = resolveSlots(raw, this.teamMembers, this.deviceStatuses);
+      // An inline grid draws a far squarer cell than a display column of the same
+      // slot count, so it needs a crop that keeps the whole face. See
+      // MIN_FACE_ASPECT. The view path above deliberately does not pass this:
+      // its column model is already right, and a floor there would only ship
+      // pixels the browser crops off again.
+      slotsByLayoutObject[oid] = resolveSlots(raw, this.teamMembers, this.deviceStatuses, MIN_FACE_ASPECT);
     };
     forEachInlineSlotsGrid(this.state.views, resolveObjectSlots);
     for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
