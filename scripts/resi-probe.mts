@@ -86,6 +86,51 @@ function shape(value: unknown, depth = 0): unknown {
   return value;
 }
 
+
+/**
+ * Every row of a list, reduced to the fields that decide "is this live".
+ *
+ * `shape()` keeps one sample, which was enough to learn that events carry a
+ * scheduleId and a time window and NOT enough to tell which of eleven events is
+ * the one on air. This keeps the timing and status of all of them.
+ *
+ * Names are kept — an encoder name and an event name are what make a capture
+ * readable, and they are already visible in the app. Urls are dropped: they are
+ * long, they carry bucket paths, and they answer nothing here.
+ */
+function liveFields(rows: unknown): unknown {
+  if (!Array.isArray(rows)) return undefined;
+  const KEEP = [
+    "uuid",
+    "name",
+    "encoderName",
+    "encoderId",
+    "scheduleId",
+    "status",
+    "state",
+    "operationalState",
+    "startTime",
+    "stopAfter",
+    "endTime",
+    "lastUpdate",
+    "isLive",
+    "live",
+  ];
+  return rows.map((row) => {
+    if (!row || typeof row !== "object") return row;
+    const src = row as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of KEEP) if (k in src) out[k] = shape(src[k]);
+    // Anything else whose NAME suggests a state, so a field we have not thought
+    // of cannot hide. Values only, still shaped.
+    for (const [k, v] of Object.entries(src)) {
+      if (k in out) continue;
+      if (/status|state|live|active|stream|broadcast|start|stop|end/i.test(k)) out[k] = shape(v);
+    }
+    return out;
+  });
+}
+
 async function req(url: string, token: string): Promise<{ ok: boolean; status: number; body: unknown }> {
   try {
     const res = await fetch(url, {
@@ -164,7 +209,11 @@ async function main(): Promise<void> {
   const results: Record<string, unknown> = {};
   for (const [name, url] of targets) {
     const r = await req(url, token);
+    const rows = r.ok ? liveFields(r.body) : undefined;
     results[name] = {
+      // Every row's timing and status, not just one sample — which of eleven
+      // events is on air is the whole question.
+      ...(rows ? { rows } : {}),
       // The path without the customer id: that is account-identifying and adds
       // nothing to the question.
       path: url.replace(c, "{customerId}"),
@@ -173,6 +222,59 @@ async function main(): Promise<void> {
       error: r.ok ? undefined : shape(r.body),
     };
     console.log(`  ${r.status === 200 ? "ok  " : String(r.status).padEnd(4)} ${name}`);
+  }
+
+  // ── Phase 2: follow a scheduleId ──────────────────────────────────────────
+  //
+  // THE UNLOCK. Bitfocus can read destination status -- the real "we are live" --
+  // but only for streams it started, because a scheduleId comes back from the
+  // POST that starts one and nowhere else. /events lists them for the whole
+  // account, so we have ids for streams nobody here started.
+  //
+  // Whether a schedule can then be READ on this API is the open question; the
+  // list form answered 400, which means the endpoint exists and wants something.
+  {
+    const evRows = (results.events as { rows?: Record<string, unknown>[] } | undefined)?.rows ?? [];
+    const ids = [...new Set(evRows.map((e) => String(e.scheduleId ?? "")).filter(Boolean))].slice(0, 3);
+    const followed: Record<string, unknown> = {};
+    for (const id of ids) {
+      for (const [label, url] of [
+        ["v3", `${API}/schedules/${encodeURIComponent(id)}`],
+        ["v3_customer", `${API}/customers/${c}/schedules/${encodeURIComponent(id)}`],
+        ["v2", `${API_V2}/schedules/${encodeURIComponent(id)}`],
+      ] as [string, string][]) {
+        const r = await req(url, token);
+        // The id itself is not recorded: it identifies a broadcast, and the shape
+        // is what the question needs.
+        followed[`${label}_${ids.indexOf(id) + 1}`] = {
+          path: url.replace(c, "{customerId}").replace(id, "{scheduleId}"),
+          httpStatus: r.status,
+          shape: r.ok ? shape(r.body) : undefined,
+        };
+        console.log(`  ${r.status === 200 ? "ok  " : String(r.status).padEnd(4)} schedule ${label}`);
+      }
+    }
+    results.schedule_by_id = followed;
+  }
+
+  // Say what it means, rather than leaving it to be read out of JSON. The whole
+  // point is to find a signal that disagrees with the encoder.
+  const nowMs = Date.now();
+  const events = (results.events as { rows?: Record<string, unknown>[] } | undefined)?.rows ?? [];
+  const inWindow = events.filter((e) => {
+    const start = Date.parse(String(e.startTime ?? ""));
+    const stop = Date.parse(String(e.stopAfter ?? ""));
+    return Number.isFinite(start) && start <= nowMs && (!Number.isFinite(stop) || nowMs < stop);
+  });
+  const encoders = (results.encoders_status_wide as { rows?: Record<string, unknown>[] } | undefined)?.rows ?? [];
+  const started = encoders.filter((e) => String(e.status ?? "").toLowerCase() === "started");
+
+  console.log("");
+  console.log(`  encoders reporting "started": ${started.length} of ${encoders.length}`);
+  console.log(`  events inside their start/stop window: ${inWindow.length} of ${events.length}`);
+  if (started.length !== inWindow.length) {
+    console.log("  ^ these DISAGREE — which is the whole point: the encoder and the");
+    console.log("    broadcast are different states, and the event window is the truer one.");
   }
 
   const out = "resi-capture.json";
