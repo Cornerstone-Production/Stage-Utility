@@ -28,56 +28,8 @@ jobs:
       - name: Check commit subjects
         run: |
           set -uo pipefail
-          PATTERN='^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([a-z0-9.+/-]+\))?!?: .+'
-          # `git revert` writes `Revert "<original subject>"` and offering to
-          # reword it is the wrong trade: the only way to fix such a commit after
-          # it is pushed is to rewrite the branch, and beta and main are never
-          # force-pushed. The generated form is unambiguous, so accept it.
-          REVERT_PATTERN='^Revert ".+"'
-          BASE="origin/${{ github.base_ref }}"
+          # The pattern lives in the script, not here. It was in both, and the
+          # only thing worse than a rule in two places is a local check that
+          # disagrees with the CI enforcing it.
           git fetch -q origin "${{ github.base_ref }}"
-
-          # --no-merges: GitHub authors merge commits and they carry no release meaning.
-          mapfile -t SUBJECTS < <(git log --no-merges --format='%s' "$BASE..HEAD")
-
-          if [ ${#SUBJECTS[@]} -eq 0 ]; then
-            echo "No non-merge commits to check."
-            exit 0
-          fi
-
-          BAD=0
-          for s in "${SUBJECTS[@]}"; do
-            if [[ "$s" =~ $PATTERN || "$s" =~ $REVERT_PATTERN ]]; then
-              echo "  ok   $s"
-            else
-              echo "  BAD  $s"
-              BAD=1
-            fi
-          done
-
-          if [ "$BAD" -ne 0 ]; then
-            cat <<'EOF'
-
-          One or more commit subjects do not follow the convention.
-
-            type(scope): subject
-
-          type must be one of:
-            feat fix perf refactor docs test build ci chore revert
-
-          scope is optional and lower-case. Add "!" after the type/scope for a
-          breaking change. Subject is imperative mood, no trailing period.
-
-          Examples:
-            feat(patch): rack colour on its header card
-            fix(server): reject cross-origin state-changing requests
-            feat(types)!: rename Slot.channel to Slot.channelId
-
-          See docs/contributing.md. Reword with:
-            git rebase -i origin/${{ github.base_ref }}
-
-          EOF
-            exit 1
-          fi
-
-          echo "All ${#SUBJECTS[@]} commit(s) follow the convention."
+          node scripts/check-commit-subjects.mjs "origin/${{ github.base_ref }}"
