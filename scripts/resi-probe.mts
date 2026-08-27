@@ -22,7 +22,7 @@
 // That path is closed to us and it is worth being precise about why: a
 // scheduleId only comes back from the POST that STARTS a stream, so the module
 // persists the ids it created (self.SCHEDULE_IDS, saved to its config). A stream
-// started on Resi's own schedule — which is how Cornerstone goes live — was
+// started on Resi's own schedule — which is how most operators go live — was
 // never created by us, so we never have its id.
 //
 // SO THIS PROBES THE INTERNAL API INSTEAD.
@@ -277,6 +277,10 @@ async function main(): Promise<void> {
     console.log("    broadcast are different states, and the event window is the truer one.");
   }
 
+  // Gitignored, and it has to stay that way: this is a live pull off a real
+  // account -- encoder and schedule uuids, service names, the operator's own
+  // name. A copy of it reached the public repo once (52e8d9c) before anyone
+  // noticed. Read it, take the fields you need, do not commit it.
   const out = "resi-capture.json";
   writeFileSync(out, JSON.stringify({ capturedAt: new Date().toISOString(), results }, null, 2));
   console.log(`\nWrote ${out}`);
