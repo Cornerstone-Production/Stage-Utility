@@ -10,7 +10,7 @@ import { test, describe } from "node:test";
 
 import { readFileSync } from "node:fs";
 
-import { resolveSlots, fitAvatarToColumn, normaliseAudioLevel, MIN_FACE_ASPECT } from "./slot-resolver.js";
+import { resolveSlots, fitAvatarToColumn, normaliseAudioLevel } from "./slot-resolver.js";
 import type { Slot, SlotLink, TeamMemberDTO } from "../types/stage.js";
 import type { DeviceStatus } from "../types/devices.js";
 
@@ -385,90 +385,88 @@ describe("avatar crop matches the shape the slot is drawn at", () => {
   });
 });
 
-// ── The face the crop throws away ──────────────────────────────────────────
-// An inline slots-grid on a custom layout draws a far squarer cell than a
-// display column of the same slot count: measured 71x143 in a browser, an
-// aspect of 0.50, against the 0.16 the column model assumes for 14 slots.
+// ── Cropping a shape the server cannot see ────────────────────────────────
+// A standalone slots display is a row of tall columns and the crop is modelled
+// on exactly that. Nothing else is. An inline slots-grid is whatever size the
+// operator dragged it to.
 //
-// PCO's crop is centred and irreversible. Asking it for 0.16 and then drawing
-// 0.50 does not show more of the face, it shows a stretched sliver of the
-// middle of it. Measured end to end against a 600x800 headshot whose face spans
-// columns 170..430: PCO returned 126x800, keeping columns 237..363 — 51% of the
-// face's width, gone before the browser saw the file.
+// PCO's crop is centred and irreversible, so a guess costs pixels that cannot
+// come back. Both guesses were made and both were wrong: crop to the column
+// shape and a 14-slot grid asked for 0.16 while drawing 0.50, destroying 51% of
+// the face's width; crop to a floor wide enough for a face and a LANDSCAPE cell
+// drew that portrait strip letterboxed inside it, black bars either side.
 //
-// The floor is expressed against the requested HEIGHT rather than as a pixel
-// count, because a stacked slot asks for a shorter crop and a fixed width would
-// mean a different shape at every depth.
+// So a caller that does not know the shape asks for the whole image.
 
-describe("the crop an inline slots-grid asks for", () => {
-  const geometry = (url: string | null) => {
-    const m = /[?&]g=(\d+)x(\d+)/.exec(url!);
-    return { w: Number(m![1]), h: Number(m![2]), aspect: Number(m![1]) / Number(m![2]) };
-  };
+describe("an avatar for a box whose shape the server cannot know", () => {
+  const geom = (url: string | null) => /[?&]g=([^&]+)/.exec(url!)![1];
 
-  test("keeps the whole of a face, where the column alone would not", () => {
-    const g = geometry(fitAvatarToColumn("http://x/a.jpg", 14, 1, MIN_FACE_ASPECT));
-    // A face spans the middle ~43% of a 3:4 frame; below (0.43 x 3)/4 the crop
-    // starts eating it. The column model alone asks for 0.158 here.
-    assert.ok(g.aspect >= 0.32, `aspect ${g.aspect.toFixed(3)} cuts into the face`);
+  test("asks for the whole image, with no crop flag at all", () => {
+    const g = geom(fitAvatarToColumn("http://x/a.jpg", 14, 1, "whole"));
+    assert.ok(!/%23|#/.test(g), `%23 is the crop flag and must be absent: g=${g}`);
   });
 
-  test("is the SHAPE that is floored, not the pixel width", () => {
-    // Same rule, two stack depths. A pixel floor would give the shorter crop a
-    // different shape and re-introduce the bug for stacked slots only.
-    for (const depth of [1, 2, 3]) {
-      const g = geometry(fitAvatarToColumn("http://x/a.jpg", 30, depth, MIN_FACE_ASPECT));
-      assert.ok(g.aspect >= 0.32, `depth ${depth}: aspect ${g.aspect.toFixed(3)}`);
+  test("and the same one whatever the column count or stack depth", () => {
+    // The point: none of these inputs describe the real box, so none of them
+    // may change the request. A crop that varies with a number it should not
+    // trust is the bug, whichever direction it varies in.
+    const all = new Set<string>();
+    for (const columns of [1, 4, 9, 13, 14, 30]) {
+      for (const depth of [1, 2, 3]) {
+        all.add(geom(fitAvatarToColumn("http://x/a.jpg", columns, depth, "whole"))!);
+      }
     }
+    assert.equal(all.size, 1, `one geometry expected, got ${[...all].join(", ")}`);
   });
 
-  test("costs a display nothing, because a display does not ask for it", () => {
-    // The column model is right for a display column, and a floor there would
-    // only ship pixels the browser crops off again.
-    //
+  test("never asks for an upscale past the source ceiling", () => {
+    const [w, h] = geom(fitAvatarToColumn("http://x/a.jpg", 9, 1, "whole"))!.split("x").map(Number);
+    assert.ok(w <= 1000 && h <= 1000, `${w}x${h}`);
+  });
+
+  test("rewrites an existing geometry rather than appending a second", () => {
+    const out = fitAvatarToColumn("http://x/a.jpg?g=158x1000%23&z=1", 14, 1, "whole");
+    assert.equal((out!.match(/g=/g) ?? []).length, 1, out!);
+    assert.match(out!, /z=1/, "other params survive");
+    assert.ok(!/%23/.test(out!), "the old crop flag must not survive either");
+  });
+});
+
+describe("a display, whose box really is a tall column", () => {
+  test("keeps the crop, byte for byte — its shape is not a guess", () => {
     // EXACT geometries, not a comparison against another call of this function:
     // written that way, moving the DEFAULT moves both sides together and the
     // regression this test is named for sails straight through. It did, once.
     const expected: Record<number, string> = {
-      4: "550x1000",
-      9: "245x1000",
-      13: "170x1000",
-      14: "158x1000",
+      4: "550x1000%23",
+      9: "245x1000%23",
+      13: "170x1000%23",
+      14: "158x1000%23",
     };
     for (const [columns, want] of Object.entries(expected)) {
-      const got = /[?&]g=(\d+x\d+)/.exec(fitAvatarToColumn("http://x/a.jpg", Number(columns))!)![1];
-      assert.equal(got, want, `columns=${columns}`);
-    }
-  });
-
-  test("never asks for more than the source has", () => {
-    const g = geometry(fitAvatarToColumn("http://x/a.jpg", 1, 1, MIN_FACE_ASPECT));
-    assert.ok(g.w <= 1000, `got ${g.w}`);
-  });
-
-  test("a wide-enough column is left alone — the floor only ever raises", () => {
-    for (const columns of [1, 2, 3, 4, 5, 6]) {
-      const floored = geometry(fitAvatarToColumn("http://x/a.jpg", columns, 1, MIN_FACE_ASPECT));
-      const plain = geometry(fitAvatarToColumn("http://x/a.jpg", columns));
-      assert.equal(floored.w, plain.w, `columns=${columns} should be untouched`);
+      assert.equal(
+        /[?&]g=([^&]+)/.exec(fitAvatarToColumn("http://x/a.jpg", Number(columns))!)![1],
+        want,
+        `columns=${columns}`,
+      );
     }
   });
 });
 
-describe("the inline-grid path is actually wired to it", () => {
-  // Without this, deleting the argument at the call site leaves every test above
-  // green while every inline grid goes back to cutting faces.
-  test("stage-controller resolves inline slots with the face floor", () => {
+describe("which path each caller takes", () => {
+  // Without this, swapping either argument leaves every test above green while
+  // every real photo goes back to being cropped to a shape nobody measured.
+  test("an inline slots-grid asks for the whole image", () => {
     const src = readFileSync(new URL("./stage-controller.ts", import.meta.url), "utf8");
     const call = /slotsByLayoutObject\[oid\]\s*=\s*resolveSlots\(([^;]*)\)/.exec(src);
     assert.ok(call, "could not find the inline slots resolution in stage-controller.ts");
-    assert.match(call[1], /MIN_FACE_ASPECT/, "inline grids are resolved without the face floor");
+    assert.match(call[1], /"whole"/, "an inline grid is being cropped to a guessed shape");
   });
 
-  test("and the display path is still left without one", () => {
+  test("a slots View keeps the column crop", () => {
     const src = readFileSync(new URL("./stage-controller.ts", import.meta.url), "utf8");
     const call = /slotsByView\[view\.id\]\s*=\s*resolveSlots\(([^;]*)\)/.exec(src);
     assert.ok(call, "could not find the view slots resolution in stage-controller.ts");
-    assert.doesNotMatch(call[1], /MIN_FACE_ASPECT/, "a display should not pay for the floor");
+    assert.doesNotMatch(call[1], /"whole"/, "a display should keep its byte saving");
   });
 });

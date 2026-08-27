@@ -600,11 +600,13 @@ body {
  * positioned, and a face needs about 60% starting near the top. Moving the crop
  * window cannot fix it; only changing the fit can.
  *
- * So the box decides. Portrait or square box -- the tall column a slots display
- * has always been -- keeps cover, which fills the card and looks right. Landscape
- * box, which is what a slots object dropped into a custom layout is, switches to
- * contain: the whole head, every time, with the card showing at the sides.
- * A gutter beside a face beats a face with no chin.
+ * Note the SOURCE in that measurement: 440x432, nearly square. That is what PCO
+ * returned when the app asked it to crop, and a near-square source is why cover
+ * ran out of height in a landscape box. The fit was never the real problem.
+ *
+ * An inline grid now receives the whole 3:4 headshot instead (see AvatarFit in
+ * slot-resolver.ts), and a tall source has height to spare: cover fills the cell
+ * at every box shape and 28% keeps the face. So there is one rule, not two.
  */
 .slot-photo {
   container-type: size;
@@ -617,9 +619,12 @@ body {
   object-position: center 28%;
 }
 
-@container (min-aspect-ratio: 1/1) {
-  .slot-photo img {
-    object-fit: contain;
-    object-position: center;
-  }
-}
+/* No `contain` variant for a landscape box.
+   It was added so a wide cell would show the whole photo rather than crop it,
+   but the photo it was given was a narrow strip PCO had already cropped, so a
+   landscape cell drew that strip letterboxed with black bars either side.
+   Reported as the photos looking horrible.
+   The strip is gone -- an inline grid now receives the whole image (see
+   AvatarFit in slot-resolver.ts) -- and with a whole 3:4 headshot `cover` at
+   28% fills the cell and keeps the entire face: measured on a 195x165 cell,
+   source rows 82..590 visible of 800, with the face at 120..380. */

@@ -36,11 +36,11 @@ re-send the plan, slot configuration and layouts along with it.
   resolving and serialising.
 - **Images are content-addressed and immutable.** Logos, layout images and people's
   photos are named by a hash of their bytes and cached for a year — a changed image
-  is a new URL. Photos are also cropped to the shape they are drawn at — for a
-  display column, which is a tall sliver. An inline mic-slots object on a custom
-  layout draws a much squarer cell, so it asks for a crop wide enough to keep a
-  whole face (about 2x the bytes of a display's crop, for the slots on that
-  layout only).
+  is a new URL. A slots DISPLAY also has its photos cropped to the column shape
+  they are drawn at, which is a tall sliver — that is the saving. An inline
+  mic-slots object on a custom layout is whatever size it was dragged to, so
+  nothing server-side knows its shape: it receives the whole image and the
+  browser crops it. Larger, for the slots on that layout only.
 
 Idle, the stream is silent: measured at 0 bytes over 12 seconds on a server with
 nothing happening.
