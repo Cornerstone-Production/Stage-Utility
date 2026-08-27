@@ -77,6 +77,12 @@ export interface StageState {
    *  "#rrggbb". One map covers the Displays cards, the Connect tool cards and the
    *  picker tiles, so a color set anywhere shows everywhere that item appears. */
   iconColors?: Record<string, string>;
+  /** Icon GLYPH per display id or tool path, as a name from the curated set in
+   *  `renderer/components/icon-set.ts`. Same keys as `iconColors`, for the same
+   *  reason: the icon belongs to the thing, not to the screen it is drawn on.
+   *  Absent, or a name this build does not know, falls back to the built-in icon
+   *  for that item — a set trimmed in a later release must not blank an icon. */
+  iconGlyphs?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
   /** Live battery bays from any Shure SBC charger connections. */

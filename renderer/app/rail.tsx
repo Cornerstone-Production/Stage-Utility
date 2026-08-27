@@ -13,6 +13,7 @@
 // inline rail and the mobile drawer.
 
 import { Fragment } from "react";
+import { ConsoleRailIcon } from "../components/console-rail-icon";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import {
@@ -27,7 +28,6 @@ import { BrandLogo } from "../components/brand-logo";
 import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { useTheme } from "../lib/use-theme";
-import { SlidersHorizontalIcon } from "lucide-react";
 import { viewSurface } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { buildLabel } from "../lib/build-label";
@@ -94,7 +94,18 @@ export function Rail({
       path: `/consoles/${v.id}`,
       label: v.name,
       description: "A console you built.",
-      icon: <SlidersHorizontalIcon className="size-4" />,
+      // Right-click it to change the glyph, the same gesture the Screens cards
+      // carry — a console is a thing the operator made, so its icon is theirs
+      // too. Keyed by view id, alongside display ids and tool paths in the same
+      // map, and it draws SlidersHorizontal until they pick something.
+      // A PLAIN GLYPH. Nothing interactive goes in here: the row itself is a
+      // <button>, and putting one inside it is invalid markup whose outer button
+      // swallows the click — the page navigated every time an icon was touched.
+      // Right-clicking the glyph opens the set, from a portal.
+      //
+      // No colour either. The rail tints its own icons by active state, like
+      // every other tab, and a colour set here would draw nothing.
+      icon: <ConsoleRailIcon viewId={v.id} label={v.name} outputs={state?.outputs ?? []} />,
       Component: () => null, // routing is by path; the route table owns the component
     }));
 

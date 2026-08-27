@@ -552,6 +552,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "icons:setColor":
       return post<T>("/api/icon-color", { key: p.key, color: p.color });
 
+    // Icon glyph for the same key; "" restores the item's built-in icon.
+    case "icons:setIcon":
+      return post<T>("/api/icon-glyph", { key: p.key, glyph: p.glyph });
+
     case "outputs:setSlug": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { slug: p.slug });

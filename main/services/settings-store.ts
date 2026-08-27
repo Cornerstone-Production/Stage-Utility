@@ -86,6 +86,7 @@ export interface SettingsData {
    *  QR code and display links instead of the LAN IP. Null = use the LAN IP. */
   publicUrl: string | null;
   iconColors?: Record<string, string>;
+  iconGlyphs?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label (channelName,
    *  or channelId when unnamed). Overrides the auto/ProdCom color. */
   captionChannelColors: Record<string, string>;
@@ -160,6 +161,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   ndiEnabled: false,
   publicUrl: null,
   iconColors: {},
+  iconGlyphs: {},
   captionChannelColors: {},
   autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
   oscFeedbackPort: 9000,

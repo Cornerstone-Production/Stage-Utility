@@ -141,6 +141,19 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // ── Icon glyph (display id or tool path) ────────────────────────────────
+    if (method === "POST" && pathname === "/api/icon-glyph") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const key = typeof body.key === "string" ? body.key : "";
+      const glyph = typeof body.glyph === "string" ? body.glyph : "";
+      try {
+        json(res, await stageController.setIconGlyph(key, glyph));
+      } catch (err) {
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+
     // ── Caption channel colors ──────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/caption-colors") {
       const body = await readBody(req) as Record<string, unknown>;

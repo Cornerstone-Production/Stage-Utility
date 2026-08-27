@@ -21,6 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
+import { viewSurface } from "@main/types/views";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
@@ -699,13 +700,41 @@ export function useStageSettings(pinnedViewId?: string) {
    * part; it says what to do instead.
    */
   async function handleSetOutputMode(id: string, mode: "display" | "panel") {
-    await writeState("outputs:setMode", { id, mode });
+    const next = await writeTo<StageState>(["stage:getState"], "outputs:setMode", { id, mode });
+    if (!next) return;
+    // AND the view it shows, or the two halves disagree.
+    //
+    // A screen's `mode` and a view's `surface` are different fields and were only
+    // ever wired one way: assigning a console view to a screen offers to make the
+    // screen a panel. Going the other way did nothing, so "Use as a control
+    // surface" left the view still marked a wall screen — and the rail lists
+    // CONSOLES from `view.surface`, so the console the operator had just made
+    // never appeared until they set it a second time in the editor.
+    const shown = next.outputs.find((o) => o.id === id)?.viewId ?? null;
+    if (!shown) return;
+    const want = mode === "panel" ? "console" : "display";
+    const view = next.views.find((v) => v.id === shown);
+    if (!view || viewSurface(view) === want) return;
+    // Its own write, and a refusal here is the server's to explain: turning a
+    // view back into a wall screen is refused while another screen needs it as a
+    // console, and that message is written for the operator.
+    await writeState("views:setSurface", { id: shown, surface: want });
   }
 
   /** Change what a View is for. Refused, with its reason, when screens would be
    *  stranded — so the message reaches the operator rather than the console. */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
-    await writeState("views:setSurface", { id, surface });
+    const next = await writeTo<StageState>(["stage:getState"], "views:setSurface", { id, surface });
+    if (!next) return;
+    // AND every screen showing it, for the same reason in reverse. A view marked
+    // a control surface whose screens are still read-only renders buttons that
+    // do nothing, which is the failure this pairing exists to prevent.
+    const want = surface === "console" ? "panel" : "display";
+    for (const o of next.outputs) {
+      if (o.viewId !== id) continue;
+      if ((o.mode ?? "display") === want) continue;
+      await writeState("outputs:setMode", { id: o.id, mode: want });
+    }
   }
 
   async function handleRemoveOutput(id: string) {
