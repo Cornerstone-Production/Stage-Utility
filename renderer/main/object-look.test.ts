@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { LAYOUT_OBJECTS } from "./layout-objects.js";
+import { HOST_FRAMED_TYPES, LAYOUT_OBJECTS, defaultStyleFor } from "./layout-objects.js";
 
 /** Content whose box is drawn for it, or that is deliberately full-bleed. */
 const BARE = [
@@ -81,5 +81,66 @@ describe("slide text reads from the back of the room", () => {
     for (const t of ["current-slide-text", "next-slide-text", "current-slide-notes"] as const) {
       assert.equal(hasCard(t), false, `${t} gained a card it should not have`);
     }
+  });
+});
+
+// ── The same widget, two destinations ──────────────────────────────────────
+// A Resi status dropped on a wall sat there with no edge at all, beside a REAPER
+// status wearing a card. They are the same kind of widget and read as two
+// different components.
+//
+// The BARE list above is right, and is why: Home's grid draws one tile frame
+// around everything on it, so a card there is a second box inside that tile. But
+// the palette offers these on a custom layout too, where nothing draws a frame.
+//
+// The frame belongs to the DESTINATION, not to the widget, so the default has to
+// know which surface it is being added to.
+
+describe("a Home tile added somewhere that is not Home", () => {
+  const chrome = (s: Record<string, unknown>) =>
+    ["background", "borderColor", "cornerRadius"].some((k) => s[k] != null);
+
+  test("wears a card, so it matches the widget beside it", () => {
+    for (const t of HOST_FRAMED_TYPES) {
+      const s = defaultStyleFor(t as never, { hostDrawsFrame: false }) as Record<string, unknown>;
+      assert.ok(chrome(s), `${t} is still bare on a custom layout`);
+    }
+  });
+
+  test("and stays bare on Home, where the grid already frames it", () => {
+    for (const t of HOST_FRAMED_TYPES) {
+      const s = defaultStyleFor(t as never, { hostDrawsFrame: true }) as Record<string, unknown>;
+      assert.ok(!chrome(s), `${t} would draw a second box inside its Home tile`);
+    }
+  });
+
+  test("a Resi status and a REAPER status end up wearing the same card", () => {
+    // The actual report, as an assertion. reaper-status was never host-framed,
+    // so it is the fixed point both must agree with.
+    const resi = defaultStyleFor("home-streaming-resi", { hostDrawsFrame: false }) as Record<string, unknown>;
+    const youtube = defaultStyleFor("home-streaming-youtube", { hostDrawsFrame: false }) as Record<string, unknown>;
+    const reaper = defaultStyleFor("reaper-status", { hostDrawsFrame: false }) as Record<string, unknown>;
+    for (const k of ["background", "borderColor", "borderWidth", "cornerRadius"]) {
+      assert.equal(resi[k], reaper[k], `Resi's ${k} differs from REAPER's`);
+      assert.equal(youtube[k], reaper[k], `YouTube's ${k} differs from REAPER's`);
+    }
+  });
+
+  test("every widget that wears a card wears the SAME card", () => {
+    // One hairline, one ground, one radius. Three widgets on a wall had three
+    // different edges before this.
+    const grounds = new Set<unknown>(), borders = new Set<unknown>(), widths = new Set<unknown>(), radii = new Set<unknown>();
+    for (const t of Object.keys(LAYOUT_OBJECTS)) {
+      // A shape's fill IS the object -- a blue rectangle is not a blue card, and
+      // holding it to the card's ground would make every shape black.
+      if (t === "shape") continue;
+      const s = defaultStyleFor(t as never, { hostDrawsFrame: false }) as Record<string, unknown>;
+      if (!chrome(s)) continue;
+      grounds.add(s.background); borders.add(s.borderColor); widths.add(s.borderWidth); radii.add(s.cornerRadius);
+    }
+    assert.deepEqual([...grounds], ["#000000"], "more than one card ground");
+    assert.deepEqual([...borders], ["rgba(255,255,255,0.1)"], "more than one border colour");
+    assert.deepEqual([...widths], [1 / 1080], "more than one hairline width");
+    assert.deepEqual([...radii], [0.0148], "more than one corner radius");
   });
 });

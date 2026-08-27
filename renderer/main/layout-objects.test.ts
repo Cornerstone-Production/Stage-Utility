@@ -115,6 +115,28 @@ function withCurrentGround(style: Record<string, unknown>): Record<string, unkno
   const opaque = bg ? LEGACY_TRANSLUCENT_GROUNDS[bg.replace(/\s+/g, "")] : undefined;
   return opaque ? { ...style, background: opaque } : style;
 }
+/**
+ * The chrome swap, applied the same way and for the same reason.
+ *
+ * Three widgets side by side on a wall had three different edges: the neutral
+ * card and Glass carried 8% white, Solid carried NO border at all, and Outline
+ * was half again as thick. One hairline and one ground now, so every carded type
+ * moved at once — and again it is ONE rule with the same values everywhere, not
+ * twenty hand-copied styles.
+ *
+ * Field by field, and only these fields: a type that changed anything ELSE still
+ * has to be recorded in RESTYLED by hand.
+ */
+function withCurrentChrome(style: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...style };
+  if (out.background === "#141414") out.background = "#000000";
+  if (out.borderColor === "rgba(255,255,255,0.08)") out.borderColor = "rgba(255,255,255,0.1)";
+  // Every preset's hairline, whatever it used to be — the neutral card and Glass
+  // at 0.001, Outline at 0.0015.
+  if (out.borderWidth === 0.001 || out.borderWidth === 0.0015) out.borderWidth = 1 / 1080;
+  return out;
+}
+
 const BASE_TEXT = { fontSize: 0.06, fontWeight: 500, color: "#ffffff", textAlign: "center", vAlign: "middle" };
 
 /**
@@ -512,7 +534,10 @@ describe("layout-object registry vs. the structures it replaced", () => {
     for (const t of ALL) {
       assert.deepEqual(
         defaultStyle(t as never),
-        withoutRemoved(RESTYLED[t] ?? withCurrentGround(originalStyle(t))),
+        // The chrome swap wraps the WHOLE expression, hand-recorded restyles
+        // included: it is one uniform change and it reached them too. Every
+        // other field of a RESTYLED entry stays pinned.
+        withoutRemoved(withCurrentChrome(RESTYLED[t] ?? withCurrentGround(originalStyle(t)))),
         `defaultStyle("${t}")`,
       );
     }
@@ -528,7 +553,9 @@ describe("layout-object registry vs. the structures it replaced", () => {
     const registry = Object.keys(LAYOUT_OBJECTS);
     for (const t of Object.keys(RESTYLED)) {
       assert.ok(registry.includes(t), `RESTYLED names "${t}", which is not an object type`);
-      assert.deepEqual(withoutRemoved(RESTYLED[t]), defaultStyle(t as never), `RESTYLED["${t}"] no longer matches the registry`);
+      // Same chrome rule as above: a recorded restyle is pinned on every field
+      // EXCEPT the one uniform swap, which reached it along with everything else.
+      assert.deepEqual(withoutRemoved(withCurrentChrome(RESTYLED[t])), defaultStyle(t as never), `RESTYLED["${t}"] no longer matches the registry`);
       if (ALL.includes(t)) {
         assert.notDeepEqual(withoutRemoved(RESTYLED[t]), withoutRemoved(originalStyle(t)), `RESTYLED["${t}"] matches the original`);
       }
