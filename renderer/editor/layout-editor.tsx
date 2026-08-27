@@ -102,6 +102,7 @@ import {
 } from "./inspector-rows";
 export { dashboardTemplate, confidenceMonitorTemplate };
 import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
+import { canvasRowFlexClass } from "./canvas-row-fit";
 
 // ── object metadata ──────────────────────────────────────────────────────────
 
@@ -1828,8 +1829,10 @@ export function LayoutEditor({
 
       {/* Fill the editor height so the side panel can use the full window height —
           except while editing an inline slots-grid, where the row stays preview-tall
-          so the InlineSlotsEditor below it stays reachable without a huge gap. */}
-      <div className={`flex gap-3 @max-4xl:flex-col min-h-0 ${!inlineGrid ? "flex-1" : ""}`}>
+          so the InlineSlotsEditor below it stays reachable without a huge gap, and
+          must be told not to shrink. See canvas-row-fit.ts for what happens when
+          it is not. */}
+      <div className={`flex gap-3 @max-4xl:flex-col min-h-0 ${canvasRowFlexClass(!!inlineGrid)}`}>
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
