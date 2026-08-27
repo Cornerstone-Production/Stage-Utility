@@ -71,9 +71,13 @@ describe("reset to default look", () => {
 
 describe("it is wired the way it is tested", () => {
   test("the editor replaces the style rather than patching it", () => {
+    // defaultStyleFor, not defaultStyle: the default now depends on the surface
+    // being edited, because Home frames its own tiles and nothing else does.
+    // Still an ASSIGNMENT -- the point of this assertion is that reset replaces
+    // the style rather than spreading a patch over whatever was there.
     assert.match(
       EDITOR,
-      /style:\s*defaultStyle\(o\.config\.type\)/,
+      /style:\s*defaultStyleFor\(o\.config\.type,/,
       "reset must assign the default style, not spread a patch over the old one",
     );
   });
