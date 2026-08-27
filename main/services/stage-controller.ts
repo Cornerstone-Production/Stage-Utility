@@ -153,6 +153,40 @@ export class LayoutConflictError extends Error {
   }
 }
 
+/**
+ * Write one operator-keyed entry into an icon map, safely.
+ *
+ * The key comes off an HTTP body, and `map[key] = value` with a key like
+ * `__proto__` writes the OBJECT PROTOTYPE rather than an entry — every object in
+ * the process then carries the property. CodeQL calls it js/remote-property-
+ * injection and it is right to: both icon setters had the same three lines, and
+ * both were reachable from an unauthenticated POST on the LAN.
+ *
+ * Two defences, because either alone is thinner than it looks. The key SHAPE is
+ * checked — real keys are display ids ("display-1"), tool paths ("/baptism") and
+ * view ids, none of which need anything outside this class. And the map is
+ * rebuilt with a null prototype, so an assignment has no prototype to reach even
+ * if a future caller skips the check.
+ */
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function writeIconEntry(
+  current: Record<string, string> | undefined,
+  key: string,
+  value: string,
+  label: string,
+): Record<string, string> {
+  if (!/^[A-Za-z0-9/_-]{1,64}$/.test(key) || FORBIDDEN_KEYS.has(key)) {
+    throw new Error(`${label} — key must be an id or a tool path`);
+  }
+  const next: Record<string, string> = Object.assign(Object.create(null), current ?? {});
+  if (value === "") delete next[key];
+  else next[key] = value;
+  // Back to an ordinary object for JSON.stringify, which skips a null-prototype
+  // object's entries in some serialisers and is not worth the risk here.
+  return { ...next };
+}
+
 export class StageController {
   private state: StageState = {
     serviceTypeId: null,
@@ -300,6 +334,12 @@ export class StageController {
       defaultAvatar: settings.defaultAvatar ?? null,
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
+      // Both of these are written to settings.json by their setters and were
+      // never read back here, so an icon colour survived until the next restart
+      // and then silently reverted to the theme accent. Verified against a real
+      // server: set, confirmed in state and on disk, restarted, gone.
+      iconColors: settings.iconColors ?? {},
+      iconGlyphs: settings.iconGlyphs ?? {},
       captionChannelColors: settings.captionChannelColors ?? {},
       autoUpdate: migrateAutoUpdate(settings.autoUpdate),
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
@@ -475,12 +515,36 @@ export class StageController {
     if (c !== "" && !/^#[0-9a-f]{6}$/.test(c)) {
       throw new Error('icon-color — color must be "#rrggbb" or "" to clear');
     }
-    const next = { ...(this.state.iconColors ?? {}) };
-    if (c === "") delete next[k];
-    else next[k] = c;
+    const next = writeIconEntry(this.state.iconColors, k, c, "icon-color");
     console.log(`[stage-controller] setIconColor ${scrub(k)} → ${scrub(c || "(cleared)")}`);
     this.state = { ...this.state, iconColors: next };
     await settingsStore.patch({ iconColors: next });
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * The icon GLYPH for a display or tool, by the same key its colour uses.
+   *
+   * "" clears it, exactly as a colour does, and clearing means "fall back to the
+   * item's built-in icon" rather than "no icon". The NAME is stored, not a
+   * component: the renderer owns the set, so a name this build cannot resolve
+   * falls back rather than blanking — a curated set trimmed in a later release
+   * must not leave an operator staring at a hole where their icon was.
+   */
+  async setIconGlyph(key: string, glyph: string): Promise<StageState> {
+    const k = key.trim();
+    if (!k) throw new Error("icon-glyph — key required");
+    const g = glyph.trim();
+    // Name-shaped only. Anything else is a caller bug, and storing it would put
+    // a value in settings.json that nothing can ever render.
+    if (g !== "" && !/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(g)) {
+      throw new Error('icon-glyph — glyph must be an icon name or "" to clear');
+    }
+    const next = writeIconEntry(this.state.iconGlyphs, k, g, "icon-glyph");
+    console.log(`[stage-controller] setIconGlyph ${scrub(k)} → ${scrub(g || "(cleared)")}`);
+    this.state = { ...this.state, iconGlyphs: next };
+    await settingsStore.patch({ iconGlyphs: next });
     this.broadcast();
     return this.state;
   }

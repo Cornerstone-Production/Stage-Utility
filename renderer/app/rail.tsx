@@ -13,6 +13,7 @@
 // inline rail and the mobile drawer.
 
 import { Fragment } from "react";
+import { IconTint } from "../components/icon-tint";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import {
@@ -94,7 +95,23 @@ export function Rail({
       path: `/consoles/${v.id}`,
       label: v.name,
       description: "A console you built.",
-      icon: <SlidersHorizontalIcon className="size-4" />,
+      // Right-click it to change the glyph, the same gesture the Screens cards
+      // carry — a console is a thing the operator made, so its icon is theirs
+      // too. Keyed by view id, alongside display ids and tool paths in the same
+      // map, and it draws SlidersHorizontal until they pick something.
+      // The same control the Screens cards carry, sized for a nav row: click it
+      // for the colour, and the panel's own button for the icon. A console is a
+      // thing the operator made, so its icon is theirs too — keyed by view id,
+      // in the same maps display ids and tool paths use.
+      icon: (
+        <IconTint
+          itemKey={v.id}
+          icon={SlidersHorizontalIcon}
+          color={state?.iconColors?.[v.id]}
+          label={v.name}
+          className="relative inline-flex size-5 shrink-0 items-center justify-center rounded-md"
+        />
+      ),
       Component: () => null, // routing is by path; the route table owns the component
     }));
 

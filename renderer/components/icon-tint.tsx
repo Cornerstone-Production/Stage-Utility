@@ -1,7 +1,9 @@
+import { createElement } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Tooltip } from "./ui/tooltip";
 import { invoke } from "../lib/api";
 import { ColorField } from "./ui/color-field";
+import { useEditableIcon } from "./editable-icon";
 import { cn } from "../lib/cn";
 
 /** The theme accent, used when an item has no color of its own. Kept as a CSS
@@ -19,6 +21,15 @@ const DEFAULT_TINT = "var(--su-accent)";
  * Built on the app's own ColorField, like every other colour control here — the
  * OS picker it used to open could not be themed, could not express an opacity,
  * and on a wall-mounted touch screen put a system window over a live dashboard.
+ *
+ * ONE PANEL for both the colour and the glyph. They were two popups on the same
+ * object — click for one, right-click for the other — which is two menus for one
+ * thing and a gesture nobody discovers. The panel now previews the icon in the
+ * colour being dragged and carries a button that swaps its body for the set.
+ *
+ * The glyph is stored in its own map under the same key as the colour, so an
+ * icon chosen on the Screens tab shows on Connect and on the picker at "/" too —
+ * the icon belongs to the thing, exactly as its colour does.
  */
 export function IconTint({
   itemKey,
@@ -39,8 +50,9 @@ export function IconTint({
   iconClassName?: string;
 }) {
   const tint = color || DEFAULT_TINT;
+  const { glyph, iconEditing } = useEditableIcon(itemKey, Icon);
   return (
-    <Tooltip label={`Change the ${label} icon color`}>
+    <Tooltip label={`Change the ${label} icon`}>
       <span
         className={cn(
           // RELATIVE, and that is load-bearing. The picker below covers this box
@@ -57,7 +69,10 @@ export function IconTint({
       >
         {/* An ordinary centred child — it is the picker that overlays it, not
             the other way round. */}
-        <Icon className={cn("pointer-events-none", iconClassName ?? "size-4")} style={{ color: tint }} />
+        {createElement(glyph, {
+          className: cn("pointer-events-none", iconClassName ?? "size-4"),
+          style: { color: tint },
+        })}
         <ColorField
           label={`${label} icon color`}
           allowAlpha={false}
@@ -66,6 +81,7 @@ export function IconTint({
           value={color || "#3b82f6"}
           onChange={(v: string) => void invoke("icons:setColor", { key: itemKey, color: v })}
           className="absolute inset-0 [&>button]:size-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
+          icon={iconEditing}
         />
       </span>
     </Tooltip>
