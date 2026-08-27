@@ -120,15 +120,18 @@ export function SlotPanel({ slot, emptySlotLogo, defaultAvatar, overlay = false,
         {/* ── Photo (top) — fills all the space above the info card and stops at
             its top edge (object-cover crops the photo, never overlapping the
             card). flex-1 so it grows to meet the card no matter the slot height. ── */}
-        {/* slot-photo: a size container, so the CSS can ask whether this box is
-            landscape and switch cover -> contain. See styles.css. */}
+        {/* slot-photo is a size container, but no longer because a container
+            QUERY reads it -- that rule is gone (see styles.css). It stays because
+            the avatar bubble below sizes itself in cqi, which has to resolve
+            against this box rather than the whole card. */}
         <div className="slot-photo relative flex-1 min-h-0 overflow-hidden">
           {photoSrc ? (
             <img
               src={photoSrc}
               alt={displayName ?? undefined}
-              // fit and focal point live in styles.css (.slot-photo img), because
-              // they depend on a container query this cannot express inline.
+              // fit and focal point live in styles.css (.slot-photo img) so the
+              // rule is stated once, beside the reasoning for it, rather than
+              // inline on an element the reasoning cannot fit next to.
               className="absolute inset-0 w-full h-full"
               draggable={false}
               onError={handleImgError}

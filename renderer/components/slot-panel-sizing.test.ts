@@ -93,6 +93,9 @@ describe("slot card sizing", () => {
     // out to an aspect of 1.18. Past that it trims the top of the HEAD, never
     // the chin.
     const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+    // Still required, though the container QUERY that used to read it is gone:
+    // the avatar bubble sizes itself in cqi and must resolve against the photo
+    // box, not the whole card.
     assert.match(css, /\.slot-photo\s*\{[^}]*container-type:\s*size/, "the photo box must be a size container");
     assert.match(css, /\.slot-photo img\s*\{[^}]*object-fit:\s*cover/s, "the photo fills the cell");
     assert.match(css, /object-position:\s*center 28%/, "the crop window starts below the very top");

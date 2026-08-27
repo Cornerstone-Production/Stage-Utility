@@ -1930,7 +1930,7 @@ export function LayoutEditor({
                   const rect = pendingRect;
                   setPendingRect(null);
                   pushHistory();
-                  const o = makeObject(t, zTop + 1, rect);
+                  const o = makeObject(t, zTop + 1, rect, view.id === HOME_VIEW_ID);
                   setObjects((prev) => [...prev, o]);
                   setSelectedIds(new Set([o.id]));
                   setDirty(true);

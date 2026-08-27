@@ -950,14 +950,20 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         </div>
       );
     case "slots-grid": {
-      // Inline: this object owns its slots (resolved by object id). Otherwise:
-      // embed an existing slots-View's resolved grid by sourceViewId.
+      // Resolved BY OBJECT wherever the server could do it -- inline grids, and
+      // grids embedding a view. Both are free-dragged boxes on a custom layout,
+      // so both get photos cropped for an unknown shape (see AvatarFit); keying
+      // on the object is what lets them differ from the source view's own
+      // display, which keeps the column crop it is correctly modelled on.
+      //
+      // slotsByView is the fallback, and it still matters: a state broadcast from
+      // a server that has not resolved this object yet, or an object whose id is
+      // not in the layout the server holds, would otherwise draw an empty grid.
       const inline = c.source === "inline";
+      const byObject = ctx.state.slotsByLayoutObject?.[o.id];
       const slots = inline
-        ? (ctx.state.slotsByLayoutObject?.[o.id] ?? [])
-        : c.sourceViewId
-          ? (ctx.state.slotsByView?.[c.sourceViewId] ?? [])
-          : [];
+        ? (byObject ?? [])
+        : (byObject ?? (c.sourceViewId ? (ctx.state.slotsByView?.[c.sourceViewId] ?? []) : []));
       if (slots.length === 0) {
         return <span style={{ ...ts, color: "rgba(255,255,255,0.3)" }}>Mic slots</span>;
       }

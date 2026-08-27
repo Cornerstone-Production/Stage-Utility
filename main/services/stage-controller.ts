@@ -1,7 +1,7 @@
 // Single source of truth for all stage state.
 // Every mutating method ends with broadcast("stage:state-changed").
 
-import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid } from "./layout-clone.js";
+import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
@@ -2666,6 +2666,17 @@ export class StageController {
     };
     forEachInlineSlotsGrid(this.state.views, resolveObjectSlots);
     for (const oid of this.rawSlotsByObject.keys()) if (!(oid in slotsByLayoutObject)) resolveObjectSlots(oid);
+
+    // A grid EMBEDDING a slots view is the same problem wearing a different
+    // source. Its slots come from that view, but its box is a free-dragged
+    // rectangle on a custom layout, so it needs the whole image exactly as an
+    // inline grid does. Keyed by the OBJECT so the source view's own display
+    // keeps the column crop it is correctly modelled on; the renderer reads this
+    // first and falls back to slotsByView for anything not resolved here.
+    forEachViewSourcedSlotsGrid(this.state.views, (oid, sourceViewId) => {
+      const raw = this.rawSlotsByView.get(sourceViewId) ?? [];
+      slotsByLayoutObject[oid] = resolveSlots(raw, this.teamMembers, this.deviceStatuses, "whole");
+    });
 
     const resolvedByOutput: Record<string, ResolvedOutput> = {};
     for (const output of this.state.outputs) {
