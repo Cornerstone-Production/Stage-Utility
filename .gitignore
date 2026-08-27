@@ -28,9 +28,15 @@ npm-debug.log*
 # Claude Code local config
 .claude/
 
-# Local SenSource API diagnostic captures (contain org names/addresses/MACs — never commit)
+# Local API diagnostic captures — never commit.
+#
+# SenSource carries org names, addresses and MACs. Resi carries encoder and
+# destination names, which are the room and the platform you stream to. Neither
+# holds a credential by construction, and neither belongs in the history.
 sensource-capture*.json
 sensource-probe*.json
+resi-capture*.json
+resi-probe*.json
 
 # Local tooling scratch (Playwright MCP screenshots/logs, impeccable design plugin)
 .playwright-mcp/
