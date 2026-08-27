@@ -238,6 +238,30 @@ const COLUMN_ASPECT_BUDGET = 2.2;
  *  less than its 1/depth share of the photo. ~110px of a ~1027px card, measured. */
 const INFO_CARD_FRACTION = 0.12;
 
+/**
+ * Narrowest crop a face survives, as width ÷ height of the requested geometry.
+ *
+ * The column-shaped crop below assumes the box that draws the photo is shaped
+ * like a full-height display column. Nothing guarantees that. ONE url serves
+ * every context that draws these slots, and an inline slots-grid on a custom
+ * layout draws a far squarer cell — measured 71×143, an aspect of 0.50, where a
+ * 14-slot display column would be 0.16.
+ *
+ * PCO's crop is centred and irreversible, so asking for 0.16 and then drawing
+ * 0.50 does not show more of the face. It shows a stretched sliver of the middle
+ * of it: measured end to end, 51% of the face's width was gone before the
+ * browser ever saw the file. That is the faces-cut-off report.
+ *
+ * A headshot's face spans roughly the middle 43% of a 3:4 frame, so all of it
+ * survives any crop at or above (0.43 × 3) ÷ 4 ≈ 0.32. This keeps a little
+ * margin for a face that is not centred.
+ *
+ * Each context's own `object-fit: cover` still crops to whatever its box really
+ * is — that part was always right, and it is the only crop that knows the shape.
+ * This floor only stops the SERVER discarding pixels a browser might still need.
+ */
+export const MIN_FACE_ASPECT = 0.35;
+
 /** Columns a view renders: stacked slots share one, so they do not each get a
  *  column's width. Mirrors the grouping the kiosk does with `stackWithPrevious`. */
 function columnCount(slots: Slot[]): number {
@@ -284,12 +308,11 @@ export function fitAvatarToColumn(
   url: string | null,
   columns: number,
   stackDepth = 1,
+  /** See MIN_FACE_ASPECT. 0 (the default) keeps the column-shaped crop a display
+   *  wants; a caller drawing a squarer box passes the floor it needs. */
+  minAspect = 0,
 ): string | null {
   if (!url) return null;
-  const width = Math.min(
-    AVATAR_MAX_PX,
-    Math.max(120, Math.ceil((AVATAR_MAX_PX * COLUMN_ASPECT_BUDGET) / columns)),
-  );
   // Not simply height/depth: the info card under the photo is sized by the card's
   // WIDTH, so it costs the same pixels in a half-height slot as a full one. A slot
   // in a 2-stack therefore keeps well under half the photo height, not half.
@@ -300,6 +323,19 @@ export function fitAvatarToColumn(
   const share = (1 / depth - INFO_CARD_FRACTION) / (1 - INFO_CARD_FRACTION);
   // A floor keeps a deep stack from asking for a letterbox sliver.
   const height = Math.max(240, Math.round(AVATAR_MAX_PX * Math.max(0, share)));
+  // The floor is on the SHAPE, not on a pixel count: a stacked slot asks for a
+  // shorter crop, and the width that keeps a face in a 1000px-tall frame would be
+  // a portrait letterbox in a 432px-tall one. Held against `height`, the same
+  // rule reads the same at every stack depth. `minAspect` is 0 for a display,
+  // whose column model is already right — there it costs nothing.
+  const width = Math.min(
+    AVATAR_MAX_PX,
+    Math.max(
+      120, // absurd column count: still legible, whatever the arithmetic says
+      Math.ceil(height * minAspect),
+      Math.ceil((AVATAR_MAX_PX * COLUMN_ASPECT_BUDGET) / columns),
+    ),
+  );
   const geometry = `${width}x${height}%23`;
   return /[?&]g=\d+x\d+(%23|#)?/.test(url)
     ? url.replace(/([?&]g=)\d+x\d+(%23|#)?/, `$1${geometry}`)
@@ -310,6 +346,16 @@ export function resolveSlots(
   slots: Slot[],
   members: TeamMemberDTO[],
   deviceStatuses: Map<string, DeviceStatus>,
+  /**
+   * How square the box drawing these slots can be, as width ÷ height.
+   *
+   * A display column is a tall sliver and the crop below is modelled on one, so
+   * a display passes nothing. An INLINE slots-grid on a custom layout is not:
+   * measured 71x143, an aspect of 0.50, against the 0.16 the column model
+   * assumes for the same 14 slots. Passing MIN_FACE_ASPECT there stops PCO
+   * cropping to a shape that box will never draw. See MIN_FACE_ASPECT.
+   */
+  minPhotoAspect = 0,
 ): Slot[] {
   // How wide each column will be drawn, which sets the avatar crop below.
   const columns = columnCount(slots);
@@ -385,7 +431,7 @@ export function resolveSlots(
     return {
       ...slot,
       displayName: member?.name ?? null,
-      photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns, depths[slotIndex] ?? 1),
+      photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns, depths[slotIndex] ?? 1, minPhotoAspect),
       shownPositions,
       device,
     };
