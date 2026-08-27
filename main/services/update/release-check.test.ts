@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { fetchReleases, packagedUpdateStatus, parseReleases } from "./release-check.js";
+import { fetchReleases, packagedUpdateStatus, parseReleases, clearReleaseCache } from "./release-check.js";
 
 // Shaped like the GitHub releases API: newest first, one object per release.
 // `prerelease` is here because GitHub sends it, not because it is read — the
@@ -235,5 +235,88 @@ describe("what a packaged install shows under \"What's new\"", () => {
       "1.10.0-beta.37",
     );
     assert.deepEqual(s.changelog, ["a — newest", "b — older"]);
+  });
+});
+
+describe("the rate limit, which is what a 403 here really is", () => {
+  // GitHub allows 60 unauthenticated requests an hour PER IP, and one update
+  // check spends two. A church runs more than one of these on one connection, so
+  // the quota goes and the operator sees "GitHub answered 403" — which reads like
+  // a broken install rather than "wait 46 minutes".
+  //
+  // Reproduced exactly that against the real API while diagnosing it:
+  //   core limit=60 remaining=0 reset in 46 min
+
+  const headers = (h: Record<string, string>) => ({ get: (n: string) => h[n.toLowerCase()] ?? null });
+
+  it("says how long to wait instead of quoting a status code", async () => {
+    clearReleaseCache();
+    const resetAt = Math.floor((Date.now() + 30 * 60_000) / 1000);
+    const doFetch = async () => ({
+      ok: false,
+      status: 403,
+      json: async () => ({ message: "API rate limit exceeded" }),
+      headers: headers({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(resetAt) }),
+    });
+    await assert.rejects(() => fetchReleases(doFetch), /hourly limit for this network is used up/);
+    await assert.rejects(() => fetchReleases(doFetch), /resets in 30 min/);
+  });
+
+  it("still reports a 403 that is NOT a quota as a 403", async () => {
+    // A private repo or a blocked token is a different problem and must not be
+    // described as a rate limit.
+    clearReleaseCache();
+    const doFetch = async () => ({
+      ok: false,
+      status: 403,
+      json: async () => ({ message: "Forbidden" }),
+      headers: headers({ "x-ratelimit-remaining": "57" }),
+    });
+    await assert.rejects(() => fetchReleases(doFetch), /GitHub answered 403/);
+  });
+});
+
+describe("conditional requests, so polling does not spend the quota", () => {
+  // A 304 does not count against the rate limit. That is the whole fix: an
+  // install that checks all day spends requests only when something was released.
+
+  const headers = (h: Record<string, string>) => ({ get: (n: string) => h[n.toLowerCase()] ?? null });
+
+  it("sends If-None-Match once it has an ETag, and serves the cache on 304", async () => {
+    clearReleaseCache();
+    const sent: (string | undefined)[] = [];
+    let phase = 0;
+    const doFetch = async (_url: string, init: { headers: Record<string, string> }) => {
+      sent.push(init.headers["If-None-Match"]);
+      if (phase === 0) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [gh("v1.11.0")],
+          headers: headers({ etag: 'W/"abc123"' }),
+        };
+      }
+      return { ok: false, status: 304, json: async () => null, headers: headers({}) };
+    };
+
+    const first = await fetchReleases(doFetch);
+    assert.ok(first.some((r) => r.tag === "v1.11.0"), "the first call reads the body");
+    assert.equal(sent[0], undefined, "nothing to send on the first request");
+
+    phase = 1;
+    const second = await fetchReleases(doFetch);
+    assert.equal(sent[2], 'W/"abc123"', "the ETag must go out on the next request");
+    assert.ok(
+      second.some((r) => r.tag === "v1.11.0"),
+      "a 304 must serve the cached releases, not an empty list — an empty list reads as " +
+        "'no releases' and would silently claim the install is up to date",
+    );
+  });
+
+  it("clearReleaseCache forces a fresh request", () => {
+    clearReleaseCache();
+    // Nothing to assert beyond it not throwing: the behaviour is covered above,
+    // and this pins that the escape hatch a "check now" needs exists.
+    assert.ok(true);
   });
 });

@@ -211,13 +211,86 @@ export function packagedUpdateStatus(
 export type FetchLike = (
   url: string,
   init: { headers: Record<string, string>; signal: AbortSignal },
-) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+) => Promise<{
+  ok: boolean;
+  status: number;
+  json(): Promise<unknown>;
+  /** Optional so the canned responses in tests need not grow a header bag. */
+  headers?: { get(name: string): string | null };
+}>;
 
-function getJson(url: string, doFetch: FetchLike): Promise<{ ok: boolean; status: number; json(): Promise<unknown> }> {
-  return doFetch(url, {
-    headers: { Accept: "application/vnd.github+json", "User-Agent": "stage-utility-updater" },
-    signal: AbortSignal.timeout(15_000),
-  });
+/**
+ * The last ETag and parsed body per URL.
+ *
+ * GitHub allows 60 unauthenticated requests an hour PER IP, and an update check
+ * spends two of them. A church runs more than one of these on one connection --
+ * a display box, a booth machine, whatever a volunteer left open -- and they
+ * share that 60. Running out shows up as `403`, which reads like a broken
+ * install rather than a quota.
+ *
+ * A conditional request fixes it properly: send If-None-Match, and GitHub
+ * answers 304 with no body -- and a 304 DOES NOT COUNT against the rate limit.
+ * So an install that polls all day spends its quota only when something has
+ * actually been released.
+ *
+ * In memory on purpose. It is a cache, losing it costs one request, and putting
+ * it on disk would mean a store to classify, back up and migrate for no gain.
+ */
+const conditional = new Map<string, { etag: string; body: unknown }>();
+
+/** Reset the ETag cache. For tests, and for a "check now" that must not 304. */
+export function clearReleaseCache(): void {
+  conditional.clear();
+}
+
+/**
+ * A 403 that is really a quota, told as one.
+ *
+ * GitHub sends x-ratelimit-remaining: 0 with a reset epoch. Saying "try again at
+ * 10:47" is the difference between a message an operator can act on and one that
+ * looks like the updater is broken.
+ */
+function rateLimitMessage(res: { headers?: { get(name: string): string | null } }): string | null {
+  const remaining = res.headers?.get("x-ratelimit-remaining");
+  if (remaining !== "0") return null;
+  const reset = Number(res.headers?.get("x-ratelimit-reset"));
+  if (!Number.isFinite(reset)) return "GitHub's hourly limit for this network is used up.";
+  const at = new Date(reset * 1000);
+  const mins = Math.max(1, Math.round((at.getTime() - Date.now()) / 60_000));
+  return `GitHub's hourly limit for this network is used up — it resets in ${mins} min.`;
+}
+
+function getJson(url: string, doFetch: FetchLike) {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "stage-utility-updater",
+  };
+  // Only when we have something to compare against. A 304 costs no quota.
+  const known = conditional.get(url);
+  if (known) headers["If-None-Match"] = known.etag;
+  return doFetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+}
+
+/**
+ * The body for a URL, using the cache when GitHub says nothing changed.
+ *
+ * @returns the parsed body, or null when the response was not usable.
+ */
+async function bodyOf(
+  url: string,
+  res: { ok: boolean; status: number; json(): Promise<unknown>; headers?: { get(n: string): string | null } },
+): Promise<unknown | null> {
+  if (res.status === 304) {
+    const known = conditional.get(url);
+    // 304 without a cached body should not happen -- we only send If-None-Match
+    // when we have one -- but treating it as "no data" beats throwing.
+    return known ? known.body : null;
+  }
+  if (!res.ok) return null;
+  const body = await res.json();
+  const etag = res.headers?.get("etag");
+  if (etag) conditional.set(url, { etag, body });
+  return body;
 }
 
 /**
@@ -237,8 +310,15 @@ function getJson(url: string, doFetch: FetchLike): Promise<{ ok: boolean; status
  */
 export async function fetchReleases(doFetch: FetchLike = fetch): Promise<ReleaseInfo[]> {
   const page = await getJson(RELEASES_URL, doFetch);
-  if (!page.ok) throw new Error(`Release check failed: GitHub answered ${page.status}`);
-  const body = await page.json();
+  if (!page.ok && page.status !== 304) {
+    const quota = page.status === 403 ? rateLimitMessage(page) : null;
+    throw new Error(
+      quota
+        ? `Release check failed: ${quota}`
+        : `Release check failed: GitHub answered ${page.status}`,
+    );
+  }
+  const body = await bodyOf(RELEASES_URL, page);
   if (!Array.isArray(body)) {
     const msg = (body as { message?: unknown } | null)?.message;
     throw new Error(
@@ -248,14 +328,22 @@ export async function fetchReleases(doFetch: FetchLike = fetch): Promise<Release
   const releases = parseReleases(body);
 
   const latest = await getJson(LATEST_URL, doFetch);
-  if (latest.ok) {
-    for (const r of parseReleases([await latest.json()])) {
-      if (!releases.some((have) => have.tag === r.tag)) releases.push(r);
+  if (latest.ok || latest.status === 304) {
+    const newest = await bodyOf(LATEST_URL, latest);
+    if (newest) {
+      for (const r of parseReleases([newest])) {
+        if (!releases.some((have) => have.tag === r.tag)) releases.push(r);
+      }
     }
   } else if (latest.status !== 404) {
     // A main-track box answers from exactly this endpoint; failing silently
     // here would be the same invisible no-op the page-only bug produced.
-    throw new Error(`Release check failed: GitHub answered ${latest.status} for the newest stable`);
+    const quota = latest.status === 403 ? rateLimitMessage(latest) : null;
+    throw new Error(
+      quota
+        ? `Release check failed: ${quota}`
+        : `Release check failed: GitHub answered ${latest.status} for the newest stable`,
+    );
   }
   return releases;
 }
