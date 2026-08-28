@@ -44,12 +44,16 @@ export const PREVIEW_SHAPES: PreviewShape[] = [
 export function ShapePreview({
   shape,
   layout,
+  viewId,
   ndiSource,
   surface,
   avail,
 }: {
   shape: PreviewShape;
   layout: LayoutDTO;
+  /** The View being previewed — seeds the embed chain, so a self-embed reads the
+   *  same in the editor as it does on the screen. */
+  viewId?: string | null;
   ndiSource: string | null;
   surface: ViewSurface;
   /** Space the editor has for the canvas, in rendered pixels. */
@@ -89,6 +93,7 @@ export function ShapePreview({
               preview would let looking at the page advance the service. */}
           <LayoutRenderer
             layout={layout}
+            viewId={viewId}
             ndiSource={ndiSource}
             interactive={false}
             surface={surface}

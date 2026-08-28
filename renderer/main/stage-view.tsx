@@ -491,6 +491,7 @@ export function StageView() {
                   looked at, since every card renders one. */}
               <LayoutRenderer
                 layout={activeView.layout}
+                viewId={activeView.id}
                 ndiSource={activeView.ndiSource ?? null}
                 interactive={capabilityLive(
                   contextForOutput(currentDisplay?.mode, !!previewViewId),
@@ -514,21 +515,29 @@ export function StageView() {
   if (kind === "dashboard") {
     return (
       <StageErrorBoundary>
-        <DashboardView displayId={displayId} />
+        {/* The view sizes to h-full so it can also live inside an embed tile;
+            the screen height and the safe-area insets belong to this route. */}
+        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          <DashboardView displayId={displayId} />
+        </div>
       </StageErrorBoundary>
     );
   }
   if (kind === "stage") {
     return (
       <StageErrorBoundary>
-        <StageDisplayView displayId={displayId} />
+        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          <StageDisplayView displayId={displayId} />
+        </div>
       </StageErrorBoundary>
     );
   }
   if (kind === "transcription") {
     return (
       <StageErrorBoundary>
-        <TranscriptionView displayId={displayId} />
+        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          <TranscriptionView displayId={displayId} />
+        </div>
       </StageErrorBoundary>
     );
   }
@@ -547,7 +556,9 @@ export function StageView() {
   if (kind === "spl-rundown") {
     return (
       <StageErrorBoundary>
-        <SplRundownView displayId={displayId} />
+        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          <SplRundownView displayId={displayId} />
+        </div>
       </StageErrorBoundary>
     );
   }

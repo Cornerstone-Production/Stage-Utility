@@ -20,6 +20,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { EMBEDDABLE_VIEW_KINDS, isEmbeddableViewKind, isOfferableInEmbedPicker } from "./layout-objects.js";
+import { embedRefusal } from "./embed-chain.js";
 import type { ViewKind } from "../../main/types/stage.js";
 
 /** Every kind a View can be — so "exactly these are embeddable" is checked
@@ -29,11 +30,13 @@ const ALL_VIEW_KINDS: ViewKind[] = ["slots", "dashboard", "stage", "transcriptio
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const read = (f: string) => fs.readFileSync(path.join(HERE, f), "utf8");
 
-/** The three files that put a plan rundown on a screen. */
+/** The three files that put a plan rundown on a screen. The layout object no
+ *  longer names ScriptView itself — every embedded View of every kind goes
+ *  through embedded-view.tsx, so that is the surface now. */
 const SURFACES = {
   page: "scriptview-plan-view.tsx",
   viewKind: "script-view.tsx",
-  layoutObject: "layout-renderer.tsx",
+  layoutObject: "embedded-view.tsx",
 } as const;
 
 /** The shared implementation every one of them must go through. */
@@ -121,16 +124,27 @@ describe("embedding cannot recurse", () => {
   // the bug it guards is the recurring failure in this repo, so the decision was
   // moved into a function and the function is what gets called here.
 
-  it("refuses custom views, which is what makes recursion impossible", () => {
-    assert.equal(isEmbeddableViewKind("custom"), false);
-    assert.equal(isOfferableInEmbedPicker("custom"), false);
+  it("refuses a view that is already being drawn above this one", () => {
+    // Custom views used to be barred outright, which made recursion impossible
+    // by making the only nestable kind unavailable. They render now, so the
+    // guard is a real one: the ancestor chain, checked per box.
+    assert.equal(isEmbeddableViewKind("custom"), true);
+    assert.ok(embedRefusal("v-1", ["v-1"]), "a view inside itself was not refused");
+    assert.ok(embedRefusal("v-9", ["a", "b", "c"]), "unbounded nesting was not refused");
+    assert.equal(embedRefusal("v-9", ["a", "b"]), null, "legal nesting was refused");
   });
 
   it("offers exactly the kinds that render in a box", () => {
-    // EXACT, not a floor. A new View kind must not become embeddable by default
-    // — every renderer currently assumes it owns the screen, and finding out on
-    // a stage monitor is the wrong time.
-    assert.deepEqual([...EMBEDDABLE_VIEW_KINDS], ["script"]);
+    // EXACT, not a floor. Every kind renders now, so this is every kind — and it
+    // stays a written-out list so that adding a View kind is a deliberate
+    // decision to make it embeddable rather than something that happens by
+    // accident. EmbeddedView's switch is exhaustive over ViewKind, so a kind
+    // added and forgotten here is a compile error there.
+    assert.deepEqual(
+      [...EMBEDDABLE_VIEW_KINDS],
+      ["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown"],
+    );
+    assert.deepEqual([...EMBEDDABLE_VIEW_KINDS].sort(), [...ALL_VIEW_KINDS].sort());
   });
 
   it("never offers a kind it cannot render", () => {
@@ -142,6 +156,5 @@ describe("embedding cannot recurse", () => {
         assert.ok(isOfferableInEmbedPicker(kind), `${kind} is embeddable but not offerable`);
       }
     }
-    assert.ok(!isOfferableInEmbedPicker("custom"), "custom must never be offerable");
   });
 });

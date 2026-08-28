@@ -32,8 +32,8 @@ import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
-import { EMBED_FONT_FRACTION, isEmbeddableViewKind } from "./layout-objects";
-import { ScriptView } from "./script-view";
+import { EMBED_FONT_FRACTION } from "./layout-objects";
+import { EmbeddedView } from "./embedded-view";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
@@ -2171,14 +2171,9 @@ function PlanAttachment({
  * loop — while ignoring the object's style and scaling a full-screen design down
  * instead of reflowing into the box.
  *
- * CUSTOM Views are deliberately not embeddable, and that is the entire recursion
- * guard: a custom View is the only kind that holds a layout, so refusing it means
- * an embed can never reach another embed. No depth counter, nothing to get wrong
- * later. Containers already cover composing objects within one layout.
- *
- * Kinds are added as they stop assuming they own the screen — every View renderer
- * currently hardcodes a viewport height, which is right on a display and wrong in
- * a box. `script` is converted; the rest say so rather than rendering broken.
+ * WHICH kinds draw, and what stops the recursion, are no longer this object's
+ * business. EmbeddedView answers both, and the `screen-embed` object asks it the
+ * same question — so a kind that draws in one tile draws in every tile.
  */
 function ViewEmbedObject({
   o,
@@ -2198,35 +2193,37 @@ function ViewEmbedObject({
   if (!config.viewId) return notice("Pick a view to embed");
   if (!view) return notice("That view no longer exists");
 
-  if (isEmbeddableViewKind(view.kind)) {
-    // w-full h-full, not the object's alignment: boxStyle turns every object into
-    // a flex column aligned by textAlign, which shrink-wraps a child that has no
-    // width of its own — a left-aligned box rendered the rundown at about half
-    // the width it was given. An embed always fills its box; alignment is a text
-    // idea and does not apply.
-    // The font size is set HERE, on the wrapper, and inherited by the whole
-    // rundown. Every other object applies it per text node through textStyle,
-    // which an embedded component never passes through — so without this the
-    // table fell back to the browser default 16px however large the object was,
-    // with no control that did anything.
-    return (
-      <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}>
-        {/* textSizeClass="" drops the page's viewport-relative clamp so the rows
-            inherit the object's own font-size, which boxStyle sets from the
-            object's style. Without it the table capped at ~17px however large the
-            object was — unreadable on a 4K stage panel, with the font-size field
-            hidden as well, so there was no way to fix it. */}
-        <ScriptView
-          scriptViewLayoutId={view.scriptViewLayoutId ?? null}
-          showHeader={config.showHeader ?? false}
-          textSizeClass=""
-          autoScroll={config.autoScroll ?? true}
-        />
-      </div>
-    );
-  }
+  // The embedded view's canvas is the BOX, not the screen. A custom view is
+  // drawn by the same RenderObject a display uses, and everything that sizes
+  // itself there — fonts, spacing — is a fraction of ctx.H. Left as the parent's
+  // H, a quarter-height tile drew its child four times too large: correct-looking
+  // markup, unreadable output. Live pixels when the parent placed responsively,
+  // design px otherwise; o.h is a fraction of the canvas height either way, so
+  // the units match whichever branch supplied H.
+  const boxH = ctx.placed?.get(o.id)?.height ?? o.h * ctx.H;
+  const embedCtx: LayoutRenderCtx = { ...ctx, H: boxH };
 
-  return notice(`"${view.name}" is a ${view.kind} view — not embeddable yet`);
+  // w-full h-full, not the object's alignment: boxStyle turns every object into
+  // a flex column aligned by textAlign, which shrink-wraps a child that has no
+  // width of its own — a left-aligned box rendered the rundown at about half the
+  // width it was given. An embed always fills its box; alignment is a text idea
+  // and does not apply.
+  //
+  // The font size is set HERE, on the wrapper, and inherited by the whole
+  // embedded view. Every other object applies it per text node through textStyle,
+  // which an embedded component never passes through — so without this the
+  // rundown fell back to the browser default 16px however large the object was,
+  // with no control that did anything.
+  return (
+    <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}>
+      <EmbeddedView
+        view={view}
+        ctx={embedCtx}
+        showHeader={config.showHeader ?? false}
+        autoScroll={config.autoScroll ?? true}
+      />
+    </div>
+  );
 }
 
 /** The PCO service order as a scrolling list — highlights the live item and shows
@@ -2455,6 +2452,7 @@ export function LayoutRenderer({
   ndiSource,
   interactive = false,
   surface,
+  viewId,
 }: {
   layout: LayoutDTO;
   ndiSource: string | null;
@@ -2462,6 +2460,16 @@ export function LayoutRenderer({
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
+  /**
+   * Which View this layout belongs to — it SEEDS the embed chain.
+   *
+   * Without it the outermost view is not on the chain, so a tile pointing back
+   * at the view it lives on is not a cycle: it draws a second copy of the whole
+   * layout inside itself and only the depth cap stops it. Verified in a browser,
+   * which is the only place it shows — every unit test builds the chain by hand
+   * and so agrees with whatever the component does.
+   */
+  viewId?: string | null;
 }) {
   const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
@@ -2532,7 +2540,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, embedChain: [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

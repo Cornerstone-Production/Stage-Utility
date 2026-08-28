@@ -525,17 +525,17 @@ export function Inspector({
       })()}
       {c.type === "view-embed" && (() => {
         // Both the picker and the renderer ask the same function — see
-        // isEmbeddableViewKind. Custom never appears, which IS the recursion
-        // guard; other kinds appear but say why they do not render yet.
+        // isEmbeddableViewKind. Every kind renders now; a view that would
+        // contain itself is refused at render time, per box, by embed-chain.ts.
         const embeddable = (embedViews ?? []).filter((v) => isOfferableInEmbedPicker(v.kind));
         return embeddable.length === 0 ? (
           <p className="text-caption2 text-fg-muted">
-            No embeddable views yet — make a Script view first, then point this at it.
+            No other views yet — make one, then point this at it.
           </p>
         ) : (
           <RowSelect
             label="View"
-            hint="Renders that view's content here, natively. Script views work today; other kinds are being converted."
+            hint="Renders that view's content here, natively. A view cannot contain itself, and nesting stops after three levels."
             value={c.viewId ?? ""}
             options={[{ value: "", label: "None" }, ...embeddable.map((v) => ({ value: v.id, label: `${v.name} (${v.kind})` }))]}
             onChange={(v) => onConfig({ ...c, viewId: v || null })}

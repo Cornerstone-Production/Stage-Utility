@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { LayoutDTO, LayoutObject } from "@main/types/views";
+import { HOME_VIEW_ID } from "@main/services/home-view";
 
 import { ObjectContent, boxStyle, useLayoutData } from "../../main/layout-renderer";
 import type { LayoutRenderCtx } from "../../main/layout-renderer";
@@ -192,8 +193,10 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     // And it IS Home — the flag the streaming cards read to know they are tiles
     // on a page of tiles rather than widgets on a wall.
     home: true,
-    // Nothing above Home. A card that embeds a view starts the chain here.
-    embedChain: [],
+    // Home IS the outermost view, so it is ON the chain rather than absent from
+    // it: a card embedding Home would otherwise draw a second Home inside itself
+    // and only the depth cap would stop it.
+    embedChain: [HOME_VIEW_ID],
     placed: undefined,
   };
 }
