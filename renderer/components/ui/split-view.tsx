@@ -132,7 +132,17 @@ export function SplitView({
     <div className={cn("flex h-full w-full overflow-hidden", className)}>
       <div
         className={cn(
-          "shrink-0 h-full overflow-hidden",
+          // SCROLLS VERTICALLY, clips horizontally.
+          //
+          // It was overflow-hidden on both axes, so a rail taller than the
+          // window simply lost its bottom: at 620px tall with a few consoles
+          // added, Settings and everything under it sat at y=717 with no way to
+          // reach them. The rail grows with the operator's consoles, so "it fits"
+          // is not something this can assume.
+          //
+          // Horizontal stays hidden: the collapse animates WIDTH, and a label
+          // mid-transition would otherwise put a scrollbar under the rail.
+          "shrink-0 h-full overflow-y-auto overflow-x-hidden",
           // Animate the collapse, but never while dragging: a width transition
           // mid-drag rubber-bands behind the pointer.
           !resizing && "transition-[width] duration-(--motion-quick)",
