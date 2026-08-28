@@ -192,6 +192,8 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     // And it IS Home — the flag the streaming cards read to know they are tiles
     // on a page of tiles rather than widgets on a wall.
     home: true,
+    // Nothing above Home. A card that embeds a view starts the chain here.
+    embedChain: [],
     placed: undefined,
   };
 }

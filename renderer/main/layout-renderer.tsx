@@ -102,6 +102,17 @@ export interface LayoutRenderCtx {
    * OBS status and REAPER status are.
    */
   home: boolean;
+
+  /**
+   * The views being drawn ABOVE this one, outermost first. Empty at the top.
+   *
+   * Required rather than optional, exactly like `home` above it and for the same
+   * reason: every surface that builds a context has to say which it is. An
+   * optional field defaulting to [] would let a surface forget, and a forgotten
+   * chain reads as "nothing above me" — which is the one answer that makes a
+   * cycle undetectable.
+   */
+  embedChain: readonly string[];
 }
 
 function pad(n: number): string {
@@ -2521,7 +2532,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, embedChain: [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
