@@ -265,9 +265,15 @@ export function Readout({
         gap: `${boxH * GAP_SCALE}px`,
         overflow: "hidden",
         minHeight: 0,
-        opacity: dim ? 0.45 : 1,
-        // Inherited so the fill below can inherit it in turn — the ground has to
-        // be the same shape as the object or its corners sit proud of them.
+        // NOT `opacity` here. Dimming the whole composition took the CAPTION
+        // with it, so a row of widgets had two caption strengths: the dimmed
+        // ones at 45% of the muted token, and the ones in an active state — an
+        // ERROR, a recording — at full. "REAPER" beside "REAPER" in two
+        // different greys, which is what was reported.
+        //
+        // A caption NAMES the box; it does not report anything, so it reads the
+        // same whatever the box is doing. Dim belongs to the reading, and moves
+        // to the value and its sub-line below.
         borderRadius: "inherit",
       }}
     >
@@ -297,6 +303,9 @@ export function Readout({
             // boxStyle), and falls back to the token where it did not, so this
             // stays explicit either way.
             color: filled ? "#ffffff" : valueColor ?? "var(--readout-value-color, var(--color-fg))",
+            // The dim lives here now: it is the READING that is stale or
+            // unreachable, not the label naming the box.
+            opacity: dim ? 0.45 : 1,
             lineHeight: VALUE_LEADING,
             whiteSpace: "nowrap",
             ...(upper ? { textTransform: "uppercase" as const } : null),
@@ -307,7 +316,7 @@ export function Readout({
         </span>
       </div>
       {sub && subPx > 0 ? (
-        <span style={{ ...subStyle, position: "relative" }} title={sub}>
+        <span style={{ ...subStyle, position: "relative", opacity: dim ? 0.45 : 1 }} title={sub}>
           {sub}
         </span>
       ) : null}
