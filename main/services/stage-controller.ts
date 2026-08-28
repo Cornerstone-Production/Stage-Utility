@@ -217,7 +217,7 @@ export class StageController {
     lanUrl: null,
     showQr: true,
     kioskDiscovery: false,
-    allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
+    allowedServiceTypeIds: [],
     checklistNoteCategories: [],
     checklistNoteTeams: [],
     appName: "Stage Utility",
@@ -310,10 +310,17 @@ export class StageController {
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
 
-    const allowedServiceTypeIds: string[] =
-      Array.isArray(settings.allowedServiceTypeIds) && settings.allowedServiceTypeIds.length > 0
-        ? settings.allowedServiceTypeIds
-        : ["41227", "61695", "75953", "249176"];
+    // An EMPTY list means "all allowed" and is passed through as such.
+    //
+    // This used to substitute four hardcoded ids for an empty list, which made
+    // the documented "empty = all" unreachable at boot: the Plan tab normalises
+    // "everything on" to [], so turning every service type on and restarting
+    // silently re-restricted the install to those four. On any org but the one
+    // the ids came from, they match nothing — so a fresh install could not pick
+    // a service type at all, with an empty picker and nothing to explain it.
+    const allowedServiceTypeIds: string[] = Array.isArray(settings.allowedServiceTypeIds)
+      ? settings.allowedServiceTypeIds
+      : [];
 
     this.state = {
       ...this.state,

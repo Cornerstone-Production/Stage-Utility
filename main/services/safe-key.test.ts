@@ -10,7 +10,7 @@ test("the three keys that reach the prototype chain are refused", () => {
 });
 
 test("ordinary identifiers are allowed", () => {
-  for (const k of ["display-1", "view-2", "41227", "default", "proto", "__protox__", ""]) {
+  for (const k of ["display-1", "view-2", "1234567", "default", "proto", "__protox__", ""]) {
     assert.equal(isSafeKey(k), true, `${k} should be allowed`);
   }
 });

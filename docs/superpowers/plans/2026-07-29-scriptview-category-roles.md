@@ -713,7 +713,7 @@ git commit -m "feat(scriptview): render columns from roles, hiding roles a servi
 ```bash
 curl -s http://localhost:8788/api/scriptview/roles | head -c 300; echo
 curl -s -X POST http://localhost:8788/api/scriptview/roles/seed \
-  -H 'Content-Type: application/json' -d '{"serviceTypeId":"41227"}' \
+  -H 'Content-Type: application/json' -d '{"serviceTypeId":"SERVICE_TYPE_ID"}' \
   | python3 -c "import json,sys; print(len(json.load(sys.stdin)), 'roles')"
 curl -s -X POST http://localhost:8788/api/scriptview/roles \
   -H 'Content-Type: application/json' -d '{"roles":"nope"}' | head -c 80
