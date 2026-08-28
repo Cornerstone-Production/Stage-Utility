@@ -633,21 +633,27 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // the colour differs, which is the distinction that was meant to be visible.
     const filled = opts.fillWhenLive ?? FILL_WHEN_ACTIVE;
 
-    // GREEN for live, grey for off air. Not the red a recorder uses: red is
-    // what OBS and REAPER mean by "rolling", and a wall carrying both wants
-    // one red. Off air takes the muted grey its neighbours wear rather than
-    // full-strength white — it is the resting state, not an announcement —
-    // while unreachable stays dimmed outright, so the two are still told apart
-    // by more than their word.
+    // GREEN for live, grey for anything else. Not the red a recorder uses: red
+    // is what OBS and REAPER mean by "rolling", and a wall carrying both wants
+    // one red.
     return readout(ind.value, {
       caption: only ?? "Streaming",
       // Only where there is a number to put underneath. On a wall the quiet
       // states are one word; Home shows the connection line instead.
       sub: ind.state === "live" ? ind.sub : null,
       upper: true,
-      dim: ind.state === "offline",
+      // QUIET IS ONE THING. Off air and unreachable both read at the same
+      // strength, because both mean "nothing is going out" and the WORD already
+      // says which.
+      //
+      // Off air used to be `--color-fg-muted`, a third level at 70% between a
+      // dimmed 45% and full white. On a wall beside REAPER and OBS -- which dim
+      // when they cannot be reached -- it was the brightest quiet thing in the
+      // row and read as the one still doing something. Reported twice as the
+      // streaming widgets not matching the grey their neighbours wear.
+      dim: !live,
       fill: live && filled ? "var(--green-9)" : null,
-      valueColor: live && !filled ? "var(--green-10)" : ind.state === "idle" ? "var(--color-fg-muted)" : null,
+      valueColor: live && !filled ? "var(--green-10)" : null,
     });
   };
 
