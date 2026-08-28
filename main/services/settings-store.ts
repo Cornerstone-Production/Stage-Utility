@@ -124,6 +124,19 @@ export interface SettingsData {
    * one pass.
    */
   layoutDefaultsCleaned?: boolean;
+  /**
+   * Which of a plan's notes become the pre-service checklist.
+   *
+   * Names, not ids. A plan note carries `category_name` on its own attributes
+   * and its teams by name, so matching on names costs no extra request — and a
+   * category renamed in PCO SHOULD stop matching, because the operator renamed
+   * the thing they were pointing at.
+   *
+   * Both empty means no checklist, not every note. See selectNotes in
+   * plan-note-checklist.ts for why that direction is the safe one.
+   */
+  checklistNoteCategories?: string[];
+  checklistNoteTeams?: string[];
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -167,6 +180,8 @@ const DEFAULT_SETTINGS: SettingsData = {
   oscFeedbackPort: 9000,
   splVisibleMetrics: [],
   onboardingDismissed: false,
+  checklistNoteCategories: [],
+  checklistNoteTeams: [],
 };
 
 /** Default attendance capture windows (minutes). Shared by the recorder (fallback

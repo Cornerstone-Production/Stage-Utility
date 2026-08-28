@@ -124,6 +124,7 @@ const EXPECTED_RUNTIME = [
   "attendance-history.json",
   "automation-log.json",
   "baptism.json",
+  "checklist-ticks.json",
   "service-timeline.json",
   "signals.json",
   "stream-starts.json",

@@ -167,6 +167,18 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "pco:getPlanItems":
       return apiFetch<T>("/api/pco/plan-items");
 
+    // The pre-service checklist, read from the plan's notes in Planning Center.
+    case "checklist:get":
+      return apiFetch<T>("/api/pco/checklist");
+    case "checklist:sources":
+      return apiFetch<T>("/api/pco/checklist-sources");
+    // Both writes answer with the whole list as it now stands, so the caller
+    // renders what the server says rather than applying its own optimism.
+    case "checklist:tick":
+      return post<T>("/api/pco/checklist/tick", p);
+    case "checklist:clear":
+      return post<T>("/api/pco/checklist/clear");
+
     case "propresenter:getStatus":
       return apiFetch<T>("/api/propresenter/status");
     case "propresenter:getInstances":
@@ -324,6 +336,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       });
     case "settings:setTaperWindow":
       return post<T>("/api/taper-window", p);
+    case "settings:setChecklistSources":
+      return post<T>("/api/checklist-sources", p);
     case "settings:setTimezone":
       return post<T>("/api/timezone", p);
     case "settings:setHourCycle":

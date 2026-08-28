@@ -44,7 +44,7 @@ switches.
 | **Service timer** | The running item's clock, and what is next | Planning Center Live |
 | **Service pacing** | How far ahead or behind the whole plan the service is | Recorded service timeline |
 | **Next service** | The next plan, its series and when it starts | Planning Center |
-| **Readiness** | What still needs doing before the next service | Planning Center + integration states |
+| **Readiness** | What still needs doing before the next service, including the plan's own checklist ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center + integration states |
 | **Recent services** | Attendance, length and start time, recently averaged | Recorded history |
 | **Plan file** | A page from a file attached to the plan | Planning Center attachments |
 | **Embedded view** | Another view, drawn inside this one | This app |
@@ -225,7 +225,7 @@ nothing.
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
 | **Action button** | Runs one of the app's own actions | This app |
 | **Notes** | A shared note anyone can type into | This app |
-| **Checklist** | A list of things to tick off | This app |
+| **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
 
 **Notes** and **Checklist** are shared, not per-screen: two people looking at them
 see the same text. See [OSC](../integrations/osc.md) and

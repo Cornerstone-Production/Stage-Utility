@@ -298,7 +298,11 @@ export type LayoutObjectConfig =
   // "config" store, so it rides along in every backup). `placeholder` is the
   // prompt shown while empty; the content itself is never in the layout.
   | { type: "notes"; placeholder?: string }
-  | { type: "checklist"; title?: string; resetDaily?: boolean }
+  // No `resetDaily`: it was declared here and read by nothing, for its whole
+  // life. The rows come from the plan's notes now, and their ticks are stored
+  // per plan — so the reset happens because a new plan is a new set of keys,
+  // not because a flag asked for it.
+  | { type: "checklist"; title?: string }
   // A button bound to an entry in the automation action registry. The general
   // form of osc-button/rosstalk-button, which stay as they are so existing
   // layouts keep working — this is for everything else the registry can already

@@ -21,6 +21,7 @@ import {
 import { AppLink } from "../app-link";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { readinessChecks, outstanding, type ReadinessCheck } from "./readiness";
+import { usePlanChecklist } from "../../main/use-plan-checklist";
 import type { LayoutObjectConfig } from "@main/types/views";
 /**
  * The cards Home draws with its own markup. Derived from the config union so a
@@ -320,7 +321,12 @@ export function NextServiceCard({
 }
 
 export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] }) {
+  // The plan's own checklist, written in Planning Center. Rows an operator ticks
+  // by hand, alongside the checks the app works out for itself.
+  const { rows: planRows, toggle } = usePlanChecklist();
+
   const todo = outstanding(checks);
+  const planTodo = planRows.filter((r) => !r.done);
   // Measure the box rather than guess at it: this card is placed at four
   // different tile sizes on Home and at any size at all on a canvas, so "how
   // many rows fit" is not something the caller can be trusted to pass in.
@@ -330,8 +336,16 @@ export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] })
   // scroll and must not clip, so it shows LESS — the passing checks are the
   // ones you do not need to see, and hiding the outstanding ones would make
   // "2 to sort out" a lie about the rows underneath it.
-  const shown = rows >= checks.length ? checks : todo.slice(0, Math.max(1, rows));
-  const hidden = checks.length - shown.length;
+  //
+  // The plan's rows queue behind the app's own, because a screen that is not
+  // routed stops the service in a way that an unticked job does not.
+  const total = checks.length + planRows.length;
+  const budget = Math.max(1, rows);
+  const shownChecks = total <= budget ? checks : todo.slice(0, budget);
+  const shownPlan =
+    total <= budget ? planRows : planTodo.slice(0, Math.max(0, budget - shownChecks.length));
+  const hidden = total - shownChecks.length - shownPlan.length;
+  const stillToDo = todo.length + planTodo.length;
 
   return (
     <section ref={wrapRef} className="flex h-full w-full flex-col overflow-hidden">
@@ -340,20 +354,62 @@ export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] })
           Ready for the next service
         </h2>
         <span className="ml-auto text-caption1 text-fg-subtle">
-          {todo.length === 0 ? "everything set" : `${todo.length} to sort out`}
+          {stillToDo === 0 ? "everything set" : `${stillToDo} to sort out`}
         </span>
       </header>
-      {shown.map((c) => (
+      {shownChecks.map((c) => (
         <CheckRow key={c.id} check={c} />
+      ))}
+      {shownPlan.map((r) => (
+        <PlanCheckRow key={r.key} row={r} onToggle={() => void toggle(r.key, !r.done)} />
       ))}
       {hidden > 0 && (
         <p className="px-4 py-2 text-caption1 text-fg-subtle">
-          {todo.length > shown.length
-            ? `+${todo.length - shown.length} more to sort out`
+          {stillToDo > shownChecks.length + shownPlan.length
+            ? `+${stillToDo - shownChecks.length - shownPlan.length} more to sort out`
             : `${hidden} already set`}
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * One row from the plan's notes.
+ *
+ * A SQUARE mark, where a derived check draws a round one. The shapes carry the
+ * difference: a round mark reports something the app worked out and cannot be
+ * ticked, a square one is a box a person ticks. Drawing both as circles made
+ * tapping a derived check look like it should do something, and it never can —
+ * the next state broadcast would undo it.
+ */
+function PlanCheckRow({
+  row,
+  onToggle,
+}: {
+  row: { key: string; text: string; done: boolean };
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={row.done}
+      className="flex w-full items-center gap-3 border-b border-line px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"
+    >
+      <span
+        className={cn(
+          "grid size-4 shrink-0 place-items-center rounded",
+          row.done ? "bg-accent text-on-accent" : "border border-fg-subtle",
+        )}
+        aria-hidden="true"
+      >
+        {row.done && <CheckIcon className="size-2.5" strokeWidth={3} />}
+      </span>
+      <span className={cn("min-w-0 flex-1 truncate text-body", row.done ? "text-fg-muted line-through" : "text-fg")}>
+        {row.text}
+      </span>
+    </button>
   );
 }
 

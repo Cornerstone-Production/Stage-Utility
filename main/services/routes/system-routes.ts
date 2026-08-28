@@ -139,6 +139,16 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // Which plan notes feed the pre-service checklist. Names, not ids — see
+    // stageController.setChecklistSources.
+    if (method === "POST" && pathname === "/api/checklist-sources") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const list = (v: unknown) =>
+        Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+      json(res, await stageController.setChecklistSources(list(body.categories), list(body.teams)));
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/timezone") {
       const body = await readBody(req) as Record<string, unknown>;
       const tz = typeof body.timezone === "string" ? body.timezone : null;
