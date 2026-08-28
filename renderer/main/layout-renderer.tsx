@@ -665,19 +665,27 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   // composition: two ALL-CAPS lines in a row of three-line cards. isHomeCard is
   // exhaustive by type, so no case can shadow one of these again.
   //
-  // pointer-events-none, ALWAYS — not gated on ctx.interactive like
-  // live-controls is.
+  // Clicks reach these cards on HOME and nowhere else.
   //
-  // Some of these cards contain in-app links (/screens, /history) put there for
-  // Home, which runs in the operator shell. Every OTHER surface that renders
-  // them — a wall display, a panel, the editor preview — is on the kiosk
-  // router, whose whole route table is "/". A touch on the SPL stat took a
-  // display to a "Route not found" page and left it there until somebody walked
-  // over and reloaded it.
+  // Some of them contain in-app links (/screens, /history) put there for Home,
+  // which runs in the operator shell. Every OTHER surface that renders them — a
+  // wall display, a panel — is on the kiosk router, whose whole route table is
+  // "/". A touch on the SPL stat took a display to a "Route not found" page and
+  // left it there until somebody walked over and reloaded it.
   //
-  // Their capability is ["readout"], with no drill-down, so a link that does
-  // nothing off the shell is what the model already says they are. Home renders
-  // them directly, not through here, and keeps its links.
+  // This used to be pointer-events-none ALWAYS, on the reasoning that "Home
+  // renders them directly, not through here". That stopped being true when Home
+  // became a grid: HomeGrid draws every card through ObjectContent, so the
+  // blanket rule made the operator's own front page inert. Its readiness card's
+  // chevrons went nowhere, its drill-downs did nothing, and its checklist could
+  // not be ticked — reported as "I am not able to interact with the widget at
+  // all", which was exactly right and was true of every card on the page.
+  //
+  // `home` alone is not enough: the layout EDITOR sets home:true when the Home
+  // view is open, and a link that navigates out of the editor mid-edit is the
+  // same bug wearing different clothes. `interactive` is false there and on
+  // every wall surface, so the pair is the honest test — this is the operator's
+  // own screen, and it is live.
   if (isHomeCard(c)) {
     // OFF HOME, the three streaming cards wear the wall composition instead.
     //
@@ -688,8 +696,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // drawn on rather than by which of two near-identical types got picked.
     const platform = WALL_TWIN[c.type as keyof typeof WALL_TWIN];
     if (!ctx.home && platform !== undefined) return streamingReadout(platform, {});
+    const live = ctx.home && ctx.interactive;
     return (
-      <div className="w-full h-full pointer-events-none">
+      <div className={live ? "w-full h-full" : "w-full h-full pointer-events-none"}>
         <HomeCard
           type={c.type}
           state={ctx.state}
