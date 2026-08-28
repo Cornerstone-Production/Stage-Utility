@@ -20,28 +20,18 @@ import { useStageState } from "../main/use-stage-state";
 export function ConsoleRailIcon({
   viewId,
   label,
-  outputs,
 }: {
   viewId: string;
   label: string;
-  /** For the fallback below — the screens that show this view. */
-  outputs: { id: string; viewId?: string | null }[];
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const { state } = useStageState();
   const glyphs = state?.iconGlyphs ?? {};
 
-  // The view's own choice first, then the icon of a SCREEN showing it.
-  //
-  // A console tab and the Screens card for the screen running it are the same
-  // thing to the operator, so changing the card's icon has to move the tab. They
-  // stay keyed separately — a card by its output id, a tab by its view id —
-  // because a screen re-pointed at another view should keep its own icon.
-  // Reading through covers the case without making the two share a key they
-  // would then fight over.
-  const fromScreen = outputs.find((o) => o.viewId === viewId && glyphs[o.id]);
-  const chosen = glyphs[viewId] ?? (fromScreen ? glyphs[fromScreen.id] : null);
-  const glyph = resolveIcon(chosen) ?? SlidersHorizontalIcon;
+  // ONE key, shared with the Screens card for any screen showing this console —
+  // see iconKeyFor. It was two, with the tab preferring its own, and setting the
+  // icon on the card then moved nothing if the tab had ever been set.
+  const glyph = resolveIcon(glyphs[viewId]) ?? SlidersHorizontalIcon;
 
   return (
     <>

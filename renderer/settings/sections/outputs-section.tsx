@@ -49,6 +49,9 @@ interface OutputRowProps {
   onRename: (name: string) => void;
   /** This display's icon tint, or undefined for the theme default. */
   iconColor?: string;
+  /** Where this card's icon is stored — the view id for a control surface, so it
+   *  is the same entry the sidebar tab uses; the output id otherwise. */
+  iconKey: string;
   /** Save the friendly URL slug ("" clears it). Rejects with a reason the card shows. */
   onSetSlug: (slug: string) => Promise<void>;
   onSetView: (viewId: string | null) => void;
@@ -69,7 +72,20 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+/**
+ * Where a screen's icon lives.
+ *
+ * A screen showing a CONTROL SURFACE is, to the operator, the same thing as the
+ * console tab in the sidebar — so both use the view's key and there is one icon
+ * between them. Anything else is a screen in its own right and keys by its id.
+ */
+export function iconKeyFor(output: { id: string; viewId?: string | null }, views: View[]): string {
+  if (!output.viewId) return output.id;
+  const view = views.find((v) => v.id === output.viewId);
+  return view && viewSurface(view) === "console" ? view.id : output.id;
+}
+
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
@@ -157,7 +173,14 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           onTouchStart={(e) => e.stopPropagation()}
           className="flex shrink-0"
         >
-          <IconTint itemKey={output.id} icon={MonitorIcon} color={iconColor} label={output.name} />
+          {/* Keyed by the VIEW when this screen shows a control surface, so the
+              card and that console's tab in the sidebar are one entry. They used
+              to be two — the card by output id, the tab by view id, with the tab
+              preferring its own — so setting the icon on the card moved nothing
+              if the tab had ever been set. One key, no precedence to reason
+              about. A screen showing a wall-screen view keeps its own key: it is
+              a screen, not a thing the sidebar lists. */}
+          <IconTint itemKey={iconKey} icon={MonitorIcon} color={iconColor} label={output.name} />
         </span>
         <Input
           value={editName}
@@ -631,7 +654,8 @@ export function OutputsSection({
                 baseUrl={baseUrl}
                 online={connected.has(output.id)}
                 canRemove={outputs.length > 1}
-                iconColor={stageState.iconColors?.[output.id]}
+                iconColor={stageState.iconColors?.[iconKeyFor(output, stageState.views)]}
+                iconKey={iconKeyFor(output, stageState.views)}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
                 onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
