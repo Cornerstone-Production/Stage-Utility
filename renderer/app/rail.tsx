@@ -105,7 +105,7 @@ export function Rail({
       //
       // No colour either. The rail tints its own icons by active state, like
       // every other tab, and a colour set here would draw nothing.
-      icon: <ConsoleRailIcon viewId={v.id} label={v.name} outputs={state?.outputs ?? []} />,
+      icon: <ConsoleRailIcon viewId={v.id} label={v.name} />,
       Component: () => null, // routing is by path; the route table owns the component
     }));
 

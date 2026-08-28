@@ -137,6 +137,11 @@ export function useStageSettings(pinnedViewId?: string) {
     }
   }
 
+  /** The StageState as it stands right now, from the cache every write updates.
+   *  Read fresh at each step: these handlers make TWO writes and the second has
+   *  to see what the first did. */
+  const stateNow = () => queryClient.getQueryData<StageState>(["stage:getState"]);
+
   /** The same, for the writes that return a fresh StageState. */
   async function writeState(
     channel: string,
@@ -699,41 +704,65 @@ export function useStageSettings(pinnedViewId?: string) {
    * the change happening and then silently undo it. The refusal is the useful
    * part; it says what to do instead.
    */
+  /**
+   * A screen's mode and its view's surface move together, and the ORDER is not
+   * a detail.
+   *
+   * Two guards on the server refuse in opposite directions, each waiting for the
+   * other side to move first:
+   *
+   *   setOutputMode(display)   refuses while the view it shows is a console
+   *   setViewSurface(console)  refuses while a screen showing it is not a panel
+   *
+   * So there is one rule: whichever side is being made MORE permissive goes
+   * first. Becoming a control surface, the screen leads; becoming a wall screen,
+   * the view does. Doing it the other way round is a deadlock — "Use as a
+   * display" was refused outright, with the server correctly explaining that the
+   * screen was still showing a control surface, and no order of clicking could
+   * get out of it.
+   */
   async function handleSetOutputMode(id: string, mode: "display" | "panel") {
-    const next = await writeTo<StageState>(["stage:getState"], "outputs:setMode", { id, mode });
-    if (!next) return;
-    // AND the view it shows, or the two halves disagree.
-    //
-    // A screen's `mode` and a view's `surface` are different fields and were only
-    // ever wired one way: assigning a console view to a screen offers to make the
-    // screen a panel. Going the other way did nothing, so "Use as a control
-    // surface" left the view still marked a wall screen — and the rail lists
-    // CONSOLES from `view.surface`, so the console the operator had just made
-    // never appeared until they set it a second time in the editor.
-    const shown = next.outputs.find((o) => o.id === id)?.viewId ?? null;
-    if (!shown) return;
-    const want = mode === "panel" ? "console" : "display";
-    const view = next.views.find((v) => v.id === shown);
-    if (!view || viewSurface(view) === want) return;
-    // Its own write, and a refusal here is the server's to explain: turning a
-    // view back into a wall screen is refused while another screen needs it as a
-    // console, and that message is written for the operator.
-    await writeState("views:setSurface", { id: shown, surface: want });
+    const shown = stateNow()?.outputs.find((o) => o.id === id)?.viewId ?? null;
+    const wantSurface = mode === "panel" ? "console" : "display";
+    const viewNeedsIt = (() => {
+      const v = stateNow()?.views.find((x) => x.id === shown);
+      return v ? viewSurface(v) !== wantSurface : false;
+    })();
+
+    if (mode === "display" && shown && viewNeedsIt) {
+      // The view first: the screen cannot become a display while it is on one.
+      if (!(await writeState("views:setSurface", { id: shown, surface: "display" }))) return;
+      await writeState("outputs:setMode", { id, mode });
+      return;
+    }
+
+    if (!(await writeState("outputs:setMode", { id, mode }))) return;
+    if (shown && viewNeedsIt) {
+      await writeState("views:setSurface", { id: shown, surface: wantSurface });
+    }
   }
 
-  /** Change what a View is for. Refused, with its reason, when screens would be
-   *  stranded — so the message reaches the operator rather than the console. */
+  /** Change what a View is for, and the screens showing it, in the order the
+   *  guards allow. See handleSetOutputMode. */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
-    const next = await writeTo<StageState>(["stage:getState"], "views:setSurface", { id, surface });
-    if (!next) return;
-    // AND every screen showing it, for the same reason in reverse. A view marked
-    // a control surface whose screens are still read-only renders buttons that
-    // do nothing, which is the failure this pairing exists to prevent.
-    const want = surface === "console" ? "panel" : "display";
-    for (const o of next.outputs) {
-      if (o.viewId !== id) continue;
-      if ((o.mode ?? "display") === want) continue;
-      await writeState("outputs:setMode", { id: o.id, mode: want });
+    const wantMode = surface === "console" ? "panel" : "display";
+    const showing = (stateNow()?.outputs ?? []).filter(
+      (o) => o.viewId === id && (o.mode ?? "display") !== wantMode,
+    );
+
+    if (surface === "console") {
+      // The screens first: the view cannot become a console while a screen
+      // showing it is still a plain display.
+      for (const o of showing) {
+        if (!(await writeState("outputs:setMode", { id: o.id, mode: "panel" }))) return;
+      }
+      await writeState("views:setSurface", { id, surface });
+      return;
+    }
+
+    if (!(await writeState("views:setSurface", { id, surface }))) return;
+    for (const o of showing) {
+      await writeState("outputs:setMode", { id: o.id, mode: "display" });
     }
   }
 
