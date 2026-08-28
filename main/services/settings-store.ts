@@ -139,7 +139,7 @@ export interface SettingsData {
   checklistNoteTeams?: string[];
 }
 
-const DEFAULT_SETTINGS: SettingsData = {
+export const DEFAULT_SETTINGS: SettingsData = {
   // Off until someone turns it on: a timer that starts itself unasked during a
   // service is worse than one that has to be started.
   baptismAutoStart: { enabled: false, testimonyKeyword: "baptism stories" },
@@ -154,7 +154,9 @@ const DEFAULT_SETTINGS: SettingsData = {
   integrationEnabled: {},
   showQr: true,
   displays: [{ id: "display-1", name: "Display 1" }],
-  allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
+  // Empty, which every reader treats as "all allowed". Seeding it with ids
+  // restricts a fresh install to service types that exist in no other org.
+  allowedServiceTypeIds: [],
   wirelessMeterRateMs: 1000,
   appName: "Stage Utility",
   kioskDiscovery: false,

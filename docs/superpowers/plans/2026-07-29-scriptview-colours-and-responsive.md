@@ -146,7 +146,7 @@ Find where `stage-controller.ts` builds the `ScriptViewRundownDTO` and add, alon
 Run: `npm run type-check`, then restart the dev server and
 
 ```bash
-curl -s "http://localhost:8788/api/scriptview/rundown?serviceTypeId=41227" \
+curl -s "http://localhost:8788/api/scriptview/rundown?serviceTypeId=SERVICE_TYPE_ID" \
   | python3 -c "import json,sys; print(json.load(sys.stdin).get('itemTypeColors'))"
 ```
 
