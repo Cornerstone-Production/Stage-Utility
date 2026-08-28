@@ -20,9 +20,12 @@ import { useStageState } from "../main/use-stage-state";
 export function ConsoleRailIcon({
   viewId,
   label,
+  active,
 }: {
   viewId: string;
   label: string;
+  /** Whether this console is the page being shown. */
+  active: boolean;
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const { state } = useStageState();
@@ -32,6 +35,19 @@ export function ConsoleRailIcon({
   // see iconKeyFor. It was two, with the tab preferring its own, and setting the
   // icon on the card then moved nothing if the tab had ever been set.
   const glyph = resolveIcon(glyphs[viewId]) ?? SlidersHorizontalIcon;
+
+  // The operator's colour, but ONLY while this console is the current page.
+  //
+  // An inactive row is quiet on purpose: the rail says which page you are on by
+  // being the one coloured thing in it, and a column of tinted icons takes that
+  // away. Selected, the row is already the accent — so wearing the icon's own
+  // colour there says the same thing in the operator's terms instead of the
+  // theme's. Unset falls through to the row's own styling, which is what every
+  // other tab does.
+  //
+  // Same key as the Screens card for the screen running this console (see
+  // iconKeyFor), so the two are one colour rather than two that can disagree.
+  const colour = active ? state?.iconColors?.[viewId] : undefined;
 
   return (
     <>
@@ -43,7 +59,7 @@ export function ConsoleRailIcon({
           setAnchor(e.currentTarget.firstElementChild as HTMLElement);
         }}
       >
-        {createElement(glyph, { className: "size-4" })}
+        {createElement(glyph, { className: "size-4", style: colour ? { color: colour } : undefined })}
       </span>
       {anchor && (
         <IconMenu
