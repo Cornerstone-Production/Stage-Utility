@@ -332,6 +332,23 @@ function usePreviewDraftSlots(previewViewId: string | null): Slot[] | null {
 
 // ---- main view --------------------------------------------------------------
 
+/**
+ * The screen a full-page View is drawn on.
+ *
+ * Every one of these views sizes itself to h-full, because each also renders
+ * inside an embed tile — so the viewport height and the safe-area insets belong
+ * to the ROUTE, not to the component. Five kinds needed the identical wrapper;
+ * this is it, rather than five copies to keep in step the next time a phone adds
+ * an inset.
+ */
+function KioskFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      {children}
+    </div>
+  );
+}
+
 export function StageView() {
   const { state, isLoading, error } = useStageState();
   const pathSlug = getDisplayId();
@@ -515,29 +532,27 @@ export function StageView() {
   if (kind === "dashboard") {
     return (
       <StageErrorBoundary>
-        {/* The view sizes to h-full so it can also live inside an embed tile;
-            the screen height and the safe-area insets belong to this route. */}
-        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <KioskFrame>
           <DashboardView displayId={displayId} />
-        </div>
+        </KioskFrame>
       </StageErrorBoundary>
     );
   }
   if (kind === "stage") {
     return (
       <StageErrorBoundary>
-        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <KioskFrame>
           <StageDisplayView displayId={displayId} />
-        </div>
+        </KioskFrame>
       </StageErrorBoundary>
     );
   }
   if (kind === "transcription") {
     return (
       <StageErrorBoundary>
-        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <KioskFrame>
           <TranscriptionView displayId={displayId} />
-        </div>
+        </KioskFrame>
       </StageErrorBoundary>
     );
   }
@@ -545,20 +560,18 @@ export function StageView() {
     const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
     return (
       <StageErrorBoundary>
-        {/* ScriptView sizes to h-full so it can also live inside a layout object;
-            the screen height and the safe-area insets belong to this route. */}
-        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <KioskFrame>
           <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} />
-        </div>
+        </KioskFrame>
       </StageErrorBoundary>
     );
   }
   if (kind === "spl-rundown") {
     return (
       <StageErrorBoundary>
-        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <KioskFrame>
           <SplRundownView displayId={displayId} />
-        </div>
+        </KioskFrame>
       </StageErrorBoundary>
     );
   }

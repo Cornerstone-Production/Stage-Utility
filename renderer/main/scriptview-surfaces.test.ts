@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { EMBEDDABLE_VIEW_KINDS, isEmbeddableViewKind, isOfferableInEmbedPicker } from "./layout-objects.js";
+import { EMBEDDABLE_VIEW_KINDS, isEmbeddableViewKind } from "./layout-objects.js";
 import { embedRefusal } from "./embed-chain.js";
 import type { ViewKind } from "../../main/types/stage.js";
 
@@ -147,14 +147,11 @@ describe("embedding cannot recurse", () => {
     assert.deepEqual([...EMBEDDABLE_VIEW_KINDS].sort(), [...ALL_VIEW_KINDS].sort());
   });
 
-  it("never offers a kind it cannot render", () => {
-    // The picker may list more than the renderer supports (so an operator can
-    // see the kind exists), but it must never offer one the recursion guard
-    // excludes — that pairing is the only combination that could recurse.
-    for (const kind of ALL_VIEW_KINDS) {
-      if (isEmbeddableViewKind(kind)) {
-        assert.ok(isOfferableInEmbedPicker(kind), `${kind} is embeddable but not offerable`);
-      }
-    }
-  });
+  // "never offers a kind it cannot render" used to live here, walking every kind
+  // and checking the picker against the renderer. It guarded a real hazard while
+  // the two lists could differ; isOfferableInEmbedPicker now just calls
+  // isEmbeddableViewKind, so the loop asserted a function equals itself. What
+  // actually stops a kind being offered that cannot be drawn is EmbeddedView's
+  // exhaustive switch over ViewKind — a compile error, not a test — plus the
+  // list equality asserted above.
 });

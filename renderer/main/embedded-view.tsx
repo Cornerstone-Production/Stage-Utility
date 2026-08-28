@@ -113,10 +113,16 @@ export function EmbeddedView({
       // by the PARENT layout's object ids; a child layout's objects are not in
       // it, and carrying it would be a map nothing can hit that still has to be
       // reasoned about at every read.
+      // `home` is dropped for the same reason as `placed`: it describes the
+      // SURFACE, and this view is a tile on that surface rather than the surface
+      // itself. Inherited, a wall view embedded on a Home card drew its
+      // streaming objects as Home's interactive cards instead of as the wall
+      // widgets that view is designed around.
       const childCtx: LayoutRenderCtx = {
         ...ctx,
         embedChain: childChain(view.id, ctx.embedChain),
         placed: undefined,
+        home: false,
       };
 
       return (

@@ -1,9 +1,17 @@
-// Every kind draws something, and a cycle draws a notice instead of hanging.
+// Every kind reaches its own component, and a cycle draws a notice instead of
+// hanging.
 //
 // Rendered, not reasoned about: the failure this guards is a box that renders
 // nothing, or renders for ever. Neither shows up in a unit test over the pieces
 // — the old `view-embed` had passing tests over its picker the whole time it was
 // drawing "not embeddable yet" for four of the five kinds it offered.
+//
+// The FIRST version of this file guarded nothing. It asserted only that the box
+// was non-empty and did not contain "not embeddable yet", which every refusal
+// notice also satisfies — so five of the seven fixtures never reached a
+// component at all, and stubbing the whole switch out kept the suite green. Each
+// kind now gets a fixture that reaches its component and is asserted on a string
+// only that component emits.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
@@ -12,12 +20,25 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-// React only runs act() quietly when it is told it is in a test environment;
-// without this every awaited render logs "not configured to support act(...)".
+// React runs act() quietly only when told it is in a test environment; without
+// this every awaited render logs "not configured to support act(...)".
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+/**
+ * jsdom does no layout, so every element measures 0 — and the embed sizes its
+ * child's canvas by MEASURING its rendered box. One height for every element is
+ * enough: the only assertion that reads it is the box-sizing test below, and it
+ * cares that the number came from the box rather than from the object's
+ * fraction of a canvas.
+ */
+const BOX_PX = 270;
+Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+  get: () => BOX_PX,
+  configurable: true,
+});
+
 // jsdom ships neither, and both are reached by a render: the state hooks open
-// the state stream, and several views fetch on mount. Left real, a request
+// the state stream, and every view fetches on mount. Left real, a request
 // outlives the test and settles after teardown has removed `window`, which
 // surfaces as the FILE failing while every test in it passes.
 class StubEventSource {
@@ -30,6 +51,17 @@ class StubEventSource {
   close(): void {}
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
+
+const SLOT = {
+  id: "s-1",
+  channel: "1",
+  order: 0,
+  link: { kind: "static", label: "SLOT LABEL", color: "#888888" },
+  device: { status: "none", rf: null, battery: null, freq: null, audioLevel: null,
+    charge: null, iemCharge: null, label: null, iemLabel: null },
+};
+
+/** A view that embeds ITSELF — the case only the real LayoutRenderer can check. */
 const SELF_VIEW = {
   id: "v-self",
   name: "Self",
@@ -47,30 +79,60 @@ const SELF_VIEW = {
   },
 };
 
-/** Enough StageState for LayoutRenderer to hydrate; `/api/state` is the only
- *  route it needs, and every other fetch answers with an empty object. */
-const STATE = { views: [SELF_VIEW], outputs: [], slotsByView: {}, slotsByLayoutObject: {},
-  emptySlotLogo: null, defaultAvatar: null, hourCycle: "24h" };
+/** Enough StageState for every view to hydrate and draw its real content. */
+const STATE = {
+  views: [SELF_VIEW],
+  outputs: [{ id: "d-1", name: "Left Screen", viewId: null }],
+  slotsByView: { "v-1": [SLOT] },
+  slotsByLayoutObject: {},
+  emptySlotLogo: null,
+  defaultAvatar: null,
+  hourCycle: "24h",
+  appName: "APP NAME",
+  appLogo: null,
+  appLogoMonochrome: false,
+  serviceTypeName: "ST",
+  planTitle: "PT",
+  planSeriesTitle: "PS",
+  showQr: false,
+  remoteUrl: "",
+  planId: null,
+  serviceTypeId: null,
+  pcoConfigured: true,
+  chargerBays: [],
+};
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
-  const body = String(url).includes("/api/state") ? STATE : {};
+  const u = String(url);
+  const body = u.includes("/api/state") ? STATE : u.includes("transcript") ? [] : {};
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
 
 const { render, screen, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
+const { act } = await import("react");
+const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { EmbeddedView } = await import("./embedded-view.js");
 const { RenderObject, LayoutRenderer } = await import("./layout-renderer.js");
-const { act } = await import("react");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => cleanup());
 afterEach(async () => { cleanup(); await settle(); });
 
+/** The app wraps everything in a TooltipProvider; three of the views render a
+ *  Tooltip and throw without one. */
+async function draw(element: React.ReactElement) {
+  let container!: HTMLElement;
+  await act(async () => {
+    container = render(React.createElement(TooltipProvider as never, null, element)).container;
+    await settle();
+  });
+  return container;
+}
+
 function ctxWith(embedChain: string[]) {
   return {
-    state: { views: [], outputs: [], slotsByView: {}, slotsByLayoutObject: {} },
-    propresenter: null, propInstances: [], pcoLive: null, planItems: null,
+    state: STATE, propresenter: null, propInstances: null, pcoLive: null, planItems: null,
     transcript: [], spl: null, obs: null, reaper: null, resi: null, youtube: null,
     osc: null, peopleCount: null, serviceLow: null, serviceAttendance: null,
     servicePeak: null, servicePeakAttendance: null, baptism: null,
@@ -80,83 +142,101 @@ function ctxWith(embedChain: string[]) {
   } as never;
 }
 
-const view = (kind: string, id = "v-1") => ({ id, name: "Test view", kind, layout: { objects: [] } }) as never;
+const view = (kind: string, id = "v-1") => ({
+  id, name: "Test view", kind,
+  layout: { objects: [
+    { id: "t1", type: "text", x: 0, y: 0, w: 1, h: 1, z: 0,
+      config: { type: "text", text: "CUSTOM BODY" }, style: { fontSize: 0.1 } },
+  ] },
+}) as never;
 
 describe("a cycle is refused, not rendered", () => {
-  test("a view already above this one draws a notice", () => {
+  test("a view already above this one draws a notice", async () => {
     // Without this the render recurses until the tab dies — on a wall display
     // with nobody standing next to it.
-    render(React.createElement(EmbeddedView, { view: view("custom", "v-1"), ctx: ctxWith(["v-1"]) } as never));
+    await draw(React.createElement(EmbeddedView, { view: view("custom", "v-1"), ctx: ctxWith(["v-1"]) } as never));
     assert.ok(screen.getByText(/cannot contain itself/i), "a self-embed did not draw a notice");
   });
 
-  test("past the depth cap draws a notice", () => {
-    render(React.createElement(EmbeddedView, { view: view("custom", "v-9"), ctx: ctxWith(["a", "b", "c"]) } as never));
+  test("past the depth cap draws a notice", async () => {
+    await draw(React.createElement(EmbeddedView, { view: view("custom", "v-9"), ctx: ctxWith(["a", "b", "c"]) } as never));
     assert.ok(screen.getByText(/nested more than/i), "unbounded nesting was allowed");
   });
 });
 
-describe("every kind draws something", () => {
-  for (const kind of ["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown"]) {
-    test(`${kind} is not an empty box`, () => {
-      const { container } = render(
-        React.createElement(EmbeddedView, { view: view(kind), ctx: ctxWith([]) } as never),
+describe("every kind reaches its own component", () => {
+  /**
+   * A string ONLY that kind's component can emit, so a tile that quietly drew a
+   * notice instead — which is what five of these fixtures used to do — fails.
+   * Deliberately not "the box is non-empty": every refusal notice passes that.
+   */
+  const MARKER: Record<string, RegExp> = {
+    slots: /SLOT LABEL/,                 // the slot's own label, through SlotPanel
+    dashboard: /Up next/,                // dashboard's panel heading
+    stage: /Remaining slides/,           // the stage display's, and only its
+    transcription: /Waiting for transcript/,
+    custom: /CUSTOM BODY/,               // the embedded layout's own object
+    script: /Planning Center not configured/, // ScriptView's own unconfigured state
+    "spl-rundown": /Max SPL per item/,
+  };
+
+  for (const [kind, marker] of Object.entries(MARKER)) {
+    test(`${kind} draws its component, not a notice`, async () => {
+      const container = await draw(
+        // displayId is what the per-display kinds need; the others ignore it.
+        React.createElement(EmbeddedView, { view: view(kind), ctx: ctxWith([]), displayId: "d-1" } as never),
       );
-      // Not asserting WHAT it drew — each kind is its own component with its own
-      // tests. Asserting that the embed reached one at all, which is exactly what
-      // four kinds failed to do before this.
-      assert.ok(
-        (container.textContent ?? "").trim().length > 0 || container.querySelector("div, svg"),
-        `a ${kind} view rendered an empty box`,
-      );
-      assert.equal(
-        (container.textContent ?? "").includes("not embeddable yet"),
-        false,
-        `a ${kind} view still says it is not embeddable`,
-      );
-      cleanup();
+      const text = container.textContent ?? "";
+      assert.match(text, marker, `a ${kind} view did not reach its component (drew: ${text.slice(0, 120)})`);
+      assert.equal(text.includes("not embeddable yet"), false, `a ${kind} view still says it is not embeddable`);
     });
   }
 });
 
-describe("an embedded custom view is drawn to the BOX, not the screen", () => {
-  // Through RenderObject, so this exercises the real `view-embed` case rather
-  // than a component called with hand-made arguments. Everything that sizes
-  // itself in a layout is a fraction of ctx.H; handing the child the parent's H
-  // drew a quarter-height tile's contents four times too large, which is markup
-  // that looks right and output nobody can read.
+describe("a per-display kind says so rather than drawing an empty box", () => {
+  for (const kind of ["dashboard", "stage", "spl-rundown"]) {
+    test(`${kind} without a screen behind it`, async () => {
+      await draw(React.createElement(EmbeddedView, { view: view(kind), ctx: ctxWith([]) } as never));
+      assert.ok(screen.getByText(/set up per screen/i), `a ${kind} view with no display id drew nothing useful`);
+    });
+  }
+});
+
+describe("an embedded view is sized by its BOX, not by a fraction", () => {
+  // The arithmetic that looks right — `o.h * ctx.H` — is right only for a
+  // top-level object on a laid-out canvas. Here the embed is inside a CONTAINER,
+  // where `o.h` is a fraction of the container and not of the canvas, so the
+  // fraction says 1080 and the box is 270. Home is worse still: it does not use
+  // the object's h to lay anything out at all.
   //
   // Inline font-size, not a class: jsdom loads no stylesheet, so a Tailwind class
   // resolves to nothing. This is a style attribute the renderer writes itself.
-  const child = {
-    id: "v-child",
-    name: "Child",
-    kind: "custom",
-    layout: {
-      canvas: { width: 1920, height: 1080 },
-      objects: [
+  test("an embed filling a half-height container gets the container's box", async () => {
+    const ctx = ctxWith([]);
+    (ctx as unknown as { state: { views: unknown[] } }).state = { ...STATE, views: [
+      { id: "v-child", name: "Child", kind: "custom", layout: { objects: [
         { id: "t1", type: "text", x: 0, y: 0, w: 1, h: 1, z: 0,
           config: { type: "text", text: "Inner" }, style: { fontSize: 0.1 } },
+      ] } },
+    ] } as never;
+
+    const container = {
+      id: "c1", type: "container", x: 0, y: 0, w: 1, h: 0.5, z: 0,
+      config: { type: "container" },
+      children: [
+        { id: "o-embed", type: "view-embed", x: 0, y: 0, w: 1, h: 1, z: 0,
+          config: { type: "view-embed", viewId: "v-child" } },
       ],
-    },
-  };
-
-  test("a quarter-height tile sizes its child's text to the tile", () => {
-    const ctx = ctxWith([]);
-    (ctx as unknown as { state: { views: unknown[] } }).state.views = [child];
-    const embed = {
-      id: "o-embed", type: "view-embed", x: 0, y: 0, w: 1, h: 0.25, z: 0,
-      config: { type: "view-embed", viewId: "v-child" },
     };
-    render(React.createElement(RenderObject, { o: embed, ctx } as never));
+    await draw(React.createElement(RenderObject, { o: container, ctx } as never));
 
-    const inner = screen.getByText("Inner");
-    // H is 1080 and the box is a quarter of it, so the child's canvas is 270 and
-    // a 0.1 font is 27px. The parent's H would have given 108.
+    const inner = screen.getByText("Inner") as HTMLElement;
+    // The box measures BOX_PX, so a 0.1 font is 27px. `o.h * ctx.H` would give
+    // 1 x 1080 -> 108px, and the parent's raw H would give the same.
     assert.equal(
-      (inner as HTMLElement).style.fontSize,
-      "27px",
-      "the embedded view sized its text to the screen instead of to its box",
+      inner.style.fontSize,
+      `${0.1 * BOX_PX}px`,
+      "the embedded view sized its text off a fraction instead of its rendered box",
     );
   });
 });
@@ -169,13 +249,9 @@ describe("the OUTERMOST view is on the chain too", () => {
   // second copy of the whole layout inside itself, and only the depth cap
   // stopped it. Seen in a browser, invisible to every unit test.
   test("a tile pointing at its own view draws the notice, not a second copy", async () => {
-    const layout = SELF_VIEW.layout;
-    await act(async () => {
-      render(React.createElement(LayoutRenderer, {
-        layout, viewId: "v-self", ndiSource: null, interactive: false,
-      } as never));
-      await settle();
-    });
+    await draw(React.createElement(LayoutRenderer, {
+      layout: SELF_VIEW.layout, viewId: "v-self", ndiSource: null, interactive: false,
+    } as never));
 
     assert.ok(screen.getByText(/cannot contain itself/i), "the view embedded itself without a notice");
     // Once, from the layout itself. Twice means the embed drew the whole view

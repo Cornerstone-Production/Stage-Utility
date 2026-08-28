@@ -2186,6 +2186,34 @@ function ViewEmbedObject({
 }) {
   const view = config.viewId ? ctx.state.views?.find((v) => v.id === config.viewId) ?? null : null;
 
+  // The embedded view's canvas is the BOX, not the screen. A custom view is
+  // drawn by the same RenderObject a display uses, and everything that sizes
+  // itself there — fonts, spacing — is a fraction of ctx.H. Left as the parent's
+  // H, a quarter-height tile drew its child four times too large: correct-looking
+  // markup, unreadable output.
+  //
+  // MEASURED, not derived. The obvious arithmetic — `o.h * ctx.H`, or the placed
+  // rect — is right only for a top-level object on a laid-out canvas. Inside a
+  // container `o.h` is a fraction of the CONTAINER, so an embed filling a
+  // half-height container claimed twice its box; `placed` is absent for every
+  // letterboxed layout, which is most wall displays; and on Home the object's
+  // h is not used to lay anything out at all (see home-cards.ts), so it means
+  // nothing. The rendered box is the one thing that is true on all four paths.
+  //
+  // useLayoutEffect, so the measurement lands in the same commit as the first
+  // paint and nothing is ever seen at the fallback size.
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const [boxH, setBoxH] = useState(0);
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const measure = () => setBoxH(el.clientHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [view?.id]);
+
   const notice = (text: string) => (
     <div className="flex items-center justify-center h-full text-fg-subtle text-caption1 text-center px-3">{text}</div>
   );
@@ -2193,15 +2221,9 @@ function ViewEmbedObject({
   if (!config.viewId) return notice("Pick a view to embed");
   if (!view) return notice("That view no longer exists");
 
-  // The embedded view's canvas is the BOX, not the screen. A custom view is
-  // drawn by the same RenderObject a display uses, and everything that sizes
-  // itself there — fonts, spacing — is a fraction of ctx.H. Left as the parent's
-  // H, a quarter-height tile drew its child four times too large: correct-looking
-  // markup, unreadable output. Live pixels when the parent placed responsively,
-  // design px otherwise; o.h is a fraction of the canvas height either way, so
-  // the units match whichever branch supplied H.
-  const boxH = ctx.placed?.get(o.id)?.height ?? o.h * ctx.H;
-  const embedCtx: LayoutRenderCtx = { ...ctx, H: boxH };
+  // Before the first measurement there is nothing better to say than the
+  // parent's canvas; it is replaced within the same commit.
+  const embedCtx: LayoutRenderCtx = { ...ctx, H: boxH || ctx.H };
 
   // w-full h-full, not the object's alignment: boxStyle turns every object into
   // a flex column aligned by textAlign, which shrink-wraps a child that has no
@@ -2214,8 +2236,12 @@ function ViewEmbedObject({
   // which an embedded component never passes through — so without this the
   // rundown fell back to the browser default 16px however large the object was,
   // with no control that did anything.
+  // The wrapper's own font size stays a fraction of ctx.H: it is the OBJECT's
+  // style, sized against the canvas exactly as every other object's font size
+  // is, and it is the operator's control over the embed. Only the child view's
+  // canvas is the box.
   return (
-    <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}>
+    <div ref={boxRef} className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}>
       <EmbeddedView
         view={view}
         ctx={embedCtx}
