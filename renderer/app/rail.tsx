@@ -88,32 +88,35 @@ export function Rail({
   // console view, so it qualified — and the rail then carried TWO Home entries,
   // the real front door at the top and a second one under Consoles that opened
   // Home's cards on a bare canvas route.
-  const consoles: Destination[] = screensListViews(state?.views ?? [])
-    .filter((v) => viewSurface(v) === "console")
-    .map((v) => ({
-      path: `/consoles/${v.id}`,
+  const consoleViews = screensListViews(state?.views ?? []).filter((v) => viewSurface(v) === "console");
+
+  // Longest match first: /settings/branding must beat /settings.
+  //
+  // Over the PATHS, and before the destinations are built, because a console's
+  // icon has to know whether it is the current page — it wears the operator's
+  // colour only while selected. One computation, with `active` derived from it,
+  // rather than a second copy of the same rule.
+  const activePath =
+    [...ALL_DESTINATIONS.map((d) => d.path), ...consoleViews.map((v) => `/consoles/${v.id}`)]
+      .sort((a, b) => b.length - a.length)
+      .find((p) => pathname === p || pathname.startsWith(`${p}/`)) ?? null;
+
+  const consoles: Destination[] = consoleViews.map((v) => {
+    const path = `/consoles/${v.id}`;
+    return {
+      path,
       label: v.name,
       description: "A console you built.",
-      // Right-click it to change the glyph, the same gesture the Screens cards
-      // carry — a console is a thing the operator made, so its icon is theirs
-      // too. Keyed by view id, alongside display ids and tool paths in the same
-      // map, and it draws SlidersHorizontal until they pick something.
       // A PLAIN GLYPH. Nothing interactive goes in here: the row itself is a
       // <button>, and putting one inside it is invalid markup whose outer button
       // swallows the click — the page navigated every time an icon was touched.
       // Right-clicking the glyph opens the set, from a portal.
-      //
-      // No colour either. The rail tints its own icons by active state, like
-      // every other tab, and a colour set here would draw nothing.
-      icon: <ConsoleRailIcon viewId={v.id} label={v.name} outputs={state?.outputs ?? []} />,
+      icon: <ConsoleRailIcon viewId={v.id} label={v.name} active={activePath === path} />,
       Component: () => null, // routing is by path; the route table owns the component
-    }));
+    };
+  });
 
-  // Longest match first: /settings/branding must beat /settings.
-  const active =
-    [...ALL_DESTINATIONS, ...consoles]
-      .sort((a, b) => b.path.length - a.path.length)
-      .find((d) => pathname === d.path || pathname.startsWith(`${d.path}/`)) ?? null;
+  const active = [...ALL_DESTINATIONS, ...consoles].find((d) => d.path === activePath) ?? null;
 
   return (
     <Sidebar className="relative">

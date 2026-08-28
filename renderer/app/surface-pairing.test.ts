@@ -39,9 +39,9 @@ describe("setting a screen to a control surface", () => {
   });
 
   test("does nothing further when the first write was refused", () => {
-    // writeTo answers null on failure. Carrying on would set a view's surface
-    // for a screen whose mode never actually changed.
-    assert.match(src, /if \(!next\) return;/);
+    // writeState answers false on failure. Carrying on would change one half of
+    // the pair for a change the server had already rejected.
+    assert.match(src, /if \(!\(await writeState\(/);
   });
 });
 
@@ -53,14 +53,16 @@ describe("setting a view to a control surface", () => {
   });
 
   test("EVERY screen, not just the first — a view can be on several", () => {
-    assert.match(src, /for \(const o of next\.outputs\)/);
+    assert.match(src, /for \(const o of showing\)/);
   });
 
-  test("skips a screen already in the right mode, so it writes only what changed", () => {
-    assert.match(src, /=== want\) continue;/);
+  test("writes only the screens that actually differ", () => {
+    // `showing` is filtered to the ones not already in the wanted mode, so a
+    // pairing does not re-write half the wall to no effect.
+    assert.match(src, /\(o\.mode \?\? "display"\) !== wantMode/);
   });
 
   test("does nothing further when the first write was refused", () => {
-    assert.match(src, /if \(!next\) return;/);
+    assert.match(src, /if \(!\(await writeState\(/);
   });
 });
