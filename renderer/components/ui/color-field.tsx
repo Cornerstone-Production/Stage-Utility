@@ -264,7 +264,6 @@ function ColorPanel({
       {icon && pickingIcon ? (
         <IconGrid
           current={icon.current}
-          tint={swatchCss}
           onPick={(name) => { icon.onPick(name); setPickingIcon(false); }}
           onClear={() => { icon.onClear(); setPickingIcon(false); }}
         />

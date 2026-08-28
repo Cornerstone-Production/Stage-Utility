@@ -21,6 +21,23 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 NODE="$(command -v node)"
 UNIT="stage-survival-test"
 
+# Wait for the CHILD TO EXIST, rather than guessing how long that takes.
+#
+# `sleep 4` was a budget, not a condition: on a slow runner the parent had
+# written PARENT-START and not yet reached its spawn, so the teardown hit a
+# parent with no child, nothing could survive, and the run failed exactly as a
+# real survival failure does. Windows hit that twice in a row. PARENT-SPAWNED is
+# the precondition the test needs -- there IS a detached child to outlive the
+# teardown -- so all three platforms wait for it.
+wait_for_spawn() {
+  deadline=$(( $(date +%s) + 60 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if grep -q "PARENT-SPAWNED" "$1" 2>/dev/null; then return 0; fi
+    sleep 0.25
+  done
+  return 1
+}
+
 stop_unit() { sudo systemctl stop "$UNIT" >/dev/null 2>&1 || true; }
 # Logs are removed only on the way out, never between cases - a case creates its
 # log and then stops any stale unit, so clearing logs in that step would delete
@@ -43,7 +60,11 @@ run_case() { # $1 = swap|stopfirst   $2 = expected yes|no
   sudo systemd-run --unit="$UNIT" --setenv=SURVIVAL_LOG="$log" \
     "$NODE" "$HERE/parent.mjs" >/dev/null
 
-  sleep 4
+  if ! wait_for_spawn "$log"; then
+    echo "  linux survival: INCONCLUSIVE - no child was spawned within 60s"
+    echo "  Nothing was torn down, so this does not indicate a survival failure."
+    exit 1
+  fi
   if [ "$mode" = stopfirst ]; then
     sudo systemctl stop "$UNIT" >/dev/null 2>&1 || true
   fi

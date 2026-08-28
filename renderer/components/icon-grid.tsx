@@ -1,9 +1,12 @@
 // icon-grid.tsx — the searchable set, with no opinion about where it sits.
 //
-// Extracted from the standalone picker when the icon and its colour became ONE
-// panel: the grid is now a mode of the colour panel rather than a second popup
-// beside it, so it cannot own its own placement or dismissal. Those belong to
-// whatever is hosting it.
+// It cannot own its placement or dismissal: it is hosted twice, inline in the
+// colour panel on a Screens card and in a small menu of its own on the console
+// rail. Both of those belong to the host.
+//
+// Cells are drawn in the theme ACCENT rather than in the colour being edited.
+// Tinting them to the draft made the grid a different colour on every card and
+// matched nothing else in the app's chrome.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ICON_SET, searchIcons } from "./icon-set";
@@ -13,14 +16,11 @@ export function IconGrid({
   current,
   onPick,
   onClear,
-  /** Drawn in each cell, so the grid previews the colour it will actually be. */
-  tint,
 }: {
   current?: string | null;
   onPick: (name: string) => void;
   /** Back to the item's built-in icon. */
   onClear: () => void;
-  tint?: string;
 }) {
   const [query, setQuery] = useState("");
   const search = useRef<HTMLInputElement>(null);
@@ -61,7 +61,10 @@ export function IconGrid({
                   current === name && "bg-fill ring-1 ring-accent",
                 )}
               >
-                <Icon className="size-4" style={{ color: tint }} />
+                {/* The theme accent, like every other icon in the app's chrome.
+                    Drawing each cell in the colour being edited made the grid a
+                    different colour on every card and matched nothing around it. */}
+                <Icon className="size-4 text-accent" />
               </button>
             ))}
           </div>
