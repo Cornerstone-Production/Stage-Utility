@@ -9,9 +9,10 @@ import type { Slot, ScriptViewLayout } from "./pco.js";
 import type { OscTargetConfig } from "./osc.js";
 import type { RossTalkTargetConfig } from "./rosstalk.js";
 
-/** A binding that names hardware the destination will not have. */
+/** A binding that names something — hardware, or a screen — the destination will
+ *  not have. */
 export interface UnresolvableRef {
-  kind: "wireless" | "charger" | "spl" | "sensource" | "propresenter";
+  kind: "wireless" | "charger" | "spl" | "sensource" | "propresenter" | "output";
   /** The view whose layout holds it — without this the rebind list cannot link
    *  anywhere, since an object id alone does not say which editor to open. */
   viewId: string;

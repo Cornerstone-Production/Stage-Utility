@@ -33,7 +33,8 @@ import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { EMBED_FONT_FRACTION } from "./layout-objects";
-import { EmbeddedView } from "./embedded-view";
+import { EmbeddedView, EmbedNotice } from "./embedded-view";
+import { useEmbedBoxHeight } from "./embed-box";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
@@ -815,6 +816,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
     case "view-embed":
       return <ViewEmbedObject o={o} config={c} ctx={ctx} />;
+    case "screen-embed":
+      return <ScreenEmbedObject o={o} config={c} ctx={ctx} />;
     case "current-slide-notes": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       return span(pro?.currentNotes ?? "");
@@ -2190,33 +2193,10 @@ function ViewEmbedObject({
   // drawn by the same RenderObject a display uses, and everything that sizes
   // itself there — fonts, spacing — is a fraction of ctx.H. Left as the parent's
   // H, a quarter-height tile drew its child four times too large: correct-looking
-  // markup, unreadable output.
-  //
-  // MEASURED, not derived. The obvious arithmetic — `o.h * ctx.H`, or the placed
-  // rect — is right only for a top-level object on a laid-out canvas. Inside a
-  // container `o.h` is a fraction of the CONTAINER, so an embed filling a
-  // half-height container claimed twice its box; `placed` is absent for every
-  // letterboxed layout, which is most wall displays; and on Home the object's
-  // h is not used to lay anything out at all (see home-cards.ts), so it means
-  // nothing. The rendered box is the one thing that is true on all four paths.
-  //
-  // useLayoutEffect, so the measurement lands in the same commit as the first
-  // paint and nothing is ever seen at the fallback size.
-  const boxRef = useRef<HTMLDivElement | null>(null);
-  const [boxH, setBoxH] = useState(0);
-  useLayoutEffect(() => {
-    const el = boxRef.current;
-    if (!el) return;
-    const measure = () => setBoxH(el.clientHeight);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [view?.id]);
+  // markup, unreadable output. See useEmbedBoxHeight for why it is measured.
+  const { ref: boxRef, height: boxH } = useEmbedBoxHeight(view?.id ?? null);
 
-  const notice = (text: string) => (
-    <div className="flex items-center justify-center h-full text-fg-subtle text-caption1 text-center px-3">{text}</div>
-  );
+  const notice = (text: string) => <EmbedNotice text={text} />;
 
   if (!config.viewId) return notice("Pick a view to embed");
   if (!view) return notice("That view no longer exists");
@@ -2248,6 +2228,80 @@ function ViewEmbedObject({
         showHeader={config.showHeader ?? false}
         autoScroll={config.autoScroll ?? true}
       />
+    </div>
+  );
+}
+
+/**
+ * What another screen is showing, right now.
+ *
+ * Resolves output -> its routed view -> EmbeddedView, so it follows a routing
+ * change without anyone touching this layout. That is the whole difference from
+ * view-embed, and it is why this is the object a producer wall is built from.
+ * It is also the only way the per-display kinds — dashboard, stage, SPL rundown
+ * — can be embedded at all, because each is configured against a display id and
+ * a view-embed has none to give.
+ *
+ * Each not-showing state is NAMED. A tile that draws an empty box for "unrouted"
+ * and an empty box for "deleted" and an empty box for "blacked out" is three
+ * different problems wearing one face, at the moment somebody is trying to work
+ * out what is wrong with a screen.
+ */
+function ScreenEmbedObject({
+  o,
+  config,
+  ctx,
+}: {
+  o: LayoutObject;
+  config: Extract<LayoutObjectConfig, { type: "screen-embed" }>;
+  ctx: LayoutRenderCtx;
+}) {
+  // From `outputs`, which is what the server derives resolvedByOutput from — the
+  // routing, the blackout flag and the screen's NAME all come off the one record
+  // rather than being joined back together from two.
+  const output = config.outputId ? ctx.state.outputs?.find((x) => x.id === config.outputId) ?? null : null;
+  const view = output?.viewId ? ctx.state.views?.find((v) => v.id === output.viewId) ?? null : null;
+  const showing = Boolean(view) && !output?.blackout;
+
+  // Measured on the BODY, not the tile: the label bar takes real height, and a
+  // child sized against the whole tile overflows by exactly that much.
+  const { ref: boxRef, height: boxH } = useEmbedBoxHeight(view?.id ?? null);
+
+  const notice = (text: string) => <EmbedNotice text={text} />;
+
+  // Guard clauses, in the order the screen itself resolves. Blackout comes BEFORE
+  // the routing check because a blacked-out screen shows black whatever it is
+  // routed to — read as an order, not counted out of nested ternary indentation.
+  const body = (() => {
+    if (!config.outputId) return notice("Pick a screen to show");
+    if (!output) return notice("That screen no longer exists");
+    if (output.blackout) return notice("Blackout");
+    if (!view) return notice(`"${output.name}" is not showing anything`);
+    return <EmbeddedView view={view} ctx={{ ...ctx, H: boxH || ctx.H }} displayId={output.id} />;
+  })();
+
+  return (
+    <div
+      className="flex h-full w-full flex-col overflow-hidden"
+      style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}
+    >
+      {config.showLabel !== false && output && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-1">
+          {config.showStatus !== false && (
+            // Routed and not blacked out. Deliberately NOT "a browser is
+            // attached": nothing in the state says that, and a dot claiming it
+            // would be reassurance about a screen that could be switched off.
+            <span
+              className={`size-1.5 shrink-0 rounded-full ${showing ? "bg-live-9" : "bg-fg-faint"}`}
+              aria-label={showing ? "Showing its view" : "Dark"}
+            />
+          )}
+          <span className="truncate text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+            {output.name}
+          </span>
+        </div>
+      )}
+      <div ref={boxRef} className="min-h-0 flex-1">{body}</div>
     </div>
   );
 }

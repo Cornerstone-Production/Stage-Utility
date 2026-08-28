@@ -23,6 +23,20 @@ import { TranscriptionView } from "./transcription-view";
 import { SplRundownView } from "./spl-rundown-view";
 import { SlotsColumns } from "../components/slots-columns";
 
+/**
+ * What an embed says when it is not drawing a view.
+ *
+ * ONE component, for the same reason EmbeddedView is one: this text is the only
+ * thing an operator sees when a tile is empty, and three copies of it drifted
+ * into three different class orders before they could drift into three
+ * different looks.
+ */
+export function EmbedNotice({ text }: { text: string }) {
+  return (
+    <div className="flex items-center justify-center h-full text-fg-subtle text-caption1 text-center px-3">{text}</div>
+  );
+}
+
 export function EmbeddedView({
   view,
   ctx,
@@ -38,11 +52,7 @@ export function EmbeddedView({
   showHeader?: boolean;
   autoScroll?: boolean;
 }) {
-  const notice = (text: string) => (
-    <div className="flex h-full items-center justify-center px-3 text-center text-caption1 text-fg-subtle">
-      {text}
-    </div>
-  );
+  const notice = (text: string) => <EmbedNotice text={text} />;
 
   /** Configured per DISPLAY, not per view. Without a display id there is nothing
    *  to read the configuration from, and saying so beats drawing an empty box

@@ -354,6 +354,16 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
     homeSize: "l",
   },
+  "screen-embed": {
+    label: "Embedded screen",
+    blurb: "What another screen is showing, live",
+    group: "PCO / service",
+    config: () => ({ type: "screen-embed", outputId: null, showLabel: true, showStatus: true }),
+    // Same starting size as the embedded VIEW above, and for the same reason:
+    // whatever the screen is routed to should look like it does on that screen.
+    style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
+    homeSize: "l",
+  },
   "home-readiness": {
     label: "Readiness",
     blurb: "What still needs doing before the next service",

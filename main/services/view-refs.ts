@@ -51,6 +51,11 @@ export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
       const c = o.config as unknown as Record<string, unknown>;
       const type = str(c.type);
 
+      // `screen-embed` is deliberately absent from THIS expression: it
+      // references an OUTPUT, and an output's routed view is already walked from
+      // the outputs list. Putting its outputId here would put a non-view id into
+      // a list of view ids. It is not refless, though — it goes on the rebind
+      // work list below, because a bundle carries views and never outputs.
       const embed =
         type === "view-embed" ? str(c.viewId)
         : type === "slots-grid" && c.source === "view" ? str(c.sourceViewId)
@@ -92,6 +97,12 @@ export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
       // fixed constant and is never listed at all.
       const pp = str(c.propresenterInstanceId);
       if (pp && pp !== "default") push("propresenter", pp, "ProPresenter");
+      // The screen a `screen-embed` watches. Output ids are per-install and a
+      // bundle carries no outputs, so every screen tile in an imported wall
+      // points at nothing until somebody repoints it. Named here so the import
+      // report says which objects, rather than the operator finding out from a
+      // wall of "That screen no longer exists" on a Sunday.
+      if (type === "screen-embed") push("output", str(c.outputId), "Screen");
     });
   }
 
