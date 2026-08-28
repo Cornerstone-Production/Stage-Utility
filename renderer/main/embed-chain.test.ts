@@ -21,9 +21,14 @@ describe("a view may not contain itself", () => {
   });
 
   it("refuses a view further up the chain, not only the immediate parent", () => {
-    // A -> B -> C -> A. Checking only the parent lets this through and the
-    // render loops for ever.
-    const r = embedRefusal("v-a", ["v-a", "v-b", "v-c"]);
+    // A -> B, and A again. Checking only the immediate parent looks at "v-b",
+    // misses it, and lets the render loop for ever.
+    //
+    // The chain is deliberately SHORTER than MAX_EMBED_DEPTH. At exactly the cap
+    // the depth guard fires on this fixture too, so a parent-only regression
+    // returns a depth refusal instead of nothing — the test still failed, but on
+    // a coincidence rather than on the cycle it names.
+    const r = embedRefusal("v-a", ["v-a", "v-b"]);
     assert.equal(r?.reason, "cycle");
   });
 
