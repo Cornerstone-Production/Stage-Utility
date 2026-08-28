@@ -36,8 +36,23 @@ describe("the console rail's icon", () => {
     assert.doesNotMatch(ICON.split("return (")[1] ?? "", /<button|<a\s|<input/, "an interactive element is back inside the row");
   });
 
-  test("sets no colour — the row colours its own icon by active state", () => {
-    assert.doesNotMatch(ICON, /color:\s*tint|style=\{\{\s*color/, "a colour here fights the row's active styling");
+  test("wears the operator's colour ONLY while it is the current page", () => {
+    // This used to assert no colour at all, and it was right then: an
+    // unconditional tint gave a column of coloured icons and took away the one
+    // thing the rail says by colour, which is where you are.
+    //
+    // Selected is different — the row is already the accent there, so the icon's
+    // own colour says the same thing in the operator's terms. The rule is the
+    // CONDITION, so this pins that rather than the absence.
+    assert.match(ICON, /const colour = active \? state\?\.iconColors\?\.\[viewId\] : undefined;/);
+    assert.match(ICON, /style: colour \? \{ color: colour \} : undefined/);
+  });
+
+  test("and falls through to the row's own styling when none is set", () => {
+    // `undefined`, not a computed default: an inactive row, or a console the
+    // operator never coloured, has to inherit exactly what every other tab does.
+    assert.match(ICON, /: undefined/);
+    assert.doesNotMatch(ICON, /color:\s*(DEFAULT_TINT|"var\()/, "a fallback colour here overrides the row");
   });
 
   test("opens on the GLYPH, not on the row", () => {
