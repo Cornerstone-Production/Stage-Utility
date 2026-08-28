@@ -6,6 +6,12 @@ import { migrateSurfaces, migrationLog } from "./surface-migration.js";
 import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
+import { checklistTicksStore } from "./checklist-ticks-store.js";
+import {
+  planChecklistItems,
+  selectNotes,
+  type PlanChecklistDTO,
+} from "./plan-note-checklist.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
@@ -212,6 +218,8 @@ export class StageController {
     showQr: true,
     kioskDiscovery: false,
     allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
+    checklistNoteCategories: [],
+    checklistNoteTeams: [],
     appName: "Stage Utility",
     accentColor: null,
     appLogo: null,
@@ -326,6 +334,8 @@ export class StageController {
       showQr,
       kioskDiscovery,
       allowedServiceTypeIds,
+      checklistNoteCategories: settings.checklistNoteCategories ?? [],
+      checklistNoteTeams: settings.checklistNoteTeams ?? [],
       appName: settings.appName ?? "Stage Utility",
       accentColor: settings.accentColor ?? null,
       appLogo: settings.appLogo ?? null,
@@ -752,6 +762,113 @@ export class StageController {
     const ordered = categories.filter((c) => used.has(c));
     for (const c of used) if (!ordered.includes(c)) ordered.push(c); // any non-canonical, at end
     return { planId: this.state.planId, items, noteCategories: ordered };
+  }
+
+  // ── Pre-service checklist, sourced from Planning Center plan notes ───────
+  //
+  // The checklist an operator ticks off here is the note their team lead already
+  // writes on the plan each week. Nothing is authored in this app, deliberately:
+  // a second copy would go stale the first week somebody edited one and not the
+  // other, and the PCO note is the one the rest of the team already reads.
+
+  /**
+   * The active plan's checklist: the chosen plan notes, flattened to rows, with
+   * this plan's ticks applied.
+   *
+   * Returns an empty, `unconfigured: false` result when PCO is not connected or
+   * no plan is selected — there is nothing to configure yet in either case, and
+   * telling somebody to pick a note category before they have connected PCO is
+   * advice they cannot act on.
+   */
+  async listPlanChecklist(): Promise<PlanChecklistDTO> {
+    const planId = this.state.planId;
+    const empty: PlanChecklistDTO = { planId, rows: [], unconfigured: false };
+    if (!this.pcoAppId || !this.pcoSecret) return empty;
+    if (!this.state.serviceTypeId || !planId) return empty;
+
+    const settings = await settingsStore.get();
+    const categories = settings.checklistNoteCategories ?? [];
+    const teams = settings.checklistNoteTeams ?? [];
+    if (categories.length === 0 && teams.length === 0) {
+      return { planId, rows: [], unconfigured: true };
+    }
+
+    const notes = await pcoService.listPlanNotes(
+      this.pcoAppId,
+      this.pcoSecret,
+      this.state.serviceTypeId,
+      planId,
+    );
+    const ticked = new Set(checklistTicksStore.get(planId));
+    const rows = planChecklistItems(selectNotes(notes, categories, teams)).map((item) => ({
+      ...item,
+      done: ticked.has(item.key),
+    }));
+    return { planId, rows, unconfigured: false };
+  }
+
+  /**
+   * Tick or untick one row, and hand back the whole list as it now stands.
+   *
+   * Returning the list rather than void is what stops the UI having to guess:
+   * the caller renders what the server says instead of applying its own optimism
+   * and hoping the two agree. The store's write is awaited, so a failed save
+   * reaches the operator instead of looking saved until the next restart.
+   */
+  async setChecklistTick(key: string, done: boolean): Promise<PlanChecklistDTO> {
+    const planId = this.state.planId;
+    if (!planId) throw new Error("No plan is selected, so there is nothing to tick");
+    await checklistTicksStore.set(planId, key, done);
+    return this.listPlanChecklist();
+  }
+
+  /** Clear every tick on the active plan — "start this week over". */
+  async clearChecklistTicks(): Promise<PlanChecklistDTO> {
+    const planId = this.state.planId;
+    if (!planId) throw new Error("No plan is selected, so there is nothing to clear");
+    await checklistTicksStore.clear(planId);
+    return this.listPlanChecklist();
+  }
+
+  /**
+   * Choose which plan notes feed the checklist.
+   *
+   * Stored as NAMES because that is what a note carries. A category renamed in
+   * PCO stops matching, which is the right behaviour: the operator renamed the
+   * thing they were pointing at, and silently following a rename would be a
+   * guess about intent this app is not entitled to make.
+   */
+  async setChecklistSources(categories: string[], teams: string[]): Promise<StageState> {
+    const clean = (xs: string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
+    await settingsStore.patch({
+      checklistNoteCategories: clean(categories),
+      checklistNoteTeams: clean(teams),
+    });
+    this.state = {
+      ...this.state,
+      checklistNoteCategories: clean(categories),
+      checklistNoteTeams: clean(teams),
+    };
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * The plan-note categories and team names this service type actually offers,
+   * for the settings picker.
+   *
+   * Read live rather than stored: a category renamed in PCO must show up under
+   * its new name, and a picker built from a stale copy is how somebody ends up
+   * choosing an option that matches nothing.
+   */
+  async listChecklistSources(): Promise<{ categories: string[]; teams: string[] }> {
+    const none = { categories: [], teams: [] };
+    if (!this.pcoAppId || !this.pcoSecret || !this.state.serviceTypeId) return none;
+    const [categories, teams] = await Promise.all([
+      pcoService.listPlanNoteCategories(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId),
+      pcoService.listTeamNames(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId),
+    ]);
+    return { categories, teams };
   }
 
   // ── ScriptView (in-app ScriptViewer replacement) ────────────────────────

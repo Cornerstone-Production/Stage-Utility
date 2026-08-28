@@ -88,6 +88,10 @@ screens.
 | GET | `/api/spl/history` | List saved past-service SPL records |
 | GET | `/api/spl/history/:key` | One past-service record |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
+| GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
+| GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
+| POST | `/api/pco/checklist/tick` | `{ key, done }` — tick one row; answers with the whole list |
+| POST | `/api/pco/checklist/clear` | Untick every row on the active plan |
 
 **People, attendance, timeline & baptism**
 | Method | Path | Purpose |

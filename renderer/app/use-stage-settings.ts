@@ -352,6 +352,15 @@ export function useStageSettings(pinnedViewId?: string) {
     await writeState("settings:setTaperWindow", partial, { fail: "Failed to update taper settings" });
   }
 
+  /** Which plan notes feed the pre-service checklist. */
+  async function handleSetChecklistSources(categories: string[], teams: string[]) {
+    await writeState(
+      "settings:setChecklistSources",
+      { categories, teams },
+      { fail: "Failed to save which notes feed the checklist" },
+    );
+  }
+
   async function handleSetTimezone(tz: string | null) {
     await writeState("settings:setTimezone", { timezone: tz }, { fail: "Failed to set the time zone" });
   }
@@ -801,6 +810,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetAutoUpdate,
     handleSetReconnectSchedule,
     handleSetTaperWindow,
+    handleSetChecklistSources,
     handleSetTimezone,
     handleSetHourCycle,
     handleSetAllowedServiceTypes,

@@ -30,6 +30,7 @@ export interface SectionHandlers {
   handleSetAutoUpdate: (partial: { mode?: "manual" | "auto-install" | "auto-full"; enabled?: boolean; dayOfWeek?: number | null; hour?: number }) => Promise<void>;
   handleSetReconnectSchedule: (partial: { enabled?: boolean; leadMin?: number; tailMin?: number; dormantMin?: number }) => Promise<void>;
   handleSetTaperWindow: (partial: { preMin?: number; postMin?: number }) => Promise<void>;
+  handleSetChecklistSources: (categories: string[], teams: string[]) => Promise<void>;
   handleSetTimezone: (tz: string | null) => Promise<void>;
   handleSetHourCycle: (cycle: "12h" | "24h") => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;

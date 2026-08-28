@@ -56,6 +56,9 @@ export interface StageState {
   kioskDiscovery: boolean;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];
+  /** Plan-note categories/teams feeding the pre-service checklist (names). */
+  checklistNoteCategories: string[];
+  checklistNoteTeams: string[];
   /** Customizable brand name shown in the sidebar header and on the kiosk. */
   appName: string;
   /** Themeable brand accent (#rrggbb), or null to use the built-in default. */

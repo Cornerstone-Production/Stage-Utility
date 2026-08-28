@@ -7,6 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
+import { errorMessage } from "../errors.js";
 import { baptismTriggersStore } from "../baptism-triggers-store.js";
 import { stageController } from "../stage-controller.js";
 import { attendanceStore } from "../attendance-store.js";
@@ -187,6 +188,45 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     // SPL-rundown dashboards.
     if (method === "GET" && pathname === "/api/pco/plan-items") {
       json(res, await stageController.listCurrentPlanItems());
+      return;
+    }
+
+    // The pre-service checklist, read from the plan's notes.
+    if (method === "GET" && pathname === "/api/pco/checklist") {
+      json(res, await stageController.listPlanChecklist());
+      return;
+    }
+
+    // The categories and teams this service type offers, for the settings picker.
+    if (method === "GET" && pathname === "/api/pco/checklist-sources") {
+      json(res, await stageController.listChecklistSources());
+      return;
+    }
+
+    // POST /api/pco/checklist/tick — { key, done }
+    // Awaited before the response: a tick that looked saved and was not is how
+    // somebody skips a job on Sunday believing it was done.
+    if (method === "POST" && pathname === "/api/pco/checklist/tick") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.key !== "string" || typeof body.done !== "boolean") {
+        error(res, "body.key (string) and body.done (boolean) required");
+        return;
+      }
+      try {
+        json(res, await stageController.setChecklistTick(body.key, body.done));
+      } catch (err) {
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+
+    // POST /api/pco/checklist/clear — start this week's list over.
+    if (method === "POST" && pathname === "/api/pco/checklist/clear") {
+      try {
+        json(res, await stageController.clearChecklistTicks());
+      } catch (err) {
+        error(res, errorMessage(err));
+      }
       return;
     }
 

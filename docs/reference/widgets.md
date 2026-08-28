@@ -44,7 +44,7 @@ switches.
 | **Service timer** | The running item's clock, and what is next | Planning Center Live |
 | **Service pacing** | How far ahead or behind the whole plan the service is | Recorded service timeline |
 | **Next service** | The next plan, its series and when it starts | Planning Center |
-| **Readiness** | What still needs doing before the next service | Planning Center + integration states |
+| **Readiness** | What still needs doing before the next service, including the plan's own checklist ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center + integration states |
 | **Recent services** | Attendance, length and start time, recently averaged | Recorded history |
 | **Plan file** | A page from a file attached to the plan | Planning Center attachments |
 | **Embedded view** | Another view, drawn inside this one | This app |

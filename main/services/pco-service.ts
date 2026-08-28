@@ -3,6 +3,7 @@
 
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import { scheduleItems } from "./automation-item-schedule.js";
+import type { PlanNoteDTO } from "./plan-note-checklist.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
 import { pickServiceTime } from "./pick-service-time.js";
 
@@ -698,11 +699,29 @@ class PcoService {
     secret: string,
     serviceTypeId: string,
   ): Promise<string[]> {
-    const cacheKey = `note-categories:${appId}:${serviceTypeId}`;
+    return this.noteCategoryNames(appId, secret, serviceTypeId, "item_note_categories");
+  }
+
+  /**
+   * Ordered names from a `*_note_categories` collection on a service type.
+   *
+   * Shared by the item-note columns and the plan-note categories, which are two
+   * different endpoints returning the same shape. Written once because this
+   * repository's most expensive recurring mistake is fixing one copy of a thing
+   * that exists in several — the pagination, the sequence sort and the
+   * do-not-cache-a-failure rule would all have had to be got right twice.
+   */
+  private async noteCategoryNames(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    collection: "item_note_categories" | "plan_note_categories",
+  ): Promise<string[]> {
+    const cacheKey = `${collection}:${appId}:${serviceTypeId}`;
     const cached = this.cacheGet<string[]>(cacheKey);
     if (cached) return cached;
 
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/item_note_categories?per_page=100`;
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/${collection}?per_page=100`;
     const json = await this.request(url, appId, secret).catch(() => null);
     const items = json && Array.isArray(json.data) ? json.data : [];
     const result = items
@@ -714,11 +733,105 @@ class PcoService {
       .sort((a, b) => a.sequence - b.sequence)
       .map((c) => c.name);
 
-    // Only cache a real answer. The request above yields null on failure and the
-    // parse below turns that into an empty list; caching it would store a FAILURE
-    // as data, with a success's TTL.
+    // Only cache a real answer. A failed request parses to an empty list, and
+    // caching that would store a FAILURE as data, with a success's TTL.
     this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return result;
+  }
+
+  /** The plan-note categories a service type offers, for the checklist picker. */
+  async listPlanNoteCategories(appId: string, secret: string, serviceTypeId: string): Promise<string[]> {
+    return this.noteCategoryNames(appId, secret, serviceTypeId, "plan_note_categories");
+  }
+
+  /**
+   * Every team name on a service type, for the checklist picker.
+   *
+   * Its own request rather than deriving from listTeamPositions, which already
+   * has the teams cached: a team with no positions defined does not appear
+   * there, and a picker that silently omits an option somebody uses is worse
+   * than one extra request every fifteen minutes.
+   */
+  async listTeamNames(appId: string, secret: string, serviceTypeId: string): Promise<string[]> {
+    const cacheKey = `team-names:${appId}:${serviceTypeId}`;
+    const cached = this.cacheGet<string[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/teams?per_page=100`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const items = json && Array.isArray(json.data) ? json.data : [];
+    const result = [
+      ...new Set(
+        items
+          .map((n) => (typeof n.attributes.name === "string" ? n.attributes.name : ""))
+          .filter(Boolean),
+      ),
+    ].sort((a, b) => a.localeCompare(b));
+
+    this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
+    return result;
+  }
+
+  /**
+   * A plan's NOTES — the ones written at the top of the plan for a team, not the
+   * per-item notes that fill the rundown columns above.
+   *
+   * These are what a production lead already writes each week ("Assigned Teams"
+   * in PCO), so pulling them is what lets one checklist live in one place
+   * instead of being copied into this app and going stale.
+   *
+   * `category_name` rides on the note's own attributes, so grouping by category
+   * costs no second request. Team names do need `include=teams`.
+   */
+  async listPlanNotes(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<PlanNoteDTO[]> {
+    const cacheKey = `plan-notes:${appId}:${planId}`;
+    const cached = this.cacheGet<PlanNoteDTO[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/notes?include=teams&per_page=100`;
+    const json = await this.request(url, appId, secret);
+    const nodes = Array.isArray(json.data) ? json.data : [json.data];
+
+    const teamById = new Map<string, string>();
+    for (const n of json.included ?? []) {
+      if (n.type === "Team" && typeof n.attributes.name === "string" && n.attributes.name) {
+        teamById.set(n.id, n.attributes.name);
+      }
+    }
+
+    const out: PlanNoteDTO[] = [];
+    for (const node of nodes) {
+      if (!node) continue;
+      const content = typeof node.attributes.content === "string" ? node.attributes.content : "";
+      if (!content.trim()) continue; // an empty note is not a note
+      // PCO documents `teams` as to_one, but the plan editor lets a note be
+      // assigned to SEVERAL teams and then sends an array. Reading only one
+      // shape would drop every team on a multi-team note — silently, and only
+      // for the churches that use the feature the most.
+      const rel = node.relationships?.teams?.data;
+      const refs = Array.isArray(rel) ? rel : rel ? [rel] : [];
+      out.push({
+        id: node.id,
+        categoryName: typeof node.attributes.category_name === "string" ? node.attributes.category_name : "",
+        content,
+        teamNames: refs.map((r) => teamById.get(r.id)).filter((n): n is string => !!n),
+      });
+    }
+
+    // One page only, on purpose: a plan carries a handful of notes, not
+    // hundreds. Said out loud rather than truncated in silence, so a church that
+    // somehow passes 100 leaves a trace instead of losing rows off the bottom.
+    if (nodes.length >= 100) {
+      console.warn(`[pco] plan ${scrub(planId)} returned a full page of notes; any beyond 100 are not shown`);
+    }
+
+    this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
+    return out;
   }
 
   /**
