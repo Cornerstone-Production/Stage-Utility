@@ -63,6 +63,10 @@ Doors at 8, band on stage 8:30.      <- context, not a row
 - CO2 tank hooked up                 <- row
 ```
 
+The same list appears in two places: the **Readiness** card on Home, and the
+**Checklist** object on a custom layout. One source, one set of ticks — ticking in
+one shows in the other. On a wall display the list shows but cannot be ticked.
+
 **Ticks** are stored in Stage only; Planning Center never sees them. They are
 keyed to the row's wording, so adding or reordering lines in the note leaves
 existing ticks on their own rows, and rewording a row clears its tick. Each plan

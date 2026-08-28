@@ -21,7 +21,7 @@ import {
 import { AppLink } from "../app-link";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { readinessChecks, outstanding, type ReadinessCheck } from "./readiness";
-import { usePlanChecklist } from "./use-plan-checklist";
+import { usePlanChecklist } from "../../main/use-plan-checklist";
 import type { LayoutObjectConfig } from "@main/types/views";
 /**
  * The cards Home draws with its own markup. Derived from the config union so a

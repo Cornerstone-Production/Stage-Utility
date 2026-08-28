@@ -1,4 +1,11 @@
-// The plan's checklist, and the one thing that makes ticking feel instant.
+// The plan's checklist, shared by both widgets that draw one.
+//
+// Lives here rather than beside either caller because BOTH the Home card and the
+// custom-layout checklist object read it. Two copies of "fetch, tick
+// optimistically, reconcile" would drift the first time either was touched, and
+// the reconciliation is the subtle part.
+//
+// The one thing that makes ticking feel instant:
 //
 // A tick is a round trip: the server owns the store, and the write is awaited so
 // that a failed save is a failed tick rather than one that looked done until the
@@ -13,11 +20,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { invoke } from "../../lib/api";
+import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
-import { toast } from "../../components/ui";
+import { toast } from "../components/ui";
 import type { PlanChecklistDTO, PlanChecklistRow } from "@main/services/plan-note-checklist";
-import { useStageState } from "../../main/use-stage-state";
+import { useStageState } from "./use-stage-state";
 
 export interface PlanChecklist {
   rows: PlanChecklistRow[];

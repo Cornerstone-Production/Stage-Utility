@@ -225,7 +225,7 @@ nothing.
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
 | **Action button** | Runs one of the app's own actions | This app |
 | **Notes** | A shared note anyone can type into | This app |
-| **Checklist** | A list of things to tick off | This app |
+| **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
 
 **Notes** and **Checklist** are shared, not per-screen: two people looking at them
 see the same text. See [OSC](../integrations/osc.md) and
