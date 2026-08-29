@@ -225,15 +225,17 @@ export function resolvePlanCurrentNext(
   return { currentItemTitle: current?.title ?? null, nextItemTitle: next?.title ?? null };
 }
 
-// Generic JSON:API node from PCO
-interface PcoNode {
+// Generic JSON:API node from PCO. Exported because every PCO product speaks the
+// same JSON:API dialect, so a client for another one (Calendar) parses the same
+// shape rather than declaring its own copy of it.
+export interface PcoNode {
   id: string;
   type?: string;
   attributes: Record<string, unknown>;
   relationships?: Record<string, { data: { id: string; type: string } | null | { id: string; type: string }[] }>;
 }
 
-interface PcoResponse<T extends PcoNode = PcoNode> {
+export interface PcoResponse<T extends PcoNode = PcoNode> {
   data: T | T[];
   included?: PcoNode[];
 }
@@ -312,6 +314,7 @@ class PcoService {
     url: string,
     appId: string,
     secret: string,
+    apiVersion?: string,
   ): Promise<PcoResponse<T>> {
     // Every PCO call queues here. Retrying a 429 does not help if the burst that
     // caused it is still in flight, so the cap is what actually prevents one —
@@ -319,10 +322,53 @@ class PcoService {
     // be small.
     const release = await this.acquireSlot();
     try {
-      return await this.requestInner<T>(url, appId, secret);
+      return await this.requestInner<T>(url, appId, secret, apiVersion);
     } finally {
       release();
     }
+  }
+
+  /**
+   * A GET against ANOTHER Planning Center product's API — Calendar, today —
+   * carried by this client's transport.
+   *
+   * PCO's rate limit is per APP, not per product, so a second client with its own
+   * concurrency gate would not be a second budget: it would be the same budget
+   * spent twice as fast, and the cap that exists to prevent a 429 would stop
+   * capping anything. Sharing the transport is the only way the ceiling stays a
+   * ceiling. The retry budget, the backoff, the auth header and the scrubbed
+   * logging come along for the same reason — none of them is worth a second copy.
+   *
+   * `apiVersion` is REQUIRED here, unlike on the internal `request`. PCO versions
+   * each product by date and resolves the header to the newest published version
+   * at or before it; send nothing and you get whatever is configured as the app's
+   * default in a developer console outside this repository. A caller reaching a
+   * new product must therefore state which contract it was written against.
+   *
+   * `url` is REBUILT on the constant's origin before it is used, exactly as
+   * pcoUrlFrom does for a link out of a response body. Every request from here
+   * carries the operator's App ID and secret, and this is the first PUBLIC way
+   * into the credentialed fetch — until now the invariant "no outside string
+   * reaches it" held because `request` was private and every URL was built in
+   * this file. A docstring asking callers to behave would have traded that for a
+   * rule someone has to remember; rebuilding the host from the constant keeps it
+   * a property of the code, and is the documented remediation for the
+   * js/request-forgery alerts this file has already collected once.
+   *
+   * @throws when `url` is not on PCO's origin, rather than sending credentials.
+   */
+  async requestProduct<T extends PcoNode = PcoNode>(
+    url: string,
+    appId: string,
+    secret: string,
+    apiVersion: string,
+  ): Promise<PcoResponse<T>> {
+    // The origin is the CONSTANT's; only the path and query come from the
+    // caller. There is no string it can pass that sends the credentials
+    // elsewhere, including through a parser disagreement.
+    const safe = pcoUrlFrom(url, PCO_BASE);
+    if (!safe) throw new Error(`[pco] refusing to send credentials to ${scrub(url)}`);
+    return this.request<T>(safe, appId, secret, apiVersion);
   }
 
   /** Wait for a free request slot; resolves with the function that frees it. */
@@ -347,6 +393,7 @@ class PcoService {
     url: string,
     appId: string,
     secret: string,
+    apiVersion?: string,
   ): Promise<PcoResponse<T>> {
     if (DEBUG_PCO) console.log(`[pco] GET ${scrub(url)}`);
     // Retry transient failures (429 rate-limit, 5xx, network) with backoff. PCO
@@ -359,6 +406,11 @@ class PcoService {
           headers: {
             Authorization: this.makeAuthHeader(appId, secret),
             "Content-Type": "application/json",
+            // Omitted entirely when absent, so every existing /services/v2 call
+            // sends the byte-identical header set it sent before. Pinning those
+            // is a separate change on its own branch; this is the hook the
+            // Calendar client pins itself through in the meantime.
+            ...(apiVersion ? { "X-PCO-API-Version": apiVersion } : {}),
           },
         });
       } catch (err) {
