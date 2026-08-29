@@ -21,6 +21,9 @@ export type StageScreen =
   | { k: "error"; message: string }
   | { k: "blackout" }
   | { k: "unrouted"; displayName: string | null; locked: boolean }
+  /** A preview whose View has been deleted. Distinct from `unrouted`: a View WAS
+   *  assigned here, and it is the View that is gone. */
+  | { k: "view-missing"; displayName: string | null; locked: boolean }
   | { k: "not-configured"; displayName: string | null; locked: boolean }
   | { k: "empty"; displayName: string | null; locked: boolean }
   | {
@@ -69,8 +72,16 @@ export function resolveScreen(input: ScreenInput): StageScreen {
   // Name comes from the Output, kind from the View it is routed to — the same two
   // places the `displays` shim was assembled from before it was dropped.
   const currentDisplay = previewViewId ? null : (state.outputs?.find((o) => o.id === displayId) ?? null);
-  const kind: ViewKind = previewView?.kind ?? state.resolvedByOutput?.[displayId]?.kind ?? "slots";
-  const displayName = previewView ? null : (multiDisplay ? (currentDisplay?.name ?? displayId) : null);
+  // The Output's name, or NOTHING.
+  //
+  // This used to fall back to `displayId`, and a display id is whatever came out
+  // of the URL: a preview slug whose View had been deleted, or any path typed by
+  // hand, was drawn into the top bar as the screen's own name. A URL fragment on
+  // an auditorium wall reads as a bug and tells an operator less than blank does.
+  //
+  // No preview check is needed here: `currentDisplay` is already null in one, for
+  // the same reason `resolved` is.
+  const displayName = multiDisplay ? (currentDisplay?.name ?? null) : null;
 
   // A real output (not a preview) with no View routed to it is unconfigured —
   // show a clear "no view assigned" screen rather than an empty slot grid.
@@ -88,13 +99,27 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     return { k: "blackout" };
   }
 
-  // The one check that DOES still need previewViewId: a preview has no resolved
-  // output at all, and "no resolved output" is exactly what unrouted means — so
-  // without this every preview would render the "no view assigned" placeholder.
-  const isUnrouted = !previewViewId && (!resolved || resolved.viewId === null);
-  if (isUnrouted) {
-    return { k: "unrouted", displayName, locked: outputLocked };
+  // Where the kind comes from. A preview answers with its own View; a real output
+  // answers with the routing the server resolved for it. Exactly one of the two
+  // applies — which is the one check that still needs previewViewId, since a
+  // preview has no resolved output at all and "no resolved output" is what
+  // unrouted means for everything else.
+  //
+  // When the source that applies is absent, this screen does not know what to
+  // show. That used to be written `?? "slots"`, so a preview of a View that had
+  // been DELETED drew somebody's mic-slot grid with nothing to say anything was
+  // wrong. There is no default kind any more: not knowing is its own screen.
+  const source: { kind: ViewKind } | null = previewViewId
+    ? previewView
+    : ((resolved && resolved.viewId !== null) ? resolved : null);
+  if (!source) {
+    // A preview gets its own wording. "No view assigned" would be false here —
+    // one was assigned; it is the View that is gone.
+    return previewViewId
+      ? { k: "view-missing", displayName, locked: outputLocked }
+      : { k: "unrouted", displayName, locked: outputLocked };
   }
+  const kind: ViewKind = source.kind;
 
   // The View the chosen arm renders from. StageView computed this same
   // expression separately inside the custom arm, the script arm and the slots

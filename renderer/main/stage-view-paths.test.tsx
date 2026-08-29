@@ -144,6 +144,16 @@ async function showScreen(
 const says = (c: HTMLElement, text: string) => (c.textContent ?? "").includes(text);
 /** The top bar's way home — stripped on a locked output, present otherwise. */
 const hasHomeLink = (c: HTMLElement) => !!c.querySelector('a[href="/"]');
+/**
+ * Whether a press can reach the layout's controls.
+ *
+ * A BOOLEAN, deliberately, and so is every other DOM assertion in this file. An
+ * `assert.equal(someElement, null)` that fails hands node:test a jsdom node to
+ * serialize into the failure report — it walks into the document and the window
+ * behind it, and the run hangs for twenty seconds and then dies naming the FILE
+ * instead of the test. Found by mutating the resolver to watch these bite.
+ */
+const hasInertControls = (c: HTMLElement) => !!c.querySelector(".pointer-events-none.w-full");
 
 // ---- lifecycle --------------------------------------------------------------
 
@@ -321,7 +331,7 @@ describe("StageView renders each view kind", () => {
   test("custom with no layout drawn yet is the empty screen", async () => {
     const c = await showScreen("/display-1", ofKind("custom"));
     assert.ok(says(c, "No mic slots assigned yet"), c.textContent ?? "");
-    assert.equal(c.querySelector('div[style*="width: 1920px"]'), null);
+    assert.equal(!!c.querySelector('div[style*="width: 1920px"]'), false);
   });
 
   test("dashboard draws the dashboard", async () => {
@@ -361,5 +371,127 @@ describe("StageView renders each view kind", () => {
     }));
     assert.ok((c.textContent ?? "").length > 0, "an unknown kind rendered nothing at all");
     assert.ok(says(c, "No mic slots assigned yet"), c.textContent ?? "");
+  });
+});
+
+// ---- everything below POSTDATES the parity baseline --------------------------
+//
+// The block above is the contract that the refactor changed nothing. These are
+// the two bugs the refactor exposed, fixed deliberately afterwards, plus the
+// panel-mode case the parity block was missing. They are here rather than in
+// their own file because they are assertions about the same rendered screens,
+// and a second harness for four tests is a second harness to keep in step.
+
+describe("StageView no longer names a screen after its URL", () => {
+  test("a preview of a deleted View is not labelled with its slug", async () => {
+    // The top bar used to fall back to the display id, which in a preview is the
+    // URL fragment: an operator saw "preview-gone" written on the screen as if
+    // that were a display's name.
+    const c = await showScreen("/preview-gone", stageState({
+      outputs: [
+        { id: "display-1", name: "Stage left", viewId: "v1" },
+        { id: "display-2", name: "Stage right", viewId: "v1" },
+      ],
+    }));
+    assert.ok(!says(c, "preview-gone"), c.textContent ?? "");
+    assert.ok(!says(c, "preview-"), c.textContent ?? "");
+  });
+
+  test("the browser tab is not titled after the URL either", async () => {
+    // The same fallback, in a second place: the tab title did its own
+    // `outputs.find(...) ?? displayId`, so every preview tab read
+    // "Stage Utility — preview-v1". It now reads the resolved screen's name, so
+    // the tab and the top bar cannot disagree.
+    const twoDisplays = {
+      outputs: [
+        { id: "display-1", name: "Stage left", viewId: "v1" },
+        { id: "display-2", name: "Stage right", viewId: "v1" },
+      ],
+    };
+    await showScreen("/preview-v1", stageState({ ...twoDisplays, slotsByView: { v1: [slot("Pastor")] } }));
+    assert.ok(!document.title.includes("preview-"), document.title);
+    assert.equal(document.title, "Stage Utility");
+    cleanup();
+
+    // A real display still names itself, which is the whole point of the title.
+    await showScreen("/display-1", stageState({ ...twoDisplays, slotsByView: { v1: [slot("Pastor")] } }));
+    assert.equal(document.title, "Stage Utility — Stage left");
+  });
+
+  test("an address with no display behind it is not labelled with the path", async () => {
+    const c = await showScreen("/display-9", stageState({
+      outputs: [
+        { id: "display-1", name: "Stage left", viewId: "v1" },
+        { id: "display-2", name: "Stage right", viewId: "v1" },
+      ],
+      resolvedByOutput: { "display-9": resolved() },
+    }));
+    assert.ok(!says(c, "display-9"), c.textContent ?? "");
+  });
+});
+
+describe("StageView says when a previewed View is gone", () => {
+  test("a preview of a deleted View says so, instead of drawing an empty slot grid", async () => {
+    const c = await showScreen("/preview-gone", stageState({ views: [] }));
+    assert.ok(says(c, "View not found"), c.textContent ?? "");
+    assert.ok(says(c, "has been deleted"), c.textContent ?? "");
+    // The screen it used to draw, which said nothing was wrong.
+    assert.ok(!says(c, "No mic slots assigned yet"), c.textContent ?? "");
+  });
+
+  test("a real output with its View deleted still says unrouted, not view-missing", async () => {
+    // The server clears an output's routing when its View goes, so on a wall
+    // screen the honest message is that nothing is assigned. Only a preview,
+    // whose URL still names the View, gets the other wording.
+    const c = await showScreen("/display-1", stageState({
+      views: [],
+      resolvedByOutput: { "display-1": resolved({ viewId: null }) },
+    }));
+    assert.ok(says(c, "Display not configured"), c.textContent ?? "");
+    assert.ok(!says(c, "View not found"), c.textContent ?? "");
+  });
+});
+
+describe("StageView keeps controls dead unless the screen is a panel", () => {
+  // The observable is the class, not a click: a `live-controls` object renders
+  // the same buttons either way, and what changes is whether a press can reach
+  // them. `pointer-events-none` is what the renderer puts there, and it is the
+  // one thing standing between a wall screen and the service advancing because
+  // somebody leaned on it.
+  const withControls = (mode?: string) => stageState({
+    views: [{
+      id: "v1", name: "Console", kind: "custom",
+      layout: {
+        canvas: { width: 1920, height: 1080, background: null },
+        objects: [{ id: "o1", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "live-controls" } }],
+      },
+    }],
+    outputs: [{ id: "display-1", name: "Stage left", viewId: "v1", ...(mode ? { mode } : {}) }],
+    resolvedByOutput: { "display-1": resolved({ kind: "custom" }) },
+  });
+
+  test("a display's controls are inert", async () => {
+    const c = await showScreen("/display-1", withControls());
+    assert.equal(hasInertControls(c), true, "a wall screen's controls were left live");
+  });
+
+  test("a panel's controls are live", async () => {
+    // The Output's mode reaches the renderer through the resolved screen; before
+    // it was carried there, this was the one thing on the `view` arm that no
+    // rendered test covered.
+    const c = await showScreen("/display-1", withControls("panel"));
+    assert.equal(
+      hasInertControls(c),
+      false,
+      "a panel's controls were left inert — the Output's mode did not reach the renderer",
+    );
+  });
+
+  test("a preview of a panel is still inert", async () => {
+    // A "/preview-…" iframe is always a display: every card on the Screens page
+    // renders one, and a preview whose buttons fired would let that page advance
+    // the service by being looked at.
+    const c = await showScreen("/preview-v1", withControls("panel"));
+    assert.equal(hasInertControls(c), true, "a preview's controls were live");
   });
 });

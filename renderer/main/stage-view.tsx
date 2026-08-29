@@ -294,6 +294,38 @@ function KioskUnrouted({ state, displayName, locked }: { state: StageState; disp
   );
 }
 
+// Shown when a preview points at a View that no longer exists.
+//
+// Its own screen rather than the unrouted one: a view WAS chosen here, and
+// saying "no view is assigned" would send the operator looking for a routing
+// problem that is not there. Before this existed the same state fell through to
+// the slots kind and drew an empty mic-slot grid, which said nothing at all.
+function KioskViewMissing({ state, displayName, locked }: { state: StageState; displayName: string | null; locked?: boolean }) {
+  return (
+    <div className="flex flex-col h-[100dvh] kiosk-surface">
+      <KioskTopBar
+        serviceTypeName={state.serviceTypeName}
+        planSeriesTitle={state.planSeriesTitle}
+        planTitle={state.planTitle}
+        showQr={state.showQr}
+        remoteUrl={state.remoteUrl}
+        displayName={displayName}
+        appName={state.appName}
+        appLogo={state.appLogo}
+        appLogoMonochrome={state.appLogoMonochrome}
+        locked={locked}
+      />
+      <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
+        <MonitorIcon className="size-12 text-gray-7" />
+        <p className="text-title3 text-gray-9 font-semibold">View not found</p>
+        <p className="text-body text-gray-7">
+          The view this preview points at has been deleted. Pick another under Settings → Screens.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function KioskError({ message }: { message: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-4 px-12 text-center">
@@ -347,11 +379,15 @@ export function StageView() {
   const previewViewId = displayId.startsWith("preview-") ? displayId.slice("preview-".length) : null;
   const previewDraftSlots = usePreviewDraftSlots(previewViewId);
 
+  // What this screen shows. Pure, and computed here rather than below the effects
+  // so the tab title can read the same answer the top bar draws — this used to be
+  // a second `outputs.find` with its own fallback, which is how the tab of a
+  // preview came to be titled after the URL it was opened at.
+  const screen = resolveScreen({ state, isLoading, error, displayId, previewViewId });
+
   // Keep the browser tab title in sync with the brand + this display's name, so
   // renaming a display (Settings) updates its kiosk tab too.
-  const titleDisplay = (state?.outputs?.length ?? 0) > 1
-    ? (state?.outputs?.find((o) => o.id === displayId)?.name ?? displayId)
-    : null;
+  const titleDisplay = "displayName" in screen ? screen.displayName : null;
   useEffect(() => {
     const appName = state?.appName?.trim() || "Stage Utility";
     document.title = titleDisplay ? `${appName} — ${titleDisplay}` : appName;
@@ -425,8 +461,6 @@ export function StageView() {
     };
   }, [displayId]);
 
-  const screen = resolveScreen({ state, isLoading, error, displayId, previewViewId });
-
   // The three screens that draw nothing from the state, first — they are the only
   // ones reachable without one.
   if (screen.k === "loading") return <KioskLoading />;
@@ -444,6 +478,8 @@ export function StageView() {
     switch (screen.k) {
       case "unrouted":
         return <KioskUnrouted state={state} displayName={screen.displayName} locked={screen.locked} />;
+      case "view-missing":
+        return <KioskViewMissing state={state} displayName={screen.displayName} locked={screen.locked} />;
       case "not-configured":
         return <KioskNotConfigured state={state} displayName={screen.displayName} locked={screen.locked} />;
       case "empty":
