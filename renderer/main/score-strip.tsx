@@ -43,17 +43,34 @@ function TeamLogo({ team }: { team: ScoreTeamDTO }) {
   );
 }
 
-function Side({
+/**
+ * One team's half of a strip: its colour, its mark, its score.
+ *
+ * Exported because the context-bar capsule is a <button>, not a strip, and so
+ * cannot be a ScoreStrip — but the part that must not be written twice is this
+ * one. The colour, the feather mask and the WCAG ink live here and nowhere else,
+ * so the capsule and the wall widget cannot drift into disagreeing about what
+ * colour a team is.
+ *
+ * `scored` marks the side a score just landed on. It drives a one-pass sweep in
+ * CSS and is set only when the caller has already checked reduced motion.
+ */
+export function ScoreSide({
   team,
   side,
   size,
+  scored = false,
 }: {
   team: ScoreTeamDTO;
   side: "away" | "home";
-  size: "compact" | "full";
+  size: ScoreStripSize;
+  scored?: boolean;
 }) {
   return (
-    <div className={cn("score-side", `score-side-${side}`)} style={sideVars(team)}>
+    <div
+      className={cn("score-side", `score-side-${side}`, scored && "score-side-scored")}
+      style={sideVars(team)}
+    >
       <TeamLogo team={team} />
       {size === "full" && (
         <span className="score-names">
@@ -65,7 +82,7 @@ function Side({
           {team.record && <span className="score-record">{team.record}</span>}
         </span>
       )}
-      <span className="score-value">
+      <span className={cn("score-value", scored && "score-value-bump")}>
         {/* null is NO READING, and is not 0. An em dash says "we have not been
             told" rather than asserting a nil-nil game. */}
         {team.score ?? "—"}
@@ -74,13 +91,25 @@ function Side({
   );
 }
 
+/**
+ * How much of a side there is room for.
+ *
+ * "full" is a card: mark, name, record, score. "compact" is a wall tile or a
+ * stack peek: mark and score. "capsule" is the context bar, where the same two
+ * things are drawn smaller still.
+ */
+export type ScoreStripSize = "capsule" | "compact" | "full";
+
 export function ScoreStrip({
   game,
   size = "full",
+  scored = null,
   className,
 }: {
   game: ScoreGameDTO;
-  size?: "compact" | "full";
+  size?: ScoreStripSize;
+  /** Which side a score just landed on, or null. Already reduced-motion checked. */
+  scored?: "away" | "home" | null;
   className?: string;
 }) {
   return (
@@ -91,9 +120,9 @@ export function ScoreStrip({
       className={cn("score-strip", size === "compact" && "score-strip-compact", className)}
       aria-label={`${game.away.displayName} ${game.away.score ?? "no score"}, ${game.home.displayName} ${game.home.score ?? "no score"}. ${game.shortDetail}`}
     >
-      <Side team={game.away} side="away" size={size} />
+      <ScoreSide team={game.away} side="away" size={size} scored={scored === "away"} />
       <ScoreCenter game={game} />
-      <Side team={game.home} side="home" size={size} />
+      <ScoreSide team={game.home} side="home" size={size} scored={scored === "home"} />
     </div>
   );
 }

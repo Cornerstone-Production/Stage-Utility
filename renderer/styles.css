@@ -664,7 +664,8 @@ body {
 /* The card these sit on is neutral dark whatever the app theme: a stage display
    is dark, and the context bar is dark. Strictly R=G=B. */
 .score-strip,
-.score-card {
+.score-card,
+.score-capsule {
   --score-fg: rgba(255, 255, 255, .92);
   --score-muted: rgba(255, 255, 255, .62);
   --score-subtle: rgba(255, 255, 255, .38);
@@ -944,4 +945,236 @@ body {
 /* Home plate completes the grid's geometry but is never occupied by a runner. */
 .score-base-home {
   visibility: hidden;
+}
+
+/* ── The context-bar capsule, and the activity it grows into ───────────────
+   Every number here is from the mockup this was built against.
+
+   Two rules are load-bearing and were each a real bug:
+
+   1. THE MASK IS ON A ::before LAYER, NEVER ON THE ELEMENT. That lives in
+      .score-side above and is reused verbatim; nothing here re-states it.
+   2. NOTHING ANIMATES INDEPENDENTLY INSIDE THE EXPANDING SHELL. Three earlier
+      passes gave the coloured sides their own transform, and every one read as
+      the box "clipping" open — an outline that had already landed with colour
+      still travelling inside it. The shell's own scale IS the expansion. The
+      cards get no transitions at all until `.is-settled` lands one shell-length
+      later, so a score that opens the panel AND moves the focus cannot animate
+      the focus change inside the opening shell. */
+
+/* The capsule: logos and numbers only. The abbreviation is redundant beside a
+   mark the operator already recognises, and dropping it buys back real width in
+   a bar that also carries the plan and the timer. */
+.score-capsule {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 11px;
+  background: var(--score-surface);
+  border: 1px solid var(--score-line);
+  font: inherit;
+  padding: 0;
+  transition: box-shadow 420ms var(--score-ease), border-color 160ms var(--score-ease);
+}
+button.score-capsule {
+  cursor: pointer;
+}
+button.score-capsule:hover {
+  border-color: rgba(255, 255, 255, .22);
+}
+button.score-capsule:focus-visible {
+  outline: 2px solid var(--su-focus);
+  outline-offset: 3px;
+}
+.score-capsule .score-side {
+  flex: 0 0 auto;
+  gap: 7px;
+  padding: 5px 9px;
+}
+/* The colour has to run past the seam before it can fade, or the feather starts
+   under the number. */
+.score-capsule .score-side-away {
+  padding-right: 22px;
+}
+.score-capsule .score-side-home {
+  padding-left: 22px;
+}
+.score-capsule .score-logo {
+  width: 18px;
+  height: 18px;
+  font-size: 8px;
+}
+.score-capsule .score-value {
+  font-size: 15px;
+  letter-spacing: -.02em;
+  padding: 0;
+  margin: 0;
+}
+.score-capsule-mid {
+  padding: 0 7px;
+  font-size: 9.5px;
+  color: var(--score-subtle);
+  letter-spacing: .05em;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+/* The host clips; the shell scales. Height leads on the way in and trails on the
+   way out, so the panel is never clipped mid-flight in either direction. */
+.score-host {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 620ms var(--score-ease) 60ms;
+}
+.score-host.is-open {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 560ms var(--score-spring);
+}
+.score-clip {
+  overflow: hidden;
+}
+
+/* Origin is the top, so growth pushes downward from where the capsule sits.
+   Closing is the same sequence reversed — an exit that behaves differently from
+   the entrance reads as two unrelated animations. */
+.score-shell {
+  /* Capped and pushed to the capsule's side rather than run full-bleed. At a
+     console width the page is ~1180px, and a card that wide is two slabs of
+     brand colour with a thread of neutral between them — it reads as a banner
+     the page grew, not as the capsule opening. Held to a card's width, under the
+     end of the bar where the item lands, the capsule stays the thing that
+     opened. */
+  max-width: 640px;
+  margin: 0 20px 14px auto;
+  transform-origin: top center;
+  opacity: 0;
+  transform: translateY(-10px) scaleY(.68) scaleX(.86);
+  transition: opacity 260ms var(--score-ease), transform 300ms var(--score-ease);
+}
+.score-host.is-open .score-shell {
+  opacity: 1;
+  transform: none;
+  transition: opacity 300ms var(--score-ease), transform 620ms var(--score-spring);
+}
+
+/* The ONE exception to rule 2, and it is deliberately the neutral-grey centre:
+   staggering grey text reads as detail settling, not as the panel filling in.
+   The coloured sides never get one. */
+.score-host .score-center {
+  opacity: 0;
+  transition: opacity 150ms var(--score-ease);
+}
+.score-host.is-open .score-center {
+  opacity: 1;
+  transition-delay: 170ms;
+}
+
+/* Cards are absolutely placed and moved by TRANSFORM only, so focusing one
+   animates on the compositor rather than reflowing the page under it. Only the
+   container's height animates in layout, driven from the same measurement, so
+   the two cannot disagree. Both are set from JS — see layoutStack. */
+.score-stack {
+  position: relative;
+}
+.score-stack.is-settled {
+  transition: height 520ms var(--score-spring);
+}
+.score-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--score-line);
+  background: var(--score-surface);
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .42);
+  will-change: transform;
+}
+.score-stack.is-settled .score-card {
+  transition: transform 520ms var(--score-spring), box-shadow 320ms var(--score-ease);
+}
+.score-card.is-focused {
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
+}
+.score-card:focus-visible {
+  outline: 2px solid var(--su-focus);
+  outline-offset: 3px;
+}
+/* Clipped by HEIGHT rather than faded, so a peek strip is a real strip and not a
+   ghost of a taller card. The row is what animates; .score-more inside it keeps
+   its natural height, which is why THAT is the thing layoutStack measures. */
+.score-card-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.score-stack.is-settled .score-card-body {
+  transition: grid-template-rows 520ms var(--score-spring), opacity 200ms var(--score-ease);
+}
+.score-card.is-focused .score-card-body {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.score-stack.is-settled .score-card.is-focused .score-card-body {
+  transition-delay: 0ms, 140ms;
+}
+.score-card-body-in {
+  overflow: hidden;
+}
+.score-more {
+  background: var(--score-surface);
+  border-top: 1px solid var(--score-line);
+  padding: 11px 16px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.score-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  font-size: 9.5px;
+  letter-spacing: .05em;
+  color: var(--score-subtle);
+}
+.score-stale {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--score-muted);
+  margin: 0;
+}
+
+/* A light sweeps across the side that just scored — one pass, not a pulse. It is
+   an overlay, NOT a transform of the side, so it is not the second moving object
+   rule 2 forbids. Added from JS only when reduced motion is off. */
+.score-side-scored::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, .42) 50%, transparent 65%);
+  transform: translateX(-120%);
+  opacity: 0;
+  animation: score-sweep 780ms var(--score-ease) 260ms 1;
+}
+@keyframes score-sweep {
+  0% { transform: translateX(-120%); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { transform: translateX(120%); opacity: 0; }
+}
+/* The number itself, because the number is the news.
+   A one-shot ANIMATION rather than a transition-and-a-timer: the class arrives
+   with the strip that React remounts on a new rev, so the browser owns both the
+   start and the end, and nothing has to remember to take it off again. */
+.score-value-bump {
+  animation: score-bump 700ms var(--score-spring) 1;
+}
+@keyframes score-bump {
+  0% { transform: scale(1); }
+  22% { transform: scale(1.18); }
+  100% { transform: scale(1); }
 }

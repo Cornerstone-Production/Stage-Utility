@@ -58,3 +58,6 @@ scripts/survival/.survival-*.log
 # test, redacted; the raw capture never gets committed.
 resi-capture.json
 *-capture.json
+
+# Agent scratch: SDD ledgers and briefs. Never committed.
+.superpowers/

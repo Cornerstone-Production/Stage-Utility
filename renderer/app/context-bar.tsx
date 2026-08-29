@@ -31,6 +31,14 @@ import { useIntegrations } from "../main/use-integration-states";
 import { useResiState, useYouTubeState } from "../main/use-stream-state";
 import { DisconnectedPopover } from "./disconnected-popover";
 import { formatClock } from "../lib/clock-format";
+import { useScoresState } from "../main/use-scores-state";
+import {
+  ScoreActivityHost,
+  ScoreCapsule,
+  capsuleView,
+  prefersReducedMotion,
+  scoredSide,
+} from "./score-activity";
 
 /** Everything an item needs to render. Gathered by `useBarContext`. */
 export interface BarItemContext {
@@ -42,6 +50,10 @@ export interface BarItemContext {
   integrations: ReturnType<typeof useIntegrations>;
   resi: StreamStatusDTO | null;
   youtube: StreamStatusDTO | null;
+  scores: ScoresStatusDTO | null;
+  /** True while this is the configurator's inert preview strip. Items that are
+   *  interactive in the bar render as plain readings in there. */
+  preview?: boolean;
 }
 
 export interface ContextBarState {
@@ -94,6 +106,7 @@ export function useBarContext(): BarItemContext {
   const integrations = useIntegrations();
   const resi = useResiState();
   const youtube = useYouTubeState();
+  const scores = useScoresState();
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -111,7 +124,7 @@ export function useBarContext(): BarItemContext {
   });
 
   const bar = contextBarState(pcoLive, now, skewMs);
-  return { state, bar, now, obs, reaper, integrations, resi, youtube };
+  return { state, bar, now, obs, reaper, integrations, resi, youtube, scores };
 }
 
 /** The strip's own layout. Shared with the configurator's preview, so a bar that
@@ -198,6 +211,13 @@ export function ContextBar() {
           );
         })}
       </header>
+
+      {/* The panel belongs to the ITEM: a bar without the capsule has no panel to
+          grow out of, and mounting it anyway would give the page a document-wide
+          pointerdown listener nothing can ever open. */}
+      {rows.includes("scores") && (
+        <ScoreActivityHost scores={ctx.scores} />
+      )}
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
       <BarConfigurator open={configuring} onOpenChange={setConfiguring} rows={rows} />
@@ -357,6 +377,29 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       if (ind.state !== "live") return <Idle>{ind.state === "offline" ? "No recorder" : "Standby"}</Idle>;
       return (
         <span className="text-footnote font-mono tabular-nums text-live-11">{ind.sub ?? ind.value}</span>
+      );
+    }
+
+    case "scores": {
+      // Four states, in order of what is true — see capsuleView, which is where
+      // the ordering lives so it can be tested. Only a LIVE game is a capsule;
+      // the other three are readings like every other idle item on this bar.
+      const view = capsuleView(ctx.scores);
+      if (view.kind === "idle") return <Idle>{view.text}</Idle>;
+      // A score arriving is INVOLUNTARY motion — the viewer did not ask for it —
+      // which is the category prefers-reduced-motion exists for most strongly.
+      // Checked here, in JS: the global CSS override collapses a transition's
+      // duration but cannot stop a class this decides to hand the strip.
+      const scored = prefersReducedMotion()
+        ? null
+        : scoredSide(view.game, ctx.scores?.lastEvents ?? []);
+      return (
+        <ScoreCapsule
+          game={view.game}
+          scored={scored}
+          rev={ctx.scores?.rev ?? 0}
+          preview={ctx.preview}
+        />
       );
     }
 

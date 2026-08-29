@@ -244,7 +244,11 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
             )}
           />
         ) : (
-          renderBarItem(row.id as BarItemId, ctx)
+          // `preview: true`. In here a row is a thing you drag, so an item that
+          // is a real control in the bar renders as a plain reading: a live
+          // score capsule would toggle the panel behind this dialog on the very
+          // press that was reaching for the row.
+          renderBarItem(row.id as BarItemId, { ...ctx, preview: true })
         )}
       </span>
 
