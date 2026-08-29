@@ -95,16 +95,17 @@ Split this way because `scores-parse.ts` is where the two bugs that matter live 
 | `renderer/app/score-activity-store.ts` (new) | Module-level open/focus state, `useSyncExternalStore`. Why: `renderBarItem` is a pure `(id, ctx) => ReactNode` and the guard at `context-bar.test.tsx:149` asserts it never returns null. Threading open state through `BarItemContext` would put UI state in a data object every item reads. A module store is the same shape `toast.tsx` already uses. |
 | `renderer/app/score-activity.tsx` (new) | The Live Activity panel and the wallet stack. |
 | `renderer/main/scores-object.tsx` (new) | The custom layout object body. |
-| `renderer/components/ui/searchable-list.tsx` (new) | Popover + query + filtered list. See the decision below. |
-| `renderer/settings/panels/scores-teams-panel.tsx` (new) | The bespoke Integrations panel. |
+| `renderer/settings/panels/scores-teams-panel.tsx` (new) | The bespoke Integrations panel, with its own popover, query state and filter. See the decision below. |
 
-### One decision to flag, with a recommendation
+### One decision, settled
 
 Research §3.6 found **four** hand-rolled search-filter popovers already in the repo (`position-picker.tsx`, `icon-grid.tsx`, `home-editor.tsx`'s `AddWidgetSheet`, plus `multi-select.tsx` which has no search at all). CLAUDE.md says: *"If the same shape exists in three places, prefer removing the duplication over fixing it three times."*
 
-**Recommendation, taken in this plan:** extract `renderer/components/ui/searchable-list.tsx` and make the scores picker its first consumer — but do **not** migrate the existing four in this PR. Migrating `position-picker.tsx` means touching slot matching, and `icon-grid.tsx` means touching every icon field, in a PR about sports scores. That is the scope creep CLAUDE.md warns about from the other direction.
+This plan originally recommended extracting `renderer/components/ui/searchable-list.tsx` with the scores picker as its first consumer. **Henry overruled that: the picker is bespoke and no new primitive ships.**
 
-The honest cost of that call: the abstraction ships with one consumer, which is speculative generality. It is worth it here only because the alternative is knowingly writing a fifth copy. Task 3 records a follow-up to migrate the other three. **If Henry would rather see the picker written bespoke and no new primitive, that is a one-file change to Task 3 — say so before it starts.**
+The reasoning that survives either way is that a primitive extracted for exactly one consumer is speculative generality — you cannot tell which parts of the shape are general until a second caller disagrees with one — while migrating the existing four means touching slot matching and every icon field in a PR about sports scores. Neither half of that trade was worth taking here, so the fifth copy is written knowingly, is confined to one file, and the deduplication stays available as its own change when someone has three callers to design against.
+
+What does **not** change with the decision: the picker is built on Radix `Popover`, never on `select.tsx` (which renders a native `<select>`, so the OS draws the list and its first-letter typeahead fights any text field inside it — `position-picker.tsx` records exactly this lesson); the query matches display name **and** abbreviation; an empty result shows an explicit empty state; and the query resets on close.
 
 ---
 
@@ -1373,173 +1374,36 @@ git commit -m "feat(scores): poll ESPN on a schedule, and register the integrati
 ## Task 3: The team picker
 
 **Files:**
-- Create: `renderer/components/ui/searchable-list.tsx`
 - Create: `renderer/settings/panels/scores-teams-panel.tsx`
-- Create: `renderer/components/ui/searchable-list.test.tsx`
+- Create: `renderer/settings/panels/scores-teams-panel.test.tsx`
 - Modify: `renderer/components/integrations-panel.tsx`
+- Modify: `renderer/lib/api.ts`
 
 **Interfaces:**
 - Consumes: `scores:listTeams`, `scores:getFavourites`, `scores:setFavourites`.
-- Produces: `SearchableList`, `ScoresTeamsPanel`.
+- Produces: `ScoresTeamsPanel`, `TeamPicker`, `filterTeams`.
 
-- [ ] **Step 1: Write `renderer/components/ui/searchable-list.tsx`**
+- [ ] **Step 1: Write `renderer/settings/panels/scores-teams-panel.tsx`**
 
-Built on Radix `Popover`, **not** on `select.tsx`. That is not a style preference: `select.tsx` renders a native `<select>`, the OS draws the open list, and the browser's first-letter typeahead fights a text field placed inside it. `position-picker.tsx`'s header comment records exactly this lesson — read it before writing this file and follow its structure.
+Bespoke, with its own popover, query state and filter — see the decision in File Structure. Built on Radix `Popover`, **not** on `select.tsx`: `select.tsx` renders a native `<select>`, so the OS draws the open list and its first-letter typeahead fights a text field placed inside it. Read `renderer/settings/sections/position-picker.tsx`'s header comment first and follow its structure.
 
-```tsx
-// searchable-list.tsx — a filtered, checkable list in a popover.
-//
-// The fourth hand-rolled search-filter popover in this repo would have been one
-// too many: position-picker.tsx, icon-grid.tsx and home-editor.tsx's
-// AddWidgetSheet already each carry their own copy of query state + a filter + an
-// empty state. This is that shape, once.
-//
-// It ships with ONE consumer (the scores team picker) and the other three are
-// deliberately NOT migrated here — moving position-picker means touching slot
-// matching in a PR about sports scores. See the plan's File Structure note; the
-// migration is recorded as a follow-up.
-//
-// Popover, not Select: select.tsx renders a NATIVE <select>, so the OS draws the
-// list and its first-letter typeahead fights any text field inside it.
-// position-picker.tsx states the same reasoning in its own header.
+A list of followed teams — logo, display name, league — each with a remove button, plus one "Add a team" popover grouped by league, its options loaded from `scores:listTeams` on first open. Saving calls `scores:setFavourites`.
 
-import { useMemo, useState } from "react";
-import { Popover, PopoverContent, PopoverTrigger } from "./popover";
-import { cn } from "../../lib/cn";
+Four rules this panel must honour:
 
-export interface SearchableOption {
-  value: string;
-  label: string;
-  /** Also matched by the query — a team's abbreviation, a group name. */
-  keywords?: string;
-  /** Drawn before the label. A logo, a swatch. */
-  adornment?: React.ReactNode;
-  /** Groups the list under a heading. */
-  group?: string;
-}
-
-export function SearchableList({
-  options,
-  selected,
-  onChange,
-  trigger,
-  placeholder = "Search…",
-  empty = "Nothing matches",
-  multiple = true,
-}: {
-  options: readonly SearchableOption[];
-  selected: readonly string[];
-  onChange: (next: string[]) => void;
-  trigger: React.ReactNode;
-  placeholder?: string;
-  empty?: string;
-  multiple?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const hits = q
-      ? options.filter(
-          (o) =>
-            o.label.toLowerCase().includes(q) || (o.keywords ?? "").toLowerCase().includes(q),
-        )
-      : options;
-    const byGroup = new Map<string, SearchableOption[]>();
-    for (const o of hits) {
-      const key = o.group ?? "";
-      byGroup.set(key, [...(byGroup.get(key) ?? []), o]);
-    }
-    return [...byGroup.entries()];
-  }, [options, query]);
-
-  const chosen = new Set(selected);
-
-  function toggle(value: string) {
-    if (!multiple) {
-      onChange([value]);
-      setOpen(false);
-      return;
-    }
-    onChange(chosen.has(value) ? selected.filter((v) => v !== value) : [...selected, value]);
-  }
-
-  return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        // The query resets on close, so re-opening never shows a filtered list
-        // whose filter is invisible because the field scrolled out of view.
-        if (!next) setQuery("");
-      }}
-    >
-      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="start">
-        <div className="border-line border-b p-2">
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={placeholder}
-            aria-label={placeholder}
-            className="bg-fill text-body placeholder:text-fg-subtle w-full rounded-md px-2.5 py-1.5 outline-none"
-          />
-        </div>
-        <div className="max-h-72 overflow-y-auto p-1" role="listbox" aria-multiselectable={multiple}>
-          {groups.length === 0 && (
-            <p className="text-footnote text-fg-subtle px-2.5 py-4 text-center">{empty}</p>
-          )}
-          {groups.map(([group, items]) => (
-            <div key={group}>
-              {group && (
-                <p className="text-caption2 text-fg-subtle px-2.5 pt-2 pb-1 font-medium tracking-wider uppercase">
-                  {group}
-                </p>
-              )}
-              {items.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  role="option"
-                  aria-selected={chosen.has(o.value)}
-                  onClick={() => toggle(o.value)}
-                  className={cn(
-                    "text-body flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left",
-                    chosen.has(o.value) ? "bg-fill text-fg" : "text-fg-muted hover:bg-fill",
-                  )}
-                >
-                  {o.adornment}
-                  <span className="truncate">{o.label}</span>
-                  {chosen.has(o.value) && <span className="text-accent-11 ml-auto text-xs">Following</span>}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-```
-
-- [ ] **Step 2: Write `renderer/components/ui/searchable-list.test.tsx`**
-
-Cover: the query filters on both `label` and `keywords`; an empty result shows the empty state and not a bare list; toggling a selected option removes it; `multiple: false` replaces rather than appends and closes the popover.
-
-The query-resets-on-close behaviour is the one worth a guard with proof: remove the `setQuery("")` and confirm the test goes red.
-
-- [ ] **Step 3: Write `renderer/settings/panels/scores-teams-panel.tsx`**
-
-A list of followed teams — logo, display name, league — each with a remove button, plus one "Add a team" `SearchableList` grouped by league, its options loaded per league from `scores:listTeams` on first open. Saving calls `scores:setFavourites`.
-
-Two rules this panel must honour:
-
+- The query matches the full display name **and** the abbreviation. An operator who thinks of the team as "CHC" should not have to know it is filed under "Chicago Cubs".
+- An empty result shows an explicit **empty state**, never a bare list.
+- The **query resets on close**, so re-opening never shows a filtered list whose filter has scrolled out of view.
 - The **whole favourite is saved, not just the id.** `displayName`, `abbreviation`, `logo` and `color` are cached at selection time so no display ever fetches `a.espncdn.com` and the settings row renders before the first poll.
 - A failed `listTeams` **shows the operator the error**. It does not silently render an empty dropdown. `catch` sets an error message in state and the panel says which league could not be loaded.
 
-- [ ] **Step 4: Register the panel**
+- [ ] **Step 2: Write `renderer/settings/panels/scores-teams-panel.test.tsx`**
+
+Cover the filter rule (display name, abbreviation, case-insensitive, empty query, no match) and the picker itself. The query-resets-on-close behaviour is the one worth a guard with proof: remove the `setQuery("")` and confirm the test goes red.
+
+Render the REAL popover rather than testing a helper in isolation, or the guard cannot see the component it guards. Two jsdom notes that cost time: `cleanup()` between renders (two mounted pickers means two "Add a team" buttons and the query fails on ambiguity), and let Radix's async focus work settle before teardown removes `window`, or every test passes while the FILE fails on an unhandledRejection.
+
+- [ ] **Step 3: Register the panel**
 
 `renderer/components/integrations-panel.tsx:1226` already has the bespoke-panel escape hatch:
 
@@ -1550,7 +1414,7 @@ if (descriptor.id === "osc") return <OscTargetsPanel />;
 
 Add `if (descriptor.id === "scores") return <ScoresTeamsPanel />;` beside them, and add `"scores"` to the appropriate group in the group table at `:986`. It belongs in whichever group reads as "things that display information", not "control & output" — check the table and choose deliberately.
 
-- [ ] **Step 5: Drive it in a browser**
+- [ ] **Step 4: Drive it in a browser**
 
 ```bash
 STAGE_UTILITY_DATA=/tmp/stage-scores-test npm run server &
@@ -1569,10 +1433,10 @@ A control that renders is not a control that does anything. Drive it.
 lsof -ti tcp:8799 | xargs -r kill -9
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git commit -m "feat(scores): choose which teams to follow, with one searchable list instead of a fifth copy"
+git commit -m "feat(scores): choose which teams to follow"
 ```
 
 ---
@@ -2223,7 +2087,7 @@ git commit -m "docs: live scores"
 - *The composed pitch-by-pitch sentence* from the original screenshot ("Kevin Gausman throws 80 mph slider outside…"). Research §1.4 established it is not a field in any endpoint — ESPN composes it client-side. Reconstructing it costs a 752 KB per-game request. The scoreboard's own `situation.lastPlay.text` is free but terse ("Pitch 3 : Ball 2"). **Neither ships here.** The activity shows score, status and the sport centre; the play line is a follow-up worth costing separately, and building it on a guess about phrasing would be our prose presented as ESPN's.
 - *NFL possession.* **Now built, not omitted.** A live football payload probed after the research doc was written confirms `situation.possession` is a bare team id string ("23"), agreeing with `drives.current.team.id` on the summary endpoint. `shortDownDistanceText` ("3rd & 10") is preferred over `downDistanceText` ("3rd & 9 at SJSU 28"), whose field position the centre has no room for. Two traps are guarded by tests: `possessionText` is the ball's FIELD POSITION and matches no team id, and `lastPlay.start.team.id` names the kicking team between a kickoff and the first snap. Possession is absent (not null) in some states and is rendered as nothing when null. **Caveat carried into `docs/integrations/scores.md`:** every football observation is from `football/college-football`, because no NFL game was live on the capture date — the NFL shares the sport shape and situation keys, so this is strong evidence, not proof, and wants a spot-check against a live regular-season NFL game.
 - *Soccer, college.* The leagues table takes a row plus a fixture. Four leagues ship; the shape is built for more.
-- *Migrating the other three search popovers.* Flagged as a decision in File Structure with a recommendation and a follow-up.
+- *Any shared search-popover primitive.* The plan proposed extracting one; Henry overruled it and the picker is bespoke. The four existing copies are untouched, and this is knowingly the fifth. See the decision in File Structure.
 
 **Placeholder scan.** No "TBD", no "add appropriate error handling", no "similar to Task N". Every code step carries the code. The three places that say "find that line" (`stores.ts`, the IPC handler registration, the integrations group table) name the file and the neighbouring symbol, because the line number will have drifted.
 

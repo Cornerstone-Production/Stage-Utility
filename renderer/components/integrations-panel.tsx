@@ -9,6 +9,7 @@ import { useRevealNonce } from "../app/flash";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
+import { ScoresTeamsPanel } from "../settings/panels/scores-teams-panel";
 import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
 import { CompanionInfoPanel } from "./companion-info-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
@@ -986,6 +987,11 @@ const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "Wireless", ids: ["wireless"] },
   { title: "Streaming", ids: ["resi", "youtube"] },
   { title: "Control & output", ids: ["obs", "reaper", "osc", "rosstalk", "ross-tsl"] },
+  // Its own group rather than "Control & output": scores are something the app
+  // READS and shows, and nothing here controls a device. "People" is the only
+  // other read-only feed and it is named for what it counts, so a general
+  // heading is the honest place for this one.
+  { title: "Information", ids: ["scores"] },
 ];
 
 /** Two integrations that present as one card. RossTalk (commands, TCP 7788) and
@@ -1225,6 +1231,9 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const bodyFor = (descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode => {
     if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
     if (descriptor.id === "osc") return <OscTargetsPanel />;
+    // Its own panel: the only setting is WHICH TEAMS, and a searchable
+    // multi-league team picker is not expressible as a ConfigField.
+    if (descriptor.id === "scores") return <ScoresTeamsPanel />;
     if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
     // Its own panel: what Companion needs is an address to dial and the module
     // to dial it with, not a form.

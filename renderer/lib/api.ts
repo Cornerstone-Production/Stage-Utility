@@ -194,6 +194,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "scores:getStatus":
       return apiFetch<T>("/api/scores/status");
+    case "scores:getFavourites":
+      return apiFetch<T>("/api/scores/favourites");
+    case "scores:setFavourites":
+      return post<T>("/api/scores/favourites", p);
+    case "scores:listTeams":
+      return apiFetch<T>(`/api/scores/teams?league=${encodeURIComponent(String(p.league))}`);
 
     case "resi:getStatus":
       return apiFetch<T>("/api/resi/status");
