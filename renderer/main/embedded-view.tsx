@@ -14,7 +14,8 @@ import type { ReactNode } from "react";
 
 import type { LayoutRenderCtx } from "./layout-renderer";
 import { RenderObject } from "./layout-renderer";
-import type { View } from "@main/types/views";
+import type { LayoutObject, View } from "@main/types/views";
+import { EMBED_FONT_FRACTION } from "./layout-objects";
 import { childChain, embedRefusal } from "./embed-chain";
 import { ScriptView } from "./script-view";
 import { DashboardView } from "./dashboard-view";
@@ -34,6 +35,36 @@ import { SlotsColumns } from "../components/slots-columns";
 export function EmbedNotice({ text }: { text: string }) {
   return (
     <div className="flex items-center justify-center h-full text-fg-subtle text-caption1 text-center px-3">{text}</div>
+  );
+}
+
+/**
+ * The wrapper that carries an embed's OWN font size.
+ *
+ * ONE component, for the third time in this file's story: the arithmetic
+ * `(o.style?.fontSize ?? EMBED_FONT_FRACTION) * canvasH` was written in three
+ * places across the two embed objects the moment they each grew an expanded
+ * copy. Every other object gets this from `textStyle`; an embed cannot, because
+ * the components it draws never pass through it — so the size is set here and
+ * INHERITED by the whole embedded view.
+ *
+ * @param canvasH what the object's font size is a fraction of: the parent canvas
+ *   on a tile, the panel when the tile has been expanded — an expanded copy is
+ *   not on the parent canvas at all.
+ */
+export function EmbedFontBox({
+  o,
+  canvasH,
+  children,
+}: {
+  o: LayoutObject;
+  canvasH: number;
+  children: ReactNode;
+}) {
+  return (
+    <div className="h-full w-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * canvasH}px` }}>
+      {children}
+    </div>
   );
 }
 

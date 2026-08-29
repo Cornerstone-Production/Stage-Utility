@@ -32,9 +32,9 @@ import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
-import { EMBED_FONT_FRACTION } from "./layout-objects";
-import { EmbeddedView, EmbedNotice } from "./embedded-view";
+import { EmbeddedView, EmbedFontBox, EmbedNotice } from "./embedded-view";
 import { useEmbedBoxHeight } from "./embed-box";
+import { useExpand } from "./expand-overlay";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
@@ -2196,14 +2196,33 @@ function ViewEmbedObject({
   // markup, unreadable output. See useEmbedBoxHeight for why it is measured.
   const { ref: boxRef, height: boxH } = useEmbedBoxHeight(view?.id ?? null);
 
+  // Before the early returns: a hook cannot be called conditionally, and every
+  // one of those returns is a notice with nothing worth expanding anyway.
+  const { tileRef, control, overlay } = useExpand(ctx.interactive);
+
   const notice = (text: string) => <EmbedNotice text={text} />;
 
   if (!config.viewId) return notice("Pick a view to embed");
   if (!view) return notice("That view no longer exists");
 
-  // Before the first measurement there is nothing better to say than the
-  // parent's canvas; it is replaced within the same commit.
-  const embedCtx: LayoutRenderCtx = { ...ctx, H: boxH || ctx.H };
+  // ONE body, drawn at whichever pair of heights is asking. Two copies of this
+  // JSX would have been two answers to "what does this embed show", and the
+  // expanded one is the copy nobody looks at while editing.
+  //
+  // The two are DIFFERENT numbers on the tile and the same number expanded, so
+  // they stay separate parameters: see the note below for why the object's own
+  // font size is the parent canvas here, and EmbedFontBox for why an expanded
+  // copy has no parent canvas to be a fraction of.
+  const body = (canvasH: number, childH: number) => (
+    <EmbedFontBox o={o} canvasH={canvasH}>
+      <EmbeddedView
+        view={view}
+        ctx={{ ...ctx, H: childH }}
+        showHeader={config.showHeader ?? false}
+        autoScroll={config.autoScroll ?? true}
+      />
+    </EmbedFontBox>
+  );
 
   // w-full h-full, not the object's alignment: boxStyle turns every object into
   // a flex column aligned by textAlign, which shrink-wraps a child that has no
@@ -2220,14 +2239,22 @@ function ViewEmbedObject({
   // style, sized against the canvas exactly as every other object's font size
   // is, and it is the operator's control over the embed. Only the child view's
   // canvas is the box.
+  //
+  // `relative`, so the expand control can sit in the corner without being an
+  // ancestor of anything the view draws. It is absolutely positioned and adds no
+  // height, so the box measurement below is untouched.
   return (
-    <div ref={boxRef} className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}>
-      <EmbeddedView
-        view={view}
-        ctx={embedCtx}
-        showHeader={config.showHeader ?? false}
-        autoScroll={config.autoScroll ?? true}
-      />
+    <div ref={tileRef} className="relative w-full h-full">
+      <div ref={boxRef} className="w-full h-full">{body(ctx.H, boxH || ctx.H)}</div>
+      {/* Each object gates on the states IT resolves — a missing view here, an
+          unrouted or blacked-out screen there. The notices EmbeddedView emits
+          for itself (a per-display kind, a recursion refusal, an empty view) are
+          gated by neither, deliberately: the alternative is a second copy of its
+          kind switch, which is the duplication this file keeps paying for.
+          Expanding one of those enlarges the same sentence, which is harmless;
+          a screen tile's states are gated because they change mid-service. */}
+      {control(view.name)}
+      {overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H), view.name)}
     </div>
   );
 }
@@ -2266,24 +2293,46 @@ function ScreenEmbedObject({
   // Measured on the BODY, not the tile: the label bar takes real height, and a
   // child sized against the whole tile overflows by exactly that much.
   const { ref: boxRef, height: boxH } = useEmbedBoxHeight(view?.id ?? null);
-
   const notice = (text: string) => <EmbedNotice text={text} />;
 
   // Guard clauses, in the order the screen itself resolves. Blackout comes BEFORE
   // the routing check because a blacked-out screen shows black whatever it is
   // routed to — read as an order, not counted out of nested ternary indentation.
-  const body = (() => {
+  const content = (childH: number) => {
     if (!config.outputId) return notice("Pick a screen to show");
     if (!output) return notice("That screen no longer exists");
     if (output.blackout) return notice("Blackout");
     if (!view) return notice(`"${output.name}" is not showing anything`);
-    return <EmbeddedView view={view} ctx={{ ...ctx, H: boxH || ctx.H }} displayId={output.id} />;
-  })();
+    return <EmbeddedView view={view} ctx={{ ...ctx, H: childH }} displayId={output.id} />;
+  };
+
+  // The font box wraps the body rather than the whole tile: the overlay is a
+  // portal to document.body and inherits nothing from this tile's wrapper,
+  // however the React tree reads. Same two heights view-embed takes.
+  const body = (canvasH: number, childH: number) => (
+    <EmbedFontBox o={o} canvasH={canvasH}>{content(childH)}</EmbedFontBox>
+  );
+
+  // Only when there is something to enlarge. A blacked-out, unrouted or deleted
+  // screen's whole content is one sentence, and full-screening a sentence is a
+  // control that does nothing. `showing` already implies `output`; the ternary
+  // is what tells the type checker so.
+  //
+  // The gate goes INTO the hook rather than around its output. Gated only on the
+  // way out, an operator who expanded a tile and then blacked that screen out
+  // kept an invisible "expanded": no control to reopen it, a document key
+  // listener still attached, and the panel springing back to full screen by
+  // itself the moment the blackout cleared.
+  const expandable = showing ? output : null;
+  const { tileRef, control, overlay } = useExpand(ctx.interactive && expandable !== null);
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
-      style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}
+      ref={tileRef}
+      // `relative`, so the expand control sits in the corner as a SIBLING of the
+      // body rather than an ancestor of it. Absolutely positioned, so it adds no
+      // height and the body measurement is untouched.
+      className="relative flex h-full w-full flex-col overflow-hidden"
     >
       {config.showLabel !== false && output && (
         <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-1">
@@ -2301,7 +2350,10 @@ function ScreenEmbedObject({
           </span>
         </div>
       )}
-      <div ref={boxRef} className="min-h-0 flex-1">{body}</div>
+      <div ref={boxRef} className="min-h-0 flex-1">{body(ctx.H, boxH || ctx.H)}</div>
+      {expandable && control(expandable.name)}
+      {expandable &&
+        overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H), expandable.name)}
     </div>
   );
 }
