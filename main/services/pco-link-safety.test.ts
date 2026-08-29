@@ -76,6 +76,41 @@ describe("the URL actually handed to fetch()", () => {
     assert.equal(new URL(out).origin, new URL(PCO).origin);
   });
 
+  // THE GUARD: a pathname that begins with `//` must not move the origin.
+  //
+  // CodeQL flagged this as js/request-forgery (critical) plus two
+  // js/file-access-to-http on PR #349. It is not theoretical. The candidates
+  // below have a genuine PCO origin, so sameOrigin passes them, and their
+  // pathname starts with `//`. The OLD implementation rebuilt with
+  // `new URL(path, origin)`, whose first argument is RE-PARSED -- and `//host`
+  // reads as a protocol-relative authority, not a path. It produced
+  // https://attacker.example/steal, and pcoFetch attaches the operator's PCO
+  // app id and secret to whatever URL it is handed.
+  //
+  // Built from PCO's ORIGIN, not from PCO: PCO carries a path, so
+  // `${PCO}//host` yields a pathname of `/services/v2//host`, which does not
+  // start with `//` and would not reproduce the bug at all.
+  //
+  // Proven red in the session that wrote it: restoring
+  // `new URL(`${parsed.pathname}${parsed.search}`, new URL(base).origin)`
+  // fails this with "walked off-origin to https://attacker.example/steal".
+  it("cannot be walked off-origin by a pathname that starts //", () => {
+    const origin = new URL(PCO).origin;
+    for (const hostile of [
+      `${origin}//attacker.example/steal`,
+      `${origin}//attacker.example/steal?x=1`,
+      `${origin}///attacker.example/steal`,
+    ]) {
+      const out = pcoUrlFrom(hostile, PCO);
+      if (out === null) continue; // rejected outright is also safe
+      assert.equal(
+        new URL(out).origin,
+        origin,
+        `${hostile} walked off-origin to ${out}`,
+      );
+    }
+  });
+
   it("returns null for anything that is not PCO's", () => {
     for (const bad of [
       "https://api.planningcenteronline.com.evil.example/steal",

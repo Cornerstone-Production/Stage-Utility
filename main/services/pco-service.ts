@@ -135,15 +135,26 @@ export function withOffset(url: string, offset: number): string {
  */
 export function pcoUrlFrom(candidate: unknown, base: string): string | null {
   if (!sameOrigin(candidate, base)) return null;
-  let path: string;
   try {
     const parsed = new URL(candidate);
-    path = `${parsed.pathname}${parsed.search}`;
+    // Built by ASSIGNMENT, never by `new URL(path, origin)`.
+    //
+    // The two-argument constructor RE-PARSES its first argument, and a pathname
+    // beginning with `//` is read as a protocol-relative AUTHORITY, not a path.
+    // So a candidate of
+    //     https://api.planningcenteronline.com//attacker.example/steal
+    // passes sameOrigin (its origin really is PCO's), yields a pathname of
+    // `//attacker.example/steal`, and rebuilds as https://attacker.example/steal
+    // -- off-origin, with pcoFetch about to attach the app id and secret to it.
+    //
+    // The setters write one component each and cannot touch the origin.
+    const rebuilt = new URL(base);
+    rebuilt.pathname = parsed.pathname;
+    rebuilt.search = parsed.search;
+    return rebuilt.toString();
   } catch {
     return null;
   }
-  // The origin is the CONSTANT's, never the candidate's.
-  return new URL(path, new URL(base).origin).toString();
 }
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
 // everything, which re-pulled it constantly (the live timer polls every 1–4s and
