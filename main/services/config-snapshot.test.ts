@@ -111,6 +111,8 @@ const EXPECTED_CONFIG = [
   "saved-colors.json",
   "rosstalk-settings.json",
   "rosstalk-targets.json",
+  // The operator's followed teams. Losing them to a reinstall is losing setup.
+  "scores-favourites.json",
   "scriptview-config.json",
   "scriptview-layouts.json",
   "scriptview-roles.json",

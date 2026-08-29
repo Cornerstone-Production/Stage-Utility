@@ -17,6 +17,7 @@ import type {
   ScoreSituation,
   ScoreState,
   ScoreTeamDTO,
+  ScoresStatusDTO,
   SportKind,
 } from "../types/scores.js";
 import { leagueById } from "../types/scores.js";
@@ -266,4 +267,36 @@ export function diffScores(
     }
   }
   return events;
+}
+
+/**
+ * Is this snapshot worth an SSE frame?
+ *
+ * StatusIntegration.emitIfChanged compares the DTO's keys SHALLOWLY, and on this
+ * DTO that is always true: `games` is a freshly built array on every poll and
+ * `fetchedAt` is a new timestamp by definition. Left to the base class, a
+ * 25-second poll would be a 25-second broadcast to every display — precisely
+ * what the house broadcast-on-change rule exists to prevent. So the scores
+ * service overrides it with this.
+ *
+ * `fetchedAt` is deliberately NOT a reason to broadcast. It moves every poll and
+ * means nothing to a viewer on its own. It is still kept current on `last`, so
+ * the hello burst hydrates a newly-connected display with an accurate one; a
+ * long-connected display simply holds the timestamp of the last poll that
+ * actually changed something. Staleness is signalled by `error`, which is
+ * compared here.
+ *
+ * `games` is compared by serialisation rather than by a hand-written list of the
+ * fields that matter. The base class's own comment records why: two integrations
+ * carried hand-written field comparisons, and a list of field names is a list to
+ * forget to extend the next time the DTO grows. The games array is a handful of
+ * entries at a 25-second cadence, so the cost is irrelevant.
+ */
+export function scoresChanged(prev: ScoresStatusDTO, next: ScoresStatusDTO): boolean {
+  return (
+    prev.connected !== next.connected ||
+    prev.error !== next.error ||
+    prev.rev !== next.rev ||
+    JSON.stringify(prev.games) !== JSON.stringify(next.games)
+  );
 }

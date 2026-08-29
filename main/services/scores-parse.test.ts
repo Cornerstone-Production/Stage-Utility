@@ -10,8 +10,8 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { baselineOf, diffScores, parseScoreboard, sortGames } from "./scores-parse.js";
-import type { ScoreGameDTO } from "../types/scores.js";
+import { baselineOf, diffScores, parseScoreboard, scoresChanged, sortGames } from "./scores-parse.js";
+import { SCORES_OFFLINE, type ScoreGameDTO, type ScoresStatusDTO } from "../types/scores.js";
 
 const MLB = JSON.parse(
   readFileSync(new URL("./fixtures/espn-mlb-doubleheader.json", import.meta.url), "utf8"),
@@ -278,5 +278,53 @@ describe("sortGames", () => {
       a.map((g) => g.eventId),
       b.map((g) => g.eventId),
     );
+  });
+});
+
+describe("scoresChanged", () => {
+  const games = parseScoreboard("mlb", MLB, new Set([NYY]));
+
+  function snapshot(over: Partial<ScoresStatusDTO> = {}): ScoresStatusDTO {
+    return {
+      ...SCORES_OFFLINE,
+      connected: true,
+      games: structuredClone(games),
+      fetchedAt: "2026-08-29T17:00:00.000Z",
+      ...over,
+    };
+  }
+
+  test("a poll that changed NOTHING but the wall clock is not a broadcast", () => {
+    // THE guard. `games` is a fresh array every poll and `fetchedAt` is a new
+    // timestamp by definition, so StatusIntegration's shallow key compare says
+    // "changed" every single time — turning a 25-second poll into a 25-second
+    // SSE frame to every display, which is exactly what the house
+    // broadcast-on-change rule forbids.
+    const before = snapshot();
+    const after = snapshot({ fetchedAt: "2026-08-29T17:00:25.000Z" });
+    assert.equal(scoresChanged(before, after), false);
+  });
+
+  test("a score moving IS a broadcast", () => {
+    const after = snapshot();
+    after.games[0].home.score = (after.games[0].home.score ?? 0) + 1;
+    assert.equal(scoresChanged(snapshot(), after), true);
+  });
+
+  test("a game's own status moving IS a broadcast", () => {
+    // The clock and the period are what a live card is showing. Comparing only
+    // the scores would freeze a card mid-inning.
+    const after = snapshot();
+    after.games[0].shortDetail = "Top 9th";
+    assert.equal(scoresChanged(snapshot(), after), true);
+  });
+
+  test("losing the connection, and the error arriving, are both broadcasts", () => {
+    assert.equal(scoresChanged(snapshot(), snapshot({ connected: false })), true);
+    assert.equal(scoresChanged(snapshot(), snapshot({ error: "ESPN unreachable" })), true);
+  });
+
+  test("a scoring event bumping rev IS a broadcast", () => {
+    assert.equal(scoresChanged(snapshot(), snapshot({ rev: 1 })), true);
   });
 });

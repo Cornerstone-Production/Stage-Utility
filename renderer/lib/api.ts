@@ -191,6 +191,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>("/api/obs/status");
     case "reaper:getStatus":
       return apiFetch<T>("/api/reaper/status");
+
+    case "scores:getStatus":
+      return apiFetch<T>("/api/scores/status");
+
     case "resi:getStatus":
       return apiFetch<T>("/api/resi/status");
     case "youtube:getStatus":
