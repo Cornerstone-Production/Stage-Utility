@@ -628,3 +628,320 @@ body {
    AvatarFit in slot-resolver.ts) -- and with a whole 3:4 headshot `cover` at
    28% fills the cell and keeps the entire face: measured on a 195x165 cell,
    source rows 82..590 visible of 800, with the face at 120..380. */
+
+/* ── Live scores ───────────────────────────────────────────────────────────
+   The team-colour feather, the strip, and the per-sport centre.
+
+   Written as CSS rather than Tailwind utilities for two reasons. The mask
+   cannot be expressed as a utility at all; and the rest is a set of precise,
+   interdependent measurements taken from one mockup, which are easier to keep
+   in step as a block than scattered through arbitrary-value classes in three
+   components that must agree pixel for pixel.
+
+   Every surface here is a neutral dark card. A team colour fills its OWN side
+   and never tints the surface, and there is no saturate() anywhere - see the
+   R=G=B rule. */
+:root {
+  /* A MASK, not a gradient in the background.
+
+     Fading a colour to `transparent` interpolates toward transparent BLACK,
+     which leaves a faint dark shoulder just before it disappears - visible as a
+     hard-ish edge at the very end however many stops you add. A mask
+     interpolates ALPHA only, so the hue never shifts and the tail actually
+     reaches nothing.
+
+     The stops approximate an ease-out: most of the fade happens early and the
+     last stretch is nearly flat, which is what removes the visible "start of the
+     fade". Solid across the first 42% - where the logo and the number sit - so
+     the ink score-ink.ts computes is against the real brand colour. */
+  --score-feather-r: linear-gradient(to right, #000 0%, #000 42%, rgba(0,0,0,.92) 55%, rgba(0,0,0,.74) 66%, rgba(0,0,0,.5) 76%, rgba(0,0,0,.28) 85%, rgba(0,0,0,.12) 92%, rgba(0,0,0,.04) 97%, transparent 100%);
+  --score-feather-l: linear-gradient(to left,  #000 0%, #000 42%, rgba(0,0,0,.92) 55%, rgba(0,0,0,.74) 66%, rgba(0,0,0,.5) 76%, rgba(0,0,0,.28) 85%, rgba(0,0,0,.12) 92%, rgba(0,0,0,.04) 97%, transparent 100%);
+  /* Restrained overshoot, only where the motion means "something just happened". */
+  --score-spring: cubic-bezier(.22, 1.06, .36, 1);
+  --score-ease: cubic-bezier(.2, .6, .2, 1);
+}
+
+/* The card these sit on is neutral dark whatever the app theme: a stage display
+   is dark, and the context bar is dark. Strictly R=G=B. */
+.score-strip,
+.score-card {
+  --score-fg: rgba(255, 255, 255, .92);
+  --score-muted: rgba(255, 255, 255, .62);
+  --score-subtle: rgba(255, 255, 255, .38);
+  --score-line: rgba(255, 255, 255, .10);
+  --score-dim: rgba(255, 255, 255, .15);
+  /* The one warm accent: bases, outs, possession, power play. It marks a state
+     ON a neutral surface and never tints the surface itself. */
+  --score-mark: #f5c451;
+  --score-surface: #161616;
+}
+
+/* THE MASK GOES ON A BACKGROUND LAYER, NEVER ON THE ELEMENT.
+   Masking the element fades its CONTENT too, which is what made the scores near
+   the seam hard to read. The colour is a pseudo-element; the text rides above
+   it on z-index 1. */
+.score-side {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 16px;
+  color: var(--score-ink);
+  overflow: hidden;
+}
+.score-side::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--score-team);
+}
+.score-side > * {
+  position: relative;
+  z-index: 1;
+}
+.score-side-away::before {
+  -webkit-mask-image: var(--score-feather-r);
+  mask-image: var(--score-feather-r);
+}
+.score-side-home::before {
+  -webkit-mask-image: var(--score-feather-l);
+  mask-image: var(--score-feather-l);
+}
+/* The two sides mirror, so each team's mark sits at its own outer edge. */
+.score-side-home {
+  flex-direction: row-reverse;
+}
+
+/* The strip: away side, centre, home side.
+   min-height is set by the TALLEST centre any sport produces - baseball's four
+   rows - so the centre is never clamped. Clamping it is what clipped the count
+   and the bonus label in the mockup. */
+.score-strip {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  background: var(--score-surface);
+  min-height: 80px;
+  /* So the strip can answer "am I narrow" about ITSELF rather than about the
+     viewport. The same strip renders in a context-bar panel, in a stack card and
+     in a wall tile, and the viewport says nothing useful about any of them. */
+  container-type: inline-size;
+}
+.score-strip-compact {
+  min-height: 56px;
+}
+.score-strip-compact .score-side {
+  gap: 8px;
+  padding: 8px 11px;
+}
+
+.score-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--score-ink-soft);
+  color: var(--score-team);
+}
+.score-strip-compact .score-logo {
+  width: 22px;
+  height: 22px;
+  font-size: 8px;
+}
+.score-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* The one part of a side that is allowed to give up width.
+   The logo and the score are fixed; when a narrow panel runs out of room it is
+   the name that truncates, because a shortened name still identifies the team
+   and a shortened SCORE is a different number. Without `flex: 1 1 auto` the
+   nowrap children below give this column a large min-content width, the side
+   overflows, and the score paints straight over the name. */
+.score-names {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Clips its own children. The name and the record are both nowrap, so a
+     column squeezed to zero does not stop them being laid out - they simply
+     spill, and on the home side (which is row-reverse and end-aligned) they
+     spill LEFT, straight over the score. Measured at 320px: a 0-wide column
+     with a 34px name inside it, painting across a score that ends 11px to its
+     left. */
+  overflow: hidden;
+}
+.score-side-home .score-names {
+  align-items: flex-end;
+}
+.score-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.score-record {
+  font-size: 9.5px;
+  letter-spacing: .03em;
+  opacity: .55;
+  font-variant-numeric: tabular-nums;
+  /* nowrap like the name above it. Without this a narrow panel breaks "70-64"
+     across two lines as "70-" / "64", which reads as a different number and
+     pushes the strip taller than the stack measured it at. Clipped rather than
+     wrapped, for the same reason the name is. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.score-value {
+  font-size: 29px;
+  font-weight: 600;
+  letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.score-strip-compact .score-value {
+  font-size: 20px;
+}
+.score-side-away .score-value {
+  margin-left: auto;
+  padding-left: 10px;
+}
+.score-side-home .score-value {
+  margin-right: auto;
+  padding-right: 10px;
+}
+
+/* ── The centre, per sport ──
+   A bases diamond in a basketball game is nonsense and a down-and-distance line
+   means nothing in the ninth inning, so this is a switch over the sport rather
+   than one shape wearing different labels. */
+.score-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex-shrink: 0;
+  width: 100px;
+  padding: 10px 2px;
+  color: var(--score-subtle);
+  z-index: 1;
+}
+.score-strip-compact .score-center {
+  width: 68px;
+  gap: 3px;
+  padding: 6px 2px;
+}
+.score-period {
+  font-size: 9.5px;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+.score-clock {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--score-fg);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+}
+.score-strip-compact .score-clock {
+  font-size: 11px;
+}
+.score-downdistance {
+  font-size: 10px;
+  color: var(--score-muted);
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+/* Which team has the ball. A dot beside the score would be lost against a brand
+   colour; in the neutral centre it reads at a glance. */
+.score-possession {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  letter-spacing: .06em;
+}
+.score-pip {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+.score-possession-away .score-pip {
+  border-right: 5px solid var(--score-mark);
+}
+.score-possession-home .score-pip {
+  border-left: 5px solid var(--score-mark);
+}
+.score-note {
+  font-size: 8.5px;
+  letter-spacing: .07em;
+  color: var(--score-mark);
+}
+
+.score-outs {
+  display: flex;
+  gap: 3px;
+}
+.score-out {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--score-dim);
+}
+.score-out-on {
+  background: var(--score-mark);
+}
+
+/* Below this the strip cannot hold a full name without eating the score.
+   Measured: a side needs the logo (32), the score (~28), two gaps (22) and its
+   padding (32) before a name gets a single pixel, so with the 100px centre in
+   the middle a full strip runs out of room at about 460. Rather than truncate a
+   name to nothing, the strip drops to marks and scores - which is exactly what
+   the compact size shows, and is still the two things anybody is reading. */
+@container (max-width: 460px) {
+  .score-names {
+    display: none;
+  }
+}
+
+/* A real diamond: 2nd at the TOP, 3rd on the LEFT, 1st on the RIGHT.
+   A 2x2 grid rotated 45deg puts top-left at the top and bottom-left at the left,
+   so the cells read 2nd, 1st, 3rd, home. A three-cell ROW rotated 45deg would
+   put third base on a diagonal, which is not a diamond. */
+.score-bases {
+  display: grid;
+  grid-template-columns: repeat(2, 7px);
+  grid-template-rows: repeat(2, 7px);
+  gap: 3px;
+  transform: rotate(45deg);
+}
+.score-base {
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: var(--score-dim);
+}
+.score-base-on {
+  background: var(--score-mark);
+}
+/* Home plate completes the grid's geometry but is never occupied by a runner. */
+.score-base-home {
+  visibility: hidden;
+}
