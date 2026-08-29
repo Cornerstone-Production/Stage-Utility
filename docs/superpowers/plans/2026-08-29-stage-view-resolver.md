@@ -210,7 +210,24 @@ and pass unchanged against the new one.
 
 ---
 
-## Task 3: The silent slots default
+## Task 3: Two real bugs, fixed deliberately
+
+Now, and only now, change the behaviour that should change. Both of these were
+found by extracting the resolver — neither was visible while the logic was
+braided through the component.
+
+### 3a — `displayName` renders a URL slug
+
+On a multi-display install, when a **preview's View has been deleted**,
+`displayName` falls through to the literal `preview-<id>` slug. The screen
+labels itself with a URL fragment.
+
+Trace it in the resolver, decide what it SHOULD say — the display's real name if
+one is reachable, otherwise no name at all rather than a slug — and fix it there.
+A test that the slug never reaches a rendered name, proven red by restoring the
+fallthrough.
+
+### 3b — The silent slots default
 
 Now, and only now, change the one behaviour that should change.
 
@@ -220,9 +237,19 @@ const kind: ViewKind = previewView?.kind ?? state.resolvedByOutput?.[displayId]?
 
 A screen whose routing fails to resolve renders **mic slots** — somebody else's roster on a wall, with nothing indicating anything went wrong. It is the same failure the exhaustive switch was added to prevent, one level upstream, and invisible to the type checker because `kind` is a valid `ViewKind` either way.
 
-- [ ] **Step 1: Establish when it actually fires**
+- [ ] **Step 1: Confirm the reachability finding**
 
-Before changing anything, work out every input that reaches the `?? "slots"` fallback: an output whose `resolvedByOutput` entry is missing, an entry with a null kind, a routed view id that matches no view. For each, say whether the earlier `unrouted` guard already caught it. **If every path is already caught, the default is dead code** — say so, delete it, and stop. That is a legitimate and cheaper outcome than inventing a state.
+Task 1 established that the ONLY live reach is a **preview of a deleted View** —
+a real output hits the `isUnrouted` guard first, so the mic-slots-on-a-wall
+scenario cannot happen through normal routing. Confirm that yourself rather than
+inheriting it; if a real output CAN reach it, this is a bigger fix than planned
+and you should say so before changing anything.
+
+Given the finding holds, this is a **preview-only** defect. That lowers the
+stakes but does not remove them: an operator previewing a deleted View sees a
+mic-slots grid and no indication anything is wrong. **If the fallback turns out
+to be fully dead, delete it** rather than inventing a state for it — that is the
+cheaper and more honest outcome.
 
 - [ ] **Step 2: If it IS reachable, make it say so**
 
