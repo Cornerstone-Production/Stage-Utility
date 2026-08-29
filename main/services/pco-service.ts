@@ -98,6 +98,23 @@ export function withOffset(url: string, offset: number): string {
  * that sends the credentials somewhere else, including through a redirect chain
  * or a URL parser disagreement.
  *
+ * That sentence was FALSE for two years, and the guard written to prove it did
+ * not notice. The path and query used to be spliced back together as a STRING
+ * and handed to `new URL(path, origin)` -- and a path beginning `//` is not a
+ * path to that constructor, it is a PROTOCOL-RELATIVE URL. So
+ * `https://api.planningcenteronline.com//attacker.test/x` passed sameOrigin
+ * honestly (the origin really does match), produced the pathname
+ * `//attacker.test/x`, and re-resolved to `https://attacker.test/x` -- with the
+ * operator's App ID and secret attached. `\\attacker.test` reached the same
+ * place, because WHATWG folds a backslash to a slash for a special scheme, so no
+ * check on the RAW string would have caught it either.
+ *
+ * The fix is to stop round-tripping through a string. Assigning `.pathname` on a
+ * URL object sets a component; it cannot reach the origin, where the two-argument
+ * constructor can. Latent rather than live when found -- nothing was passing a
+ * response-body string in -- but the boundary is the entire justification for
+ * `requestProduct` being public, so it has to be true rather than nearly true.
+ *
  * It also gives static analysis something it can see. CodeQL reads a
  * user-defined type predicate as an ordinary boolean, so the guarded string
  * stayed tainted and js/request-forgery fired at critical on the release PR;
@@ -107,15 +124,18 @@ export function withOffset(url: string, offset: number): string {
  */
 export function pcoUrlFrom(candidate: unknown, base: string): string | null {
   if (!sameOrigin(candidate, base)) return null;
-  let path: string;
   try {
     const parsed = new URL(candidate);
-    path = `${parsed.pathname}${parsed.search}`;
+    // Built by ASSIGNMENT, never by `new URL(path, origin)`. The setters write
+    // one component each and cannot touch the origin; the constructor re-parses
+    // its first argument and will happily read `//host` as an authority.
+    const rebuilt = new URL(base);
+    rebuilt.pathname = parsed.pathname;
+    rebuilt.search = parsed.search;
+    return rebuilt.toString();
   } catch {
     return null;
   }
-  // The origin is the CONSTANT's, never the candidate's.
-  return new URL(path, new URL(base).origin).toString();
 }
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
 // everything, which re-pulled it constantly (the live timer polls every 1–4s and

@@ -133,24 +133,70 @@ function linesOf(file: string): string[] {
   return fs.readFileSync(path.join(HERE, file), "utf8").split("\n");
 }
 
+/**
+ * One console call as SOURCE TEXT, however many lines it spans.
+ *
+ * This scan used to look at single lines, which meant a call written as
+ *
+ *   console.warn(
+ *     `[pco] ... ${value} ...`,
+ *   );
+ *
+ * was invisible to it: the line matching `console.warn(` holds no interpolation,
+ * and the line holding the interpolation does not match. Both PCO clients
+ * contain exactly such a call, so the rule had a shape it structurally could not
+ * see -- found by breaking one on purpose and watching the guard stay green,
+ * which is the only way any of these have ever been found here.
+ *
+ * The block runs to the first line containing `);`, capped. Over-inclusion is
+ * deliberate: sweeping in an extra line can only ever ADD an interpolation to
+ * check, so the error direction is a false FAILURE, which someone reads. Ending
+ * the block early would drop one, which nobody does.
+ */
+function consoleCalls(lines: string[]): { line: number; text: string }[] {
+  const calls: { line: number; text: string }[] = [];
+  lines.forEach((line, i) => {
+    if (isComment(line)) return;
+    if (!/console\.(log|warn|error)\s*\(/.test(line)) return;
+    const block: string[] = [];
+    for (let j = i; j < lines.length && j < i + 10; j++) {
+      block.push(lines[j]);
+      if (lines[j].includes(");")) break;
+    }
+    calls.push({ line: i + 1, text: block.join("\n") });
+  });
+  return calls;
+}
+
 describe("scrub coverage in every PCO client", () => {
   for (const file of PCO_CLIENTS) {
-    it(`${file}: every console line interpolates only scrubbed values`, () => {
+    it(`${file}: every console call interpolates only scrubbed values`, () => {
       // Matched on the interpolation, not on the word "scrub": a comment saying
       // the right thing cannot satisfy this. An EXACT check over every log site,
       // so a newly-added unscrubbed one fails rather than riding along under a
       // floor.
       const offenders: string[] = [];
-      linesOf(file).forEach((line, i) => {
-        if (!/console\.(log|warn|error)\(/.test(line)) return;
-        // Every `${...}` in the line must have scrub( inside it.
-        for (const m of line.matchAll(/\$\{([^}]*)\}/g)) {
-          if (!m[1].includes("scrub(")) offenders.push(`${i + 1}: ${line.trim()}`);
+      for (const call of consoleCalls(linesOf(file))) {
+        // Every `${...}` in the call must have scrub( inside it.
+        for (const m of call.text.matchAll(/\$\{([^}]*)\}/g)) {
+          if (!m[1].includes("scrub(")) offenders.push(`${call.line}: ${m[0]}`);
         }
-      });
+      }
       assert.deepEqual(offenders, [], `${file}: these log sites interpolate unscrubbed values`);
     });
   }
+
+  it("and the scan can actually SEE a call that spans several lines", () => {
+    // The guard on the guard. Both clients contain a multi-line console.warn; a
+    // line-based scan reports zero interpolations for it and passes on anything.
+    const seen = PCO_CLIENTS.map((f) => consoleCalls(linesOf(f)))
+      .flat()
+      .filter((c) => c.text.includes("\n"));
+    assert.ok(seen.length >= 2, `found ${seen.length} multi-line console calls; expected at least 2`);
+    for (const c of seen) {
+      assert.match(c.text, /\$\{/, `a multi-line call was captured without its body: ${c.text}`);
+    }
+  });
 });
 
 describe("pagination in every PCO client", () => {
@@ -170,6 +216,91 @@ describe("pagination in every PCO client", () => {
       assert.deepEqual(offenders, [], `${file}: these build a request URL out of a response body`);
     });
   }
+});
+
+/**
+ * Candidates whose ORIGIN genuinely is PCO's, and whose PATH then tries to be a
+ * host.
+ *
+ * `sameOrigin` passes every one of these honestly. The hole was downstream:
+ * pcoUrlFrom used to splice pathname + search into a STRING and hand it to
+ * `new URL(path, origin)`, and a "path" beginning `//` is not a path to that
+ * constructor -- it is a protocol-relative URL, so the origin argument is
+ * ignored and the credentials follow the attacker's host.
+ *
+ * The list is deliberately wider than the one bug. The guard this replaces
+ * covered a look-alike host, an off-origin host, a scheme downgrade and a
+ * non-URL, and its author plainly believed that was exhaustive -- it was the
+ * tenth guard in this repo to pass on the exact defect it was written for. Four
+ * of the ten below got through before the fix. The other six never did, and are
+ * kept precisely because "we tried it and it was already safe" is the part that
+ * is otherwise lost the moment the session ends.
+ */
+const PATH_THAT_WANTS_TO_BE_A_HOST = [
+  // Leaked before the fix.
+  "//attacker.test/x",
+  "///attacker.test/x",
+  "//user:pw@attacker.test/x",
+  // Leaked before the fix, and no check on the RAW string would have caught it:
+  // WHATWG folds a backslash to a slash for a special scheme, so this ARRIVES as
+  // a `//` path however it was written.
+  "/\\\\attacker.test/x",
+  // Did not leak, before or after. Kept as evidence they were tried.
+  "/@attacker.test/x",
+  "/%2f%2fattacker.test/x",
+  "/%5c%5cattacker.test/x",
+  "/%0a//attacker.test/x",
+  "/../../attacker.test/x",
+  "/.//attacker.test/x",
+] as const;
+
+describe("a path that tries to be a host", () => {
+  it("never leaves PCO's origin, whatever the path looks like", () => {
+    for (const path of PATH_THAT_WANTS_TO_BE_A_HOST) {
+      const out = pcoUrlFrom(`https://api.planningcenteronline.com${path}`, PCO);
+      assert.ok(out, `pcoUrlFrom returned null for ${path}`);
+      assert.equal(
+        new URL(out).origin,
+        "https://api.planningcenteronline.com",
+        `credentials would go off-origin for ${path}: ${out}`,
+      );
+    }
+  });
+
+  it("and the whole way through requestProduct, to the URL fetch is handed", async () => {
+    // Asserted at the SINK. The unit test above pins the helper; this pins that
+    // nothing between it and fetch() undoes the work -- the helper was correct
+    // for two years by inspection and wrong in practice.
+    const realFetch = globalThis.fetch;
+    const asked: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      asked.push(url);
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      for (const path of PATH_THAT_WANTS_TO_BE_A_HOST) {
+        await pcoService.requestProduct(
+          `https://api.planningcenteronline.com${path}`,
+          "app",
+          "secret",
+          "2018-11-01",
+        );
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    assert.equal(asked.length, PATH_THAT_WANTS_TO_BE_A_HOST.length);
+    for (const url of asked) {
+      assert.equal(
+        new URL(url).origin,
+        "https://api.planningcenteronline.com",
+        `a credentialed request went to ${new URL(url).origin}`,
+      );
+    }
+  });
 });
 
 describe("requestProduct, the one PUBLIC way into a credentialed fetch", () => {
