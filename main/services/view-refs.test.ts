@@ -101,6 +101,22 @@ describe("what a view points at", () => {
     );
   });
 
+  test("two screen tiles on the same wall get labels that tell them apart", () => {
+    // A bundle carries no outputs (see the test above), so there is no output
+    // name to read here — but every screen tile used to push the literal
+    // "Screen" as its label regardless, and an imported producer wall of a
+    // dozen screens showed a dozen identical rows differing only by a raw
+    // output id nobody could act on.
+    const v = view("view-1", [
+      obj("o1", { type: "screen-embed", outputId: "out-1" }),
+      obj("o2", { type: "screen-embed", outputId: "out-2" }),
+    ]);
+    const labels = collectRefs([v], "view-1").unresolvable.map((u) => u.label);
+    assert.equal(labels.length, 2);
+    assert.notEqual(labels[0], labels[1], "two different screen tiles read as the same rebind row");
+    assert.notEqual(labels[0], "Screen", "the row still carries the old placeholder");
+  });
+
   test("a screen tile with no screen chosen yet is not work", () => {
     // Nothing to repoint. Listing it would put "fix this" beside an object the
     // operator has not finished placing.

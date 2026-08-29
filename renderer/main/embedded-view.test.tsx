@@ -192,19 +192,24 @@ describe("an embedded view is sized by its BOX, not by a fraction", () => {
   // Inline font-size, not a class: jsdom loads no stylesheet, so a Tailwind class
   // resolves to nothing. This is a style attribute the renderer writes itself.
   test("an embed filling a half-height container gets the container's box", async () => {
-    const ctx = ctxWith([]);
-    (ctx as unknown as { state: { views: unknown[] } }).state = { ...STATE, views: [
-      { id: "v-child", name: "Child", kind: "custom", layout: { objects: [
-        { id: "t1", type: "text", x: 0, y: 0, w: 1, h: 1, z: 0,
-          config: { type: "text", text: "Inner" }, style: { fontSize: 0.1 } },
-      ] } },
-    ] } as never;
+    const childView: View = {
+      id: "v-child", name: "Child", kind: "custom", createdAt: "2026-01-01T00:00:00.000Z",
+      layout: {
+        version: 1,
+        canvas: { width: 1920, height: 1080, fit: "contain" },
+        objects: [
+          { id: "t1", x: 0, y: 0, w: 1, h: 1, z: 0,
+            config: { type: "text", text: "Inner" }, style: { fontSize: 0.1 } },
+        ],
+      },
+    };
+    const ctx = makeRenderCtx({ state: { ...STATE, views: [childView] }, embedChain: [] });
 
-    const container = {
-      id: "c1", type: "container", x: 0, y: 0, w: 1, h: 0.5, z: 0,
+    const container: LayoutObject = {
+      id: "c1", x: 0, y: 0, w: 1, h: 0.5, z: 0,
       config: { type: "container" },
       children: [
-        { id: "o-embed", type: "view-embed", x: 0, y: 0, w: 1, h: 1, z: 0,
+        { id: "o-embed", x: 0, y: 0, w: 1, h: 1, z: 0,
           config: { type: "view-embed", viewId: "v-child" } },
       ],
     };

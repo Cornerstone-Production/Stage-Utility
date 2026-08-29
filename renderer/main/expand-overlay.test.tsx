@@ -362,6 +362,75 @@ describe("prefers-reduced-motion", () => {
   });
 });
 
+describe("a panel nested inside another expanded panel", () => {
+  test("Escape closes only the innermost one", async () => {
+    // A view-embed can hold a custom view whose own objects include another
+    // view-embed — a producer wall nested inside a producer wall. Each level
+    // runs its own `useExpand`, and each attaches its own document keydown
+    // listener; one Escape used to collapse every level because all of them
+    // reacted to the same key press.
+    const innerView: View = {
+      id: "v-inner", name: "Inner Wall", kind: "custom", createdAt: "2026-01-01T00:00:00.000Z",
+      layout: { version: 1, canvas: { width: 1920, height: 1080, fit: "contain" }, objects: [textObject] },
+    };
+    const innerTileObject: LayoutObject = {
+      id: "o-inner", x: 0, y: 0, w: 1, h: 1, z: 0,
+      config: { type: "view-embed", viewId: "v-inner" }, style: {},
+    };
+    const outerView: View = {
+      id: "v-outer", name: "Outer Wall", kind: "custom", createdAt: "2026-01-01T00:00:00.000Z",
+      layout: { version: 1, canvas: { width: 1920, height: 1080, fit: "contain" }, objects: [innerTileObject] },
+    };
+    const outerTileObject: LayoutObject = {
+      id: "o-outer", x: 0, y: 0, w: 1, h: 1, z: 0,
+      config: { type: "view-embed", viewId: "v-outer" }, style: {},
+    };
+
+    const ctx = makeRenderCtx({
+      state: { ...STATE, views: [outerView, innerView], outputs: [] },
+      interactive: true,
+    });
+
+    let container!: HTMLElement;
+    await act(async () => {
+      ({ container } = render(
+        React.createElement(TooltipProvider as never, null,
+          React.createElement(RenderObject, { o: outerTileObject, ctx } as never)),
+      ) as never);
+      await settle();
+    });
+
+    // Open the outer panel by its OWN control — the inner tile draws inside the
+    // outer tile's compact box too, before anything is expanded, so it has an
+    // "Expand Inner Wall" button of its own already sitting in `container` and
+    // the generic `openOverlay` helper (first button in the container) would
+    // click that one by mistake.
+    const outerBtn = container.querySelector<HTMLButtonElement>(`[aria-label="Expand Outer Wall"]`);
+    assert.ok(outerBtn, "the outer tile offered no way to expand");
+    await act(async () => { fireEvent.click(outerBtn); await settle(); });
+    assert.equal(overlays(), 1, "the outer panel never opened");
+
+    const innerBtn = document.querySelector<HTMLButtonElement>(
+      `[data-expand-overlay] [aria-label="Expand Inner Wall"]`,
+    );
+    assert.ok(innerBtn, "the inner tile offered no way to expand");
+    await act(async () => { fireEvent.click(innerBtn); await settle(); });
+    assert.equal(overlays(), 2, "the inner panel never opened");
+
+    await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); await settle(); });
+
+    assert.equal(overlays(), 1, "Escape closed more than the innermost panel");
+    assert.equal(
+      document.querySelector("[data-expand-overlay]")?.getAttribute("aria-label"),
+      "Outer Wall",
+      "the surviving panel was the wrong one — the outer panel closed instead of the inner one",
+    );
+
+    await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); await settle(); });
+    assert.equal(overlays(), 0, "the outer panel did not close on its own Escape");
+  });
+});
+
 describe("the expand affordance is a sibling of the tile's content, not its ancestor", () => {
   test("a control inside the tile still gets its own press", async () => {
     // The nested-<button> bug, which this repository has shipped twice: an outer

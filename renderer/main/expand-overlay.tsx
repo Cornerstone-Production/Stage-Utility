@@ -44,6 +44,19 @@ const OPEN_MS = 260;
 /** Everything a Tab can land on inside the panel. */
 const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+// Every open panel's `close`, in the order it opened — module-level because a
+// tile nested inside an expanded panel mounts its OWN instance of this hook,
+// with no shared ancestor to hold the stack. Escape should close only the
+// innermost panel, and stopPropagation cannot deliver that here: every panel's
+// listener is on the same `document` node, so it is a sibling call, not an
+// ancestor one, and only stopIMMEDIATEPropagation would matter — which
+// requires listener registration order to match nesting order, and it does
+// not (the outer panel mounts, and therefore attaches, before the inner one
+// exists). Checking "am I the last entry on the stack" instead needs no
+// ordering assumption: whichever panel opened most recently is the top,
+// however the listeners happen to be ordered.
+const openPanels: Array<() => void> = [];
+
 export function useExpand(enabled: boolean) {
   const tileRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -76,16 +89,24 @@ export function useExpand(enabled: boolean) {
   // is a touchscreen more often than not and has no Escape key at all.
   useEffect(() => {
     if (!expanded) return;
+    openPanels.push(close);
     // No stopPropagation: this listens on `document`, which is the end of the
     // bubble path, so it would stop nothing — and the sibling listeners it looks
     // like it is defending against are on the same node and would need
-    // stopImmediatePropagation. A call that reads as a guard and is not one is
-    // worse than no call.
+    // stopImmediatePropagation, in mount order, which is not nesting order (see
+    // `openPanels` above). Instead: every open panel's listener fires, and each
+    // checks whether IT is the innermost one before acting.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      if (openPanels[openPanels.length - 1] !== close) return;
+      close();
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      const i = openPanels.lastIndexOf(close);
+      if (i !== -1) openPanels.splice(i, 1);
+    };
   }, [expanded, close]);
 
   // Focus MOVES into the panel and comes back out again.

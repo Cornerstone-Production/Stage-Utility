@@ -104,7 +104,12 @@ export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
       // points at nothing until somebody repoints it. Named here so the import
       // report says which objects, rather than the operator finding out from a
       // wall of "That screen no longer exists" on a Sunday.
-      if (type === "screen-embed") push("output", str(c.outputId), "Screen");
+      //
+      // No output name to borrow — a bundle carries no outputs, so there is
+      // nothing here to read one from (see above). The object id at least
+      // tells two rows on a producer wall apart; the literal "Screen" told
+      // them apart from nothing.
+      if (type === "screen-embed") push("output", str(c.outputId), o.id);
     });
   }
 
