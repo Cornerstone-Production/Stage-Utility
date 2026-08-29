@@ -539,7 +539,7 @@ export function Inspector({
         ) : (
           <RowSelect
             label="View"
-            hint="Renders that view's content here, natively. Every kind works; pick an Embedded screen instead to follow what a display is showing. A view cannot contain itself, and nesting stops after three levels."
+            hint="Renders that view's content here, natively. Dashboard, stage and SPL-rundown views are configured per screen, not per view — pick an Embedded screen for those instead. A view cannot contain itself, and nesting stops after three levels."
             value={c.viewId ?? ""}
             options={[{ value: "", label: "None" }, ...embeddable.map((v) => ({ value: v.id, label: `${v.name} (${v.kind})` }))]}
             onChange={(v) => onConfig({ ...c, viewId: v || null })}

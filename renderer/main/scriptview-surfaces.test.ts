@@ -94,24 +94,33 @@ describe("the rundown has one implementation", () => {
   // not take.
   const viewportHeightInClass = () => /className="[^"]*(?:h-\[100dvh\]|h-\[100vh\]|h-screen)/;
 
-  it("the shared body claims no height of its own", () => {
-    // It is embedded in boxes of three different shapes. A viewport height here
-    // means 100% of the SCREEN rather than of the box it was given — on the page
-    // that pushes the last rows past the clip, hidden by the sticky footer, so it
-    // looks right and scrolls short. An earlier draft did exactly that.
-    assert.ok(
-      !viewportHeightInClass().test(read(SHARED)),
-      `${SHARED} must not size itself to the viewport`,
-    );
-  });
+  /** Every component that renders both on a display and inside an Embedded
+   *  view tile, so it must fill whatever box it is given rather than assume
+   *  it owns the screen. Six, not two: the multiview work put dashboard,
+   *  stage, transcription and SPL-rundown views under the identical contract
+   *  ScriptView already had, and a scan covering only the original pair is
+   *  how the other four regress silently. */
+  const VIEWPORT_HEIGHT_GUARDED = [
+    SHARED,
+    SURFACES.viewKind,
+    "dashboard-view.tsx",
+    "stage-display-view.tsx",
+    "transcription-view.tsx",
+    "spl-rundown-view.tsx",
+  ] as const;
 
-  it("the embeddable View-kind sizes to its box, not the screen", () => {
-    // ScriptView renders both on a display and inside a layout object. The kiosk
-    // route supplies the screen height; the component must not assume it.
-    assert.ok(
-      !viewportHeightInClass().test(read(SURFACES.viewKind)),
-      "script-view.tsx must size to h-full, not the viewport",
-    );
+  it("no view surface sizes itself to the viewport", () => {
+    // It is embedded in boxes of several different shapes — a page, a tile, a
+    // console. A viewport height here means 100% of the SCREEN rather than of
+    // the box it was given — on the page that pushes the last rows past the
+    // clip, hidden by the sticky footer, so it looks right and scrolls short.
+    // An earlier draft of the shared rundown body did exactly that.
+    for (const file of VIEWPORT_HEIGHT_GUARDED) {
+      assert.ok(
+        !viewportHeightInClass().test(read(file)),
+        `${file} must not size itself to the viewport — use h-full`,
+      );
+    }
   });
 });
 

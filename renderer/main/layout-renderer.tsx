@@ -2600,13 +2600,16 @@ export function LayoutRenderer({
   /**
    * Which View this layout belongs to — it SEEDS the embed chain.
    *
-   * Without it the outermost view is not on the chain, so a tile pointing back
-   * at the view it lives on is not a cycle: it draws a second copy of the whole
-   * layout inside itself and only the depth cap stops it. Verified in a browser,
-   * which is the only place it shows — every unit test builds the chain by hand
-   * and so agrees with whatever the component does.
+   * Required rather than optional, exactly like `embedChain` above and for the
+   * same reason: an optional field defaulting a caller to `embedChain: []`
+   * lets a surface forget it, and a forgotten seed is indistinguishable from
+   * "nothing above me" — the one answer that makes a tile pointing back at the
+   * view it lives on undetectable as a cycle. It then draws a second copy of
+   * the whole layout inside itself and only the depth cap stops it. Verified
+   * in a browser, which is the only place it shows — every unit test builds
+   * the chain by hand and so agrees with whatever the component does.
    */
-  viewId?: string | null;
+  viewId: string | null;
 }) {
   const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 

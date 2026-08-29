@@ -52,10 +52,12 @@ export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
       const type = str(c.type);
 
       // `screen-embed` is deliberately absent from THIS expression: it
-      // references an OUTPUT, and an output's routed view is already walked from
-      // the outputs list. Putting its outputId here would put a non-view id into
-      // a list of view ids. It is not refless, though — it goes on the rebind
-      // work list below, because a bundle carries views and never outputs.
+      // references an OUTPUT, not a view, and an output is per-install — its
+      // routed view does not travel with an export at all (see
+      // docs/moving-a-view.md). Putting its outputId here would put a
+      // non-view id into a list of view ids. It is not refless, though — it
+      // goes on the rebind work list below, because a bundle carries views
+      // and never outputs.
       const embed =
         type === "view-embed" ? str(c.viewId)
         : type === "slots-grid" && c.source === "view" ? str(c.sourceViewId)
