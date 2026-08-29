@@ -52,7 +52,9 @@ class StubEventSource {
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
 
-const SLOT = {
+const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
+
+const SLOT: Slot = {
   id: "s-1",
   channel: "1",
   order: 0,
@@ -62,44 +64,30 @@ const SLOT = {
 };
 
 /** A view that embeds ITSELF — the case only the real LayoutRenderer can check. */
-const SELF_VIEW = {
+const SELF_VIEW: View = {
   id: "v-self",
   name: "Self",
   kind: "custom",
   createdAt: "2026-01-01T00:00:00.000Z",
   layout: {
     version: 1,
-    canvas: { width: 1920, height: 1080, background: null, fit: "letterbox" },
+    canvas: { width: 1920, height: 1080, background: null, fit: "contain" },
     objects: [
-      { id: "t-self", type: "text", x: 0, y: 0, w: 1, h: 0.2, z: 0,
+      { id: "t-self", x: 0, y: 0, w: 1, h: 0.2, z: 0,
         config: { type: "text", text: "SELF BODY" }, style: { fontSize: 0.1 } },
-      { id: "o-self", type: "view-embed", x: 0, y: 0.2, w: 1, h: 0.8, z: 1,
+      { id: "o-self", x: 0, y: 0.2, w: 1, h: 0.8, z: 1,
         config: { type: "view-embed", viewId: "v-self" } },
     ],
   },
 };
 
 /** Enough StageState for every view to hydrate and draw its real content. */
-const STATE = {
+const STATE: StageState = {
+  ...DEFAULT_STAGE_STATE,
   views: [SELF_VIEW],
   outputs: [{ id: "d-1", name: "Left Screen", viewId: null }],
   slotsByView: { "v-1": [SLOT] },
-  slotsByLayoutObject: {},
-  emptySlotLogo: null,
-  defaultAvatar: null,
-  hourCycle: "24h",
-  appName: "APP NAME",
-  appLogo: null,
-  appLogoMonochrome: false,
-  serviceTypeName: "ST",
-  planTitle: "PT",
-  planSeriesTitle: "PS",
-  showQr: false,
-  remoteUrl: "",
-  planId: null,
-  serviceTypeId: null,
   pcoConfigured: true,
-  chargerBays: [],
 };
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
   const u = String(url);
@@ -131,15 +119,7 @@ async function draw(element: React.ReactElement) {
 }
 
 function ctxWith(embedChain: string[]) {
-  return {
-    state: STATE, propresenter: null, propInstances: null, pcoLive: null, planItems: null,
-    transcript: [], spl: null, obs: null, reaper: null, resi: null, youtube: null,
-    osc: null, peopleCount: null, serviceLow: null, serviceAttendance: null,
-    servicePeak: null, servicePeakAttendance: null, baptism: null,
-    serviceTimeline: null, integrations: [], integrationLabels: {}, wireless: [],
-    now: 0, skewMs: 0, ndiSource: null, H: 1080, placed: undefined,
-    home: false, interactive: false, embedChain,
-  } as never;
+  return makeRenderCtx({ state: STATE, embedChain });
 }
 
 const view = (kind: string, id = "v-1") => ({

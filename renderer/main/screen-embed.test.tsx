@@ -47,50 +47,33 @@ class StubEventSource {
  *  is checkable rather than inferred from the box being non-empty. */
 const VIEW_MARKER = "ROUTED VIEW BODY";
 
-const ROUTED_VIEW = {
+const ROUTED_VIEW: View = {
   id: "v-1",
   name: "Slots A",
   kind: "custom",
+  createdAt: "2026-01-01T00:00:00.000Z",
   layout: {
+    version: 1,
+    canvas: { width: 1920, height: 1080, fit: "contain" },
     objects: [
-      { id: "t1", type: "text", x: 0, y: 0, w: 1, h: 1, z: 0,
+      { id: "t1", x: 0, y: 0, w: 1, h: 1, z: 0,
         config: { type: "text", text: VIEW_MARKER }, style: { fontSize: 0.1 } },
     ],
   },
 };
-
-const STATE = {
-  views: [ROUTED_VIEW],
-  outputs: [],
-  slotsByView: {},
-  slotsByLayoutObject: {},
-  emptySlotLogo: null,
-  defaultAvatar: null,
-  hourCycle: "24h",
-  appName: "APP NAME",
-  appLogo: null,
-  appLogoMonochrome: false,
-  serviceTypeName: "ST",
-  planTitle: "PT",
-  planSeriesTitle: "PS",
-  showQr: false,
-  remoteUrl: "",
-  planId: null,
-  serviceTypeId: null,
-  pcoConfigured: true,
-  chargerBays: [],
-};
-(globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
-  const u = String(url);
-  const body = u.includes("/api/state") ? STATE : u.includes("transcript") ? [] : {};
-  return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
-};
-
 const { render, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { act } = await import("react");
 const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { RenderObject } = await import("./layout-renderer.js");
+const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
+
+const STATE: StageState = { ...DEFAULT_STAGE_STATE, views: [ROUTED_VIEW], outputs: [] };
+(globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
+  const u = String(url);
+  const body = u.includes("/api/state") ? STATE : u.includes("transcript") ? [] : {};
+  return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+};
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
@@ -108,17 +91,8 @@ async function draw(element: React.ReactElement) {
   return container;
 }
 
-function ctxWith(outputs: unknown[], views: unknown[] = [ROUTED_VIEW], embedChain: string[] = []) {
-  return {
-    state: { ...STATE, outputs, views },
-    propresenter: null, propInstances: null, pcoLive: null, planItems: null,
-    transcript: [], spl: null, obs: null, reaper: null, resi: null, youtube: null,
-    osc: null, peopleCount: null, serviceLow: null, serviceAttendance: null,
-    servicePeak: null, servicePeakAttendance: null, baptism: null,
-    serviceTimeline: null, integrations: [], integrationLabels: {}, wireless: [],
-    now: 0, skewMs: 0, ndiSource: null, H: 1080, placed: undefined,
-    home: false, interactive: false, embedChain,
-  } as never;
+function ctxWith(outputs: Output[], views: View[] = [ROUTED_VIEW], embedChain: string[] = []) {
+  return makeRenderCtx({ state: { ...STATE, outputs, views }, embedChain });
 }
 
 /** The tile as the renderer builds it, through the real RenderObject — so the
@@ -143,10 +117,17 @@ describe("a screen tile", () => {
   test("follows the routing when it changes, without the layout changing", async () => {
     // The whole difference from view-embed. Same object, same config; only the
     // OUTPUT moved, and the tile has to move with it.
-    const other = { id: "v-2", name: "Other", kind: "custom", layout: { objects: [
-      { id: "t2", type: "text", x: 0, y: 0, w: 1, h: 1, z: 0,
-        config: { type: "text", text: "SECOND VIEW BODY" }, style: { fontSize: 0.1 } },
-    ] } };
+    const other: View = {
+      id: "v-2", name: "Other", kind: "custom", createdAt: "2026-01-01T00:00:00.000Z",
+      layout: {
+        version: 1,
+        canvas: { width: 1920, height: 1080, fit: "contain" },
+        objects: [
+          { id: "t2", x: 0, y: 0, w: 1, h: 1, z: 0,
+            config: { type: "text", text: "SECOND VIEW BODY" }, style: { fontSize: 0.1 } },
+        ],
+      },
+    };
     const o = tile({ outputId: "out-1" });
     const routed = (viewId: string) =>
       React.createElement(TooltipProvider as never, null,
@@ -202,7 +183,7 @@ describe("a screen tile", () => {
     ["routed", { id: "out-1", name: "Left Display", viewId: "v-1" }, "Showing its view"],
     ["blacked out", { id: "out-1", name: "Left Display", viewId: "v-1", blackout: true }, "Dark"],
     ["unrouted", { id: "out-1", name: "Left Display", viewId: null }, "Dark"],
-  ] as [string, Record<string, unknown>, string][]) {
+  ] as [string, Output, string][]) {
     test(`the status dot reads "${expected}" when the screen is ${state}`, async () => {
       const container = await draw(React.createElement(RenderObject, {
         o: tile({ outputId: "out-1", showLabel: true, showStatus: true }), ctx: ctxWith([output]),

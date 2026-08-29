@@ -25,6 +25,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
+import type { LayoutRenderCtx } from "./layout-renderer";
 
 const teardown = installDom();
 
@@ -55,8 +56,8 @@ class StubEventSource {
 /** The routed view draws this and nothing else does. */
 const VIEW_MARKER = "ROUTED VIEW BODY";
 
-const textObject = {
-  id: "t1", type: "text", x: 0, y: 0, w: 1, h: 1, z: 0,
+const textObject: LayoutObject = {
+  id: "t1", x: 0, y: 0, w: 1, h: 1, z: 0,
   config: { type: "text", text: VIEW_MARKER }, style: { fontSize: 0.1 },
 };
 
@@ -64,22 +65,15 @@ const textObject = {
  *  to a real action so pressing it is observable as a request rather than as an
  *  absence of one. */
 const INNER_ACTION = "inner-action";
-const innerButtonObject = {
-  id: "t2", type: "action-button", x: 0, y: 0, w: 1, h: 1, z: 0,
+const innerButtonObject: LayoutObject = {
+  id: "t2", x: 0, y: 0, w: 1, h: 1, z: 0,
   config: { type: "action-button", actionId: INNER_ACTION, label: "INNER CONTROL" }, style: {},
 };
 
-const view = (objects: unknown[]) => ({
-  id: "v-1", name: "Slots A", kind: "custom", layout: { objects },
+const view = (objects: LayoutObject[]): View => ({
+  id: "v-1", name: "Slots A", kind: "custom", createdAt: "2026-01-01T00:00:00.000Z",
+  layout: { version: 1, canvas: { width: 1920, height: 1080, fit: "contain" }, objects },
 });
-
-const STATE = {
-  views: [], outputs: [], slotsByView: {}, slotsByLayoutObject: {},
-  emptySlotLogo: null, defaultAvatar: null, hourCycle: "24h", appName: "APP NAME",
-  appLogo: null, appLogoMonochrome: false, serviceTypeName: "ST", planTitle: "PT",
-  planSeriesTitle: "PS", showQr: false, remoteUrl: "", planId: null, serviceTypeId: null,
-  pcoConfigured: true, chargerBays: [],
-};
 
 /** Every request the render (or a press) made, so a press is provable. */
 const requests: string[] = [];
@@ -95,6 +89,9 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { RenderObject } = await import("./layout-renderer.js");
+const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
+
+const STATE: StageState = { ...DEFAULT_STAGE_STATE };
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
@@ -127,23 +124,17 @@ const titleFor = (kind: Kind, screen: string) => (kind === "screen-embed" ? scre
 function ctxFor(
   interactive: boolean,
   screen: string,
-  objects: unknown[],
+  objects: LayoutObject[],
   stopped: "blackout" | "view-deleted" | null = null,
-) {
-  return {
+): LayoutRenderCtx {
+  return makeRenderCtx({
     state: {
       ...STATE,
       views: stopped === "view-deleted" ? [] : [view(objects)],
       outputs: [{ id: "out-1", name: screen, viewId: "v-1", blackout: stopped === "blackout" }],
     },
-    propresenter: null, propInstances: null, pcoLive: null, planItems: null,
-    transcript: [], spl: null, obs: null, reaper: null, resi: null, youtube: null,
-    osc: null, peopleCount: null, serviceLow: null, serviceAttendance: null,
-    servicePeak: null, servicePeakAttendance: null, baptism: null,
-    serviceTimeline: null, integrations: [], integrationLabels: {}, wireless: [],
-    now: 0, skewMs: 0, ndiSource: null, H: 1080, placed: undefined,
-    home: false, interactive, embedChain: [],
-  };
+    interactive,
+  });
 }
 
 const objectFor = (kind: Kind) => ({
@@ -154,7 +145,7 @@ const objectFor = (kind: Kind) => ({
   style: {},
 });
 
-const tree = (kind: Kind, ctx: unknown) =>
+const tree = (kind: Kind, ctx: LayoutRenderCtx) =>
   React.createElement(TooltipProvider as never, null,
     React.createElement(RenderObject, { o: objectFor(kind), ctx } as never));
 
@@ -164,7 +155,7 @@ const tree = (kind: Kind, ctx: unknown) =>
  */
 async function renderTile(
   { kind = "screen-embed", interactive, title = "Left Display", objects = [textObject] }:
-  { kind?: Kind; interactive: boolean; title?: string; objects?: unknown[] },
+  { kind?: Kind; interactive: boolean; title?: string; objects?: LayoutObject[] },
 ) {
   let result!: { container: HTMLElement; rerender: (el: React.ReactElement) => void };
   await act(async () => {
