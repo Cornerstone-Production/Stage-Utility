@@ -20,10 +20,10 @@
 // deliberately smaller and denser than the kiosk norm; they are not an oversight
 // waiting to be "fixed" up to stage sizes.
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertCircleIcon, CalendarDaysIcon, Loader2Icon } from "lucide-react";
 
-import { invoke } from "../lib/api";
+import { invoke, onNotification } from "../lib/api";
 import { formatClock } from "../lib/clock-format";
 import { cn } from "../lib/cn";
 import { contrastRatio, formatColor, parseColor } from "../components/ui/color-math";
@@ -357,23 +357,19 @@ function Notice({ children, spinner }: { children: React.ReactNode; spinner: boo
 // ── the wrapper that fetches ─────────────────────────────────────────────────
 
 /**
- * How often the grid is re-read.
+ * The kiosk route and the layout embed both come through here.
  *
- * Matched to the calendar client's own three-minute cache on event instances, so
- * a display asking more often would only be served the same answer. Several
- * displays share that server-side cache, so the cost is one PCO request every
- * three minutes for the whole building, not one per screen.
+ * PUSHED, not polled. An earlier version refetched on a three-minute interval in
+ * every client, which on a nine-tile producer multiview is nine clients asking
+ * the server every three minutes for data that changes twice a week. The server
+ * keeps the timer — one read for the whole building — and sends a frame only
+ * when the grid is not what it was. See main/services/calendar-broadcaster.ts.
  *
- * A poll rather than a pushed channel, unlike the rest of this app. The grid has
- * no event to push from: nothing here observes Planning Center, so a broadcast
- * would need a server-side poller feeding it — the same request on the same
- * timer, with a channel and a subscriber gate around it. It also carries the
- * date rollover for free: the anchor is computed server-side on every read, so
- * the month turns over on its own at local midnight.
+ * Hydrate-on-mount as well as subscribe, following use-reaper-state. The channel
+ * is in HYDRATED_CHANNELS so a late subscriber gets the connect-time snapshot
+ * replayed, but that snapshot cannot contain a calendar view created since the
+ * page loaded — and this hook's whole job is one specific view id.
  */
-const REFRESH_MS = 3 * 60_000;
-
-/** The kiosk route and the layout embed both come through here. */
 export function CalendarView({
   viewId,
   pcoConfigured,
@@ -389,32 +385,40 @@ export function CalendarView({
   const [failed, setFailed] = useState(false);
   const [tick, setTick] = useState(() => Date.now());
 
-  const load = useCallback(() => {
-    return invoke<CalendarGrid>("calendar:getGrid", { viewId }).then(
-      (g) => ({ g, ok: true as const }),
-      () => ({ g: null, ok: false as const }),
-    );
-  }, [viewId]);
-
   useEffect(() => {
     let cancelled = false;
-    const run = () => {
-      void load().then(({ g, ok }) => {
+    invoke<CalendarGrid>("calendar:getGrid", { viewId }).then(
+      (g) => {
         if (cancelled) return;
-        // The failure is REPORTED, not swallowed: a calendar that quietly empties
-        // itself is the absence nobody reports. The last good grid is kept on
-        // screen underneath the notice rather than blanked.
-        setFailed(!ok);
+        setFailed(false);
         if (g) setGrid(g);
-      });
-    };
-    run();
-    const t = setInterval(run, REFRESH_MS);
+      },
+      () => {
+        // REPORTED, not swallowed: a calendar that quietly empties itself is the
+        // absence nobody reports. CalendarMonth keeps the last good month on
+        // screen under the notice rather than blanking it.
+        if (!cancelled) setFailed(true);
+      },
+    );
     return () => {
       cancelled = true;
-      clearInterval(t);
     };
-  }, [load]);
+  }, [viewId]);
+
+  // The push. The payload is a map keyed by view id, because two calendar views
+  // can filter to two different departments — a frame that did not name the view
+  // could not say which grid it carried.
+  useEffect(() => {
+    if (!viewId) return;
+    return onNotification("calendar:grid", (p) => {
+      const next = (p as Record<string, CalendarGrid> | null)?.[viewId];
+      if (!next) return;
+      setGrid(next);
+      // A frame arriving IS the server reaching Planning Center, so it clears a
+      // stale marker that an earlier failure put up.
+      setFailed(false);
+    });
+  }, [viewId]);
 
   // A minute is enough: the highlight moves between events, and the day rolls
   // over. A one-second tick would re-render the whole grid sixty times as often

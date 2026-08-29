@@ -39,6 +39,9 @@ export const HYDRATED_CHANNELS = [
   "companion:signals",
   "people:count",
   "displays:presence",
+  // The month grid. Bookings change a couple of times a week, so a display that
+  // subscribed after the burst would show an empty calendar for days.
+  "calendar:grid",
   // Wireless telemetry. A pack in a drawer reports the same numbers for days, so
   // "broadcast on change" leaves a late subscriber blank indefinitely — exactly
   // the case this list exists for.

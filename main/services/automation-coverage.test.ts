@@ -22,6 +22,7 @@ import { INTEGRATION_IDS } from "./integration-ids.js";
  */
 const BROADCAST_CHANNELS = new Set([
   "attendance:history",
+  "calendar:grid",
   "baptism:state",
   "displays:presence",
   "integrations:state-changed",

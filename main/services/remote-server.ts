@@ -67,6 +67,7 @@ import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
 import { calendarRoutes } from "./routes/calendar-routes.js";
+import { calendarBroadcaster } from "./calendar-broadcaster.js";
 
 /**
  * Route modules, in dispatch order. Order is load-bearing: a module that
@@ -902,6 +903,10 @@ export class RemoteServer {
       // so once made the scan find a channel named by prose, which is the same
       // trap from the other side.
       sseWrite(res, "wireless:channels" satisfies typeof WIRELESS_STATUS_CHANNEL, stageController.wirelessChannelStatuses());
+      // A calendar is STATE, not an event: a display opened in the middle of a
+      // month must show it at once, not sit blank until somebody moves a booking
+      // — which on this channel can be days.
+      sseWrite(res, "calendar:grid", calendarBroadcaster.getLatest());
       sseWrite(res, "displays:presence", presenceSnapshot());
       sseClients.add(res);
       // Correlate this stream to its client id so POST /api/events/subscribe can set
