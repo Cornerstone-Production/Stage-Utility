@@ -8,26 +8,74 @@ and displays read from.
 
 Stage talks to PCO's Services v2 REST API
 (`https://api.planningcenteronline.com/services/v2`) using **Basic Auth** — a
-Personal Access Token's App ID + Secret. The client (`pco-service.ts`) flattens
-JSON:API responses into slim DTOs and caches by volatility:
+Personal Access Token's App ID + Secret. Every request pins the API version with
+an `X-PCO-API-Version` header (see [API version](#api-version)). The client
+(`pco-service.ts`) flattens JSON:API responses into slim DTOs and caches by
+volatility:
 
 - **LONG (15 min):** near-static per service day — service types, note
   categories, team positions, plan service times.
-- **MEDIUM (3 min):** still-editable plan content — plan list, items, team
-  members, attachments.
+- **MEDIUM (3 min, or 45 s inside a service window):** still-editable plan
+  content — plan list, items, team members, attachments.
 - **Uncached:** the live on-air timer (`getLive()`), so the countdown stays
   real-time.
 
+A **service window** is the same one the integration reconnect schedule uses:
+PCO's rehearsal and service times widened by the lead and tail configured under
+Settings → Advanced (`service-window.ts`). It compares instants against plan
+times, so there is no calendar-date or hour-of-day question in it. The MEDIUM TTL
+is resolved when a cache entry is read rather than when it is written, so a window
+opening shortens entries that are already cached.
+
+The two PCO-freshness uses of the window — this TTL and the roster re-pull below —
+deliberately ignore the reconnect schedule's **enabled** switch, which governs how
+integrations back off when reconnecting rather than how fresh PCO data is. Turning
+it off does not slow either of them down; the lead and tail under it still shape
+the window.
+
 `stage-controller.ts` owns the synced state and re-pulls the plan/roster/photos
-on the configured **Refresh interval** (5 min–2 h). The live countdown updates
-continuously regardless of that setting. The **Pre-service countdown** option
-picks what it counts to: *Plan start* (matches PCO's green timer, service time
-minus pre-service items above a "service start" header) or *Service start time*.
-Avatars are upscaled and plan attachments (e.g. the stage plot) are proxied and
-cached so kiosk displays get a stable URL that always tracks the current plan.
+on the configured **Refresh interval** (5 min–2 h). Two things run faster than
+that setting: the live countdown, which updates continuously, and the **team
+roster**, which is re-pulled once a minute while a service window is open so a
+last-minute substitution reaches a stage display in about a minute rather than
+waiting up to two hours. Outside a window the roster makes no extra requests at
+all and moves on the configured interval exactly as before.
+
+The **Pre-service countdown** option picks what the countdown counts to: *Plan
+start* (matches PCO's green timer, service time minus pre-service items above a
+"service start" header) or *Service start time*. Avatars are upscaled and plan
+attachments (e.g. the stage plot) are proxied and cached so kiosk displays get a
+stable URL that always tracks the current plan.
 
 Testing the integration lists service types as a minimal auth check. The Secret
 is stored encrypted (secret key `secret`).
+
+## API version
+
+PCO versions each product by date. A request selects one with an
+`X-PCO-API-Version: YYYY-MM-DD` header, and PCO resolves it by an equal-or-earlier
+match. A request that sends no header is served whatever version is set as the
+app's default in PCO's developer console — a setting outside this repository that
+differs between installs.
+
+Stage pins the version explicitly, in `PCO_API_VERSION` in `pco-service.ts`:
+
+```
+X-PCO-API-Version: 2018-11-01
+```
+
+Always an exact date, never a "give me the newest" sentinel — a floating request
+would let a PCO release change field names, defaults or pagination under a running
+install with no code change here. Services publishes exactly two versions,
+`2018-08-01` (withdrawn 2 April 2024) and `2018-11-01`, so the pin is both the
+newest and the only one still served. The single documented difference between
+them is that `2018-11-01` makes the `/people` endpoint respect the "Can view
+people not on My Teams" permission; Stage calls no `/people` endpoint.
+
+To bump it: take the newest date from the version selector at
+<https://api.planningcenteronline.com/docs/apps/services>, read that version's
+changelog entry for field or pagination changes, change the constant, and confirm
+against a real organisation that the plan, roster and photos still render.
 
 ## Item times
 
