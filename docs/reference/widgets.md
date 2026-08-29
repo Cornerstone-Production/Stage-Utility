@@ -69,9 +69,18 @@ existing screens do not break.
 | **Screens online** | How many displays are connected, of how many | Live display presence |
 | **Recording** *(Home)* | Is anything rolling — every recorder at once | OBS + REAPER |
 | **Streaming** *(Home)* | Live or off air, across every platform | Resi + YouTube + OBS |
+| **Live scores** | Live score for a team you follow | ESPN public scoreboard |
 
 **Streaming status** can be pinned to one platform, or left on **any**, where it
 answers for whichever is live.
+
+**Live scores** shows one game: a team you follow, or **any followed team**, which
+picks whichever of them is playing and prefers the one that scored most recently.
+Nobody is standing at a wall display to choose, so that is the default. **Show
+sport detail** draws the bases and count, the down and distance, or the game
+clock; turning it off leaves the score and the status line. The teams themselves
+are chosen in Settings, Integrations, Live scores — see
+[Live scores](../integrations/scores.md).
 
 ### The four "is it happening" widgets behave alike
 

@@ -127,7 +127,21 @@ export function possessionSide(game: ScoreGameDTO): "away" | "home" | null {
   return null;
 }
 
-export function ScoreCenter({ game }: { game: ScoreGameDTO }) {
+export function ScoreCenter({
+  game,
+  detail = true,
+}: {
+  game: ScoreGameDTO;
+  /**
+   * Draw the sport-specific centre, or just the status line.
+   *
+   * A wall tile placed small has room for the score and "Top 3rd" and nothing
+   * else, and a bases diamond nobody can resolve at that size is decoration. The
+   * OFF state is the same shape a not-yet-started game already draws, so it is
+   * one composition rendered with less in it rather than a second layout.
+   */
+  detail?: boolean;
+}) {
   const situation = game.situation;
 
   // Before it starts, the only true thing to say is when. Once it is over, that
@@ -147,6 +161,15 @@ export function ScoreCenter({ game }: { game: ScoreGameDTO }) {
       <div className="score-center">
         <Period>{game.shortDetail || "Delayed"}</Period>
         <span className="score-note">DELAYED</span>
+      </div>
+    );
+  }
+
+  // Detail off: ESPN's own shortDetail, which is already formatted per sport.
+  if (!detail) {
+    return (
+      <div className="score-center">
+        <Period>{game.shortDetail}</Period>
       </div>
     );
   }

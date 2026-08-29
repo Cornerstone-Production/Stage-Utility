@@ -750,6 +750,24 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: () => PILL({ fontWeight: 700, uppercase: true }),
   },
 
+  // Live scores. Its own composition -- team colours, the score, and the centre
+  // each sport needs -- so it is NOT a PILL and NOT in IDIOM_TYPES: there is no
+  // caption/value/sub to squeeze it into.
+  scores: {
+    label: "Live scores",
+    blurb: "Live score for a team you follow",
+    group: "Status",
+    config: () => ({ type: "scores", game: "auto", detail: true }),
+    // BARE, like slots-grid, and for the same reason it gives: the strip paints
+    // its own neutral ground edge to edge. A card around it would be a hairline
+    // and a radius nobody could see -- the strip's own opaque ground covers both
+    // the card's corners and its fill. This DEVIATES from the plan's table, which
+    // had scores carded; the plan was written before the strip existed.
+    style: () => TEXT(),
+    homeSize: "m",
+    integration: { id: "scores", label: "Live scores" },
+  },
+
   // Video layer — native client only; the web build ignores it.
   "ndi-video": {
     label: "NDI video",

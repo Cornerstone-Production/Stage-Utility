@@ -19,6 +19,8 @@ import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
 import { streamers, streamIndicator } from "../app/recording-status";
 import { useReaperState } from "./use-reaper-state";
+import { useScoresState } from "./use-scores-state";
+import { ScoresObject } from "./scores-object";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
@@ -54,6 +56,7 @@ export interface LayoutRenderCtx {
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
   reaper: ReaperStatusDTO | null;
+  scores: ScoresStatusDTO | null;
   resi: StreamStatusDTO | null;
   youtube: StreamStatusDTO | null;
   osc: OscFeedbackDTO | null;
@@ -1263,6 +1266,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     }
+    case "scores":
+      return <ScoresObject config={c} scores={ctx.scores} />;
+
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
       // a type to the registry without a renderer here and this assignment stops
@@ -2405,6 +2411,9 @@ export function useLayoutData(layout?: LayoutDTO) {
   const spl = useSplState(want(["spl-meter"]));
   const obs = useObsState(want(["obs-status"]));
   const reaper = useReaperState(want(["reaper-status"]));
+  // Gated like every other integration hook: a clock-only wall screen must not
+  // hold a poll open against ESPN.
+  const scores = useScoresState(want(["scores", "home-scores"]));
   // Both gated on the streaming objects: a clock-only wall screen must not hold
   // a poll open against two cloud APIs, one of which has a daily quota.
   const streamWanted = want(["stream-status", "home-streaming", "home-streaming-resi", "home-streaming-youtube"]);
@@ -2432,7 +2441,7 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -2452,7 +2461,7 @@ export function LayoutRenderer({
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -2521,7 +2530,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

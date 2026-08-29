@@ -48,6 +48,7 @@ import { useSplState } from "../main/use-spl-state";
 import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsState } from "../main/use-obs-state";
+import { useQuery } from "@tanstack/react-query";
 import { useReaperState } from "../main/use-reaper-state";
 import { useOscTargets } from "../main/use-osc-state";
 import { useStageState } from "../main/use-stage-state";
@@ -340,6 +341,14 @@ export function Inspector({
       .then(setRosstalkCommands)
       .catch(() => {});
   }, []);
+  // The followed teams, for the scores object's team select. The SAME query key
+  // the settings panel writes through, so following a new team there populates
+  // this select without a reload.
+  const { data: scoresConfig } = useQuery({
+    queryKey: ["scores:getFavourites"],
+    queryFn: () => invoke<ScoresConfig>("scores:getFavourites"),
+    retry: 1,
+  });
   const planItems = usePlanItems();
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
@@ -918,6 +927,38 @@ export function Inspector({
             <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? FILL_WHEN_ACTIVE} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             <RowSwitch label="Show position" checked={c.showPosition ?? false} onChange={(v) => onConfig({ ...c, showPosition: v })} />
             <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+          </>
+        );
+      })()}
+      {c.type === "scores" && (() => {
+        const favourites = scoresConfig?.favourites ?? [];
+        return (
+          <>
+            {/* ONLY the configured favourites, never all 122 teams. An object
+                offering a team the integration does not follow is a control that
+                silently does nothing -- the poll never asks about that team, so
+                the box would stay empty for ever with no way to tell why. */}
+            <RowSelect
+              label="Game"
+              hint="Which followed game this shows. Any team follows whichever one is live."
+              value={c.game}
+              options={[
+                { value: "auto", label: "Any followed team" },
+                ...favourites.map((f) => ({ value: f.teamId, label: f.displayName })),
+              ]}
+              onChange={(v) => onConfig({ ...c, game: v })}
+            />
+            {favourites.length === 0 && (
+              <p className="text-caption2 text-fg-muted leading-snug">
+                No teams followed yet. Choose them in Settings, Integrations, Live scores.
+              </p>
+            )}
+            <RowSwitch
+              label="Show sport detail"
+              hint="Bases and count, down and distance, the game clock. Off leaves the score and the status line."
+              checked={c.detail ?? true}
+              onChange={(v) => onConfig({ ...c, detail: v })}
+            />
           </>
         );
       })()}

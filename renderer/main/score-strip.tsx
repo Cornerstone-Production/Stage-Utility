@@ -104,12 +104,15 @@ export function ScoreStrip({
   game,
   size = "full",
   scored = null,
+  detail = true,
   className,
 }: {
   game: ScoreGameDTO;
   size?: ScoreStripSize;
   /** Which side a score just landed on, or null. Already reduced-motion checked. */
   scored?: "away" | "home" | null;
+  /** Draw the sport-specific centre, or just the status line. See ScoreCenter. */
+  detail?: boolean;
   className?: string;
 }) {
   return (
@@ -121,7 +124,7 @@ export function ScoreStrip({
       aria-label={`${game.away.displayName} ${game.away.score ?? "no score"}, ${game.home.displayName} ${game.home.score ?? "no score"}. ${game.shortDetail}`}
     >
       <ScoreSide team={game.away} side="away" size={size} scored={scored === "away"} />
-      <ScoreCenter game={game} />
+      <ScoreCenter game={game} detail={detail} />
       <ScoreSide team={game.home} side="home" size={size} scored={scored === "home"} />
     </div>
   );

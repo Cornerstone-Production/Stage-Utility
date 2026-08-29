@@ -407,6 +407,21 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  // A followed team's live score, from the ESPN scores integration
+  // (`scores:status` channel). Renders the shared ScoreStrip -- the same strip
+  // the context-bar capsule and the Home card draw, at wall size.
+  | {
+      type: "scores";
+      /** Which followed game this object shows. `"auto"` follows whichever
+       *  followed game is live, preferring the one that scored most recently --
+       *  which is what a wall display wants, since nobody is there to pick.
+       *  Otherwise an ESPN TEAM id: the object resolves that team's game of the
+       *  day. Never an event id, which is a per-day value that means nothing next
+       *  week. */
+      game: "auto" | string;
+      /** Show the sport-specific centre, or just the score and the status. */
+      detail?: boolean;
+    }
   // A RossTalk control button. Tapping it (on a real display / operator surface,
   // never in the editor) fires `commandId` with `params` at `targetId`, or `raw`
   // when no catalogue command is chosen. No feedback bind: RossTalk is send-only,

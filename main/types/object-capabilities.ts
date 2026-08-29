@@ -71,6 +71,11 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   "plan-attachment": ["readout"],
   "pp-timer": ["readout"],
   "reaper-status": ["readout"],
+  // Readout only. No drilldown: a DRILLDOWN capability without a matching route
+  // is asserted against in both directions, and there is no scores page to send
+  // an operator to -- the panel that shows more is the context-bar activity, and
+  // it opens from the bar, not from a wall tile.
+  scores: ["readout"],
   "record-status": ["readout"],
   "section-chip": ["readout"],
   "service-order": ["readout"],
