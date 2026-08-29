@@ -10,6 +10,7 @@ import {
   zonedDateKey,
   zonedMinuteOfDay,
   zonedParts,
+  startOfZonedDay,
 } from "./app-timezone.js";
 
 // 18:30 America/Chicago on Sunday 2 Aug 2026 — 23:30 UTC the same day.
@@ -82,5 +83,38 @@ describe("configuration", () => {
     assert.equal(isValidTimeZone("UTC"), true);
     assert.equal(isValidTimeZone(""), false);
     assert.equal(isValidTimeZone("Mars/Olympus_Mons"), false);
+  });
+});
+
+describe("startOfZonedDay", () => {
+  it("is the inverse of zonedDateKey", () => {
+    for (const key of ["2026-01-15", "2026-07-04", "2026-11-01"]) {
+      assert.equal(zonedDateKey(startOfZonedDay(key, "America/Chicago"), "America/Chicago"), key, key);
+    }
+  });
+
+  it("lands on local midnight, not UTC midnight", () => {
+    // 06:00Z in CST. A host-clock implementation returns 00:00Z and puts the
+    // whole day six hours early.
+    assert.equal(new Date(startOfZonedDay("2026-01-15", "America/Chicago")).toISOString(), "2026-01-15T06:00:00.000Z");
+    assert.equal(new Date(startOfZonedDay("2026-07-15", "America/Chicago")).toISOString(), "2026-07-15T05:00:00.000Z");
+  });
+
+  it("uses the offset in force ON that date, not the one in force now", () => {
+    // A single-pass implementation reads the offset at UTC midnight, which for a
+    // spring-forward date can be the wrong side of the change.
+    assert.equal(new Date(startOfZonedDay("2026-03-08", "America/Chicago")).toISOString(), "2026-03-08T06:00:00.000Z");
+    assert.equal(new Date(startOfZonedDay("2026-03-09", "America/Chicago")).toISOString(), "2026-03-09T05:00:00.000Z");
+  });
+
+  it("handles a zone that has no midnight on the day the clocks jump", () => {
+    // Santiago springs forward AT midnight: 2026-09-06 begins at 01:00 local.
+    // Returning an instant on the 5th would put a whole day one square early.
+    const t = startOfZonedDay("2026-09-06", "America/Santiago");
+    assert.equal(zonedDateKey(t, "America/Santiago"), "2026-09-06");
+  });
+
+  it("refuses an instant, which would be a whole offset out", () => {
+    assert.throws(() => startOfZonedDay("2026-01-15T00:00:00Z", "UTC"), /YYYY-MM-DD/);
   });
 });
