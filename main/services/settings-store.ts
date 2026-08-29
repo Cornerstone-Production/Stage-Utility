@@ -5,6 +5,7 @@ import type { BaptismAutoStart, DisplayInfo, Output } from "../types/stage.js";
 import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
+import { ID_KINDS, initialFloor, nextId, type IdKind } from "./id-allocator.js";
 
 export interface SettingsData {
   /** Whether and how the baptism timer starts itself from the plan. */
@@ -241,31 +242,81 @@ export const settingsStore = {
   },
 
   /**
-   * Raise an id high-water mark — optionally alongside the fields the caller was
-   * going to write anyway — in ONE serialized read-modify-write.
+   * Allocate one or more ids AND advance the floor as one serialized
+   * read-modify-write.
    *
-   * Separate from `patch` for two reasons. `patch` shallow-merges, so two
-   * concurrent patches that each carry an `idFloors` read before the other's
-   * write would leave one kind's floor back at the older value, and a floor that
-   * went backwards is the id-reuse bug again. And `Math.max` against `current`
-   * inside the update makes the write monotonic whatever order they land in: a
-   * floor can only ever go up.
+   * Atomic by construction rather than by luck. Allocation reads a floor and
+   * writes it back, and its callers await in between — so with a cold settings
+   * cache two concurrent creates could both read the same floor and be handed
+   * the same id. Doing the whole read-allocate-write inside `store.update` puts
+   * it on the same write queue as every other settings write, which is the only
+   * thing that makes the pair indivisible. Nothing else in the code states that
+   * dependency, so it must not be left implicit.
+   *
+   * `allocate` runs INSIDE that queue and must therefore be SYNCHRONOUS —
+   * awaiting in there would hold every other settings write for as long as it
+   * took. It is handed a `next` it may call as many times as it needs (a view
+   * bundle mints one id per imported view), each call passing the ids taken so
+   * far so the collision check stays honest across the batch.
+   *
+   * `alsoWrite` turns what was allocated into settings fields to write in the
+   * SAME file write — `addOutput`'s outputs list, which cannot be built until
+   * the id exists. It must not produce branding-image fields: this path does not
+   * externalize data URLs the way `patch` does.
    */
-  async raiseIdFloor(
-    kind: "view" | "output",
-    floor: number,
-    also: Partial<SettingsData> = {},
-  ): Promise<SettingsData> {
-    const clean = (await externalizeBrandingImages(also as Record<string, unknown>)) as Partial<SettingsData>;
-    return syncTimeZone(
-      await store.update((current) => ({
+  async allocateIds<R>(
+    kind: IdKind,
+    allocate: (next: (existingIds: readonly string[]) => string) => R,
+    alsoWrite: (allocated: R) => Partial<SettingsData> = () => ({}),
+  ): Promise<R> {
+    const { prefix, first } = ID_KINDS[kind];
+    let allocated!: R;
+    // Wrapped like every other write path, so the "no caller can forget"
+    // invariant syncTimeZone documents stays literally true.
+    syncTimeZone(await store.update((current) => {
+      let floor = Math.max(current.idFloors?.[kind] ?? first, first);
+      allocated = allocate((existingIds) => {
+        const minted = nextId(prefix, existingIds, floor);
+        floor = minted.nextFloor;
+        return minted.id;
+      });
+      return {
         ...current,
-        ...clean,
-        idFloors: {
-          ...current.idFloors,
-          [kind]: Math.max(current.idFloors?.[kind] ?? 0, floor),
-        },
-      })),
-    );
+        ...alsoWrite(allocated),
+        // Monotonic against `current`, not against the floor read above: a floor
+        // that went backwards is the id-reuse bug again.
+        idFloors: { ...current.idFloors, [kind]: Math.max(current.idFloors?.[kind] ?? 0, floor) },
+      };
+    }));
+    return allocated;
+  },
+
+  /**
+   * Record a floor for any kind that has none yet, from the ids already on disk.
+   *
+   * Every install that upgrades into id floors has ids and no floor, and the
+   * fallback for a missing floor is the collision check alone — `max(existing) +
+   * 1`, the original bug. Deleting the highest-numbered view or display and
+   * creating another is the first thing that reaches it, so the very first
+   * delete-then-create after an update would reuse an id and then self-heal,
+   * which is the shape of defect nobody ever reports.
+   *
+   * A floor that is already PRESENT is authoritative and is left alone. It knows
+   * about ids that have been spent and deleted; the live list does not, so
+   * recomputing it from the live list could only ever lower it.
+   */
+  async seedIdFloors(seeds: Record<IdKind, readonly string[]>): Promise<void> {
+    syncTimeZone(await store.update((current) => {
+      const floors = { ...current.idFloors };
+      let changed = false;
+      for (const kind of Object.keys(seeds) as IdKind[]) {
+        if (floors[kind] !== undefined) continue;
+        floors[kind] = initialFloor(kind, seeds[kind]);
+        changed = true;
+      }
+      // Reference-equal means "nothing changed", which DataStore.update honours
+      // by not writing — so a normal boot costs no disk write.
+      return changed ? { ...current, idFloors: floors } : current;
+    }));
   },
 };

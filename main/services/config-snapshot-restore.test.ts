@@ -104,3 +104,61 @@ describe("configSnapshot.apply — failure path", () => {
     assert.equal(controller.autoRefreshTimer, null);
   });
 });
+
+// Id floors are the one thing in a config snapshot that must NOT go back to what
+// the snapshot held.
+//
+// Everything else in a restore is the operator's setting, and putting it back is
+// the point. A floor is not a setting — it is the record of which ids have been
+// SPENT. A month-old snapshot carries a floor from before this month's views
+// existed, so restoring it verbatim hands those deleted ids straight back out to
+// the next thing created, and slots.json is keyed by output id with Pis,
+// bookmarks and QR codes pointing at `/<id>`.
+describe("a restore never lowers an id floor", () => {
+  const SETTINGS = path.join(TMP, "settings.json");
+
+  afterEach(async () => {
+    quiet();
+    await fs.rm(SETTINGS, { force: true });
+  });
+
+  async function applyFloors(live: unknown, snapshot: unknown): Promise<unknown> {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", idFloors: live }), "utf8");
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", idFloors: snapshot } }));
+    return (JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { idFloors?: unknown }).idFloors;
+  }
+
+  it("KEEPS THE LIVE FLOOR when the snapshot's is lower", async () => {
+    // The whole finding: an old snapshot's floor would otherwise win, and the
+    // ids issued between then and now would be handed out a second time.
+    assert.deepEqual(
+      await applyFloors({ view: 40, output: 12 }, { view: 9, output: 3 }),
+      { view: 40, output: 12 },
+      "the restore moved a floor backwards — every id issued since the snapshot can now be reissued",
+    );
+  });
+
+  it("takes the snapshot's floor when it is higher", async () => {
+    // Monotonic in both directions: a snapshot from another install with higher
+    // floors is also a record of ids that were spent.
+    assert.deepEqual(await applyFloors({ view: 4 }, { view: 30, output: 8 }), { view: 30, output: 8 });
+  });
+
+  it("restores everything else verbatim", async () => {
+    // The exception is floors and only floors. A restore that quietly kept other
+    // live values would not be a restore.
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", idFloors: { view: 40 } }), "utf8");
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", idFloors: { view: 9 } } }));
+    const written = JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { appName: string };
+    assert.equal(written.appName, "Restored");
+  });
+
+  it("carries nothing forward when there is no live settings.json", async () => {
+    // A restore onto a fresh install. No spent ids to protect, and a missing file
+    // must not fail the restore.
+    await fs.rm(SETTINGS, { force: true });
+    await configSnapshot.apply(snapshotOf({ "settings.json": { idFloors: { view: 9 } } }));
+    const written = JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { idFloors?: unknown };
+    assert.deepEqual(written.idFloors, { view: 9 });
+  });
+});

@@ -11,7 +11,6 @@ import { errorMessage } from "./errors.js";
 import { remapBundle } from "./view-remap.js";
 import { collectRefs } from "./view-refs.js";
 import { viewsStore } from "./views-store.js";
-import { nextId } from "./id-allocator.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { notesStore } from "./notes-store.js";
@@ -84,20 +83,23 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
   const bundle = raw;
 
   const existing = await viewsStore.load();
-  const usedIds = new Set(existing.map((v) => v.id));
+
   // The same permanence rule createView follows, and the third place this
-  // allocation lived. Scanning `usedIds` alone only avoided COLLISIONS: it
+  // allocation lived. Scanning the live ids alone only avoided COLLISIONS: it
   // happily handed an imported view the id of one the operator had deleted,
   // which slots.json, bookmarks and QR codes all still point at.
-  let floor = (await settingsStore.get()).idFloors?.view ?? 1;
-  const mintViewId = (): string => {
-    const minted = nextId("view", [...usedIds], floor);
-    usedIds.add(minted.id);
-    floor = minted.nextFloor;
-    return minted.id;
-  };
-
-  const { views, viewIdMap, objectIdMap } = remapBundle(bundle.views as View[], mintViewId);
+  //
+  // The whole remap runs inside the settings write queue so the floor is read,
+  // advanced once per imported view and written as a single step. remapBundle is
+  // synchronous CPU work, which is what makes that safe to do in there.
+  const { views, viewIdMap, objectIdMap } = await settingsStore.allocateIds("view", (next) => {
+    const usedIds = new Set(existing.map((v) => v.id));
+    return remapBundle(bundle.views as View[], () => {
+      const id = next([...usedIds]);
+      usedIds.add(id);
+      return id;
+    });
+  });
 
   const takenNames = new Set(existing.map((v) => v.name));
   const reportViews: ImportReport["views"] = [];
@@ -108,8 +110,6 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
     return { ...v, name };
   });
 
-  // Floor first: a burnt id costs nothing, a reused one costs an operator's slots.
-  await settingsStore.raiseIdFloor("view", floor);
   await viewsStore.save([...existing, ...named]);
 
   // Side data, re-keyed. A key may be a layout OBJECT id (an inline slots-grid)

@@ -134,6 +134,64 @@ export function appVersion(): string {
   }
 }
 
+/** A settings blob, read far enough to reach its id floors and no further. */
+type FloorsOnly = { idFloors?: Record<string, unknown> };
+
+/**
+ * Keep the LIVE id floors when a snapshot's are lower.
+ *
+ * Everything else in a restore is meant to go back to what the snapshot held —
+ * that is the point of a restore. Id floors are the exception: they are not a
+ * setting the operator chose, they are the record of which ids have been SPENT.
+ * A month-old snapshot carries a floor from before this month's views existed,
+ * so letting it win would hand those ids straight back out to the next thing
+ * created — and slots.json is keyed by output id, with Pis, bookmarks and QR
+ * codes pointing at `/<id>`.
+ *
+ * Merged per kind and taken as a max, so a snapshot from a DIFFERENT install
+ * cannot lower this one's floors either.
+ */
+async function carryIdFloorsForward(dest: string, contents: unknown): Promise<unknown> {
+  if (contents === null || typeof contents !== "object" || Array.isArray(contents)) return contents;
+
+  let raw: string;
+  try {
+    raw = await fs.readFile(dest, "utf8");
+  } catch (err) {
+    // No live settings.json at all — a restore onto a fresh install. Not a
+    // failure: there are simply no spent ids to carry forward. Anything else is
+    // rethrown rather than treated as "nothing there".
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return contents;
+    throw err;
+  }
+
+  let live: FloorsOnly;
+  try {
+    live = JSON.parse(raw) as FloorsOnly;
+  } catch {
+    // The file exists but does not parse. This restore is about to replace it
+    // anyway, and there is no higher floor to be read out of it, so the
+    // snapshot's floors are the only record there is — that IS the answer here,
+    // not a swallowed error. Said out loud because it means ids issued since the
+    // snapshot was taken could be handed out again.
+    console.warn(
+      "[config-snapshot] the existing settings.json does not parse, so id floors could not be carried forward — ids created since this snapshot may be reissued",
+    );
+    return contents;
+  }
+
+  const incoming = (contents as FloorsOnly).idFloors ?? {};
+  const merged: Record<string, number> = {};
+  for (const kind of Object.keys({ ...live.idFloors, ...incoming })) {
+    const a = live.idFloors?.[kind];
+    const b = incoming[kind];
+    const best = Math.max(typeof a === "number" ? a : 0, typeof b === "number" ? b : 0);
+    if (best > 0) merged[kind] = best;
+  }
+  if (Object.keys(merged).length === 0) return contents;
+  return { ...(contents as Record<string, unknown>), idFloors: merged };
+}
+
 /**
  * Quiet the things that write config on a timer, before a restore lands.
  *
@@ -261,11 +319,12 @@ class ConfigSnapshotService {
       if (!configFiles().includes(name)) continue; // allowlist only
       if (contents === undefined || contents === null) continue;
       const dest = path.join(getUserDataPath(), name);
+      const toWrite = name === "settings.json" ? await carryIdFloorsForward(dest, contents) : contents;
       // Atomic, for the reason data-store.ts spells out: a plain writeFile
       // truncates in place, so a power cut here leaves a short settings.json that
       // the next boot cannot parse, quarantines, and replaces with defaults —
       // losing the settings the operator restored this bundle to recover.
-      await atomicWrite(dest, JSON.stringify(contents, null, 2));
+      await atomicWrite(dest, JSON.stringify(toWrite, null, 2));
       applied.push(name);
     }
     // Uploaded images, restored under their content-hashed names. The directory is

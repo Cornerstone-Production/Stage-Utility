@@ -8,7 +8,7 @@
 // another.
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
 import { nextId } from "./id-allocator.js";
 
@@ -52,18 +52,20 @@ describe("an id is never reissued", () => {
   });
 });
 
-// ── Through the real store, across a real restart ───────────────────────────
+// ── Through the real store, across real restarts ────────────────────────────
 //
 // The floor is only worth having if it SURVIVES. `DataStore.load()` hands back a
 // warm in-memory Map once it is open, so deleting the file and calling `init()`
 // in this process would not reload anything — a "survives a restart" test
 // written that way passes with the floor never having reached the disk, which is
 // the exact defect being guarded. `main/services/checklist-ticks-store.test.ts`
-// documents the same trap.
+// documents the same trap. Cache-busting the `stage-controller.js` specifier
+// would not help either: its own import of `settings-store.js` still resolves to
+// the warm module.
 //
-// So this restarts for real: a second node process, cold module caches, the same
-// data directory. It also reads settings.json directly, because the file is the
-// only honest evidence of persistence.
+// So these restart for real — a second node process, cold module caches, the
+// same data directory — and read settings.json off the disk, because the file is
+// the only honest evidence of persistence.
 
 import { spawn } from "node:child_process";
 import * as fs from "node:fs/promises";
@@ -73,7 +75,21 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-ids-"));
+const CONTROLLER = path.join(REPO, "main/services/stage-controller.js");
+
+const tempDirs: string[] = [];
+async function tempDataDir(): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "stage-ids-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+// A CI box should not accumulate one of these per run.
+after(async () => {
+  for (const dir of tempDirs) await fs.rm(dir, { recursive: true, force: true });
+});
+
+const TMP = await tempDataDir();
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
@@ -89,38 +105,35 @@ ctl.broadcast = () => {};
 ctl.recomputeResolved = () => {};
 ctl.state = { ...ctl.state, views: [], outputs: [] };
 
-async function idFloorsOnDisk(): Promise<{ view?: number; output?: number }> {
-  const raw = JSON.parse(await fs.readFile(path.join(TMP, "settings.json"), "utf8")) as {
+async function idFloorsOnDisk(dir = TMP): Promise<{ view?: number; output?: number }> {
+  const raw = JSON.parse(await fs.readFile(path.join(dir, "settings.json"), "utf8")) as {
     idFloors?: { view?: number; output?: number };
   };
   return raw.idFloors ?? {};
 }
 
 /**
- * Boot a fresh process against the same data directory and create one view
- * there, the way a restarted server would: load views.json, then allocate.
+ * Boot a fresh process against `dataDir` and run `body` in it, the way a
+ * restarted server would.
  *
  * Nothing short of a new process is a restart. This one shares no module cache,
- * no DataStore and no controller instance with the test above it, so the only
- * thing carrying the floor across is the file itself.
+ * no DataStore and no controller instance with the test that spawned it, so the
+ * only thing carrying a floor across is the file itself. `body` is TypeScript
+ * source with `stageController` and `ctl` (its broadcast/recompute stubbed) in
+ * scope, and reports by printing `CREATED:<id>`.
+ *
+ * `.mts` because the temp directory has no package.json: without the extension
+ * tsx compiles it as CJS and rejects the top-level await.
  */
-async function createViewAfterRestart(): Promise<string> {
-  // `.mts` so the temp directory (which has no package.json) is still treated as
-  // ESM — the project is `"type": "module"` and this script uses top-level await.
-  const script = path.join(TMP, "restart.mts");
+async function inAFreshProcess(dataDir: string, body: string): Promise<string> {
+  const script = path.join(dataDir, `restart-${Math.random().toString(36).slice(2)}.mts`);
   await fs.writeFile(
     script,
-    `import * as fs from "node:fs/promises";
-import * as path from "node:path";
-const { stageController } = await import(${JSON.stringify(path.join(REPO, "main/services/stage-controller.js"))});
+    `const { stageController } = await import(${JSON.stringify(CONTROLLER)});
 const ctl = stageController as unknown as { state: Record<string, unknown>; broadcast: () => void; recomputeResolved: () => void };
 ctl.broadcast = () => {};
 ctl.recomputeResolved = () => {};
-const views = JSON.parse(await fs.readFile(path.join(process.env.STAGE_UTILITY_DATA!, "views.json"), "utf8"));
-ctl.state = { ...ctl.state, views, outputs: [] };
-const state = await stageController.createView("After restart");
-const created = state.views[state.views.length - 1];
-console.log("CREATED:" + created.id);
+${body}
 process.exit(0);
 `,
     "utf8",
@@ -128,7 +141,7 @@ process.exit(0);
   const out = await new Promise<string>((resolve, reject) => {
     const child = spawn("npx", ["tsx", script], {
       cwd: REPO,
-      env: { ...process.env, STAGE_UTILITY_DATA: TMP },
+      env: { ...process.env, STAGE_UTILITY_DATA: dataDir, HOME: path.join(dataDir, "home") },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -166,7 +179,16 @@ describe("through the real store", () => {
     // The restart. max(existing) + 1 over the surviving view-1/view-2 answers
     // "view-3" — the id of the view the operator deleted, which slots.json,
     // bookmarks and QR codes still point at.
-    assert.equal(await createViewAfterRestart(), "view-4", "a deleted id came back after a restart");
+    const id = await inAFreshProcess(
+      TMP,
+      `import * as fs from "node:fs/promises";
+import * as path from "node:path";
+const views = JSON.parse(await fs.readFile(path.join(process.env.STAGE_UTILITY_DATA!, "views.json"), "utf8"));
+ctl.state = { ...ctl.state, views, outputs: [] };
+const state = await stageController.createView("After restart");
+console.log("CREATED:" + state.views[state.views.length - 1].id);`,
+    );
+    assert.equal(id, "view-4", "a deleted id came back after a restart");
   });
 
   it("does not reissue a deleted display's id, and keeps display-1 reserved", async () => {
@@ -181,5 +203,91 @@ describe("through the real store", () => {
 
     const c = await stageController.addOutput("Replacement");
     assert.equal(c.output.id, "display-4", "a deleted display's id came back");
+  });
+});
+
+// An install that UPGRADES into id floors has ids and no floor. Nothing writes a
+// floor until an id is issued, so without seeding at boot the very first
+// delete-then-create after the update falls back to `max(existing) + 1` and
+// reuses the highest id — once, after which it self-heals. That is the shape of
+// defect that is never reported, and for a display it means the new one inherits
+// the deleted one's slots.json bucket.
+describe("an install that upgrades into id floors", () => {
+  it("does not reissue the highest view id on its FIRST delete-then-create", async () => {
+    const dir = await tempDataDir();
+    await fs.mkdir(path.join(dir, "home"), { recursive: true });
+    // Settings as they were BEFORE this change: no idFloors key at all.
+    await fs.writeFile(
+      path.join(dir, "settings.json"),
+      JSON.stringify({
+        serviceTypeId: null,
+        serviceTypeName: null,
+        planMode: "manual",
+        planId: null,
+        planTitle: null,
+        planSeriesTitle: null,
+        integrationConfigs: {},
+        integrationEnabled: {},
+        showQr: true,
+        displays: [],
+        allowedServiceTypeIds: [],
+        outputs: [{ id: "display-1", name: "Display 1", viewId: "view-1" }],
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(dir, "views.json"),
+      JSON.stringify(
+        [1, 2, 3, 4, 5].map((n) => ({
+          id: `view-${n}`,
+          name: `View ${n}`,
+          kind: "slots",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        })),
+      ),
+      "utf8",
+    );
+
+    // The real boot path — init() is where the seeding lives — then the first
+    // thing an operator does after updating.
+    const id = await inAFreshProcess(
+      dir,
+      `await stageController.init();
+ctl.broadcast = () => {};
+ctl.recomputeResolved = () => {};
+await stageController.deleteView("view-5");
+const state = await stageController.createView("Replacement");
+console.log("CREATED:" + state.views[state.views.length - 1].id);`,
+    );
+    assert.equal(id, "view-6", "the upgraded install handed out the id of the view just deleted");
+    assert.equal((await idFloorsOnDisk(dir)).view, 7);
+  });
+});
+
+// Allocation reads a floor and writes it back, and its callers await in between.
+// That pair is only indivisible because the whole read-allocate-write happens
+// inside `store.update` — the settings write queue. It used to be safe only by
+// accident: `DataStore.writeRaw` sets the cache before writing, so a WARM cache
+// resolves in microtasks and nothing can interleave. On a COLD cache, which is
+// every allocation made in the first moments after a boot, two concurrent
+// creates could both read the same floor and be handed the same id.
+//
+// A cold cache is the whole point, so this runs in a fresh process against a
+// data directory with no settings.json at all.
+describe("two allocations at once", () => {
+  it("cannot be handed the same id on a COLD settings cache", async () => {
+    const dir = await tempDataDir();
+    await fs.mkdir(path.join(dir, "home"), { recursive: true });
+    const ids = await inAFreshProcess(
+      dir,
+      `const { settingsStore } = await import(${JSON.stringify(path.join(REPO, "main/services/settings-store.js"))});
+const alloc = () => settingsStore.allocateIds("view", (next) => next([]));
+console.log("CREATED:" + (await Promise.all([alloc(), alloc(), alloc()])).join(","));`,
+    );
+    assert.deepEqual(
+      ids.split(","),
+      ["view-1", "view-2", "view-3"],
+      "concurrent allocations collided — the floor was read outside the write queue",
+    );
   });
 });

@@ -27,7 +27,6 @@ import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
 import { migrateInlineBrandingImages } from "./branding-image-store.js";
-import { nextId } from "./id-allocator.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
@@ -310,6 +309,15 @@ export class StageController {
     const kioskDiscovery = settings.kioskDiscovery ?? false;
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
+
+    // Every install that predates id floors has ids and no floor, and a missing
+    // floor falls back to `max(existing) + 1` — the bug. Seeding here, from what
+    // was just loaded, is what stops the FIRST delete-then-create after an update
+    // reissuing the highest id. Only kinds with no floor recorded are touched.
+    await settingsStore.seedIdFloors({
+      view: views.map((v) => v.id),
+      output: outputs.map((o) => o.id),
+    });
 
     // An EMPTY list means "all allowed" and is passed through as such.
     //
@@ -2214,18 +2222,26 @@ export class StageController {
     name?: string,
     viewId?: string | null,
   ): Promise<{ state: StageState; output: Output }> {
-    const { id, nextFloor } = await this.nextOutputId();
-    const num = parseInt(id.replace("display-", ""), 10);
-    const output: Output = {
-      id,
-      name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
-      viewId: viewId ?? null,
-    };
-    console.log(`[stage-controller] addOutput id=${scrub(id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
-    const outputs = [...this.state.outputs, output];
+    // One write: the id, the floor that stops it ever coming back, and the
+    // outputs list that could not be built until the id existed. The whole
+    // read-allocate-write happens inside the settings write queue, so two
+    // concurrent adds cannot be handed the same id.
+    const { output, outputs } = await settingsStore.allocateIds(
+      "output",
+      (next): { output: Output; outputs: Output[] } => {
+        const id = next(this.state.outputs.map((o) => o.id));
+        const num = parseInt(id.replace("display-", ""), 10);
+        const created: Output = {
+          id,
+          name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
+          viewId: viewId ?? null,
+        };
+        return { output: created, outputs: [...this.state.outputs, created] };
+      },
+      (allocated) => ({ outputs: allocated.outputs }),
+    );
+    console.log(`[stage-controller] addOutput id=${scrub(output.id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
     this.state = { ...this.state, outputs };
-    // One write: the new output and the floor that stops its id ever coming back.
-    await settingsStore.raiseIdFloor("output", nextFloor, { outputs });
     this.recomputeResolved();
     this.broadcast();
     return { state: this.state, output };
@@ -2718,7 +2734,7 @@ export class StageController {
   }
 
   /**
-   * Allocate a view id and record the floor BEFORE the view exists.
+   * Allocate a view id, recording the floor BEFORE the view exists.
    *
    * The floor lives in settings.json and views live in views.json, so there is
    * no save here to fold it into — it is its own write, and an AWAITED one. A
@@ -2729,35 +2745,8 @@ export class StageController {
    * the view save afterwards fails, the only cost is a number nobody used. Ids
    * are permanent, not contiguous.
    */
-  private async allocateViewId(): Promise<string> {
-    const floor = (await settingsStore.get()).idFloors?.view ?? 1;
-    const { id, nextFloor } = nextId(
-      "view",
-      this.state.views.map((v) => v.id),
-      floor,
-    );
-    await settingsStore.raiseIdFloor("view", nextFloor);
-    return id;
-  }
-
-  /**
-   * The next display id, plus the floor the caller must persist.
-   *
-   * Unlike views, `addOutput` already writes settings.json — the outputs list
-   * lives there — so the floor rides along in that same write instead of costing
-   * a second one.
-   *
-   * display-1 is reserved as the primary/default output (PRIMARY_DISPLAY_ID), so
-   * dynamically-created outputs start at display-2. (Views, which have no
-   * reserved id, start at view-1.)
-   */
-  private async nextOutputId(): Promise<{ id: string; nextFloor: number }> {
-    const floor = Math.max((await settingsStore.get()).idFloors?.output ?? 2, 2);
-    return nextId(
-      "display",
-      this.state.outputs.map((o) => o.id),
-      floor,
-    );
+  private allocateViewId(): Promise<string> {
+    return settingsStore.allocateIds("view", (next) => next(this.state.views.map((v) => v.id)));
   }
 
   private assertPco(): void {
