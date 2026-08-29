@@ -136,6 +136,7 @@ export const HOST_FRAMED_TYPES = new Set<LayoutObjectType>([
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl",
   "home-screens", "home-streaming", "home-streaming-resi", "home-streaming-youtube",
+  "home-scores",
 ]);
 
 type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
@@ -765,6 +766,26 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     // had scores carded; the plan was written before the strip existed.
     style: () => TEXT(),
     homeSize: "m",
+    integration: { id: "scores", label: "Live scores" },
+  },
+
+  // The same fact on Home, in Home's own voice. A separate type rather than the
+  // wall object with a flag, exactly as the recording and streaming pairs are:
+  // the two are different compositions, and a card that wore the wall's got a
+  // panel of brand colour beside a readiness list.
+  "home-scores": {
+    label: "Scores",
+    blurb: "Followed teams' scores, on your own page",
+    group: "Status",
+    config: () => ({ type: "home-scores" }),
+    // Bare on Home, carded on a wall -- see HOST_FRAMED_TYPES.
+    style: () => TEXT(),
+    homeSize: "m",
+    // "always", by NOT saying otherwise. Sunday afternoon NFL overlaps the second
+    // service in most US churches, so "idle" as a default would mean the feature
+    // never fires on the day it exists for. The operator's own page is not
+    // stage-facing and they chose to add the card; `when` is on the config for
+    // anyone who wants it gone mid-service.
     integration: { id: "scores", label: "Live scores" },
   },
 

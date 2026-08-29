@@ -407,6 +407,15 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  // Followed scores on the operator's own Home page. A quiet composition, NOT
+  // the wall strip: a Home tile sits beside a readiness list and a next-service
+  // card, and a panel of brand colour would out-shout every one of them. The
+  // team colour survives as the chip.
+  // No size/when here, unlike the plan's snippet: Home's size and visibility live
+  // on LayoutObject.home (HomePlacement), which is where the editor writes them
+  // and the grid reads them. Every sibling home-* member omits them for the same
+  // reason, and a config field nothing ever fills is a branch never exercised.
+  | { type: "home-scores" }
   // A followed team's live score, from the ESPN scores integration
   // (`scores:status` channel). Renders the shared ScoreStrip -- the same strip
   // the context-bar capsule and the Home card draw, at wall size.

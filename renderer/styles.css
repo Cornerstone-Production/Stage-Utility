@@ -1215,3 +1215,93 @@ button.score-capsule:focus-visible {
   text-align: center;
   padding: 8px;
 }
+
+/* ── Followed scores on Home ───────────────────────────────────────────────
+   Deliberately quiet. A Home tile sits beside a readiness list and a next-service
+   card; the wall strip's panel of brand colour would out-shout every one of them,
+   so the team colour survives as the CHIP and nothing else. */
+.home-scores {
+  /* Asks about ITSELF, not the viewport: the operator resizes this tile from
+     Medium to Large and back, and the viewport says nothing about either. */
+  container-type: size;
+  overflow: hidden;
+}
+.home-scores-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+/* A Medium tile is 120px, which holds ONE matchup under the heading. The second
+   and third appear only when there is genuinely room for them -- clipping a row
+   is how a card ends up showing half a score. */
+.home-scores-game:nth-child(n + 2) {
+  display: none;
+}
+@container (min-height: 200px) {
+  .home-scores-game:nth-child(2) { display: block; }
+}
+@container (min-height: 290px) {
+  .home-scores-game:nth-child(3) { display: block; }
+}
+.home-scores-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 2px 0;
+}
+/* The LOSER is dimmed rather than the leader emphasised: everything else on this
+   page is already at full strength, so lifting one row would make the card louder
+   than its neighbours. */
+.home-scores-row.is-trailing .home-scores-name,
+.home-scores-row.is-trailing .home-scores-value,
+.home-scores-row.is-trailing .home-scores-chip {
+  opacity: .5;
+}
+.home-scores-chip {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 8.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+.home-scores-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-fg-muted);
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.home-scores-value {
+  margin-left: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg);
+  letter-spacing: -.02em;
+}
+.home-scores-foot {
+  border-top: 1px solid var(--color-line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A live game earns the same green dot every other live thing on this page uses. */
+.home-scores-live::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--live-9);
+  margin-right: 5px;
+  vertical-align: middle;
+}

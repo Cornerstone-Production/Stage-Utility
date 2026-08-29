@@ -76,6 +76,7 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   // an operator to -- the panel that shows more is the context-bar activity, and
   // it opens from the bar, not from a wall tile.
   scores: ["readout"],
+  "home-scores": ["readout"],
   "record-status": ["readout"],
   "section-chip": ["readout"],
   "service-order": ["readout"],

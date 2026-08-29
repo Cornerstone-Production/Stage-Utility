@@ -70,6 +70,7 @@ existing screens do not break.
 | **Recording** *(Home)* | Is anything rolling — every recorder at once | OBS + REAPER |
 | **Streaming** *(Home)* | Live or off air, across every platform | Resi + YouTube + OBS |
 | **Live scores** | Live score for a team you follow | ESPN public scoreboard |
+| **Scores** *(Home)* | Followed teams' scores, on your own page | ESPN public scoreboard |
 
 **Streaming status** can be pinned to one platform, or left on **any**, where it
 answers for whichever is live.
@@ -81,6 +82,13 @@ sport detail** draws the bases and count, the down and distance, or the game
 clock; turning it off leaves the score and the status line. The teams themselves
 are chosen in Settings, Integrations, Live scores — see
 [Live scores](../integrations/scores.md).
+
+The Home card is a quieter reading of the same thing: a chip in the team's colour,
+the name, the score, and the trailing side dimmed. It shows one matchup on a
+Medium tile and up to three as you make the tile taller. It stays on the page
+during a service by default — Sunday afternoon football overlaps the second
+service in most churches, which is the day the card exists for — and its own
+settings can hide it while a plan item is live.
 
 ### The four "is it happening" widgets behave alike
 

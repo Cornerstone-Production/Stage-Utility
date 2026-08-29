@@ -370,6 +370,7 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // group of its own: it is one widget reading one integration, and a group
   // holding a single entry is a heading with nothing under it.
   { type: "scores", label: "Live scores", group: "Status", after: "stream-status" },
+  { type: "home-scores", label: "Scores", group: "Status", after: "scores" },
 ];
 
 /**
