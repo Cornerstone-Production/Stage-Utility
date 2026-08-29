@@ -26,4 +26,15 @@ export async function calendarRoutes(c: RouteCtx): Promise<void> {
     }
     return;
   }
+
+  // The org's calendars and tags, for the two pickers in a calendar View's
+  // settings. Read live so a renamed tag appears under its new name.
+  if (method === "GET" && pathname === "/api/pco/calendar-sources") {
+    try {
+      json(res, await stageController.listCalendarSources());
+    } catch (err) {
+      json(res, { error: errorMessage(err) }, 502);
+    }
+    return;
+  }
 }

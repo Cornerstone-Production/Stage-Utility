@@ -21,6 +21,7 @@ import { scrub } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, type CalendarGrid } from "./calendar-grid.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
+import type { CalendarSelection, CalendarSourceDTO, CalendarTagDTO } from "../types/calendar.js";
 
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
@@ -905,19 +906,79 @@ export class StageController {
     // reads pcoConfigured off the state it already has to say which it is.
     if (!this.pcoAppId || !this.pcoSecret) return buildGrid([], anchorIso, zone);
 
-    // viewId is accepted now and unused until the per-view calendar and tag
-    // filters exist. Reading the view here rather than later keeps the route's
-    // shape settled while the filters are built.
-    void viewId;
+    // Empty is NOT an empty filter — it is no filter, and PCO is asked for
+    // everything. See View.calendarSources for why that is the opposite of the
+    // checklist's rule.
+    const view = viewId ? this.state.views.find((v) => v.id === viewId) ?? null : null;
+    const calendarIds = (view?.calendarSources ?? []).map((s) => s.id).filter(Boolean);
+    const tagIds = (view?.calendarTags ?? []).map((s) => s.id).filter(Boolean);
 
     const { fromIso, toIso } = gridWindow(anchorIso, zone);
     const events = await pcoCalendarService.listEventInstances(this.pcoAppId, this.pcoSecret, {
       fromIso,
       toIso,
-      calendarIds: [],
-      tagIds: [],
+      calendarIds,
+      tagIds,
     });
     return buildGrid(events, anchorIso, zone);
+  }
+
+  /**
+   * The org's calendars and tags, for the two pickers.
+   *
+   * Read live rather than stored, for the reason listChecklistSources is: a tag
+   * renamed in Planning Center must appear under its new name, and a picker
+   * built from a remembered copy is how somebody chooses an option that matches
+   * nothing and cannot tell why their calendar is empty.
+   */
+  async listCalendarSources(): Promise<{ calendars: CalendarSourceDTO[]; tags: CalendarTagDTO[] }> {
+    if (!this.pcoAppId || !this.pcoSecret) return { calendars: [], tags: [] };
+    const [calendars, tags] = await Promise.all([
+      pcoCalendarService.listCalendars(this.pcoAppId, this.pcoSecret),
+      pcoCalendarService.listCalendarTags(this.pcoAppId, this.pcoSecret),
+    ]);
+    return { calendars, tags };
+  }
+
+  /**
+   * Which calendars and tags a calendar View draws.
+   *
+   * Both lists are stored WHOLE — an id with the name it read as when it was
+   * chosen. Unlike setViewScriptViewLayout, an id PCO no longer offers is NOT
+   * refused: a tag deleted in Planning Center would then either silently widen
+   * the filter or fail every save the operator makes afterwards. It is kept, and
+   * the picker shows it marked, so the choice is visible and theirs to remove.
+   */
+  async setViewCalendarFilters(
+    id: string,
+    calendarSources: CalendarSelection[],
+    calendarTags: CalendarSelection[],
+  ): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setCalendarFilters — view ${id} not found`);
+    }
+    const clean = (list: CalendarSelection[]): CalendarSelection[] => {
+      const seen = new Set<string>();
+      const out: CalendarSelection[] = [];
+      for (const s of list) {
+        const sid = typeof s?.id === "string" ? s.id.trim() : "";
+        if (!sid || seen.has(sid)) continue;
+        seen.add(sid);
+        out.push({ id: sid, name: typeof s.name === "string" ? s.name : "" });
+      }
+      return out;
+    };
+    const views = this.state.views.map((v) =>
+      v.id === id ? { ...v, calendarSources: clean(calendarSources), calendarTags: clean(calendarTags) } : v,
+    );
+    console.log(
+      `[stage-controller] setViewCalendarFilters id=${scrub(id)} calendars=${scrub(calendarSources.length)} tags=${scrub(calendarTags.length)}`,
+    );
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
   }
 
   // ── ScriptView (in-app ScriptViewer replacement) ────────────────────────

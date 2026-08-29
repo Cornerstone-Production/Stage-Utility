@@ -173,6 +173,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       const viewId = typeof p.viewId === "string" ? p.viewId : null;
       return apiFetch<T>(`/api/pco/calendar${viewId ? `?viewId=${encodeURIComponent(viewId)}` : ""}`);
     }
+    // The org's calendars and tags, for a calendar View's two pickers.
+    case "calendar:sources":
+      return apiFetch<T>("/api/pco/calendar-sources");
 
     // The pre-service checklist, read from the plan's notes in Planning Center.
     case "checklist:get":
@@ -482,6 +485,17 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "views:setScriptViewLayout": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { scriptViewLayoutId: p.scriptViewLayoutId });
+    }
+
+    // Both lists, always together: the server refuses one without the other,
+    // because a request carrying half of them is a client that has lost state
+    // rather than a partial update.
+    case "views:setCalendarFilters": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, {
+        calendarSources: p.calendarSources,
+        calendarTags: p.calendarTags,
+      });
     }
 
     case "views:setSlots": {

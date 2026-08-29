@@ -8,6 +8,8 @@
 // re-exported from stage.ts, so no import anywhere had to change.
 
 
+import type { CalendarSelection } from "./calendar.js";
+
 export type ViewKind =
   | "slots"
   | "dashboard"
@@ -138,6 +140,26 @@ export interface View {
    * about it.
    */
   scriptViewLayoutId?: string | null;
+  /**
+   * Which of the org's calendars a "calendar" View draws. ABSENT OR EMPTY MEANS
+   * EVERY CALENDAR.
+   *
+   * On the VIEW rather than in settings, so two calendar views on two screens
+   * can show two departments. That is the whole point of the filter: the busiest
+   * observed day held thirteen events unfiltered and three under one department's
+   * tag.
+   *
+   * Empty meaning "everything" is the OPPOSITE of the checklist's rule, where
+   * nothing chosen means the feature is off. The difference is deliberate: a
+   * checklist that fills itself with every note on the plan is noise, while a
+   * calendar view showing nothing is simply broken, and a View is created before
+   * anyone has opened its settings.
+   */
+  calendarSources?: CalendarSelection[] | null;
+  /** Which tags a "calendar" View draws. Absent or empty means every tag, for
+   *  the reason above. PCO composes several tags as OR within a tag group and
+   *  AND across groups, which is why the picker groups them. */
+  calendarTags?: CalendarSelection[] | null;
   /**
    * Bumped on every layout save. An editor sends back the revision it opened, so
    * a save built on a layout someone else has since replaced can be detected

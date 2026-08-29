@@ -109,6 +109,21 @@ export interface CalendarGrid {
   unplaceable: number;
 }
 
+/**
+ * One calendar or tag an operator has chosen, as stored on a View.
+ *
+ * The ID is what filters — names are not stable and PCO does not accept one.
+ * The NAME is a cached label, and only ever a label: it is what the picker shows
+ * for a choice Planning Center no longer offers, so a deleted or renamed tag
+ * appears struck through instead of vanishing and silently widening the filter.
+ * Nothing reads it to decide what to fetch.
+ */
+export interface CalendarSelection {
+  id: string;
+  /** The name as it read when it was chosen. A label, never a filter. */
+  name: string;
+}
+
 /** One of the org's calendars, for the picker. */
 export interface CalendarSourceDTO {
   id: string;
