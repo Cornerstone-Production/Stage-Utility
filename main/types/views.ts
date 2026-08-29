@@ -15,7 +15,30 @@ export type ViewKind =
   | "transcription"
   | "custom"
   | "script"
-  | "spl-rundown";
+  | "spl-rundown"
+  | "calendar";
+
+/** Empty only when `T` names every ViewKind; otherwise `never`, which nothing
+ *  can be assigned to. */
+type Exhaustive<T extends readonly ViewKind[]> = Exclude<ViewKind, T[number]> extends never ? T : never;
+
+/**
+ * Identity over a list of kinds, but it will not compile unless the list names
+ * EVERY ViewKind.
+ *
+ * A `ViewKind[]` annotation refuses a kind that does not exist and says nothing
+ * about one left out — and one left out is the failure that has actually
+ * happened here: the new-view dialog's order list was retyped from memory, lost
+ * "stage" and "spl-rundown", and two kinds became uncreatable with nothing
+ * failing to say so. Wrap the list in this and the build names the kind that was
+ * forgotten.
+ *
+ * Adding a kind to {@link ViewKind} should break every call site. That is the
+ * point: each one is a place a kind has to be handled.
+ */
+export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Exhaustive<T>): T {
+  return kinds;
+}
 
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
