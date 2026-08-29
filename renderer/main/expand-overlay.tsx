@@ -126,13 +126,13 @@ export function useExpand(enabled: boolean) {
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
+    // No "focus is outside the panel" case: this handler is on the portal root,
+    // so a keydown only reaches it when focus is already inside.
     const active = document.activeElement;
-    // Wrapping both ways, and also when focus is not in the panel at all —
-    // otherwise Tab from outside walks the covered page.
-    if (e.shiftKey && (active === first || !panel.contains(active))) {
+    if (e.shiftKey && active === first) {
       e.preventDefault();
       last.focus();
-    } else if (!e.shiftKey && (active === last || !panel.contains(active))) {
+    } else if (!e.shiftKey && active === last) {
       e.preventDefault();
       first.focus();
     }
@@ -197,9 +197,14 @@ export function useExpand(enabled: boolean) {
         type="button"
         onClick={open}
         aria-label={`Expand ${title}`}
-        className="absolute bottom-1 right-1 z-10 flex size-7 items-center justify-center rounded-md border border-line bg-bg/80 text-fg-subtle shadow-sm backdrop-blur transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        // size-11 = 44px, the accessible touch target, on a surface that is a
+        // touchscreen more often than not. It costs a bigger occluded corner,
+        // and that is the right trade: a 28px target missed on the first press
+        // is a producer poking at a tile mid-service, while the corner it
+        // covers is the least-used part of a box whose content is centred.
+        className="absolute bottom-1 right-1 z-10 flex size-11 items-center justify-center rounded-lg border border-line bg-bg/80 text-fg-subtle shadow-sm backdrop-blur transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
-        <Maximize2Icon className="size-3.5" />
+        <Maximize2Icon className="size-4" />
       </button>
     );
   }

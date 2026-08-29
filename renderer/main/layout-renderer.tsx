@@ -2196,9 +2196,14 @@ function ViewEmbedObject({
   // markup, unreadable output. See useEmbedBoxHeight for why it is measured.
   const { ref: boxRef, height: boxH } = useEmbedBoxHeight(view?.id ?? null);
 
-  // Before the early returns: a hook cannot be called conditionally, and every
-  // one of those returns is a notice with nothing worth expanding anyway.
-  const { tileRef, control, overlay } = useExpand(ctx.interactive);
+  // Before the early returns: a hook cannot be called conditionally. And gated
+  // on `view`, not just on `interactive` — the SAME reason screen-embed passes
+  // its `expandable` in rather than wrapping the hook's output. Gated only on
+  // the way out, deleting a view while its tile was expanded left an invisible
+  // "expanded": the panel gone, no control to reopen it, a document keydown
+  // listener still attached, and the panel springing back by itself if the view
+  // came back. Two call sites, one shape, gated the same way at both.
+  const { tileRef, control, overlay } = useExpand(ctx.interactive && !!view);
 
   const notice = (text: string) => <EmbedNotice text={text} />;
 

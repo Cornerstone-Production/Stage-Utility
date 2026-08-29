@@ -118,12 +118,23 @@ type Kind = (typeof KINDS)[number];
  *  screen, a VIEW tile by the view, and they are deliberately different words. */
 const titleFor = (kind: Kind, screen: string) => (kind === "screen-embed" ? screen : "Slots A");
 
-function ctxFor(interactive: boolean, screen: string, objects: unknown[], blackout = false) {
+/**
+ * @param stopped the tile stops having anything to show — the screen goes to
+ *   blackout for a `screen-embed`, the view is deleted for a `view-embed`. The
+ *   two objects reach the same state by different routes, which is exactly why
+ *   the guard below runs against both.
+ */
+function ctxFor(
+  interactive: boolean,
+  screen: string,
+  objects: unknown[],
+  stopped: "blackout" | "view-deleted" | null = null,
+) {
   return {
     state: {
       ...STATE,
-      views: [view(objects)],
-      outputs: [{ id: "out-1", name: screen, viewId: "v-1", blackout }],
+      views: stopped === "view-deleted" ? [] : [view(objects)],
+      outputs: [{ id: "out-1", name: screen, viewId: "v-1", blackout: stopped === "blackout" }],
     },
     propresenter: null, propInstances: null, pcoLive: null, planItems: null,
     transcript: [], spl: null, obs: null, reaper: null, resi: null, youtube: null,
@@ -265,29 +276,98 @@ for (const kind of KINDS) {
   });
 }
 
-describe("a screen that stops showing while it is expanded", () => {
-  test("closes the panel, and does not reopen it when the screen comes back", async () => {
-    // Straight off a producer desk: expand a tile, then black that screen out.
-    // Gated only on the way out, the hook kept an invisible "expanded" — no
-    // control to reopen with, a document key listener still attached, and the
-    // panel springing back to full screen by itself when the blackout cleared.
-    const { container, rerender } = await renderTile({ interactive: true });
-    await openOverlay(container);
-    assert.ok(overlayEl(), "the overlay never opened");
+// One shape, two call sites, so it is proven at both. `useExpand`'s gate is an
+// INPUT: gated only on the way out, the hook kept an invisible "expanded" —
+// the panel gone, no control to reopen with, a document keydown listener still
+// attached, and the panel springing back to full screen by itself when the tile
+// had something to show again.
+for (const [kind, stopped, what] of [
+  ["screen-embed", "blackout", "the screen is blacked out"],
+  ["view-embed", "view-deleted", "the view is deleted"],
+] as [Kind, "blackout" | "view-deleted", string][]) {
+  describe(`a ${kind} tile expanded when ${what}`, () => {
+    test("closes the panel, and does not reopen it when the tile comes back", async () => {
+      const { container, rerender } = await renderTile({ kind, interactive: true });
+      await openOverlay(container);
+      assert.ok(overlayEl(), "the overlay never opened");
 
-    await act(async () => {
-      rerender(tree("screen-embed", ctxFor(true, "Left Display", [textObject], true)));
-      await settle();
-    });
-    assert.equal(overlays(), 0, "a blacked-out screen kept its panel open");
-    assert.equal(buttons(container), 0, "a blacked-out screen still offered to expand");
+      await act(async () => {
+        rerender(tree(kind, ctxFor(true, "Left Display", [textObject], stopped)));
+        await settle();
+      });
+      assert.equal(overlays(), 0, `${what} and the panel stayed open`);
+      assert.equal(buttons(container), 0, `${what} and the tile still offered to expand`);
 
-    await act(async () => {
-      rerender(tree("screen-embed", ctxFor(true, "Left Display", [textObject], false)));
-      await settle();
+      await act(async () => {
+        rerender(tree(kind, ctxFor(true, "Left Display", [textObject], null)));
+        await settle();
+      });
+      assert.equal(overlays(), 0, "the panel reopened by itself when the tile came back");
+      assert.equal(buttons(container), 1, "the tile came back without its expand control");
     });
-    assert.equal(overlays(), 0, "the panel reopened by itself when the blackout cleared");
-    assert.equal(buttons(container), 1, "the screen came back without its expand control");
+  });
+}
+
+// The FLIP itself. jsdom has no layout, so BOTH halves need stubbing: a
+// matchMedia that answers, and rects that are not 0x0 — without the rects the
+// motion path bails on its own divide-by-zero guard and the assertion below
+// would pass for a component that never animates.
+describe("prefers-reduced-motion", () => {
+  const rect = (left: number, top: number, width: number, height: number) => ({
+    left, top, width, height, right: left + width, bottom: top + height, x: left, y: top,
+    toJSON() {},
+  });
+
+  /** Open a tile with the media query answering `reduce: <reduced>`, and report
+   *  what the panel's inline transform was before the release frame. */
+  async function transformOnOpen(reduced: boolean) {
+    const realMatchMedia = window.matchMedia;
+    // Element, not HTMLElement: getBoundingClientRect is defined one level up,
+    // so HTMLElement.prototype has no own descriptor to put back afterwards.
+    const realRect = Object.getOwnPropertyDescriptor(Element.prototype, "getBoundingClientRect")!;
+    (window as unknown as { matchMedia: unknown }).matchMedia = (q: string) => ({
+      matches: q.includes("reduced-motion") ? reduced : false,
+      media: q, onchange: null,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+      dispatchEvent: () => false,
+    });
+    // The panel is the overlay root's only child; everything else is the tile.
+    Object.defineProperty(Element.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value(this: HTMLElement) {
+        return this.parentElement?.hasAttribute("data-expand-overlay")
+          ? rect(0, 0, 1000, 800)
+          : rect(100, 200, 250, 200);
+      },
+    });
+    try {
+      const { container } = await renderTile({ interactive: true });
+      const btn = expandControl(container);
+      assert.ok(btn, "no way to expand the tile");
+      // No settle(): the release is two requestAnimationFrames away, and this
+      // reads the INVERTED position the transition starts from.
+      await act(async () => { fireEvent.click(btn); });
+      const panel = document.querySelector<HTMLElement>("[data-expand-overlay] > div");
+      assert.ok(panel, "the overlay opened without a panel");
+      return { transform: panel.style.transform, transition: panel.style.transition };
+    } finally {
+      (window as unknown as { matchMedia: unknown }).matchMedia = realMatchMedia;
+      Object.defineProperty(Element.prototype, "getBoundingClientRect", realRect);
+    }
+  }
+
+  test("off: the panel starts on the tile and is carried out", async () => {
+    // 250x200 at (100,200) growing into 1000x800 at (0,0).
+    const { transform, transition } = await transformOnOpen(false);
+    assert.equal(transform, "translate(100px, 200px) scale(0.25, 0.25)",
+      "the panel did not start on the tile — an overlay that appears at full size reads as the page having jumped");
+    assert.equal(transition, "none", "the inverted position was itself animated");
+  });
+
+  test("on: nothing is transformed, and it still opens", async () => {
+    const { transform } = await transformOnOpen(true);
+    assert.equal(transform, "", "a reduced-motion viewer was animated anyway");
+    assert.equal(overlays(), 1, "reduced motion stopped the overlay opening at all");
   });
 });
 
