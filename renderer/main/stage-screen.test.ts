@@ -324,7 +324,56 @@ describe("the view kind", () => {
       displayName: null,
       locked: false,
       isPreview: false,
+      outputMode: undefined,
     });
+  });
+
+  test("a kind this build does not recognise still reaches a screen", () => {
+    // Not hypothetical: a newer server can route a View kind this build has
+    // never heard of. The chain has no arm for it, so it must fall through to
+    // the Planning-Center check and the slots arm — never off the end into a
+    // blank screen. This is why the fall-through is a fall-through and not
+    // `if (kind === "slots")`.
+    const unknown = "holodeck" as ViewKind;
+    const routed = resolveScreen(input({
+      state: stageState({
+        views: [{ id: "v1", name: "From the future", kind: unknown }] as unknown as View[],
+        resolvedByOutput: { "display-1": resolvedOutput({ kind: unknown }) },
+      }),
+    }));
+    assert.equal(routed.k, "view");
+    assert.equal(routed.k === "view" && routed.kind, unknown);
+
+    const noPco = resolveScreen(input({
+      state: stageState({
+        pcoConfigured: false,
+        views: [{ id: "v1", name: "From the future", kind: unknown }] as unknown as View[],
+        resolvedByOutput: { "display-1": resolvedOutput({ kind: unknown }) },
+      }),
+    }));
+    assert.equal(noPco.k, "not-configured");
+  });
+
+  test("carries the output's mode, and never a preview's", () => {
+    // The custom arm turns this into `contextForOutput(mode, isPreview)`, which
+    // decides whether a button on a wall screen actually fires. It rides along
+    // with the screen because it comes from the same `outputs.find` the display
+    // name does — looked up twice, the preview rule gets remembered once.
+    const panel = resolveScreen(input({
+      state: stageState({
+        outputs: [{ id: "display-1", name: "Console", viewId: "v1", mode: "panel" }] as unknown as Output[],
+      }),
+    }));
+    assert.equal(panel.k === "view" && panel.outputMode, "panel");
+
+    const preview = resolveScreen(input({
+      displayId: "preview-v1",
+      previewViewId: "v1",
+      state: stageState({
+        outputs: [{ id: "preview-v1", name: "Not a screen", viewId: "v1", mode: "panel" }] as unknown as Output[],
+      }),
+    }));
+    assert.equal(preview.k === "view" && preview.outputMode, undefined);
   });
 
   test("a preview of a View that no longer exists falls back to slots (known bug)", () => {

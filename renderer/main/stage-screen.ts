@@ -2,7 +2,7 @@
 //
 // StageView interleaved three unrelated kinds of decision — lifecycle
 // (loading/error/no state), output state (blackout/unrouted/locked) and view
-// kind — across fourteen returns and nine derived values. None of the outcomes
+// kind — across fifteen returns and nine derived values. None of the outcomes
 // could be checked without opening a browser on a wall screen, which is how
 // every guard in that file was verified for its whole life.
 //
@@ -33,6 +33,13 @@ export type StageScreen =
       displayName: string | null;
       locked: boolean;
       isPreview: boolean;
+      /** How the Output renders — `panel` is the only surface whose controls are
+       *  live. Undefined on a preview and on an Output with no mode set, which
+       *  `contextForOutput` reads as `display`. Carried here rather than looked
+       *  up again by the caller: it comes from the same `outputs.find` the name
+       *  does, and a preview has to null it, which is a rule that must live in
+       *  exactly one place. */
+      outputMode: Output["mode"];
     };
 
 export interface ScreenInput {
@@ -67,16 +74,23 @@ export function resolveScreen(input: ScreenInput): StageScreen {
 
   // A real output (not a preview) with no View routed to it is unconfigured —
   // show a clear "no view assigned" screen rather than an empty slot grid.
+  //
+  // NULL IN A PREVIEW, and that is load-bearing: it is the single line that
+  // keeps an output's blackout and its kiosk lock out of the settings preview
+  // iframe. The three checks below read it and do not re-test previewViewId.
   const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
   // Per-output kiosk lock (Displays-tab toggle) — never in the settings preview iframe.
-  const outputLocked = !previewViewId && (resolved?.locked ?? false);
+  const outputLocked = resolved?.locked ?? false;
 
   // Blackout: a true black screen on command (Companion / Displays page), taking
   // priority over the routed View. Toggling it off restores the View instantly.
-  if (!previewViewId && resolved?.blackout) {
+  if (resolved?.blackout) {
     return { k: "blackout" };
   }
 
+  // The one check that DOES still need previewViewId: a preview has no resolved
+  // output at all, and "no resolved output" is exactly what unrouted means — so
+  // without this every preview would render the "no view assigned" placeholder.
   const isUnrouted = !previewViewId && (!resolved || resolved.viewId === null);
   if (isUnrouted) {
     return { k: "unrouted", displayName, locked: outputLocked };
@@ -95,6 +109,7 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     displayName,
     locked: outputLocked,
     isPreview: !!previewViewId,
+    outputMode: currentDisplay?.mode,
   });
 
   // Custom-layout views render the visual-editor layout below the same kiosk top
