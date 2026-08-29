@@ -184,6 +184,9 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     integrations: d.integrationsSnap.states,
     integrationLabels: d.integrationsSnap.labels,
     wireless: d.wireless,
+    // Real presence, from the heartbeat — Home's screens count and its readiness
+    // list are two of the three things in the app that draw it.
+    onlineOutputIds: d.onlineOutputIds,
     now: d.now,
     skewMs: d.skewMs,
     ndiSource: null,

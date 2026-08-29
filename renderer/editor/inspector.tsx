@@ -587,7 +587,7 @@ export function Inspector({
       {c.type === "screen-embed" && c.outputId && c.showLabel !== false && (
         <RowSwitch
           label="Show a status dot"
-          hint="Lit while that screen is showing its view, dark while it is unrouted or blacked out."
+          hint="Lit while a browser is actually open on that screen, dark when nothing has reported in. Not the routing — the tile itself already says what the screen is showing."
           checked={c.showStatus ?? true}
           onChange={(v) => onConfig({ ...c, showStatus: v })}
         />

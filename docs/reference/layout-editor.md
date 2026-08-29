@@ -153,9 +153,11 @@ stage and SPL rundown views are configured per display rather than per view, so
 an Embedded view pointed at one says so instead of rendering it — Embedded
 screen is the only way to bring one into a tile.
 
-A screen tile's status dot means only that the screen is **routed to a view and
-not blacked out**. It is not a "connected" light: nothing in the app knows
-whether a browser is actually open on that display, so the dot never claims it.
+A screen tile's status dot means a **browser is actually open on that display**.
+Each display page heartbeats, and a screen that stops reporting goes dark within
+ninety seconds — whether it was unplugged, switched off or simply closed. It is
+not a routing light: what a screen is or is not showing (unrouted, blacked out,
+a deleted view) is named in the body of the tile itself.
 
 On an interactive surface — a console, or a screen set to panel mode — each tile
 carries a small button in its bottom-right corner that expands it to fill the

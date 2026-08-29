@@ -175,24 +175,9 @@ describe("a screen tile", () => {
     assert.equal(text.includes(VIEW_MARKER), false, "a blacked-out screen drew its routed view");
   });
 
-  // The dot is the only thing on a tile readable from across a producer desk. Lit
-  // beside a screen the room cannot see is the same lie as drawing the routed
-  // view, in one pixel instead of a panel. One test per state so a failure names
-  // which one broke.
-  for (const [state, output, expected] of [
-    ["routed", { id: "out-1", name: "Left Display", viewId: "v-1" }, "Showing its view"],
-    ["blacked out", { id: "out-1", name: "Left Display", viewId: "v-1", blackout: true }, "Dark"],
-    ["unrouted", { id: "out-1", name: "Left Display", viewId: null }, "Dark"],
-  ] as [string, Output, string][]) {
-    test(`the status dot reads "${expected}" when the screen is ${state}`, async () => {
-      const container = await draw(React.createElement(RenderObject, {
-        o: tile({ outputId: "out-1", showLabel: true, showStatus: true }), ctx: ctxWith([output]),
-      } as never));
-      const dot = container.querySelector("[aria-label]");
-      assert.ok(dot, "the tile drew no status dot");
-      assert.equal(dot.getAttribute("aria-label"), expected);
-    });
-  }
+  // The status dot lives in display-presence-wiring.test.tsx. It stopped being a
+  // property of what the tile is SHOWING when it started meaning "a browser is
+  // attached", and the states it reads are presence states, not routing ones.
 
   test("says so when the screen was deleted", async () => {
     const container = await draw(React.createElement(RenderObject, {

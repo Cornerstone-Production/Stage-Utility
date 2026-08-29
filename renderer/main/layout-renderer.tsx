@@ -1,6 +1,6 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
-import { HomeCard, isHomeCard, onlineFromState } from "../app/home/cards";
+import { HomeCard, isHomeCard } from "../app/home/cards";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
@@ -15,6 +15,7 @@ import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
+import { useDisplayPresence } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
 import { streamers, streamIndicator } from "../app/recording-status";
@@ -114,6 +115,16 @@ export interface LayoutRenderCtx {
    * cycle undetectable.
    */
   embedChain: readonly string[];
+
+  /**
+   * Screens with a browser actually attached, from the `displays:presence`
+   * heartbeat — not screens that merely have a view routed.
+   *
+   * Required, like `embedChain` and `home`, so a surface cannot quietly report
+   * an empty set. Empty is a legitimate answer (nothing is on); "I forgot to
+   * pass it" must not be indistinguishable from it.
+   */
+  onlineOutputIds: readonly string[];
 }
 
 function pad(n: number): string {
@@ -717,8 +728,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           pcoLive={ctx.pcoLive}
           now={ctx.now}
           skewMs={ctx.skewMs}
-          // From the state snapshot, not a presence hook — see onlineFromState.
-          onlineOutputIds={onlineFromState(ctx.state)}
+          onlineOutputIds={ctx.onlineOutputIds}
           secondsToStart={homeSecondsToStart(ctx)}
         />
       </div>
@@ -2294,6 +2304,9 @@ function ScreenEmbedObject({
   const output = config.outputId ? ctx.state.outputs?.find((x) => x.id === config.outputId) ?? null : null;
   const view = output?.viewId ? ctx.state.views?.find((v) => v.id === output.viewId) ?? null : null;
   const showing = Boolean(view) && !output?.blackout;
+  // Deliberately not folded into `showing`: a screen can be connected and
+  // blacked out, or routed and unplugged, and the tile has to be able to say so.
+  const connected = output !== null && ctx.onlineOutputIds.includes(output.id);
 
   // Measured on the BODY, not the tile: the label bar takes real height, and a
   // child sized against the whole tile overflows by exactly that much.
@@ -2342,12 +2355,19 @@ function ScreenEmbedObject({
       {config.showLabel !== false && output && (
         <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-1">
           {config.showStatus !== false && (
-            // Routed and not blacked out. Deliberately NOT "a browser is
-            // attached": nothing in the state says that, and a dot claiming it
-            // would be reassurance about a screen that could be switched off.
+            // A browser is attached — the heartbeat, not the routing.
+            //
+            // This dot used to mean "routed and not blacked out", on the
+            // reasoning that nothing in the app knew whether a screen was
+            // actually up. display-presence.ts always did, and so the dot spent
+            // its life reassuring a producer about screens that were switched
+            // off. Routed and connected are independent facts and the tile keeps
+            // them apart: the BODY names what the screen is or is not showing
+            // ("Blackout", "…is not showing anything"), and the dot answers the
+            // one question the body cannot — is anybody there.
             <span
-              className={`size-1.5 shrink-0 rounded-full ${showing ? "bg-live-9" : "bg-fg-faint"}`}
-              aria-label={showing ? "Showing its view" : "Dark"}
+              className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-live-9" : "bg-fg-faint"}`}
+              aria-label={connected ? "Connected" : "Not connected"}
             />
           )}
           <span className="truncate text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
@@ -2561,6 +2581,20 @@ export function useLayoutData(layout?: LayoutDTO) {
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
   const servicePeaks = useLiveServicePeaks(peopleWanted);
   const wireless = useWirelessTelemetry(want(["wireless-summary", "wireless-channel"]));
+  // The screen tile's status dot, Home's screens count and Home's readiness list
+  // are the only things that draw presence — so a wall of clocks subscribes to
+  // nothing, which was the whole objection to wiring this up at all.
+  //
+  // "view-embed" is in the list because collectLayoutTypes cannot see inside one:
+  // an embedded view's objects are fetched separately, so a screen tile nested in
+  // one would report a set nobody filled and sit dark for ever. The dot read the
+  // state snapshot before this change and worked there, so leaving it out would
+  // be a regression, not a saving — and presence is one hydrated channel that
+  // broadcasts only on change, which is a far cheaper thing to open speculatively
+  // than a poll against a cloud API.
+  const onlineOutputIds = useDisplayPresence(
+    want(["screen-embed", "home-screens", "home-readiness", "view-embed"]),
+  );
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
@@ -2577,7 +2611,7 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs };
 }
 
 /**
@@ -2611,7 +2645,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -2680,7 +2714,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
