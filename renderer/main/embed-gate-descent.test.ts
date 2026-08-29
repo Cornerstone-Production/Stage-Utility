@@ -139,6 +139,25 @@ describe("the gates a layout computes", () => {
     assert.deepEqual([...types].sort(), ["clock", "text"]);
   });
 
+  test("report a screen tile that is itself inside an embedded view", () => {
+    // The sole justification for deleting "view-embed" from the presence gate.
+    // That entry was a stand-in for this descent; with it gone, a nested screen
+    // tile's status dot is lit only because the descent reaches through the
+    // view-embed and finds the tile. If it ever stops, presence goes dark inside
+    // every nested tile and nothing else in the suite notices.
+    const inner = view("v-inner", "clock", [screenEmbed("s1", "out-1")]);
+    const types = layoutChannelTypes(
+      layoutOf(viewEmbed("e1", "v-inner")),
+      [inner],
+      [output("out-1", null)],
+      "v-outer",
+    );
+    assert.ok(
+      types.has("screen-embed"),
+      "the nested screen tile was invisible to the gate, so its status dot would never light",
+    );
+  });
+
   test("ignore a layout left behind on a view that is no longer custom", () => {
     // A slots view draws SlotsColumns, not objects — whatever `layout` it is
     // still carrying from when it was custom is not on any screen.

@@ -293,11 +293,18 @@ function KioskUnrouted({ state, displayName, locked }: { state: StageState; disp
   );
 }
 
-function KioskError({ message }: { message: string }) {
+/**
+ * @param title what went wrong, in the operator's words. Defaults to the state
+ *   failure this component was written for — and is a PARAMETER because it is
+ *   now also reached when the state loaded perfectly and the view kind on it is
+ *   one this build has never heard of. A wall display reading "Could not load
+ *   stage state" sends somebody looking for a server problem that is not there.
+ */
+function KioskError({ message, title = "Could not load stage state" }: { message: string; title?: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-4 px-12 text-center">
       <AlertCircleIcon className="size-10 text-red-10" />
-      <p className="text-title3 text-gray-9 font-semibold">Could not load stage state</p>
+      <p className="text-title3 text-gray-9 font-semibold">{title}</p>
       <p className="text-caption1 text-gray-7">{message}</p>
     </div>
   );
@@ -666,13 +673,22 @@ export function StageView() {
     }
 
     default: {
-      // Exhaustive. Add a ViewKind without an arm above and this line stops
-      // compiling — which is the whole point of the switch. The runtime branch
-      // below is unreachable from TypeScript and reachable from a display
-      // holding a kind an older build never heard of.
+      // Exhaustive: add a ViewKind without an arm above and this line stops
+      // compiling, which is the whole point of the switch.
       const _never: never = kind;
       void _never;
-      return <KioskError message={`Unknown view kind: ${String(kind)}`} />;
+      // Still REACHABLE at runtime, and not theoretically: `kind` comes off
+      // server state, and the app ships a beta/main track switch — so a view
+      // kind written by a beta build and read by a main build is a real path.
+      // An error beats the mic slots this used to fall through to, but it has to
+      // name the actual problem: the state loaded fine, this build just cannot
+      // draw that kind.
+      return (
+        <KioskError
+          title="This build cannot draw this view"
+          message={`The screen is routed to a "${String(kind)}" view, which this version does not know. Update this screen, or route it to another view.`}
+        />
+      );
     }
   }
 }

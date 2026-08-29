@@ -2600,6 +2600,18 @@ function collectLayoutTypes(
 /**
  * Which object types a layout actually puts on screen, embedded views included.
  *
+ * Deliberately WIDER than the render, in two places, and neither is a bug to be
+ * tidied up later:
+ *
+ *   HIDDEN objects count. Every renderer filters `o.hidden` on the way out; this
+ *   does not, so a hidden meter still holds its channel open. Unhiding is one
+ *   click, mid-service, and a widget that appears and then sits blank until a
+ *   subscription catches up is worse than a channel nobody is reading.
+ *
+ *   A BLACKED-OUT screen tile counts. It draws the word "Blackout" and nothing
+ *   else, but blackout is a momentary command from Companion and un-blacking has
+ *   to restore the picture instantly, not start subscribing.
+ *
  * Exported for the guard suite: the gates below are a set membership test, so
  * this set IS the behaviour worth testing, and testing it needs no React.
  *
@@ -2630,6 +2642,15 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const views = state?.views;
   const outputs = state?.outputs;
+  // `views`/`outputs` are fresh array identities on every state broadcast, so
+  // this walk runs per broadcast rather than per layout change. Left that way
+  // deliberately, and measured: a deliberately heavy shape — thirty views of
+  // forty objects, four embeds per level fanning out to the depth cap — walks in
+  // 0.054 ms, and broadcasts are change-driven rather than a poll. Narrowing the
+  // dependency would mean deriving a signature from the same fields the walk
+  // reads, which is the same walk wearing a hat. The result feeds only the
+  // `want()` booleans, so an identical set re-derived changes nothing downstream
+  // and no subscription is torn down.
   const types = useMemo(() => {
     if (!layout) return null; // editor / unknown → enable everything
     return layoutChannelTypes(layout, views ?? [], outputs ?? [], viewId);

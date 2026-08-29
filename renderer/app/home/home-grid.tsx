@@ -154,7 +154,11 @@ const NOMINAL_H = ROW_PX * 6;
  * efficiency rule every other surface follows.
  */
 function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
-  const d = useLayoutData(layout);
+  // HOME_VIEW_ID, matching `embedChain` below: the gate walks embedded layouts
+  // under the same cycle/depth limiter the renderer uses, so seeding it with
+  // nothing would give the gate one more level of budget than the render and
+  // subscribe for a tile Home refuses to draw.
+  const d = useLayoutData(layout, HOME_VIEW_ID);
   // No state yet — the caller renders nothing rather than a grid of dashes.
   if (!d.state) return null;
   // Assembled exactly as LayoutRenderer assembles it — the three renamed fields
