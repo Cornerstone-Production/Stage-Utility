@@ -35,6 +35,7 @@ import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { EmbeddedView, EmbedFontBox, EmbedNotice } from "./embedded-view";
 import { useEmbedBoxHeight } from "./embed-box";
+import { childChain, embedRefusal } from "./embed-chain";
 import { useExpand } from "./expand-overlay";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
@@ -2540,14 +2541,81 @@ function ServiceOrderObject({
   );
 }
 
-/** Collect the set of object `config.type`s present in a layout (recursing into
- *  container children) so live-data hooks can be gated to only the channels the
- *  layout actually renders. */
-function collectLayoutTypes(objects: LayoutObject[] | undefined, into: Set<string>): void {
+/** Collect the set of object `config.type`s present in a layout so live-data
+ *  hooks can be gated to only the channels the layout actually renders.
+ *
+ *  Recurses into container children AND through both embed objects into the
+ *  layouts they draw, because a widget in a tile is every bit as on-screen as
+ *  one on the canvas. Without the descent, an OBS badge inside a producer
+ *  multiview asked for a channel nobody subscribed to and sat dead for ever.
+ *
+ *  The cheap alternative — naming `view-embed`/`screen-embed` in every gate —
+ *  makes any layout containing one tile subscribe to everything, which is the
+ *  efficiency these gates exist to buy.
+ *
+ *  @param views   every View, so an embed's target can be resolved. Passed in
+ *    rather than read from a module-level store: this is a pure function, and
+ *    the caller (useLayoutData) already holds the state.
+ *  @param outputs every Output, so a screen-embed can be resolved the way the
+ *    tile itself resolves it — output -> its routed view.
+ *  @param chain   the views already being drawn above this layout, outermost
+ *    first — the SAME chain the renderer carries in `ctx.embedChain`.
+ */
+function collectLayoutTypes(
+  objects: LayoutObject[] | undefined,
+  into: Set<string>,
+  views: readonly View[],
+  outputs: readonly Output[],
+  chain: readonly string[],
+): void {
+  /** One level in, guarded by embed-chain — the renderer's own limiter, not a
+   *  second one. A view that would be REFUSED on screen draws nothing, so it
+   *  needs no channels; and cycles terminate here for the same reason they
+   *  terminate there. Two limiters that disagree would be worse than one: the
+   *  gate would either starve a tile that draws or subscribe for one that does
+   *  not. */
+  const descend = (viewId: string | null | undefined) => {
+    if (!viewId || embedRefusal(viewId, chain)) return;
+    const view = views.find((v) => v.id === viewId);
+    // Only a CUSTOM view draws objects. Every other kind is a whole component
+    // with its own hooks, and a view that used to be custom can still be
+    // carrying the layout it had then — collecting that would gate channels on
+    // objects nobody can see.
+    const layout = view?.kind === "custom" ? view.layout : undefined;
+    if (!layout) return;
+    collectLayoutTypes(layout.objects, into, views, outputs, childChain(viewId, chain));
+  };
+
   for (const o of objects ?? []) {
-    if (o.config?.type) into.add(o.config.type);
-    if (o.children?.length) collectLayoutTypes(o.children, into);
+    const config = o.config;
+    if (config?.type) into.add(config.type);
+    if (o.children?.length) collectLayoutTypes(o.children, into, views, outputs, chain);
+    if (config?.type === "view-embed") descend(config.viewId);
+    // Resolved through the OUTPUT, exactly as the tile does, so a routing change
+    // moves the gates with it rather than leaving the new view's widgets dark.
+    else if (config?.type === "screen-embed") descend(outputs.find((x) => x.id === config.outputId)?.viewId);
   }
+}
+
+/**
+ * Which object types a layout actually puts on screen, embedded views included.
+ *
+ * Exported for the guard suite: the gates below are a set membership test, so
+ * this set IS the behaviour worth testing, and testing it needs no React.
+ *
+ * @param viewId the View this layout belongs to — it seeds the embed chain, the
+ *   same way LayoutRenderer seeds `ctx.embedChain`. Absent (Home, the editor)
+ *   means nothing is above this layout.
+ */
+export function layoutChannelTypes(
+  layout: LayoutDTO,
+  views: readonly View[],
+  outputs: readonly Output[],
+  viewId?: string | null,
+): Set<string> {
+  const into = new Set<string>();
+  collectLayoutTypes(layout.objects, into, views, outputs, viewId ? [viewId] : []);
+  return into;
 }
 
 /** Live data + tickers shared by the kiosk renderer and the settings editor.
@@ -2555,17 +2623,20 @@ function collectLayoutTypes(objects: LayoutObject[] | undefined, into: Set<strin
  *  hooks are gated to the object types the layout contains — so a clock-only
  *  display doesn't subscribe to (or re-render on) SPL/transcript/wireless/etc.
  *  Called with no arg (editor) → every hook is enabled so previews always show data. */
-export function useLayoutData(layout?: LayoutDTO) {
+export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
+  // The state comes FIRST, before the gates that used to be computed above it:
+  // an embedded view's objects live in `state.views`, and a gate that cannot see
+  // them leaves every widget inside a tile without a channel.
+  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
+  const views = state?.views;
+  const outputs = state?.outputs;
   const types = useMemo(() => {
     if (!layout) return null; // editor / unknown → enable everything
-    const s = new Set<string>();
-    collectLayoutTypes(layout.objects, s);
-    return s;
-  }, [layout]);
+    return layoutChannelTypes(layout, views ?? [], outputs ?? [], viewId);
+  }, [layout, views, outputs, viewId]);
   const want = (kinds: string[]) => types === null || kinds.some((k) => types.has(k));
   const peopleWanted = want(["people-counter", "people-graph", "people-panel"]);
 
-  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript(want(["transcript-strip"]));
   const spl = useSplState(want(["spl-meter"]));
   const obs = useObsState(want(["obs-status"]));
@@ -2585,16 +2656,12 @@ export function useLayoutData(layout?: LayoutDTO) {
   // are the only things that draw presence — so a wall of clocks subscribes to
   // nothing, which was the whole objection to wiring this up at all.
   //
-  // "view-embed" is in the list because collectLayoutTypes cannot see inside one:
-  // an embedded view's objects are fetched separately, so a screen tile nested in
-  // one would report a set nobody filled and sit dark for ever. The dot read the
-  // state snapshot before this change and worked there, so leaving it out would
-  // be a regression, not a saving — and presence is one hydrated channel that
-  // broadcasts only on change, which is a far cheaper thing to open speculatively
-  // than a poll against a cloud API.
-  const onlineOutputIds = useDisplayPresence(
-    want(["screen-embed", "home-screens", "home-readiness", "view-embed"]),
-  );
+  // "view-embed" was in this list too, as a stand-in for the descent that did
+  // not exist: a screen tile nested inside an embedded view was invisible to the
+  // gate and its dot never lit. collectLayoutTypes now walks into embedded
+  // layouts, so that tile reports "screen-embed" on its own and the stand-in is
+  // gone — a view-embed of a clock no longer opens the presence channel.
+  const onlineOutputIds = useDisplayPresence(want(["screen-embed", "home-screens", "home-readiness"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
@@ -2645,7 +2712,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).

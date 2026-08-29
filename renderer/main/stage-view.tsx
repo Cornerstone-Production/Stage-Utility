@@ -480,14 +480,154 @@ export function StageView() {
     );
   }
 
-  // Custom-layout views render the visual-editor layout below the same kiosk top
-  // bar (brand + plan context + connect QR) the other views show.
-  if (kind === "custom") {
-    const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
-    if (activeView?.layout) {
+  // Every view kind, in ONE switch, with a `default` the type checker enforces.
+  //
+  // This was an if-chain with the slots body sitting after it as the implicit
+  // fallback, so a kind with no arm did not blank and did not throw — it drew
+  // MIC SLOTS. An eighth kind added by somebody who missed this file would have
+  // put a department's slot grid on an office wall, silently, and the first
+  // report of it would have come from whoever was standing in front of it.
+  //
+  // The guards above (blackout, unrouted) stay above: they hold whatever the
+  // kind is, and folding them in would make each of seven arms repeat them.
+  switch (kind) {
+    // Custom-layout views render the visual-editor layout below the same kiosk
+    // top bar (brand + plan context + connect QR) the other views show.
+    case "custom": {
+      const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
+      if (activeView?.layout) {
+        return (
+          <StageErrorBoundary>
+            <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+              <KioskTopBar
+                serviceTypeName={state.serviceTypeName}
+                planSeriesTitle={state.planSeriesTitle}
+                planTitle={state.planTitle}
+                showQr={state.showQr}
+                remoteUrl={state.remoteUrl}
+                displayName={displayName}
+                appName={state.appName}
+                appLogo={state.appLogo}
+                appLogoMonochrome={state.appLogoMonochrome}
+                locked={outputLocked}
+              />
+              <div className="flex-1 min-h-0">
+                {/* Controls are live only where the operator deliberately made
+                    them so. A screen is a read-only display unless it was set to
+                    panel mode, and a "/preview-…" iframe is always a display —
+                    otherwise the Screens page could advance the service by being
+                    looked at, since every card renders one. */}
+                <LayoutRenderer
+                  layout={activeView.layout}
+                  viewId={activeView.id}
+                  ndiSource={activeView.ndiSource ?? null}
+                  interactive={capabilityLive(
+                    contextForOutput(currentDisplay?.mode, !!previewViewId),
+                    "control",
+                  )}
+                  surface={viewSurface(activeView)}
+                />
+              </div>
+            </div>
+          </StageErrorBoundary>
+        );
+      }
       return (
         <StageErrorBoundary>
-          <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
+        </StageErrorBoundary>
+      );
+    }
+
+    // Dashboard- and stage-kind displays render entirely different views.
+    case "dashboard":
+      return (
+        <StageErrorBoundary>
+          <KioskFrame>
+            <DashboardView displayId={displayId} />
+          </KioskFrame>
+        </StageErrorBoundary>
+      );
+
+    case "stage":
+      return (
+        <StageErrorBoundary>
+          <KioskFrame>
+            <StageDisplayView displayId={displayId} />
+          </KioskFrame>
+        </StageErrorBoundary>
+      );
+
+    case "transcription":
+      return (
+        <StageErrorBoundary>
+          <KioskFrame>
+            <TranscriptionView displayId={displayId} />
+          </KioskFrame>
+        </StageErrorBoundary>
+      );
+
+    case "script": {
+      const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
+      return (
+        <StageErrorBoundary>
+          <KioskFrame>
+            <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} />
+          </KioskFrame>
+        </StageErrorBoundary>
+      );
+    }
+
+    case "spl-rundown":
+      return (
+        <StageErrorBoundary>
+          <KioskFrame>
+            <SplRundownView displayId={displayId} />
+          </KioskFrame>
+        </StageErrorBoundary>
+      );
+
+    case "slots": {
+      // Slots are the only kind whose content comes from Planning Center, so
+      // this check lives HERE rather than above the switch — where it sat while
+      // slots was the fallthrough, and where it would now wrongly gate a clock
+      // wall on a PCO connection nothing on it needs.
+      if (!state.pcoConfigured) {
+        return (
+          <StageErrorBoundary>
+            <KioskNotConfigured state={state} displayName={displayName} locked={outputLocked} />
+          </StageErrorBoundary>
+        );
+      }
+
+      // A preview reads the View's slots directly; a real output reads its own
+      // routed slots (no fallback to the primary display). In preview mode, an
+      // unsaved draft pushed from the Views editor (already resolved) takes
+      // precedence so edits show live; null draft falls back to saved state.
+      const displaySlots = previewViewId
+        ? (previewDraftSlots ?? state.slotsByView?.[previewViewId] ?? [])
+        // Derived rather than read from a second copy: slotsByDisplay held exactly
+        // slotsByView[thisOutput's View], and shipping both put ~6 KB of duplicate
+        // slot data in every state broadcast to every display.
+        : (state.slotsByView?.[state.resolvedByOutput?.[displayId]?.viewId ?? ""] ?? []);
+      const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
+
+      // Physical alignment: when the View has a slotsLayout, columns are sized in
+      // inches (against the monitor's active width) so they line up with the chargers.
+      const slotsView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
+      const slotsLayout = slotsView?.slotsLayout ?? null;
+
+      if (sortedSlots.length === 0) {
+        return (
+          <StageErrorBoundary>
+            <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
+          </StageErrorBoundary>
+        );
+      }
+
+      return (
+        <StageErrorBoundary>
+          <div className="flex flex-col h-[100dvh] overscroll-none overflow-hidden bg-transparent pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
             <KioskTopBar
               serviceTypeName={state.serviceTypeName}
               planSeriesTitle={state.planSeriesTitle}
@@ -500,151 +640,39 @@ export function StageView() {
               appLogoMonochrome={state.appLogoMonochrome}
               locked={outputLocked}
             />
-            <div className="flex-1 min-h-0">
-              {/* Controls are live only where the operator deliberately made
-                  them so. A screen is a read-only display unless it was set to
-                  panel mode, and a "/preview-…" iframe is always a display —
-                  otherwise the Screens page could advance the service by being
-                  looked at, since every card renders one. */}
-              <LayoutRenderer
-                layout={activeView.layout}
-                viewId={activeView.id}
-                ndiSource={activeView.ndiSource ?? null}
-                interactive={capabilityLive(
-                  contextForOutput(currentDisplay?.mode, !!previewViewId),
-                  "control",
-                )}
-                surface={viewSurface(activeView)}
-              />
+            {/* Desktop / kiosk: fill-height columns (stacked slots share a column).
+                With a slotsLayout, columns are inch-sized and centered so they line up
+                with the chargers; otherwise they share width equally. */}
+            <SlotsColumns
+              slots={sortedSlots}
+              slotsLayout={slotsLayout}
+              emptySlotLogo={state.emptySlotLogo}
+              defaultAvatar={state.defaultAvatar}
+              className="flex-1 max-sm:hidden"
+            />
+
+            {/* Phone: 2-up card grid, scrolls when it overflows (weekly-setup check).
+                container-type makes the card's cqw-based sizing scale to the card. */}
+            <div className="hidden max-sm:grid grid-cols-2 auto-rows-max content-start gap-2 p-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
+              {sortedSlots.filter((slot) => slot.link.kind !== "spacer").map((slot) => (
+                <div key={slot.id} className="aspect-[3/4] flex [container-type:inline-size]">
+                  <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} defaultAvatar={state.defaultAvatar} overlay />
+                </div>
+              ))}
             </div>
           </div>
         </StageErrorBoundary>
       );
     }
-    return (
-      <StageErrorBoundary>
-        <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
-      </StageErrorBoundary>
-    );
-  }
 
-  // Dashboard- and stage-kind displays render entirely different views.
-  if (kind === "dashboard") {
-    return (
-      <StageErrorBoundary>
-        <KioskFrame>
-          <DashboardView displayId={displayId} />
-        </KioskFrame>
-      </StageErrorBoundary>
-    );
+    default: {
+      // Exhaustive. Add a ViewKind without an arm above and this line stops
+      // compiling — which is the whole point of the switch. The runtime branch
+      // below is unreachable from TypeScript and reachable from a display
+      // holding a kind an older build never heard of.
+      const _never: never = kind;
+      void _never;
+      return <KioskError message={`Unknown view kind: ${String(kind)}`} />;
+    }
   }
-  if (kind === "stage") {
-    return (
-      <StageErrorBoundary>
-        <KioskFrame>
-          <StageDisplayView displayId={displayId} />
-        </KioskFrame>
-      </StageErrorBoundary>
-    );
-  }
-  if (kind === "transcription") {
-    return (
-      <StageErrorBoundary>
-        <KioskFrame>
-          <TranscriptionView displayId={displayId} />
-        </KioskFrame>
-      </StageErrorBoundary>
-    );
-  }
-  if (kind === "script") {
-    const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
-    return (
-      <StageErrorBoundary>
-        <KioskFrame>
-          <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} />
-        </KioskFrame>
-      </StageErrorBoundary>
-    );
-  }
-  if (kind === "spl-rundown") {
-    return (
-      <StageErrorBoundary>
-        <KioskFrame>
-          <SplRundownView displayId={displayId} />
-        </KioskFrame>
-      </StageErrorBoundary>
-    );
-  }
-
-  if (!state.pcoConfigured) {
-    return (
-      <StageErrorBoundary>
-        <KioskNotConfigured state={state} displayName={displayName} locked={outputLocked} />
-      </StageErrorBoundary>
-    );
-  }
-
-  // Slots-kind: a preview reads the View's slots directly; a real output reads
-  // its own routed slots (no fallback to the primary display). In preview mode,
-  // an unsaved draft pushed from the Views editor (already resolved) takes
-  // precedence so edits show live; null draft falls back to saved state.
-  const displaySlots = previewViewId
-    ? (previewDraftSlots ?? state.slotsByView?.[previewViewId] ?? [])
-    // Derived rather than read from a second copy: slotsByDisplay held exactly
-    // slotsByView[thisOutput'sView], and shipping both put ~6 KB of duplicate slot
-    // data in every state broadcast to every display.
-    : (state.slotsByView?.[state.resolvedByOutput?.[displayId]?.viewId ?? ""] ?? []);
-  const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
-
-  // Physical alignment: when the View has a slotsLayout, columns are sized in
-  // inches (against the monitor's active width) so they line up with the chargers.
-  const slotsView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
-  const slotsLayout = slotsView?.slotsLayout ?? null;
-
-  if (sortedSlots.length === 0) {
-    return (
-      <StageErrorBoundary>
-        <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
-      </StageErrorBoundary>
-    );
-  }
-
-  return (
-    <StageErrorBoundary>
-      <div className="flex flex-col h-[100dvh] overscroll-none overflow-hidden bg-transparent pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-        <KioskTopBar
-          serviceTypeName={state.serviceTypeName}
-          planSeriesTitle={state.planSeriesTitle}
-          planTitle={state.planTitle}
-          showQr={state.showQr}
-          remoteUrl={state.remoteUrl}
-          displayName={displayName}
-          appName={state.appName}
-          appLogo={state.appLogo}
-          appLogoMonochrome={state.appLogoMonochrome}
-          locked={outputLocked}
-        />
-        {/* Desktop / kiosk: fill-height columns (stacked slots share a column).
-            With a slotsLayout, columns are inch-sized and centered so they line up
-            with the chargers; otherwise they share width equally. */}
-        <SlotsColumns
-          slots={sortedSlots}
-          slotsLayout={slotsLayout}
-          emptySlotLogo={state.emptySlotLogo}
-          defaultAvatar={state.defaultAvatar}
-          className="flex-1 max-sm:hidden"
-        />
-
-        {/* Phone: 2-up card grid, scrolls when it overflows (weekly-setup check).
-            container-type makes the card's cqw-based sizing scale to the card. */}
-        <div className="hidden max-sm:grid grid-cols-2 auto-rows-max content-start gap-2 p-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
-          {sortedSlots.filter((slot) => slot.link.kind !== "spacer").map((slot) => (
-            <div key={slot.id} className="aspect-[3/4] flex [container-type:inline-size]">
-              <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} defaultAvatar={state.defaultAvatar} overlay />
-            </div>
-          ))}
-        </div>
-      </div>
-    </StageErrorBoundary>
-  );
 }
