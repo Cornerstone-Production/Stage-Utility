@@ -22,7 +22,7 @@ is taken arrives as `<name> (imported)`; the one you already had is untouched.
 
 | | |
 |---|---|
-| The layout, and any view it embeds with an **Embedded view** object | An embed whose target is missing renders an error, so dependencies come automatically |
+| The layout, and any view it embeds | An embed whose target is missing renders an error, so dependencies come automatically |
 | Slot rows | Every service type, not just the active one |
 | Notes and checklists | Keyed to their objects, so they follow them |
 | Images | Stored by content hash, so a logo you already have is shared, not duplicated |
