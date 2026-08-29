@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Tooltip } from "../components/ui/tooltip";
+import { parseColor } from "../components/ui/color-math";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
@@ -15,13 +16,25 @@ interface StageDisplayViewProps {
   displayId: string;
 }
 
-// White vs near-black text for a colored chip, by perceived luminance.
-function chipText(hex: string): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return "#fff";
-  const n = parseInt(m[1], 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+/**
+ * White vs near-black text for a colored chip, by perceived luminance.
+ *
+ * The PARSE is shared with every other colour helper (color-math's parseColor);
+ * the weights and the threshold are NOT, and must not be. These are YIQ weights
+ * at 0.6, answering "which text reads on this chip". color-math's isDark answers
+ * a near-enough question with different weights at 0.55, and hueOf in
+ * item-color.ts answers a third one — folding any of them together would flip
+ * text colours on a live stage display for no reason.
+ *
+ * The six-digit gate stays too. parseColor also accepts #rgb, #rrggbbaa and
+ * rgba(), and widening what this accepts is a behaviour change however harmless
+ * it looks; the leading hash stays OPTIONAL here, which it is nowhere else.
+ */
+export function chipText(hex: string): string {
+  if (!/^#?[0-9a-f]{6}$/i.test(hex)) return "#fff";
+  const c = parseColor(hex.startsWith("#") ? hex : `#${hex}`);
+  if (!c) return "#fff";
+  const lum = (0.299 * c.r + 0.587 * c.g + 0.114 * c.b) / 255;
   return lum > 0.6 ? "#111111" : "#fff";
 }
 
