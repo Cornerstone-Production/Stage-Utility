@@ -116,7 +116,8 @@ The honest cost of that call: the abstraction ships with one consumer, which is 
 - Create: `main/services/scores-parse.ts`
 - Create: `main/services/scores-parse.test.ts`
 - Create: `main/services/fixtures/espn-mlb-doubleheader.json`
-- Create: `main/services/fixtures/espn-nfl-timeout.json`
+- Create: `main/services/fixtures/espn-nfl-scoreboard.json`
+- Create: `main/services/fixtures/espn-football-in-play.json`
 
 **Interfaces:**
 - Produces: `ScoresConfig`, `ScoreFavourite`, `ScoreGameDTO`, `ScoreTeamDTO`, `ScoreSituation`, `ScoresStatusDTO`, `ScoreEvent`, `LEAGUES`, `LeagueId`; `fetchScoreboard(league, dates?)`, `fetchTeams(league)`; `parseScoreboard(league, json, favourites)`, `diffScores(prev, next)`, `sortGames(games)`.
@@ -206,11 +207,14 @@ export interface ScoreTeamDTO {
  * a discriminated union rather than a wide optional-everything record, and every
  * renderer switches on `kind` with a default that draws the status detail alone.
  *
- * NFL possession is deliberately absent. The research could not observe
- * `possession` / `downDistanceText` on a live payload (the one NFL game
- * available sat in an official timeout and its situation keys did not include
- * them), and a field nothing fills is a branch nothing exercises. Add it when
- * a live regular-season payload proves the name and type.
+ * Football possession IS carried, on evidence gathered after the research doc
+ * was written: `situation.possession` is a bare team id string, cross-checked
+ * against `drives.current.team.id` on the summary endpoint. It is OMITTED
+ * (absent, not null) in some states — an official timeout, and between a kickoff
+ * and the receiving team's first snap — and was present at the end of a quarter,
+ * so "absent at dead ball" is too broad a rule. Read it independently of
+ * `shortDownDistanceText`, which is present on that first snap when possession
+ * is not.
  */
 export type ScoreSituation =
   | {
@@ -222,7 +226,18 @@ export type ScoreSituation =
       strikes: number;
       outs: number;
     }
-  | { kind: "football"; down: number | null; distance: number | null; redZone: boolean }
+  | {
+      kind: "football";
+      down: number | null;
+      distance: number | null;
+      redZone: boolean;
+      /** The team id with the ball, or null. NOT possessionText (that is the
+       *  ball's field position) and NOT lastPlay.start.team.id (after a kickoff
+       *  that is the team who just kicked it away). */
+      possession: string | null;
+      /** "3rd & 10" — ESPN's short form. Independent of possession. */
+      downDistance: string | null;
+    }
   | { kind: "basketball" }
   | { kind: "hockey" };
 
@@ -304,7 +319,26 @@ mkdir -p main/services/fixtures
 curl -s 'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=20260829' \
   > main/services/fixtures/espn-mlb-doubleheader.json
 curl -s 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard' \
-  > main/services/fixtures/espn-nfl-timeout.json
+  > main/services/fixtures/espn-nfl-scoreboard.json
+# A football slate captured WHILE a game is in play, so it carries a real
+# situation.possession. College football, because the NFL regular season had not
+# started — same sport path, same situation keys.
+curl -s 'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard' \
+  > main/services/fixtures/espn-football-in-play.json
+```
+
+Each is then trimmed to the fields the parser reads (dropping `lastPlay`, which
+carries headshots and win-probability blocks nothing here touches). That takes the
+three from 321 KB / 292 KB / 306 KB to roughly 70 KB / 41 KB / 73 KB, which is the
+difference between a fixture a reviewer can read and one they cannot.
+
+Verify the in-play fixture actually caught a possession before committing:
+
+```bash
+node -e "const j=require('./main/services/fixtures/espn-football-in-play.json');
+const e=j.events.find(e=>e.competitions[0].situation?.possession);
+if(!e) throw new Error('fixture caught no in-play possession — recapture');
+console.log('possession:', e.shortName, e.competitions[0].situation.possession);"
 ```
 
 The MLB fixture **must** contain the BOS @ NYY doubleheader (events `401874913` and `401816717`). Verify before committing:
@@ -2187,7 +2221,7 @@ git commit -m "docs: live scores"
 
 - *The toast.* Replaced by the context-bar capsule at Henry's direction. `toast.tsx` is untouched.
 - *The composed pitch-by-pitch sentence* from the original screenshot ("Kevin Gausman throws 80 mph slider outside…"). Research §1.4 established it is not a field in any endpoint — ESPN composes it client-side. Reconstructing it costs a 752 KB per-game request. The scoreboard's own `situation.lastPlay.text` is free but terse ("Pitch 3 : Ball 2"). **Neither ships here.** The activity shows score, status and the sport centre; the play line is a follow-up worth costing separately, and building it on a guess about phrasing would be our prose presented as ESPN's.
-- *NFL possession and down-and-distance text.* Research could not observe `possession` / `downDistanceText` on a live payload. `down` and `distance` are in the DTO because they were observed; possession is not, per the constraint against DTO fields nothing fills.
+- *NFL possession.* **Now built, not omitted.** A live football payload probed after the research doc was written confirms `situation.possession` is a bare team id string ("23"), agreeing with `drives.current.team.id` on the summary endpoint. `shortDownDistanceText` ("3rd & 10") is preferred over `downDistanceText` ("3rd & 9 at SJSU 28"), whose field position the centre has no room for. Two traps are guarded by tests: `possessionText` is the ball's FIELD POSITION and matches no team id, and `lastPlay.start.team.id` names the kicking team between a kickoff and the first snap. Possession is absent (not null) in some states and is rendered as nothing when null. **Caveat carried into `docs/integrations/scores.md`:** every football observation is from `football/college-football`, because no NFL game was live on the capture date — the NFL shares the sport shape and situation keys, so this is strong evidence, not proof, and wants a spot-check against a live regular-season NFL game.
 - *Soccer, college.* The leagues table takes a row plus a fixture. Four leagues ship; the shape is built for more.
 - *Migrating the other three search popovers.* Flagged as a decision in File Structure with a recommendation and a follow-up.
 

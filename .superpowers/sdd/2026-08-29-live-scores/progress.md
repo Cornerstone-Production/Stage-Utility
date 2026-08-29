@@ -1,0 +1,2 @@
+# SDD ledger — plan: docs/superpowers/plans/2026-08-29-live-scores.md
+- Task 1 — ESPN client + pure folds. 17 tests added (suite 2560 -> 2577). Guards proven red: doubleheader diff key (team-only key reports BOS from:0 to:6 against the other half), null score coercion (`?? 0` -> "0 !== null"), possession-vs-possessionText ("SJSU 28" is neither 23 nor 30), possession/downDistance independence (football arm bailing on absent possession drops "1st & 10").
