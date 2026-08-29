@@ -1,0 +1,343 @@
+// Every screen a wall display can land on, asserted without a browser.
+//
+// Before resolveScreen existed, the only way to check "a blackout beats the
+// routed view" or "a lock never applies in the settings preview" was to open a
+// kiosk page and look at it. These are the same decisions, run as functions.
+
+import assert from "node:assert/strict";
+import { test, describe } from "node:test";
+
+import { resolveScreen, type ScreenInput } from "./stage-screen.js";
+
+// ---- fixtures ---------------------------------------------------------------
+
+function resolvedOutput(over: Partial<ResolvedOutput> = {}): ResolvedOutput {
+  return {
+    viewId: "v1",
+    kind: "slots",
+    ndiSource: null,
+    viewName: "Mic board",
+    blackout: false,
+    locked: false,
+    ...over,
+  };
+}
+
+function stageState(over: Partial<StageState> = {}): StageState {
+  return {
+    pcoConfigured: true,
+    views: [{ id: "v1", name: "Mic board", kind: "slots" }],
+    outputs: [{ id: "display-1", name: "Stage left", viewId: "v1" }],
+    resolvedByOutput: { "display-1": resolvedOutput() },
+    slotsByView: {},
+    ...over,
+  } as unknown as StageState;
+}
+
+function input(over: Partial<ScreenInput> = {}): ScreenInput {
+  return {
+    state: stageState(),
+    isLoading: false,
+    error: null,
+    displayId: "display-1",
+    previewViewId: null,
+    ...over,
+  };
+}
+
+// ---- lifecycle --------------------------------------------------------------
+
+describe("lifecycle comes first", () => {
+  test("loading beats everything, including a blackout", () => {
+    const screen = resolveScreen(input({
+      isLoading: true,
+      state: stageState({ resolvedByOutput: { "display-1": resolvedOutput({ blackout: true }) } }),
+    }));
+    assert.equal(screen.k, "loading");
+  });
+
+  test("an error beats a missing state", () => {
+    const screen = resolveScreen(input({ error: "SSE dropped", state: null }));
+    assert.deepEqual(screen, { k: "error", message: "SSE dropped" });
+  });
+
+  test("a missing state is an error, not an empty screen", () => {
+    const screen = resolveScreen(input({ state: null }));
+    assert.deepEqual(screen, { k: "error", message: "State is unavailable." });
+  });
+});
+
+// ---- output state -----------------------------------------------------------
+
+describe("output state", () => {
+  test("BLACKOUT beats the routed view", () => {
+    // Toggling blackout off must restore the view instantly, so blackout is a
+    // state, not a property of the view.
+    const screen = resolveScreen(input({
+      state: stageState({ resolvedByOutput: { "display-1": resolvedOutput({ blackout: true }) } }),
+    }));
+    assert.equal(screen.k, "blackout");
+  });
+
+  test("a blackout with nothing routed is still black, not the unrouted placeholder", () => {
+    // Blackout is checked BEFORE routing: an operator who blacks out a screen
+    // gets black, whatever that screen is (or is not) showing.
+    const screen = resolveScreen(input({
+      state: stageState({
+        resolvedByOutput: { "display-1": resolvedOutput({ viewId: null, blackout: true }) },
+      }),
+    }));
+    assert.equal(screen.k, "blackout");
+  });
+
+  test("a PREVIEW ignores blackout", () => {
+    // The settings live preview renders a view regardless of output routing.
+    const screen = resolveScreen(input({
+      displayId: "preview-v1",
+      previewViewId: "v1",
+      state: stageState({ resolvedByOutput: { "preview-v1": resolvedOutput({ blackout: true }) } }),
+    }));
+    assert.equal(screen.k, "view");
+  });
+
+  test("an output with no view routed is unrouted, not empty", () => {
+    const screen = resolveScreen(input({
+      state: stageState({ resolvedByOutput: { "display-1": resolvedOutput({ viewId: null }) } }),
+    }));
+    assert.equal(screen.k, "unrouted");
+  });
+
+  test("an output the server never resolved is unrouted", () => {
+    const screen = resolveScreen(input({ state: stageState({ resolvedByOutput: {} }) }));
+    assert.equal(screen.k, "unrouted");
+  });
+
+  test("carries the lock through, and never locks a preview", () => {
+    const locked = resolveScreen(input({
+      state: stageState({ resolvedByOutput: { "display-1": resolvedOutput({ locked: true }) } }),
+    }));
+    assert.equal(locked.k === "view" && locked.locked, true);
+
+    // The settings preview iframe is inside the operator app, where navigation
+    // has to keep working — a lock must never follow the View into it.
+    const preview = resolveScreen(input({
+      displayId: "preview-v1",
+      previewViewId: "v1",
+      state: stageState({ resolvedByOutput: { "preview-v1": resolvedOutput({ locked: true }) } }),
+    }));
+    assert.equal(preview.k === "view" && preview.locked, false);
+  });
+
+  test("the lock reaches the unrouted and not-configured screens too", () => {
+    const unrouted = resolveScreen(input({
+      state: stageState({
+        resolvedByOutput: { "display-1": resolvedOutput({ viewId: null, locked: true }) },
+      }),
+    }));
+    assert.deepEqual(unrouted, { k: "unrouted", displayName: null, locked: true });
+
+    const notConfigured = resolveScreen(input({
+      state: stageState({
+        pcoConfigured: false,
+        resolvedByOutput: { "display-1": resolvedOutput({ locked: true }) },
+      }),
+    }));
+    assert.deepEqual(notConfigured, { k: "not-configured", displayName: null, locked: true });
+  });
+
+  test("names the display only when there is more than one", () => {
+    // Today displayName is null on a single-display install. Preserve that.
+    const single = resolveScreen(input());
+    assert.equal(single.k === "view" && single.displayName, null);
+
+    const multi = resolveScreen(input({
+      state: stageState({
+        outputs: [
+          { id: "display-1", name: "Stage left", viewId: "v1" },
+          { id: "display-2", name: "Stage right", viewId: "v1" },
+        ] as unknown as Output[],
+      }),
+    }));
+    assert.equal(multi.k === "view" && multi.displayName, "Stage left");
+  });
+
+  test("falls back to the raw id when a named display is not in outputs", () => {
+    const screen = resolveScreen(input({
+      displayId: "display-9",
+      state: stageState({
+        outputs: [
+          { id: "display-1", name: "Stage left", viewId: "v1" },
+          { id: "display-2", name: "Stage right", viewId: "v1" },
+        ] as unknown as Output[],
+        resolvedByOutput: { "display-9": resolvedOutput() },
+      }),
+    }));
+    assert.equal(screen.k === "view" && screen.displayName, "display-9");
+  });
+
+  test("a preview is never named, however many displays exist", () => {
+    const screen = resolveScreen(input({
+      displayId: "preview-v1",
+      previewViewId: "v1",
+      state: stageState({
+        outputs: [
+          { id: "display-1", name: "Stage left", viewId: "v1" },
+          { id: "display-2", name: "Stage right", viewId: "v1" },
+        ] as unknown as Output[],
+      }),
+    }));
+    assert.equal(screen.k === "view" && screen.displayName, null);
+  });
+});
+
+// ---- view kind --------------------------------------------------------------
+
+describe("the view kind", () => {
+  test("prefers the preview's kind over the routed one", () => {
+    const screen = resolveScreen(input({
+      displayId: "preview-v2",
+      previewViewId: "v2",
+      state: stageState({
+        views: [
+          { id: "v1", name: "Mic board", kind: "slots" },
+          { id: "v2", name: "Lobby", kind: "dashboard" },
+        ] as unknown as View[],
+        resolvedByOutput: { "preview-v2": resolvedOutput({ kind: "slots" }) },
+      }),
+    }));
+    assert.equal(screen.k === "view" && screen.kind, "dashboard");
+    assert.equal(screen.k === "view" && screen.isPreview, true);
+  });
+
+  test("takes the routed view's kind when not previewing", () => {
+    const screen = resolveScreen(input({
+      state: stageState({
+        views: [{ id: "v1", name: "Lobby", kind: "dashboard" }] as unknown as View[],
+        resolvedByOutput: { "display-1": resolvedOutput({ kind: "dashboard" }) },
+      }),
+    }));
+    assert.equal(screen.k === "view" && screen.kind, "dashboard");
+    assert.equal(screen.k === "view" && screen.isPreview, false);
+  });
+
+  test("resolves the View object the arm will need", () => {
+    // StageView computed activeView separately in the custom arm, the script arm
+    // and the slots arm — the same expression all three times. One resolution
+    // here serves all of them.
+    const custom = resolveScreen(input({
+      state: stageState({
+        views: [{ id: "v1", name: "Wall", kind: "custom", layout: { canvas: { width: 1920 }, objects: [] } }] as unknown as View[],
+        resolvedByOutput: { "display-1": resolvedOutput({ kind: "custom" }) },
+      }),
+    }));
+    assert.equal(custom.k === "view" && custom.view?.id, "v1");
+
+    const script = resolveScreen(input({
+      state: stageState({
+        views: [{ id: "v1", name: "Script", kind: "script", scriptViewLayoutId: "sl1" }] as unknown as View[],
+        resolvedByOutput: { "display-1": resolvedOutput({ kind: "script" }) },
+      }),
+    }));
+    assert.equal(script.k === "view" && script.view?.scriptViewLayoutId, "sl1");
+  });
+
+  test("the preview's own View wins over the routed one", () => {
+    const screen = resolveScreen(input({
+      displayId: "preview-v2",
+      previewViewId: "v2",
+      state: stageState({
+        views: [
+          { id: "v1", name: "Mic board", kind: "slots" },
+          { id: "v2", name: "Lobby", kind: "slots" },
+        ] as unknown as View[],
+      }),
+    }));
+    assert.equal(screen.k === "view" && screen.view?.id, "v2");
+  });
+
+  test("routing that points at a deleted View still resolves a screen, with no View", () => {
+    const screen = resolveScreen(input({
+      state: stageState({
+        views: [],
+        resolvedByOutput: { "display-1": resolvedOutput({ viewId: "gone" }) },
+      }),
+    }));
+    assert.equal(screen.k === "view" && screen.view, null);
+  });
+
+  test("every non-slots kind reaches its own arm", () => {
+    for (const kind of ["dashboard", "stage", "transcription", "script", "spl-rundown"] as const) {
+      const screen = resolveScreen(input({
+        state: stageState({
+          views: [{ id: "v1", name: "V", kind }] as unknown as View[],
+          resolvedByOutput: { "display-1": resolvedOutput({ kind }) },
+        }),
+      }));
+      assert.equal(screen.k, "view", `${kind} should render a view`);
+      assert.equal(screen.k === "view" && screen.kind, kind);
+    }
+  });
+
+  test("a custom View with a layout renders it; one without is empty", () => {
+    const drawn = resolveScreen(input({
+      state: stageState({
+        views: [{ id: "v1", name: "Wall", kind: "custom", layout: { canvas: { width: 1920 }, objects: [] } }] as unknown as View[],
+        resolvedByOutput: { "display-1": resolvedOutput({ kind: "custom" }) },
+      }),
+    }));
+    assert.equal(drawn.k, "view");
+
+    const blank = resolveScreen(input({
+      state: stageState({
+        views: [{ id: "v1", name: "Wall", kind: "custom" }] as unknown as View[],
+        resolvedByOutput: { "display-1": resolvedOutput({ kind: "custom" }) },
+      }),
+    }));
+    assert.deepEqual(blank, { k: "empty", displayName: null, locked: false });
+  });
+
+  test("slots without Planning Center is not-configured", () => {
+    const screen = resolveScreen(input({ state: stageState({ pcoConfigured: false }) }));
+    assert.equal(screen.k, "not-configured");
+  });
+
+  test("Planning Center is only a prerequisite for slots, not for the other kinds", () => {
+    // A dashboard or a custom wall does not need PCO to draw itself, and the
+    // check sits after those arms so it never intercepts them.
+    const screen = resolveScreen(input({
+      state: stageState({
+        pcoConfigured: false,
+        views: [{ id: "v1", name: "Lobby", kind: "dashboard" }] as unknown as View[],
+        resolvedByOutput: { "display-1": resolvedOutput({ kind: "dashboard" }) },
+      }),
+    }));
+    assert.equal(screen.k, "view");
+  });
+
+  test("a configured slots display reaches the slots arm", () => {
+    const screen = resolveScreen(input());
+    assert.deepEqual(screen, {
+      k: "view",
+      kind: "slots",
+      view: { id: "v1", name: "Mic board", kind: "slots" },
+      displayId: "display-1",
+      displayName: null,
+      locked: false,
+      isPreview: false,
+    });
+  });
+
+  test("a preview of a View that no longer exists falls back to slots (known bug)", () => {
+    // `?? "slots"` means a screen whose routing fails to resolve renders
+    // somebody's mic slots. Moved here verbatim and pinned by this test so the
+    // change that fixes it is visible as a change; it is NOT fixed in this
+    // refactor.
+    const screen = resolveScreen(input({
+      displayId: "preview-gone",
+      previewViewId: "gone",
+      state: stageState({ views: [] }),
+    }));
+    assert.equal(screen.k === "view" && screen.kind, "slots");
+    assert.equal(screen.k === "view" && screen.view, null);
+  });
+});
