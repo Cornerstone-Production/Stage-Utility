@@ -25,17 +25,43 @@ Object.defineProperty(HTMLElement.prototype, "clientHeight", {
   configurable: true,
 });
 
-// jsdom ships no EventSource, and a render opens the state stream.
+// jsdom ships no EventSource, and a render opens the state stream. This one
+// DELIVERS: a stub whose addEventListener was a no-op let a hook that subscribed
+// and never updated pass a full suite green — which is the exact behaviour this
+// file exists for, since the dot going dark when a tab closes arrives only ever
+// as a pushed frame.
+type Frame = (e: { data: string }) => void;
+const streams: StubEventSource[] = [];
 class StubEventSource {
   static readonly CONNECTING = 0;
   readyState = 0;
   onmessage: unknown = null;
   onerror: unknown = null;
-  addEventListener(): void {}
-  removeEventListener(): void {}
+  onopen: unknown = null;
+  listeners = new Map<string, Set<Frame>>();
+  constructor() {
+    streams.push(this);
+  }
+  addEventListener(channel: string, cb: Frame): void {
+    let set = this.listeners.get(channel);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(channel, set);
+    }
+    set.add(cb);
+  }
+  removeEventListener(channel: string, cb: Frame): void {
+    this.listeners.get(channel)?.delete(cb);
+  }
   close(): void {}
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
+
+/** Push a `displays:presence` frame down every open stream, as the server does. */
+function pushPresence(connected: string[], rev: number): void {
+  const data = JSON.stringify({ connected, rev });
+  for (const s of streams) for (const cb of [...(s.listeners.get("displays:presence") ?? [])]) cb({ data });
+}
 
 const ROUTED_VIEW: View = {
   id: "v-1",
@@ -63,24 +89,37 @@ const { useDisplayPresence } = await import("./use-display-presence.js");
 const STATE: StageState = { ...DEFAULT_STAGE_STATE, views: [ROUTED_VIEW], outputs: [] };
 
 /** Every path a render touches, plus a settable presence answer. */
-let presence: { connected: string[] } = { connected: [] };
+let presence: { connected: string[]; rev: number } = { connected: [], rev: 0 };
 let presenceReads: string[] = [];
+/** When set, the presence read hangs until this resolves — so a test can land a
+ *  pushed frame while the read is genuinely in flight. */
+let holdPresence: Promise<void> | null = null;
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
   const u = String(url);
-  if (u.includes("/api/displays/presence")) presenceReads.push(u);
-  const body = u.includes("/api/displays/presence")
+  const isPresence = u.includes("/api/displays/presence");
+  if (isPresence) presenceReads.push(u);
+  const body = isPresence
     ? presence
     : u.includes("/api/state")
       ? STATE
       : u.includes("transcript")
         ? []
         : {};
-  return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+  return {
+    ok: true,
+    status: 200,
+    // apiFetch returns res.json(), so a pending json() defers the whole read.
+    json: async () => {
+      if (isPresence && holdPresence) await holdPresence;
+      return isPresence ? presence : body;
+    },
+    text: async () => JSON.stringify(body),
+  };
 };
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
-beforeEach(() => { cleanup(); presenceReads = []; });
+beforeEach(() => { cleanup(); presenceReads = []; holdPresence = null; });
 afterEach(async () => { cleanup(); await settle(); });
 
 async function draw(element: React.ReactElement) {
@@ -163,7 +202,7 @@ describe("useDisplayPresence", () => {
     // Presence broadcasts ONLY when it changes, so a hook that only subscribed
     // would render every dot dark in a quiet building until somebody unplugged
     // something. This is the read that makes the first paint true.
-    presence = { connected: ["out-1", "out-9"] };
+    presence = { connected: ["out-1", "out-9"], rev: 3 };
     const container = await draw(React.createElement(Probe, { enabled: true, onIds: () => {} }));
     assert.equal(container.textContent, "out-1,out-9");
     assert.equal(presenceReads.length, 1, "the hook did not read presence on mount");
@@ -173,7 +212,7 @@ describe("useDisplayPresence", () => {
     // The objection that kept the fake in place: an object on a wall display has
     // no business subscribing to presence. It does not have to — the gate is the
     // same one useObsState is behind.
-    presence = { connected: ["out-1"] };
+    presence = { connected: ["out-1"], rev: 3 };
     const container = await draw(React.createElement(Probe, { enabled: false, onIds: () => {} }));
     assert.equal(container.textContent, "");
     assert.equal(presenceReads.length, 0, "a disabled hook still asked the server for presence");
@@ -182,7 +221,7 @@ describe("useDisplayPresence", () => {
   test("a failed read reports nothing, never a stale everything", async () => {
     // "We do not know" has to read as NOT connected. The one direction a failure
     // must never fall is the reassuring one.
-    presence = { connected: ["out-1"] };
+    presence = { connected: ["out-1"], rev: 3 };
     const realFetch = (globalThis as unknown as { fetch: unknown }).fetch;
     (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
       if (String(url).includes("/api/displays/presence")) throw new Error("offline");
@@ -191,6 +230,78 @@ describe("useDisplayPresence", () => {
     try {
       const container = await draw(React.createElement(Probe, { enabled: true, onIds: () => {} }));
       assert.equal(container.textContent, "");
+    } finally {
+      (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
+    }
+  });
+});
+
+describe("useDisplayPresence stays live after the first read", () => {
+  // The half that ships broken and green: a hook that subscribes and never
+  // applies what it is handed. Replacing the notification body with a no-op left
+  // every other test in this file passing, because they only exercise the mount
+  // read — and the behaviour the whole task exists for, a dot going dark when a
+  // tab closes, arrives ONLY as a pushed frame.
+
+  test("a screen that appears in a pushed set lights up", async () => {
+    // Revisions only ever go up across this file: api.ts caches the last payload
+    // per channel for the life of the module, so a later test reading a LOWER
+    // revision than an earlier test pushed is a server that cannot exist.
+    presence = { connected: [], rev: 5 };
+    const container = await draw(React.createElement(Probe, { enabled: true, onIds: () => {} }));
+    assert.equal(container.textContent, "", "the mount read should have reported nothing");
+    await act(async () => { pushPresence(["out-1"], 6); await settle(); });
+    assert.equal(container.textContent, "out-1", "a pushed connection never reached the hook");
+  });
+
+  test("a screen that DISAPPEARS from a pushed set goes dark — the closed tab", async () => {
+    // This is the transition the routed-set fake could never produce: nothing
+    // about the screen's configuration changed, only whether a browser is on it.
+    presence = { connected: ["out-1", "out-2"], rev: 10 };
+    const container = await draw(React.createElement(Probe, { enabled: true, onIds: () => {} }));
+    assert.equal(container.textContent, "out-1,out-2");
+    await act(async () => { pushPresence(["out-1"], 11); await settle(); });
+    assert.equal(container.textContent, "out-1", "the closed screen stayed lit");
+    await act(async () => { pushPresence([], 12); await settle(); });
+    assert.equal(container.textContent, "", "the last screen closing left the hook lit");
+  });
+
+  test("a push that lands mid-read is not clobbered by the older read", async () => {
+    // Both deliver the same server-side truth, and arrival order does not say
+    // which is newer. Ordered by revision: the read was computed at rev 20, the
+    // broadcast is rev 21, so the broadcast stands. Last-write-wins would put the
+    // closed screen back and leave it there until the next change.
+    let release!: () => void;
+    holdPresence = new Promise<void>((r) => { release = r; });
+    presence = { connected: ["out-1", "out-2"], rev: 20 };
+    const container = await draw(React.createElement(Probe, { enabled: true, onIds: () => {} }));
+    await act(async () => { pushPresence(["out-1"], 21); await settle(); });
+    assert.equal(container.textContent, "out-1");
+    await act(async () => { release(); await settle(); });
+    assert.equal(container.textContent, "out-1", "the in-flight read overwrote a newer broadcast");
+  });
+
+  test("a failing read on re-enable clears what was there, rather than leaving it lit", async () => {
+    // First mount reads a live screen, then the hook is disabled and re-enabled
+    // with the read failing. Without the clear, `out-1` survives in state and
+    // renders as Connected on the strength of a read that just failed.
+    presence = { connected: ["out-1"], rev: 30 };
+    let result!: { rerender: (el: React.ReactElement) => void; container: HTMLElement };
+    const probe = (enabled: boolean) =>
+      React.createElement(TooltipProvider as never, null, React.createElement(Probe, { enabled, onIds: () => {} }));
+    await act(async () => { result = render(probe(true)) as never; await settle(); });
+    assert.equal(result.container.textContent, "out-1");
+
+    await act(async () => { result.rerender(probe(false)); await settle(); });
+
+    const realFetch = (globalThis as unknown as { fetch: unknown }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
+      if (String(url).includes("/api/displays/presence")) throw new Error("offline");
+      return (realFetch as (u: unknown) => Promise<unknown>)(url);
+    };
+    try {
+      await act(async () => { result.rerender(probe(true)); await settle(); });
+      assert.equal(result.container.textContent, "", "a failed re-read left the old set lit");
     } finally {
       (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
     }
