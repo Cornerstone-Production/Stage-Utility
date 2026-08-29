@@ -776,7 +776,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
  * the guard test calls THIS, so it fails on the behaviour changing rather than
  * on a string moving inside a 2,500-line file.
  */
-export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = ["script"];
+export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = ["script", "calendar"];
 
 export function isEmbeddableViewKind(kind: ViewKind): boolean {
   return EMBEDDABLE_VIEW_KINDS.includes(kind);

@@ -66,6 +66,7 @@ import { randomUUID } from "node:crypto";
 import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
+import { calendarRoutes } from "./routes/calendar-routes.js";
 
 /**
  * Route modules, in dispatch order. Order is load-bearing: a module that
@@ -94,6 +95,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   systemRoutes,
   brandingRoutes,
   presetRoutes,
+  calendarRoutes,
 ] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────

@@ -18,7 +18,9 @@ import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../t
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
-import { hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
+import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
+import { buildGrid, gridWindow, type CalendarGrid } from "./calendar-grid.js";
+import { pcoCalendarService } from "./pco-calendar-service.js";
 
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
@@ -876,6 +878,46 @@ export class StageController {
       pcoService.listTeamNames(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId),
     ]);
     return { categories, teams };
+  }
+
+  /**
+   * This month's Planning Center Calendar, already bucketed into squares.
+   *
+   * Built here, never in the browser. The squares are calendar DAYS, and which
+   * day an instant falls on is a question only the app time zone can answer —
+   * see calendar-grid.ts. The renderer gets days and a zone, not instants and a
+   * guess.
+   *
+   * The anchor is "now", so the grid rolls to the next month by itself: the
+   * client refetches on a timer and gets whatever month it is in the app's zone,
+   * with no state to go stale on a display nobody touches for a year.
+   *
+   * A failure to reach PCO PROPAGATES — the route answers 502 and the display
+   * says it could not read the calendar. An empty grid would be a lie, and a
+   * month that quietly empties itself is exactly the kind of absence nobody
+   * reports.
+   */
+  async getCalendarGrid(viewId: string | null): Promise<CalendarGrid> {
+    const zone = appTimeZone();
+    const anchorIso = new Date().toISOString();
+    // Not configured is not an error: a display routed to a calendar before
+    // Planning Center is connected should draw an empty month, and the renderer
+    // reads pcoConfigured off the state it already has to say which it is.
+    if (!this.pcoAppId || !this.pcoSecret) return buildGrid([], anchorIso, zone);
+
+    // viewId is accepted now and unused until the per-view calendar and tag
+    // filters exist. Reading the view here rather than later keeps the route's
+    // shape settled while the filters are built.
+    void viewId;
+
+    const { fromIso, toIso } = gridWindow(anchorIso, zone);
+    const events = await pcoCalendarService.listEventInstances(this.pcoAppId, this.pcoSecret, {
+      fromIso,
+      toIso,
+      calendarIds: [],
+      tagIds: [],
+    });
+    return buildGrid(events, anchorIso, zone);
   }
 
   // ── ScriptView (in-app ScriptViewer replacement) ────────────────────────

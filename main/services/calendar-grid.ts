@@ -16,8 +16,10 @@
 // carries: an event's TIME still has to be printed, and printing it in the
 // browser's zone is the same failure a formatting step later.
 
-import type { CalendarEventDTO } from "../types/calendar.js";
+import type { CalendarDay, CalendarEventDTO, CalendarGrid } from "../types/calendar.js";
 import { appTimeZone, startOfZonedDay, zonedDateKey, zonedParts, type TimeZone } from "./app-timezone.js";
+
+export type { CalendarDay, CalendarGrid } from "../types/calendar.js";
 
 /**
  * Six weeks, always.
@@ -45,40 +47,6 @@ const MONTH_NAMES = [
   "November",
   "December",
 ];
-
-/** One square of the grid. */
-export interface CalendarDay {
-  /** YYYY-MM-DD, in the app time zone. */
-  date: string;
-  /**
-   * False for the leading and trailing squares that belong to the adjacent
-   * months. They carry real events and are not filler — the renderer dims them,
-   * it does not skip them.
-   */
-  inMonth: boolean;
-  /** All-day events first, then timed ones in start order. An event spanning
-   *  several days appears in each day it touches, not only the first. */
-  events: CalendarEventDTO[];
-}
-
-export interface CalendarGrid {
-  /** e.g. "August 2026". */
-  monthLabel: string;
-  /** Exactly {@link DAYS_IN_GRID}, in order, starting on a Sunday. */
-  days: CalendarDay[];
-  /**
-   * The zone every date above was computed in.
-   *
-   * Sent so the renderer can print event times and decide which square is today
-   * in the SAME zone the squares were built in. Without it a browser set to
-   * another zone draws a correct grid with the wrong times on it.
-   */
-  zone: TimeZone;
-  /** Events that carried an unparseable time and landed on no square. Normally
-   *  zero; a non-zero count is a contract breach worth surfacing rather than a
-   *  routine case, so the caller gets the number instead of a log line. */
-  unplaceable: number;
-}
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");

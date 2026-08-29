@@ -167,6 +167,13 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "pco:getPlanItems":
       return apiFetch<T>("/api/pco/plan-items");
 
+    // The month grid, already bucketed into days in the app time zone. The
+    // browser is never given raw instants to bucket — see calendar-grid.ts.
+    case "calendar:getGrid": {
+      const viewId = typeof p.viewId === "string" ? p.viewId : null;
+      return apiFetch<T>(`/api/pco/calendar${viewId ? `?viewId=${encodeURIComponent(viewId)}` : ""}`);
+    }
+
     // The pre-service checklist, read from the plan's notes in Planning Center.
     case "checklist:get":
       return apiFetch<T>("/api/pco/checklist");

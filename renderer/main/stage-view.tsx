@@ -12,6 +12,7 @@ import { StageDisplayView } from "./stage-display-view";
 import { TranscriptionView } from "./transcription-view";
 import { ScriptView } from "./script-view";
 import { SplRundownView } from "./spl-rundown-view";
+import { CalendarView } from "./calendar-view";
 import { LayoutRenderer } from "./layout-renderer";
 import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface } from "@main/types/views";
@@ -548,6 +549,21 @@ export function StageView() {
     return (
       <StageErrorBoundary>
         <SplRundownView displayId={displayId} />
+      </StageErrorBoundary>
+    );
+  }
+  if (kind === "calendar") {
+    return (
+      <StageErrorBoundary>
+        {/* CalendarMonth sizes to h-full so the same component can live inside a
+            layout object; the screen height and the safe-area insets belong to
+            this route, exactly as they do for the script kind above. */}
+        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          <CalendarView
+            viewId={resolved?.viewId ?? previewViewId ?? null}
+            pcoConfigured={state.pcoConfigured ?? false}
+          />
+        </div>
       </StageErrorBoundary>
     );
   }

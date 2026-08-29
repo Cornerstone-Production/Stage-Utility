@@ -142,7 +142,7 @@ describe("embedding cannot recurse", () => {
     // EXACT, not a floor. A new View kind must not become embeddable by default
     // — every renderer currently assumes it owns the screen, and finding out on
     // a stage monitor is the wrong time.
-    assert.deepEqual([...EMBEDDABLE_VIEW_KINDS], ["script"]);
+    assert.deepEqual([...EMBEDDABLE_VIEW_KINDS], ["script", "calendar"]);
   });
 
   it("never offers a kind it cannot render", () => {

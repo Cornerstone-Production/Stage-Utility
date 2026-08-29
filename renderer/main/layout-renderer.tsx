@@ -34,6 +34,7 @@ import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { EMBED_FONT_FRACTION, isEmbeddableViewKind } from "./layout-objects";
 import { ScriptView } from "./script-view";
+import { CalendarView } from "./calendar-view";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
@@ -2186,6 +2187,27 @@ function ViewEmbedObject({
 
   if (!config.viewId) return notice("Pick a view to embed");
   if (!view) return notice("That view no longer exists");
+
+  if (view.kind === "calendar") {
+    // Its own arm rather than a shared one: the calendar takes no ScriptView
+    // props and, unlike the rundown, does not inherit a font size — its squares
+    // are sized by the box, and forcing an inherited font on a six-row grid
+    // makes the rows overflow rather than shrink.
+    //
+    // now + skewMs, not Date.now(): this app has one clock, corrected against the
+    // server, and "which square is today" must be asked on that one. The
+    // component's own minute tick is skipped while a value is supplied, since
+    // ctx.now already ticks.
+    return (
+      <div className="w-full h-full">
+        <CalendarView
+          viewId={view.id}
+          pcoConfigured={ctx.state.pcoConfigured ?? false}
+          nowMs={ctx.now + ctx.skewMs}
+        />
+      </div>
+    );
+  }
 
   if (isEmbeddableViewKind(view.kind)) {
     // w-full h-full, not the object's alignment: boxStyle turns every object into

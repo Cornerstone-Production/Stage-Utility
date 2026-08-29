@@ -67,6 +67,48 @@ export interface CalendarWindow {
   tagIds: readonly string[];
 }
 
+/**
+ * One square of a month grid.
+ *
+ * A DAY, not a range of instants. Which day an instant falls on is a question
+ * only the app time zone can answer, so the bucketing happens on the server —
+ * see main/services/calendar-grid.ts.
+ */
+export interface CalendarDay {
+  /** YYYY-MM-DD, in the app time zone. */
+  date: string;
+  /**
+   * False for the leading and trailing squares that belong to the adjacent
+   * months. They carry real events and are not filler — the renderer dims them,
+   * it does not skip them.
+   */
+  inMonth: boolean;
+  /** All-day events first, then timed ones in start order. An event spanning
+   *  several days appears in each day it touches, not only the first. */
+  events: CalendarEventDTO[];
+}
+
+/** A month as six weeks of squares, ready to draw. */
+export interface CalendarGrid {
+  /** e.g. "August 2026". */
+  monthLabel: string;
+  /** Exactly 42, in order, starting on a Sunday. Six weeks always, so the grid
+   *  does not change height between months. */
+  days: CalendarDay[];
+  /**
+   * The zone every date above was computed in.
+   *
+   * Sent so the renderer can print event times, and decide which square is
+   * today, in the SAME zone the squares were built in. Without it a browser set
+   * to another zone draws a correct grid with the wrong times on it.
+   */
+  zone: string;
+  /** Events that carried an unparseable time and landed on no square. Normally
+   *  zero; a non-zero count is a contract breach worth surfacing rather than a
+   *  routine case, so the caller gets the number instead of a log line. */
+  unplaceable: number;
+}
+
 /** One of the org's calendars, for the picker. */
 export interface CalendarSourceDTO {
   id: string;
