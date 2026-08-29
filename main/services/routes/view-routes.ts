@@ -27,8 +27,15 @@ import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../..
 import { LayoutConflictError, stageController } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 
-/** An untrusted body value that is a list of `{ id, name }` strings. */
-function isSelectionList(v: unknown): boolean {
+/**
+ * An untrusted body value that is a list of `{ id, name }` strings.
+ *
+ * A type PREDICATE, so the narrowing it performs is the thing handed on. The
+ * first draft returned a bare boolean and needed a second function to rebuild
+ * the list past a cast — two passes over the same value where one does, and the
+ * cast was the part that asserted rather than proved.
+ */
+function isSelectionList(v: unknown): v is CalendarSelection[] {
   return (
     Array.isArray(v) &&
     v.every(
@@ -39,12 +46,6 @@ function isSelectionList(v: unknown): boolean {
         typeof (e as { name?: unknown }).name === "string",
     )
   );
-}
-
-/** Rebuild the list from its checked fields rather than casting it. A cast
- *  asserts a shape without proving it, and this one arrives from the network. */
-function asSelectionList(v: unknown): CalendarSelection[] {
-  return (v as { id: string; name: string }[]).map((e) => ({ id: e.id, name: e.name }));
 }
 
 /**
@@ -288,12 +289,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // Both calendar lists move together — a picker change sends the pair, so a
       // request carrying one and not the other is a client that has lost half its
       // state, not a partial update to honour.
-      const hasCalendarFilters =
-        "calendarSources" in body &&
-        "calendarTags" in body &&
-        isSelectionList(body.calendarSources) &&
-        isSelectionList(body.calendarTags);
-      if (("calendarSources" in body || "calendarTags" in body) && !hasCalendarFilters) {
+      const calendarFilters =
+        isSelectionList(body.calendarSources) && isSelectionList(body.calendarTags)
+          ? { sources: body.calendarSources, tags: body.calendarTags }
+          : null;
+      if (("calendarSources" in body || "calendarTags" in body) && !calendarFilters) {
         error(res, "body.calendarSources and body.calendarTags must BOTH be arrays of { id, name } strings");
         return;
       }
@@ -302,7 +302,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // as anything reading the code — or analysing it — can tell.
       const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
       const hasSurface = surface !== null;
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface && !hasCalendarFilters) {
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface && !calendarFilters) {
         error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.scriptViewLayoutId (string|null), or body.calendarSources + body.calendarTags (arrays) required");
         return;
       }
@@ -338,12 +338,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
       if (hasScriptViewLayout) state = await stageController.setViewScriptViewLayout(id, body.scriptViewLayoutId as string | null);
-      if (hasCalendarFilters) {
-        state = await stageController.setViewCalendarFilters(
-          id,
-          asSelectionList(body.calendarSources),
-          asSelectionList(body.calendarTags),
-        );
+      if (calendarFilters) {
+        state = await stageController.setViewCalendarFilters(id, calendarFilters.sources, calendarFilters.tags);
       }
       json(res, state);
       return;

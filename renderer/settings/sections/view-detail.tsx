@@ -306,7 +306,7 @@ export function ViewDetail({
       ) : view.kind === "calendar" ? (
         <>
           <Separator />
-          <CalendarSources view={view} />
+          <CalendarSources view={view} pcoConfigured={stageState.pcoConfigured ?? false} />
           <p className="text-caption2 text-fg-muted">
             The calendar view draws this month from Planning Center Calendar, six weeks at a time,
             and marks whatever is running now. There is no booking-versus-event distinction because

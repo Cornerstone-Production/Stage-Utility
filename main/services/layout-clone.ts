@@ -114,7 +114,10 @@ const DEFAULT_VIEW_NAMES: Record<ViewKind, string> = {
 export function defaultViewName(kind: ViewKind): string {
   // The lookup can still miss: `kind` reaches here from a request body and from
   // views.json, either of which can carry a kind this build has never heard of.
-  return DEFAULT_VIEW_NAMES[kind] ?? "Slots";
+  // "View", NOT "Slots" — a fallback naming an unrecognised kind after a real
+  // one is the bug the record above replaced, and repeating it here would put it
+  // back one line down.
+  return DEFAULT_VIEW_NAMES[kind] ?? "View";
 }
 
 /** A sensible starting layout for a new custom View — proves the schema and

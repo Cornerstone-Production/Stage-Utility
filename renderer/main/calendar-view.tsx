@@ -7,11 +7,12 @@
 // rendered in a test at all.
 //
 // NO BUCKETING HAPPENS HERE. Which calendar day an instant falls on is a
-// question only the app time zone can answer, and that zone is a server setting
-// the browser cannot see. The server sends days, and the zone it used, so the
-// times printed on them are printed in the same zone — a laptop set to another
-// zone would otherwise draw a correct grid with the wrong times on it. See
-// main/services/calendar-grid.ts.
+// question only the app time zone can answer, and that zone is a SERVER SETTING
+// the browser cannot ask for. So the server sends days, and the zone it used —
+// and this file then reasons in that zone with the very same helpers the server
+// bucketed with, so the two cannot come to disagree by a day. A laptop set to
+// another zone would otherwise draw a correct grid with the wrong times on it.
+// See main/services/calendar-grid.ts.
 //
 // THIS IS AN OFFICE DISPLAY, read from a desk, not a stage display read from
 // thirty feet. Six rows of squares each holding several events cannot carry
@@ -20,10 +21,13 @@
 // waiting to be "fixed" up to stage sizes.
 
 import { useCallback, useEffect, useState } from "react";
-import { CalendarDaysIcon, Loader2Icon } from "lucide-react";
+import { AlertCircleIcon, CalendarDaysIcon, Loader2Icon } from "lucide-react";
 
 import { invoke } from "../lib/api";
+import { formatClock } from "../lib/clock-format";
 import { cn } from "../lib/cn";
+import { contrastRatio, formatColor, parseColor } from "../components/ui/color-math";
+import { zonedDateKey } from "@main/services/app-timezone";
 import type { CalendarDay, CalendarEventDTO, CalendarGrid } from "@main/types/calendar";
 
 /** Sunday first, matching the grid the server builds. */
@@ -56,37 +60,6 @@ const MAX_EVENTS_PER_DAY = 4;
 
 // ── colour ───────────────────────────────────────────────────────────────────
 
-function parseHex(hex: string): [number, number, number] | null {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return null;
-  const n = parseInt(m[1], 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function toHex([r, g, b]: [number, number, number]): string {
-  return `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
-}
-
-/** WCAG relative luminance. */
-function luminance([r, g, b]: [number, number, number]): number {
-  const f = (v: number) => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
-}
-
-/** WCAG contrast between two `#rrggbb` colours. Exported for the guard that
- *  checks the floor below actually holds. */
-export function contrastRatio(a: string, b: string): number {
-  const ca = parseHex(a);
-  const cb = parseHex(b);
-  if (!ca || !cb) return 1;
-  const la = luminance(ca);
-  const lb = luminance(cb);
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
-
 /**
  * A tag's colour, raised to a contrast floor against the kiosk backdrop.
  *
@@ -106,18 +79,17 @@ export function contrastRatio(a: string, b: string): number {
  */
 export function readableTagColor(hex: string | null): string | null {
   if (!hex) return null;
-  const rgb = parseHex(hex);
-  if (!rgb) return null;
+  let c = parseColor(hex);
+  if (!c) return null;
   if (contrastRatio(hex, KIOSK_BACKDROP) >= MIN_CONTRAST) return hex;
 
   // Lighten toward white, because the backdrop is near-black: there is nowhere
   // darker to go. Steps rather than a solved blend so the hue survives — a
   // solved one lands on grey for a colour that started very dark.
-  let c = rgb;
-  for (let i = 0; i < 24 && contrastRatio(toHex(c), KIOSK_BACKDROP) < MIN_CONTRAST; i++) {
-    c = [c[0] + (255 - c[0]) * 0.15, c[1] + (255 - c[1]) * 0.15, c[2] + (255 - c[2]) * 0.15];
+  for (let i = 0; i < 24 && contrastRatio(formatColor(c), KIOSK_BACKDROP) < MIN_CONTRAST; i++) {
+    c = { r: c.r + (255 - c.r) * 0.15, g: c.g + (255 - c.g) * 0.15, b: c.b + (255 - c.b) * 0.15, a: 1 };
   }
-  return toHex(c);
+  return formatColor(c);
 }
 
 // ── what a square shows ──────────────────────────────────────────────────────
@@ -139,36 +111,18 @@ export function visibleEvents(events: readonly CalendarEventDTO[]): {
 
 // ── zone-aware formatting ────────────────────────────────────────────────────
 
-/** "YYYY-MM-DD" at `ms` in `zone` — the same key the server built its squares
- *  with, so "is this today?" is asked in the app's zone and not the browser's. */
-function dateKeyIn(ms: number, zone: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: zone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(new Date(ms));
-    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-    return `${get("year")}-${get("month")}-${get("day")}`;
-  } catch {
-    // An unknown zone name must not blank the display. Nothing matches, so no
-    // square is marked today — visibly wrong, rather than wrong somewhere else.
-    return "";
-  }
-}
-
-function timeIn(iso: string, zone: string): string {
-  const ms = Date.parse(iso);
-  if (Number.isNaN(ms)) return "";
-  try {
-    return new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit" })
-      .format(new Date(ms))
-      .replace(/\s?([AP])M$/i, (_, ap: string) => ap.toLowerCase());
-  } catch {
-    return "";
-  }
-}
+// Both of these come from the app's own helpers rather than a local Intl call.
+//
+// zonedDateKey is the SAME function the server bucketed the squares with, so
+// "which square is today" is answered exactly as "which square is this event on"
+// was — a second implementation is how the two would come to disagree by a day.
+// It is importable here because it is pure and takes its zone explicitly; what
+// the renderer cannot do is ASK for the app's zone, which is why the grid
+// carries it.
+//
+// formatClock is the app's one display clock, and it reads the operator's
+// 12h/24h setting. A local Intl call here hardcoded 12h, so a 24h install got
+// 19:30 everywhere else and 7:30 PM on the calendar.
 
 /**
  * The one event to mark as running, or null.
@@ -231,7 +185,7 @@ function EventRow({
         // Inline because the value is the organisation's data, not a token.
         style={{ backgroundColor: color ?? "currentColor", opacity: color ? 1 : 0.35 }}
       />
-      {!event.allDay && <span className="shrink-0 tabular-nums opacity-70">{timeIn(event.startsAt, zone)}</span>}
+      {!event.allDay && <span className="shrink-0 tabular-nums opacity-70">{formatClock(event.startsAt, { timeZone: zone })}</span>}
       <span className="truncate">{event.name}</span>
     </li>
   );
@@ -305,15 +259,19 @@ export function CalendarMonth({
   pcoConfigured: boolean;
   failed?: boolean;
 }) {
-  if (failed || !grid) {
+  // With no grid there is nothing to draw, so the whole surface says why. With a
+  // grid AND a failure the last good month stays up, marked stale in the header
+  // below — throwing away a correct month because the NEXT read failed is worse
+  // than showing one that is a few minutes old and says so.
+  if (!grid) {
     return (
-      <Notice>
+      <Notice spinner={!failed}>
         {failed ? "Could not read the calendar from Planning Center" : "Loading the calendar…"}
       </Notice>
     );
   }
 
-  const todayKey = dateKeyIn(nowMs, grid.zone);
+  const todayKey = zonedDateKey(nowMs, grid.zone);
   const runningId = runningEventId(
     grid.days.find((d) => d.date === todayKey),
     nowMs,
@@ -325,12 +283,32 @@ export function CalendarMonth({
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
         <CalendarDaysIcon className="size-4 text-fg-subtle" aria-hidden="true" />
         <span className="text-footnote font-title text-fg">{grid.monthLabel}</span>
-        {total === 0 && (
-          <span className="ml-auto text-caption2 text-fg-faint">
-            {pcoConfigured
-              ? "Nothing on the calendar this month"
-              : "Planning Center is not connected yet"}
+        {/* The failure wins the slot. An operator looking at a month that has
+            stopped updating needs to be told that before anything else, and a
+            "nothing this month" on a stale grid is the lie this says instead. */}
+        {/* The failure wins the slot. An operator looking at a month that has
+            stopped updating needs to be told that before anything else, and a
+            "nothing this month" on a stale grid is the lie this says instead. */}
+        {failed ? (
+          <span className="ml-auto text-caption2 text-warn-11">
+            Could not reach Planning Center — showing the last month read
           </span>
+        ) : grid.unplaceable > 0 ? (
+          // The mapper upstream guarantees an ISO start, so this is a contract
+          // breach rather than a routine case — and the whole point of counting
+          // it was that the caller SAYS so. Counting it and drawing nothing
+          // would be the silent absence this feature is written against.
+          <span className="ml-auto text-caption2 text-warn-11">
+            {`${grid.unplaceable} event${grid.unplaceable === 1 ? "" : "s"} had no usable time and could not be drawn`}
+          </span>
+        ) : (
+          total === 0 && (
+            <span className="ml-auto text-caption2 text-fg-faint">
+              {pcoConfigured
+                ? "Nothing on the calendar this month"
+                : "Planning Center is not connected yet"}
+            </span>
+          )
         )}
       </div>
       <div className="grid shrink-0 grid-cols-7 border-b border-line">
@@ -361,10 +339,16 @@ export function CalendarMonth({
   );
 }
 
-function Notice({ children }: { children: React.ReactNode }) {
+/** @param spinner false for a settled state — a spinner over a failure says the
+ *  app is still trying, which it is not until the next poll. */
+function Notice({ children, spinner }: { children: React.ReactNode; spinner: boolean }) {
   return (
     <div className="flex h-full items-center justify-center gap-2 kiosk-surface text-footnote text-fg-subtle">
-      <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+      {spinner ? (
+        <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+      ) : (
+        <AlertCircleIcon className="size-4 text-warn-11" aria-hidden="true" />
+      )}
       {children}
     </div>
   );
@@ -442,6 +426,6 @@ export function CalendarView({
   }, [nowMs]);
 
   return (
-    <CalendarMonth grid={grid} nowMs={nowMs ?? tick} pcoConfigured={pcoConfigured} failed={failed && !grid} />
+    <CalendarMonth grid={grid} nowMs={nowMs ?? tick} pcoConfigured={pcoConfigured} failed={failed} />
   );
 }

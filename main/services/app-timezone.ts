@@ -150,13 +150,20 @@ export function startOfZonedDay(dateKey: string, tz: TimeZone = appTimeZone()): 
   if (!m) throw new Error(`startOfZonedDay expects a YYYY-MM-DD date, got "${dateKey}"`);
   const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 
-  const candidates = new Set<number>();
-  for (const probe of [wall, wall - zoneOffsetMs(wall, tz)]) {
-    candidates.add(wall - zoneOffsetMs(probe, tz));
-  }
-  const sorted = [...candidates].sort((a, b) => a - b);
-  // The EARLIEST instant that actually reads as this date locally — which on a
-  // fall-back date is the first of the two 00:00s, not the second.
-  const onDate = sorted.filter((t) => zonedDateKey(t, tz) === dateKey);
-  return onDate.length > 0 ? onDate[0] : sorted[sorted.length - 1];
+  // Exactly two candidates, because there are exactly two offsets in play: the
+  // one in force at the naive guess, and the one in force where that guess
+  // lands. They are equal on all but two days a year.
+  const naive = wall - zoneOffsetMs(wall, tz);
+  const corrected = wall - zoneOffsetMs(naive, tz);
+  const earlier = Math.min(naive, corrected);
+  const later = Math.max(naive, corrected);
+
+  // The EARLIEST instant that reads as this date locally — on a fall-back date
+  // that is the first of the two 00:00s, not the second.
+  if (zonedDateKey(earlier, tz) === dateKey) return earlier;
+  if (zonedDateKey(later, tz) === dateKey) return later;
+  // Neither reads as this date, which happens only where the zone SKIPS midnight
+  // (Santiago, Beirut): the day has no 00:00 and begins when the clocks jumped,
+  // so the later candidate is the first instant on it.
+  return later;
 }

@@ -19,9 +19,14 @@ import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
-import { buildGrid, gridWindow, type CalendarGrid } from "./calendar-grid.js";
+import { buildGrid, gridWindow } from "./calendar-grid.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
-import type { CalendarSelection, CalendarSourceDTO, CalendarTagDTO } from "../types/calendar.js";
+import type {
+  CalendarGrid,
+  CalendarSelection,
+  CalendarSourceDTO,
+  CalendarTagDTO,
+} from "../types/calendar.js";
 
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
@@ -909,9 +914,11 @@ export class StageController {
     // Empty is NOT an empty filter — it is no filter, and PCO is asked for
     // everything. See View.calendarSources for why that is the opposite of the
     // checklist's rule.
+    // No re-filtering of the ids: setViewCalendarFilters is the only writer and
+    // it trims, drops blanks and de-duplicates on the way in.
     const view = viewId ? this.state.views.find((v) => v.id === viewId) ?? null : null;
-    const calendarIds = (view?.calendarSources ?? []).map((s) => s.id).filter(Boolean);
-    const tagIds = (view?.calendarTags ?? []).map((s) => s.id).filter(Boolean);
+    const calendarIds = (view?.calendarSources ?? []).map((s) => s.id);
+    const tagIds = (view?.calendarTags ?? []).map((s) => s.id);
 
     const { fromIso, toIso } = gridWindow(anchorIso, zone);
     const events = await pcoCalendarService.listEventInstances(this.pcoAppId, this.pcoSecret, {

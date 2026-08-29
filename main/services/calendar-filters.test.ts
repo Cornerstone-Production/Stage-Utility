@@ -31,6 +31,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { stageController } = await import("./stage-controller.js");
 const { pcoCalendarService } = await import("./pco-calendar-service.js");
+const { gridWindow } = await import("./calendar-grid.js");
 
 type Mutable = {
   state: { views: View[]; [k: string]: unknown };
@@ -100,9 +101,15 @@ describe("the filters the operator chose reach Planning Center", () => {
   });
 
   it("windows the request to a whole six-week grid, not a month", async () => {
+    // Compared against gridWindow rather than measured in days. A six-week grid
+    // spanning a DST change is 42 days ± an hour, so a `> 41 && < 42` bound is
+    // green on a UTC CI box and red on a developer's machine in October — a test
+    // failing on the calendar rather than on the code. This still fails if the
+    // window is narrowed to a calendar month, which is what it is for.
     await stageController.getCalendarGrid("v-open");
-    const days = (Date.parse(asked[0].toIso) - Date.parse(asked[0].fromIso)) / 86_400_000;
-    assert.ok(days > 41 && days < 42, `expected a 42-day window, got ${days.toFixed(2)} days`);
+    const expected = gridWindow(new Date().toISOString());
+    assert.equal(asked[0].fromIso, expected.fromIso);
+    assert.equal(asked[0].toIso, expected.toIso);
   });
 });
 

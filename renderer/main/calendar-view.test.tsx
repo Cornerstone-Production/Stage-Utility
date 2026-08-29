@@ -42,9 +42,8 @@ const teardown = installDom();
 // would come up with no document.
 const { render, screen, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { CalendarMonth, readableTagColor, visibleEvents, contrastRatio, KIOSK_BACKDROP } = await import(
-  "./calendar-view.js"
-);
+const { CalendarMonth, readableTagColor, visibleEvents, KIOSK_BACKDROP } = await import("./calendar-view.js");
+const { contrastRatio } = await import("../components/ui/color-math.js");
 
 const ZONE = "America/Chicago";
 
@@ -288,5 +287,37 @@ describe("empty and broken states", () => {
     // reports.
     render(React.createElement(CalendarMonth, { pcoConfigured: true, grid: null, nowMs: 0, failed: true }));
     assert.ok(screen.getByText(/could not read/i));
+  });
+
+  test("keeps the last good month up when a LATER read fails, and marks it stale", () => {
+    // Throwing away a correct month because the next poll failed is worse than
+    // showing one a few minutes old. The first version of this dropped the
+    // failure entirely once a grid had loaded: the month simply stopped
+    // updating, with nothing on screen to say so.
+    const g = grid({ "2026-08-14": [event("a", "2026-08-14T19:00:00Z", "2026-08-14T20:00:00Z")] });
+    render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: g,
+        nowMs: Date.parse("2026-08-10T18:00:00Z"),
+        failed: true,
+      }),
+    );
+    assert.equal(screen.getAllByRole("gridcell").length, 42, "the month was thrown away");
+    assert.ok(cell("2026-08-14").textContent?.includes("Event a"), "its events went with it");
+    assert.ok(screen.getByText(/could not reach planning center/i), "nothing said it was stale");
+  });
+
+  test("a failure outranks the empty-month note, which would be the wrong story", () => {
+    render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: grid(),
+        nowMs: Date.parse("2026-08-10T18:00:00Z"),
+        failed: true,
+      }),
+    );
+    assert.equal(screen.queryByText(/nothing on the calendar/i), null);
+    assert.ok(screen.getByText(/could not reach planning center/i));
   });
 });

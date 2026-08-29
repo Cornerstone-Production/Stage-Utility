@@ -103,9 +103,15 @@ export interface CalendarGrid {
    * to another zone draws a correct grid with the wrong times on it.
    */
   zone: string;
-  /** Events that carried an unparseable time and landed on no square. Normally
-   *  zero; a non-zero count is a contract breach worth surfacing rather than a
-   *  routine case, so the caller gets the number instead of a log line. */
+  /**
+   * Events that carried an unparseable time and landed on no square.
+   *
+   * Normally zero — the client's mapper guarantees an ISO start — so a non-zero
+   * count is a contract breach rather than a routine case. It travels to the
+   * renderer, which SAYS so in the header, instead of becoming a server log line
+   * nobody reads: an event that quietly failed to draw is exactly the silent
+   * absence this whole feature is written against.
+   */
   unplaceable: number;
 }
 

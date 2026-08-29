@@ -17,9 +17,14 @@
 // browser's zone is the same failure a formatting step later.
 
 import type { CalendarDay, CalendarEventDTO, CalendarGrid } from "../types/calendar.js";
-import { appTimeZone, startOfZonedDay, zonedDateKey, zonedParts, type TimeZone } from "./app-timezone.js";
-
-export type { CalendarDay, CalendarGrid } from "../types/calendar.js";
+import {
+  appTimeZone,
+  startOfZonedDay,
+  zonedDateKey,
+  zonedParts,
+  type TimeZone,
+  type ZonedParts,
+} from "./app-timezone.js";
 
 /**
  * Six weeks, always.
@@ -31,8 +36,8 @@ export type { CalendarDay, CalendarGrid } from "../types/calendar.js";
 const DAYS_IN_GRID = 42;
 
 /** Written out rather than formatted, so the label does not depend on the
- *  server's locale — a container with no ICU data would otherwise print a
- *  number where a month name belongs. */
+ *  server's LOCALE. The zone comes from Intl either way, so this is about which
+ *  language the month is named in, not about ICU being present at all. */
 const MONTH_NAMES = [
   "January",
   "February",
@@ -76,10 +81,15 @@ function anchorMs(monthAnchorIso: string): number {
   return ms;
 }
 
+/** The anchor broken into local parts — the one place either entry point turns
+ *  an instant into a wall-clock month. */
+function anchorParts(monthAnchorIso: string, zone: TimeZone): ZonedParts {
+  return zonedParts(anchorMs(monthAnchorIso), zone);
+}
+
 /** The date the visible grid starts on: the Sunday on or before the 1st of the
  *  anchor's LOCAL month. */
-function gridStartKey(monthAnchorIso: string, zone: TimeZone): string {
-  const p = zonedParts(anchorMs(monthAnchorIso), zone);
+function gridStartKey(p: ZonedParts): string {
   const first = `${p.year}-${pad(p.month)}-01`;
   const weekday = new Date(Date.UTC(p.year, p.month - 1, 1)).getUTCDay();
   return addDays(first, -weekday);
@@ -96,7 +106,7 @@ function gridStartKey(monthAnchorIso: string, zone: TimeZone): string {
  * reads one in the ORG's zone, which need not be the app's.
  */
 export function gridWindow(monthAnchorIso: string, zone: TimeZone = appTimeZone()): { fromIso: string; toIso: string } {
-  const startKey = gridStartKey(monthAnchorIso, zone);
+  const startKey = gridStartKey(anchorParts(monthAnchorIso, zone));
   const from = startOfZonedDay(startKey, zone);
   // One second before the next day begins, so the bound is inclusive of the last
   // visible square without claiming any part of the day after it.
@@ -129,9 +139,9 @@ export function buildGrid(
   monthAnchorIso: string,
   zone: TimeZone = appTimeZone(),
 ): CalendarGrid {
-  const p = zonedParts(anchorMs(monthAnchorIso), zone);
+  const p = anchorParts(monthAnchorIso, zone);
   const monthPrefix = `${p.year}-${pad(p.month)}`;
-  const startKey = gridStartKey(monthAnchorIso, zone);
+  const startKey = gridStartKey(p);
 
   const days: CalendarDay[] = [];
   const byKey = new Map<string, CalendarEventDTO[]>();
@@ -157,11 +167,11 @@ export function buildGrid(
     if (endMs > startMs && endMs === startOfZonedDay(toKey, zone)) toKey = addDays(toKey, -1);
 
     // YYYY-MM-DD sorts lexicographically, so clipping to the grid is a compare.
-    for (
-      let key = fromKey < firstKey ? firstKey : fromKey;
-      key <= (toKey > lastKey ? lastKey : toKey);
-      key = addDays(key, 1)
-    ) {
+    // Both ends clamped before the loop, not in its condition — the upper bound
+    // does not change while it runs.
+    const firstVisible = fromKey < firstKey ? firstKey : fromKey;
+    const lastVisible = toKey > lastKey ? lastKey : toKey;
+    for (let key = firstVisible; key <= lastVisible; key = addDays(key, 1)) {
       byKey.get(key)?.push(ev);
     }
   }

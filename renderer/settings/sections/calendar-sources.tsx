@@ -28,9 +28,11 @@ import {
   FieldLabel,
   FieldSet,
   MultiSelect,
+  toast,
   type MultiSelectOption,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
+import { errorMessage } from "@main/services/errors";
 import type { CalendarSelection, CalendarSourceDTO, CalendarTagDTO } from "@main/types/calendar";
 import type { View } from "@main/types/stage";
 
@@ -85,22 +87,32 @@ export function toSelections(
   return ids.map((id) => ({ id, name: liveNames.get(id) ?? storedNames.get(id) ?? "" }));
 }
 
-export function CalendarSources({ view }: { view: View }) {
-  const [sources, setSources] = useState<Sources | null>(null);
+/**
+ * Three states, not two.
+ *
+ * A `Sources | null` said "could not read Planning Center" for the whole of
+ * every page load, because null is also what it starts as — an operator opening
+ * these settings was told the read had failed before it had been attempted. And
+ * a successful read on an install with no credentials returns two empty lists,
+ * not an error, which the same message got wrong in the other direction.
+ */
+type Load = { at: "loading" } | { at: "failed" } | { at: "loaded"; sources: Sources };
+
+export function CalendarSources({ view, pcoConfigured }: { view: View; pcoConfigured: boolean }) {
+  const [load, setLoad] = useState<Load>({ at: "loading" });
 
   const calendars = view.calendarSources ?? [];
   const tags = view.calendarTags ?? [];
+  const sources = load.at === "loaded" ? load.sources : null;
 
   useEffect(() => {
     let current = true;
     invoke<Sources>("calendar:sources")
       .then((s) => {
-        if (current) setSources(s);
+        if (current) setLoad({ at: "loaded", sources: s });
       })
-      // Left null rather than emptied: an empty picker and a picker that could
-      // not be loaded look identical, and the description below says which.
       .catch(() => {
-        if (current) setSources(null);
+        if (current) setLoad({ at: "failed" });
       });
     return () => {
       current = false;
@@ -108,12 +120,24 @@ export function CalendarSources({ view }: { view: View }) {
   }, []);
 
   const save = (nextCalendars: CalendarSelection[], nextTags: CalendarSelection[]) => {
+    // REPORTED, not dropped. A rejected save leaves the picker showing a choice
+    // the server does not have, which the next broadcast silently undoes — the
+    // operator sees their tick appear and then vanish for no stated reason.
     void invoke("views:setCalendarFilters", {
       id: view.id,
       calendarSources: nextCalendars,
       calendarTags: nextTags,
-    });
+    }).catch((e: unknown) => toast.error(`Could not save what this calendar shows: ${errorMessage(e)}`));
   };
+
+  const status =
+    load.at === "loading"
+      ? " Reading the calendars from Planning Center…"
+      : load.at === "failed"
+        ? " Could not read the calendars from Planning Center."
+        : !pcoConfigured
+          ? " Planning Center is not connected yet, so there is nothing to choose from."
+          : "";
 
   return (
     <FieldSet>
@@ -125,12 +149,15 @@ export function CalendarSources({ view }: { view: View }) {
               Filtering is how a month stays readable — an unfiltered day can hold a dozen
               bookings, most of them somebody else&rsquo;s. Choose nothing and every event on every
               calendar is drawn.
-              {!sources && " Could not read the calendars from Planning Center."}
+              {status}
             </FieldDescription>
           </FieldContent>
         </Field>
 
-        <Field>
+        {/* data-field names the two pickers apart. They are otherwise identical
+            controls whose only distinguishing text is a SUMMARY that changes
+            with the selection, so nothing stable identifies one of them. */}
+        <Field data-field="calendars">
           <FieldContent>
             <FieldLabel>Calendars</FieldLabel>
             <FieldDescription>
@@ -147,7 +174,7 @@ export function CalendarSources({ view }: { view: View }) {
           />
         </Field>
 
-        <Field>
+        <Field data-field="tags">
           <FieldContent>
             <FieldLabel>Tags</FieldLabel>
             <FieldDescription>
