@@ -10,20 +10,27 @@
 // one panel: they describe the same object. A preview in the colour being
 // dragged, and a button that swaps the body for the icon set.
 //
-// And the accent flash, which is the same shape one level up: `--brand-accent`
-// is ONE variable on the document root, and seventeen components call
-// useStageState. Every one starts with a null state, and applyAccentVar(undefined)
-// REMOVES the override — so any component mounting mid-session stripped the
-// accent off the whole page until its own fetch returned. The panel's saved
-// colours list is one of those seventeen, which is why opening a picker flashed
-// every accent-coloured thing on the page.
+// The accent flash is the same shape one level up: `--brand-accent` is ONE
+// variable on the document root, and seventeen components call useStageState.
+// Every one started with a null state, and applyAccentVar(undefined) REMOVES the
+// override — so any component mounting mid-session stripped the accent off the
+// whole page until its own fetch returned. The panel's saved colours list is one
+// of those seventeen, which is why opening a picker flashed every
+// accent-coloured thing on the page.
+//
+// That guard USED TO LIVE HERE, as a regex over use-stage-state.ts looking for
+// `if (!state) return;`. It was the vacuous kind: it asserted the shape of one
+// implementation rather than the behaviour, so it went red the moment the accent
+// moved out of a per-consumer effect and into the shared store — where the rule
+// it protects is now structural. It has been replaced by three cases in
+// `renderer/main/use-stage-state.test.tsx` that render the hook and read
+// `--brand-accent` off the document, which is what a browser actually acts on.
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
 const FIELD = readFileSync(new URL("./color-field.tsx", import.meta.url), "utf8");
-const HOOK = readFileSync(new URL("../../main/use-stage-state.ts", import.meta.url), "utf8");
 
 describe("one colour panel at a time", () => {
   test("there is a register of open panels, not just per-instance state", () => {
@@ -51,19 +58,6 @@ describe("one colour panel at a time", () => {
 
   test("the field actually uses it", () => {
     assert.match(FIELD, /useOnlyOnePanel\(open, setOpen\)/);
-  });
-});
-
-describe("the brand accent", () => {
-  test("is not cleared by a component that has not hydrated", () => {
-    const eff = /Push the themeable brand accent[\s\S]*?\}, \[[^\]]*\]\);/.exec(HOOK);
-    assert.ok(eff, "the accent effect is gone");
-    assert.match(eff[0], /if \(!state\) return;/, "an un-hydrated instance still strips the accent");
-  });
-
-  test("but a hydrated null accent still clears it — that is a real choice", () => {
-    const eff = /Push the themeable brand accent[\s\S]*?\}, \[[^\]]*\]\);/.exec(HOOK)![0];
-    assert.match(eff, /applyAccentVar\(state\.accentColor\)/);
   });
 });
 
