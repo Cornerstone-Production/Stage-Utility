@@ -67,7 +67,7 @@ import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
 import { calendarRoutes } from "./routes/calendar-routes.js";
-import { calendarBroadcaster } from "./calendar-broadcaster.js";
+import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 
 /**
  * Route modules, in dispatch order. Order is load-bearing: a module that
@@ -906,7 +906,11 @@ export class RemoteServer {
       // A calendar is STATE, not an event: a display opened in the middle of a
       // month must show it at once, not sit blank until somebody moves a booking
       // — which on this channel can be days.
-      sseWrite(res, "calendar:grid", calendarBroadcaster.getLatest());
+      // The LITERAL with `satisfies`, matching the wireless line above: the
+      // hydrated-channels scan can only see a quoted channel name, and the
+      // `satisfies` is what makes renaming CALENDAR_CHANNEL stop compiling here
+      // rather than silently leaving this burst writing to a dead channel.
+      sseWrite(res, "calendar:grid" satisfies typeof CALENDAR_CHANNEL, calendarBroadcaster.getLatest());
       sseWrite(res, "displays:presence", presenceSnapshot());
       sseClients.add(res);
       // Correlate this stream to its client id so POST /api/events/subscribe can set

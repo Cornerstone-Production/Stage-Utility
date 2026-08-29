@@ -27,7 +27,6 @@ import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../..
 import { LayoutConflictError, stageController } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
-import { scrub } from "../scrub.js";
 
 /**
  * An untrusted body value that is a list of `{ id, name }` strings.
@@ -346,13 +345,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         // changed a filter is looking at the screen, so the grid must reapply now
         // rather than up to three minutes later — but a PCO read must not hold
         // the settings save open, and the save has already succeeded either way.
-        void calendarBroadcaster.refresh(true).then((failed) => {
-          for (const f of failed) {
-            console.warn(
-              `[calendar] view ${scrub(f.viewId)} could not be refreshed after a filter change: ${scrub(f.message)}`,
-            );
-          }
-        });
+        calendarBroadcaster.refreshInBackground("filter change", true);
       }
       json(res, state);
       return;

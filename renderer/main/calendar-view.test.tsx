@@ -33,26 +33,45 @@ const teardown = installDom();
 // a stray call from settling after teardown and failing the whole FILE while
 // every test in it passes.
 let sent: { url: string; method: string }[] = [];
+/** Set to fail any request whose URL carries a `month=` — a paged month 502ing
+ *  while the live channel is perfectly healthy, which is the real case. */
+let failPagedMonths = false;
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init?: RequestInit) => {
   sent.push({ url, method: init?.method ?? "GET" });
+  if (failPagedMonths && url.includes("month=")) {
+    return { ok: false, status: 502, json: async () => ({ error: "down" }), text: async () => '{"error":"down"}' };
+  }
   // A real grid for the calendar route: CalendarView renders a notice rather
   // than a header until it has one, and the chevrons live in the header.
   const payload = url.includes("/api/pco/calendar") ? grid() : {};
   return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
 };
 
-// EventSource, for the pushed calendar:grid channel. A no-op is enough: these
-// assert what the component ASKS for, and the push path has its own tests in
-// main/services/calendar-broadcaster.test.ts.
+// EventSource for the pushed calendar:grid channel. It records its listeners so
+// a test can DELIVER a frame — the server-side push has its own tests in
+// main/services/calendar-broadcaster.test.ts, but what the component does when a
+// frame lands can only be checked here.
+const sseHandlers = new Map<string, Set<(e: { data: string }) => void>>();
 (globalThis as unknown as { EventSource: unknown }).EventSource = class {
-  addEventListener() {}
-  removeEventListener() {}
+  addEventListener(channel: string, fn: (e: { data: string }) => void) {
+    let set = sseHandlers.get(channel);
+    if (!set) sseHandlers.set(channel, (set = new Set()));
+    set.add(fn);
+  }
+  removeEventListener(channel: string, fn: (e: { data: string }) => void) {
+    sseHandlers.get(channel)?.delete(fn);
+  }
   close() {}
 };
 
+/** Deliver one `calendar:grid` frame, exactly as the server's fan-out would. */
+function pushFrame(payload: unknown): void {
+  for (const fn of sseHandlers.get("calendar:grid") ?? []) fn({ data: JSON.stringify(payload) });
+}
+
 // After installDom(), never before: a static import evaluates first and React
 // would come up with no document.
-const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { CalendarMonth, CalendarView, readableTagColor, visibleEvents, KIOSK_BACKDROP } = await import(
   "./calendar-view.js"
@@ -100,6 +119,7 @@ after(async () => {
 beforeEach(() => {
   cleanup();
   sent = [];
+  failPagedMonths = false;
 });
 afterEach(async () => {
   cleanup();
@@ -334,7 +354,10 @@ describe("empty and broken states", () => {
         failed: true,
       }),
     );
-    assert.equal(screen.queryByText(/nothing on the calendar/i), null);
+    assert.ok(
+      screen.queryByText(/nothing on the calendar/i) === null,
+      "an empty-month note went out over a failure, which is the wrong story",
+    );
     assert.ok(screen.getByText(/could not reach planning center/i));
   });
 });
@@ -367,8 +390,14 @@ describe("the month chevrons", () => {
         nav: null,
       }),
     );
-    assert.equal(screen.queryByRole("button", { name: /previous month/i }), null);
-    assert.equal(screen.queryByRole("button", { name: /next month/i }), null);
+    assert.ok(
+      screen.queryByRole("button", { name: /previous month/i }) === null,
+      "a chevron rendered with no nav supplied",
+    );
+    assert.ok(
+      screen.queryByRole("button", { name: /next month/i }) === null,
+      "a chevron rendered with no nav supplied",
+    );
   });
 
   it("are present, and are real buttons, where controls are live", () => {
@@ -412,7 +441,10 @@ describe("the month chevrons", () => {
         nav: { ...base, offset: 0 },
       }),
     );
-    assert.equal(screen.queryByRole("button", { name: /^today$/i }), null);
+    assert.ok(
+      screen.queryByRole("button", { name: /^today$/i }) === null,
+      "Today offered on the current month, where it would do nothing",
+    );
     cleanup();
     render(
       React.createElement(CalendarMonth, {
@@ -438,7 +470,10 @@ describe("the month chevrons", () => {
       }),
     );
     assert.ok(screen.getByText(/could not read that month/i));
-    assert.equal(screen.queryByText(/showing the last month read/i), null);
+    assert.ok(
+      screen.queryByText(/showing the last month read/i) === null,
+      "a paged-month failure claimed the LIVE month had gone stale",
+    );
   });
 });
 
@@ -519,6 +554,61 @@ describe("paging is per screen, and the current month stays live", () => {
       sent.filter((r) => r.url.includes("month=")),
       [],
     );
+  });
+
+  it("clears a paged month's failure on returning to today", async () => {
+    // The bug this exists for: one `failed` boolean served both fetch paths, so
+    // a paged month that 502'd left "Could not reach Planning Center — showing
+    // the last month read" sitting over a current grid on a healthy channel —
+    // and, by this feature's own design, it cleared only on the next pushed
+    // frame, which for a calendar is a couple of times a WEEK.
+    failPagedMonths = true;
+    render(React.createElement(CalendarView, { viewId: "v-1", pcoConfigured: true, interactive: true }));
+    await mounted();
+
+    fireEvent.click(screen.getByRole("button", { name: /next month/i }));
+    await pastDebounce();
+    assert.ok(screen.queryByText(/could not read that month/i), "the paged failure never showed");
+
+    fireEvent.click(screen.getByRole("button", { name: /^today$/i }));
+    await mounted();
+
+    assert.ok(
+      screen.queryByText(/could not reach planning center/i) === null,
+      "the live month inherited the paged month's failure",
+    );
+    assert.ok(
+      screen.queryByText(/could not read that month/i) === null,
+      "the paged failure survived the return to today",
+    );
+    assert.ok(screen.getByRole("grid"), "the live month is not on screen at all");
+  });
+
+  it("does not let a pushed frame clear a PAGED month's failure", async () => {
+    // The same shared boolean, the other way round: the ordinary three-minute
+    // push called setFailed(false) while the paged grid was still null, which
+    // left "Loading the calendar…" up for ever with nothing loading and nothing
+    // that ever would.
+    failPagedMonths = true;
+    render(React.createElement(CalendarView, { viewId: "v-1", pcoConfigured: true, interactive: true }));
+    await mounted();
+
+    fireEvent.click(screen.getByRole("button", { name: /next month/i }));
+    await pastDebounce();
+    assert.ok(screen.queryByText(/could not read that month/i), "the paged failure never showed");
+
+    // A routine push lands while the operator is still looking at the failed
+    // month. It is news about the current month and about nothing else.
+    act(() => {
+      pushFrame({ "v-1": grid() });
+    });
+    await mounted();
+
+    assert.ok(
+      screen.queryByText(/loading the calendar/i) === null,
+      "a pushed frame turned the paged failure into a spinner that never resolves",
+    );
+    assert.ok(screen.queryByText(/could not read that month/i), "the paged failure was cleared by unrelated news");
   });
 
   it("asks for the current month with NO month parameter, so it is the live one", async () => {

@@ -245,11 +245,56 @@ describe("paging to another month", () => {
   });
 
   it("lands mid-month, so no offset can tip into an adjacent one", () => {
-    // The anchor only has to fall INSIDE the right month. Anchoring on midnight
-    // of the 1st leaves no margin at all in a zone behind UTC.
+    // Asserts the ACTUAL month for every offset, in a zone BEHIND UTC — which is
+    // where the bug lives. An anchor at UTC midnight on the 1st is 18:00 or 19:00
+    // on the LAST DAY OF THE PREVIOUS MONTH in Chicago, so every offset comes out
+    // a month early.
+    //
+    // The first version of this test asserted only /^[A-Z][a-z]+ \d{4}$/ — a
+    // shape every month label satisfies, including the wrong one. It passed in
+    // 21ms under the exact bug it names while three sibling tests went red.
+    // Expected values come from civil arithmetic here, not from the code under
+    // test, so the two cannot agree by construction.
+    const MONTHS = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December",
+    ];
+    // LAST_DAY is 31 August 2026 in Chicago: month index 7 of year 2026.
+    const BASE_YEAR = 2026;
+    const BASE_INDEX = 7;
     for (let n = -MAX_MONTH_OFFSET; n <= MAX_MONTH_OFFSET; n++) {
-      const label = buildGrid([], monthAnchor(n, ZONE, LAST_DAY), ZONE).monthLabel;
-      assert.ok(/^[A-Z][a-z]+ \d{4}$/.test(label), `${n} produced "${label}"`);
+      const total = BASE_INDEX + n;
+      const year = BASE_YEAR + Math.floor(total / 12);
+      const expected = `${MONTHS[((total % 12) + 12) % 12]} ${year}`;
+      assert.equal(
+        buildGrid([], monthAnchor(n, ZONE, LAST_DAY), ZONE).monthLabel,
+        expected,
+        `offset ${n} did not land in ${expected}`,
+      );
+    }
+  });
+
+  it("survives a zone WELL behind UTC, where the margin is thinnest", () => {
+    // Chicago is UTC-5. Anywhere further west has further to fall off the front
+    // of the month, so the anchor's midday has to hold there too.
+    for (const zone of ["America/Anchorage", "Pacific/Honolulu", "Pacific/Midway"]) {
+      assert.equal(buildGrid([], monthAnchor(0, zone, LAST_DAY), zone).monthLabel, "August 2026", zone);
+      assert.equal(buildGrid([], monthAnchor(1, zone, LAST_DAY), zone).monthLabel, "September 2026", zone);
+      assert.equal(buildGrid([], monthAnchor(-1, zone, LAST_DAY), zone).monthLabel, "July 2026", zone);
+    }
+  });
+
+  it("survives a zone AHEAD of UTC, which falls off the other end", () => {
+    // A midday anchor has to survive being pushed forward too: east of UTC the
+    // same instant is later, so an anchor near the end of a month is the risk.
+    for (const zone of ["Pacific/Auckland", "Pacific/Kiritimati", "Asia/Tokyo"]) {
+      const label = buildGrid([], monthAnchor(0, zone, LAST_DAY), zone).monthLabel;
+      // 2026-09-01T02:00:00Z is already September east of UTC, so the CURRENT
+      // month there genuinely is September — the point is that it is a real
+      // month resolved in that zone, and that stepping is exact from it.
+      assert.equal(label, "September 2026", zone);
+      assert.equal(buildGrid([], monthAnchor(1, zone, LAST_DAY), zone).monthLabel, "October 2026", zone);
+      assert.equal(buildGrid([], monthAnchor(-1, zone, LAST_DAY), zone).monthLabel, "August 2026", zone);
     }
   });
 

@@ -545,7 +545,23 @@ export function CalendarView({
    * PREVIOUS month's grid was on screen under the new month's heading.
    */
   const [paged, setPaged] = useState<{ key: string; grid: CalendarGrid } | null>(null);
-  const [failed, setFailed] = useState(false);
+
+  /**
+   * TWO failure flags, not one, because these are facts about two different
+   * requests and neither is evidence about the other.
+   *
+   * One boolean produced both halves of the same bug. A paged month that 502s
+   * set it; clicking Today then showed "Could not reach Planning Center —
+   * showing the last month read" over a perfectly current grid on a healthy
+   * channel, and it cleared only on the next pushed frame, which for a calendar
+   * is a couple of times a WEEK. In the other direction the ordinary three-minute
+   * push cleared it while the paged month was still null, leaving "Loading the
+   * calendar…" on screen for ever with nothing loading and nothing that ever
+   * would — the silent-absence failure this file's comments argue against,
+   * committed by the file itself.
+   */
+  const [liveFailed, setLiveFailed] = useState(false);
+  const [pagedFailed, setPagedFailed] = useState(false);
   const [tick, setTick] = useState(() => Date.now());
 
   /**
@@ -571,14 +587,14 @@ export function CalendarView({
     invoke<CalendarGrid>("calendar:getGrid", { viewId }).then(
       (g) => {
         if (cancelled) return;
-        setFailed(false);
+        setLiveFailed(false);
         if (g) setLiveGrid(g);
       },
       () => {
         // REPORTED, not swallowed: a calendar that quietly empties itself is the
         // absence nobody reports. CalendarMonth keeps the last good month on
         // screen under the notice rather than blanking it.
-        if (!cancelled) setFailed(true);
+        if (!cancelled) setLiveFailed(true);
       },
     );
     return () => {
@@ -595,9 +611,10 @@ export function CalendarView({
       const next = (p as Record<string, CalendarGrid> | null)?.[viewId];
       if (!next) return;
       setLiveGrid(next);
-      // A frame arriving IS the server reaching Planning Center, so it clears a
-      // stale marker that an earlier failure put up.
-      setFailed(false);
+      // A frame arriving IS the server reaching Planning Center, so it clears the
+      // stale marker on the LIVE month. It says nothing about a paged month the
+      // operator asked for and did not get, and must not clear that.
+      setLiveFailed(false);
     });
   }, [viewId]);
 
@@ -610,10 +627,13 @@ export function CalendarView({
    * liveGrid where nothing was reading it. Paging away and back would leave a
    * display quietly showing a stale month.
    *
-   * The generation counter is not decoration. Clicking a chevron twice quickly
-   * starts two requests, and the FIRST can answer second — without this, holding
-   * a chevron down lands the display on whichever month the network happened to
-   * finish last.
+   * Two things stop a slow reply landing on the wrong month: the `cancelled`
+   * flag, which drops a reply for an effect that has been torn down, and the
+   * `{ key, grid }` tag, which means a reply is only rendered while it is still
+   * the month being asked for. Clicking a chevron twice quickly starts two
+   * requests and the FIRST can answer second; without both, holding a chevron
+   * down lands the display on whichever month the network happened to finish
+   * last.
    */
   // The month travels as a DATE, not an offset: a page left open across midnight
   // on the 31st must not have its "+1" quietly mean a different month than it did
@@ -639,7 +659,7 @@ export function CalendarView({
           // Tagged with the month it answers, so a slow reply for a month the
           // operator has already paged past cannot land on the screen.
           setPaged(g ? { key: wantedKey, grid: g } : null);
-          setFailed(!g);
+          setPagedFailed(!g);
         },
         () => {
           if (cancelled) return;
@@ -647,7 +667,7 @@ export function CalendarView({
           // specific question; leaving the previous month on screen under a
           // notice would look like the answer to it.
           setPaged(null);
-          setFailed(true);
+          setPagedFailed(true);
         },
       );
     }, 250);
@@ -688,7 +708,10 @@ export function CalendarView({
       grid={shown === 0 ? liveGrid : pagedGrid}
       nowMs={nowMs ?? tick}
       pcoConfigured={pcoConfigured}
-      failed={failed}
+      // Whichever month is on screen answers for itself. Returning to the
+      // current month must not inherit the paged month's failure, and a pushed
+      // frame must not clear one.
+      failed={shown === 0 ? liveFailed : pagedFailed}
       nav={
         interactive
           ? {

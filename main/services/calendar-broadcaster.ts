@@ -59,17 +59,35 @@ class CalendarBroadcaster {
     return this.latest;
   }
 
+  /**
+   * Refresh without waiting for it, reporting whatever went wrong.
+   *
+   * ONE implementation, called from the timer and from the settings save. Both
+   * want the same thing — start a read, do not block on it, say what failed —
+   * and the two hand-written copies differed only in their log line, which is
+   * how the second one came to have no `.catch` on a detached promise.
+   *
+   * The `.catch` here is terminal, and that is not the swallow the house rule
+   * forbids: refresh() already RETURNS its per-view failures, so this only ever
+   * catches a rejection of the whole call — and there is no caller above a timer
+   * tick to hand it to. Without it an unhandled rejection can take the process
+   * down.
+   */
+  refreshInBackground(reason: string, force = false): void {
+    void this.refresh(force)
+      .then((failed) => {
+        for (const f of failed) {
+          console.warn(`[calendar] view ${scrub(f.viewId)} could not be refreshed (${scrub(reason)}): ${scrub(f.message)}`);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error(`[calendar] refresh (${scrub(reason)}) failed outright: ${scrub(errorMessage(err))}`);
+      });
+  }
+
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => {
-      void this.refresh().then((failed) => {
-        // The timer is the top of this chain, so it is the one that reports.
-        // refresh() hands failures back rather than swallowing them.
-        for (const f of failed) {
-          console.warn(`[calendar] view ${scrub(f.viewId)} could not be refreshed: ${scrub(f.message)}`);
-        }
-      });
-    }, REFRESH_MS);
+    this.timer = setInterval(() => this.refreshInBackground("timer"), REFRESH_MS);
     // An idle timer must not hold the process open.
     this.timer.unref?.();
   }
@@ -119,7 +137,10 @@ class CalendarBroadcaster {
     this.latest = next;
     if (signature === this.signature) return failed;
     this.signature = signature;
-    broadcast(CALENDAR_CHANNEL, next);
+    // The signature IS the serialized payload, so it is handed straight to the
+    // fan-out rather than stringified a second time — broadcast's third
+    // parameter exists for exactly this, and this is a perf change.
+    broadcast(CALENDAR_CHANNEL, next, signature);
     return failed;
   }
 }

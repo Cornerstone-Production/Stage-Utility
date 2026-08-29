@@ -96,16 +96,6 @@ function gridStartKey(p: ZonedParts): string {
 }
 
 /**
- * The instants to ask PCO for, covering the WHOLE visible grid.
- *
- * Not the calendar month. The six-week grid shows up to eleven days of the
- * adjacent months, and a month-shaped window leaves those squares empty — which
- * on screen is indistinguishable from a day with nothing booked.
- *
- * Both bounds are explicit instants because the client rejects a bare date: PCO
- * reads one in the ORG's zone, which need not be the app's.
- */
-/**
  * How far either side of the current month the UI will page.
  *
  * Three years each way is generous for "when did we last run that?" and for a
@@ -162,6 +152,16 @@ export function monthOffsetOf(key: string, zone: TimeZone = appTimeZone(), nowMs
   return offset;
 }
 
+/**
+ * The instants to ask PCO for, covering the WHOLE visible grid.
+ *
+ * Not the calendar month. The six-week grid shows up to eleven days of the
+ * adjacent months, and a month-shaped window leaves those squares empty — which
+ * on screen is indistinguishable from a day with nothing booked.
+ *
+ * Both bounds are explicit instants because the client rejects a bare date: PCO
+ * reads one in the ORG's zone, which need not be the app's.
+ */
 export function gridWindow(monthAnchorIso: string, zone: TimeZone = appTimeZone()): { fromIso: string; toIso: string } {
   const startKey = gridStartKey(anchorParts(monthAnchorIso, zone));
   const from = startOfZonedDay(startKey, zone);

@@ -173,7 +173,7 @@ describe("choosing a tag reaches the server", () => {
     draw();
     assert.ok(screen.getByText(/reading the calendars/i));
     await settle();
-    assert.equal(screen.queryByText(/reading the calendars/i), null);
+    assert.ok(screen.queryByText(/reading the calendars/i) === null, "still claiming to be loading after the read landed");
   });
 
   it("says the read failed when it did", async () => {
