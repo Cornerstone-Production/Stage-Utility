@@ -8,6 +8,19 @@
 
 **Tech Stack:** TypeScript, React 19, `node:test` + `@testing-library/react` with the repo's `installDom()` harness.
 
+## Execution split — read before starting
+
+These five tasks do NOT all belong on one branch, because two of them depend on
+the unmerged multiview work (PR #346) and three do not. Verified: `embedChain`
+and three of Task 1's four target files do not exist on `beta`.
+
+| Tasks | Branch | Why |
+|---|---|---|
+| **4 (ids), 2 (shared state)** | `feat/presence-and-ids`, off `beta` | Pre-existing and app-wide. Nothing to do with multiview; mergeable immediately, whatever happens to #346. |
+| **1 (test-ctx safety), 3 (presence), 5 (residue)** | on top of `feat/multiview`, pushed into PR #346 | They depend on files that branch introduces, and they correct claims that branch makes. #346 should not ship with a dot that lies. |
+
+Do not start Tasks 1, 3 or 5 on a branch off `beta` — they will not compile.
+
 ## Global Constraints
 
 - Branch `feat/presence-and-ids` off `beta`. Every change is a PR; **never** push to `beta`/`main`, never `gh pr merge`.
