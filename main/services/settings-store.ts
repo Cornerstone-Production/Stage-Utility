@@ -303,11 +303,13 @@ export const settingsStore = {
    * missing floor is the collision check alone — `max(existing) + 1`, the
    * original bug.
    *
-   * TOO LOW is a restore, and it is the likelier of the two. A pre-feature
-   * snapshot carries no floors at all, so the merge in config-snapshot.ts has
-   * only the LIVE floor to keep — a number from the box being restored ONTO,
-   * which knows nothing about the ids that arrived with the snapshot. Restore
-   * last week's backup onto a new box and every id in it sits above the floor.
+   * TOO LOW is anything that put ids on disk without going through the
+   * allocator: a settings.json edited by hand, a data directory assembled by
+   * copying files, an older build. A restore USED to be the main way in — a
+   * pre-feature snapshot carries no floors, and the merge had only the live
+   * floor to keep — but config-snapshot.ts now raises the floor past the ids in
+   * the bundle as it writes, so the floor is correct before this ever runs. This
+   * is the backstop, not the thing that closes that hole.
    *
    * RAISING, not overwriting, is what makes recomputing from the live list safe.
    * A stored floor knows about ids that were spent and then deleted, which the

@@ -296,13 +296,17 @@ console.log("CREATED:" + (await Promise.all([alloc(), alloc(), alloc()])).join("
 // will ever do with this data, and it was the last way an id could come back.
 //
 // A snapshot taken before id floors existed carries none, so the merge in
-// config-snapshot.ts has only the LIVE floor to keep — a number belonging to the
+// config-snapshot.ts had only the LIVE floor to keep — a number belonging to the
 // box being restored ONTO, which knows nothing about the ids that arrived with
-// the snapshot. Every restored id then sits above the floor. Boot is what
-// repairs that, and only because seeding RAISES a floor it finds too low; while
-// it skipped any floor that was merely present, the first delete-then-create
-// after a restore reissued an id, and slots.json is keyed by output id, so the
-// new display inherited the dead one's mic slots.
+// the snapshot. Every restored id then sat above the floor, and the first
+// delete-then-create reissued one; slots.json is keyed by output id, so the new
+// display inherited the dead one's mic slots.
+//
+// TWO things now stop that, and this drives both: the restore raises the floor
+// past the ids in the bundle as it writes them (see
+// config-snapshot-restore.test.ts, which asserts that with no boot at all), and
+// boot's seeding RAISES a floor it finds too low rather than skipping any floor
+// that is merely present. This is the end-to-end path through both.
 describe("a snapshot restored from before id floors existed", () => {
   it("does not reissue an id the snapshot brought with it", async () => {
     const dir = await tempDataDir();

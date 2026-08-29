@@ -120,6 +120,7 @@ describe("a restore never lowers an id floor", () => {
   afterEach(async () => {
     quiet();
     await fs.rm(SETTINGS, { force: true });
+    await fs.rm(path.join(TMP, "views.json"), { force: true });
   });
 
   async function applyFloors(live: unknown, snapshot: unknown): Promise<unknown> {
@@ -153,12 +154,57 @@ describe("a restore never lowers an id floor", () => {
     assert.equal(written.appName, "Restored");
   });
 
-  it("carries nothing forward when there is no live settings.json", async () => {
-    // A restore onto a fresh install. No spent ids to protect, and a missing file
-    // must not fail the restore.
+  it("works with no live settings.json at all", async () => {
+    // A restore onto a fresh install. Nothing to protect, and a missing file must
+    // not fail the restore. `output` appears at its reserved minimum because
+    // display-1 is the primary output and is never allocated.
     await fs.rm(SETTINGS, { force: true });
     await configSnapshot.apply(snapshotOf({ "settings.json": { idFloors: { view: 9 } } }));
     const written = JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { idFloors?: unknown };
-    assert.deepEqual(written.idFloors, { view: 9 });
+    assert.deepEqual(written.idFloors, { view: 9, output: 2 });
+  });
+
+  // A pre-feature snapshot carries no floors at all, so the live floor — a number
+  // belonging to the box being restored ONTO — would win by being the only
+  // candidate, and land below every id in the bundle.
+  //
+  // Boot's seeding would repair that, but only at the NEXT boot, whenever that
+  // happens. Kill the box in the seconds between apply() and the restart it
+  // triggers and the low floor is what is on disk; a delete-then-create before
+  // the box comes back would still reissue. A restore is exactly when someone is
+  // most likely to be power-cycling a box, so the floor is made correct at the
+  // instant it is written instead.
+  it("RAISES THE FLOOR PAST THE IDS IT IS RESTORING, with no boot in between", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ idFloors: { view: 1, output: 2 } }), "utf8");
+    await configSnapshot.apply(
+      snapshotOf({
+        // No idFloors: this snapshot predates the feature. Its ids run to 3.
+        "settings.json": {
+          outputs: [1, 2, 3].map((n) => ({ id: `display-${n}`, name: `D${n}`, viewId: null })),
+        },
+        "views.json": [1, 2, 3].map((n) => ({ id: `view-${n}`, name: `V${n}`, kind: "slots" })),
+      }),
+    );
+    assert.deepEqual(
+      (JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { idFloors?: unknown }).idFloors,
+      { view: 4, output: 4 },
+      "the floor landed below the ids the restore just wrote — until the next boot, deleting the highest and creating would reissue it",
+    );
+  });
+
+  it("still lets a higher live floor win over the restored ids", async () => {
+    // The three candidates are a max, not a precedence order. A live floor of 40
+    // knows about ids this box spent and DELETED, which no file can show.
+    await fs.writeFile(SETTINGS, JSON.stringify({ idFloors: { view: 40 } }), "utf8");
+    await configSnapshot.apply(
+      snapshotOf({
+        "settings.json": {},
+        "views.json": [{ id: "view-3", name: "V3", kind: "slots" }],
+      }),
+    );
+    assert.deepEqual(
+      (JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { idFloors?: { view?: number } }).idFloors?.view,
+      40,
+    );
   });
 });
