@@ -291,3 +291,91 @@ console.log("CREATED:" + (await Promise.all([alloc(), alloc(), alloc()])).join("
     );
   });
 });
+
+// Restoring last week's backup onto a new box is the likeliest thing an operator
+// will ever do with this data, and it was the last way an id could come back.
+//
+// A snapshot taken before id floors existed carries none, so the merge in
+// config-snapshot.ts has only the LIVE floor to keep — a number belonging to the
+// box being restored ONTO, which knows nothing about the ids that arrived with
+// the snapshot. Every restored id then sits above the floor. Boot is what
+// repairs that, and only because seeding RAISES a floor it finds too low; while
+// it skipped any floor that was merely present, the first delete-then-create
+// after a restore reissued an id, and slots.json is keyed by output id, so the
+// new display inherited the dead one's mic slots.
+describe("a snapshot restored from before id floors existed", () => {
+  it("does not reissue an id the snapshot brought with it", async () => {
+    const dir = await tempDataDir();
+    await fs.mkdir(path.join(dir, "home"), { recursive: true });
+
+    // The box being restored ONTO: it has booted, so it HAS floors, and they are
+    // low because there is almost nothing on it.
+    const base = {
+      serviceTypeId: null,
+      planMode: "manual",
+      integrationConfigs: {},
+      integrationEnabled: {},
+      showQr: true,
+      displays: [],
+      allowedServiceTypeIds: [],
+    };
+    await fs.writeFile(
+      path.join(dir, "settings.json"),
+      JSON.stringify({
+        ...base,
+        outputs: [{ id: "display-1", name: "Display 1", viewId: null }],
+        idFloors: { view: 1, output: 2 },
+      }),
+      "utf8",
+    );
+    await fs.writeFile(path.join(dir, "views.json"), "[]", "utf8");
+
+    const restored = [1, 2, 3].map((n) => ({
+      id: `view-${n}`,
+      name: `View ${n}`,
+      kind: "slots",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }));
+    const snapshot = {
+      kind: "stage-utility-config",
+      version: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        // No idFloors: this snapshot predates the feature. Its ids run to 3.
+        "settings.json": {
+          ...base,
+          outputs: [1, 2, 3].map((n) => ({ id: `display-${n}`, name: `D${n}`, viewId: `view-${n}` })),
+        },
+        "views.json": restored,
+      },
+    };
+
+    // The real restore path, in its own process, the way the operator triggers it.
+    await inAFreshProcess(
+      dir,
+      `const { configSnapshot } = await import(${JSON.stringify(path.join(REPO, "main/services/config-snapshot.js"))});
+await configSnapshot.apply(${JSON.stringify(snapshot)});
+console.log("CREATED:applied");`,
+    );
+    const landed = JSON.parse(await fs.readFile(path.join(dir, "views.json"), "utf8")) as { id: string }[];
+    assert.deepEqual(landed.map((v) => v.id), ["view-1", "view-2", "view-3"], "the snapshot did not land");
+
+    // The restart that follows a restore, then the first thing anyone does.
+    const ids = await inAFreshProcess(
+      dir,
+      `await stageController.init();
+ctl.broadcast = () => {};
+ctl.recomputeResolved = () => {};
+await stageController.deleteView("view-3");
+const state = await stageController.createView("Replacement");
+await stageController.removeOutput("display-3");
+const { output } = await stageController.addOutput("Replacement");
+console.log("CREATED:" + state.views[state.views.length - 1].id + "," + output.id);`,
+    );
+    assert.deepEqual(
+      ids.split(","),
+      ["view-4", "display-4"],
+      "a restored id was handed straight back out — the new display inherits the dead one's slots.json bucket",
+    );
+  });
+});

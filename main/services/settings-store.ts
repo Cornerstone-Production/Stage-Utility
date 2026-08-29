@@ -220,10 +220,13 @@ export const settingsStore = {
     return syncTimeZone(await store.load());
   },
 
-  async save(data: SettingsData): Promise<void> {
-    syncTimeZone(data);
-    return store.save(data);
-  },
+  // There is deliberately no `save`. A whole-object write is a read-modify-write
+  // that is not serialized against anything, so it undoes every field written
+  // between the read and the write -- and one of those fields is idFloors, the
+  // high-water mark that stops a deleted view or display id being reissued.
+  // `patch` is a serialized read-modify-write and takes only the fields that
+  // actually changed. Removed rather than documented so the type checker is what
+  // stops the next caller.
 
   async get(): Promise<SettingsData> {
     return syncTimeZone(await store.load());
@@ -292,26 +295,35 @@ export const settingsStore = {
   },
 
   /**
-   * Record a floor for any kind that has none yet, from the ids already on disk.
+   * Bring every floor up to at least one past the highest id on disk. Boot's
+   * repair pass for a floor that is missing or too low.
    *
-   * Every install that upgrades into id floors has ids and no floor, and the
-   * fallback for a missing floor is the collision check alone — `max(existing) +
-   * 1`, the original bug. Deleting the highest-numbered view or display and
-   * creating another is the first thing that reaches it, so the very first
-   * delete-then-create after an update would reuse an id and then self-heal,
-   * which is the shape of defect nobody ever reports.
+   * MISSING is the install that upgraded into id floors: nothing writes a floor
+   * until an id is issued, so it has ids and no floor, and the fallback for a
+   * missing floor is the collision check alone — `max(existing) + 1`, the
+   * original bug.
    *
-   * A floor that is already PRESENT is authoritative and is left alone. It knows
-   * about ids that have been spent and deleted; the live list does not, so
-   * recomputing it from the live list could only ever lower it.
+   * TOO LOW is a restore, and it is the likelier of the two. A pre-feature
+   * snapshot carries no floors at all, so the merge in config-snapshot.ts has
+   * only the LIVE floor to keep — a number from the box being restored ONTO,
+   * which knows nothing about the ids that arrived with the snapshot. Restore
+   * last week's backup onto a new box and every id in it sits above the floor.
+   *
+   * RAISING, not overwriting, is what makes recomputing from the live list safe.
+   * A stored floor knows about ids that were spent and then deleted, which the
+   * live list cannot; taking the max keeps that knowledge and adds the ids the
+   * floor did not know about. It can only ever move a floor up. (This used to
+   * skip any floor that was present, on the reasoning that recomputing could
+   * only lower it — true of an overwrite, and the reason a restore reissued ids.)
    */
   async seedIdFloors(seeds: Record<IdKind, readonly string[]>): Promise<void> {
     syncTimeZone(await store.update((current) => {
       const floors = { ...current.idFloors };
       let changed = false;
       for (const kind of Object.keys(seeds) as IdKind[]) {
-        if (floors[kind] !== undefined) continue;
-        floors[kind] = initialFloor(kind, seeds[kind]);
+        const raised = Math.max(floors[kind] ?? 0, initialFloor(kind, seeds[kind]));
+        if (raised === floors[kind]) continue;
+        floors[kind] = raised;
         changed = true;
       }
       // Reference-equal means "nothing changed", which DataStore.update honours
