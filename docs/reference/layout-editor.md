@@ -140,6 +140,33 @@ toggles.
 you opened it on: switching to another console tab lands on that console, live,
 not in its editor.
 
+## Multiviews
+
+A custom view filled with **Embedded screen** objects is a producer overview: one
+tile per screen, each showing what that display is currently routed to, and
+following along the moment somebody changes the routing — no edit to the layout
+itself.
+
+**Embedded screen** follows a display; **Embedded view** pins one view wherever
+it is placed, whatever that view's own display later gets routed to. Dashboard,
+stage and SPL rundown views are configured per display rather than per view, so
+an Embedded view pointed at one says so instead of rendering it — Embedded
+screen is the only way to bring one into a tile.
+
+A screen tile's status dot means only that the screen is **routed to a view and
+not blacked out**. It is not a "connected" light: nothing in the app knows
+whether a browser is actually open on that display, so the dot never claims it.
+
+On an interactive surface — a console, or a screen set to panel mode — each tile
+carries a small button in its bottom-right corner that expands it to fill the
+window; Escape or the panel's close control brings it back. A wall display draws
+no such control at all, so a tile there cannot be expanded — an overlay a
+passer-by opened would stay open until somebody walked over to close it.
+
+Views may be nested three deep, and a view cannot contain itself, directly or
+through another embed in between — a tile that would loop draws a notice
+explaining why instead of rendering.
+
 ## Look: surface and tint
 
 Two independent questions, in that order.

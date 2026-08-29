@@ -22,7 +22,7 @@ is taken arrives as `<name> (imported)`; the one you already had is untouched.
 
 | | |
 |---|---|
-| The layout, and any view it embeds | An embed whose target is missing renders an error, so dependencies come automatically |
+| The layout, and any view it embeds with an **Embedded view** object | An embed whose target is missing renders an error, so dependencies come automatically |
 | Slot rows | Every service type, not just the active one |
 | Notes and checklists | Keyed to their objects, so they follow them |
 | Images | Stored by content hash, so a logo you already have is shared, not duplicated |
@@ -40,9 +40,15 @@ wireless rack, so bringing the source building's connection definitions would
 point the new rig at receivers that are not in the room. That is worse than an
 unbound object, because it looks configured.
 
-Objects bound to absent gear **keep their bindings** and render as unconfigured.
-Nothing is silently cleared. The import report lists them by name, grouped by
-what they need, and each entry opens the editor for the view holding it.
+The target of an **Embedded screen** object stays behind for the same kind of
+reason: it watches an output id, and an output is a screen configured on this
+install. The file carries no outputs at all, so every screen tile in an
+imported wall arrives unbound, whatever it was pointed at on the source.
+
+Objects bound to absent gear or a missing screen **keep their bindings** and
+render as unconfigured. Nothing is silently cleared. The import report lists
+them by name, grouped by what they need, and each entry opens the editor for
+the view holding it.
 
 ### What resolves anyway
 
