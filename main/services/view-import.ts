@@ -11,6 +11,8 @@ import { errorMessage } from "./errors.js";
 import { remapBundle } from "./view-remap.js";
 import { collectRefs } from "./view-refs.js";
 import { viewsStore } from "./views-store.js";
+import { nextId } from "./id-allocator.js";
+import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
 import { notesStore } from "./notes-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
@@ -83,12 +85,16 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
 
   const existing = await viewsStore.load();
   const usedIds = new Set(existing.map((v) => v.id));
-  let counter = 1;
+  // The same permanence rule createView follows, and the third place this
+  // allocation lived. Scanning `usedIds` alone only avoided COLLISIONS: it
+  // happily handed an imported view the id of one the operator had deleted,
+  // which slots.json, bookmarks and QR codes all still point at.
+  let floor = (await settingsStore.get()).idFloors?.view ?? 1;
   const mintViewId = (): string => {
-    while (usedIds.has(`view-${counter}`)) counter++;
-    const id = `view-${counter}`;
-    usedIds.add(id);
-    return id;
+    const minted = nextId("view", [...usedIds], floor);
+    usedIds.add(minted.id);
+    floor = minted.nextFloor;
+    return minted.id;
   };
 
   const { views, viewIdMap, objectIdMap } = remapBundle(bundle.views as View[], mintViewId);
@@ -102,6 +108,8 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
     return { ...v, name };
   });
 
+  // Floor first: a burnt id costs nothing, a reused one costs an operator's slots.
+  await settingsStore.raiseIdFloor("view", floor);
   await viewsStore.save([...existing, ...named]);
 
   // Side data, re-keyed. A key may be a layout OBJECT id (an inline slots-grid)

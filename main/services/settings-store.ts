@@ -25,6 +25,19 @@ export interface SettingsData {
   displays: DisplayInfo[];
   /** Physical screens + their View routing (canonical once migrated). */
   outputs?: Output[];
+  /**
+   * High-water marks for id allocation — the next number each kind may use.
+   *
+   * Persisted because a deleted item leaves no trace in the live list, and
+   * `max(existing) + 1` therefore hands its id to the next thing created. Ids
+   * are permanent by contract: slots.json is keyed by output id, and Pis,
+   * bookmarks and QR codes point at `/<id>`.
+   *
+   * Absent means "not recorded yet", and the allocator falls back to the
+   * collision check alone — so an install that upgrades into this keeps working
+   * and starts recording from its current maximum.
+   */
+  idFloors?: { view?: number; output?: number };
   /** Allowlisted service type IDs for auto mode. Empty = all allowed. */
   allowedServiceTypeIds: string[];
   /** Polling/metering interval (ms) applied to all wireless gear. */
@@ -154,6 +167,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   integrationEnabled: {},
   showQr: true,
   displays: [{ id: "display-1", name: "Display 1" }],
+  idFloors: {},
   // Empty, which every reader treats as "all allowed". Seeding it with ids
   // restricts a fresh install to service types that exist in no other org.
   allowedServiceTypeIds: [],
@@ -224,5 +238,34 @@ export const settingsStore = {
     // live poller advancing the plan while the operator changes display routing)
     // from clobbering this one's fields.
     return syncTimeZone(await store.update((current) => ({ ...current, ...clean })));
+  },
+
+  /**
+   * Raise an id high-water mark — optionally alongside the fields the caller was
+   * going to write anyway — in ONE serialized read-modify-write.
+   *
+   * Separate from `patch` for two reasons. `patch` shallow-merges, so two
+   * concurrent patches that each carry an `idFloors` read before the other's
+   * write would leave one kind's floor back at the older value, and a floor that
+   * went backwards is the id-reuse bug again. And `Math.max` against `current`
+   * inside the update makes the write monotonic whatever order they land in: a
+   * floor can only ever go up.
+   */
+  async raiseIdFloor(
+    kind: "view" | "output",
+    floor: number,
+    also: Partial<SettingsData> = {},
+  ): Promise<SettingsData> {
+    const clean = (await externalizeBrandingImages(also as Record<string, unknown>)) as Partial<SettingsData>;
+    return syncTimeZone(
+      await store.update((current) => ({
+        ...current,
+        ...clean,
+        idFloors: {
+          ...current.idFloors,
+          [kind]: Math.max(current.idFloors?.[kind] ?? 0, floor),
+        },
+      })),
+    );
   },
 };
