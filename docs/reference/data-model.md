@@ -125,6 +125,27 @@ becomes a console and the screens showing it become panels, so a control surface
 worked before still works. What moved is written to the log, so a stray control
 left on a wall display years ago can be spotted and set back deliberately.
 
+## What a display shows
+
+A routed view isn't the only thing a display can render. In order of precedence:
+
+- **Blackout** — a true black screen, commanded through
+  [Companion](../integrations/companion.md). It overrides everything else and
+  lifts instantly when turned off.
+- **Unrouted** — the display's output has no view assigned.
+- **View missing** — a live preview (`/preview-<id>`) whose view has since been
+  deleted. Distinct from unrouted: a view WAS assigned here, and it's the view
+  that's gone rather than the routing.
+- **Not configured** — the routed view needs Planning Center (a Slots view, or
+  any kind this build doesn't recognize) and the install has no PCO credentials
+  configured yet.
+- **Empty** — the routed view is a Slots view with no slots configured, or a
+  Custom layout with nothing drawn on it.
+
+A **locked** display (set on Screens) strips the escape hatches a kiosk
+otherwise shows. A **preview** ignores blackout and the lock and renders the
+previewed view directly, regardless of what is actually routed to that output.
+
 ## Object capabilities
 
 Every layout object declares what it can do — render data, invoke an action,

@@ -64,7 +64,7 @@ Tools have no QR codes of their own; they are links you send someone rather than
 codes you print and mount. Where a QR does appear it encodes the `/<id>` address
 and never a slug, since a printed code outlives the session it was made in.
 
-They are not on the Displays tab, which answers a different question: which view a
+They are not on the Screens page, which answers a different question: which view a
 physical screen shows.
 
 ## Icon colors

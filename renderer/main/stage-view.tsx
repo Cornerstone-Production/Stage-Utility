@@ -84,7 +84,7 @@ interface KioskTopBarProps {
   appName: string;
   appLogo: string | null;
   appLogoMonochrome: boolean;
-  /** This output is locked (from its Displays-tab toggle) — strip the nav escape
+  /** This output is locked (from its Screens-page toggle) — strip the nav escape
    *  hatches even without the ?kiosk=1 URL override. */
   locked?: boolean;
 }
@@ -287,7 +287,7 @@ function KioskUnrouted({ state, displayName, locked }: { state: StageState; disp
         <MonitorIcon className="size-12 text-gray-7" />
         <p className="text-title3 text-gray-9 font-semibold">Display not configured</p>
         <p className="text-body text-gray-7">
-          No view is assigned to this display. Assign one under Settings → Displays.
+          No view is assigned to this display. Assign one under Settings → Screens.
         </p>
       </div>
     </div>
@@ -404,7 +404,7 @@ export function StageView() {
     });
   }, [displayId]);
 
-  // Presence heartbeat: tell the server this screen is alive so Settings → Displays
+  // Presence heartbeat: tell the server this screen is alive so Settings → Screens
   // can show a Connected/Offline dot. Fast cadence near/during a PCO service, slow
   // otherwise (no point pinging every 20s during a dead week); a sendBeacon on unload
   // flips the dot offline at once, and the server TTL catches ungraceful deaths.
@@ -465,7 +465,7 @@ export function StageView() {
   // ones reachable without one.
   if (screen.k === "loading") return <KioskLoading />;
   if (screen.k === "error") return <KioskError message={screen.message} />;
-  // Blackout: a true black screen on command (Companion / Displays page), taking
+  // Blackout: a true black screen on command (Companion), taking
   // priority over the routed View. Toggling it off restores the View instantly.
   if (screen.k === "blackout") return <div className="fixed inset-0 z-50 bg-black" />;
   // Unreachable: resolveScreen turns a missing state into the error screen above,

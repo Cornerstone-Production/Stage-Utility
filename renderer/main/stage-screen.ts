@@ -90,10 +90,10 @@ export function resolveScreen(input: ScreenInput): StageScreen {
   // keeps an output's blackout and its kiosk lock out of the settings preview
   // iframe. The three checks below read it and do not re-test previewViewId.
   const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
-  // Per-output kiosk lock (Displays-tab toggle) — never in the settings preview iframe.
+  // Per-output kiosk lock (Screens-page toggle) — never in the settings preview iframe.
   const outputLocked = resolved?.locked ?? false;
 
-  // Blackout: a true black screen on command (Companion / Displays page), taking
+  // Blackout: a true black screen on command (Companion), taking
   // priority over the routed View. Toggling it off restores the View instantly.
   if (resolved?.blackout) {
     return { k: "blackout" };

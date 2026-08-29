@@ -521,7 +521,7 @@ export class StageController {
   /** Set (or clear with null) the public base URL — persisted + broadcast. */
   /**
    * Tint one item's icon. `key` is a display id ("display-1") or a tool path
-   * ("/baptism"); one map so a color set on the Displays tab or Connect also
+   * ("/baptism"); one map so a color set on the Screens page or Connect also
    * shows on the picker at /. An empty color clears the entry back to the theme
    * default rather than storing a sentinel.
    */

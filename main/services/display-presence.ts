@@ -8,7 +8,7 @@
 // leaving beacon. Presence is ephemeral: purely in-memory, never persisted.
 //
 // The connected set is broadcast on "displays:presence" only when it changes, so
-// the Settings → Displays page can light a per-display Connected/Offline dot.
+// the Settings → Screens page can light a per-display Connected/Offline dot.
 
 import { broadcast } from "./broadcaster.js";
 

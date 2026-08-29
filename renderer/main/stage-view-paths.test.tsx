@@ -1,7 +1,7 @@
 // Every screen StageView can land on, rendered.
 //
 // This file exists to be a PARITY BASELINE. It was written against the
-// fourteen-return version of the component, run green, and only then did the
+// fifteen-return version of the component, run green, and only then did the
 // component become one switch over `resolveScreen`. If a single assertion here
 // had to be edited to survive that change, the change was a behaviour change —
 // on the component every wall display in a building renders, where the failure
