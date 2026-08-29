@@ -105,6 +105,63 @@ function gridStartKey(p: ZonedParts): string {
  * Both bounds are explicit instants because the client rejects a bare date: PCO
  * reads one in the ORG's zone, which need not be the app's.
  */
+/**
+ * How far either side of the current month the UI will page.
+ *
+ * Three years each way is generous for "when did we last run that?" and for a
+ * booking made well ahead. Unbounded is how a stuck chevron walks the server
+ * through a thousand months of Planning Center reads.
+ */
+export const MAX_MONTH_OFFSET = 36;
+
+/**
+ * The anchor instant for a month, `offset` months from the current one.
+ *
+ * Resolved through the APP time zone, never the host clock. "Which month is it"
+ * is exactly the question a UTC box gets wrong after 19:00 in Chicago — on the
+ * 31st it would answer with the next month, and every display in the building
+ * would page forward for five hours.
+ *
+ * Midday, not midnight: the anchor only has to land inside the right month, and
+ * midday is the furthest any offset can be from tipping into an adjacent day.
+ *
+ * @throws if `offset` is not an integer within {@link MAX_MONTH_OFFSET}.
+ */
+export function monthAnchor(offset: number, zone: TimeZone = appTimeZone(), nowMs = Date.now()): string {
+  if (!Number.isInteger(offset) || Math.abs(offset) > MAX_MONTH_OFFSET) {
+    throw new Error(`month offset must be a whole number within ${MAX_MONTH_OFFSET} of now, got ${offset}`);
+  }
+  const p = zonedParts(nowMs, zone);
+  // Civil month arithmetic. Date.UTC normalises a month of -1 or 12 into the
+  // right year, so no wrap-around case is written by hand here.
+  const t = new Date(Date.UTC(p.year, p.month - 1 + offset, 1, 12));
+  return t.toISOString();
+}
+
+/**
+ * The offset, in months, from the current month to `key` ("YYYY-MM").
+ *
+ * The month a client asks for travels as a DATE, not an offset, so a page open
+ * across midnight on the 31st cannot silently mean a different month than it did
+ * when the operator clicked. This turns it back into an offset so it can be
+ * range-checked against the same bound the UI pages within.
+ *
+ * @throws if `key` is not a real YYYY-MM, or is outside {@link MAX_MONTH_OFFSET}.
+ */
+export function monthOffsetOf(key: string, zone: TimeZone = appTimeZone(), nowMs = Date.now()): number {
+  const m = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!m) throw new Error(`month must be YYYY-MM, got "${key}"`);
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  if (month < 1 || month > 12) throw new Error(`month must be 01-12, got "${key}"`);
+  const now = zonedParts(nowMs, zone);
+  const offset = (year - now.year) * 12 + (month - now.month);
+  if (Math.abs(offset) > MAX_MONTH_OFFSET) {
+    throw new Error(`month "${key}" is more than ${MAX_MONTH_OFFSET} months from now`);
+  }
+  return offset;
+}
+
 export function gridWindow(monthAnchorIso: string, zone: TimeZone = appTimeZone()): { fromIso: string; toIso: string } {
   const startKey = gridStartKey(anchorParts(monthAnchorIso, zone));
   const from = startOfZonedDay(startKey, zone);

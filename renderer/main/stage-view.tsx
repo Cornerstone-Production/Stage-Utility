@@ -562,6 +562,13 @@ export function StageView() {
           <CalendarView
             viewId={resolved?.viewId ?? previewViewId ?? null}
             pcoConfigured={state.pcoConfigured ?? false}
+            // The same answer every control on every surface uses. False on a
+            // wall display, so it gets no chevrons and cannot be left on the
+            // wrong month by a passer-by.
+            interactive={capabilityLive(
+              contextForOutput(currentDisplay?.mode, !!previewViewId),
+              "control",
+            )}
           />
         </div>
       </StageErrorBoundary>

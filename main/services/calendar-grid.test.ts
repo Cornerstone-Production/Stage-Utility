@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { CalendarEventDTO } from "../types/calendar.js";
-import { buildGrid, gridWindow } from "./calendar-grid.js";
+import { buildGrid, gridWindow, monthAnchor, monthOffsetOf, MAX_MONTH_OFFSET } from "./calendar-grid.js";
 
 /** UTC-6 in winter, UTC-5 in summer — the zone the bucketing bug shows up in. */
 const ZONE = "America/Chicago";
@@ -221,3 +221,88 @@ describe("bad input", () => {
     assert.equal(grid.unplaceable, 1);
   });
 });
+
+describe("paging to another month", () => {
+  // 14:00Z on the last day of August is 09:00 on the 31st in Chicago, and
+  // 2026-09-01 in UTC only three hours earlier than it is anywhere. The whole
+  // point of these is that the app zone decides, not the host.
+  const LAST_DAY = Date.parse("2026-09-01T02:00:00Z"); // still 31 Aug in Chicago
+
+  it("resolves the current month in the APP zone, not the host's", () => {
+    // A UTC box on the evening of the 31st has already rolled into September.
+    // If that decided the month, every display in the building would page
+    // forward for five hours.
+    assert.equal(buildGrid([], monthAnchor(0, ZONE, LAST_DAY), ZONE).monthLabel, "August 2026");
+    assert.equal(buildGrid([], monthAnchor(0, "UTC", LAST_DAY), "UTC").monthLabel, "September 2026");
+  });
+
+  it("steps whole months, and across a year boundary", () => {
+    const label = (n: number) => buildGrid([], monthAnchor(n, ZONE, LAST_DAY), ZONE).monthLabel;
+    assert.equal(label(1), "September 2026");
+    assert.equal(label(-1), "July 2026");
+    assert.equal(label(5), "January 2027");
+    assert.equal(label(-8), "December 2025");
+  });
+
+  it("lands mid-month, so no offset can tip into an adjacent one", () => {
+    // The anchor only has to fall INSIDE the right month. Anchoring on midnight
+    // of the 1st leaves no margin at all in a zone behind UTC.
+    for (let n = -MAX_MONTH_OFFSET; n <= MAX_MONTH_OFFSET; n++) {
+      const label = buildGrid([], monthAnchor(n, ZONE, LAST_DAY), ZONE).monthLabel;
+      assert.ok(/^[A-Z][a-z]+ \d{4}$/.test(label), `${n} produced "${label}"`);
+    }
+  });
+
+  it("REFUSES an offset outside the paging bound rather than clamping it", () => {
+    // A silent clamp draws a different month than the one asked for and says
+    // nothing, which is the whole failure mode this feature keeps guarding
+    // against.
+    assert.throws(() => monthAnchor(MAX_MONTH_OFFSET + 1, ZONE, LAST_DAY), /within/);
+    assert.throws(() => monthAnchor(-MAX_MONTH_OFFSET - 1, ZONE, LAST_DAY), /within/);
+    assert.throws(() => monthAnchor(1.5, ZONE, LAST_DAY), /whole number/);
+    assert.throws(() => monthAnchor(NaN, ZONE, LAST_DAY), /whole number/);
+  });
+});
+
+describe("reading a month key off the wire", () => {
+  const LAST_DAY = Date.parse("2026-09-01T02:00:00Z"); // still 31 Aug in Chicago
+
+  it("turns a key into an offset in the app zone", () => {
+    assert.equal(monthOffsetOf("2026-08", ZONE, LAST_DAY), 0);
+    assert.equal(monthOffsetOf("2026-09", ZONE, LAST_DAY), 1);
+    assert.equal(monthOffsetOf("2025-12", ZONE, LAST_DAY), -8);
+  });
+
+  it("REJECTS a malformed key rather than coercing it to today", () => {
+    // Falling back to the current month would answer a question the operator
+    // did not ask, with nothing on screen to say so.
+    for (const bad of ["", "2026", "2026-8", "26-08", "2026-08-01", "not-a-month", "2026-13", "2026-00"]) {
+      assert.throws(() => monthOffsetOf(bad, ZONE, LAST_DAY), /month/, bad);
+    }
+  });
+
+  it("REJECTS a key beyond the paging bound", () => {
+    assert.throws(() => monthOffsetOf("2999-01", ZONE, LAST_DAY), /months from now/);
+    assert.throws(() => monthOffsetOf("1900-01", ZONE, LAST_DAY), /months from now/);
+  });
+
+  it("round-trips with monthAnchor over the whole paging range", () => {
+    for (let n = -MAX_MONTH_OFFSET; n <= MAX_MONTH_OFFSET; n++) {
+      const anchor = monthAnchor(n, ZONE, LAST_DAY);
+      const p = zonedPartsOf(anchor);
+      const key = `${p.year}-${String(p.month).padStart(2, "0")}`;
+      assert.equal(monthOffsetOf(key, ZONE, LAST_DAY), n, key);
+    }
+  });
+});
+
+/** The anchor's own year/month, read back the way the server would. */
+function zonedPartsOf(iso: string): { year: number; month: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: ZONE,
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date(iso));
+  const get = (t: string) => Number(parts.find((x) => x.type === t)?.value ?? "0");
+  return { year: get("year"), month: get("month") };
+}

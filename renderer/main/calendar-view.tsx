@@ -20,14 +20,15 @@
 // deliberately smaller and denser than the kiosk norm; they are not an oversight
 // waiting to be "fixed" up to stage sizes.
 
-import { useEffect, useState } from "react";
-import { AlertCircleIcon, CalendarDaysIcon, Loader2Icon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertCircleIcon, CalendarDaysIcon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
 
 import { invoke, onNotification } from "../lib/api";
 import { formatClock } from "../lib/clock-format";
 import { cn } from "../lib/cn";
 import { contrastRatio, formatColor, parseColor } from "../components/ui/color-math";
 import { zonedDateKey } from "@main/services/app-timezone";
+import { MAX_MONTH_OFFSET } from "@main/services/calendar-grid";
 import type { CalendarDay, CalendarEventDTO, CalendarGrid } from "@main/types/calendar";
 
 /** Sunday first, matching the grid the server builds. */
@@ -239,11 +240,49 @@ function DaySquare({
  *   corrected where the caller has a server clock. Used only to decide which
  *   square is today and which event is running.
  */
+/** The month chevrons' wiring. Supplied only where controls are live. */
+export interface CalendarNav {
+  /** Months from the current one. 0 is the live, pushed month. */
+  offset: number;
+  canPrev: boolean;
+  canNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  onToday: () => void;
+}
+
+/** A chevron. A real <button>, so it is tab-reachable and fires on Enter and
+ *  Space without any of that being reimplemented here. */
+function NavButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded p-0.5 text-fg-subtle hover:text-fg hover:bg-fill-active disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-fg-subtle focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+    >
+      {children}
+    </button>
+  );
+}
+
 export function CalendarMonth({
   grid,
   nowMs,
   pcoConfigured,
   failed = false,
+  nav = null,
 }: {
   grid: CalendarGrid | null;
   nowMs: number;
@@ -258,16 +297,66 @@ export function CalendarMonth({
    */
   pcoConfigured: boolean;
   failed?: boolean;
+  /**
+   * The month chevrons, or null for no controls at all.
+   *
+   * Null on a WALL DISPLAY, which is the point: there is nobody standing at it
+   * to press anything, and a control that renders where it cannot be used is
+   * furniture. The caller decides, from capabilityLive(ctx, "control") — the
+   * app's existing answer to "is this surface operable", rather than a second
+   * flag that could disagree with it.
+   */
+  nav?: CalendarNav | null;
 }) {
-  // With no grid there is nothing to draw, so the whole surface says why. With a
-  // grid AND a failure the last good month stays up, marked stale in the header
-  // below — throwing away a correct month because the NEXT read failed is worse
-  // than showing one that is a few minutes old and says so.
+  // With no grid there is nothing to draw, so the surface says why. With a grid
+  // AND a failure the last good month stays up, marked stale in the header below
+  // — throwing away a correct month because the NEXT read failed is worse than
+  // showing one that is a few minutes old and says so.
+  //
+  // The CHEVRONS STAY at both. A month the operator paged to arrives a moment
+  // after the click, and a full-surface notice in the meantime takes away the
+  // controls — including the way back to today — leaving them stranded on a
+  // blank screen with nothing to press. A wall display has no chevrons anyway,
+  // so it gets the bare notice it always did.
   if (!grid) {
-    return (
+    const body = (
       <Notice spinner={!failed}>
-        {failed ? "Could not read the calendar from Planning Center" : "Loading the calendar…"}
+        {failed
+          ? nav && nav.offset !== 0
+            ? "Could not read that month from Planning Center"
+            : "Could not read the calendar from Planning Center"
+          : "Loading the calendar…"}
       </Notice>
+    );
+    if (!nav) return body;
+    return (
+      <div className="flex h-full min-h-0 flex-col kiosk-surface">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+          <CalendarDaysIcon className="size-4 text-fg-subtle" aria-hidden="true" />
+          {/* No month name: the server names the month, in the app time zone,
+              and it has not answered yet. Naming it here would be the browser's
+              zone answering a question it does not own. */}
+          <span className="text-footnote font-title text-fg-subtle">—</span>
+          <span className="flex items-center gap-0.5">
+            <NavButton label="Previous month" onClick={nav.onPrev} disabled={!nav.canPrev}>
+              <ChevronLeftIcon className="size-4" aria-hidden="true" />
+            </NavButton>
+            <NavButton label="Next month" onClick={nav.onNext} disabled={!nav.canNext}>
+              <ChevronRightIcon className="size-4" aria-hidden="true" />
+            </NavButton>
+            {nav.offset !== 0 && (
+              <button
+                type="button"
+                onClick={nav.onToday}
+                className="ml-1 rounded px-1.5 py-0.5 text-caption2 text-fg-subtle hover:text-fg hover:bg-fill-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              >
+                Today
+              </button>
+            )}
+          </span>
+        </div>
+        <div className="min-h-0 flex-1">{body}</div>
+      </div>
     );
   }
 
@@ -282,16 +371,38 @@ export function CalendarMonth({
     <div className="flex h-full min-h-0 flex-col kiosk-surface">
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
         <CalendarDaysIcon className="size-4 text-fg-subtle" aria-hidden="true" />
+        {/* The label is the SERVER's, rendered in the app time zone. A month name
+            computed here would be the browser's idea of the month. */}
         <span className="text-footnote font-title text-fg">{grid.monthLabel}</span>
-        {/* The failure wins the slot. An operator looking at a month that has
-            stopped updating needs to be told that before anything else, and a
-            "nothing this month" on a stale grid is the lie this says instead. */}
+        {nav && (
+          <span className="flex items-center gap-0.5">
+            <NavButton label="Previous month" onClick={nav.onPrev} disabled={!nav.canPrev}>
+              <ChevronLeftIcon className="size-4" aria-hidden="true" />
+            </NavButton>
+            <NavButton label="Next month" onClick={nav.onNext} disabled={!nav.canNext}>
+              <ChevronRightIcon className="size-4" aria-hidden="true" />
+            </NavButton>
+            {/* Only once paged away. On the current month it would do nothing,
+                and a live control that does nothing reads as broken. */}
+            {nav.offset !== 0 && (
+              <button
+                type="button"
+                onClick={nav.onToday}
+                className="ml-1 rounded px-1.5 py-0.5 text-caption2 text-fg-subtle hover:text-fg hover:bg-fill-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              >
+                Today
+              </button>
+            )}
+          </span>
+        )}
         {/* The failure wins the slot. An operator looking at a month that has
             stopped updating needs to be told that before anything else, and a
             "nothing this month" on a stale grid is the lie this says instead. */}
         {failed ? (
           <span className="ml-auto text-caption2 text-warn-11">
-            Could not reach Planning Center — showing the last month read
+            {nav && nav.offset !== 0
+              ? "Could not read that month from Planning Center"
+              : "Could not reach Planning Center — showing the last month read"}
           </span>
         ) : grid.unplaceable > 0 ? (
           // The mapper upstream guarantees an ISO start, so this is a contract
@@ -357,6 +468,40 @@ function Notice({ children, spinner }: { children: React.ReactNode; spinner: boo
 // ── the wrapper that fetches ─────────────────────────────────────────────────
 
 /**
+ * How long a console sits on a month it was paged to before dropping back.
+ *
+ * Ten minutes: long enough that reading last December is not interrupted, short
+ * enough that a console paged to March on Thursday is showing this month again
+ * by Sunday. A wall display never pages at all, so this only ever affects a
+ * surface someone was standing at.
+ */
+const IDLE_RESET_MS = 10 * 60_000;
+
+/**
+ * "YYYY-MM", `offset` months from now, in the grid's zone.
+ *
+ * The zone comes from the live grid the server sent. Before that arrives there
+ * is nothing to page from — the chevrons have no month to be relative to — so
+ * the browser's own zone is the only available answer and is used as one. The
+ * server re-derives the offset in the APP zone from whatever key it receives, so
+ * a disagreement here can only ever be about which month the client ASKED for,
+ * never about which month it is served.
+ */
+function monthKeyFor(offset: number, zone: string | undefined): string {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    ...(zone ? { timeZone: zone } : {}),
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  // Date.UTC normalises month -1 or 12 into the neighbouring year, so no
+  // wrap-around case is written by hand.
+  const d = new Date(Date.UTC(get("year"), get("month") - 1 + offset, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
  * The kiosk route and the layout embed both come through here.
  *
  * PUSHED, not polled. An earlier version refetched on a three-minute interval in
@@ -373,17 +518,53 @@ function Notice({ children, spinner }: { children: React.ReactNode; spinner: boo
 export function CalendarView({
   viewId,
   pcoConfigured,
+  interactive = false,
   nowMs,
 }: {
   viewId: string | null;
   /** From the stage state the caller already holds. Required for the reason
    *  CalendarMonth's copy is. */
   pcoConfigured: boolean;
+  /**
+   * Whether this surface is operable — capabilityLive(ctx, "control"). False on
+   * a wall display, which therefore gets no chevrons and always shows the
+   * current month.
+   */
+  interactive?: boolean;
   nowMs?: number;
 }) {
-  const [grid, setGrid] = useState<CalendarGrid | null>(null);
+  /** The month pushed on the channel. Always the CURRENT one. */
+  const [liveGrid, setLiveGrid] = useState<CalendarGrid | null>(null);
+  /**
+   * A month the operator paged to, TAGGED with the month it is.
+   *
+   * The tag is what makes the value derivable rather than something an effect
+   * has to clear: while a new month is in flight the tag does not match, so it
+   * simply is not rendered. Storing a bare grid meant clearing it synchronously
+   * inside an effect, which cascades a render — and until it was cleared, the
+   * PREVIOUS month's grid was on screen under the new month's heading.
+   */
+  const [paged, setPaged] = useState<{ key: string; grid: CalendarGrid } | null>(null);
   const [failed, setFailed] = useState(false);
   const [tick, setTick] = useState(() => Date.now());
+
+  /**
+   * Months from the current one. REACT STATE, per client, and deliberately not
+   * on the View.
+   *
+   * A View can be routed to several screens at once, so an offset stored in its
+   * config would page every wall display in the building to December because one
+   * operator looked at December on their console. That is the same shape as a
+   * per-device setting kept globally.
+   *
+   * Starting at 0 also means a remount resets it, which is half of "a console
+   * left on March must not still be on March on Sunday".
+   */
+  const [offset, setOffset] = useState(0);
+
+  // Wall displays cannot page at all, so nothing can leave one on the wrong
+  // month even if a stray offset ever got set.
+  const shown = interactive ? offset : 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -391,7 +572,7 @@ export function CalendarView({
       (g) => {
         if (cancelled) return;
         setFailed(false);
-        if (g) setGrid(g);
+        if (g) setLiveGrid(g);
       },
       () => {
         // REPORTED, not swallowed: a calendar that quietly empties itself is the
@@ -413,12 +594,83 @@ export function CalendarView({
     return onNotification("calendar:grid", (p) => {
       const next = (p as Record<string, CalendarGrid> | null)?.[viewId];
       if (!next) return;
-      setGrid(next);
+      setLiveGrid(next);
       // A frame arriving IS the server reaching Planning Center, so it clears a
       // stale marker that an earlier failure put up.
       setFailed(false);
     });
   }, [viewId]);
+
+  /**
+   * A month the operator paged to — fetched once and left alone.
+   *
+   * ONLY for a non-zero offset. Serving the current month from here too would
+   * look harmless and would break the live path: the grid on screen would be a
+   * frozen copy taken at page time, and every subsequent push would land in
+   * liveGrid where nothing was reading it. Paging away and back would leave a
+   * display quietly showing a stale month.
+   *
+   * The generation counter is not decoration. Clicking a chevron twice quickly
+   * starts two requests, and the FIRST can answer second — without this, holding
+   * a chevron down lands the display on whichever month the network happened to
+   * finish last.
+   */
+  // The month travels as a DATE, not an offset: a page left open across midnight
+  // on the 31st must not have its "+1" quietly mean a different month than it did
+  // when the operator clicked. null on the current month, which is never fetched.
+  const wantedKey = useMemo(
+    () => (shown === 0 ? null : monthKeyFor(shown, liveGrid?.zone)),
+    [shown, liveGrid?.zone],
+  );
+
+  // Derived, not cleared: a grid for a month we are no longer showing is simply
+  // not the one rendered.
+  const pagedGrid = paged && paged.key === wantedKey ? paged.grid : null;
+
+  useEffect(() => {
+    if (wantedKey === null) return;
+    let cancelled = false;
+    // Debounced, so a held-down chevron walks the offset without firing a
+    // request per step.
+    const t = setTimeout(() => {
+      invoke<CalendarGrid>("calendar:getGrid", { viewId, month: wantedKey }).then(
+        (g) => {
+          if (cancelled) return;
+          // Tagged with the month it answers, so a slow reply for a month the
+          // operator has already paged past cannot land on the screen.
+          setPaged(g ? { key: wantedKey, grid: g } : null);
+          setFailed(!g);
+        },
+        () => {
+          if (cancelled) return;
+          // Blanked ON PURPOSE, unlike the live month. The operator asked a
+          // specific question; leaving the previous month on screen under a
+          // notice would look like the answer to it.
+          setPaged(null);
+          setFailed(true);
+        },
+      );
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [wantedKey, viewId]);
+
+  /**
+   * Drop back to the current month after a spell of not touching it.
+   *
+   * A console paged to March and walked away from must not still be on March on
+   * Sunday morning. There is no reusable idle helper in this app — the only
+   * other idle timer is the kiosk cursor-hide in main/index.tsx, which is an
+   * inline setTimeout reset by input events — so this takes the same shape at a
+   * length suited to a room rather than a pointer.
+   */
+  useEffect(() => {
+    if (offset === 0) return;
+    const t = setTimeout(() => setOffset(0), IDLE_RESET_MS);
+    return () => clearTimeout(t);
+  }, [offset]);
 
   // A minute is enough: the highlight moves between events, and the day rolls
   // over. A one-second tick would re-render the whole grid sixty times as often
@@ -430,6 +682,25 @@ export function CalendarView({
   }, [nowMs]);
 
   return (
-    <CalendarMonth grid={grid} nowMs={nowMs ?? tick} pcoConfigured={pcoConfigured} failed={failed} />
+    <CalendarMonth
+      // The live month on 0, the one-shot otherwise. The current month is never
+      // served from pagedGrid — see the effect above for why that matters.
+      grid={shown === 0 ? liveGrid : pagedGrid}
+      nowMs={nowMs ?? tick}
+      pcoConfigured={pcoConfigured}
+      failed={failed}
+      nav={
+        interactive
+          ? {
+              offset: shown,
+              canPrev: shown > -MAX_MONTH_OFFSET,
+              canNext: shown < MAX_MONTH_OFFSET,
+              onPrev: () => setOffset((o) => Math.max(-MAX_MONTH_OFFSET, o - 1)),
+              onNext: () => setOffset((o) => Math.min(MAX_MONTH_OFFSET, o + 1)),
+              onToday: () => setOffset(0),
+            }
+          : null
+      }
+    />
   );
 }

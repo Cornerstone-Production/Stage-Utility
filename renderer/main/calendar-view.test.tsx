@@ -21,28 +21,42 @@
 // Every id, name and colour below is INVENTED. This is a public repository.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, beforeEach, describe, test } from "node:test";
+import { after, afterEach, beforeEach, describe, it, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
 import type { CalendarEventDTO, CalendarGrid } from "@main/types/calendar";
 
 const teardown = installDom();
 
-// Nothing here fetches — CalendarMonth is handed its grid — but a stub keeps a
-// stray call from settling after teardown and failing the whole FILE while every
-// test in it passes.
-(globalThis as unknown as { fetch: unknown }).fetch = async () => ({
-  ok: true,
-  status: 200,
-  json: async () => ({}),
-  text: async () => "{}",
-});
+// CalendarMonth is handed its grid and fetches nothing; CalendarView does, and
+// the navigation suite at the bottom reads what it asked for. The stub also keeps
+// a stray call from settling after teardown and failing the whole FILE while
+// every test in it passes.
+let sent: { url: string; method: string }[] = [];
+(globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init?: RequestInit) => {
+  sent.push({ url, method: init?.method ?? "GET" });
+  // A real grid for the calendar route: CalendarView renders a notice rather
+  // than a header until it has one, and the chevrons live in the header.
+  const payload = url.includes("/api/pco/calendar") ? grid() : {};
+  return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
+};
+
+// EventSource, for the pushed calendar:grid channel. A no-op is enough: these
+// assert what the component ASKS for, and the push path has its own tests in
+// main/services/calendar-broadcaster.test.ts.
+(globalThis as unknown as { EventSource: unknown }).EventSource = class {
+  addEventListener() {}
+  removeEventListener() {}
+  close() {}
+};
 
 // After installDom(), never before: a static import evaluates first and React
 // would come up with no document.
-const { render, screen, cleanup } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { CalendarMonth, readableTagColor, visibleEvents, KIOSK_BACKDROP } = await import("./calendar-view.js");
+const { CalendarMonth, CalendarView, readableTagColor, visibleEvents, KIOSK_BACKDROP } = await import(
+  "./calendar-view.js"
+);
 const { contrastRatio } = await import("../components/ui/color-math.js");
 
 const ZONE = "America/Chicago";
@@ -83,7 +97,10 @@ after(async () => {
   await settle();
   teardown();
 });
-beforeEach(() => cleanup());
+beforeEach(() => {
+  cleanup();
+  sent = [];
+});
 afterEach(async () => {
   cleanup();
   await settle();
@@ -319,5 +336,199 @@ describe("empty and broken states", () => {
     );
     assert.equal(screen.queryByText(/nothing on the calendar/i), null);
     assert.ok(screen.getByText(/could not reach planning center/i));
+  });
+});
+
+
+// ── month navigation ─────────────────────────────────────────────────────────
+//
+// What these guard:
+//
+// 1. THE OFFSET IS NOT SHARED. A View can be routed to several screens at once,
+//    so an offset kept in its config would page every wall in the building
+//    because one operator looked at December.
+// 2. A WALL DISPLAY HAS NO CONTROLS AND CANNOT PAGE. Nobody is standing at it.
+// 3. RETURNING TO THE CURRENT MONTH READS THE LIVE CHANNEL. Serving the current
+//    month from the one-shot path instead looks harmless and freezes the
+//    display on a copy taken at page time.
+// 4. A BAD `month` IS REJECTED, not coerced to today.
+//
+// All four proven red in the session that wrote them.
+
+describe("the month chevrons", () => {
+  const g = () => grid();
+
+  it("are absent when CalendarMonth is given no nav", () => {
+    render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: g(),
+        nowMs: Date.parse("2026-08-14T18:00:00Z"),
+        nav: null,
+      }),
+    );
+    assert.equal(screen.queryByRole("button", { name: /previous month/i }), null);
+    assert.equal(screen.queryByRole("button", { name: /next month/i }), null);
+  });
+
+  it("are present, and are real buttons, where controls are live", () => {
+    // Real <button>s so they are tab-reachable and fire on Enter and Space
+    // without any of that being reimplemented.
+    const nav = { offset: 0, canPrev: true, canNext: true, onPrev() {}, onNext() {}, onToday() {} };
+    render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: g(),
+        nowMs: Date.parse("2026-08-14T18:00:00Z"),
+        nav,
+      }),
+    );
+    const prev = screen.getByRole("button", { name: /previous month/i });
+    assert.equal(prev.tagName, "BUTTON");
+    assert.equal(prev.getAttribute("type"), "button");
+  });
+
+  it("stop at the paging bound rather than walking off it", () => {
+    const nav = { offset: -36, canPrev: false, canNext: true, onPrev() {}, onNext() {}, onToday() {} };
+    render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: g(),
+        nowMs: Date.parse("2026-08-14T18:00:00Z"),
+        nav,
+      }),
+    );
+    assert.equal((screen.getByRole("button", { name: /previous month/i }) as HTMLButtonElement).disabled, true);
+    assert.equal((screen.getByRole("button", { name: /next month/i }) as HTMLButtonElement).disabled, false);
+  });
+
+  it("offers Today only once paged away, since on 0 it would do nothing", () => {
+    const base = { canPrev: true, canNext: true, onPrev() {}, onNext() {}, onToday() {} };
+    render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: g(),
+        nowMs: Date.parse("2026-08-14T18:00:00Z"),
+        nav: { ...base, offset: 0 },
+      }),
+    );
+    assert.equal(screen.queryByRole("button", { name: /^today$/i }), null);
+    cleanup();
+    render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: g(),
+        nowMs: Date.parse("2026-08-14T18:00:00Z"),
+        nav: { ...base, offset: 2 },
+      }),
+    );
+    assert.ok(screen.getByRole("button", { name: /^today$/i }));
+  });
+
+  it("says a PAGED month could not be read, not that the live one went stale", () => {
+    // Different sentences on purpose: one is "the thing you just asked for
+    // failed", the other is "what you are looking at has stopped updating".
+    render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: g(),
+        nowMs: Date.parse("2026-08-14T18:00:00Z"),
+        failed: true,
+        nav: { offset: -1, canPrev: true, canNext: true, onPrev() {}, onNext() {}, onToday() {} },
+      }),
+    );
+    assert.ok(screen.getByText(/could not read that month/i));
+    assert.equal(screen.queryByText(/showing the last month read/i), null);
+  });
+});
+
+describe("paging is per screen, and the current month stays live", () => {
+  // The mount fetch resolves through a couple of macrotasks before the header —
+  // and therefore the chevrons — exist. The file-wide settle() is a single
+  // setTimeout(0), which is enough for a component handed its data and not for
+  // one that fetches it.
+  const mounted = async () => {
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 10));
+  };
+
+  /**
+   * Long enough to outlast the paged fetch's 250ms debounce.
+   *
+   * Required for anything asserting which requests were NOT made: a shorter wait
+   * ends before the debounced fetch can fire, so the assertion passes because the
+   * test was quick rather than because the code was right — which is exactly how
+   * the current-month guard first passed with the live path broken.
+   */
+  const pastDebounce = async () => {
+    for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 60));
+  };
+
+  /** Two mounted CalendarViews over the same view id, as two screens would be. */
+  const twoScreens = () =>
+    render(
+      React.createElement(
+        "div",
+        null,
+        React.createElement(CalendarView, { key: "a", viewId: "v-1", pcoConfigured: true, interactive: true }),
+        React.createElement(CalendarView, { key: "b", viewId: "v-1", pcoConfigured: true, interactive: true }),
+      ),
+    );
+
+  it("does not page the OTHER screen showing the same view", async () => {
+    // The offset lives in React state, per mounted instance. Moving it into the
+    // View's config makes both move together, which is the bug.
+    twoScreens();
+    await mounted();
+    const nexts = screen.getAllByRole("button", { name: /next month/i });
+    assert.equal(nexts.length, 2, "expected one pair of chevrons per screen");
+
+    // queryAllByRole, not getAllByRole: the getAll* family THROWS on zero
+    // matches, so asserting "none yet" with it fails the test on the very
+    // condition it is asserting.
+    assert.equal(screen.queryAllByRole("button", { name: /^today$/i }).length, 0, "neither screen has paged yet");
+
+    fireEvent.click(nexts[0]);
+    await mounted();
+
+    // Exactly ONE screen has paged: only it offers a way back to today.
+    assert.equal(
+      screen.queryAllByRole("button", { name: /^today$/i }).length,
+      1,
+      "paging one screen paged the other as well",
+    );
+  });
+
+  it("gives a WALL DISPLAY no chevrons at all", async () => {
+    // The gate lives in CalendarView, which decides nav-or-null from
+    // `interactive`. Handing CalendarMonth a null nav only proves CalendarMonth
+    // draws what it is given — the first version of this test did exactly that
+    // and stayed green with the gate deleted.
+    render(React.createElement(CalendarView, { viewId: "v-1", pcoConfigured: true, interactive: false }));
+    await mounted();
+    assert.equal(screen.queryAllByRole("button", { name: /previous month/i }).length, 0);
+    assert.equal(screen.queryAllByRole("button", { name: /next month/i }).length, 0);
+  });
+
+  it("never asks for a paged month on a wall display", async () => {
+    // Belt and braces on the same gate: even if an offset were somehow set, a
+    // display must not start fetching months.
+    sent = [];
+    render(React.createElement(CalendarView, { viewId: "v-1", pcoConfigured: true, interactive: false }));
+    await pastDebounce();
+    assert.deepEqual(
+      sent.filter((r) => r.url.includes("month=")),
+      [],
+    );
+  });
+
+  it("asks for the current month with NO month parameter, so it is the live one", async () => {
+    // The current month must come off the pushed channel. A `month=` on the
+    // mount fetch is the tell that it is being served from the one-shot path.
+    sent = [];
+    render(React.createElement(CalendarView, { viewId: "v-1", pcoConfigured: true, interactive: true }));
+    await pastDebounce();
+    const calls = sent.filter((r) => r.url.includes("/api/pco/calendar"));
+    assert.equal(calls.length, 1, `expected one hydrate, saw ${JSON.stringify(calls.map((c) => c.url))}`);
+    assert.ok(!calls[0].url.includes("month="), `the current month was fetched as a paged month: ${calls[0].url}`);
   });
 });

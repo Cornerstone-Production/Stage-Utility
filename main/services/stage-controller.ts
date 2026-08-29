@@ -19,7 +19,7 @@ import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
-import { buildGrid, gridWindow } from "./calendar-grid.js";
+import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
 import type {
   CalendarGrid,
@@ -894,18 +894,23 @@ export class StageController {
    * see calendar-grid.ts. The renderer gets days and a zone, not instants and a
    * guess.
    *
-   * The anchor is "now", so the grid rolls to the next month by itself: the
-   * client refetches on a timer and gets whatever month it is in the app's zone,
-   * with no state to go stale on a display nobody touches for a year.
+   * `monthOffset` 0 — the default and the only value the broadcaster ever uses —
+   * is the CURRENT month in the app's zone, so the grid rolls over by itself with
+   * no state to go stale on a display nobody touches for a year. A non-zero
+   * offset is a one-shot answer to an operator paging back or forward; nothing
+   * subscribes to it, because a past month is not going to change under them.
    *
    * A failure to reach PCO PROPAGATES — the route answers 502 and the display
    * says it could not read the calendar. An empty grid would be a lie, and a
    * month that quietly empties itself is exactly the kind of absence nobody
    * reports.
    */
-  async getCalendarGrid(viewId: string | null): Promise<CalendarGrid> {
+  async getCalendarGrid(viewId: string | null, monthOffset = 0): Promise<CalendarGrid> {
     const zone = appTimeZone();
-    const anchorIso = new Date().toISOString();
+    // Throws on an offset outside the paging bound, which the route turns into a
+    // 400. A silent clamp would draw a different month than the one asked for and
+    // say nothing about it.
+    const anchorIso = monthAnchor(monthOffset, zone);
     // Not configured is not an error: a display routed to a calendar before
     // Planning Center is connected should draw an empty month, and the renderer
     // reads pcoConfigured off the state it already has to say which it is.

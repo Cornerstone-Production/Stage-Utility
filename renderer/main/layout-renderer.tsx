@@ -2203,6 +2203,7 @@ function ViewEmbedObject({
         <CalendarView
           viewId={view.id}
           pcoConfigured={ctx.state.pcoConfigured ?? false}
+          interactive={ctx.interactive}
           nowMs={ctx.now + ctx.skewMs}
         />
       </div>

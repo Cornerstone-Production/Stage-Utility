@@ -113,9 +113,27 @@ Times are bucketed into days on the **server**, in the app time zone. All-day
 events arrive as local midnight expressed in UTC, and a browser — or a UTC-clocked
 host — bucketing them by UTC date puts them on the wrong square.
 
+The current month is **pushed**, not polled. The server re-reads Planning Center
+on a three-minute timer — once for the whole building — and broadcasts on the
+`calendar:grid` SSE channel only when the grid is not what it was, which for a
+calendar is a couple of times a week. It skips the read entirely when no screen
+is showing a calendar. The channel is hydrated on connect, so a display opened
+mid-month is not blank until something happens to change.
+
+**Month navigation** is a separate path. Chevrons in the header page back and
+forward up to 36 months, and any month other than the current one is a one-shot
+`?month=YYYY-MM` read that nothing subscribes to — a past month is not going to
+change while it is being looked at. Returning to the current month drops back to
+the live channel.
+
+Paging is per screen and is not stored on the View: a View can be routed to
+several screens at once, so a stored offset would page every wall in the building
+because one operator looked at December. A **wall display has no chevrons at all**
+— controls are live only where the operator made the surface operable — and a
+console paged away resets to the current month after ten minutes and on reload.
+
 Caching is separate from the Services client's: event instances for 3 minutes,
-calendars and tags for 15. A display re-reads every 3 minutes, and several
-displays share one cached answer.
+calendars and tags for 15.
 
 ## Controlling Live
 

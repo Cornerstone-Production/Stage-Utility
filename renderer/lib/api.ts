@@ -171,7 +171,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     // browser is never given raw instants to bucket — see calendar-grid.ts.
     case "calendar:getGrid": {
       const viewId = typeof p.viewId === "string" ? p.viewId : null;
-      return apiFetch<T>(`/api/pco/calendar${viewId ? `?viewId=${encodeURIComponent(viewId)}` : ""}`);
+      // `month` is YYYY-MM and is omitted for the current month, which is the
+      // only one the pushed channel carries.
+      const month = typeof p.month === "string" ? p.month : null;
+      const qs = new URLSearchParams();
+      if (viewId) qs.set("viewId", viewId);
+      if (month) qs.set("month", month);
+      const q = qs.toString();
+      return apiFetch<T>(`/api/pco/calendar${q ? `?${q}` : ""}`);
     }
     // The org's calendars and tags, for a calendar View's two pickers.
     case "calendar:sources":
