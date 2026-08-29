@@ -59,6 +59,19 @@ shows nothing.
 [ScriptView and Baptisms](../features/scriptview-and-baptisms.md). It is kept so
 existing screens do not break.
 
+**Embedded view** offers every view kind but draws only the two that can size
+themselves to a box: **Script** and **Calendar**. The rest say so rather than
+rendering broken, and a Custom view is never offered — refusing it is what makes
+an embed unable to reach another embed.
+
+A **Calendar** view draws the current month as six weeks, marks today, and
+highlights the one timed event running right now. A day that will not fit shows
+the first few events and then a `+N more` count. Which calendars and tags it
+draws are set on the view, not globally, so two screens can show two departments
+— see [Planning Center Calendar](../integrations/planning-center.md#calendar).
+There is no booking-versus-event setting, because Planning Center does not model
+the difference.
+
 ## Status
 
 | Widget | What it shows | Source |

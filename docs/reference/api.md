@@ -90,6 +90,8 @@ screens.
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
 | GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
+| GET | `/api/pco/calendar?viewId=…` | This month as a six-week grid of days, bucketed in the app time zone and filtered by the view's calendars and tags. 502 if Planning Center cannot be reached |
+| GET | `/api/pco/calendar-sources` | The organisation's calendars and tags (settings picker) |
 | POST | `/api/pco/checklist/tick` | `{ key, done }` — tick one row; answers with the whole list |
 | POST | `/api/pco/checklist/clear` | Untick every row on the active plan |
 
