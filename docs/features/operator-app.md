@@ -46,6 +46,17 @@ because that is what going back means.
 Addresses for these pages, and the rules about display slugs that must not
 collide with them, are in [Display URLs](../display-urls.md).
 
+## Every page says its name
+
+The page's name sits in the top bar on a phone and above the content on a
+desktop, where it carries a one-line description of what the page is for. A
+console is named after the view it shows, so the name you gave it in Screens is
+the name on the page and in the sidebar.
+
+Pages you reach from inside another page — the layout editor, a ScriptView
+rundown, the patch editor — draw their own heading instead, and the top bar names
+the section they belong to.
+
 ## Home
 
 Home is a grid of widgets you build yourself, out of the same registry every
@@ -116,7 +127,8 @@ custom views can be consoles — the built-in kinds have no layout to put a
 control on.
 
 **Reaching one.** Every console gets its own row in the sidebar, at
-`/consoles/<view id>`. That row is absent until a console exists. A console can
+`/consoles/<view id>`, and the console's own name heads the page. Renaming the
+view in Screens renames both. That row is absent until a console exists. A console can
 also drive a physical screen, but only one whose mode is set to **panel**; the
 server refuses a console view on a screen left in display mode, so a wall cannot
 end up rendering a live button by accident.

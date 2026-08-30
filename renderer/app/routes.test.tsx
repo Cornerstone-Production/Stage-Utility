@@ -1,6 +1,5 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
-import { readFileSync } from "node:fs";
 
 // The DOM must exist before the component modules are evaluated - a `before`
 // hook runs after the module body, so a static import would render into nothing.
@@ -57,13 +56,23 @@ describe("operator destinations", () => {
     );
   });
 
-  test("a console produces a rail entry, so /consoles is not an empty exemption", () => {
+  test("a console produces a rail entry, so /consoles is not an empty exemption", async () => {
     // The exemption above says console rail entries come from state. This checks
-    // that claim rather than trusting it: an exemption nobody verifies is how the
-    // next real gap hides behind a comment.
-    const rail = readFileSync(new URL("./rail.tsx", import.meta.url), "utf8");
-    assert.match(rail, /viewSurface\(v\) === "console"/, "rail.tsx no longer derives console entries");
-    assert.ok(rail.includes("/consoles/"), "rail.tsx no longer builds /consoles/<id> paths");
+    // that claim by RUNNING the derivation the rail and the shell both call,
+    // rather than by reading rail.tsx for a string — a source scan is satisfied
+    // by a comment, and this one was, right up until the derivation moved file.
+    const { consolePages } = await import("./active-page.js");
+    const views = [
+      { id: "home", name: "Home", kind: "custom", surface: "console", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "view-monitor-world", name: "Monitor World", kind: "custom", surface: "console", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "view-lobby", name: "Lobby", kind: "slots", createdAt: "2026-01-01T00:00:00.000Z" },
+    ] as unknown as Parameters<typeof consolePages>[0];
+    // Exactly one: the slots View is not a console, and Home is filtered out.
+    assert.deepEqual(
+      consolePages(views).map((p) => p.path),
+      ["/consoles/view-monitor-world"],
+      "consoles no longer produce /consoles/<id> entries from state",
+    );
   });
 
   test("paths and labels are unique", () => {

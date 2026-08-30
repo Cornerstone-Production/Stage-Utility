@@ -28,11 +28,10 @@ import { BrandLogo } from "../components/brand-logo";
 import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { useTheme } from "../lib/use-theme";
-import { viewSurface } from "@main/types/views";
-import { screensListViews } from "@main/services/home-view";
 import { buildLabel } from "../lib/build-label";
 import { withViewTransition } from "../lib/view-transition";
 import { resetCurrentRoute } from "./route-reset";
+import { consolePageFor, consoleViewList, resolvePage } from "./active-page";
 import { useStageState } from "../main/use-stage-state";
 import { errorMessage } from "@main/services/errors";
 import { isUpdateAvailable } from "@main/services/update/availability";
@@ -80,41 +79,31 @@ export function Rail({
   const versionError = updateError ? errorMessage(updateError) : null;
   const updateAvailable = isUpdateAvailable(updateStatus);
 
-  // A rail entry per console View. Derived from state rather than a fixed table,
-  // because consoles are created by the operator — this is the one part of the
-  // rail that is theirs.
-  //
-  // Home is filtered out, by the same helper the Screens page uses. It is a
-  // console view, so it qualified — and the rail then carried TWO Home entries,
-  // the real front door at the top and a second one under Consoles that opened
-  // Home's cards on a bare canvas route.
-  const consoleViews = screensListViews(state?.views ?? []).filter((v) => viewSurface(v) === "console");
+  // A rail entry per console View, from the same helper the shell titles a
+  // console with. The rail row and the page title cannot disagree about a
+  // console's name if only one place decides what it is called.
+  const consoleViews = consoleViewList(state?.views);
 
-  // Longest match first: /settings/branding must beat /settings.
+  // Which page is current. resolvePage is the app's ONE matcher; the rail used
+  // to carry its own copy of the longest-prefix rule, over a candidate list that
+  // knew nothing about the nested routes.
   //
-  // Over the PATHS, and before the destinations are built, because a console's
-  // icon has to know whether it is the current page — it wears the operator's
-  // colour only while selected. One computation, with `active` derived from it,
-  // rather than a second copy of the same rule.
-  const activePath =
-    [...ALL_DESTINATIONS.map((d) => d.path), ...consoleViews.map((v) => `/consoles/${v.id}`)]
-      .sort((a, b) => b.length - a.length)
-      .find((p) => pathname === p || pathname.startsWith(`${p}/`)) ?? null;
+  // Resolved before the destinations are built, because a console's icon has to
+  // know whether it is the current page — it wears the operator's colour only
+  // while selected.
+  const activePath = resolvePage(pathname, consoleViews.map(consolePageFor))?.page.path ?? null;
 
-  const consoles: Destination[] = consoleViews.map((v) => {
-    const path = `/consoles/${v.id}`;
-    return {
-      path,
-      label: v.name,
-      description: "A console you built.",
-      // A PLAIN GLYPH. Nothing interactive goes in here: the row itself is a
-      // <button>, and putting one inside it is invalid markup whose outer button
-      // swallows the click — the page navigated every time an icon was touched.
-      // Right-clicking the glyph opens the set, from a portal.
-      icon: <ConsoleRailIcon viewId={v.id} label={v.name} active={activePath === path} />,
-      Component: () => null, // routing is by path; the route table owns the component
-    };
-  });
+  const consoles: Destination[] = consoleViews.map((v) => ({
+    // path, label and description all come from consolePageFor, so the rail row
+    // and the page header cannot name the same console two different things.
+    ...consolePageFor(v),
+    // A PLAIN GLYPH. Nothing interactive goes in here: the row itself is a
+    // <button>, and putting one inside it is invalid markup whose outer button
+    // swallows the click — the page navigated every time an icon was touched.
+    // Right-clicking the glyph opens the set, from a portal.
+    icon: <ConsoleRailIcon viewId={v.id} label={v.name} active={activePath === `/consoles/${v.id}`} />,
+    Component: () => null, // routing is by path; the route table owns the component
+  }));
 
   const active = [...ALL_DESTINATIONS, ...consoles].find((d) => d.path === activePath) ?? null;
 
