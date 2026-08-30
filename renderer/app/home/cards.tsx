@@ -758,13 +758,21 @@ export function ScoresCard({ game = "auto" }: { game?: "auto" | string }) {
   return (
     <section className="home-scores flex h-full w-full flex-col px-4 py-3">
       <div className="flex items-baseline gap-2">
-        <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+        <h2 className="shrink-0 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Scores
         </h2>
         {featured && (
           <span
             className={cn(
-              "ml-auto font-mono text-caption2 text-fg-subtle",
+              // ONE LINE, always. shortDetail is whatever ESPN sent and falls
+              // back to the longer `detail`, so a game that has not started
+              // reads "8/30 - 1:40 PM EDT" rather than "Top 2nd" -- eighteen
+              // characters where the card budgeted for seven. Wrapped, it put a
+              // second 13px line into a card with 3px spare, and the venue was
+              // the only box left able to give: its text came out sliced through
+              // the middle of the glyphs. Truncating is the same answer the team
+              // name and the venue already use in this card.
+              "ml-auto min-w-0 truncate font-mono text-caption2 text-fg-subtle",
               featured.state === "in" && !featured.delayed && "home-scores-live",
             )}
           >
@@ -773,7 +781,10 @@ export function ScoresCard({ game = "auto" }: { game?: "auto" | string }) {
         )}
       </div>
 
-      <div className="home-scores-list mt-1.5">
+      {/* mt-1 here and pt-1 on the venue below are part of the card's height
+          budget at a 120px tile, not free spacing -- home-scores-fit.test.ts
+          holds the total and .home-scores-list in styles.css says why. */}
+      <div className="home-scores-list mt-1">
         {games.slice(0, 3).map((g) => (
           <div key={g.eventId} className="home-scores-game">
             <ScoresRow team={g.away} trailing={behind(g.away, g.home)} />
@@ -783,7 +794,7 @@ export function ScoresCard({ game = "auto" }: { game?: "auto" | string }) {
       </div>
 
       {featured?.venue && (
-        <p className="home-scores-foot mt-auto pt-1.5 text-caption2 text-fg-subtle">
+        <p className="home-scores-foot mt-auto pt-1 text-caption2 text-fg-subtle">
           {featured.venue}
         </p>
       )}

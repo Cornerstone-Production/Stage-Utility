@@ -1265,11 +1265,30 @@ button.score-capsule:focus-visible {
   container-type: size;
   overflow: hidden;
 }
+/* NO min-height: 0 here, deliberately.
+
+   The list IS the card's content. Which matchups are in it is already decided,
+   by the container queries below, on the grounds that a row must be whole or
+   absent; letting the box that holds them shrink under them undoes that decision
+   after the fact. With min-height at its `auto` default the list is never
+   smaller than the rows it was given, so anything the card is ever short by
+   comes out of the venue line instead of a score.
+
+   It was min-height: 0, and a Medium tile was four pixels over budget, so flex
+   took the four from here: the list ended above its own last row, and the venue
+   rule -- which mt-auto pins to the bottom of the card -- came to rest flush
+   against the second chip, one pixel row after the circle's last arc pixel. That
+   is what read as a clipped chip. Nothing was truncated; a solid rule butted
+   against the bottom of a circle just looks like one, and the first chip sits
+   far enough above the rule that only the second ever showed it.
+
+   The card is over by nothing now -- 91px of the 94 a 120px tile leaves, which
+   the browser measures as five clear pixels between chip and rule. The budget is
+   held by home-scores-fit.test.ts; this line is what keeps it holdable. */
 .home-scores-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 0;
 }
 /* A Medium tile is 120px, which holds ONE matchup under the heading. The second
    and third appear only when there is genuinely room for them -- clipping a row
@@ -1326,6 +1345,17 @@ button.score-capsule:focus-visible {
   font-variant-numeric: tabular-nums;
   color: var(--color-fg);
   letter-spacing: -.02em;
+  /* The CHIP is the row's height. This is 17px type on the page's inherited 1.5,
+     which made a 25.5px line box -- a pixel and a half taller than the 24px
+     circle beside it, twice per matchup, and three of the four pixels a 120px
+     tile was over budget by.
+
+     Leading only, never ink. The span does not clip, so the glyphs keep their
+     22px natural extent and simply overflow this 17px box by 2.5px each way --
+     still comfortably inside the 24px the row is, which is why nothing here is
+     cropped. Checked in a browser on every glyph a score can hold: a digit, a
+     three-digit basketball score, and the em dash a null score draws. */
+  line-height: 1;
 }
 .home-scores-foot {
   border-top: 1px solid var(--color-line);
