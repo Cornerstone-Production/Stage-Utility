@@ -5,6 +5,7 @@ import { CheckCircle2Icon, Loader2Icon, PlusIcon, TrashIcon, XCircleIcon } from 
 import { invoke, onNotification } from "../lib/api";
 import { Button, InfoHint, Input, NumberInput, Separator, Status, Switch, toast } from "./ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
 const DEFAULT_PORT = 7788;
 
@@ -173,7 +174,11 @@ export function RossTalkTargetsPanel() {
   const simulate = data?.simulate ?? true;
 
   return (
-    <div className="flex flex-col gap-3">
+    // Host + port + device + test is ~560px of row that cannot wrap, so this
+    // panel's dialog takes the wide variant. The marker is what
+    // integration-dialog-size.test.tsx reads off the rendered page, so the width
+    // and the panel cannot drift apart.
+    <div className="flex flex-col gap-3" {...{ [WIDE_PANEL_ATTR]: "" }}>
       <div
         className={
           "flex items-start gap-3 rounded-lg border p-3 " +

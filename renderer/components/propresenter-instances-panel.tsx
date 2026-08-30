@@ -18,6 +18,7 @@ import {
 import { PlusIcon, TrashIcon, Loader2Icon } from "lucide-react";
 import { ConnectionBadge } from "./connection-badge";
 import { feedId } from "./integration-panel-helpers";
+import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
 // ---- ProPresenter extra instances -------------------------------------------
 
@@ -93,7 +94,11 @@ export function ProPresenterInstancesPanel({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    // Each instance is a four-field form ~520px wide that cannot wrap, so this
+    // panel's dialog takes the wide variant. The marker is what
+    // integration-dialog-size.test.tsx reads off the rendered page, so the width
+    // and the panel cannot drift apart.
+    <div className="flex flex-col gap-2" {...{ [WIDE_PANEL_ATTR]: "" }}>
       <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
         Additional instances (auditoriums)
         <InfoHint>

@@ -33,6 +33,7 @@ import {
   ChevronDownIcon,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
 
@@ -582,7 +583,11 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
   }
 
   return (
-    <div className={cn("flex flex-col gap-0", className)}>
+    // Name + provider + host + status + switch + delete is ~560px of row that
+    // cannot wrap, so this panel's dialog takes the wide variant. The marker is
+    // what integration-dialog-size.test.tsx reads off the rendered page, so the
+    // width and the panel cannot drift apart.
+    <div className={cn("flex flex-col gap-0", className)} {...{ [WIDE_PANEL_ATTR]: "" }}>
       {meterRateField}
       {body}
     </div>

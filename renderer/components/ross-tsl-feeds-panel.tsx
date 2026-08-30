@@ -15,6 +15,7 @@ import {
 } from "./ui";
 import { PlusIcon, TrashIcon, Loader2Icon } from "lucide-react";
 import { feedId } from "./integration-panel-helpers";
+import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
 // ---- Ross TSL feeds editor --------------------------------------------------
 
@@ -72,7 +73,11 @@ export function RossTslFeedsPanel({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    // Metric + zone + TSL # + prefix + suffix is ~620px of row and the widest
+    // unbreakable line in any integration, so this panel's dialog takes the wide
+    // variant. The marker is what integration-dialog-size.test.tsx reads off the
+    // rendered page, so the width and the panel cannot drift apart.
+    <div className="flex flex-col gap-2" {...{ [WIDE_PANEL_ATTR]: "" }}>
       <span className="flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-wider text-gray-9">
         Multiviewer feeds
         <InfoHint>
