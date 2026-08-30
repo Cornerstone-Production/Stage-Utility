@@ -11,8 +11,15 @@ export interface ConfigField {
   /** Optional longer explanation shown behind an "i" info popover next to the label. */
   help?: string;
   /** Value pre-filled in the setup form when nothing is saved yet (so e.g. a poll
-   *  interval shows 45 instead of 0/blank). Does not override a saved value. */
+   *  interval shows its default instead of 0/blank). Must be the same value the
+   *  service falls back to, or the form advertises a rate the service does not
+   *  run. Does not override a saved value. */
   default?: string | number;
+  /** Bounds for a `number` field, enforced by the input. Without them the field
+   *  accepts 0 or a negative and the service silently clamps it, so the form
+   *  shows one rate and the poller runs another. */
+  min?: number;
+  max?: number;
   /**
    * Show this field only while another field in the same card holds this value.
    *

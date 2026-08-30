@@ -19,7 +19,12 @@ import { rosstalkManager } from "./rosstalk-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, propresenterManager, type PropInstanceConfig } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
-import { type SenSourceConfig, sensourceService } from "./sensource-service.js";
+import {
+  DEFAULT_POLL_SECONDS as SENSOURCE_DEFAULT_POLL_SECONDS,
+  MIN_POLL_SECONDS as SENSOURCE_MIN_POLL_SECONDS,
+  type SenSourceConfig,
+  sensourceService,
+} from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
 import type { ConnectionManagedId } from "./integration-ids.js";
 import type { ConnState } from "./integration-base.js";
@@ -423,6 +428,12 @@ const ROSSTALK_DESCRIPTOR: IntegrationDescriptor = {
   configSchema: [],
 };
 
+// Upper bound on the poll-interval FORM FIELD only. The poller deliberately has
+// no ceiling — an operator throttling to stay inside an API quota is allowed any
+// interval — so this lives here with the descriptor rather than being exported
+// from the service as an invariant the service does not enforce.
+const SENSOURCE_MAX_POLL_SECONDS = 3600;
+
 // SenSource Vea people-counter integration — polls the Vea API for live people
 // counts (attendance / occupancy), shown by the custom-layout "People counter"
 // object. The operator enters an API client id + secret (created in the Vea
@@ -433,7 +444,7 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "SenSource Vea",
   description:
-    "Brings live people counts — attendance and room occupancy — from SenSource Vea onto displays and graphs. Connects to the Vea cloud API with an API client ID + secret (created in Vea → API clients). Vea's counts lag a few minutes server-side, so polling faster than the default adds requests without fresher numbers. Pick which zones to count below.",
+    "Brings live people counts — attendance and room occupancy — from SenSource Vea onto displays and graphs. Connects to the Vea cloud API with an API client ID + secret (created in Vea → API clients). Pick which zones to count below.",
   configSchema: [
     {
       key: "clientId",
@@ -460,8 +471,11 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       key: "pollSeconds",
       label: "Poll interval (s)",
       type: "number",
-      placeholder: "45",
-      default: 45,
+      placeholder: String(SENSOURCE_DEFAULT_POLL_SECONDS),
+      default: SENSOURCE_DEFAULT_POLL_SECONDS,
+      min: SENSOURCE_MIN_POLL_SECONDS,
+      max: SENSOURCE_MAX_POLL_SECONDS,
+      help: "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls.",
     },
   ],
 };
@@ -1519,7 +1533,7 @@ class IntegrationManager {
       clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
       clientSecret: secrets.clientSecret || null,
       apiToken: secrets.apiToken || null,
-      pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : 45,
+      pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS,
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],

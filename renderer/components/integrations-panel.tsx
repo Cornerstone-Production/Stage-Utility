@@ -418,6 +418,8 @@ export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshe
                   <NumberInput
                     value={typeof value === "number" ? value : Number(value) || 0}
                     onChange={(n) => setField(field.key, String(n))}
+                    min={field.min}
+                    max={field.max}
                     className="w-44"
                     aria-label={field.label}
                   />
