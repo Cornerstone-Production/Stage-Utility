@@ -155,9 +155,25 @@ A routed view isn't the only thing a display can render. In order of precedence:
   the kind rather than blanking, and rather than quietly drawing mic slots the
   way it once did.
 
+### The top bar
+
+The strip across the top of a kiosk carries the brand, the plan context and the
+QR link back. Not every view kind draws one: a full-bleed kind gives its content
+the whole panel instead. `KIND_DRAWS_TOP_BAR` in `main/types/views.ts` is the
+single declaration of which do — today slots, custom and dashboard — and both
+the kiosk and the Screens card read it, so the two cannot disagree. The
+placeholder screens (loading, unrouted, empty, not configured, view missing)
+draw a bar whatever the routing says, because there is no content yet to fill
+the panel.
+
 A **locked** display (set on Screens) strips the escape hatches a kiosk
-otherwise shows. A **preview** ignores blackout and the lock and renders the
-previewed view directly, regardless of what is actually routed to that output.
+otherwise shows. Its only effect is on the bar, so the Screens card offers it
+only where there is a bar to strip. A display with its **top bar hidden** (also
+set on Screens) draws no top bar at all — no brand, plan context or QR — and its
+content fills the strip instead; the two are independent, since a lock keeps the
+bar and only removes its links. A **preview** ignores blackout, the lock and the
+hidden top bar, and renders the previewed view directly, regardless of what is
+actually routed to that output.
 
 ## Object capabilities
 

@@ -15,31 +15,48 @@
 // included. Where a comment records a bug that was fixed once, it travelled
 // with the line it guards.
 
+/**
+ * The kiosk chrome a screen draws around whatever it is showing.
+ *
+ * One shape rather than the same fields repeated on five arms. It is not the
+ * type alone that stops a sixth arm being added half-wired — the single
+ * ScreenTopBar below is — but an arm that omits this shape cannot be handed to
+ * it without failing the build, which is the half worth having. `hideTopBar`
+ * was added here for that reason: the bar had six render sites, and gating one
+ * of them is how five walls keep a bar the operator turned off.
+ */
+export interface ScreenChrome {
+  displayName: string | null;
+  locked: boolean;
+  /** This display's "hide top bar" toggle (Screens page). True = draw no top bar
+   *  at all and let the content fill the strip. Independent of `locked`, which
+   *  keeps the bar and only strips its escape hatches. */
+  hideTopBar: boolean;
+}
+
 /** The screen a display should be showing, once every input is accounted for. */
 export type StageScreen =
   | { k: "loading" }
   | { k: "error"; message: string }
   | { k: "blackout" }
-  | { k: "unrouted"; displayName: string | null; locked: boolean }
+  | ({ k: "unrouted" } & ScreenChrome)
   /** A preview whose View has been deleted. Distinct from `unrouted`: a View WAS
    *  assigned here, and it is the View that is gone. */
-  | { k: "view-missing"; displayName: string | null; locked: boolean }
-  | { k: "not-configured"; displayName: string | null; locked: boolean }
-  | { k: "empty"; displayName: string | null; locked: boolean }
+  | ({ k: "view-missing" } & ScreenChrome)
+  | ({ k: "not-configured" } & ScreenChrome)
+  | ({ k: "empty" } & ScreenChrome)
   /** A view kind this build has no arm for. Reachable in earnest, not just in
    *  theory: `kind` comes off server state and the app ships a beta/main track
    *  switch, so a kind written by a beta build and read by a main build lands
    *  here. It used to land on the slots grid instead, silently. */
   | { k: "unknown-kind"; kind: string }
-  | {
+  | ({
       k: "view";
       kind: ViewKind;
       /** The View the arm renders from, resolved once. Null when routing points
        *  at a View that no longer exists. */
       view: View | null;
       displayId: string;
-      displayName: string | null;
-      locked: boolean;
       isPreview: boolean;
       /** How the Output renders — `panel` is the only surface whose controls are
        *  live. Undefined on a preview and on an Output with no mode set, which
@@ -48,7 +65,7 @@ export type StageScreen =
        *  does, and a preview has to null it, which is a rule that must live in
        *  exactly one place. */
       outputMode: Output["mode"];
-    };
+    } & ScreenChrome);
 
 export interface ScreenInput {
   state: StageState | null;
@@ -95,8 +112,16 @@ export function resolveScreen(input: ScreenInput): StageScreen {
   // keeps an output's blackout and its kiosk lock out of the settings preview
   // iframe. The three checks below read it and do not re-test previewViewId.
   const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
-  // Per-output kiosk lock (Screens-page toggle) — never in the settings preview iframe.
-  const outputLocked = resolved?.locked ?? false;
+  // The kiosk chrome every arm below carries, built once. Both Screens-page
+  // toggles read off the resolved output, so both inherit its preview rule:
+  // `resolved` is null in a preview, and that is the single line keeping an
+  // output's lock — and now its hidden top bar — out of the settings preview
+  // iframe, which needs its navigation and its context.
+  const chrome: ScreenChrome = {
+    displayName,
+    locked: resolved?.locked ?? false,
+    hideTopBar: resolved?.hideTopBar ?? false,
+  };
 
   // Blackout: a true black screen on command (Companion), taking
   // priority over the routed View. Toggling it off restores the View instantly.
@@ -121,8 +146,8 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     // A preview gets its own wording. "No view assigned" would be false here —
     // one was assigned; it is the View that is gone.
     return previewViewId
-      ? { k: "view-missing", displayName, locked: outputLocked }
-      : { k: "unrouted", displayName, locked: outputLocked };
+      ? { k: "view-missing", ...chrome }
+      : { k: "unrouted", ...chrome };
   }
   const kind: ViewKind = source.kind;
 
@@ -136,10 +161,9 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     kind,
     view: activeView,
     displayId,
-    displayName,
-    locked: outputLocked,
     isPreview: !!previewViewId,
     outputMode: currentDisplay?.mode,
+    ...chrome,
   });
 
   // Custom-layout views render the visual-editor layout below the same kiosk top
@@ -147,7 +171,7 @@ export function resolveScreen(input: ScreenInput): StageScreen {
   // with nothing drawn on it yet is empty, not broken.
   if (kind === "custom") {
     if (activeView?.layout) return view();
-    return { k: "empty", displayName, locked: outputLocked };
+    return { k: "empty", ...chrome };
   }
 
   // Dashboard- and stage-kind displays render entirely different views, as do
@@ -177,7 +201,7 @@ export function resolveScreen(input: ScreenInput): StageScreen {
   // step stays there.
   if (kind === "slots") {
     if (!state.pcoConfigured) {
-      return { k: "not-configured", displayName, locked: outputLocked };
+      return { k: "not-configured", ...chrome };
     }
     return view();
   }

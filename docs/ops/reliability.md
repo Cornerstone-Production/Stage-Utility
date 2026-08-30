@@ -36,23 +36,61 @@ Tunable under **Settings → Advanced → Network & behavior**.
 
 ## Where your data lives
 
-`$STAGE_UTILITY_DATA` if set, otherwise `~/.stage-utility` (`/var/lib/stage-utility`
-on a Linux install).
+`$STAGE_UTILITY_DATA` if set. Otherwise it depends on how the app was installed —
+the running server prints its own path in **Settings → Advanced**:
+
+| Install | Data directory |
+|---|---|
+| Linux (one-line installer) | `/var/lib/stage-utility` |
+| macOS (one-line installer) | `/usr/local/var/stage-utility` |
+| Windows | `%ProgramData%\stage-utility` |
+| Homebrew | `$(brew --prefix)/var/stage-utility` |
+| Checkout, or no installer | `~/.stage-utility` |
+
+**Your configuration** — everything a config backup carries:
 
 | | |
 |---|---|
-| `settings.json` | non-secret config — service type, plan mode, outputs, branding |
+| `settings.json` | service type, plan mode, outputs, integration config, branding, backup schedule, time zone |
 | `views.json`, `slots.json` | view definitions and slot sets |
 | `presets.json`, `layout-templates.json`, `layout-groups.json` | saved slot presets and layout libraries |
-| `scriptview-*.json`, `patch.json`, `automation-*.json`, `osc.json` | per-feature config |
+| `notes.json` | what an operator typed into a notes object |
+| `scriptview-config.json`, `scriptview-layouts.json`, `scriptview-roles.json` | ScriptView columns and category roles |
+| `patch.json` | the stage patch sheet |
+| `automation-rules.json`, `automation-settings.json` | rules, and simulate/disarm |
+| `osc-targets.json`, `rosstalk-targets.json`, `rosstalk-settings.json` | control targets |
+| `wireless-connections.json` | receivers and chargers (never their passwords) |
+| `kiosk-devices.json` | which machine drives which screen |
+| `bar-config.json`, `saved-colors.json` | the context bar's arrangement, and your colours |
+| `baptism-triggers.json`, `scores-favourites.json` | per-plan baptism items, followed teams |
 | `branding-images/`, `layout-images/` | uploaded images, named by content hash |
+
+**What it observed** — deliberately not restored, because it describes this
+machine's history rather than how you set it up:
+
+| | |
+|---|---|
 | `spl-history/`, `attendance-history/`, `service-timeline/` | recorded services, one file each |
 | `archive/` | the raw samples behind them — see [data archive](../data-archive.md) |
 | `baptism.json` | baptism sessions |
+| `checklist-ticks.json` | which checklist rows are ticked, per plan |
+| `automation-log.json` | the Activity log |
+| `signals.json` | the values Companion reads |
+| `stream-starts.json` | when each platform was first seen live |
+| `update-notices.json` | which release has been announced |
+
+**Neither** — never in a backup, and never restored:
+
+| | |
+|---|---|
 | `cache/photos/`, `cache/attachments/` | cached Planning Center photos and plan files |
 | `server.log`, `update.log` | log history, replayed into `/log` on boot |
 | `secrets.bin` | integration and wireless credentials, AES-256-GCM encrypted |
 | `encryption.key` | 32-byte key, generated on first run, mode `600` |
+| `snapshots/`, `backups/` | saved config snapshots, and what the scheduler wrote |
+
+Which half a file lands in is declared where the file is defined and checked by
+the test suite, so a new store cannot quietly miss a backup.
 
 A `*.json.migrated` file is an older store kept after its contents were split into
 per-service files. Safe to delete.

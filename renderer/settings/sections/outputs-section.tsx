@@ -4,7 +4,7 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -26,7 +26,7 @@ import { IconTint } from "../../components/icon-tint";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
-import { viewSurface, outputMode } from "@main/types/views";
+import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
@@ -58,6 +58,8 @@ interface OutputRowProps {
   /** Rename the view this screen is showing (not the screen). */
   onRenameView: (viewId: string, name: string) => void;
   onSetLocked: (locked: boolean) => void;
+  /** Show or hide THIS display's kiosk top bar (brand, plan context, QR). */
+  onSetHideTopBar: (hideTopBar: boolean) => void;
   /** Awaited: switching a screen to a panel must LAND before a console view
    *  is assigned to it, because the server refuses the pair in the wrong order. */
   onSetMode: (mode: "display" | "panel") => Promise<void>;
@@ -85,9 +87,16 @@ export function iconKeyFor(output: { id: string; viewId?: string | null }, views
   return view && viewSurface(view) === "console" ? view.id : output.id;
 }
 
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
+  // Both bar items below are about a strip that only some kinds draw. Offering
+  // them where no bar exists is not a harmless extra: "Lock display" shipped
+  // that way, and on a calendar or a script wall it persisted a flag, turned its
+  // icon accent, and changed nothing on the screen — the operator reads that as
+  // a locked display. An unrouted screen still shows a bar (the placeholder
+  // draws one whatever the routing says), so no view assigned means keep them.
+  const drawsTopBar = assignedView ? KIND_DRAWS_TOP_BAR[assignedView.kind] : true;
   const [renamingView, setRenamingView] = useState(false);
   const [viewName, setViewName] = useState("");
 
@@ -283,13 +292,32 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconK
                   : <HandIcon className="size-3.5 text-fg-subtle" />}
                 {outputMode(output) === "panel" ? "Use as a display" : "Use as a control surface"}
               </DropdownMenu.Item>
-              <DropdownMenu.Item
-                onSelect={() => onSetLocked(!(output.locked ?? false))}
-                className={MENU_ITEM}
-              >
-                {output.locked ? <LockIcon className="size-3.5 text-accent" /> : <LockOpenIcon className="size-3.5 text-fg-subtle" />}
-                {output.locked ? "Unlock display" : "Lock display"}
-              </DropdownMenu.Item>
+              {/* The lock's ONLY effect is on the top bar: it strips the home
+                  link and the QR and leaves the rest. So it belongs with the
+                  item below, and neither is offered on a screen with no bar. */}
+              {drawsTopBar && (
+                <DropdownMenu.Item
+                  onSelect={() => onSetLocked(!(output.locked ?? false))}
+                  className={MENU_ITEM}
+                >
+                  {output.locked ? <LockIcon className="size-3.5 text-accent" /> : <LockOpenIcon className="size-3.5 text-fg-subtle" />}
+                  {output.locked ? "Unlock display" : "Lock display"}
+                </DropdownMenu.Item>
+              )}
+              {/* Per display, not global: some screens want the plan context and
+                  the QR, a stage-facing wall wants that strip back. Separate from
+                  the lock above, which KEEPS the bar and only strips its links. */}
+              {drawsTopBar && (
+                <DropdownMenu.Item
+                  onSelect={() => onSetHideTopBar(!(output.hideTopBar ?? false))}
+                  className={MENU_ITEM}
+                >
+                  {output.hideTopBar
+                    ? <PanelTopDashedIcon className="size-3.5 text-accent" />
+                    : <PanelTopIcon className="size-3.5 text-fg-subtle" />}
+                  {output.hideTopBar ? "Show top bar" : "Hide top bar"}
+                </DropdownMenu.Item>
+              )}
               <DropdownMenu.Item
                 // preventDefault keeps the menu OPEN across the copy. Without it
                 // Radix closes and returns focus to the trigger, which discards
@@ -661,6 +689,7 @@ export function OutputsSection({
                 onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
+                onSetHideTopBar={(hideTopBar) => handlers.handleSetOutputHideTopBar(output.id, hideTopBar)}
                 onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}

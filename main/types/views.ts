@@ -42,6 +42,40 @@ export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Ex
   return kinds;
 }
 
+/**
+ * Whether a display ROUTED to a view of this kind draws the kiosk top bar.
+ *
+ * The bar carries the brand, the plan context and the QR link home — it is the
+ * operator's way off a wall screen. The full-bleed kinds suppress it so their
+ * content owns the whole panel; only `slots` and `custom` keep it.
+ *
+ * This is deliberately a `Record` over every kind rather than a list of the
+ * true ones: a list says nothing about a kind left out, and a new ViewKind that
+ * silently defaults to `false` is a display that quietly loses its way home.
+ * As a Record the build refuses a kind that has not decided.
+ *
+ * The PLACEHOLDER screens are not in here and must not be: loading, unrouted,
+ * empty, not-configured and view-missing draw a bar whatever kind the routing
+ * points at, because there is no content yet to bleed. `hideTopBar` overrides
+ * all of it — this map is only about the default.
+ *
+ * Two readers, one fact: `stage-view.tsx` decides structurally which arms
+ * render `ScreenTopBar`, and `outputs-section.tsx` decides whether the "Hide
+ * top bar" and "Lock display" menu items would do anything on this screen.
+ * `stage-view-paths.test.tsx` renders every kind and asserts the real DOM
+ * against this map, so the two cannot drift apart.
+ */
+export const KIND_DRAWS_TOP_BAR: Record<ViewKind, boolean> = {
+  slots: true,
+  custom: true,
+  dashboard: true,
+  stage: false,
+  transcription: false,
+  script: false,
+  "spl-rundown": false,
+  calendar: false,
+};
+
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
   /** Stable id for keying/dedupe (falls back to a synthesized one). */
@@ -933,6 +967,11 @@ export interface Output {
   /** When true, this display's top bar hides its nav escape hatches (QR/settings +
    *  home logo) so a handed-out link can't navigate away from the display. */
   locked?: boolean;
+  /** When true, this display draws no top bar at all — no brand, plan context or
+   *  QR — and its content fills the strip the bar would have taken. Absent means
+   *  the bar shows, which is what every screen did before this existed.
+   *  Independent of `locked`, which KEEPS the bar and only strips its links. */
+  hideTopBar?: boolean;
   /** How this screen renders. Absent = "display" — read through {@link outputMode}.
    *  Only a "panel" may be bound to a console View, enforced server-side in
    *  stage-controller's setOutputView. */
@@ -947,6 +986,10 @@ export interface ResolvedOutput {
   viewName: string | null;
   blackout: boolean;
   locked: boolean;
+  /** Resolved {@link Output.hideTopBar}. It rides here as well as on the Output
+   *  because this descriptor is what the kiosk reads — leaving it off would make
+   *  every display do the outputs lookup this type exists to prevent. */
+  hideTopBar: boolean;
 }
 
 /**

@@ -705,6 +705,18 @@ export function useStageSettings(pinnedViewId?: string) {
     );
   }
 
+  /** Show or hide one display's kiosk top bar. Optimistic like the lock: the
+   *  server only refuses an id that does not exist, and the menu label has to
+   *  flip under the operator's finger. */
+  async function handleSetOutputHideTopBar(id: string, hideTopBar: boolean) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { hideTopBar }) }),
+      () => ipc<StageState>("outputs:setHideTopBar", { id, hideTopBar }),
+      "Failed to update the display's top bar",
+    );
+  }
+
   /**
    * Make a screen a read-only display or an interactive control surface.
    *
@@ -843,6 +855,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,
+    handleSetOutputHideTopBar,
     handleSetOutputMode,
     handleSetViewSurface,
     handleRemoveOutput,
