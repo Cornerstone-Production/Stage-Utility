@@ -1,6 +1,6 @@
 import { errorMessage } from "@main/services/errors";
 import { availableCount } from "@main/services/update/availability";
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon } from "lucide-react";
 import { invoke, onNotification } from "../../lib/api";
@@ -17,6 +17,7 @@ import {
   Input,
   NumberInput,
   Button,
+  type ButtonProps,
   Select,
   SelectTrigger,
   SelectContent,
@@ -85,7 +86,56 @@ function UpdateProgress({ step }: { step: UpdateStatus["step"] }) {
   );
 }
 
-function UpdatesPanel({
+/**
+ * A control the update lock guards.
+ *
+ * The lock deliberately does NOT disable these. A live service can go wrong and
+ * the operator may genuinely need to update or restart in the middle of one, so
+ * each of these opens a destructive override dialog instead of refusing — that
+ * is the "or override in the dialog" the lock warning promises. What was missing
+ * was the affordance: while locked they rendered exactly as they do when there
+ * is nothing to worry about, so the warning above them was the only thing on
+ * screen saying otherwise, and "Update now" in full accent said the opposite.
+ *
+ * Three signals, never colour alone — the same set for every guarded control:
+ * off the accent down to the page's secondary weight, an amber lock in place of
+ * the action's own icon, and a label that says pressing it now is an override.
+ * The tooltip repeats the reasons for a pointer user; it is never the only place
+ * they are said.
+ */
+function GuardedButton({
+  locked,
+  reasons,
+  variant = "filled",
+  icon,
+  label,
+  lockedLabel,
+  ...props
+}: Omit<ButtonProps, "children"> & {
+  /** Is the update lock active right now? Never feeds `disabled`. */
+  locked: boolean;
+  /** What the lock is protecting, for the tooltip. */
+  reasons: string[];
+  /** The action's own icon, shown when nothing is locked. */
+  icon?: ReactNode;
+  label: ReactNode;
+  lockedLabel: string;
+}) {
+  return (
+    <Button
+      {...props}
+      variant={locked ? "filled" : variant}
+      tooltip={locked ? `Locked — ${reasons.join(" · ")}. You'll be asked to confirm.` : ""}
+    >
+      {locked ? <LockIcon className="size-3.5 text-amber-11" /> : icon}
+      {locked ? lockedLabel : label}
+    </Button>
+  );
+}
+
+// Exported for update-lock-affordance.test.tsx, which renders it directly — the
+// whole AdvancedSection needs a full StageState it has no opinion about.
+export function UpdatesPanel({
   updateStatus,
   autoUpdate,
   handlers,
@@ -135,6 +185,11 @@ function UpdatesPanel({
       offs.forEach((off) => off());
     };
   }, []);
+  // Presentation only. Every control below stays clickable while this is true —
+  // the override is the point — it changes how they READ. Hidden mid-update for
+  // the same reason the warning is: the update is already the thing happening.
+  const guarded = (lock?.active ?? false) && !updating;
+  const lockReasons = lock?.reasons ?? [];
 
   async function onUpdateNow() {
     if (lock?.active) {
@@ -363,19 +418,27 @@ function UpdatesPanel({
               <RefreshCwIcon className="size-3.5 text-gray-9" />
               Check now
             </Button>
-            <Button
+            <GuardedButton
+              locked={guarded}
+              reasons={lockReasons}
               variant="accent"
               size="small"
               onClick={onUpdateNow}
               disabled={updating || (s?.tagBased ? available === 0 : behind === 0)}
-            >
-              {updating ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
-              {updating ? "Updating…" : "Update now"}
-            </Button>
-            <Button variant="filled" size="small" onClick={onRestart} disabled={updating}>
-              <RotateCwIcon className="size-3.5 text-gray-9" />
-              Restart
-            </Button>
+              icon={updating ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
+              label={updating ? "Updating…" : "Update now"}
+              lockedLabel="Update anyway"
+            />
+            <GuardedButton
+              locked={guarded}
+              reasons={lockReasons}
+              size="small"
+              onClick={onRestart}
+              disabled={updating}
+              icon={<RotateCwIcon className="size-3.5 text-gray-9" />}
+              label="Restart"
+              lockedLabel="Restart anyway"
+            />
           </div>
         </Field>
 
@@ -401,14 +464,17 @@ function UpdatesPanel({
                   {s.tracks.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Button
-                variant="filled"
+              {/* Locked too: a track switch reinstalls, rebuilds and restarts,
+                  and onSwitchTrack already asks for the same override. */}
+              <GuardedButton
+                locked={guarded}
+                reasons={lockReasons}
                 size="small"
                 disabled={updating || (trackSel ?? s.branch) === s.branch}
                 onClick={onSwitchTrack}
-              >
-                Switch
-              </Button>
+                label="Switch"
+                lockedLabel="Switch anyway"
+              />
             </div>
           </Field>
         ) : null}
@@ -427,9 +493,15 @@ function UpdatesPanel({
             {/* Reuses onRestart, which already refuses (with an override) during a
                 live service or an active recording — a deferred update must not be
                 the thing that finally interrupts one. */}
-            <Button variant="accent" size="small" onClick={() => void onRestart()}>
-              Restart now
-            </Button>
+            <GuardedButton
+              locked={guarded}
+              reasons={lockReasons}
+              variant="accent"
+              size="small"
+              onClick={() => void onRestart()}
+              label="Restart now"
+              lockedLabel="Restart anyway"
+            />
           </div>
         ) : null}
 
