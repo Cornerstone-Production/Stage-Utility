@@ -18,7 +18,7 @@ import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
-import { resolveScreen, type StageScreen } from "./stage-screen";
+import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
 // form (/display-1), falling back to the legacy ?display= query, then default.
@@ -205,6 +205,38 @@ function KioskTopBar({
   );
 }
 
+/**
+ * The kiosk top bar for a screen — or nothing at all, on a display whose
+ * operator has hidden it.
+ *
+ * EVERY screen draws its bar through here. There were six render sites, each
+ * repeating the same nine props off the state, and a per-display flag gated at
+ * one of them would have left five walls still showing a bar the operator
+ * turned off. One component, one gate: a seventh screen cannot draw an ungated
+ * bar, because there is nothing else to draw.
+ *
+ * Returning null rather than hiding the bar is deliberate — every caller is a
+ * flex column whose content is `flex-1`, so the strip is reclaimed rather than
+ * left as a gap.
+ */
+function ScreenTopBar({ state, screen }: { state: StageState; screen: ScreenChrome }) {
+  if (screen.hideTopBar) return null;
+  return (
+    <KioskTopBar
+      serviceTypeName={state.serviceTypeName}
+      planSeriesTitle={state.planSeriesTitle}
+      planTitle={state.planTitle}
+      showQr={state.showQr}
+      remoteUrl={state.remoteUrl}
+      displayName={screen.displayName}
+      appName={state.appName}
+      appLogo={state.appLogo}
+      appLogoMonochrome={state.appLogoMonochrome}
+      locked={screen.locked}
+    />
+  );
+}
+
 // ---- loading / empty states -------------------------------------------------
 
 function KioskLoading() {
@@ -216,21 +248,10 @@ function KioskLoading() {
   );
 }
 
-function KioskNotConfigured({ state, displayName, locked }: { state: StageState; displayName: string | null; locked?: boolean }) {
+function KioskNotConfigured({ state, screen }: { state: StageState; screen: ScreenChrome }) {
   return (
     <div className="flex flex-col h-[100dvh] kiosk-surface">
-      <KioskTopBar
-        serviceTypeName={state.serviceTypeName}
-        planSeriesTitle={state.planSeriesTitle}
-        planTitle={state.planTitle}
-        showQr={state.showQr}
-        remoteUrl={state.remoteUrl}
-        displayName={displayName}
-        appName={state.appName}
-        appLogo={state.appLogo}
-        appLogoMonochrome={state.appLogoMonochrome}
-        locked={locked}
-      />
+      <ScreenTopBar state={state} screen={screen} />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
         <MonitorIcon className="size-12 text-gray-7" />
         <p className="text-title3 text-gray-9 font-semibold">Planning Center not configured</p>
@@ -242,21 +263,10 @@ function KioskNotConfigured({ state, displayName, locked }: { state: StageState;
   );
 }
 
-function KioskEmpty({ state, displayName, locked }: { state: StageState; displayName: string | null; locked?: boolean }) {
+function KioskEmpty({ state, screen }: { state: StageState; screen: ScreenChrome }) {
   return (
     <div className="flex flex-col h-[100dvh] kiosk-surface">
-      <KioskTopBar
-        serviceTypeName={state.serviceTypeName}
-        planSeriesTitle={state.planSeriesTitle}
-        planTitle={state.planTitle}
-        showQr={state.showQr}
-        remoteUrl={state.remoteUrl}
-        displayName={displayName}
-        appName={state.appName}
-        appLogo={state.appLogo}
-        appLogoMonochrome={state.appLogoMonochrome}
-        locked={locked}
-      />
+      <ScreenTopBar state={state} screen={screen} />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
         <MonitorIcon className="size-12 text-gray-7" />
         <p className="text-title3 text-gray-9 font-semibold">
@@ -269,21 +279,10 @@ function KioskEmpty({ state, displayName, locked }: { state: StageState; display
 }
 
 // Shown when an output exists but has no View routed to it.
-function KioskUnrouted({ state, displayName, locked }: { state: StageState; displayName: string | null; locked?: boolean }) {
+function KioskUnrouted({ state, screen }: { state: StageState; screen: ScreenChrome }) {
   return (
     <div className="flex flex-col h-[100dvh] kiosk-surface">
-      <KioskTopBar
-        serviceTypeName={state.serviceTypeName}
-        planSeriesTitle={state.planSeriesTitle}
-        planTitle={state.planTitle}
-        showQr={state.showQr}
-        remoteUrl={state.remoteUrl}
-        displayName={displayName}
-        appName={state.appName}
-        appLogo={state.appLogo}
-        appLogoMonochrome={state.appLogoMonochrome}
-        locked={locked}
-      />
+      <ScreenTopBar state={state} screen={screen} />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
         <MonitorIcon className="size-12 text-gray-7" />
         <p className="text-title3 text-gray-9 font-semibold">Display not configured</p>
@@ -301,21 +300,10 @@ function KioskUnrouted({ state, displayName, locked }: { state: StageState; disp
 // saying "no view is assigned" would send the operator looking for a routing
 // problem that is not there. Before this existed the same state fell through to
 // the slots kind and drew an empty mic-slot grid, which said nothing at all.
-function KioskViewMissing({ state, displayName, locked }: { state: StageState; displayName: string | null; locked?: boolean }) {
+function KioskViewMissing({ state, screen }: { state: StageState; screen: ScreenChrome }) {
   return (
     <div className="flex flex-col h-[100dvh] kiosk-surface">
-      <KioskTopBar
-        serviceTypeName={state.serviceTypeName}
-        planSeriesTitle={state.planSeriesTitle}
-        planTitle={state.planTitle}
-        showQr={state.showQr}
-        remoteUrl={state.remoteUrl}
-        displayName={displayName}
-        appName={state.appName}
-        appLogo={state.appLogo}
-        appLogoMonochrome={state.appLogoMonochrome}
-        locked={locked}
-      />
+      <ScreenTopBar state={state} screen={screen} />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
         <MonitorIcon className="size-12 text-gray-7" />
         <p className="text-title3 text-gray-9 font-semibold">View not found</p>
@@ -513,13 +501,13 @@ export function StageView() {
   const body = ((): ReactNode => {
     switch (screen.k) {
       case "unrouted":
-        return <KioskUnrouted state={state} displayName={screen.displayName} locked={screen.locked} />;
+        return <KioskUnrouted state={state} screen={screen} />;
       case "view-missing":
-        return <KioskViewMissing state={state} displayName={screen.displayName} locked={screen.locked} />;
+        return <KioskViewMissing state={state} screen={screen} />;
       case "not-configured":
-        return <KioskNotConfigured state={state} displayName={screen.displayName} locked={screen.locked} />;
+        return <KioskNotConfigured state={state} screen={screen} />;
       case "empty":
-        return <KioskEmpty state={state} displayName={screen.displayName} locked={screen.locked} />;
+        return <KioskEmpty state={state} screen={screen} />;
       case "view":
         return renderView(screen, state, previewViewId, previewDraftSlots);
       default: {
@@ -547,7 +535,7 @@ function renderView(
   previewViewId: string | null,
   previewDraftSlots: Slot[] | null,
 ): ReactNode {
-  const { kind, view: activeView, displayId, displayName, locked, isPreview, outputMode } = screen;
+  const { kind, view: activeView, displayId, isPreview, outputMode } = screen;
 
   switch (kind) {
     // Custom-layout views render the visual-editor layout below the same kiosk top
@@ -558,21 +546,10 @@ function renderView(
       // screen, so a layout is always here. Falling back to that same screen keeps
       // an impossible state from going dark; it is not a second opinion about
       // what a blank custom View shows.
-      if (!layout) return <KioskEmpty state={state} displayName={displayName} locked={locked} />;
+      if (!layout) return <KioskEmpty state={state} screen={screen} />;
       return (
         <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-          <KioskTopBar
-            serviceTypeName={state.serviceTypeName}
-            planSeriesTitle={state.planSeriesTitle}
-            planTitle={state.planTitle}
-            showQr={state.showQr}
-            remoteUrl={state.remoteUrl}
-            displayName={displayName}
-            appName={state.appName}
-            appLogo={state.appLogo}
-            appLogoMonochrome={state.appLogoMonochrome}
-            locked={locked}
-          />
+          <ScreenTopBar state={state} screen={screen} />
           <div className="flex-1 min-h-0">
             {/* Controls are live only where the operator deliberately made
                 them so. A screen is a read-only display unless it was set to
@@ -680,23 +657,12 @@ function renderView(
   const slotsLayout = activeView?.slotsLayout ?? null;
 
   if (sortedSlots.length === 0) {
-    return <KioskEmpty state={state} displayName={displayName} locked={locked} />;
+    return <KioskEmpty state={state} screen={screen} />;
   }
 
   return (
     <div className="flex flex-col h-[100dvh] overscroll-none overflow-hidden bg-transparent pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      <KioskTopBar
-        serviceTypeName={state.serviceTypeName}
-        planSeriesTitle={state.planSeriesTitle}
-        planTitle={state.planTitle}
-        showQr={state.showQr}
-        remoteUrl={state.remoteUrl}
-        displayName={displayName}
-        appName={state.appName}
-        appLogo={state.appLogo}
-        appLogoMonochrome={state.appLogoMonochrome}
-        locked={locked}
-      />
+      <ScreenTopBar state={state} screen={screen} />
       {/* Desktop / kiosk: fill-height columns (stacked slots share a column).
           With a slotsLayout, columns are inch-sized and centered so they line up
           with the chargers; otherwise they share width equally. */}

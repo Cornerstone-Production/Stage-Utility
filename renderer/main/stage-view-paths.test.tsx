@@ -58,7 +58,26 @@ let stateMode: StateMode = "ok";
     if (stateMode === "pending") return new Promise(() => {});
     return { ok: true, status: 200, json: async () => stateBody, text: async () => "" };
   }
+  // A calendar view hydrates its own month on mount, and CalendarMonth reads
+  // `grid.days` unguarded — so the blanket `{}` below put the calendar kind on
+  // the error boundary rather than on screen, and any assertion about what a
+  // calendar display draws passed by rendering "Display error".
+  if (String(input).startsWith("/api/pco/calendar")) {
+    return { ok: true, status: 200, json: async () => CALENDAR_GRID, text: async () => "" };
+  }
   return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+};
+
+/** Six weeks of empty squares — the smallest thing CalendarMonth can draw. */
+const CALENDAR_GRID = {
+  monthLabel: "August 2026",
+  zone: "America/Chicago",
+  unplaceable: 0,
+  days: Array.from({ length: 42 }, (_, i) => ({
+    date: `2026-08-${String((i % 31) + 1).padStart(2, "0")}`,
+    inMonth: true,
+    events: [],
+  })),
 };
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -89,7 +108,7 @@ afterEach(async () => { cleanup(); await settle(); });
 // ---- fixtures ---------------------------------------------------------------
 
 function resolved(over: Record<string, unknown> = {}) {
-  return { viewId: "v1", kind: "slots", ndiSource: null, viewName: "Mic board", blackout: false, locked: false, ...over };
+  return { viewId: "v1", kind: "slots", ndiSource: null, viewName: "Mic board", blackout: false, locked: false, hideTopBar: false, ...over };
 }
 
 /** One slot, complete enough for SlotPanel to draw it. */
@@ -523,5 +542,154 @@ describe("StageView keeps controls dead unless the screen is a panel", () => {
     // the service by being looked at.
     const c = await showScreen("/preview-v1", withControls("panel"));
     assert.equal(hasInertControls(c), true, "a preview's controls were live");
+  });
+});
+
+// ---- the per-display top bar ------------------------------------------------
+
+describe("StageView honours a display's hidden top bar", () => {
+  // The bar has SIX render sites in this component. Gating one of them is how
+  // five walls keep a bar the operator turned off and nobody notices for a
+  // month — so this is a TABLE over every screen a display can land on, not a
+  // spot check on whichever one happened to be edited.
+  //
+  // The observable is the bar's own context label, "<service>: <plan>", which
+  // nothing else on any of these screens draws. Not a class and not a test id:
+  // those keep passing when a seventh render site draws a bar without the gate,
+  // and the words on the screen are what the operator is looking at.
+  const TOP_BAR = "Weekend: A plan";
+  const hasTopBar = (c: HTMLElement) => says(c, TOP_BAR);
+
+  /**
+   * Every screen a display can land on, and whether it draws a top bar.
+   *
+   * The `bar: false` rows are as load-bearing as the others: a dashboard that
+   * grows an ungated bar, or a blackout that grows one, fails the hidden half
+   * below. That is the seventh-render-site case this table exists for.
+   */
+  const SCREENS: { name: string; bar: boolean; state: () => Record<string, unknown> }[] = [
+    { name: "slots", bar: true, state: () => stageState({ slotsByView: { v1: [slot("Pastor")] } }) },
+    { name: "slots with nothing assigned (the empty screen)", bar: true, state: () => stageState({ slotsByView: {} }) },
+    { name: "slots without Planning Center (not configured)", bar: true, state: () => stageState({ pcoConfigured: false, slotsByView: {} }) },
+    {
+      name: "a custom layout",
+      bar: true,
+      state: () => ofKind("custom", { layout: { canvas: { width: 1920, height: 1080, background: null }, objects: [] } }),
+    },
+    { name: "a custom view with nothing drawn on it", bar: true, state: () => ofKind("custom") },
+    { name: "an unrouted display", bar: true, state: () => stageState({ resolvedByOutput: { "display-1": resolved({ viewId: null }) } }) },
+    { name: "dashboard", bar: false, state: () => ofKind("dashboard") },
+    { name: "stage", bar: false, state: () => ofKind("stage") },
+    { name: "transcription", bar: false, state: () => ofKind("transcription") },
+    { name: "script", bar: false, state: () => ofKind("script", { scriptViewLayoutId: "sl1" }) },
+    { name: "spl-rundown", bar: false, state: () => ofKind("spl-rundown") },
+    { name: "calendar", bar: false, state: () => ofKind("calendar") },
+    { name: "a blacked-out display", bar: false, state: () => stageState({ resolvedByOutput: { "display-1": resolved({ blackout: true }) } }) },
+  ];
+
+  /** The same state, with this display's top bar hidden. */
+  function hidden(state: Record<string, unknown>): Record<string, unknown> {
+    const byOutput = state.resolvedByOutput as Record<string, Record<string, unknown>>;
+    const resolvedByOutput: Record<string, unknown> = {};
+    for (const [id, r] of Object.entries(byOutput)) resolvedByOutput[id] = { ...r, hideTopBar: true };
+    return { ...state, resolvedByOutput };
+  }
+
+  for (const screen of SCREENS) {
+    test(`${screen.name}: draws its bar ${screen.bar ? "by default" : "never"}, and never when hidden`, async () => {
+      const shown = await showScreen("/display-1", screen.state());
+      assert.equal(
+        hasTopBar(shown),
+        screen.bar,
+        screen.bar
+          ? `${screen.name} lost its top bar with nothing hidden`
+          : `${screen.name} grew a top bar: ${shown.textContent ?? ""}`,
+      );
+      cleanup();
+
+      const off = await showScreen("/display-1", hidden(screen.state()));
+      assert.equal(
+        hasTopBar(off),
+        false,
+        `${screen.name} still drew its top bar with hideTopBar set — a render site is missing the gate`,
+      );
+    });
+  }
+
+  test("hiding one display's bar leaves another display's alone", async () => {
+    const two = {
+      slotsByView: { v1: [slot("Pastor")] },
+      outputs: [
+        { id: "display-1", name: "Stage left", viewId: "v1" },
+        { id: "display-2", name: "Stage right", viewId: "v1" },
+      ],
+      resolvedByOutput: {
+        "display-1": resolved({ hideTopBar: true }),
+        "display-2": resolved(),
+      },
+    };
+    const off = await showScreen("/display-1", stageState(two));
+    assert.equal(hasTopBar(off), false, "the display the toggle was set on kept its bar");
+    cleanup();
+    const on = await showScreen("/display-2", stageState(two));
+    assert.equal(hasTopBar(on), true, "hiding one display's bar hid another's — the flag is not per display");
+  });
+
+  test("the settings preview keeps its bar however the output is set", async () => {
+    // The same rule the lock and the blackout follow: the preview iframe lives
+    // in the settings console and is not the wall screen the toggle is about.
+    const c = await showScreen("/preview-v1", stageState({
+      slotsByView: { v1: [slot("Pastor")] },
+      outputs: [
+        { id: "display-1", name: "Stage left", viewId: "v1" },
+        { id: "preview-v1", name: "Not a real screen", viewId: "v1" },
+      ],
+      resolvedByOutput: { "preview-v1": resolved({ hideTopBar: true }) },
+    }));
+    assert.equal(hasTopBar(c), true, "a preview lost its bar to an output's toggle");
+  });
+
+  test("a hidden bar is not a lock, and a lock is not a hidden bar", async () => {
+    const withSlots = { slotsByView: { v1: [slot("Pastor")] } };
+    // Locked, bar shown: the bar is there, its way home is not.
+    const locked = await showScreen("/display-1", stageState({
+      ...withSlots,
+      resolvedByOutput: { "display-1": resolved({ locked: true }) },
+    }));
+    assert.equal(hasTopBar(locked), true, "a lock hid the whole bar");
+    assert.equal(hasHomeLink(locked), false);
+    cleanup();
+
+    // Bar hidden, unlocked: no bar, so no way home either — but the view itself
+    // is untouched, which is the whole difference from a blackout.
+    const bare = await showScreen("/display-1", stageState({
+      ...withSlots,
+      resolvedByOutput: { "display-1": resolved({ hideTopBar: true }) },
+    }));
+    assert.equal(hasTopBar(bare), false);
+    assert.equal(hasHomeLink(bare), false, "the way home lives in the bar that is gone");
+    assert.ok(says(bare, "Pastor"), "hiding the bar hid the view with it");
+  });
+
+  test("the content reclaims the strip, rather than leaving a gap", async () => {
+    // The bar is a `shrink-0` row above a `flex-1` body, so it has to be GONE
+    // and not merely blank: an empty spacer would leave a dark band across the
+    // top of the wall, and every assertion above about the bar's words would
+    // still pass. Counting the shell's children is what catches that.
+    const state = stageState({ slotsByView: { v1: [slot("Pastor")] } });
+    const shown = await showScreen("/display-1", state);
+    const withBar = (shown.firstElementChild as HTMLElement).children.length;
+    cleanup();
+
+    const off = await showScreen("/display-1", stageState({
+      slotsByView: { v1: [slot("Pastor")] },
+      resolvedByOutput: { "display-1": resolved({ hideTopBar: true }) },
+    }));
+    const withoutBar = (off.firstElementChild as HTMLElement).children.length;
+    assert.equal(
+      withoutBar,
+      withBar - 1,
+      `the kiosk shell went from ${withBar} children to ${withoutBar}: the bar left something behind`,
+    );
   });
 });

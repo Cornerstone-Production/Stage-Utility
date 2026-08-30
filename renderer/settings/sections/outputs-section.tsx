@@ -4,7 +4,7 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -58,6 +58,8 @@ interface OutputRowProps {
   /** Rename the view this screen is showing (not the screen). */
   onRenameView: (viewId: string, name: string) => void;
   onSetLocked: (locked: boolean) => void;
+  /** Show or hide THIS display's kiosk top bar (brand, plan context, QR). */
+  onSetHideTopBar: (hideTopBar: boolean) => void;
   /** Awaited: switching a screen to a panel must LAND before a console view
    *  is assigned to it, because the server refuses the pair in the wrong order. */
   onSetMode: (mode: "display" | "panel") => Promise<void>;
@@ -85,7 +87,7 @@ export function iconKeyFor(output: { id: string; viewId?: string | null }, views
   return view && viewSurface(view) === "console" ? view.id : output.id;
 }
 
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
@@ -289,6 +291,18 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconK
               >
                 {output.locked ? <LockIcon className="size-3.5 text-accent" /> : <LockOpenIcon className="size-3.5 text-fg-subtle" />}
                 {output.locked ? "Unlock display" : "Lock display"}
+              </DropdownMenu.Item>
+              {/* Per display, not global: some screens want the plan context and
+                  the QR, a stage-facing wall wants that strip back. Separate from
+                  the lock above, which KEEPS the bar and only strips its links. */}
+              <DropdownMenu.Item
+                onSelect={() => onSetHideTopBar(!(output.hideTopBar ?? false))}
+                className={MENU_ITEM}
+              >
+                {output.hideTopBar
+                  ? <PanelTopDashedIcon className="size-3.5 text-accent" />
+                  : <PanelTopIcon className="size-3.5 text-fg-subtle" />}
+                {output.hideTopBar ? "Show top bar" : "Hide top bar"}
               </DropdownMenu.Item>
               <DropdownMenu.Item
                 // preventDefault keeps the menu OPEN across the copy. Without it
@@ -661,6 +675,7 @@ export function OutputsSection({
                 onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
+                onSetHideTopBar={(hideTopBar) => handlers.handleSetOutputHideTopBar(output.id, hideTopBar)}
                 onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}

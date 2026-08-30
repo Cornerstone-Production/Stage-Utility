@@ -458,8 +458,9 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     }
 
     // PATCH /api/outputs/:id — { name? }, { viewId? } (string|null = routing),
-    // { blackout? } (boolean = full black screen), { locked? }, and/or { slug? }
-    // (string; "" clears the friendly URL alias)
+    // { blackout? } (boolean = full black screen), { locked? }, { hideTopBar? }
+    // (boolean = draw no kiosk top bar), and/or { slug? } (string; "" clears the
+    // friendly URL alias)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
     if (method === "PATCH" && outputPatchMatch) {
       const id = outputPatchMatch[1];
@@ -469,11 +470,12 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         && (typeof body.viewId === "string" || body.viewId === null);
       const hasBlackout = typeof body.blackout === "boolean";
       const hasLocked = typeof body.locked === "boolean";
+      const hasHideTopBar = typeof body.hideTopBar === "boolean";
       const hasSlug = typeof body.slug === "string";
       const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
       const hasMode = mode !== null;
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasSlug && !hasMode) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
@@ -500,6 +502,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
       if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
+      if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
       // A rejected slug is a 400 with the reason, not a silent no-op — the operator
       // has to see WHY "/history" cannot be used.
       if (hasSlug) {

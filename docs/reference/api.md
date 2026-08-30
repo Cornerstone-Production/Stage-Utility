@@ -46,7 +46,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | DELETE | `/api/views/:id` | Delete a view |
 | GET | `/api/outputs` | List physical displays |
 | POST | `/api/outputs` | Add a display |
-| PATCH | `/api/outputs/:id` | Rename / route to a view (`{viewId}`) / set `{mode}` (`display`\|`panel`). A console view on a display screen is refused |
+| PATCH | `/api/outputs/:id` | Rename / route to a view (`{viewId}`) / set `{mode}` (`display`\|`panel`) / show or hide its kiosk top bar (`{hideTopBar}`). A console view on a display screen is refused |
 | POST | `/api/outputs/reorder` | Reorder displays |
 | DELETE | `/api/outputs/:id` | Remove a display |
 | POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does |

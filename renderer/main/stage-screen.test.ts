@@ -19,6 +19,7 @@ function resolvedOutput(over: Partial<ResolvedOutput> = {}): ResolvedOutput {
     viewName: "Mic board",
     blackout: false,
     locked: false,
+    hideTopBar: false,
     ...over,
   };
 }
@@ -134,7 +135,7 @@ describe("output state", () => {
         resolvedByOutput: { "display-1": resolvedOutput({ viewId: null, locked: true }) },
       }),
     }));
-    assert.deepEqual(unrouted, { k: "unrouted", displayName: null, locked: true });
+    assert.deepEqual(unrouted, { k: "unrouted", displayName: null, locked: true, hideTopBar: false });
 
     const notConfigured = resolveScreen(input({
       state: stageState({
@@ -142,7 +143,7 @@ describe("output state", () => {
         resolvedByOutput: { "display-1": resolvedOutput({ locked: true }) },
       }),
     }));
-    assert.deepEqual(notConfigured, { k: "not-configured", displayName: null, locked: true });
+    assert.deepEqual(notConfigured, { k: "not-configured", displayName: null, locked: true, hideTopBar: false });
   });
 
   test("names the display only when there is more than one", () => {
@@ -321,7 +322,7 @@ describe("the view kind", () => {
         resolvedByOutput: { "display-1": resolvedOutput({ kind: "custom" }) },
       }),
     }));
-    assert.deepEqual(blank, { k: "empty", displayName: null, locked: false });
+    assert.deepEqual(blank, { k: "empty", displayName: null, locked: false, hideTopBar: false });
   });
 
   test("slots without Planning Center is not-configured", () => {
@@ -351,6 +352,7 @@ describe("the view kind", () => {
       displayId: "display-1",
       displayName: null,
       locked: false,
+      hideTopBar: false,
       isPreview: false,
       outputMode: undefined,
     });

@@ -920,6 +920,11 @@ export interface Output {
   /** When true, this display's top bar hides its nav escape hatches (QR/settings +
    *  home logo) so a handed-out link can't navigate away from the display. */
   locked?: boolean;
+  /** When true, this display draws no top bar at all — no brand, plan context or
+   *  QR — and its content fills the strip the bar would have taken. Absent means
+   *  the bar shows, which is what every screen did before this existed.
+   *  Independent of `locked`, which KEEPS the bar and only strips its links. */
+  hideTopBar?: boolean;
   /** How this screen renders. Absent = "display" — read through {@link outputMode}.
    *  Only a "panel" may be bound to a console View, enforced server-side in
    *  stage-controller's setOutputView. */
@@ -934,6 +939,10 @@ export interface ResolvedOutput {
   viewName: string | null;
   blackout: boolean;
   locked: boolean;
+  /** Resolved {@link Output.hideTopBar}. It rides here as well as on the Output
+   *  because this descriptor is what the kiosk reads — leaving it off would make
+   *  every display do the outputs lookup this type exists to prevent. */
+  hideTopBar: boolean;
 }
 
 /**

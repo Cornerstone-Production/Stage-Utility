@@ -156,8 +156,12 @@ A routed view isn't the only thing a display can render. In order of precedence:
   way it once did.
 
 A **locked** display (set on Screens) strips the escape hatches a kiosk
-otherwise shows. A **preview** ignores blackout and the lock and renders the
-previewed view directly, regardless of what is actually routed to that output.
+otherwise shows. A display with its **top bar hidden** (also set on Screens)
+draws no top bar at all — no brand, plan context or QR — and its content fills
+the strip instead; the two are independent, since a lock keeps the bar and only
+removes its links. A **preview** ignores blackout, the lock and the hidden top
+bar, and renders the previewed view directly, regardless of what is actually
+routed to that output.
 
 ## Object capabilities
 

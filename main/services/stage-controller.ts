@@ -2566,6 +2566,22 @@ export class StageController {
     return this.state;
   }
 
+  /** Show or hide an output's kiosk top bar (brand, plan context and QR). Per
+   *  display: a stage-facing wall wants the strip back, another screen wants the
+   *  context. Independent of the lock, which keeps the bar and strips its links. */
+  async setOutputHideTopBar(id: string, hideTopBar: boolean): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setHideTopBar — output ${id} not found`);
+    }
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, hideTopBar } : o));
+    console.log(`[stage-controller] setOutputHideTopBar output=${scrub(id)} → ${scrub(hideTopBar ? "HIDDEN" : "shown")}`);
+    this.state = { ...this.state, outputs };
+    await settingsStore.patch({ outputs });
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   /** Reorder outputs to match the given id order (drag-and-drop). */
   async reorderOutputs(orderedIds: string[]): Promise<StageState> {
     const byId = new Map(this.state.outputs.map((o) => [o.id, o]));
@@ -3137,6 +3153,7 @@ export class StageController {
         viewName: view?.name ?? null,
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
+        hideTopBar: output.hideTopBar ?? false,
       };
     }
     this.state = {
