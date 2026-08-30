@@ -91,6 +91,37 @@ export function liveIndex(
   return first;
 }
 
+/**
+ * The remount key that restarts a one-shot score animation.
+ *
+ * The sweep (`.score-side-scored::after`) and the bump (`.score-value-bump`) are
+ * CSS animations that run once on mount, so the ONLY way to play one twice is to
+ * hand React a different key and let it build a new node. What that key is made
+ * of decides which strips replay.
+ *
+ * It is made of the reading being animated — this game's id and this side's
+ * score — so a strip remounts exactly when the number on it changed. It used to
+ * be the global `scoreRev`, which is a counter for "some followed game scored":
+ * one run in one game remounted the strip of every OTHER game in the stack, and
+ * both sides of the capsule, none of which had moved.
+ *
+ * That was invisible, and only invisible by luck: a remounted strip that did not
+ * score carries no `is-scored` class, so it had nothing to animate. The first
+ * unconditional entrance animation added to a card would have replayed it on all
+ * four cards every time any one of them scored.
+ *
+ * THE PROPERTY TO KEEP is the one the old key had: a SECOND score in the SAME
+ * game must still restart that game's animation. Keying on the game id alone, or
+ * on anything else that holds still between two runs, silently stops the second
+ * one — which is why the guard in score-activity.test.tsx scores the same game
+ * twice rather than once.
+ */
+export function scoreKey(game: ScoreGameDTO, side?: "away" | "home"): string {
+  if (side === "away") return `${game.eventId}:a:${game.away.score}`;
+  if (side === "home") return `${game.eventId}:h:${game.home.score}`;
+  return `${game.eventId}:${game.away.score}:${game.home.score}`;
+}
+
 export type ScoreCapsuleView = { kind: "none" } | { kind: "game"; game: ScoreGameDTO };
 
 /**
@@ -201,7 +232,6 @@ function ScoreCard({
   index,
   focused,
   scored,
-  rev,
   error,
 }: {
   game: ScoreGameDTO;
@@ -209,9 +239,6 @@ function ScoreCard({
   focused: boolean;
   /** Which side a score just landed on, or null. Reduced motion is already applied. */
   scored: "away" | "home" | null;
-  /** Remounts the strip when a score arrives, which is what restarts the one-shot
-   *  sweep and bump. Without it the second score in a game animates nothing. */
-  rev: number;
   error: string | null;
 }) {
   return (
@@ -229,7 +256,8 @@ function ScoreCard({
         scoreActivity.focus(index);
       }}
     >
-      <ScoreStrip key={rev} game={game} scored={scored} />
+      {/* Keyed on this game's own two scores — see scoreKey. */}
+      <ScoreStrip key={scoreKey(game)} game={game} scored={scored} />
       {/* Clipped by HEIGHT rather than faded, so a peek strip is a real strip and
           not a ghost of a taller card. */}
       <div className="score-card-body">
@@ -255,27 +283,30 @@ function ScoreCard({
 export function ScoreCapsule({
   game,
   scored,
-  rev,
   preview = false,
 }: {
   game: ScoreGameDTO;
   /** Which side a score just landed on, or null. Reduced motion already applied. */
   scored: "away" | "home" | null;
-  /** Remounts the two sides on a score, restarting the one-shot bump. The BUTTON
-   *  is deliberately not remounted: it can hold focus, and a keyboard operator
-   *  must not lose it because somebody scored. */
-  rev: number;
   /** Rendered as a chip in the bar configurator: shows the reading, does nothing.
    *  A live button in there would toggle the panel behind the dialog on the very
    *  press that was reaching for the drag handle. */
   preview?: boolean;
 }) {
   const { open } = useScoreActivity();
+  // Each side is keyed on ITS OWN score, so the side that did not move is not
+  // rebuilt — see scoreKey. The game id is in the key too because this one
+  // capsule speaks for whichever game is live, and it CHANGES game when another
+  // one scores: without the id, switching to a game whose away score happened to
+  // match the old one would reuse the node and play nothing.
+  //
+  // The BUTTON is deliberately never remounted: it can hold focus, and a
+  // keyboard operator must not lose it because somebody scored.
   const inner = (
     <>
-      <ScoreSide key={`a${rev}`} team={game.away} side="away" size="capsule" scored={scored === "away"} />
+      <ScoreSide key={scoreKey(game, "away")} team={game.away} side="away" size="capsule" scored={scored === "away"} />
       <span className="score-capsule-mid">{game.shortDetail}</span>
-      <ScoreSide key={`h${rev}`} team={game.home} side="home" size="capsule" scored={scored === "home"} />
+      <ScoreSide key={scoreKey(game, "home")} team={game.home} side="home" size="capsule" scored={scored === "home"} />
     </>
   );
 
@@ -306,7 +337,6 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
   const games = scores?.games ?? [];
   const isOpen = open && games.length > 0;
   const clamped = focus >= 0 && focus < games.length ? focus : 0;
-  const rev = scores?.scoreRev ?? 0;
   // Read at render, so the panel honours a setting changed mid-session on the
   // very next frame rather than on the next reload.
   const motion = !prefersReducedMotion();
@@ -424,7 +454,6 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
                 index={i}
                 focused={i === clamped}
                 scored={motion ? scoredSide(game, scores?.lastEvents ?? []) : null}
-                rev={rev}
                 error={scores?.error ?? null}
               />
             ))}

@@ -26,14 +26,22 @@
 // hold timer, the rev guard, the seed, and which of four things the bar says.
 
 import { strict as assert } from "node:assert";
-import { after, describe, mock, test } from "node:test";
+import { after, afterEach, describe, mock, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
+const { render, cleanup } = await import("@testing-library/react");
 const { createScoreActivity, SCORE_HOLD_MS } = await import("./score-activity-store.js");
-const { capsuleView, liveIndex, scoredSide } = await import("./score-activity.js");
+const { ScoreActivityHost, ScoreCapsule, capsuleView, liveIndex, scoredSide } = await import(
+  "./score-activity.js"
+);
+
+// Unconditional, not a call at the end of each test body: a test that FAILS
+// never reaches its own cleanup, and proving these guards against the bug is
+// exactly when they fail on purpose.
+afterEach(() => cleanup());
 
 after(() => {
   teardown();
@@ -278,5 +286,138 @@ describe("which side just scored", () => {
 
   test("an event for another game on the board is not this game's", () => {
     assert.equal(scoredSide(game(), [{ eventId: "other", teamId: "16", from: 0, to: 1 }]), null);
+  });
+});
+
+// ── Which strips replay a one-shot score animation ───────────────────────────
+//
+// The sweep (`.score-side-scored::after`) and the bump (`.score-value-bump`) are
+// CSS animations that run ONCE on mount, so the only thing that can play one
+// again is React BUILDING A NEW NODE. That makes the remount key the entire
+// mechanism, and what the key is made of is the whole behaviour. See scoreKey in
+// score-activity.tsx.
+//
+// jsdom loads no stylesheet, so nothing here can watch an animation run — the
+// same limit the header of this file states for the mask and the stack heights.
+// What it CAN see is the one thing that decides whether one runs at all: whether
+// the node survived the re-render. Node identity is exact, it needs no layout,
+// and these render the SHIPPED components rather than calling scoreKey on its
+// own, so a key that goes back to reading `scoreRev` fails them.
+//
+// Every re-render below bumps `scoreRev` as a real poll does. That is
+// load-bearing: with it held still the old global key would not have changed
+// either, and the first test would have passed on the bug it exists to catch.
+
+/** Two games, with the away side of the SECOND carrying the score that moves. */
+function twoGames(awayTwo: number): ScoresStatusDTO {
+  return status({
+    games: [
+      game({ eventId: "one", away: TEAM("17", 2), home: TEAM("16", 6) }),
+      game({ eventId: "two", away: TEAM("17", awayTwo), home: TEAM("16", 1) }),
+    ],
+  });
+}
+
+/** A delivery in which game two's away side has just scored. */
+function scoreInGameTwo(to: number): ScoresStatusDTO {
+  return {
+    ...twoGames(to),
+    scoreRev: to,
+    lastEvents: [{ eventId: "two", teamId: "17", from: to - 1, to }],
+  };
+}
+
+/** Each card's strip node, in stack order. */
+function strips(container: HTMLElement): Element[] {
+  return [...container.querySelectorAll("[data-score-card]")].map((card) => {
+    const strip = card.querySelector("[data-score-strip]");
+    assert.ok(strip, "a card in the stack rendered no strip");
+    return strip;
+  });
+}
+
+describe("a score replays the animation on the game that scored, and only that one", () => {
+  test("THE GUARD: the OTHER game's strip is not rebuilt", () => {
+    const { container, rerender } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    const before = strips(container);
+    assert.equal(before.length, 2, "the stack did not render both games");
+
+    rerender(<ScoreActivityHost scores={scoreInGameTwo(1)} />);
+    const after = strips(container);
+
+    // `assert.ok` on a comparison, never `assert.notEqual` on the nodes
+    // themselves: a failing assert.equal INSPECTS both values to build its diff,
+    // and inspecting two jsdom elements walks a circular graph big enough that
+    // the runner killed the whole file at its 30s timeout with no message at
+    // all. The bug reintroduction that proved these guards red is exactly when
+    // that happens, so a guard that cannot report its own failure is no guard.
+    assert.ok(
+      after[1] !== before[1],
+      "the game that scored kept its node, so its sweep could never play",
+    );
+    // The bug. A key made from the GLOBAL scoreRev rebuilds every strip in the
+    // stack whenever ANY game scores — wasted work today, and the moment a card
+    // gains an unconditional entrance animation, four of them replaying it at
+    // once for one run in one game.
+    assert.ok(
+      after[0] === before[0],
+      "a score in the other game rebuilt this game's strip, which did not move",
+    );
+  });
+
+  test("THE GUARD: a SECOND score in the SAME game restarts it", () => {
+    const { container, rerender } = render(<ScoreActivityHost scores={scoreInGameTwo(1)} />);
+    const first = strips(container)[1];
+
+    rerender(<ScoreActivityHost scores={scoreInGameTwo(2)} />);
+
+    // The property the old global key DID have, and the one a narrower key is
+    // most likely to drop: key on the game id alone and the second run in a game
+    // reuses the node and animates nothing.
+    assert.ok(
+      strips(container)[1] !== first,
+      "the second score in the same game reused the node, so nothing replayed",
+    );
+  });
+
+  test("THE GUARD: only the capsule side that scored is rebuilt", () => {
+    const { container, rerender } = render(
+      <ScoreCapsule game={game({ away: TEAM("17", 2), home: TEAM("16", 6) })} scored={null} />,
+    );
+    const away = () => container.querySelector(".score-side-away");
+    const home = () => container.querySelector(".score-side-home");
+    const [wasAway, wasHome] = [away(), home()];
+
+    rerender(
+      <ScoreCapsule game={game({ away: TEAM("17", 3), home: TEAM("16", 6) })} scored="away" />,
+    );
+
+    assert.ok(away() !== wasAway, "the side that scored kept its node");
+    assert.ok(home() === wasHome, "the side that did not score was rebuilt anyway");
+  });
+
+  test("THE GUARD: the capsule changing GAME rebuilds the side", () => {
+    // The capsule speaks for whichever game is live, and it SWITCHES game the
+    // moment another one scores — so the game id has to be in the key. Without
+    // it, arriving at a different game whose score happens to match the one
+    // leaving reuses the node, and the sweep on the team that just scored never
+    // plays.
+    const { container, rerender } = render(
+      <ScoreCapsule
+        game={game({ eventId: "one", away: TEAM("17", 2), home: TEAM("16", 6) })}
+        scored={null}
+      />,
+    );
+    const away = () => container.querySelector(".score-side-away");
+    const wasAway = away();
+
+    rerender(
+      <ScoreCapsule
+        game={game({ eventId: "two", away: TEAM("17", 2), home: TEAM("16", 6) })}
+        scored="away"
+      />,
+    );
+
+    assert.ok(away() !== wasAway, "switching to a different game reused the old side's node");
   });
 });
