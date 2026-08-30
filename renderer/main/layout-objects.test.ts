@@ -368,6 +368,7 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "home-streaming-youtube", label: "YouTube status", group: "YouTube", after: null },
   // ProVideoPlayer. `after: null` — it leads its own new group.
   { type: "pvp-layers", label: "ProVideoPlayer layers", group: "ProVideoPlayer", after: null },
+  { type: "home-pvp", label: "ProVideoPlayer", group: "ProVideoPlayer", after: "pvp-layers" },
 ];
 
 /**

@@ -74,6 +74,7 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   // Not "drilldown": a test asserts CAPABILITIES and the DRILLDOWN route table
   // agree in both directions, so declaring one without the other fails.
   "pvp-layers": ["readout"],
+  "home-pvp": ["readout"],
   "record-status": ["readout"],
   "section-chip": ["readout"],
   "service-order": ["readout"],

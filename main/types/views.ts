@@ -438,6 +438,14 @@ export type LayoutObjectConfig =
        *  an empty box. */
       hideWhenEmpty?: boolean;
     }
+  // ProVideoPlayer, on the operator's own page: what is on screen and how long
+  // is left. Always "layers with content" — a Home tile has room for the answer,
+  // not for eleven rows of mostly nothing.
+  //
+  // A bare discriminant, like home-recording-reaper. The layout object above is
+  // where the options live; a Home card is a glance, and every option on it is
+  // one more thing to set up before it says anything.
+  | { type: "home-pvp" }
   // A RossTalk control button. Tapping it (on a real display / operator surface,
   // never in the editor) fires `commandId` with `params` at `targetId`, or `raw`
   // when no catalogue command is chosen. No feedback bind: RossTalk is send-only,

@@ -61,6 +61,7 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   "obs-status": VideoIcon,
   "reaper-status": DiscIcon,
   "pvp-layers": LayersIcon,
+  "home-pvp": LayersIcon,
   "record-status": CircleDotIcon,
   "integration-status": PlugIcon,
   "osc-button": SendIcon,
