@@ -175,6 +175,27 @@ it looked shows **Live** with no number — see [Resi](../integrations/resi.md).
 YouTube reports a real broadcast start, so its elapsed time is exact. See
 [YouTube](../integrations/youtube.md).
 
+## ProVideoPlayer
+
+| Widget | What it shows | Source |
+|---|---|---|
+| **ProVideoPlayer layers** | What ProVideoPlayer has on each layer, and how long is left | PVP Network API |
+| **ProVideoPlayer** *(Home)* | What is on screen now, and how long is left | PVP Network API |
+
+**Show** chooses between every layer, only the layers holding something (the
+default), and one layer by name. There is no preview image: ProVideoPlayer's
+network API offers no thumbnail or frame of any kind, so this reports names,
+states and times only.
+
+A layer list longer than its widget is clipped — a screen cannot scroll — so the
+widget says **+N more** in the corner rather than dropping the tail silently. The
+Home card shows up to three layers and does the same.
+
+The cue name under a layer is the **last cue that touched it**, which is the only
+thing PVP reports — it never clears. Stage draws it only on a layer that actually
+holds something, so an idle layer does not claim a cue it is not showing. See
+[ProVideoPlayer](../integrations/provideoplayer.md).
+
 ## ProPresenter
 
 | Widget | What it shows | Source |

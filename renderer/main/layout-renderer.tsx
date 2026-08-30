@@ -19,6 +19,7 @@ import { useDisplayPresence } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
 import { streamers, streamIndicator } from "../app/recording-status";
+import { usePvpState, usePvpSkewMs } from "./use-pvp-state";
 import { useReaperState } from "./use-reaper-state";
 import { useScoresState } from "./use-scores-state";
 import { ScoresObject } from "./scores-object";
@@ -28,6 +29,7 @@ import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
+import { PvpObject } from "./pvp-object";
 import { ActionButton } from "./action-button";
 import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
@@ -59,6 +61,10 @@ export interface LayoutRenderCtx {
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
   reaper: ReaperStatusDTO | null;
+  /** Live ProVideoPlayer layer state — for the pvp-layers object. null until loaded. */
+  pvp: PvpStatusDTO | null;
+  /** Clock offset measured from PVP's own frames, not from PCO's. */
+  pvpSkewMs: number;
   scores: ScoresStatusDTO | null;
   resi: StreamStatusDTO | null;
   youtube: StreamStatusDTO | null;
@@ -1175,6 +1181,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         sub: pos,
       });
     }
+    case "pvp-layers":
+      return <PvpObject config={c} status={ctx.pvp} now={ctx.now} skewMs={ctx.pvpSkewMs} />;
+
     case "rosstalk-button":
       return (
         <RossTalkButton
@@ -2717,6 +2726,14 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   const spl = useSplState(want(["spl-meter"]));
   const obs = useObsState(want(["obs-status"]));
   const reaper = useReaperState(want(["reaper-status"]));
+  // Gated harder than most: the channel's DEMAND is what decides the poll cadence
+  // at the server, so an ungated hook would hold PVP at 1 Hz for a wall screen
+  // showing a clock.
+  const pvp = usePvpState(want(["pvp-layers"]));
+  // PVP's own clock offset. The shared skewMs below is PCO-derived and is 0
+  // whenever PCO is off, which would leave every PVP bar comparing a server
+  // timestamp against the browser's clock.
+  const pvpSkewMs = usePvpSkewMs(pvp);
   // Gated like every other integration hook: a clock-only wall screen must not
   // hold a poll open against ESPN.
   const scores = useScoresState(want(["scores", "home-scores"]));
@@ -2757,7 +2774,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs };
 }
 
 /**
@@ -2791,7 +2808,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -2860,7 +2877,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

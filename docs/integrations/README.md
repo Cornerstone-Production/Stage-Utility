@@ -16,6 +16,7 @@ countdown, so the app needs it.
 | [Wireless](wireless.md) | Wireless mic RF/battery/charger status |
 | [OBS Studio](obs.md) | Recording / streaming / virtual-cam state |
 | [REAPER](reaper.md) | Recording state (Web Interface poll) |
+| [ProVideoPlayer](provideoplayer.md) | What is on each PVP layer, and control of layers from rules |
 | [OSC](osc.md) | Control buttons to LAN gear + feedback |
 | [Resi](resi.md) | Whether Resi is streaming, and for how long |
 | [YouTube](youtube.md) | Whether you are live on YouTube, and for how long |
@@ -37,7 +38,8 @@ REAPER is the cleanest end-to-end template for a polling integration — see
    `this.stamped(snapshot)` at your own broadcast — see the version contract below.
 2. Descriptor + `apply<Id>()` + `get<Id>Target()` + `test()` in
    `integration-manager.ts`; secret keys in `SECRET_KEYS`.
-3. DTO in `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`), extending
+3. DTO in its own module under `main/types/` (`live.ts`, `pvp.ts`), re-exported
+   from `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`), extending
    `RevisionedStatus`.
 4. SSE hydrate + `GET /api/<id>/status` in `remote-server.ts`; `api.ts` invoke case.
 5. Live hook `renderer/main/use-<id>-state.ts`, built on `useStatusChannel`;

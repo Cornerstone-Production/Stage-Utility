@@ -13,6 +13,7 @@ import { integrationManager } from "../integration-manager.js";
 import { obsService } from "../obs-service.js";
 import { resiService } from "../resi-service.js";
 import { youtubeService } from "../youtube-service.js";
+import { pvpService } from "../pvp-service.js";
 import { reaperService } from "../reaper-service.js";
 import { scoresService } from "../scores-service.js";
 import { scoresStore } from "../scores-store.js";
@@ -50,6 +51,10 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
     }
     if (method === "GET" && pathname === "/api/reaper/status") {
       json(res, reaperService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/pvp/status") {
+      json(res, pvpService.getLatest());
       return;
     }
 

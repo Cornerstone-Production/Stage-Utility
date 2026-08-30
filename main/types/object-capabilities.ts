@@ -71,6 +71,10 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   "plan-attachment": ["readout"],
   "pp-timer": ["readout"],
   "reaper-status": ["readout"],
+  // Not "drilldown": a test asserts CAPABILITIES and the DRILLDOWN route table
+  // agree in both directions, so declaring one without the other fails.
+  "pvp-layers": ["readout"],
+  "home-pvp": ["readout"],
   // Readout only. No drilldown: a DRILLDOWN capability without a matching route
   // is asserted against in both directions, and there is no scores page to send
   // an operator to -- the panel that shows more is the context-bar activity, and

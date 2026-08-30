@@ -123,9 +123,9 @@ Both routes, and every option, are in
 people, their photos and the live service countdown.
 
 Everything else is optional and independently enabled: Shure and Sennheiser
-wireless, ProPresenter, Smaart (SPL), SenSource (people counting), OBS, REAPER,
-Resi, YouTube, OSC, RossTalk, Ross TSL, ProdCom transcription, and Bitfocus
-Companion.
+wireless, ProPresenter, ProVideoPlayer, Smaart (SPL), SenSource (people
+counting), OBS, REAPER, Resi, YouTube, OSC, RossTalk, Ross TSL, ProdCom
+transcription, and Bitfocus Companion.
 
 Setup and behaviour for each is in [integrations](docs/integrations/README.md).
 

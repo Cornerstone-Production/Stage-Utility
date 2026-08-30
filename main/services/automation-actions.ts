@@ -15,6 +15,10 @@ import { rosstalkManager } from "./rosstalk-manager.js";
 import { stageController } from "./stage-controller.js";
 import { matchRoster } from "./automation-roster-match.js";
 import { signalStore } from "./signal-store.js";
+// A separate module rather than nine more literals here: they share resolveLayer,
+// byUuid, nameSegment and flagAction, and the verify-then-report reasoning is a
+// page of comment that belongs beside the thing it governs.
+import { PVP_ACTIONS } from "./pvp-actions.js";
 
 const ok = (detail: string): ActionResult => ({ ok: true, detail });
 const fail = (detail: string): ActionResult => ({ ok: false, detail });
@@ -195,4 +199,6 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
       return ok("refreshed displays");
     },
   },
+
+  ...PVP_ACTIONS,
 };

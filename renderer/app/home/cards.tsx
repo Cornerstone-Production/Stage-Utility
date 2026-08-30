@@ -41,6 +41,9 @@ import { invoke, onNotification } from "../../lib/api";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
 import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
+import { usePvpState, usePvpSkewMs } from "../../main/use-pvp-state";
+import { PvpLayerRow } from "../../main/pvp-layer-row";
+import { visibleLayers } from "../../main/pvp-object";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
 import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl } from "../recording-status";
@@ -73,6 +76,7 @@ const HOME_CARD_TYPES: Record<HomeCardType, true> = {
   "home-spl": true,
   "home-scores": true,
   "home-screens": true,
+  "home-pvp": true,
 };
 
 export function isHomeCard(
@@ -591,6 +595,56 @@ export function SplCard() {
 }
 
 /**
+ * ProVideoPlayer, at a glance.
+ *
+ * Up to three layers with content, compact. `visibleLayers` is the SAME filter
+ * the wall object uses and PvpLayerRow is the same row, so the two surfaces
+ * cannot disagree about whether a layer is live — which matters here more than
+ * usual, because the field that would make them disagree (`playingItem`) never
+ * clears and was wrong on four layers out of five at rest.
+ *
+ * No preview image, and there is no version of this card that has one: PVP
+ * exposes no thumbnail or frame endpoint at all.
+ */
+export function PvpCard({ now }: { now: number }) {
+  const pvp = usePvpState();
+  // PVP's own clock offset rather than the PCO-derived one this card is handed:
+  // the countdown below must not go wrong because Planning Center is down.
+  const skewMs = usePvpSkewMs(pvp);
+  const rows = visibleLayers(pvp?.layers ?? [], { type: "pvp-layers", show: "with-content" });
+
+  // Three different nothings, for the reason the wall object's emptyReason
+  // exists: one is a machine to go and look at, one is not, and one is that we
+  // have not heard yet.
+  if (!pvp) return <Stat label="ProVideoPlayer" value="—" />;
+  if (!pvp.connected) return <Stat label="ProVideoPlayer" value="Offline" />;
+  if (rows.length === 0) return <Stat label="ProVideoPlayer" value="Nothing on screen" />;
+
+  return (
+    // STAT_CARD, matching the Stat fallbacks above: home-pvp is a BARE type, so
+    // nothing upstream supplies the chrome, and without this the card lost its
+    // box at exactly the moment it had something to show.
+    <div className={`${STAT_CARD} flex flex-col gap-1 min-w-0`}>
+      {/* Three, not all of them. A Home tile is a glance; the wall object is
+          where an operator goes to see the whole stack. */}
+      {rows.slice(0, 3).map((l) => (
+        <PvpLayerRow
+          key={l.uuid}
+          layer={l}
+          sampledAt={pvp.sampledAt}
+          now={now}
+          skewMs={skewMs}
+          compact
+        />
+      ))}
+      {rows.length > 3 && (
+        <span className="text-caption2 text-fg-subtle">+{rows.length - 3} more</span>
+      )}
+    </div>
+  );
+}
+
+/**
  * Followed scores, in Home's voice.
  *
  * NOT the wall strip, and this is the one deliberate departure from the plan's
@@ -767,6 +821,8 @@ export function HomeCard({
       return <StreamingCard platform="YouTube" now={now} />;
     case "home-spl":
       return <SplCard />;
+    case "home-pvp":
+      return <PvpCard now={now} />;
     case "home-screens":
       return <ScreensCard outputs={state.outputs ?? []} onlineOutputIds={onlineOutputIds} />;
     case "home-next-service":

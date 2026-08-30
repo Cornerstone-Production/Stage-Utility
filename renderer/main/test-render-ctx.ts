@@ -73,6 +73,8 @@ export function makeRenderCtx(overrides: Partial<LayoutRenderCtx> = {}): LayoutR
     spl: null,
     obs: null,
     reaper: null,
+    pvp: null,
+    pvpSkewMs: 0,
     resi: null,
     youtube: null,
     osc: null,

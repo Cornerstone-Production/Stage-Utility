@@ -986,7 +986,7 @@ const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "People", ids: ["sensource"] },
   { title: "Wireless", ids: ["wireless"] },
   { title: "Streaming", ids: ["resi", "youtube"] },
-  { title: "Control & output", ids: ["obs", "reaper", "osc", "rosstalk", "ross-tsl"] },
+  { title: "Control & output", ids: ["obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"] },
   // Its own group rather than "Control & output": scores are something the app
   // READS and shows, and nothing here controls a device. "People" is the only
   // other read-only feed and it is named for what it counts, so a general
