@@ -2,9 +2,8 @@ import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
 import { useState, useEffect, useCallback, useRef, type ChangeEvent, type ReactNode } from "react";
-import { integrationDrafts } from "./integration-drafts";
-import { SLIDE_MS, prefersReducedMotion, useSlideOnMove } from "../lib/use-slide-on-move";
-import { useRevealNonce } from "../app/flash";
+import { useSlideOnMove } from "../lib/use-slide-on-move";
+import { useRevealTarget } from "../app/flash";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
 import { OscTargetsPanel } from "./osc-targets-panel";
@@ -17,6 +16,8 @@ import { RossTslFeedsPanel } from "./ross-tsl-feeds-panel";
 import { ProPresenterInstancesPanel } from "./propresenter-instances-panel";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
+import { integrationDialogClass } from "./integration-dialog-size";
+import { UnsavedChangesDialog } from "../editor/unsaved-changes-dialog";
 import {
   Button,
   Field,
@@ -32,13 +33,17 @@ import {
   SelectItem,
   SelectValue,
   Switch,
-  Collapsible,
   NumberInput,
   toast,
   confirm,
   SkeletonRows,
   InfoHint,
-  UnsavedBanner,
+  DialogRoot,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "../components/ui";
 import { Loader2Icon, CheckCircle2Icon, XCircleIcon, RefreshCwIcon, EraserIcon } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -56,14 +61,118 @@ function isPasswordMasked(value: string): boolean {
   return /^•+$/.test(value);
 }
 
-// ---- single integration card ------------------------------------------------
+/**
+ * Cards that Getting Started can point at, by integration id.
+ *
+ * Named here rather than inline so the reveal listener below and the attribute
+ * that emits it cannot drift — a flash id with no card, or a card whose id
+ * changed, would silently stop highlighting.
+ */
+const FLASH_IDS: Record<string, string | undefined> = {
+  "planning-center": "pco-credentials",
+};
 
-interface IntegrationCardProps {
-  descriptor: IntegrationDescriptor;
-  state: IntegrationState;
-  onStateChange: (s: IntegrationState) => void;
-  /** ISO timestamp of the last successful PCO sync (planning-center card only). */
-  lastRefreshedAt?: string | null;
+/**
+ * The `data-flash-id` for one integration's card.
+ *
+ * Every integration needs one, not just the two something happened to point at:
+ * the context bar's "N disconnected" now sends you straight at whichever is
+ * down, and that is any of them. Exported so the sender and the target derive
+ * the same string from the same function — a hand-written id on one side is how
+ * a highlight silently lands nowhere.
+ */
+export function integrationFlashId(id: string): string {
+  return FLASH_IDS[id] ?? `integration-${id}`;
+}
+
+/**
+ * The order integrations are laid out in, by purpose.
+ *
+ * The headings these categories used to draw are gone: eight of them over
+ * sixteen integrations meant most held ONE card, and a heading above a single
+ * card in a four-column grid wastes three quarters of the row and rebuilds the
+ * tall thin column the grid exists to remove. The ORDER is kept, so Planning
+ * Center and ProdCom still sit next to each other and the Ross pair is still
+ * adjacent — which is all the pair card and the headings were really doing.
+ */
+const CATEGORY_ORDER: string[][] = [
+  ["planning-center", "prodcom"], // Service & plan
+  ["propresenter"], // Presentation
+  ["smaart"], // Audio
+  ["sensource"], // People
+  ["wireless"], // Wireless
+  ["resi", "youtube"], // Streaming
+  ["obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"], // Control & output
+  ["scores"], // Information
+];
+
+const ORDER = CATEGORY_ORDER.flat();
+
+/** Anything not named above sorts to the end of its half, in server order. */
+function rank(id: string): number {
+  const i = ORDER.indexOf(id);
+  return i === -1 ? ORDER.length : i;
+}
+
+/**
+ * An integration is "in use" if it is enabled or has been configured. Everything
+ * else sorts below the "Not set up" heading and renders in the quiet treatment.
+ * An ERRORING integration always stays up with the live ones, since an error is
+ * exactly what you want to see — and it is what keeps "not set up" and "broken"
+ * from reading alike now that both halves are on screen at once.
+ *
+ * At module scope because it is also what the slide animation watches: a card
+ * changes group exactly when this answer changes, and a signature built from
+ * anything else would either miss a move or animate on a re-render that was not
+ * one.
+ */
+function isInUse(state: IntegrationState): boolean {
+  return state.enabled || state.configured !== false || state.connection === "error";
+}
+
+/**
+ * What the slide animation watches: it changes when, and only when, some
+ * integration crosses between the two grids.
+ *
+ * Built from `isInUse` and nothing else. A signature that also carried, say, the
+ * connection state would re-run the FLIP on every SSE push — sliding cards that
+ * had not moved — and one that carried less would miss a move entirely.
+ */
+export function moveSignature(states: IntegrationState[]): string {
+  return states.map((s) => `${s.id}:${isInUse(s) ? 1 : 0}`).join("|");
+}
+
+/** Config keys that name the machine an integration is pointed at. */
+const HOST_KEYS = ["host", "url", "address", "ip", "server"];
+const PORT_KEYS = ["port", "apiPort"];
+
+function firstString(config: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const v = config[key];
+    if (typeof v === "string" && v !== "") return v;
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  }
+  return "";
+}
+
+/**
+ * The card's second line: what this integration is pointed at, or what it is.
+ *
+ * A row could get away with a name and a badge because it was 1176px wide and
+ * about to be opened anyway. A 252px card in a grid of sixteen has to answer
+ * "which one is this" on its own, and for a configured integration the useful
+ * answer is the address — that is what an operator is checking when something is
+ * down. Derived from the descriptor rather than a per-id table, so adding an
+ * integration cannot leave a card with a blank line under its name.
+ */
+export function summaryLine(descriptor: IntegrationDescriptor, state: IntegrationState): string {
+  const host = firstString(state.config, HOST_KEYS);
+  if (host) {
+    const port = firstString(state.config, PORT_KEYS);
+    return port ? `${host}:${port}` : host;
+  }
+  const sentence = descriptor.description?.match(/^[^.]+\./)?.[0];
+  return sentence ?? descriptor.description ?? descriptor.label;
 }
 
 // "Synced 12:52 PM" for the PCO Refresh-now row; "Never synced" when null/invalid.
@@ -102,71 +211,185 @@ function initialConfig(
   return out;
 }
 
-export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: IntegrationCardProps) {
-  // Local config mirrors state.config but tracks in-progress edits.
-  //
-  // Seeded from the draft store, not only from `state`, because this card is
-  // remounted for reasons that have nothing to do with the operator: enabling an
-  // integration moves it into a different group and therefore a different place
-  // in the React tree, and collapsing it unmounts the body outright. Held in
-  // plain `useState` alone, everything typed since the last save went with it.
-  const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(
-    () => integrationDrafts.get(descriptor.id) ?? initialConfig(descriptor, state),
-  );
+/**
+ * A panel that REPLACES the schema form, or null when the schema form is shown.
+ *
+ * These five have no ConfigField-shaped settings at all — a searchable team
+ * picker, a list of receivers, a list of UDP targets, an address to dial us on —
+ * and each saves its own list as it is edited. They therefore get no Save /
+ * Discard and no Test in the dialog footer, exactly as they had neither in the
+ * row.
+ */
+function bespokePanelFor(descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode | null {
+  if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
+  if (descriptor.id === "osc") return <OscTargetsPanel />;
+  // Its own panel: the only setting is WHICH TEAMS, and a searchable
+  // multi-league team picker is not expressible as a ConfigField.
+  if (descriptor.id === "scores") return <ScoresTeamsPanel />;
+  if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
+  // Its own panel: what Companion needs is an address to dial and the module
+  // to dial it with, not a form.
+  if (descriptor.id === "companion") return <CompanionInfoPanel state={state} />;
+  return null;
+}
 
+// ---- the card ---------------------------------------------------------------
+
+/** One integration as a card: name, what it is pointed at, its connection, and
+ *  an enable switch. Settings open in a dialog — the card never holds a form,
+ *  which is what lets the grid stay a grid and the page fit on one screen. */
+function IntegrationTile({
+  descriptor,
+  state,
+  onOpen,
+  onToggle,
+  toggling,
+}: {
+  descriptor: IntegrationDescriptor;
+  state: IntegrationState;
+  onOpen: (id: string) => void;
+  onToggle: (id: string, enabled: boolean) => void;
+  toggling: boolean;
+}) {
+  const dormant = !isInUse(state);
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      // The flash target is the TILE, not the form. The form lives in a portal
+      // and is not in the DOM until the dialog opens, so a highlight aimed at it
+      // would land on nothing — which is the bug useRevealNonce existed to work
+      // around by remounting a collapsed body open.
+      data-flash-id={integrationFlashId(descriptor.id)}
+      data-integration-card={descriptor.id}
+      // The id, not the position, is what the slide animation follows: enabling
+      // an integration moves this card into the other grid, which is a remount
+      // at a different place in the tree.
+      data-slide-id={descriptor.id}
+      onClick={() => onOpen(descriptor.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(descriptor.id);
+        }
+      }}
+      aria-haspopup="dialog"
+      aria-label={`${descriptor.label} settings`}
+      className={cn(
+        "su-card flex flex-col gap-1.5 px-3 py-2.5 min-h-24 min-w-0 text-left cursor-pointer",
+        "hover:border-line-strong transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+        // Quieter, never dimmer. A dormant card is one an operator CLICKS — on a
+        // fresh install every card on the page is one of these — so nothing here
+        // is carried by faint text. The name drops from --su-fg (16.28:1 light)
+        // to --su-fg-muted (5.63:1 light, 6.91:1 dark, both past AA), and the
+        // rest of the signal is the ground, the dashed border, the missing
+        // shadow and the words "Not set up" in the badge. Neither --su-fg-faint
+        // (1.76:1) nor --su-fg-subtle (2.45:1) appears on any text on this page.
+        dormant && "bg-transparent border-dashed shadow-none min-h-[4.5rem]",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <span
+          className={cn(
+            "flex-1 min-w-0 text-callout truncate",
+            dormant ? "font-medium text-fg-muted" : "font-semibold text-fg",
+          )}
+        >
+          {descriptor.label}
+        </span>
+        {/* No switch for an integration that dials US. There was one, and
+            nothing was gated on it: turning Companion off left the module
+            connecting and controlling the app exactly as before, while the
+            row said it was disabled. */}
+        {!descriptor.inbound && (
+          <Switch
+            checked={state.enabled}
+            disabled={toggling}
+            aria-label={`Enable ${descriptor.label}`}
+            // The switch is a control ON a card that is itself a button. Without
+            // this, flicking it also opened the dialog.
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            onCheckedChange={(v: boolean) => onToggle(descriptor.id, v)}
+          />
+        )}
+      </div>
+      <span className="text-caption1 text-fg-muted line-clamp-2 min-w-0">
+        {summaryLine(descriptor, state)}
+      </span>
+      <div className="mt-auto min-w-0">
+        {dormant ? (
+          <span className="text-caption1 text-fg-muted">Not set up</span>
+        ) : (
+          <ConnectionBadge
+            connection={state.connection}
+            message={state.message}
+            inbound={descriptor.inbound}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- the dialog -------------------------------------------------------------
+
+interface IntegrationDialogProps {
+  descriptor: IntegrationDescriptor;
+  state: IntegrationState;
+  onStateChange: (s: IntegrationState) => void;
+  /** ISO timestamp of the last successful PCO sync (planning-center only). */
+  lastRefreshedAt?: string | null;
+  onClose: () => void;
+  /** Called as the header switch is flicked, before the state comes back — the
+   *  moment to record where every card is, since this is what moves one. */
+  onBeforeMove?: () => void;
+}
+
+/**
+ * One integration's settings, in a dialog.
+ *
+ * Explicit Save, not autosave, and that is not a change: the row already
+ * compared against the saved config and offered Save / Discard. It has to stay
+ * explicit for the same reason the screen-URL dialog gives — closing a dialog
+ * blurs the field, so a blur-save races the unmount, and a value the server
+ * REFUSED would read as accepted because the dialog is already gone. A bad
+ * credential here comes back as a rejected promise, so the refusal has to stay
+ * on screen.
+ */
+export function IntegrationDialog({
+  descriptor,
+  state,
+  onStateChange,
+  lastRefreshedAt,
+  onClose,
+  onBeforeMove,
+}: IntegrationDialogProps) {
+  const bespoke = bespokePanelFor(descriptor, state);
+
+  const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(
+    () => initialConfig(descriptor, state),
+  );
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   // Compare against the saved config rather than tracking a flag, so Save/Discard
   // appear only for genuine edits — and disappear again on their own after a save.
   const pristine = initialConfig(descriptor, state);
-  const dirty = JSON.stringify(localConfig) !== JSON.stringify(pristine);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Park the draft above the card, and take it away again the moment the form
-  // matches what is saved — so "there is a draft" stays a true statement, and a
-  // clean card is seeded from the real state on its next mount.
-  useEffect(() => {
-    if (dirty) integrationDrafts.set(descriptor.id, localConfig);
-    else integrationDrafts.clear(descriptor.id);
-  }, [descriptor.id, dirty, localConfig]);
-
-  // Put the operator back in the field they were typing in. Moving between
-  // groups is a remount, and a remount blurs whatever had focus — so after
-  // flicking the enable switch they were left scrolled to a different part of
-  // the page with no caret anywhere. One-shot, taken from the store, so nothing
-  // steals focus on an ordinary re-render.
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const key = integrationDrafts.takeFocus(descriptor.id);
-    if (!key) return;
-    const el = bodyRef.current?.querySelector<HTMLInputElement>(
-      `[data-config-field="${key}"] input`,
-    );
-    if (!el) return;
-    // preventScroll, because the card is sitting on the FLIP's inverse transform
-    // at this instant: it LOOKS like it has not moved, so the browser sees a
-    // field already on screen and scrolls nowhere — and then the card slides to
-    // its real position at the top of the page, taking the caret with it and
-    // leaving the operator staring at a part of the list they were not in.
-    el.focus({ preventScroll: true });
-    // Caret where they left it, at the end of what they typed. Guarded because
-    // setSelectionRange throws InvalidStateError on a native number input.
-    if (el.type !== "number") el.setSelectionRange(el.value.length, el.value.length);
-    // Then follow the card, once it has landed. jsdom has no scrollIntoView.
-    const landed = window.setTimeout(
-      () => el.scrollIntoView?.({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }),
-      SLIDE_MS,
-    );
-    return () => window.clearTimeout(landed);
-  }, [descriptor.id]);
+  const dirty = !bespoke && JSON.stringify(localConfig) !== JSON.stringify(pristine);
 
   function setField(key: string, value: unknown) {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function handleSave() {
+  /** Save, and say whether it landed. The caller decides what to do next — a
+   *  failed save must not be followed by a close. */
+  async function handleSave(): Promise<boolean> {
     setIsSaving(true);
     try {
       // Build config — skip password fields that still show the mask
@@ -190,11 +413,26 @@ export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshe
       // save — most visibly after changing a secret.
       setLocalConfig(initialConfig(descriptor, next));
       toast.success(`${descriptor.label} settings saved.`);
+      return true;
     } catch (err) {
       console.error("[IntegrationsPanel:save] error", err);
       toast.error(`Failed to save: ${String(err)}`);
+      return false;
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function toggleEnabled(enabled: boolean) {
+    setToggling(true);
+    onBeforeMove?.();
+    try {
+      const next = await ipc<IntegrationState>("integrations:setEnabled", { id: descriptor.id, enabled });
+      onStateChange(next);
+    } catch (err) {
+      toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
+    } finally {
+      setToggling(false);
     }
   }
 
@@ -210,7 +448,6 @@ export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshe
     }
   }
 
-  const [isClearing, setIsClearing] = useState(false);
   /**
    * Empty the transcript on every display at once.
    *
@@ -252,24 +489,18 @@ export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshe
     }
   }
 
-  return (
-    // Getting-started sends "Connect Planning Center" straight at this card's form.
-    <div
-      className="flex flex-col gap-3"
-      data-flash-id={integrationFlashId(descriptor.id)}
-      ref={bodyRef}
-      // One listener for the whole form rather than a prop on each control:
-      // NumberInput takes a closed set of props and forwards no handler of its
-      // own, and React's onFocus bubbles, so the field wrapper's marker is what
-      // identifies which control the operator is in.
-      onFocus={(e) => {
-        const key = (e.target as HTMLElement)
-          .closest("[data-config-field]")
-          ?.getAttribute("data-config-field");
-        if (key) integrationDrafts.noteFocus(descriptor.id, key);
-      }}
-    >
-      {/* Schema-driven form */}
+  /** Escape, the X and a click outside all arrive here. A dismissed dialog is
+   *  never consent to throw work away. */
+  function requestClose() {
+    if (dirty) {
+      setConfirming(true);
+      return;
+    }
+    onClose();
+  }
+
+  const body = bespoke ?? (
+    <div className="flex flex-col gap-3">
       <FieldSet flat>
         <FieldGroup>
           {descriptor.configSchema.map((field) => {
@@ -298,7 +529,7 @@ export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshe
                     value={typeof value === "string" ? value : ""}
                     onValueChange={(v: string) => setField(field.key, v)}
                   >
-                    <SelectTrigger className="w-44" aria-label={field.label}>
+                    <SelectTrigger className="w-44 max-sm:w-full" aria-label={field.label}>
                       <SelectValue placeholder="Select…" />
                     </SelectTrigger>
                     <SelectContent>
@@ -321,7 +552,7 @@ export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshe
                     onChange={(n) => setField(field.key, String(n))}
                     min={field.min}
                     max={field.max}
-                    className="w-44"
+                    className="w-44 max-sm:w-full"
                     aria-label={field.label}
                   />
                 ) : (
@@ -330,7 +561,7 @@ export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshe
                     value={typeof value === "string" || typeof value === "number" ? String(value) : ""}
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setField(field.key, e.target.value)}
                     placeholder={field.placeholder ?? ""}
-                    className="w-44"
+                    className="w-44 max-sm:w-full"
                     aria-label={field.label}
                   />
                 )}
@@ -343,308 +574,169 @@ export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshe
       {descriptor.id === "sensource" && (
         <SenSourceScopePicker state={state} onStateChange={onStateChange} />
       )}
-
       {descriptor.id === "ross-tsl" && (
         <RossTslFeedsPanel state={state} onStateChange={onStateChange} />
       )}
-
       {descriptor.id === "propresenter" && (
         <ProPresenterInstancesPanel state={state} onStateChange={onStateChange} />
       )}
-
-      {/* Unsaved changes — same bar as the patch sheet and the layout editor, so
-          "you have edits" reads identically everywhere in the app. */}
-      {dirty && (
-        <UnsavedBanner
-          compact
-          className="self-start"
-          saving={isSaving}
-          onSave={handleSave}
-          onDiscard={() => setLocalConfig(initialConfig(descriptor, state))}
-        />
-      )}
-
-      {/* Actions row */}
-      <div className="flex items-center gap-2">
-        <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
-          {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
-          Test connection
-        </Button>
-        {descriptor.id === "prodcom" && (
-          <Button variant="transparent" size="small" onClick={handleClearTranscript} disabled={isClearing}>
-            {isClearing
-              ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" />
-              : <EraserIcon className="size-3.5 text-gray-9" />}
-            Clear transcript
-          </Button>
-        )}
-        {descriptor.id === "planning-center" && (
-          <>
-            <Button variant="transparent" size="small" onClick={handleRefresh} disabled={isRefreshing}>
-              {isRefreshing
-                ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" />
-                : <RefreshCwIcon className="size-3.5 text-gray-9" />}
-              Refresh now
-            </Button>
-            <span className="text-caption1 text-gray-9 tabular-nums">{fmtSynced(lastRefreshedAt)}</span>
-          </>
-        )}
-        {testResult !== null && (
-          <span
-            className={cn(
-              "text-caption1 flex items-center gap-1",
-              testResult.ok ? "text-green-10" : "text-red-10",
-            )}
-          >
-            {testResult.ok ? (
-              <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
-            ) : (
-              <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-            )}
-            {testResult.ok ? (testResult.message ?? "OK") : (testResult.message ?? "Failed")}
-          </span>
-        )}
-      </div>
+      {descriptor.id === "prodcom" && <CaptionColorsPanel />}
     </div>
   );
-}
 
-// ---- collapsible row + categories -------------------------------------------
-
-// Groups the growing integration list by purpose so the page stays scannable.
-/**
- * Cards that Getting Started can point at, by integration id.
- *
- * Named here rather than inline so the reveal listener below and the attribute
- * that emits it cannot drift — a flash id with no card, or a card whose id
- * changed, would silently stop highlighting.
- */
-const FLASH_IDS: Record<string, string | undefined> = {
-  "planning-center": "pco-credentials",
-};
-
-/**
- * The `data-flash-id` for one integration's card.
- *
- * Every integration needs one, not just the two something happened to point at:
- * the context bar's "N disconnected" now sends you straight at whichever is
- * down, and that is any of them. Exported so the sender and the target derive
- * the same string from the same function — a hand-written id on one side is how
- * a highlight silently lands nowhere.
- */
-export function integrationFlashId(id: string): string {
-  return FLASH_IDS[id] ?? `integration-${id}`;
-}
-
-const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
-  { title: "Service & plan", ids: ["planning-center", "prodcom"] },
-  { title: "Presentation", ids: ["propresenter"] },
-  { title: "Audio", ids: ["smaart"] },
-  { title: "People", ids: ["sensource"] },
-  { title: "Wireless", ids: ["wireless"] },
-  { title: "Streaming", ids: ["resi", "youtube"] },
-  { title: "Control & output", ids: ["obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"] },
-  // Its own group rather than "Control & output": scores are something the app
-  // READS and shows, and nothing here controls a device. "People" is the only
-  // other read-only feed and it is named for what it counts, so a general
-  // heading is the honest place for this one.
-  { title: "Information", ids: ["scores"] },
-];
-
-/** Two integrations that present as one card. RossTalk (commands, TCP 7788) and
- *  Ross MultiViewer (TSL UMD) are different protocols that usually address the
- *  same Carbonite, so two separate cards read as clutter. This is presentation
- *  only — each keeps its own id, enable flag, config and connection state, so
- *  layout buttons and automation actions referencing "rosstalk" are untouched. */
-const PAIRS: { title: string; ids: [string, string] }[] = [
-  { title: "Ross", ids: ["rosstalk", "ross-tsl"] },
-];
-
-/**
- * An integration is "in use" if it is enabled or has been configured. Everything
- * else is noise on this page — a site running three integrations should not scroll
- * past eleven. Nothing is hidden permanently and there is no preference to store:
- * the state already says which are in use, so the list reorganizes itself as soon
- * as one is set up. An ERRORING integration always stays in the main list, since an
- * error is exactly what you want to see.
- *
- * At module scope because it is also what the slide animation watches: a card
- * changes group exactly when this answer changes, and a signature built from
- * anything else would either miss a move or animate on a re-render that was not
- * one.
- */
-function isInUse(state: IntegrationState): boolean {
-  return state.enabled || state.configured !== false || state.connection === "error";
-}
-
-/** One integration as a collapsible card: header (name · status · enable) that
- *  expands to the config body. Configured integrations start collapsed; ones that
- *  still need setup start open, so the page opens on what needs attention. */
-function IntegrationRow({
-  descriptor,
-  state,
-  onStateChange,
-  body,
-  onBeforeMove,
-}: {
-  descriptor: IntegrationDescriptor;
-  state: IntegrationState;
-  onStateChange: (s: IntegrationState) => void;
-  body: ReactNode;
-  /** Called as the switch is flicked, before the state comes back — the moment
-   *  to record where every card is, since this is what moves one. */
-  onBeforeMove?: () => void;
-}) {
-  const [toggling, setToggling] = useState(false);
-  async function toggleEnabled(enabled: boolean) {
-    setToggling(true);
-    onBeforeMove?.();
-    try {
-      const next = await ipc<IntegrationState>("integrations:setEnabled", { id: descriptor.id, enabled });
-      onStateChange(next);
-    } catch (err) {
-      toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
-    } finally {
-      setToggling(false);
-    }
-  }
   return (
-    // The id, not the position, is what the slide animation follows: enabling an
-    // integration moves this card into a different group, which is a remount at
-    // a different place in the tree.
-    <div className="su-card px-3 py-2" data-slide-id={descriptor.id}>
-      <IntegrationEntry
-        descriptor={descriptor}
-        state={state}
-        body={body}
-        toggling={toggling}
-        onToggle={toggleEnabled}
-      />
-    </div>
-  );
-}
+    <>
+      <DialogRoot
+        open
+        onOpenChange={(next: boolean) => {
+          if (!next) requestClose();
+        }}
+      >
+        <DialogContent
+          className={integrationDialogClass(descriptor.id)}
+          // Focus is put back by the panel, which looks the card up by id after
+          // the grid has settled. Radix would otherwise restore it to the node
+          // it took focus from, and saving can move that card into the other
+          // grid — which unmounts the node and drops focus onto <body>.
+          onCloseAutoFocus={(e: Event) => e.preventDefault()}
+        >
+          <DialogHeader className="flex-row items-start gap-3 border-b border-line px-5 pb-3 pt-4 mb-0">
+            <div className="min-w-0">
+              <DialogTitle>{descriptor.label}</DialogTitle>
+              {descriptor.description && (
+                <DialogDescription>{descriptor.description}</DialogDescription>
+              )}
+            </div>
+            {/* Room for the X in the corner. */}
+            <div className="ml-auto mr-6 flex shrink-0 items-center gap-3">
+              <ConnectionBadge
+                connection={state.connection}
+                message={state.message}
+                inbound={descriptor.inbound}
+              />
+              {!descriptor.inbound && (
+                <Switch
+                  checked={state.enabled}
+                  disabled={toggling}
+                  onCheckedChange={toggleEnabled}
+                  aria-label={`Enable ${descriptor.label}`}
+                />
+              )}
+            </div>
+          </DialogHeader>
 
-/** The collapsible header + body for one integration, without a card wrapper —
- *  so it can sit alone in its own card or beside a sibling inside a pair card. */
-function IntegrationEntry({
-  descriptor,
-  state,
-  body,
-  toggling,
-  onToggle,
-}: {
-  descriptor: IntegrationDescriptor;
-  state: IntegrationState;
-  body: ReactNode;
-  toggling: boolean;
-  onToggle: (enabled: boolean) => void;
-}) {
-  // A CONFIGURED integration is collapsed, so the card the context bar's
-  // "N disconnected" aims a highlight at is not in the DOM — the highlight had
-  // nothing to land on and did nothing at all. Remounting with defaultOpen
-  // reveals it, and the operator can still close it again afterwards.
-  const revealNonce = useRevealNonce((id) => id === integrationFlashId(descriptor.id));
-  return (
-    <Collapsible
-      key={revealNonce}
-      defaultOpen={!state.configured || revealNonce > 0}
-      label={<span className="text-callout font-semibold text-fg truncate">{descriptor.label}</span>}
-      afterLabel={descriptor.description ? <InfoHint>{descriptor.description}</InfoHint> : undefined}
-      right={
-        <div className="flex items-center gap-3 shrink-0">
-          <ConnectionBadge connection={state.connection} message={state.message} inbound={descriptor.inbound} />
-          {/* No switch for an integration that dials US. There was one, and
-              nothing was gated on it: turning Companion off left the module
-              connecting and controlling the app exactly as before, while the
-              row said it was disabled. */}
-          {!descriptor.inbound && (
-            <Switch
-              checked={state.enabled}
-              onCheckedChange={onToggle}
-              disabled={toggling}
-              aria-label={`Enable ${descriptor.label}`}
-            />
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{body}</div>
+
+          {!bespoke && (
+            <DialogFooter className="mt-0 flex-wrap justify-start gap-2 border-t border-line px-5 py-3">
+              <Button variant="transparent" size="small" onClick={handleTest} disabled={isTesting}>
+                {isTesting ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" /> : null}
+                Test connection
+              </Button>
+              {descriptor.id === "prodcom" && (
+                <Button variant="transparent" size="small" onClick={handleClearTranscript} disabled={isClearing}>
+                  {isClearing
+                    ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" />
+                    : <EraserIcon className="size-3.5 text-gray-9" />}
+                  Clear transcript
+                </Button>
+              )}
+              {descriptor.id === "planning-center" && (
+                <>
+                  <Button variant="transparent" size="small" onClick={handleRefresh} disabled={isRefreshing}>
+                    {isRefreshing
+                      ? <Loader2Icon className="size-3.5 text-gray-9 animate-spin" />
+                      : <RefreshCwIcon className="size-3.5 text-gray-9" />}
+                    Refresh now
+                  </Button>
+                  <span className="text-caption1 text-fg-muted tabular-nums">{fmtSynced(lastRefreshedAt)}</span>
+                </>
+              )}
+              {testResult !== null && (
+                <span
+                  className={cn(
+                    "text-caption1 flex min-w-0 items-center gap-1",
+                    testResult.ok ? "text-green-10" : "text-red-10",
+                  )}
+                >
+                  {testResult.ok ? (
+                    <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
+                  ) : (
+                    <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {testResult.ok ? (testResult.message ?? "OK") : (testResult.message ?? "Failed")}
+                  </span>
+                </span>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                <Button
+                  variant="transparent"
+                  size="small"
+                  disabled={!dirty || isSaving}
+                  onClick={() => setLocalConfig(initialConfig(descriptor, state))}
+                >
+                  Discard
+                </Button>
+                <Button variant="accent" size="small" disabled={!dirty || isSaving} onClick={handleSave}>
+                  {isSaving ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </DialogFooter>
           )}
-        </div>
-      }
-    >
-      <div className="pt-1">{body}</div>
-    </Collapsible>
-  );
-}
+        </DialogContent>
+      </DialogRoot>
 
-/** One card holding two related integrations as sections. Each section keeps its
- *  own status badge and enable switch — this groups them visually, it does not
- *  merge them. */
-function IntegrationPairRow({
-  title,
-  entries,
-  onStateChange,
-  onBeforeMove,
-}: {
-  title: string;
-  entries: { descriptor: IntegrationDescriptor; state: IntegrationState; body: ReactNode }[];
-  onStateChange: (id: string, s: IntegrationState) => void;
-  onBeforeMove?: () => void;
-}) {
-  const [togglingId, setTogglingId] = useState<string | null>(null);
-
-  async function toggle(id: string, label: string, enabled: boolean) {
-    setTogglingId(id);
-    onBeforeMove?.();
-    try {
-      const next = await ipc<IntegrationState>("integrations:setEnabled", { id, enabled });
-      onStateChange(id, next);
-    } catch (err) {
-      toast.error(`Failed to ${enabled ? "enable" : "disable"} ${label}: ${String(err)}`);
-    } finally {
-      setTogglingId(null);
-    }
-  }
-
-  return (
-    <div className="su-card flex flex-col gap-1 px-3 py-2" data-slide-id={`pair:${title}`}>
-      <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">{title}</span>
-      {entries.map(({ descriptor, state, body }, i) => (
-        <div key={descriptor.id} className={i > 0 ? "border-t border-line pt-1" : undefined}>
-          <IntegrationEntry
-            descriptor={descriptor}
-            state={state}
-            body={body}
-            toggling={togglingId === descriptor.id}
-            onToggle={(enabled) => toggle(descriptor.id, descriptor.label, enabled)}
-          />
-        </div>
-      ))}
-    </div>
+      <UnsavedChangesDialog
+        open={confirming}
+        saving={isSaving}
+        description={`Your changes to ${descriptor.label} have not been saved.`}
+        saveLabel="Save & close"
+        onCancel={() => setConfirming(false)}
+        onDiscard={() => {
+          setConfirming(false);
+          onClose();
+        }}
+        onSave={async () => {
+          // Only close if it actually saved. A rejected credential has to stay
+          // on screen; closing on a failure is how work reads as saved and is not.
+          if (!(await handleSave())) return;
+          setConfirming(false);
+          onClose();
+        }}
+      />
+    </>
   );
 }
 
 // ---- main export ------------------------------------------------------------
+
+/** One column under `sm`, an auto-filling grid above it.
+ *
+ *  `minmax(0,1fr)` for the phone track, not a bare `1fr`: an automatic minimum
+ *  is `min-content`, and a nowrap description inside one card made the track
+ *  752px wide inside a 390px viewport, scrolling the whole page sideways. Every
+ *  child carries `min-w-0` for the same reason. */
+const GRID =
+  "grid gap-2.5 grid-cols-[minmax(0,1fr)] sm:grid-cols-[repeat(auto-fill,minmax(15.75rem,1fr))] [&>*]:min-w-0";
 
 interface IntegrationsPanelProps {
   className?: string;
 }
 
 export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
-  // Getting Started points at a specific card, and an unconfigured integration
-  // lives inside the collapsed "Not set up" group — which is exactly where a
-  // first-run operator's PCO card is, so the highlight had nothing to land on.
-  //
-  // A nonce rather than a boolean: it remounts the group with defaultOpen, so
-  // the operator can still close it afterwards, and there is no setState in an
-  // effect to cascade renders. Declared here, above every early return, because
-  // hooks must run in the same order on every render.
-  // The "Not set up" group opens when the target is one of the cards inside it.
-  // Same hook the rows use — this was the only copy of the pattern until the
-  // rows needed it too.
-  const revealNonce = useRevealNonce((flashId) => Object.values(FLASH_IDS).includes(flashId));
-
-  // A draft lives exactly as long as this page is open. It has to outlive a
-  // CARD — enabling an integration remounts one somewhere else — but leaving the
-  // page is the operator walking away from the edit, and an unsaved value that
-  // reappeared on a later visit would be a surprise they never asked for.
-  useEffect(() => () => integrationDrafts.clearAll(), []);
+  // The dialog to show, held as EITHER an integration id (a card was clicked) or
+  // a flash id (something asked us to reveal one). Resolved below, at render
+  // time rather than in an effect, because the common reveal arrives from
+  // another page: the request lands before the descriptors it has to be matched
+  // against, and a resolution parked in an effect is a cascading render for
+  // something the render can just work out.
+  const [wanted, setWanted] = useState<string | null>(null);
+  // A reveal names one integration: the context bar's "N disconnected", or
+  // Getting Started's "Connect Planning Center". Open its settings — the
+  // operator clicked it to DO something. Nothing needs expanding first; every
+  // card is mounted, always.
+  useRevealTarget(setWanted);
 
   const queryClient = useQueryClient();
   const { state: stageState } = useStageState();
@@ -654,6 +746,15 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
     queryFn: () =>
       ipc<{ descriptors: IntegrationDescriptor[]; states: IntegrationState[] }>("integrations:list"),
   });
+
+  // `wanted` as an integration id if it is one, else the integration whose flash
+  // id it is, else nothing at all — an id nobody here owns opens no dialog and
+  // does not throw.
+  const openId =
+    wanted === null || !data
+      ? null
+      : (data.descriptors.find((d) => d.id === wanted || integrationFlashId(d.id) === wanted)?.id ??
+        null);
 
   // Live state updates from backend broadcasts
   useEffect(() => {
@@ -693,16 +794,45 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   // above every early return, because hooks must run in the same order on every
   // render — so the signature is built from the raw states rather than from the
   // grouped lists below. It changes when, and only when, a descriptor crosses
-  // between "Not set up" and a category group. The same FLIP Home's grid uses;
-  // it honours prefers-reduced-motion itself, which the global CSS override
-  // cannot do for an inline transform.
-  const moveSignature = (data?.states ?? [])
-    .map((s) => `${s.id}:${isInUse(s) ? 1 : 0}`)
-    .join("|");
+  // between "Not set up" and the grid above it. The same FLIP Home's grid uses
+  // between grid cells; it honours prefers-reduced-motion itself, which the
+  // global CSS override cannot do for an inline transform.
   const { setHost: setSlideHost, capture: captureCardPositions } = useSlideOnMove(
-    moveSignature,
+    moveSignature(data?.states ?? []),
     true,
     "data-slide-id",
+  );
+
+  // Put the operator back on the card they opened. Radix restores focus to the
+  // NODE it took it from, and saving can move that card into the other grid,
+  // which unmounts the node and leaves focus on <body> with nowhere to arrow
+  // from. Run after the commit that closed the dialog, so the card is wherever
+  // it has ended up, and look it up by id rather than holding the old element.
+  const wasOpen = useRef<string | null>(null);
+  useEffect(() => {
+    const closed = wasOpen.current;
+    wasOpen.current = openId;
+    if (openId !== null || closed === null) return;
+    document
+      .querySelector<HTMLElement>(`[data-integration-card="${closed}"]`)
+      ?.focus({ preventScroll: true });
+  }, [openId]);
+
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const handleToggle = useCallback(
+    async (id: string, enabled: boolean) => {
+      setTogglingId(id);
+      captureCardPositions();
+      try {
+        const next = await ipc<IntegrationState>("integrations:setEnabled", { id, enabled });
+        handleStateChange(next);
+      } catch (err) {
+        toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
+      } finally {
+        setTogglingId(null);
+      }
+    },
+    [captureCardPositions, handleStateChange],
   );
 
   if (isLoading) {
@@ -721,147 +851,86 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
     );
   }
 
-  const { descriptors: allDescriptors, states } = data;
+  const { descriptors, states } = data;
   const stateMap = new Map(states.map((s) => [s.id, s]));
-  // Companion is listed here like everything else.
-  //
-  // It used to be filtered OUT, on the grounds that there is nothing to
-  // configure — it dials in to us rather than the other way round. But "nothing
-  // to configure" is not the same as "should not appear": this is the one page
-  // whose job is to answer "what can this talk to", and the one integration
-  // people go looking for was the one it did not mention.
-  const descriptors = allDescriptors;
   const byId = new Map(descriptors.map((d) => [d.id, d]));
 
-  // The body content for one integration: a bespoke panel (wireless/osc) or the
-  // generic schema form (+ caption colors under ProdCom).
-  const bodyFor = (descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode => {
-    if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
-    if (descriptor.id === "osc") return <OscTargetsPanel />;
-    // Its own panel: the only setting is WHICH TEAMS, and a searchable
-    // multi-league team picker is not expressible as a ConfigField.
-    if (descriptor.id === "scores") return <ScoresTeamsPanel />;
-    if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
-    // Its own panel: what Companion needs is an address to dial and the module
-    // to dial it with, not a form.
-    if (descriptor.id === "companion") return <CompanionInfoPanel state={state} />;
-    return (
-      <>
-        <IntegrationCard
-          descriptor={descriptor}
-          state={state}
-          onStateChange={handleStateChange}
-          lastRefreshedAt={stageState?.lastRefreshedAt ?? null}
-        />
-        {descriptor.id === "prodcom" && <CaptionColorsPanel />}
-      </>
-    );
-  };
-
-  // Summary strip + category groups (uncategorized descriptors fall into "Other").
-  const connectedCount = descriptors.filter((d) => stateMap.get(d.id)?.connection === "connected").length;
-  const needsSetup = descriptors.filter((d) => stateMap.get(d.id)?.configured === false).length;
-  const categorized = new Set(CATEGORY_ORDER.flatMap((c) => c.ids));
   const inUse = (d: IntegrationDescriptor) => {
     const st = stateMap.get(d.id);
     return !!st && isInUse(st);
   };
-  const dormant = descriptors.filter((d) => !inUse(d));
-  const dormantIds = new Set(dormant.map((d) => d.id));
+  const byOrder = (a: IntegrationDescriptor, b: IntegrationDescriptor) => rank(a.id) - rank(b.id);
+  const live = descriptors.filter(inUse).sort(byOrder);
+  const dormant = descriptors.filter((d) => !inUse(d)).sort(byOrder);
 
-  const groups = [
-    ...CATEGORY_ORDER.map((c) => ({
-      title: c.title,
-      items: c.ids
-        .map((id) => byId.get(id))
-        .filter((d): d is IntegrationDescriptor => !!d && !dormantIds.has(d.id)),
-    })),
-    { title: "Other", items: descriptors.filter((d) => !categorized.has(d.id) && !dormantIds.has(d.id)) },
-  ].filter((g) => g.items.length > 0);
+  const connectedCount = descriptors.filter((d) => stateMap.get(d.id)?.connection === "connected").length;
+
+  const renderTile = (descriptor: IntegrationDescriptor) => {
+    const state = stateMap.get(descriptor.id);
+    if (!state) return null;
+    return (
+      <IntegrationTile
+        key={descriptor.id}
+        descriptor={descriptor}
+        state={state}
+        onOpen={setWanted}
+        onToggle={handleToggle}
+        toggling={togglingId === descriptor.id}
+      />
+    );
+  };
+
+  const open = openId ? byId.get(openId) : undefined;
+  const openState = openId ? stateMap.get(openId) : undefined;
 
   return (
-    <div className={cn("flex flex-col gap-5", className)} ref={setSlideHost}>
-      <p className="text-caption1 text-fg-subtle">
-        <span className="font-medium text-accent">{connectedCount} connected</span>
-        {needsSetup > 0 ? ` · ${needsSetup} to set up` : ""}
-      </p>
-      {groups.length === 0 && dormant.length > 0 && (
+    <div className={cn("flex flex-col gap-2.5", className)} ref={setSlideHost}>
+      {live.length === 0 ? (
+        // "0 of 16 connected" is a useless thing to lead a fresh install with,
+        // so the sentence replaces the count rather than sitting under it.
+        // "open any card" names the interaction, which is not obvious from a card
+        // that no longer looks like a form.
         <p className="text-caption1 text-fg-muted">
-          Nothing set up yet — pick one below to get started.
+          Nothing is set up yet — open any card to connect it.
+        </p>
+      ) : (
+        // A denominator, because how many of the sixteen are up is the one fact
+        // no single card can tell you. The old "M to set up" is cut: those cards
+        // are now on screen under a heading that names the state.
+        <p className="text-caption1 text-fg-muted">
+          <span className="font-medium text-accent">{connectedCount}</span> of {descriptors.length} connected
         </p>
       )}
-      {groups.map((g) => (
-        <div key={g.title} className="flex flex-col gap-2">
-          <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">{g.title}</span>
-          {g.items.map((descriptor) => {
-            const state = stateMap.get(descriptor.id);
-            if (!state) return null;
 
-            // Paired integrations render once, as a single card, in the position of
-            // whichever id comes first; the sibling is skipped where it would have
-            // rendered on its own.
-            const pair = PAIRS.find((p) => p.ids.includes(descriptor.id));
-            if (pair) {
-              // Anchor to the first id actually in this group, not ids[0] — when one
-              // half is dormant the card must still render for the half that isn't.
-              const anchor = pair.ids.find((id) => g.items.some((d) => d.id === id));
-              if (descriptor.id !== anchor) return null;
-              const entries = pair.ids
-                .map((id) => {
-                  const d = byId.get(id);
-                  const s = stateMap.get(id);
-                  return d && s ? { descriptor: d, state: s, body: bodyFor(d, s) } : null;
-                })
-                .filter((e): e is { descriptor: IntegrationDescriptor; state: IntegrationState; body: ReactNode } => e !== null);
-              return (
-                <IntegrationPairRow
-                  key={pair.title}
-                  title={pair.title}
-                  entries={entries}
-                  onStateChange={(_id, s) => handleStateChange(s)}
-                  onBeforeMove={captureCardPositions}
-                />
-              );
-            }
-
-            return (
-              <IntegrationRow
-                key={descriptor.id}
-                descriptor={descriptor}
-                state={state}
-                onStateChange={handleStateChange}
-                body={bodyFor(descriptor, state)}
-                onBeforeMove={captureCardPositions}
-              />
-            );
-          })}
-        </div>
-      ))}
+      {live.length > 0 && <div className={GRID}>{live.map(renderTile)}</div>}
 
       {dormant.length > 0 && (
-        <Collapsible
-          key={revealNonce}
-          defaultOpen={revealNonce > 0}
-          label={`Not set up (${dormant.length})`}
-          summary="integrations you are not using"
-        >
-          <div className="flex flex-col gap-2 pt-2">
-            {dormant.map((descriptor) => {
-              const state = stateMap.get(descriptor.id);
-              if (!state) return null;
-              return (
-                <IntegrationRow
-                  key={descriptor.id}
-                  descriptor={descriptor}
-                  state={state}
-                  onStateChange={handleStateChange}
-                  body={bodyFor(descriptor, state)}
-                  onBeforeMove={captureCardPositions}
-                />
-              );
-            })}
-          </div>
-        </Collapsible>
+        // A heading, not a disclosure. The same grammar as any other group
+        // heading in the app, over a rule — so this reads as "another group, not
+        // set up", never as an error area. No count: the cards are on screen.
+        <section className="mt-2.5 border-t border-line pt-[18px]">
+          <span className="mb-2 block text-caption2 font-semibold uppercase tracking-wider text-fg-muted">
+            Not set up
+          </span>
+          <div className={GRID}>{dormant.map(renderTile)}</div>
+        </section>
+      )}
+
+      {/* Rendered here, next to the grid, rather than inside the tile. A dialog
+          owned by a tile is unmounted when that tile moves between grids — which
+          is exactly what enabling an integration does, and exactly how everything
+          typed used to be lost. In a portal beside the grid it does not care what
+          the grid does. */}
+      {open && openState && (
+        <IntegrationDialog
+          key={open.id}
+          descriptor={open}
+          state={openState}
+          onStateChange={handleStateChange}
+          lastRefreshedAt={stageState?.lastRefreshedAt ?? null}
+          onClose={() => setWanted(null)}
+          onBeforeMove={captureCardPositions}
+        />
       )}
     </div>
   );

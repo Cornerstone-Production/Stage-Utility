@@ -8,8 +8,10 @@
 //
 // Import this only from a test, and only after installDom().
 
+import { strict as assert } from "node:assert";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement, ReactNode } from "react";
+import { TooltipProvider } from "../components/ui/tooltip-provider";
 import { INTEGRATION_DESCRIPTOR_FIXTURE } from "./integration-descriptors";
 
 /** What the fake server answers for a GET, by path. Captured from a real server
@@ -60,10 +62,13 @@ export function blankState(id: string, over: Partial<IntegrationState> = {}): In
  * Point `fetch` and `EventSource` at an in-memory server.
  *
  * @param overrides per-integration state, merged over the fresh-install default.
+ * @param routes    extra or replacement GET responses, by path.
  */
 export function installFakeServer(
   overrides: Record<string, Partial<IntegrationState>> = {},
+  routes: Record<string, unknown> = {},
 ): FakeServer {
+  const getRoutes = { ...GET_ROUTES, ...routes };
   const states = new Map<string, IntegrationState>(
     INTEGRATION_DESCRIPTOR_FIXTURE.map((d) => [d.id, blankState(d.id, overrides[d.id] ?? {})]),
   );
@@ -108,8 +113,8 @@ export function installFakeServer(
 
     if (/^\/api\/integrations\/[^/]+\/test$/.test(path)) return json({ ok: true, message: "OK" });
 
-    const known = Object.keys(GET_ROUTES).find((r) => path === r || path.startsWith(`${r}?`));
-    if (known) return json(GET_ROUTES[known]);
+    const known = Object.keys(getRoutes).find((r) => path === r || path.startsWith(`${r}?`));
+    if (known) return json(getRoutes[known]);
 
     // A POST nobody declared is almost always bookkeeping (the SSE channel
     // report). A GET nobody declared is a component being told a lie, so it is
@@ -145,13 +150,41 @@ export function installFakeServer(
   };
 }
 
-/** The app's QueryClientProvider, with retries off so a failure is immediate. */
+/**
+ * The providers the operator app wraps everything in (renderer/app/index.tsx),
+ * with query retries off so a failure surfaces immediately.
+ *
+ * TooltipProvider is not optional here: ConnectionBadge's error branch renders a
+ * Tooltip, so a render of any integration in an error state throws
+ * "`Tooltip` must be used within `TooltipProvider`" without it.
+ */
 export function withQueryClient(children: ReactNode): ReactElement {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <TooltipProvider>{children}</TooltipProvider>
+    </QueryClientProvider>
+  );
 }
 
 /** Let react-query resolve, React commit, and Radix finish its animation frames. */
 export const settle = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Assert a DOM node is not there.
+ *
+ * Never `assert.equal(node, null)`: assert renders a diff of whatever it is
+ * handed, and serialising a jsdom element — a whole dialog, say — takes long
+ * enough that node:test SIGKILLs the file and reports `'test failed'` at line
+ * 1:1 instead of the assertion that failed. That has cost real time twice here.
+ * Compare booleans, and put a short excerpt of what WAS found in the message.
+ */
+export function assertAbsent(node: Element | null | undefined, message: string): void {
+  assert.equal(
+    node == null,
+    true,
+    `${message} — found <${node?.tagName?.toLowerCase()}> ${node?.textContent?.slice(0, 60) ?? ""}`,
+  );
+}
