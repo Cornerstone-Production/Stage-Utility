@@ -23,14 +23,26 @@ import { cn } from "../lib/cn";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import { BarConfigurator } from "./bar-configurator";
-import { BAR_SPACE, BAR_SPACER, visibleBarItems, type BarItemId } from "./bar-items";
+import { BAR_SPACE, BAR_SPACER, barRowsFor, type BarItemId } from "./bar-items";
+import { useBarFit } from "./bar-fit";
+import { useIsMobile } from "../lib/use-media-query";
 import { recordIndicator, recorders, streamingStat, streamers } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { useResiState, useYouTubeState } from "../main/use-stream-state";
 import { DisconnectedPopover } from "./disconnected-popover";
-import { formatClock } from "../lib/clock-format";
+import { clockParts } from "../lib/clock-format";
+import {
+  CircleDotIcon,
+  CircleOffIcon,
+  ListIcon,
+  PlugZapIcon,
+  RadioOffIcon,
+  RadioTowerIcon,
+  UnplugIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { useScoresState } from "../main/use-scores-state";
 import {
   ScoreActivityHost,
@@ -131,31 +143,37 @@ export function useBarContext(): BarItemContext {
  *  looks right there looks right above the page.
  *
  *  No bottom rule and no separate surface: it sits on the content background, so
- *  the page reads as one plane rather than a stack of bordered strips. WRAPS on
- *  a phone, one row from sm up.
+ *  the page reads as one plane rather than a stack of bordered strips.
  *
- *  Scrolling was the first fix and it was the wrong one: it stopped the items
- *  colliding, but pushed "3 disconnected" and "REC stopped" off the right edge,
- *  and an alert you have to swipe sideways to find is not an alert. Wrapping
- *  shows every reading at once and still cannot overlap. */
-export const BAR_STRIP_CLASS =
-  "flex flex-wrap items-center gap-x-3 gap-y-0.5 px-5 max-sm:px-3 py-1.5 sm:h-11 sm:flex-nowrap sm:py-0";
+ *  ONE ROW AT EVERY WIDTH. It used to wrap below 640px and scroll above it, and
+ *  both were wrong for the same reason from opposite directions: the wrap spent
+ *  a second band of the screen with the least of it to spare, and the scroll put
+ *  "6 disconnected" past the right edge — an alert you have to swipe sideways to
+ *  find is not an alert. It gives up words instead, in a fixed order, and never
+ *  gives up a number. See bar-fit.ts.
+ *
+ *  The gap and the edge padding live in `.context-strip` rather than in these
+ *  utilities because the ladder tightens both at level 2, and a rung that has to
+ *  out-specify a Tailwind class to do it is a rung that stops working the day
+ *  somebody reorders the class list. */
+export const BAR_STRIP_CLASS = "context-strip flex items-center h-11";
 
 /** One item's box in the strip.
  *
  *  shrink-0 on EVERY item. With min-w-0 they squeezed past their own content on
- *  a phone and printed over each other. */
-export const BAR_ITEM_CLASS = "flex items-center gap-2.5 shrink-0";
+ *  a phone and printed over each other. Prose items opt back into shrinking at
+ *  the floor, and only there — see `.bar-prose`. */
+export const BAR_ITEM_CLASS = "bar-item flex items-center gap-2.5 shrink-0";
 
 /**
  * A flexible space: it draws nothing and eats the slack.
  *
- * flex-1 only once the bar is a single row. On a wrapped bar it would claim the
- * whole remainder of whatever line it landed on and push the next item onto a
- * line of its own, so on a phone the items simply pack and wrap.
+ * It is a flex item at every width now that the bar is always one row. It used
+ * to be hidden below 640px, where a wrapped bar gave it a whole line's remainder
+ * to eat and it pushed the next item onto a line of its own.
  */
 export function BarSpacerEl({ className }: { className?: string }) {
-  return <span aria-hidden="true" className={cn("hidden sm:block sm:flex-1", className)} />;
+  return <span aria-hidden="true" className={cn("block flex-1", className)} />;
 }
 
 /**
@@ -178,6 +196,11 @@ export function ContextBar() {
   const ctx = useBarContext();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [configuring, setConfiguring] = useState(false);
+  // The phone reads its own set, chosen independently. `useIsMobile` is the
+  // app's ONE definition of a phone — the same one the sidebar becomes a drawer
+  // at — rather than a second threshold that could disagree with it.
+  const isMobile = useIsMobile();
+  const { ref: stripRef } = useBarFit<HTMLElement>();
 
   // Rendered once each, in the operator's order. An item with nothing to report
   // says so rather than vanishing — with ONE deliberate exception, the score
@@ -190,7 +213,7 @@ export function ContextBar() {
   // between services the whole right-hand group was absent and the bar packed
   // left. An operator cannot learn where to look on a strip that rearranges
   // itself.
-  const rows = visibleBarItems(ctx.state?.barItems);
+  const rows = barRowsFor(ctx.state?.barItems, ctx.state?.barMobileItems, isMobile);
 
   const menuItems: ContextMenuItem[] = [
     { label: "Configure bar…", onSelect: () => setConfiguring(true) },
@@ -203,7 +226,7 @@ export function ContextBar() {
 
   return (
     <>
-      <header className={cn("context-strip shrink-0", BAR_STRIP_CLASS)} onContextMenu={openMenu}>
+      <header ref={stripRef} className={cn("shrink-0", BAR_STRIP_CLASS)} onContextMenu={openMenu}>
         {rows.map((id, i) => {
           if (id === BAR_SPACER) return <BarSpacerEl key={`${id}-${i}`} />;
           if (id === BAR_SPACE) return <BarSpaceEl key={`${id}-${i}`} />;
@@ -230,7 +253,7 @@ export function ContextBar() {
       )}
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
-      <BarConfigurator open={configuring} onOpenChange={setConfiguring} rows={rows} />
+      <BarConfigurator open={configuring} onOpenChange={setConfiguring} />
     </>
   );
 }
@@ -243,8 +266,25 @@ export function ContextBar() {
  * this change turned on — and three hand-written copies is three chances for it
  * to end up meaning three different things.
  */
-function Idle({ children }: { children: ReactNode }) {
-  return <span className="text-footnote text-fg-subtle truncate">{children}</span>;
+function Idle({ glyph: Glyph, children }: { glyph: LucideIcon; children: ReactNode }) {
+  return (
+    <>
+      {/* The mark that stands in for the word from level 2 down. It is the item's
+          OWN icon — the one it answers to in the configurator — when the item is
+          set up and resting, and the negated form of that icon when the item has
+          nothing to speak for. Two marks per item rather than one, because
+          "Off air" and "No stream" are different facts and a rung that meant to
+          take a word would have taken the difference. One sentence learns the
+          whole vocabulary: the icon means resting, the icon struck through means
+          it is not there. */}
+      <Glyph aria-hidden="true" className="bar-glyph size-3.5 text-fg-subtle" />
+      {/* CLIPPED OUT OF THE LAYOUT, not removed. `display: none` would take the
+          word out of the accessibility tree too, and the icon replacing it has
+          no accessible name of its own — so a screen reader would lose the
+          reading entirely at exactly the width where a sighted reader keeps it. */}
+      <span className="bar-drop-2 text-footnote text-fg-subtle">{children}</span>
+    </>
+  );
 }
 
 /**
@@ -276,21 +316,46 @@ export function integrationHealth(states: readonly IntegrationState[] | undefine
 export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
   const { state, bar, now, obs, reaper, integrations, resi, youtube } = ctx;
   switch (id) {
-    case "clock":
+    case "clock": {
+      // THE SECONDS ARE THE ONE PLACE THE LADDER TOUCHES DIGITS, and it is worth
+      // naming rather than burying: level 1 hides ":55". It is not the same act
+      // as hiding a count — the reading survives at lower precision, the way
+      // "3d 3h" is already the timer's reading without its minutes — and this
+      // strip's clock is wall time, not the instrument anybody times a service
+      // with. That is the timer, three items along, which keeps every character
+      // at every rung.
+      //
+      // Split by Intl rather than by cutting the string: in 12h the day period
+      // FOLLOWS the seconds, so "3:20:55 PM" is not a prefix plus a suffix.
+      const t = clockParts(now, { seconds: true });
       return (
         <span className="text-footnote font-mono tabular-nums text-fg-muted">
-          {formatClock(now, { seconds: true })}
+          {t.head}
+          <span className="bar-drop-1">{t.seconds}</span>
+          {t.tail}
         </span>
       );
+    }
 
     case "plan":
+      // The service type is the one reading on this strip that is the same every
+      // week, so it is the first thing the ladder gives up — but ONLY when the
+      // plan title is there to be left behind. Dropping it from a bar with no
+      // plan loaded would leave the item with nothing to draw, and an item that
+      // renders to zero width still charges the strip a gap: a hole exactly
+      // where a reading used to be, which is the reflow this bar does not do.
       return (
         <>
-          <span className="text-footnote text-fg-muted truncate shrink-0">
+          <span
+            className={cn(
+              "text-footnote text-fg-muted shrink-0",
+              state?.planTitle && "bar-drop-1",
+            )}
+          >
             {state?.serviceTypeName ?? "No service type"}
           </span>
           {state?.planTitle && (
-            <span className="text-footnote text-fg truncate">{state.planTitle}</span>
+            <span className="bar-prose text-footnote text-fg truncate">{state.planTitle}</span>
           )}
         </>
       );
@@ -299,9 +364,11 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       // What PCO says is happening NOW, so between services the honest reading
       // is that nothing is — not an absent item.
       return bar.isLive && bar.itemTitle ? (
-        <span className="text-footnote text-fg-muted truncate max-w-56">{bar.itemTitle}</span>
+        <span className="bar-prose text-footnote text-fg-muted truncate max-w-56">
+          {bar.itemTitle}
+        </span>
       ) : (
-        <Idle>No item</Idle>
+        <Idle glyph={ListIcon}>No item</Idle>
       );
 
     case "live-timer":
@@ -322,7 +389,11 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
           <span
             aria-hidden="true"
             className={cn(
-              "text-caption2 font-medium uppercase tracking-wider",
+              // The WORD goes at level 2; the dot beside it does not, and neither
+              // does its colour. The dot has always been what says live — the
+              // word only ever repeated it, which is why it is affordable here
+              // and why nothing is lost when it goes.
+              "bar-drop-2 text-caption2 font-medium uppercase tracking-wider",
               bar.isLive ? "text-live-11" : "text-fg-subtle",
             )}
           >
@@ -335,7 +406,7 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
           <span className="sr-only">{bar.isLive ? "Live" : "Not live"}</span>
           {/* Pre-service, the timer's own label says what it is counting to. */}
           {!bar.isLive && bar.itemTitle && (
-            <span className="text-footnote text-fg-subtle truncate">{bar.itemTitle}</span>
+            <span className="bar-drop-1 text-footnote text-fg-subtle">{bar.itemTitle}</span>
           )}
           <span
             className={cn(
@@ -359,7 +430,11 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       // Healthy reads grey, not green: the reassurance is that the item is
       // there and NOT red, which is legible at a glance without adding a
       // second colour to a strip whose colours all mean "look here".
-      return <Idle>{setUp.length === 0 ? "No integrations" : "All connected"}</Idle>;
+      return setUp.length === 0 ? (
+        <Idle glyph={UnplugIcon}>No integrations</Idle>
+      ) : (
+        <Idle glyph={PlugZapIcon}>All connected</Idle>
+      );
     }
 
     case "streaming": {
@@ -368,12 +443,12 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       const st = streamingStat(streamers(resi, youtube, obs), now);
       // No tone is streamingStat's "no platform is even connected" — unknown,
       // not off air, and the one streaming state not worth a colour.
-      if (!st.tone) return <Idle>No stream</Idle>;
+      if (!st.tone) return <Idle glyph={RadioOffIcon}>No stream</Idle>;
       // Off air is quiet, not red. It is the state the bar sits in all week, and
       // a red word on a bar that is always on screen stops meaning anything long
       // before the morning it matters. Going out is the thing worth a colour, and
       // it gets the same green the widgets use.
-      if (st.tone === "danger") return <Idle>Off air</Idle>;
+      if (st.tone === "danger") return <Idle glyph={RadioTowerIcon}>Off air</Idle>;
       return <span className="text-footnote font-mono tabular-nums text-live-11">{st.value}</span>;
     }
 
@@ -384,7 +459,13 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       // Offline is not worth a colour, and neither is standby: it is what the
       // bar sits in all week. Rolling is the thing worth saying, and it gets the
       // green the streaming item beside it uses.
-      if (ind.state !== "live") return <Idle>{ind.state === "offline" ? "No recorder" : "Standby"}</Idle>;
+      if (ind.state !== "live") {
+        return ind.state === "offline" ? (
+          <Idle glyph={CircleOffIcon}>No recorder</Idle>
+        ) : (
+          <Idle glyph={CircleDotIcon}>Standby</Idle>
+        );
+      }
       return (
         <span className="text-footnote font-mono tabular-nums text-live-11">{ind.sub ?? ind.value}</span>
       );

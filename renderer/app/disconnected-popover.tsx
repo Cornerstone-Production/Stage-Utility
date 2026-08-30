@@ -12,7 +12,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, PlugZapIcon } from "lucide-react";
 
 import { flashTarget } from "./flash";
 import { integrationFlashId } from "../components/integrations-panel";
@@ -122,12 +122,20 @@ export function DisconnectedPopover({
         aria-expanded={open}
         aria-haspopup="true"
         className={cn(
-          "rounded-md px-1.5 py-0.5 text-footnote text-warn-11 transition-colors",
+          "flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-footnote text-warn-11 transition-colors",
           "hover:bg-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
           open && "bg-fill",
         )}
       >
-        {down.length} disconnected
+        {/* THE COUNT KEEPS ITS DIGITS AT EVERY RUNG. The bar's fit ladder may
+            take the WORD — a plug with a number beside it says the same thing on
+            a strip that has run out of room — but never the number, and never
+            the amber that is the reason to look. The word is clipped out of the
+            layout rather than removed, so a screen reader still reads it in
+            full. See bar-fit.ts. */}
+        <PlugZapIcon aria-hidden="true" className="bar-glyph size-3.5" />
+        {down.length}
+        <span className="bar-drop-2">disconnected</span>
       </button>
 
       {open && (

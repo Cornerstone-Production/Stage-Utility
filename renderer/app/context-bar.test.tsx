@@ -9,6 +9,7 @@ const teardown = installDom();
 
 const { contextBarState, renderBarItem, integrationHealth } = await import("./context-bar.js");
 const { BAR_ITEMS } = await import("./bar-items.js");
+const { renderToStaticMarkup } = await import("react-dom/server");
 
 after(() => {
   teardown();
@@ -345,5 +346,131 @@ describe("what counts as an integration being down", () => {
   test("and it does not hide the ones that ARE down beside it", () => {
     const { down } = integrationHealth([st({ id: "companion", inbound: true }), st({ id: "obs" })]);
     assert.deepEqual(down.map((d) => d.id), ["obs"]);
+  });
+});
+
+// ── The fit ladder, as far as it can be checked without a browser ───────────
+//
+// The ladder itself is CSS keyed off `data-fit`, and jsdom has no layout, so
+// nothing here can say a strip fits. What it CAN say is what each rung leaves
+// behind, because the rungs are expressed as classes on the markup: `bar-drop-1`
+// and `bar-drop-2` are clipped out of the layout from their rung down, and
+// `bar-glyph` is drawn only from level 2. Applying those rules to the rendered
+// markup is the rung, minus the pixels.
+//
+// The pixel half — one row, no scroll, no wrap, nothing cut — was checked in a
+// real browser at 320 / 360 / 390 / 430 / 640 / 768 / 1440px in both themes, and
+// the numbers are written down in docs/features/context-bar.md.
+
+describe("what a rung leaves behind", () => {
+  const NOW = Date.parse("2026-08-14T14:05:00.000Z");
+  const ALL = Object.keys(BAR_ITEMS) as (keyof typeof BAR_ITEMS)[];
+  const MUST_RENDER = ALL.filter((id) => !BAR_ITEMS[id].canBeEmpty);
+
+  const idle = {
+    state: null,
+    bar: contextBarState(null, NOW, 0),
+    now: NOW,
+    obs: null,
+    reaper: null,
+    integrations: { states: [], labels: {} },
+    resi: null,
+    youtube: null,
+    scores: null,
+  };
+
+  /**
+   * What an item still SHOWS at a given rung.
+   *
+   * Words clipped by a rung are removed, glyphs are added at level 2 — which is
+   * exactly what the CSS does — and what comes back is the visible reading:
+   * its text, plus a marker for each mark still drawn.
+   */
+  function visibleAt(level: number, node: unknown): string {
+    const box = document.createElement("div");
+    box.innerHTML = renderToStaticMarkup(node as never);
+    if (level >= 1) box.querySelectorAll(".bar-drop-1").forEach((n) => n.remove());
+    if (level >= 2) box.querySelectorAll(".bar-drop-2").forEach((n) => n.remove());
+    // Below level 2 the marks are `display: none`, so they are not a reading yet.
+    if (level < 2) box.querySelectorAll(".bar-glyph").forEach((n) => n.remove());
+    const marks = box.querySelectorAll("svg").length;
+    // The screen-reader-only state word is not something anybody can see.
+    box.querySelectorAll(".sr-only").forEach((n) => n.remove());
+    // The marker must carry NO DIGITS: the digit guard below counts what is left,
+    // and a "[1 mark]" suffix would read as a number the rung had added.
+    return (box.textContent ?? "").replace(/\s+/g, " ").trim() + " [mark]".repeat(marks);
+  }
+
+  test("THE GUARD: no rung can leave an item showing nothing", () => {
+    // The failure this exists for: giving an idle word `bar-drop-2` and
+    // forgetting the mark that stands in for it. The item does not vanish — it
+    // renders, so the no-reflow guards above stay green — it just becomes a
+    // zero-width box that still charges the strip a gap. A hole exactly where a
+    // reading used to be, at the only width anybody would have noticed.
+    for (const id of MUST_RENDER) {
+      for (let level = 0; level <= 3; level++) {
+        const shown = visibleAt(level, renderBarItem(id, idle));
+        assert.notEqual(shown, "", `${id} shows nothing at level ${level}`);
+      }
+    }
+  });
+
+  test("and not mid-service either, where the readings are different", () => {
+    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW, 0) };
+    for (const id of MUST_RENDER) {
+      for (let level = 0; level <= 3; level++) {
+        assert.notEqual(
+          visibleAt(level, renderBarItem(id, live)),
+          "",
+          `${id} shows nothing at level ${level} during a live service`,
+        );
+      }
+    }
+  });
+
+  test("THE GUARD: every digit on the strip survives every rung", () => {
+    // The invariant the whole ladder is built around. A rung may take a word, a
+    // qualifier or a decoration; it may never take a value. The clock's SECONDS
+    // are the one deliberate exception — a reading at lower precision rather
+    // than a value removed — so the clock is checked separately below.
+    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW, 0) };
+    const digits = (s: string) => (s.match(/\d/g) ?? []).join("");
+    for (const id of MUST_RENDER) {
+      if (id === "clock") continue;
+      for (const ctx of [idle, live]) {
+        const full = digits(visibleAt(0, renderBarItem(id, ctx)));
+        for (let level = 1; level <= 3; level++) {
+          assert.equal(
+            digits(visibleAt(level, renderBarItem(id, ctx))),
+            full,
+            `${id} lost a digit at level ${level}`,
+          );
+        }
+      }
+    }
+  });
+
+  test("the clock gives up its seconds at level 1, and nothing else, ever", () => {
+    // Named rather than waved through. It is the only place the ladder touches
+    // digits, and what it costs is precision, not a value: hh:mm is still the
+    // time. The instrument anybody actually times a service with is the timer,
+    // which keeps every character at every rung — asserted above.
+    const at0 = visibleAt(0, renderBarItem("clock", idle));
+    const at1 = visibleAt(1, renderBarItem("clock", idle));
+    assert.ok(at0.length > at1.length, `level 1 did not shorten the clock: ${at0} / ${at1}`);
+    assert.ok(at1.length > 0, "the clock disappeared entirely");
+    assert.equal(visibleAt(3, renderBarItem("clock", idle)), at1, "the clock kept shrinking past level 1");
+  });
+
+  test("THE GUARD: prose is the only thing that can be cut, and it says so", () => {
+    // `truncate` is what puts the ellipsis there. A prose reading that lost it
+    // would still be cut at the floor — by `overflow: hidden` on the strip —
+    // but with nothing to tell the reader a word had gone.
+    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW, 0) };
+    for (const [id, ctx] of [["current-item", live]] as const) {
+      const html = renderToStaticMarkup(renderBarItem(id, ctx) as never);
+      assert.match(html, /bar-prose/, `${id} is prose but carries no bar-prose hook`);
+      assert.match(html, /truncate/, `${id} can be cut at the floor with no ellipsis to show it`);
+    }
   });
 });

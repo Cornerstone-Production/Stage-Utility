@@ -73,7 +73,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | DELETE | `/api/outputs/:id` | Remove a display |
 | POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does |
 | POST | `/api/notes` | Save a notes/checklist object's content (`{objectId, content}`) |
-| POST | `/api/bar-items` | Set the context bar's items and order (`{items}`) |
+| POST | `/api/bar-items` | Set the context bar's items and order. `{items}` for the desktop bar, `{mobileItems}` for the phone's own set (empty = follow the desktop bar). Either may be omitted and is then left as it stands |
 | GET / POST | `/api/layout-templates` | List / save a custom-layout template |
 | PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
 | GET / POST | `/api/layout-groups` | List / save a reusable object group (`{name, object}`) |

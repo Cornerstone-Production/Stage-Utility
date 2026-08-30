@@ -233,6 +233,7 @@ export class StageController {
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
     barItems: [],
+    barMobileItems: [],
     savedColors: [],
     notesByObject: {},
     slotsByLayoutObject: {},
@@ -367,6 +368,7 @@ export class StageController {
       // Loaded above; without this the field stays {} and every note reads empty
       // until the first edit — the content would look lost.
       barItems: barConfigStore.get().items,
+      barMobileItems: barConfigStore.get().mobileItems,
       savedColors: savedColorsStore.all(),
       notesByObject: notesStore.all(),
       serviceTypeId: settings.serviceTypeId,
@@ -2546,10 +2548,22 @@ export class StageController {
     return this.state;
   }
 
-  /** Set which context-bar items appear, and in what order. Global config. */
-  async setBarItems(items: string[]): Promise<StageState> {
-    const saved = await barConfigStore.set(items);
-    this.state = { ...this.state, barItems: saved.items };
+  /**
+   * Set which context-bar items appear, and in what order. Global config.
+   *
+   * Two independent sets: the bar above a desktop page and the one a phone
+   * shows. Each is optional and an omitted one is left alone — the configurator
+   * edits one at a time, so a save from a phone must not carry a stale copy of
+   * the desktop order back over somebody else's edit.
+   */
+  async setBarItems(next: { items?: string[]; mobileItems?: string[] }): Promise<StageState> {
+    const saved = await barConfigStore.set(next);
+    this.state = { ...this.state, barItems: saved.items, barMobileItems: saved.mobileItems };
+    console.log(
+      `[stage-controller] setBarItems desktop=${saved.items.length} mobile=${
+        saved.mobileItems.length === 0 ? "(follows desktop)" : saved.mobileItems.length
+      }`,
+    );
     this.broadcast();
     return this.state;
   }

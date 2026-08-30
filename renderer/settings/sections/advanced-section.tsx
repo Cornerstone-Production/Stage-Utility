@@ -29,7 +29,6 @@ import {
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { DataArchivePanel } from "./data-archive-panel";
 import { BarConfigurator } from "../../app/bar-configurator";
-import { visibleBarItems } from "../../app/bar-items";
 import { clockOptions, formatClock } from "../../lib/clock-format";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
@@ -1075,11 +1074,7 @@ export function AdvancedSection({
         </FieldGroup>
       </FieldSet>
 
-      <BarConfigurator
-        open={configuringBar}
-        onOpenChange={setConfiguringBar}
-        rows={visibleBarItems(stageState.barItems)}
-      />
+      <BarConfigurator open={configuringBar} onOpenChange={setConfiguringBar} />
 
       <FieldSet>
         <Collapsible label="Kiosk devices" summary="Let screens find this server and be claimed" headerClassName="px-4 py-2.5">

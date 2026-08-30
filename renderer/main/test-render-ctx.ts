@@ -29,6 +29,7 @@ export const DEFAULT_STAGE_STATE: StageState = {
   outputs: [],
   slotsByView: {},
   barItems: [],
+  barMobileItems: [],
   savedColors: [],
   notesByObject: {},
   slotsByLayoutObject: {},

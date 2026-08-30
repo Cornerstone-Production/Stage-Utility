@@ -57,6 +57,56 @@ export function clockOptions(o: ClockOptions = {}): Intl.DateTimeFormatOptions {
 }
 
 /**
+ * A time of day split so the SECONDS can be hidden without reformatting.
+ *
+ * The context bar's fit ladder gives up the seconds before it gives up anything
+ * else, and it has to do that without changing the rest of the reading. Formatting
+ * twice — once with seconds, once without — and swapping the strings would put
+ * both in the DOM, so a screen reader would read the time twice; and it is 22px
+ * of duplicate node either way.
+ *
+ * Cutting the string by hand is wrong in 12h, where the day period follows the
+ * seconds: "3:20:55 PM" is not "3:20:55" plus a suffix. So the parts come from
+ * Intl itself and the seconds are lifted out with the separator that introduces
+ * them, leaving `head` and `tail` to be rendered either side.
+ *
+ * `head + seconds + tail` is exactly `formatClock(when, { seconds: true })`.
+ */
+export function clockParts(
+  when: number | string | Date | null | undefined,
+  o: ClockOptions = {},
+): { head: string; seconds: string; tail: string } {
+  const blank = { head: "", seconds: "", tail: "" };
+  if (when === null || when === undefined) return blank;
+  const d = when instanceof Date ? when : new Date(when);
+  if (Number.isNaN(d.getTime())) return blank;
+
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat(undefined, clockOptions({ ...o, seconds: true })).formatToParts(d);
+  } catch {
+    // Same fallback formatClock takes: an invalid timeZone from a saved layout
+    // must not blank the bar.
+    parts = new Intl.DateTimeFormat(undefined, clockOptions({ ...o, seconds: true, timeZone: null }))
+      .formatToParts(d);
+  }
+
+  const at = parts.findIndex((p) => p.type === "second");
+  // No second part at all should not happen with `second` requested, but a locale
+  // that ignored it would otherwise silently lose the whole reading here.
+  if (at === -1) return { head: parts.map((p) => p.value).join(""), seconds: "", tail: "" };
+  // The literal that introduces the seconds goes WITH them. Left behind it is a
+  // trailing colon on a clock that has stopped showing seconds.
+  const from = at > 0 && parts[at - 1]!.type === "literal" ? at - 1 : at;
+  const join = (ps: Intl.DateTimeFormatPart[]) => ps.map((p) => p.value).join("");
+  return {
+    head: join(parts.slice(0, from)),
+    seconds: join(parts.slice(from, at + 1)),
+    tail: join(parts.slice(at + 1)),
+  };
+}
+
+/**
  * A time of day, in the app's format.
  *
  * Returns "" for anything unparseable rather than "Invalid Date" — these render

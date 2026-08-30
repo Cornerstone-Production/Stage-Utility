@@ -15,13 +15,31 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     // ── Context bar items ─────────────────────────────────────────────────
     // Which items appear and in what order. Global config, so every operator
     // reads the same strip.
+    //
+    // Two sets, `items` for a desktop page and `mobileItems` for a phone. BOTH
+    // are optional and an omitted one is left as it stands — the configurator
+    // edits one at a time. A present one still has to be a string[]: a request
+    // that sent `items: "clock"` used to be rejected and must go on being
+    // rejected now that its absence is legal.
     if (method === "POST" && pathname === "/api/bar-items") {
       const body = await readBody(req) as Record<string, unknown>;
-      if (!Array.isArray(body.items) || body.items.some((i) => typeof i !== "string")) {
-        error(res, "body.items (string[]) required");
+      const ids = (v: unknown) => Array.isArray(v) && v.every((i) => typeof i === "string");
+      if (body.items !== undefined && !ids(body.items)) {
+        error(res, "body.items must be a string[]");
         return;
       }
-      json(res, await stageController.setBarItems(body.items as string[]));
+      if (body.mobileItems !== undefined && !ids(body.mobileItems)) {
+        error(res, "body.mobileItems must be a string[]");
+        return;
+      }
+      if (body.items === undefined && body.mobileItems === undefined) {
+        error(res, "body.items or body.mobileItems (string[]) required");
+        return;
+      }
+      json(res, await stageController.setBarItems({
+        items: body.items as string[] | undefined,
+        mobileItems: body.mobileItems as string[] | undefined,
+      }));
       return;
     }
 
