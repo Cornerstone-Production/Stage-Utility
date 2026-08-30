@@ -1,8 +1,24 @@
 // sensource-service.ts — Polls the SenSource Vea people-counter API and
 // broadcasts live counts on "people:count" for the dashboards + custom layouts.
 //
-// SenSource has no real-time endpoint, so we poll on an interval (their data
-// lags a few minutes server-side, so ~30–60s is plenty).
+// SenSource has no push/streaming endpoint, so we poll on an interval.
+//
+// HOW FAST, and why — measured against the live API during a Sunday arrival ramp
+// (31 people/min entering, so the true count moved every second):
+//
+//   Vea's own numbers advance about every 78 seconds. At a 45s poll the count
+//   changed on only 60% of polls, and the gap between changes was exactly one
+//   poll (30%) or two (70%) — the signature of sampling a ~78s source at 46s.
+//
+// So the upstream refresh is the floor, but our poll interval is NOT free on top
+// of it: it lands uniformly in [0, interval) after each upstream tick. At 45s
+// that was a mean 23s / worst 46s of staleness we added ourselves, which is
+// exactly why the Vea web dashboard read ahead of us. At 15s it is a mean 7.5s /
+// worst 15s. Below ~10s the return collapses — the source only moves every 78s —
+// so MIN_POLL_SECONDS stays there.
+//
+// A poll's requests all go out together for the same reason: at this cadence a
+// serial chain of round-trips is a real share of the interval.
 //
 // BUILDING TOTAL — from the authoritative "space" occupancy endpoint when a space
 // exists (this is what the Vea dashboard's "Most Recent Occupancy" reflects, and
@@ -32,10 +48,25 @@ const API_BASE = "https://vea.sensourceinc.com/api";
 const REQUEST_TIMEOUT_MS = 15000;
 /** Refresh the token this far before it actually expires. */
 const TOKEN_SKEW_MS = 60_000;
-const DEFAULT_POLL_SECONDS = 45;
-const MIN_POLL_SECONDS = 10;
-/** Rolling trend buffer size (e.g. ~3h at the 45s default cadence). */
+/** Poll cadence while something is watching, and the floor the poller enforces.
+ *  Exported because the settings descriptor and the config reader must offer the
+ *  same numbers: a form advertising a default the poller does not use gives an
+ *  operator who never opened the panel a different rate from the one shown. */
+export const DEFAULT_POLL_SECONDS = 15;
+export const MIN_POLL_SECONDS = 10;
+/** Rolling trend buffer size — ~3h at HISTORY_MIN_GAP_MS spacing. */
 const HISTORY_CAP = 240;
+/**
+ * Minimum spacing between trend-buffer samples.
+ *
+ * Deliberately NOT the poll interval. The buffer is a multi-hour trend graph, so
+ * pinning its resolution to the poll rate means dropping the interval silently
+ * shortens the graph: the same 240 points that covered three hours at a 45s poll
+ * cover one hour at 15s, and the people-graph loses two thirds of its history
+ * with nothing anywhere reporting a fault. Attendance is a slow curve; 45s of
+ * resolution is what it was drawn at and all it needs.
+ */
+const HISTORY_MIN_GAP_MS = 45_000;
 /** Poll rate when no display is watching the people count. The configured rate
  *  is for a live service; between them nobody is reading it. */
 const IDLE_POLL_MS = 60_000;
@@ -275,6 +306,15 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
   private token: string | null = null;
   private tokenExpiresAt = 0;
+  /**
+   * In-flight client-credentials exchange, shared by concurrent callers.
+   *
+   * A poll issues its requests together and every one of them asks for an auth
+   * header, so the first poll after a token expiry would otherwise send several
+   * simultaneous exchanges to the OAuth endpoint, each overwriting the other's
+   * token. Same shape secretsStore uses for its concurrent decrypt.
+   */
+  private authInFlight: Promise<string> | null = null;
 
   private lastCountSig: string | null = null;
   /** Rolling building-total samples for the people-graph trend object. */
@@ -297,6 +337,33 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
   /** True while the pending poll was scheduled at the slow idle cadence. */
   private polledIdle = false;
+
+  /** When the trend buffer last took a sample. Its own clock, not the poll's. */
+  private lastHistoryAt = 0;
+
+  /**
+   * Add a building-total sample to the rolling trend buffer, no more often than
+   * HISTORY_MIN_GAP_MS.
+   *
+   * The gate is a floor, not a ceiling: an operator who polls every five minutes
+   * still gets a point every five minutes. It only stops a fast poll from
+   * spending the fixed 240-point buffer on minutes instead of hours.
+   *
+   * Spacing is measured between the timestamps actually stored, not wall-clock
+   * call times, so the gate and the graph agree on what "45s apart" means.
+   */
+  private appendHistory(dto: PeopleCountDTO): void {
+    const parsed = Date.parse(dto.updatedAt ?? "");
+    const at = Number.isFinite(parsed) ? parsed : Date.now();
+    if (at - this.lastHistoryAt < HISTORY_MIN_GAP_MS) return;
+    this.lastHistoryAt = at;
+    this.history.push({
+      t: dto.updatedAt!,
+      attendance: dto.total.attendance ?? 0,
+      occupancy: dto.total.occupancy ?? 0,
+    });
+    if (this.history.length > HISTORY_CAP) this.history.splice(0, this.history.length - HISTORY_CAP);
+  }
 
   /**
    * Something started needing counts — poll now rather than finishing the wait.
@@ -333,8 +400,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
   configure(cfg: SenSourceConfig): void {
     this.cfg = cfg;
-    this.token = null;
-    this.tokenExpiresAt = 0;
+    this.resetAuth();
     this.resetReport();
     this.zonesCache = null;
     this.spacesCache = null;
@@ -363,15 +429,13 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     try {
       const prev = this.cfg;
       this.cfg = cfg;
-      this.token = null;
-      this.tokenExpiresAt = 0;
+      this.resetAuth();
       try {
         const locations = await this.listLocations();
         return { ok: true, message: `Authenticated — ${locations.length} location(s) visible` };
       } finally {
         this.cfg = prev;
-        this.token = null;
-        this.tokenExpiresAt = 0;
+        this.resetAuth();
       }
     } catch (err) {
       return { ok: false, message: errorMessage(err) };
@@ -388,8 +452,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       return await this.listLocations();
     } finally {
       this.cfg = prev;
-      this.token = null;
-      this.tokenExpiresAt = 0;
+      this.resetAuth();
     }
   }
 
@@ -475,8 +538,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       return await this.listZones();
     } finally {
       this.cfg = prev;
-      this.token = null;
-      this.tokenExpiresAt = 0;
+      this.resetAuth();
     }
   }
 
@@ -538,6 +600,21 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
+  /**
+   * Forget the cached token AND any exchange still in flight.
+   *
+   * Both halves: a reconfigure that dropped only the token would hand the next
+   * caller one minted from the old credentials by an exchange already running.
+   * The 401 path uses this too — a token rejected mid-flight puts the whole
+   * exchange in doubt, so restarting it is the conservative read, at the cost of
+   * two exchanges if two parallel requests are rejected at once.
+   */
+  private resetAuth(): void {
+    this.token = null;
+    this.tokenExpiresAt = 0;
+    this.authInFlight = null;
+  }
+
   private async authHeader(): Promise<string> {
     const cfg = this.cfg;
     if (!cfg) throw new Error("SenSource not configured");
@@ -549,13 +626,23 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     if (this.token && Date.now() < this.tokenExpiresAt) return `Bearer ${this.token}`;
     if (!cfg.clientId || !cfg.clientSecret) throw new Error("Missing client id / secret");
 
+    // One exchange at a time — the poll's parallel requests both land here.
+    if (!this.authInFlight) {
+      this.authInFlight = this.exchangeToken(cfg.clientId, cfg.clientSecret).finally(() => {
+        this.authInFlight = null;
+      });
+    }
+    return this.authInFlight;
+  }
+
+  private async exchangeToken(clientId: string, clientSecret: string): Promise<string> {
     const res = await fetch(AUTH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         grant_type: "client_credentials",
-        client_id: cfg.clientId,
-        client_secret: cfg.clientSecret,
+        client_id: clientId,
+        client_secret: clientSecret,
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -578,8 +665,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     });
     if (res.status === 401 && retryOn401 && !this.cfg?.apiToken) {
       // Token may have been revoked early — drop it and try once more.
-      this.token = null;
-      this.tokenExpiresAt = 0;
+      this.resetAuth();
       return this.apiGet<T>(path, false);
     }
     if (!res.ok) throw new Error(`SenSource ${path} → HTTP ${res.status}`);
@@ -605,9 +691,44 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
         excludeClosedHours: "true",
       });
 
-      const allow = await this.resolveAllowedZones();
-      const body = await this.apiGet<{ results?: unknown[] }>(`/data/traffic?${params.toString()}`);
-      const reduced = reduceTraffic(body.results ?? [], allow);
+      // Day stats: attendance (Σ entries), peak/min/avg occupancy for the day.
+      const oParams = new URLSearchParams({
+        relativeDate: "today",
+        dateGroupings: "day",
+        entityType: "space",
+        metrics: "occupancy(max),occupancy(min),occupancy(avg)",
+      });
+
+      // Nothing in this poll depends on anything else in it, so it all goes out
+      // at once rather than in a chain. At the fast cadence a serial round-trip
+      // is a tenth of the interval, and every millisecond of it is staleness
+      // added on top of Vea's own ~78s refresh. The zone and space listings are
+      // usually cache hits, but on a cold cache they are round-trips too.
+      //
+      // Occupancy catches its own rejection because the two failures are not
+      // alike: losing traffic loses the poll, while losing occupancy only leaves
+      // the building total at the zone-derived net buildDto has already computed.
+      //
+      // It carries the reason rather than logging it, so the degradation is still
+      // reported by the single handler below. Logging here instead would write a
+      // second line on every poll of an outage — one per poll, forever, which is
+      // the thing the `attempt === 0` gate on the poll error exists to prevent —
+      // and would log an occupancy failure even when traffic had already lost the
+      // poll on its own.
+      let dayOccErr: unknown = null;
+      const dayOccOrNull = this.apiGet<{ results?: unknown[] }>(
+        `/data/occupancy?${oParams.toString()}`,
+      ).catch((err: unknown) => {
+        dayOccErr = err;
+        return null;
+      });
+      const [allow, allowSpaces, traffic, dayOcc] = await Promise.all([
+        this.resolveAllowedZones(),
+        this.resolveAllowedSpaces(),
+        this.apiGet<{ results?: unknown[] }>(`/data/traffic?${params.toString()}`),
+        dayOccOrNull,
+      ]);
+      const reduced = reduceTraffic(traffic.results ?? [], allow);
       const dto = buildDto(reduced, new Date().toISOString());
 
       // Override the building total with the authoritative space-occupancy endpoint
@@ -615,16 +736,8 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       // zone-derived net already in `dto.total` if a site has no spaces or it fails.
       let occSource = "zone-net";
       try {
-        const allowSpaces = await this.resolveAllowedSpaces();
-        // Day stats: attendance (Σ entries), peak/min/avg occupancy for the day.
-        const oParams = new URLSearchParams({
-          relativeDate: "today",
-          dateGroupings: "day",
-          entityType: "space",
-          metrics: "occupancy(max),occupancy(min),occupancy(avg)",
-        });
-        const oBody = await this.apiGet<{ results?: unknown[] }>(`/data/occupancy?${oParams.toString()}`);
-        const occ = reduceSpaceOccupancy(oBody.results ?? [], allowSpaces);
+        if (!dayOcc) throw dayOccErr;
+        const occ = reduceSpaceOccupancy(dayOcc.results ?? [], allowSpaces);
         if (occ.spaces > 0) {
           // CURRENT "in the room now" = Vea's live tracked occupancy from the most
           // recent per-minute bucket (matches the dashboard's "Most Recent Occupancy",
@@ -671,13 +784,9 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
       const scope = allow ? `${reduced.zones.length} of selected zone(s)` : `${reduced.zones.length} zone(s)`;
       this.report("connected", `${scope}, occ via ${occSource}`);
-      // Append a building-total sample to the rolling trend buffer.
-      this.history.push({
-        t: dto.updatedAt!,
-        attendance: dto.total.attendance ?? 0,
-        occupancy: dto.total.occupancy ?? 0,
-      });
-      if (this.history.length > HISTORY_CAP) this.history.splice(0, this.history.length - HISTORY_CAP);
+      // Append a building-total sample to the rolling trend buffer, at the
+      // buffer's own resolution rather than the poll's — see HISTORY_MIN_GAP_MS.
+      this.appendHistory(dto);
       this.emit(dto);
       this.resetBackoff();
       ok = true;
