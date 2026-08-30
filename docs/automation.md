@@ -110,8 +110,7 @@ for "idle", because before it runs we do not know that it is idle.
 | Advance PCO Live one item | steps the live plan forward once |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
-| Fire a ProVideoPlayer cue | a cue from a playlist; ProVideoPlayer decides which layer it lands on |
-| Fire a ProVideoPlayer cue on a specific layer | the same, onto a layer you name — see the caveat below |
+| Fire a ProVideoPlayer cue | a cue from a playlist. ProVideoPlayer always plays it on the cue's own layer |
 | Clear a ProVideoPlayer layer | takes whatever is on that layer off screen |
 | Clear every ProVideoPlayer layer | blanks every screen PVP is driving |
 | Hide / unhide a ProVideoPlayer layer | the layer's hidden flag |
@@ -123,11 +122,11 @@ for "idle", because before it runs we do not know that it is idle.
 > A command that was accepted and ignored is recorded as a **failure**, not a
 > success — which is the opposite of what the log would otherwise show.
 >
-> **Fire a ProVideoPlayer cue on a specific layer** carries an open question: PVP
-> does not always honour the layer argument, so the action confirms the cue landed
-> on the layer you named and reports a failure if it did not. If that fails every
-> time on your workspace, use **Fire a ProVideoPlayer cue** and let PVP place it.
-> See [ProVideoPlayer](integrations/provideoplayer.md).
+> There is no action for firing a cue onto a layer you choose, because
+> ProVideoPlayer does not offer one: its layer-addressed endpoint accepts the
+> argument and ignores it, playing the cue on its own configured layer. Which
+> layer a cue uses is set in ProVideoPlayer, not here. See
+> [ProVideoPlayer](integrations/provideoplayer.md).
 
 ## Firing an item on time
 

@@ -314,44 +314,4 @@ export const PVP_ACTIONS: Record<string, ActionDef> = {
       });
     },
   },
-
-  "pvp.trigger-cue-on-layer": {
-    id: "pvp.trigger-cue-on-layer",
-    label: "Fire a ProVideoPlayer cue on a specific layer",
-    // THE ONE OPEN QUESTION in this integration. All five of PVP's addressing
-    // forms fire, but the single attempt to send a cue to a specific EMPTY layer
-    // did not put content there, and it is unknown whether PVP ignores the layer
-    // argument or that layer refused the media. The verify asks about THAT layer,
-    // so if the argument is ignored this reports a failure — which is the design
-    // working, not a bug.
-    help: "Fires a cue from a playlist onto a named layer. ProVideoPlayer does not always honour the layer, so this confirms the cue actually landed on it and reports a failure if it did not. Use \"Fire a ProVideoPlayer cue\" when you do not need to choose the layer.",
-    params: [LAYER_PARAM, PLAYLIST_PARAM, CUE_PARAM],
-    run: async (params, ctx) => {
-      const playlist = nameSegment(params.playlist, "playlist");
-      if ("error" in playlist) return fail(playlist.error);
-      const cue = nameSegment(params.cue, "cue");
-      if ("error" in cue) return fail(cue.error);
-      const r = await resolveLayer(params);
-      if ("error" in r) return fail(r.error);
-      const cueName = String(params.cue).trim();
-      if (ctx.simulate) return ok(`would fire cue "${cueName}" on layer ${r.layer.name}`);
-      // resolveLayer already read the workspace, so the pre-image is free — and
-      // it is not optional: lastCueName is residual, so without it a repeat
-      // trigger confirms itself against a PVP that did nothing.
-      const before = r.layer;
-      const stale = sameName(before.lastCueName, cueName);
-      // The layer by UUID, not the name the operator typed: a rename between the
-      // write and the read cannot then make a failed trigger look successful.
-      return await pvpDeps.command(
-        `/trigger/layer/${r.layer.uuid}/playlist/${playlist.value}/cue/${cue.value}`,
-        undefined,
-        {
-          what: stale
-            ? `cue "${cueName}" fired on layer ${r.layer.name} (it was already the last cue there, so only a restart can confirm it)`
-            : `cue "${cueName}" fired on layer ${r.layer.name}`,
-          holds: (layers) => cueLandedSince(before, byUuid(layers, r.layer.uuid), cueName),
-        },
-      );
-    },
-  },
 };

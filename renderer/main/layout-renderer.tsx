@@ -18,7 +18,7 @@ import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
 import { streamers, streamIndicator } from "../app/recording-status";
-import { usePvpState } from "./use-pvp-state";
+import { usePvpState, usePvpSkewMs } from "./use-pvp-state";
 import { useReaperState } from "./use-reaper-state";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
@@ -58,6 +58,8 @@ export interface LayoutRenderCtx {
   reaper: ReaperStatusDTO | null;
   /** Live ProVideoPlayer layer state — for the pvp-layers object. null until loaded. */
   pvp: PvpStatusDTO | null;
+  /** Clock offset measured from PVP's own frames, not from PCO's. */
+  pvpSkewMs: number;
   resi: StreamStatusDTO | null;
   youtube: StreamStatusDTO | null;
   osc: OscFeedbackDTO | null;
@@ -1121,7 +1123,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       });
     }
     case "pvp-layers":
-      return <PvpObject config={c} status={ctx.pvp} now={ctx.now} skewMs={ctx.skewMs} />;
+      return <PvpObject config={c} status={ctx.pvp} now={ctx.now} skewMs={ctx.pvpSkewMs} />;
 
     case "rosstalk-button":
       return (
@@ -2416,6 +2418,10 @@ export function useLayoutData(layout?: LayoutDTO) {
   // at the server, so an ungated hook would hold PVP at 1 Hz for a wall screen
   // showing a clock.
   const pvp = usePvpState(want(["pvp-layers"]));
+  // PVP's own clock offset. The shared skewMs below is PCO-derived and is 0
+  // whenever PCO is off, which would leave every PVP bar comparing a server
+  // timestamp against the browser's clock.
+  const pvpSkewMs = usePvpSkewMs(pvp);
   // Both gated on the streaming objects: a clock-only wall screen must not hold
   // a poll open against two cloud APIs, one of which has a daily quota.
   const streamWanted = want(["stream-status", "home-streaming", "home-streaming-resi", "home-streaming-youtube"]);
@@ -2443,7 +2449,7 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
 }
 
 /**
@@ -2463,7 +2469,7 @@ export function LayoutRenderer({
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -2532,7 +2538,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

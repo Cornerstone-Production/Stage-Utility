@@ -89,7 +89,9 @@ The original result was a measurement error twice over: the before/after `transp
 
 So `pvp.trigger-cue` ships, addressed as `/trigger/playlist/{playlist}/cue/{cue}` by name.
 
-**One genuine no-op remains and it is the only open question.** `/trigger/layer/{l}/playlist/{p}/cue/{c}` fires, but the one attempt to send a cue to a specific *empty* layer did not put content on that layer. Whether the layer argument is ignored or that layer refused the media is unknown. So the layer-addressed form ships as its own action, `pvp.trigger-cue-on-layer`, whose verify predicate asks about **that layer specifically** — if PVP ignores the argument, the action reports a failure rather than a success, which is exactly what the verify-then-report design is for. The docs say so plainly instead of implying the argument works.
+**SETTLED AFTER THE FACT (research §4.3): the layer argument is ignored.** `/trigger/layer/{l}/playlist/{p}/cue/{c}` fires and plays the cue on the cue's OWN configured layer whatever layer is named. Re-measured against three different empty layers with three different cues — all three landed on layer 0, and the three named layers stayed empty, which is the control that rules out one layer refusing one file.
+
+This plan originally shipped that form as `pvp.trigger-cue-on-layer` with a verify asking about the named layer, reasoning that a failure report was "the design working". It is not shippable: the action fires a real cue, changes what is on screen, and *then* reports a failure — a side effect logged as a no-op, which invites a retry that fires it again. **The action was removed.** Which layer a cue plays on is set in ProVideoPlayer, and nothing here can change it.
 
 **What did NOT change, and is the half that shaped every other decision in this plan:** a POST returns HTTP 200 with an empty body whether or not anything happened. Every action still verifies by reading state back. Decision 2 needs no revision.
 
@@ -2731,7 +2733,7 @@ The commit body names the five guard mutations from Steps 5 and 9, states plainl
 - Consumes: Task 2's `pvpService.command(path, body, verify)` and `pvpService.readLayers()`; Task 1's `PvpLayerDTO`.
 - Produces: `PVP_ACTIONS` — a `Record<string, ActionDef>` spread into `AUTOMATION_ACTIONS`; and `pvpDeps`, the test seam.
 
-The registry goes from six action kinds to fifteen, which is the doubling the research predicted and makes PVP **the first integration in this app that drives content rather than only reporting it**.
+The registry goes from six action kinds to fourteen, which is the doubling the research predicted and makes PVP **the first integration in this app that drives content rather than only reporting it**.
 
 Two things come free and are worth knowing before writing any of it:
 
@@ -3140,7 +3142,7 @@ Task 0 is settled (research §4.2): all five addressing forms fire. Two actions 
 
 **`pvp.trigger-cue`** takes a playlist and a cue, both by name, and posts `/trigger/playlist/{playlist}/cue/{cue}`. It cannot say which layer the cue will land on — PVP decides that from the cue — so its verify predicate asks whether **any** layer's last cue is now the one requested.
 
-**`pvp.trigger-cue-on-layer`** additionally takes a layer and posts `/trigger/layer/{layer}/playlist/{playlist}/cue/{cue}`. This is the one form with an open question against it: it fires, but the single attempt to send a cue to a specific *empty* layer did not put content there, and it is unknown whether the argument is ignored or that layer refused the media. Its verify predicate therefore asks about **that layer specifically**, so if PVP ignores the argument the action reports a failure. That is the design working, not a bug — and the docs say so rather than implying the argument is reliable.
+**`pvp.trigger-cue-on-layer` was specified here and NOT shipped.** Research §4.3 settled the open question against it: PVP ignores the layer argument. An action on that form fires a real cue onto the wrong layer and then reports a failure, which is worse than not offering it. `pvp-actions.test.ts` carries a guard that no action takes both a layer and a cue, so it cannot come back as an obvious-looking convenience.
 
 Both take names rather than uuids, for the reason stated in Task 5. **PVP reads an all-digits path parameter as an INDEX, never a name**, so a playlist or cue literally named "2024" cannot be addressed by name at all; the help text says so.
 
@@ -3196,38 +3198,9 @@ const cueLanded = (l: PvpLayerDTO | undefined, cue: string): boolean =>
       });
     },
   },
-
-  "pvp.trigger-cue-on-layer": {
-    id: "pvp.trigger-cue-on-layer",
-    label: "Fire a ProVideoPlayer cue on a specific layer",
-    // The one form with an open question against it. It fires, but the single
-    // attempt to send a cue to a specific EMPTY layer did not put content there,
-    // and it is unknown whether PVP ignores the layer argument or that layer
-    // refused the media. The verify asks about THAT layer, so if the argument is
-    // ignored this reports a failure — which is the design working.
-    help: "Fires a cue from a playlist onto a named layer. ProVideoPlayer does not always honour the layer, so this confirms the cue actually landed on it and reports a failure if it did not. Use \"Fire a ProVideoPlayer cue\" when you do not need to choose the layer.",
-    params: [LAYER_PARAM, PLAYLIST_PARAM, CUE_PARAM],
-    run: async (params, ctx) => {
-      const playlist = nameSegment(params.playlist, "playlist");
-      if ("error" in playlist) return fail(playlist.error);
-      const cue = nameSegment(params.cue, "cue");
-      if ("error" in cue) return fail(cue.error);
-      const r = await resolveLayer(params);
-      if ("error" in r) return fail(r.error);
-      const cueName = String(params.cue).trim();
-      if (ctx.simulate) return ok(`would fire cue "${cueName}" on layer ${r.layer.name}`);
-      // The layer by UUID, not the name the operator typed: a rename between the
-      // write and the read cannot then make a failed trigger look successful.
-      return await pvpDeps.command(
-        `/trigger/layer/${r.layer.uuid}/playlist/${playlist.value}/cue/${cue.value}`,
-        undefined,
-        {
-          what: `cue "${cueName}" fired on layer ${r.layer.name}`,
-          holds: (layers) => cueLanded(byUuid(layers, r.layer.uuid), cueName),
-        },
-      );
-    },
-  },
+    // pvp.trigger-cue-on-layer was specified here and REMOVED before merge:
+    // research §4.3 settled that PVP ignores the layer argument, so the action
+    // would fire a real cue onto the wrong layer and then report a failure.
 ```
 
 and the tests, in the same file:
@@ -3240,11 +3213,10 @@ and the tests, in the same file:
     assert.equal((await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, true);
   });
 
-  test("firing a cue ON A LAYER fails when it landed somewhere else", async () => {
-    // The open question, pinned. If PVP ignores the layer argument the cue turns
-    // up on another layer and this MUST report a failure.
-    after = [layer({ lastCueName: "SOMETHING ELSE" }), layer({ uuid: "l2", name: "Other", lastCueName: "MAIN GRAPHIC" })];
-    assert.equal((await run("pvp.trigger-cue-on-layer", { layer: "Graphics", playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, false);
+  test("there is NO action that claims to choose a cue's layer", async () => {
+    // PVP ignores the layer argument (research §4.3), so the action that took
+    // one was removed. This guard stops it returning as a convenience.
+    assert.ok(!("pvp.trigger-cue-on-layer" in PVP_ACTIONS));
   });
 
   test("an all-digits playlist or cue name is REFUSED, not sent as a position", async () => {
@@ -3340,7 +3312,7 @@ The generated `ProVideoPlayer connects / disconnects` pair is already covered by
 
 **Conditions** — the prose paragraph gains the five: *a ProVideoPlayer layer has content*, *is playing a video*, *is hidden*, *is muted*, and *ProVideoPlayer has something on screen*.
 
-**Actions** — nine rows, and the table gains a sentence above it that the rest of the actions do not need:
+**Actions** — eight rows, and the table gains a sentence above it that the rest of the actions do not need:
 
 > ProVideoPlayer answers every command with "OK" whether or not it acted on it, so every ProVideoPlayer action below reads PVP's state back to confirm what it did. A command that was accepted and ignored is recorded as a **failure**, not a success — which is the opposite of what the log would otherwise show.
 
@@ -3389,7 +3361,7 @@ git commit -m "docs: ProVideoPlayer"
 
 ## Self-Review
 
-**Spec coverage.** Every element of the operator's ask maps to a task. The **custom layout object** is Task 3, with the filter mode the research argued for (`with-content` as the default, turning eleven rows into two). The **Home tab object** is Task 4, sharing Task 3's row component rather than reimplementing it. The **full suite of automations** is Tasks 5 and 6: seven triggers plus the generated connect/disconnect pair, five conditions plus the generated `is-connected`, and nine actions — taking the action registry from six kinds to fifteen and making PVP the first integration here that drives content rather than only reporting it. The registration chain the brief enumerated is Task 2, item by item, plus two the brief did not list and the code requires: `renderer/components/integrations-panel.tsx`'s `CATEGORY_ORDER`, without which the integration is registered, polling and invisible; and `automation-engine.ts`'s `addDemandSource`, without which the `inDemand` gate is decorative.
+**Spec coverage.** Every element of the operator's ask maps to a task. The **custom layout object** is Task 3, with the filter mode the research argued for (`with-content` as the default, turning eleven rows into two). The **Home tab object** is Task 4, sharing Task 3's row component rather than reimplementing it. The **full suite of automations** is Tasks 5 and 6: seven triggers plus the generated connect/disconnect pair, five conditions plus the generated `is-connected`, and eight actions — taking the action registry from six kinds to fourteen and making PVP the first integration here that drives content rather than only reporting it. The registration chain the brief enumerated is Task 2, item by item, plus two the brief did not list and the code requires: `renderer/components/integrations-panel.tsx`'s `CATEGORY_ORDER`, without which the integration is registered, polling and invisible; and `automation-engine.ts`'s `addDemandSource`, without which the `inDemand` gate is decorative.
 
 **The efficiency decision.** Stated at the top as Decision 1: `timeElapsed` and `timeRemaining` are excluded from the compared payload, the DTO carries an anchor, and the client interpolates — following `live-poller.ts:42`, which excludes `serverNow` for exactly this reason, and `pco-timer.ts`, which is the pure interpolator this plan's `pvp-progress.ts` mirrors. The alternative (accept the frame rate, as REAPER does) is named and the reason it does not transfer is given: one recorder's six scalars is not eleven layers on nine tiles. Two things the brief did not ask for but the code forced: `emitIfChanged`'s shallow `!==` **cannot be used at all** on an array-bearing DTO, so it is overridden; and a media-uuid diff alone cannot see a single clip looping, so a drift re-anchor is part of the decision rather than an optimisation on top of it.
 
@@ -3422,7 +3394,7 @@ git commit -m "docs: ProVideoPlayer"
 
 **Three risks this plan does not remove.**
 
-*The layer argument of the layer-addressed trigger may be ignored.* All five addressing forms fire, but the one attempt to send a cue to a specific empty layer did not put content there, and nobody knows whether PVP ignored the argument or that layer refused the media. `pvp.trigger-cue-on-layer` ships with a verify that asks about that layer specifically, so the failure is visible rather than silent — but an operator who wants a cue on a chosen layer may find that this action reports `failed` every time on their workspace, and the honest answer is then to use `pvp.trigger-cue` and let PVP place it. Recorded in the docs as an open question, not as a working feature.
+*~~The layer argument may be ignored.~~* **Settled: it is** (research §4.3), and the action built on it was removed rather than shipped. An operator cannot choose a cue's layer from Stage, because ProVideoPlayer's API does not offer it — that is set in PVP. What remains genuinely unverified is narrower and stated in the docs: clearing a layer that holds content, the workspace-wide clear, and reading a hidden/muted/faded layer back.
 
 *A layer rename silently stops a rule.* Accepted, documented, and identical to the trade `pco.live.advance` already makes. There is no id in this system that both survives a workspace rebuild and is typable into a form.
 

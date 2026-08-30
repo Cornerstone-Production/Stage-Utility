@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { invoke, onNotification } from "../lib/api";
+import { useResyncOn } from "../lib/use-resync-on";
 
 /**
  * Live ProVideoPlayer layer state, pushed on the "pvp:status" channel. Hydrates
@@ -37,4 +38,33 @@ export function usePvpState(enabled = true): PvpStatusDTO | null {
   }, [enabled]);
 
   return pvp;
+}
+
+/**
+ * How far this browser's clock is behind the server's, measured from PVP's OWN
+ * frames.
+ *
+ * The shared `skewMs` threaded through the layout renderer is derived solely
+ * from `pcoLive.serverNow`, so with Planning Center unconfigured or unreachable
+ * it stays 0 — and PVP's progress bar then compares a SERVER-stamped `sampledAt`
+ * against the browser's clock. On a wall Pi a minute fast that pins every bar at
+ * 100% and every countdown at 0:00, and the clamp in computePvpProgress makes
+ * the wrong answer look like a legitimate one. Nothing about ProVideoPlayer
+ * should depend on whether Planning Center is up.
+ *
+ * `sampledAt` is stamped as the poll returns and arrives within a broadcast of
+ * being taken, so the moment a frame lands is a fair reading of the offset. Only
+ * moved when a NEW sample arrives — re-measuring on every render would chase the
+ * render loop rather than the clock.
+ */
+export function usePvpSkewMs(pvp: PvpStatusDTO | null): number {
+  const [skewMs, setSkewMs] = useState(0);
+  // useResyncOn, not an effect, and for the same reason the PCO skew uses it:
+  // the reading must be taken when the frame ARRIVES. An effect runs a paint
+  // later, so the offset would absorb however long the render took.
+  useResyncOn([pvp?.sampledAt], () => {
+    const serverMs = Date.parse(pvp?.sampledAt ?? "");
+    if (Number.isFinite(serverMs)) setSkewMs(serverMs - Date.now());
+  });
+  return skewMs;
 }

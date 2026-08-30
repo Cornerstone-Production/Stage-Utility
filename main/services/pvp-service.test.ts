@@ -2,9 +2,10 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, test } from "node:test";
 
+import { addBroadcastListener } from "./broadcaster.js";
 import { PvpService } from "./pvp-service.js";
 import { parseWorkspace } from "./pvp-parse.js";
-import type { PvpStatusDTO } from "../types/pvp.js";
+import type { PvpLayerDTO, PvpStatusDTO } from "../types/pvp.js";
 
 const FIXTURE_TEXT = readFileSync(new URL("./fixtures/pvp-workspace.json", import.meta.url), "utf8");
 const LAYERS = parseWorkspace(JSON.parse(FIXTURE_TEXT));
@@ -333,5 +334,157 @@ describe("readLayers", () => {
     // Empty is a real state — "PVP has nothing on screen". Returning it for
     // "we never spoke to PVP" would make an action verify against a fiction.
     await assert.rejects(() => new PvpService().readLayers(), /not connected/);
+  });
+});
+
+// -- The emitIfChanged OVERRIDE, driven rather than described -----------------
+//
+// This is the guard the earlier version of this file CLAIMED to have and did
+// not. Every `shouldEmit` test above calls the static pure helper directly, so
+// deleting the override -- the thing that actually decides whether a frame goes
+// out -- left the whole suite green. Measured against a live ProVideoPlayer at
+// 1 Hz with a video rolling: 2 frames per 30s with the override, 20 without it.
+// A guard over the helper alone cannot see that difference at all.
+//
+// So these drive the REAL `emitIfChanged`, through the REAL `emit`, and count
+// what reaches the broadcaster -- the frames a display would actually receive.
+// Only the poll timer is stood in for; everything between the DTO and the wire
+// is the shipping code.
+
+/** Frames seen on "pvp:status" since the last reset. */
+let frames: PvpStatusDTO[] = [];
+addBroadcastListener((channel, payload) => {
+  if (channel === "pvp:status") frames.push(payload as PvpStatusDTO);
+});
+
+/** Reaches the protected override the way the poll does. A subclass rather than
+ *  a cast, so if the override's signature ever changes this stops compiling. */
+class ProbeService extends PvpService {
+  poll(dto: PvpStatusDTO): void {
+    this.emitIfChanged(dto);
+  }
+}
+
+describe("the emitIfChanged override decides what reaches the wire", () => {
+  const probe = (): ProbeService => {
+    frames = [];
+    const svc = new ProbeService();
+    started.push(svc);
+    return svc;
+  };
+  /** A fresh array every time, exactly as parseWorkspace hands one back. */
+  const poll = (at: string, over: Partial<PvpStatusDTO> = {}): PvpStatusDTO => ({
+    connected: true,
+    layers: LAYERS.map((l) => ({ ...l })),
+    sampledAt: at,
+    ...over,
+  });
+
+  test("TEN IDENTICAL POLLS SEND ONE FRAME, NOT TEN", () => {
+    // The whole efficiency decision, at the only level that proves it. The base
+    // class compares DTO keys with `!==` and `layers` is a fresh array on every
+    // poll, so without the override this is ten frames to every connected
+    // display -- and on the live device, twenty in thirty seconds.
+    const svc = probe();
+    for (let i = 0; i < 10; i++) svc.poll(poll(`2026-08-30T12:00:0${i}.000Z`));
+    assert.equal(frames.length, 1, `sent ${frames.length} frames for ten identical polls`);
+  });
+
+  test("a cue change on the eleventh poll DOES send a second frame", () => {
+    // The other half: proving no frame is sent is worthless if the override also
+    // swallows the ones that matter.
+    const svc = probe();
+    for (let i = 0; i < 10; i++) svc.poll(poll(`2026-08-30T12:00:0${i}.000Z`));
+    svc.poll(poll("2026-08-30T12:00:10.000Z", {
+      layers: LAYERS.map((l, i) => (i === 0 ? { ...l, mediaUuid: "media-9999" } : { ...l })),
+    }));
+    assert.equal(frames.length, 2);
+    assert.equal(frames[1].layers[0].mediaUuid, "media-9999");
+  });
+
+  test("going offline sends a frame even though the DTO is smaller", () => {
+    const svc = probe();
+    svc.poll(poll("2026-08-30T12:00:00.000Z"));
+    svc.poll({ connected: false, layers: [], sampledAt: null });
+    assert.equal(frames.length, 2);
+    assert.equal(frames[1].connected, false);
+  });
+
+  test("a silent poll still updates what a late display hydrates to", () => {
+    // Both halves of the base contract. Skipping the frame is the efficiency
+    // rule; keeping `last` current is what lets a display that connects between
+    // changes hydrate with the truth rather than a stale snapshot.
+    const svc = probe();
+    svc.poll(poll("2026-08-30T12:00:00.000Z"));
+    // Only the ROLLING layer's clock moves, and by exactly the elapsed wall
+    // time. Advancing a still's anchor would be genuine drift — a paused clip
+    // that jumped — and would rightly send a frame.
+    svc.poll(poll("2026-08-30T12:00:09.000Z", {
+      layers: LAYERS.map((l) =>
+        l.playbackRate > 0 ? { ...l, anchorElapsedSec: (l.anchorElapsedSec ?? 0) + 9 } : { ...l },
+      ),
+    }));
+    assert.equal(frames.length, 1, "time moving must not send a frame");
+    assert.equal(svc.getLatest().sampledAt, "2026-08-30T12:00:09.000Z", "but `last` must be current");
+    assert.equal(svc.getLatest().layers[0].anchorElapsedSec, 18.6);
+  });
+});
+
+describe("a stale read cannot broadcast backwards over a newer one", () => {
+  // The poll is serial with itself, but command()'s verify reads run BESIDE it,
+  // and two requests to the same box can come back out of order. A poll begun
+  // before a trigger and resolving after the verify read would push the OLD
+  // workspace out after the new one — and the automation engine, which sees only
+  // consecutive frames, would read that as the layer clearing and then the same
+  // cue starting a second time. One command, one phantom "layer cleared", one
+  // duplicated "cue started".
+  //
+  // Driven through the real emitFresh via the real command(), with a transport
+  // that deliberately answers out of order.
+
+  class OrderProbe extends PvpService {
+    /** The poll's own path: stamp, read, fold in — exactly as connect() does. */
+    async slowPoll(dto: PvpStatusDTO, startedAtMs: number): Promise<void> {
+      this.foldIn(dto, startedAtMs);
+    }
+    foldIn(dto: PvpStatusDTO, at: number): void {
+      // Reaches the private emitFresh through the same door connect() uses.
+      (this as unknown as { emitFresh(l: PvpLayerDTO[], at: number): void }).emitFresh(dto.layers, at);
+    }
+  }
+
+  test("a poll that STARTED earlier but finished later is dropped", () => {
+    frames = [];
+    const svc = new OrderProbe();
+    started.push(svc);
+
+    const t0 = Date.now();
+    const oldWorkspace = LAYERS.map((l) => ({ ...l }));
+    const newWorkspace = LAYERS.map((l, i) => (i === 0 ? { ...l, mediaUuid: "media-NEW" } : { ...l }));
+
+    // The verify read: started later, arrives first.
+    svc.foldIn({ connected: true, layers: newWorkspace, sampledAt: null }, t0 + 100);
+    // The poll: started earlier, arrives second, carrying the older workspace.
+    svc.foldIn({ connected: true, layers: oldWorkspace, sampledAt: null }, t0);
+
+    assert.equal(frames.length, 1, `broadcast ${frames.length} frames; the stale one was not dropped`);
+    assert.equal(frames[0].layers[0].mediaUuid, "media-NEW");
+    assert.equal(svc.getLatest().layers[0].mediaUuid, "media-NEW", "the stale read overwrote `last`");
+  });
+
+  test("reads that arrive in order both count", () => {
+    // The other half: dropping the stale one must not also drop legitimate
+    // progress, or the channel would freeze after its first frame.
+    frames = [];
+    const svc = new OrderProbe();
+    started.push(svc);
+    const t0 = Date.now();
+    svc.foldIn({ connected: true, layers: LAYERS.map((l) => ({ ...l })), sampledAt: null }, t0);
+    svc.foldIn(
+      { connected: true, layers: LAYERS.map((l, i) => (i === 0 ? { ...l, mediaUuid: "m-2" } : { ...l })), sampledAt: null },
+      t0 + 100,
+    );
+    assert.equal(frames.length, 2);
+    assert.equal(frames[1].layers[0].mediaUuid, "m-2");
   });
 });

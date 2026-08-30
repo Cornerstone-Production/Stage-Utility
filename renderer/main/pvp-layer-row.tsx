@@ -60,7 +60,17 @@ export function PvpLayerRow({ layer, sampledAt, now, skewMs, showProgress = true
         {layer.opacity < 1 && <Badge>{Math.round(layer.opacity * 100)}%</Badge>}
       </div>
 
-      {cue && !compact && <div className="text-[0.8em] text-fg-subtle truncate min-w-0">{cue}</div>}
+      {/* LABELLED, because playingItem and playingMedia can disagree on a layer
+          that IS playing: measured live, media LoopGraphic_1_HeisWorthy.mp4 under
+          a cue reading SERIES GRAPHIC. The filename above is what is on screen;
+          this is the last cue that touched the layer. Unlabelled they read as one
+          claim, and nothing says which is authoritative. */}
+      {cue && !compact && (
+        <div className="text-[0.8em] text-fg-subtle truncate min-w-0">
+          <span className="opacity-70">Last cue: </span>
+          {cue}
+        </div>
+      )}
 
       {progress && (
         <div className="flex items-center gap-[0.4em]">

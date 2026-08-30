@@ -171,6 +171,7 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     obs: d.obs,
     reaper: d.reaper,
     pvp: d.pvp,
+    pvpSkewMs: d.pvpSkewMs,
     resi: d.resi,
     youtube: d.youtube,
     osc: d.osc,

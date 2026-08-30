@@ -161,9 +161,6 @@ describe("PVP actions verify rather than trusting a 200", () => {
     after = [stale]; // PVP answered 200 and changed nothing.
     const r = await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" });
     assert.equal(r.ok, false, `reported success against an unchanged workspace: ${r.detail}`);
-
-    const onLayer = await run("pvp.trigger-cue-on-layer", { layer: "Graphics", playlist: "PreService", cue: "MAIN GRAPHIC" });
-    assert.equal(onLayer.ok, false, `reported success against an unchanged workspace: ${onLayer.detail}`);
   });
 
   test("a re-fire IS confirmed when the media changes or the clip restarts", async () => {
@@ -208,21 +205,23 @@ describe("PVP actions verify rather than trusting a 200", () => {
     assert.match(r.detail, /already the last cue/);
   });
 
-  test("firing a cue ON A LAYER fails when it landed somewhere else", async () => {
-    // The one open question in this integration, pinned. All five addressing
-    // forms fire, but it is unknown whether the LAYER argument redirects a cue.
-    // If PVP ignores it the cue turns up on another layer, and this MUST report
-    // a failure rather than a success.
-    after = [
-      layer({ lastCueName: "SOMETHING ELSE" }),
-      layer({ uuid: "l2", name: "Other", lastCueName: "MAIN GRAPHIC" }),
-    ];
-    const r = await run("pvp.trigger-cue-on-layer", { layer: "Graphics", playlist: "PreService", cue: "MAIN GRAPHIC" });
-    assert.equal(r.ok, false);
-    assert.equal(posted[0].path, "/trigger/layer/l1/playlist/PreService/cue/MAIN%20GRAPHIC");
-    // And the plain form, on the same state, succeeds — because it never claimed
-    // to choose the layer.
-    assert.equal((await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, true);
+  test("THERE IS NO ACTION THAT CLAIMS TO CHOOSE A CUE'S LAYER", async () => {
+    // Measured on the device, not inferred: PVP's layer-addressed trigger
+    // endpoint accepts the layer and IGNORES it. Three empty layers (1, 2, 4)
+    // were each sent a different PreService cue; all three landed on layer 0,
+    // the cue's own configured layer, and the three named layers stayed empty.
+    // Three targets rather than one rules out "that layer refused that media".
+    //
+    // An action built on it would fire a real cue, change what is on screen, and
+    // then correctly report a failure — a side effect logged as a no-op, which
+    // invites a retry that fires it again. So it is not offered at all, and this
+    // is the guard that stops it being reintroduced as an obvious-looking
+    // convenience.
+    assert.ok(!("pvp.trigger-cue-on-layer" in PVP_ACTIONS));
+    for (const [id, a] of Object.entries(PVP_ACTIONS)) {
+      const takesLayerAndCue = a.params.some((p) => p.key === "layer") && a.params.some((p) => p.key === "cue");
+      assert.ok(!takesLayerAndCue, `${id} takes both a layer and a cue, which PVP cannot honour`);
+    }
   });
 
   test("an all-digits playlist or cue name is REFUSED, not sent as a position", async () => {

@@ -48,6 +48,7 @@ import { useSplState } from "../main/use-spl-state";
 import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsState } from "../main/use-obs-state";
+import { hasContent } from "@main/types/pvp";
 import { usePvpState } from "../main/use-pvp-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useOscTargets } from "../main/use-osc-state";
@@ -924,7 +925,7 @@ export function Inspector({
         );
       })()}
       {c.type === "pvp-layers" && (() => {
-        const withContent = (pvp?.layers ?? []).filter((l) => l.state !== "empty").length;
+        const withContent = (pvp?.layers ?? []).filter(hasContent).length;
         const live = !pvp?.connected
           ? "Not connected"
           : `${pvp.layers.length} layers, ${withContent} with content`;

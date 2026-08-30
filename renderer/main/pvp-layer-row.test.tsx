@@ -230,3 +230,24 @@ describe("PvpObject", () => {
     assert.ok(!html.includes("data-pvp-bar"), html);
   });
 });
+
+// ── The Home card's not-yet-heard state ─────────────────────────────────────
+//
+// It rendered the seven literal characters `\u2014` on the operator's front
+// page. JSX attribute literals do not process escapes, and nothing covered
+// PvpCard at all, so a bug visible from across the room shipped.
+//
+// renderToStaticMarkup runs the component synchronously and does not run
+// effects, so `usePvpState` has not hydrated yet and the card is in exactly the
+// state that was broken.
+
+describe("PvpCard before the first snapshot", () => {
+  test("DRAWS ONE DASH, NOT THE CHARACTERS OF AN ESCAPE SEQUENCE", async () => {
+    const { PvpCard } = await import("../app/home/cards.js");
+    const html = renderToStaticMarkup(<PvpCard now={AT} />);
+    assert.ok(!html.includes("u2014"), `the card rendered an escape sequence:\n${html}`);
+    assert.ok(html.includes("\u2014"), `the card did not render a dash:\n${html}`);
+    // And it does not accuse PVP of being down before it has heard anything.
+    assert.ok(!/offline/i.test(html), html);
+  });
+});

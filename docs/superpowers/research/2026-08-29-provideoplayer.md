@@ -117,7 +117,15 @@ nothing. Two key sets were observed across 702 samples:
 ```
 ["isPlaying","isScrubbing","layer","playbackRate","playingItem","playingMedia","timeElapsed","timeRemaining"]
 ["isPlaying","isScrubbing","layer","playbackRate","playingItem",                "timeElapsed","timeRemaining"]
+["isPlaying","isScrubbing","layer","playbackRate",                              "timeElapsed","timeRemaining"]
 ```
+
+**Corrected 2026-08-29 (later pass): there are THREE key sets, not two.** A layer
+that has never been cued in this session carries neither `playingItem` nor
+`playingMedia` — five of the eleven layers were in that state (Graphics (0.5s),
+Right Third, TAG, Lower Third, Lyr. Strp (0.5s)). It changes no conclusion, since
+the has-content rule already keys on `playingMedia` alone, but a parser written
+against the two sets above would reach for a `playingItem` that is not there.
 
 **(b) `isPlaying: true` does not mean a video is rolling.**
 
@@ -269,11 +277,19 @@ three seconds and check the landing cue by name.
 
 | Form | Result |
 |---|---|
-| `/trigger/cue/{n}` (current playlist) | **FIRES** |
-| `/trigger/playlist/{name}/cue/{n}` | **FIRES** |
+| `/trigger/cue/{index}` (current playlist) | **FIRES** |
+| `/trigger/cue/{name}` | **HTTP 400** — see the correction below |
+| `/trigger/playlist/{name}/cue/{name}` | **FIRES** |
+| `/trigger/playlist/{name}/cue/{index}` | **FIRES** |
 | `/trigger/playlist/{uuid}/cue/{n}` | **FIRES** |
-| `/trigger/playlist/{index}/cue/{n}` | **FIRES** |
-| `/trigger/layer/{l}/playlist/{p}/cue/{c}` | **FIRES** |
+| `/trigger/playlist/{index}/cue/{index}` | **FIRES** |
+| `/trigger/layer/{l}/playlist/{p}/cue/{c}` | fires, but **ignores the layer** — see §4.3 |
+
+**Corrected 2026-08-29 (later pass): the bare `/trigger/cue/{…}` form takes a
+POSITION only.** Passing a cue NAME to it returns **HTTP 400**, not 200. The row
+above originally read `/trigger/cue/{n}` and was taken to mean either. Names work
+fine when the cue is addressed through its playlist, which is the form the
+integration ships.
 
 Controlled against the obvious alternative — that any trigger merely resets to
 the top of the playlist. Asked for cues 4, 9, 2 and 11 in turn; each landed on
@@ -292,10 +308,32 @@ unchanged and remains the reason every action must verify by reading state back.
 What changed is only that triggers are usable — the verify-then-report design
 was built for the right reason and needs no revision.
 
-**The one genuine no-op remains:** `/trigger/layer/4/playlist/…` did not put
-content on the empty TAG layer. Whether the layer argument is ignored (the cue
-firing onto its own layer instead) or TAG rejects that media is **unverified**.
-Do not rely on the layer argument to redirect a cue until that is settled.
+### 4.3 CLOSED — the layer argument is ignored
+
+The one remaining open question is settled, and the answer is that
+`/trigger/layer/{l}/playlist/{p}/cue/{c}` **accepts the layer argument and
+ignores it.**
+
+The original single observation — a cue sent to the empty TAG layer did not
+appear there — could not distinguish "the argument is ignored" from "TAG refused
+that media". Re-run against **three different empty layers with three different
+cues**, which is the control that separates them:
+
+```
+asked layer 1 (Graphics (0.5s)) for PreService cue 9   -> landed on layer 0
+asked layer 2 (Right Third)     for PreService cue 10  -> landed on layer 0
+asked layer 4 (TAG)             for PreService cue 11  -> landed on layer 0
+```
+
+All three returned HTTP 200 with an empty body. All three cues appeared on layer
+0 — the cue's own configured layer — and layers 1, 2 and 4 stayed empty
+throughout. Three targets and three media rule out one layer refusing one file.
+
+**A cue plays on the layer ProVideoPlayer has configured for it, and the API
+offers no way to change that.** An integration action built on this form would
+fire a real cue, change what is on screen, and then correctly report that it had
+not done what was asked — a side effect logged as a no-op, inviting a retry that
+fires it again. Nothing should be built on the layer argument.
 
 `/clear/layer/{id}` returned 200 on an already-empty layer; clearing a layer with
 content was not tested.
@@ -384,10 +422,8 @@ demonstrates:
 
 Stated plainly so none of it becomes a bug in a plan:
 
-- **Whether the LAYER ARGUMENT of `/trigger/layer/{l}/playlist/{p}/cue/{c}`
-  actually redirects a cue.** All five forms fire (§4.2), but the one attempt to
-  send a cue to a specific empty layer did not put content there. Unknown whether
-  the argument is ignored or the layer refused the media.
+- ~~Whether the LAYER ARGUMENT of `/trigger/layer/{l}/playlist/{p}/cue/{c}`
+  actually redirects a cue.~~ **Settled: it is ignored.** See §4.3.
 - **The untested POSTs**: blend mode, transitions, transition duration, effects,
   effects presets, layer presets, target sets, and the workspace-wide
   clear/mute/hide (not tested because they would blank every screen at once).

@@ -41,7 +41,7 @@ import { invoke, onNotification } from "../../lib/api";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
 import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
-import { usePvpState } from "../../main/use-pvp-state";
+import { usePvpState, usePvpSkewMs } from "../../main/use-pvp-state";
 import { PvpLayerRow } from "../../main/pvp-layer-row";
 import { visibleLayers } from "../../main/pvp-object";
 import { useReaperState } from "../../main/use-reaper-state";
@@ -602,19 +602,25 @@ export function SplCard() {
  * No preview image, and there is no version of this card that has one: PVP
  * exposes no thumbnail or frame endpoint at all.
  */
-export function PvpCard({ now, skewMs }: { now: number; skewMs: number }) {
+export function PvpCard({ now }: { now: number }) {
   const pvp = usePvpState();
+  // PVP's own clock offset rather than the PCO-derived one this card is handed:
+  // the countdown below must not go wrong because Planning Center is down.
+  const skewMs = usePvpSkewMs(pvp);
   const rows = visibleLayers(pvp?.layers ?? [], { type: "pvp-layers", show: "with-content" });
 
   // Three different nothings, for the reason the wall object's emptyReason
   // exists: one is a machine to go and look at, one is not, and one is that we
   // have not heard yet.
-  if (!pvp) return <Stat label="ProVideoPlayer" value="\u2014" />;
+  if (!pvp) return <Stat label="ProVideoPlayer" value="—" />;
   if (!pvp.connected) return <Stat label="ProVideoPlayer" value="Offline" />;
   if (rows.length === 0) return <Stat label="ProVideoPlayer" value="Nothing on screen" />;
 
   return (
-    <div className="flex flex-col gap-1 min-w-0">
+    // STAT_CARD, matching the Stat fallbacks above: home-pvp is a BARE type, so
+    // nothing upstream supplies the chrome, and without this the card lost its
+    // box at exactly the moment it had something to show.
+    <div className={`${STAT_CARD} flex flex-col gap-1 min-w-0`}>
       {/* Three, not all of them. A Home tile is a glance; the wall object is
           where an operator goes to see the whole stack. */}
       {rows.slice(0, 3).map((l) => (
@@ -705,7 +711,7 @@ export function HomeCard({
     case "home-spl":
       return <SplCard />;
     case "home-pvp":
-      return <PvpCard now={now} skewMs={skewMs} />;
+      return <PvpCard now={now} />;
     case "home-screens":
       return <ScreensCard online={onlineOutputIds.length} total={(state.outputs ?? []).length} />;
     case "home-next-service":

@@ -92,10 +92,12 @@ opacity, and clearing a layer that was already empty. Confirmed too that an
 out-of-range opacity is silently clamped rather than rejected, which is why Stage
 refuses one before sending it.
 
-**All five of PVP's cue addressing forms fire**, and each lands on the cue asked
-for. An earlier reading that four of them did nothing was a measurement error —
-the state was read back within the same second as the request, before PVP had
-applied it.
+**Cues are addressed through a playlist.** `POST /trigger/playlist/{playlist}/cue/{cue}`
+takes either names or positions and works with both. The bare
+`POST /trigger/cue/{cue}` form takes a **position only** — a cue name there is
+rejected outright with HTTP 400. An earlier reading that most addressing forms
+did nothing was a measurement error: the state was read back within the same
+second as the request, before PVP had applied it.
 
 **Firing a cue confirms that the cue MOVED, not just that it is named.** The cue
 name PVP reports is residual, so a cue that has already played on a layer stays
@@ -106,12 +108,14 @@ to have changed: a different cue, different media, or the clip restarting. The o
 case it cannot confirm is re-firing a still that is already the last cue on its
 layer, and it says so in the failure rather than guessing.
 
-**One thing is genuinely unsettled: whether the layer argument redirects a cue.**
-Sending a cue to a specific empty layer did not put content on it, and it is not
-known whether PVP ignores the argument or that layer refused the media. **Fire a
-ProVideoPlayer cue on a specific layer** therefore confirms the cue landed on the
-layer you named and reports a failure if it did not. If it fails every time on
-your workspace, use **Fire a ProVideoPlayer cue** and let PVP place it.
+**A cue always plays on its own layer, and nothing here can change that.**
+ProVideoPlayer's layer-addressed trigger endpoint accepts a layer and ignores it:
+three different empty layers were each sent a different cue and all three cues
+appeared on the cue's own configured layer, leaving the named layers empty. Three
+targets rather than one rules out the alternative that one layer happened to
+refuse one piece of media. So Stage offers no "fire this cue onto that layer"
+action — it would change what is on screen and then correctly report that it had
+not done what was asked. Which layer a cue plays on is set in ProVideoPlayer.
 
 Two more things ship unverified against a real instance, both safe because they
 confirm themselves: clearing a layer that is holding content, and clearing the

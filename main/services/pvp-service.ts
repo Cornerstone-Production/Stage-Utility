@@ -346,7 +346,12 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
    * the base implementation broadcasts at the poll rate no matter what changed.
    *
    * Deleting this override is the single most expensive mistake available in
-   * this file, so pvp-service.test.ts asserts the outcome rather than the shape.
+   * this file. It is guarded by "the emitIfChanged override decides what reaches
+   * the wire" in pvp-service.test.ts, which drives THIS method and counts frames
+   * arriving at the broadcaster — not the static shouldEmit helper, which an
+   * earlier version of that suite tested instead and which left this line
+   * deletable with the whole suite green. On the live device the difference is
+   * 2 frames per 30s against 20.
    */
   protected override emitIfChanged(next: PvpStatusDTO): void {
     if (PvpService.shouldEmit(this.last, next, this.lastBroadcastAtMs, Date.now())) this.emit(next);

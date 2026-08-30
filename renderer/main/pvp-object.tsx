@@ -46,7 +46,7 @@ export function emptyReason(status: PvpStatusDTO | null, c: Config): string {
   // null is "no snapshot yet", not "PVP is down" — the same distinction the rest
   // of this function exists to preserve. It lasts only until the first hydrate,
   // and an unconfigured PVP hydrates to connected:false, so this does not linger.
-  if (!status) return "\u2014";
+  if (!status) return "—";
   if (!status.connected) return "ProVideoPlayer offline";
   if (c.show === "one") {
     return (c.layerName ?? "").trim() ? `No layer named ${c.layerName}` : "No layer chosen";
@@ -117,7 +117,8 @@ export function PvpObject({ config, status, now, skewMs }: {
   // Everything that changes a row's HEIGHT, not just how many rows there are.
   const clipped = useClippedRows(
     ref,
-    rows.map((l) => `${l.uuid}:${l.state}:${l.lastCueName ?? ""}:${l.durationSec ?? ""}:${l.hidden}${l.muted}${l.opacity}`).join("|"),
+    `${config.showProgress ?? true}|` +
+      rows.map((l) => `${l.uuid}:${l.state}:${l.lastCueName ?? ""}:${l.durationSec ?? ""}:${l.hidden}${l.muted}${l.opacity}`).join("|"),
   );
 
   if (rows.length === 0) {

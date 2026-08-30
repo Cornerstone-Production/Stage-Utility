@@ -465,6 +465,9 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
       if (!pvpUp(next)) return false;
       return pvpPairs(prev, next).some(
         ({ before, after }) =>
+          // Not the hasContent helper: these are the loosely-typed PvpLayer
+          // above, not PvpLayerDTO, because the registry is deliberately
+          // decoupled from the DTOs. Same rule, stated against the same field.
           pvpNamed(after, params.layer) && before.state !== "empty" && after.state === "empty",
       );
     },
