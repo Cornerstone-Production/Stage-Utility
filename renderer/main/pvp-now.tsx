@@ -13,7 +13,7 @@
 // thumbnail, preview or frame endpoint at all.
 
 import { fmtDuration } from "./pco-timer";
-import { computePvpProgress, type PvpProgress } from "./pvp-progress";
+import { computePvpProgress, pvpMeterKey, type PvpProgress } from "./pvp-progress";
 import { Readout } from "./readout";
 import type { LayoutHAlign } from "@main/types/views";
 import { hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
@@ -199,6 +199,9 @@ export function PvpNowObject({
         )
       }
       meter={progress && (config.showProgress ?? true) ? progress.fraction : null}
+      // Which clip the fraction above is a fraction of, so the rule can tell a
+      // second of a clip playing from a cut to a different one.
+      meterKey={pvpMeterKey(layer)}
       footer={next}
       align={align}
       uniform={uniform}

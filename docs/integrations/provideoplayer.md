@@ -23,6 +23,11 @@ its **Network API** over HTTP:
 - It broadcasts **on change**, not on poll: the time codes are excluded from the
   comparison and the client ticks the progress bar itself from an anchor. With a
   video rolling that is around five frames per thirty seconds rather than thirty.
+- The bar advances *smoothly* on one reading a second: it is drawn with a
+  one-second CSS transition, so the browser fills in the frames between two
+  values the app already had. It snaps instead of sliding whenever the change is
+  not a tick — a cue change, a scrub, a restart, or a display that has been
+  asleep — and holds still while a clip is paused.
 - The API token, if you use one, is stored encrypted with the other secrets and
   never appears in a log line.
 

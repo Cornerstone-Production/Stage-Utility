@@ -62,3 +62,24 @@ export function computePvpProgress(
     fraction: elapsedSec / duration,
   };
 }
+
+/**
+ * WHICH clip a progress fraction is a fraction of.
+ *
+ * The progress rule interpolates between consecutive readings, and that is only
+ * honest for two readings of the same thing — so it snaps when this changes. See
+ * readout-meter.tsx.
+ *
+ * The layer as well as the media: a widget with no layer named follows content
+ * and can move to another layer that happens to be holding the same file, which
+ * is a cut and not a tick. Falls back to the media NAME where PVP gives no uuid,
+ * and to the layer alone where it gives neither — a rule with nothing to key on
+ * still snaps on the fraction's own discontinuities.
+ *
+ * Here rather than in either widget: both the "now" readout and the layer list
+ * draw this rule, and a key that meant something different in the two of them
+ * would be two behaviours wearing one name.
+ */
+export function pvpMeterKey(layer: PvpLayerDTO | null): string | null {
+  return layer ? `${layer.uuid} ${layer.mediaUuid ?? layer.mediaName ?? ""}` : null;
+}
