@@ -373,6 +373,11 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // ProVideoPlayer. `after: null` — it leads its own new group.
   { type: "pvp-layers", label: "ProVideoPlayer layers", group: "ProVideoPlayer", after: null },
   { type: "home-pvp", label: "ProVideoPlayer", group: "ProVideoPlayer", after: "pvp-layers" },
+  // The second PVP pair: one reading rather than a list of layers. Its own
+  // labels, because two entries in one palette group called "ProVideoPlayer" is
+  // a choice an operator cannot make.
+  { type: "pvp-now", label: "ProVideoPlayer now", group: "ProVideoPlayer", after: "home-pvp" },
+  { type: "home-pvp-now", label: "On screen now", group: "ProVideoPlayer", after: "pvp-now" },
   // Live scores, from ESPN's public scoreboard. In "Status" rather than a league
   // group of its own: it is one widget reading one integration, and a group
   // holding a single entry is a heading with nothing under it.

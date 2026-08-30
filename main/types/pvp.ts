@@ -52,6 +52,35 @@ export interface PvpLayerDTO {
    * only when `state !== "empty"`.
    */
   lastCueName: string | null;
+  /**
+   * `playingItem.uuid`, or null.
+   *
+   * The KEY the next-cue lookup uses. Not the name: the live workspace carries
+   * "CLEAR ALL" in three different playlists and "CLEAR GRAPHIC" twice inside
+   * one, and all 26 entries have distinct uuids — so a name would resolve to
+   * whichever copy the walk happened to reach first, and the "next" line under
+   * it would name a cue from another part of the service.
+   */
+  lastCueUuid: string | null;
+  /**
+   * The playlist entry that FOLLOWS `lastCueUuid`, or null.
+   *
+   * Null covers three different unknowns on purpose — no cue, the last entry of
+   * its playlist, and a cue the cached playlist tree has not heard of — because
+   * the renderer does the same thing with all three: it draws no "next" line. A
+   * line that is sometimes a guess is worse than no line.
+   *
+   * WHAT THIS IS NOT: it is not what PVP will play next. It is the next entry in
+   * the playlist, which is what plays next only while the playlist keeps
+   * auto-advancing. A hand-fired cue makes it wrong until the next poll. That is
+   * why it is the quietest line on the widget and why it can be switched off.
+   *
+   * Filled by the SERVICE from a cached playlist read, not by parseWorkspace:
+   * the transport-state response says nothing about playlists, and re-reading the
+   * tree every poll to decorate one line would double the integration's traffic
+   * for a value that changes when somebody edits a playlist.
+   */
+  nextCueName: string | null;
   hidden: boolean;
   muted: boolean;
   /** 0..1. PVP silently CLAMPS an out-of-range value it is sent rather than

@@ -21,7 +21,10 @@
 
 import { errorMessage } from "./errors.js";
 import { StatusIntegration } from "./integration-base.js";
-import { driftedLayers, isWorkspaceResponse, layerSignature, parseWorkspace } from "./pvp-parse.js";
+import {
+  cueSuccessors, driftedLayers, hasUnknownCue, isPlaylistsResponse, isWorkspaceResponse,
+  layerSignature, parseWorkspace, withNextCues,
+} from "./pvp-parse.js";
 import { PVP_OFFLINE, hasContent, type PvpLayerDTO, type PvpStatusDTO } from "../types/pvp.js";
 
 /** Active cadence. Governs how fast a cue change reaches a rule, not how smooth
@@ -49,6 +52,29 @@ const DRIFT_TOLERANCE_SEC = 1;
  *  4 x 150 ms. */
 const VERIFY_ATTEMPTS = 4;
 const VERIFY_INTERVAL_MS = 150;
+
+/**
+ * How long a cached playlist tree is trusted.
+ *
+ * The tree is a SECOND request (~4.8 KB for 26 cues) and it exists only to name
+ * the entry after the current cue. Playlists are built before a service and
+ * barely touched during one, so re-reading it every poll would add 100% to this
+ * integration's traffic to decorate one line. Five minutes is a compromise
+ * nobody notices: an operator who adds a playlist mid-service sees the "next"
+ * line appear within five minutes, or immediately if a cue from it is fired —
+ * see the miss path below.
+ */
+const PLAYLIST_TTL_MS = 5 * 60_000;
+
+/**
+ * The floor under a refetch triggered by a cue the cache cannot explain.
+ *
+ * A cue uuid that is in no playlist is a legitimate state — PVP can play an item
+ * that has since been deleted from the tree — so a bare "refetch on miss" would
+ * refetch on every single poll for as long as that cue stayed up. This bounds it
+ * to twice a minute.
+ */
+const PLAYLIST_MISS_COOLDOWN_MS = 30_000;
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -82,6 +108,19 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
    * and one duplicated "cue started".
    */
   private freshestReadAtMs = 0;
+
+  /**
+   * Cue uuid -> the name of the entry after it, from the last good playlist read.
+   *
+   * `null` is "never loaded", which is different from an empty map (a workspace
+   * with no playlists): an empty map is an answer and should not be refetched
+   * every poll.
+   */
+  private successors: Map<string, string | null> | null = null;
+  private playlistsReadAtMs = 0;
+  /** So an unreachable playlist endpoint is reported once per outage rather than
+   *  once a second. Cleared on the next good read. */
+  private playlistErrorLogged = false;
 
   constructor() {
     super("pvp", "pvp:status", PVP_OFFLINE);
@@ -166,6 +205,89 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
   }
 
   /**
+   * The playlist tree, folded into a cue -> next-cue-name map.
+   *
+   * Returns the failure rather than swallowing it: the caller decides what a
+   * missing tree means, which here is "draw no next line" and not "PVP is down".
+   * A catch that only logged would be the swallowed failure CLAUDE.md forbids.
+   */
+  private async loadSuccessors(
+    t: PvpTarget,
+  ): Promise<{ successors: Map<string, string | null> } | { error: string }> {
+    try {
+      const res = await this.request(t, "/data/playlists");
+      const body: unknown = await res.json();
+      // The same trap the workspace read guards: PVP's documentation port
+      // answers 200 with JSON, and an empty map cached from it would look like a
+      // workspace that genuinely has no playlists.
+      if (!isPlaylistsResponse(body)) return { error: "the response was not a ProVideoPlayer playlist tree" };
+      return { successors: cueSuccessors(body) };
+    } catch (err) {
+      return { error: errorMessage(err) };
+    }
+  }
+
+  /**
+   * Should the playlist tree be read again?
+   *
+   * PURE and static, like `shouldEmit`, so the cadence is testable without a
+   * socket — and for the same reason: this is the half of the integration that
+   * can loop.
+   *
+   * EVERY reason to read is behind a clock, including "we have never read one".
+   * A first version wrote `hasCache === false || ageMs >= TTL`, which
+   * short-circuited the clock in exactly the case that needs it most: a PVP
+   * whose playlist endpoint does not answer never gets a cache, so the
+   * never-loaded branch fired on every single poll, for ever, issuing a second
+   * doomed request a second — and an endpoint that HANGS rather than refusing
+   * adds the 4s request timeout to every poll cycle, silently stretching the
+   * 1 Hz cadence that automation triggers ride on.
+   *
+   * `hasUnknownCue` is the one reason that is not about age: a playlist created
+   * since the last read gives a live layer a cue uuid the cache has never seen,
+   * and waiting out the TTL would leave the "next" line blank for five minutes
+   * on the playlist somebody just built. It is still floored by the cooldown,
+   * because a cue that is in NO playlist — PVP can play an item since deleted
+   * from the tree — would otherwise refetch on every poll for as long as it
+   * stayed up.
+   */
+  static shouldReadPlaylists(hasCache: boolean, ageMs: number, hasUnknownCue: boolean): boolean {
+    if (!hasCache) return ageMs >= PLAYLIST_MISS_COOLDOWN_MS;
+    return ageMs >= PLAYLIST_TTL_MS || (hasUnknownCue && ageMs >= PLAYLIST_MISS_COOLDOWN_MS);
+  }
+
+  /** Refresh the playlist cache when shouldReadPlaylists says so. */
+  private async refreshSuccessors(t: PvpTarget, layers: readonly PvpLayerDTO[]): Promise<void> {
+    const unknown = this.successors !== null && hasUnknownCue(layers, this.successors);
+    if (!PvpService.shouldReadPlaylists(this.successors !== null, Date.now() - this.playlistsReadAtMs, unknown)) {
+      return;
+    }
+
+    // Stamped BEFORE the read, so a failing endpoint is retried on the cooldown
+    // rather than on every poll.
+    this.playlistsReadAtMs = Date.now();
+    const got = await this.loadSuccessors(t);
+    if ("error" in got) {
+      if (!this.playlistErrorLogged) {
+        this.playlistErrorLogged = true;
+        // Not `report`: the transport-state poll is working, so the integration
+        // is not in error. What the operator sees is the "next cue" line absent,
+        // which is what this line explains if they come looking.
+        console.warn(`[pvp] playlist tree unavailable (${got.error}) — the next-cue line will stay blank`);
+      }
+      return;
+    }
+    // The target can change while a read is in flight — an operator switching
+    // PVP hosts in Settings — and a tree from the OLD machine cached against the
+    // new one would name next cues from the wrong box for five minutes, with
+    // nothing to say so. Two boxes running the same workspace file would never
+    // trip the unknown-cue path that would otherwise recover it.
+    if (!this.running || this.target !== t) return;
+    this.playlistErrorLogged = false;
+    this.successors = got.successors;
+  }
+
+  /**
    * The target an ACTION may use, or null.
    *
    * `running` as well as `target`, and the difference is a real bug rather than
@@ -233,6 +355,10 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
         this.resetBackoff();
         this.report("connected", `Connected to ProVideoPlayer at ${t.host}:${t.port}`);
       }
+      // Before the emit, so the frame this poll sends already carries its next
+      // cues rather than naming them a poll later.
+      await this.refreshSuccessors(t, layers);
+      if (!this.running) return;
       this.emitFresh(layers, startedAtMs);
       // inDemand, not hasSubscribers: a rule reading this channel is a watcher,
       // and an appliance with no browser attached is exactly where "nobody is
@@ -323,7 +449,11 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
   private emitFresh(layers: PvpLayerDTO[], readAtMs: number): void {
     if (readAtMs < this.freshestReadAtMs) return;
     this.freshestReadAtMs = readAtMs;
-    this.emitIfChanged({ connected: true, layers, sampledAt: new Date().toISOString() });
+    // Decorated HERE, not at each call site: command()'s verify reads fold their
+    // layers back into the channel too, and a frame from one of those without
+    // next cues would blank the line for a beat every time a rule fired.
+    const decorated = this.successors ? withNextCues(layers, this.successors) : layers;
+    this.emitIfChanged({ connected: true, layers: decorated, sampledAt: new Date().toISOString() });
   }
 
   /**

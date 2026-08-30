@@ -75,6 +75,8 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   // agree in both directions, so declaring one without the other fails.
   "pvp-layers": ["readout"],
   "home-pvp": ["readout"],
+  "pvp-now": ["readout"],
+  "home-pvp-now": ["readout"],
   // Readout only. No drilldown: a DRILLDOWN capability without a matching route
   // is asserted against in both directions, and there is no scores page to send
   // an operator to -- the panel that shows more is the context-bar activity, and

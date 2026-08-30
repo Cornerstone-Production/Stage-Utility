@@ -1,0 +1,35 @@
+{
+  "playlist": {
+    "name": "Root",
+    "uuid": "pl-root",
+    "children": [
+      {
+        "uuid": "pl-masters",
+        "name": "Masters",
+        "items": [
+          { "name": "CLEAR ALL", "uuid": "cue-0000" },
+          { "name": "MAIN GRAPHIC", "uuid": "cue-0001" },
+          { "uuid": "cue-0009", "name": "CLEAR GRAPHIC" }
+        ],
+        "children": []
+      },
+      {
+        "uuid": "pl-preservice",
+        "name": "Pre-service",
+        "items": [
+          { "uuid": "cue-0002", "name": "LOWER THIRD" }
+        ],
+        "children": [
+          {
+            "uuid": "pl-nested",
+            "name": "Nested group",
+            "items": [
+              { "uuid": "cue-0010", "name": "NESTED ONE" },
+              { "uuid": "cue-0011", "name": "NESTED TWO" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

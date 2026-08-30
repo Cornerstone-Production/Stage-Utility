@@ -1001,8 +1001,47 @@ export function Inspector({
                 onChange={(v) => onConfig({ ...c, layerName: v })}
               />
             )}
-            <RowSwitch label="Show progress" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
+            {/* The BAR, not the time. The time remaining is always drawn — it is
+                the reading this widget exists for — and hiding it behind this
+                switch is how a countdown that was never drawn read as one PVP
+                was not reporting. */}
+            <RowSwitch label="Progress bar" hint="A hairline rule under each rolling clip. The time remaining is always shown." checked={c.showProgress ?? false} onChange={(v) => onConfig({ ...c, showProgress: v })} />
             <RowSwitch label="Hide when nothing is on screen" checked={c.hideWhenEmpty ?? false} onChange={(v) => onConfig({ ...c, hideWhenEmpty: v })} />
+          </>
+        );
+      })()}
+      {c.type === "home-pvp" && (
+        <RowSwitch label="Progress bar" hint="A hairline rule under each rolling clip. The time remaining is always shown." checked={c.showProgress ?? false} onChange={(v) => onConfig({ ...c, showProgress: v })} />
+      )}
+      {(c.type === "pvp-now" || c.type === "home-pvp-now") && (() => {
+        const live = !pvp?.connected
+          ? "Not connected"
+          : `${pvp.layers.length} layers, ${(pvp.layers ?? []).filter(hasContent).length} with content`;
+        return (
+          <>
+            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{live}</span></Row>
+            {c.type === "pvp-now" && (
+              /* Free text, not a select, for the reason the layer list's field
+                 is: a dropdown is populated only while PVP is connected, so an
+                 operator building a layout on a laptop away from the machine
+                 would find it empty with no way to type the name they know. */
+              <RowText
+                label="Layer"
+                hint="Leave empty to follow whichever layer has something on it."
+                value={c.layerName ?? ""}
+                placeholder={pvp?.layers.find(hasContent)?.name ?? "Any layer with content"}
+                onChange={(v) => onConfig({ ...c, layerName: v })}
+              />
+            )}
+            <RowSwitch label="Progress bar" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
+            <RowSwitch
+              label="Next cue"
+              // The caveat, where the operator makes the decision. It is the
+              // reason this is a switch at all.
+              hint="The next entry in the playlist — what plays next only while the playlist keeps auto-advancing. A cue fired by hand makes it wrong until the next poll."
+              checked={c.showNextCue ?? true}
+              onChange={(v) => onConfig({ ...c, showNextCue: v })}
+            />
           </>
         );
       })()}

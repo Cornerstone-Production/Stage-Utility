@@ -467,6 +467,17 @@ export type LayoutObjectConfig =
   // exhaustive record over every type carrying those keys, and reusing one to
   // inherit a free Home toggle would put two different meanings behind one word.
   // PVP's "nothing on this layer" is not a recorder's "nothing is going out".
+  //
+  // ONE ROW PER LAYER, in the shape charger-battery uses: the label truncates
+  // and flexes left, the values sit right in tabular figures, and an absent row
+  // is the word `empty` at low opacity. The two-line row this drew before was
+  // neither of the two conventions the app already had.
+  //
+  // "Last cue" is NOT here any more. `playingItem` is residual — four idle
+  // layers were observed naming the same cue while showing nothing, and it
+  // disagrees on live layers too — so it cannot be the loudest text on a tile.
+  // It survives on the DTO, where actions verify against it, and on `pvp-now`
+  // as the anchor for the next-cue lookup.
   | {
       type: "pvp-layers";
       /** "with-content" is the default: it turns an eleven-row list into a
@@ -477,7 +488,13 @@ export type LayoutObjectConfig =
        *  opaque in an inspector, and a workspace rebuilt from a template has new
        *  uuids for the same layers. */
       layerName?: string | null;
-      /** Draw the progress bar and the time remaining under a rolling clip. */
+      /**
+       * Draw the hairline progress rule under a rolling clip.
+       *
+       * The TIME is not behind this and never was — it is the reading the widget
+       * exists for. This is the bar alone, and it defaults OFF on a list: four
+       * hairlines stacked in a wall tile is a texture rather than four readings.
+       */
       showProgress?: boolean;
       /** Render nothing at all when no layer matches — a tally light rather than
        *  an empty box. */
@@ -487,10 +504,50 @@ export type LayoutObjectConfig =
   // is left. Always "layers with content" — a Home tile has room for the answer,
   // not for eleven rows of mostly nothing.
   //
-  // A bare discriminant, like home-recording-reaper. The layout object above is
-  // where the options live; a Home card is a glance, and every option on it is
-  // one more thing to set up before it says anything.
-  | { type: "home-pvp" }
+  // It CARRIES A CAPTION now, which is the operator's actual complaint about it:
+  // three rows of bare text could belong to any integration in the building,
+  // while every card beside it says ProPresenter or Recording or People.
+  | {
+      type: "home-pvp";
+      /** The hairline rule under a rolling clip. Same key and same meaning as
+       *  the wall object's, so an operator learns it once. */
+      showProgress?: boolean;
+    }
+  // ProVideoPlayer, as ONE reading rather than a list: what is on now, and how
+  // long is left.
+  //
+  // The list above answers "what is every layer doing", which is a question an
+  // operator asks while setting up. This answers "what is on right now", which
+  // is the question during a service — so it uses the app's OTHER convention,
+  // the caption / value / sub readout fifteen types already share, rather than a
+  // shrunken copy of the list.
+  | {
+      type: "pvp-now";
+      /** Which layer this reads, by NAME. Empty follows whichever layer holds
+       *  content, preferring the topmost — which is what a wall wants, since
+       *  nobody is there to pick. */
+      layerName?: string | null;
+      /** The hairline rule under the time. Defaults ON here: there is exactly
+       *  one of them, and it is part of the composition that was approved. */
+      showProgress?: boolean;
+      /**
+       * The next playlist entry, under everything.
+       *
+       * Switchable because it is a QUALIFIED answer: "next" is the next entry in
+       * the playlist, which is what plays next only while the playlist keeps
+       * auto-advancing. A hand-fired cue makes it wrong until the next poll.
+       */
+      showNextCue?: boolean;
+    }
+  // The same reading on the operator's own page. No `layerName`: Home's card
+  // settings are a short menu of switches, so a text field there would be a
+  // control the card can never reach — and a Home tile wants the answer, not a
+  // set-up step before it says anything.
+  | {
+      type: "home-pvp-now";
+      showProgress?: boolean;
+      showNextCue?: boolean;
+    }
   // Followed scores on the operator's own Home page. A quiet composition, NOT
   // the wall strip: a Home tile sits beside a readiness list and a next-service
   // card, and a panel of brand colour would out-shout every one of them. The

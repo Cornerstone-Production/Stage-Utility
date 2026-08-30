@@ -138,6 +138,7 @@ export const HOST_FRAMED_TYPES = new Set<LayoutObjectType>([
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl",
   "home-screens", "home-streaming", "home-streaming-resi", "home-streaming-youtube",
   "home-pvp",
+  "home-pvp-now",
   "home-scores",
 ]);
 
@@ -635,22 +636,47 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "ProVideoPlayer layers",
     blurb: "What ProVideoPlayer has on each layer, and how long is left",
     group: "ProVideoPlayer",
-    config: () => ({ type: "pvp-layers", show: "with-content", layerName: null, showProgress: true, hideWhenEmpty: false }),
+    // showProgress OFF. The time is not behind it any more — that is the reading
+    // the widget exists for — so this is the hairline rule alone, and four of
+    // them stacked in a wall tile is a texture rather than four readings. The
+    // `-now` widgets below default it ON, where there is exactly one.
+    config: () => ({ type: "pvp-layers", show: "with-content", layerName: null, showProgress: false, hideWhenEmpty: false }),
     style: () => CARD({ fontSize: 0.05 }),
     homeSize: "m",
     integration: { id: "pvp", label: "ProVideoPlayer" },
   },
   "home-pvp": {
+    // Label unchanged. It ships, it is in the widget reference, and an operator
+    // knows it — the new card below takes a name of its own rather than this one.
     label: "ProVideoPlayer",
-    blurb: "What is on screen now, and how long is left",
+    blurb: "Every layer holding something, and how long is left",
     group: "ProVideoPlayer",
-    config: () => ({ type: "home-pvp" }),
+    config: () => ({ type: "home-pvp", showProgress: false }),
     style: BARE,
     // "m" rather than "s": the card carries a media name and a time, and the
     // observed media names are long file names. "s" is a square, and a square
     // would truncate the one thing the card exists to show.
     homeSize: "m",
-    stylingOnly: true,
+    integration: { id: "pvp", label: "ProVideoPlayer" },
+  },
+  "pvp-now": {
+    label: "ProVideoPlayer now",
+    blurb: "What is on screen right now, and how long is left",
+    group: "ProVideoPlayer",
+    config: () => ({ type: "pvp-now", layerName: null, showProgress: true, showNextCue: true }),
+    style: () => CARD({ fontSize: 0.05 }),
+    homeSize: "m",
+    integration: { id: "pvp", label: "ProVideoPlayer" },
+  },
+  "home-pvp-now": {
+    // Its own name, not a second "ProVideoPlayer": two entries in one palette
+    // group with the same label is a choice an operator cannot make.
+    label: "On screen now",
+    blurb: "The one thing ProVideoPlayer has up, and how long is left",
+    group: "ProVideoPlayer",
+    config: () => ({ type: "home-pvp-now", showProgress: true, showNextCue: true }),
+    style: BARE,
+    homeSize: "m",
     integration: { id: "pvp", label: "ProVideoPlayer" },
   },
 

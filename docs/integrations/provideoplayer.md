@@ -39,12 +39,23 @@ yours differs — paste the **API Token** if you use one, enable it, and
 **Test connection**. A successful test names how many layers PVP has and how many
 are showing something.
 
-**On a layout:** add object → **ProVideoPlayer → ProVideoPlayer layers**. Options:
-which layers to show (all, only the ones holding something, or one by name), show
-progress, and hide when nothing is on screen. **ProVideoPlayer** is the Home card
-version — up to three layers with content, no options.
+**On a layout:** add object → **ProVideoPlayer**, which offers two widgets and a
+Home card for each.
 
-## Three things that will otherwise surprise you
+**ProVideoPlayer layers** is the list — one row per layer, with the file it is
+holding and how long is left. Options: which layers to show (all, only the ones
+holding something, or one by name), a hairline progress bar, and hide when
+nothing is on screen. **ProVideoPlayer** is its Home card, showing up to three
+layers with content.
+
+**ProVideoPlayer now** answers the other question: what is up right now, on one
+layer, as a single reading with a state word beside it. Options: which layer,
+the progress bar, and the next cue. **On screen now** is its Home card.
+
+Home's cards take their settings from a right-click on the card, not from the
+layout editor. See [Widgets](../reference/widgets.md) for what each line means.
+
+## Four things that will otherwise surprise you
 
 **The Network API port is not the documentation port.** PVP serves its API
 reference on a different port, and every `/api/0/…` path on that one returns 404.
@@ -54,10 +65,20 @@ pane is the one to enter.
 
 **The cue name is the last cue that TOUCHED the layer, not what is playing.** It
 is the only thing PVP reports and it never clears — four idle layers were observed
-simultaneously naming the same cue while displaying nothing. Stage draws it only
-on a layer that actually holds something, which is why the widget looks different
-from PVP's own UI. "Has content" is decided by whether the layer holds media, and
-by nothing else.
+simultaneously naming the same cue while displaying nothing, and it disagrees with
+the file that is up even on a layer that is playing. **No widget draws it**, which
+is why they look different from PVP's own UI. It is kept because a rule that fires
+a cue verifies itself against it, and because it is what anchors the next-cue
+lookup. "Has content" is decided by whether the layer holds media, and by nothing
+else.
+
+**"Next cue" is the next PLAYLIST ENTRY, not a prediction.** Stage finds the
+current cue in the playlist tree and names the entry after it, which is what plays
+next only while the playlist keeps auto-advancing. Fire a cue by hand and the line
+is wrong until the next poll. It is drawn quietly, never without a current cue to
+anchor it, never past the end of a playlist, and it can be switched off. The
+playlist tree is read at most once every five minutes — and again within thirty
+seconds if a layer plays a cue Stage has not seen — so it costs nothing per poll.
 
 **HTTPS is not supported against a self-signed certificate.** PVP's own
 documentation uses `curl -k` throughout, which implies one, and this app will not

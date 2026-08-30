@@ -63,6 +63,8 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   "reaper-status": DiscIcon,
   "pvp-layers": LayersIcon,
   "home-pvp": LayersIcon,
+  "pvp-now": LayersIcon,
+  "home-pvp-now": LayersIcon,
   scores: TrophyIcon,
   "home-scores": TrophyIcon,
   "record-status": CircleDotIcon,
