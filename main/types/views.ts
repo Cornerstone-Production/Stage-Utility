@@ -590,7 +590,20 @@ export type LayoutObjectConfig =
   // on LayoutObject.home (HomePlacement), which is where the editor writes them
   // and the grid reads them. Every sibling home-* member omits them for the same
   // reason, and a config field nothing ever fills is a branch never exercised.
-  | { type: "home-scores" }
+  | {
+      type: "home-scores";
+      /** Which followed game this card leads with — the same field, and the same
+       *  values, as the wall object above, because "which game" is one idea and
+       *  an operator should not learn it twice. `"auto"` follows whichever
+       *  followed game is live, preferring the one that scored most recently.
+       *  Otherwise an ESPN TEAM id (`league:teamId` — see teamPin). Never an
+       *  event id, which is a per-day value that means nothing next week.
+       *
+       *  Optional here, unlike the wall object's, because every home-scores card
+       *  saved before this has no value to read and `"auto"` is what it was
+       *  already doing. */
+      game?: "auto" | string;
+    }
   // A followed team's live score, from the ESPN scores integration
   // (`scores:status` channel). Renders the shared ScoreStrip -- the same strip
   // the context-bar capsule and the Home card draw, at wall size.

@@ -11,6 +11,7 @@
 // palette PRESENTS a type, not part of what the type is. The spec carries the
 // label, group and blurb, which every surface needs.
 
+import { useState } from "react";
 import {
   BoxIcon, SquareIcon, ImageIcon, SparklesIcon, TypeIcon, ClockIcon, TimerIcon,
   TagIcon, ListIcon, ListOrderedIcon, GaugeIcon, PaperclipIcon, MonitorIcon,
@@ -24,7 +25,7 @@ import {
   RadioTowerIcon,
 } from "lucide-react";
 
-import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, type PaletteGroup } from "../main/layout-objects";
+import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, widgetMatchesQuery, type PaletteGroup } from "../main/layout-objects";
 import { cn } from "../lib/cn";
 import { Checkbox } from "../components/ui/checkbox";
 
@@ -138,21 +139,35 @@ export interface PaletteProps {
 }
 
 export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed, hideUnconfigured, onToggleHideUnconfigured }: PaletteProps) {
+  // The palette is a browse, and browsing every group is the wrong job when you
+  // already know the widget's name — which is most of the time, after the first
+  // week. Home's add-widget sheet already had this box; the predicate behind it
+  // is shared (widgetMatchesQuery), so the same words find the same widgets on
+  // both surfaces rather than two filters drifting apart.
+  const [q, setQ] = useState("");
+
   const byGroup = PALETTE_GROUP_ORDER.map((g) => ({
     group: g,
-    items: types.filter((t) => LAYOUT_OBJECTS[t]?.group === g),
+    items: types.filter((t) => LAYOUT_OBJECTS[t]?.group === g && widgetMatchesQuery(t, q)),
   })).filter((s) => s.items.length > 0);
-
-  if (byGroup.length === 0) {
-    return (
-      <p className="p-3 text-caption2 text-fg-subtle">
-        Nothing matches the current filter.
-      </p>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-0.5 p-1">
+      {/* The filters stay put when nothing matches. They used to sit BELOW an
+          early return, so a filter that emptied the list took its own off switch
+          with it — with a search box that is a dead end: you cannot clear a query
+          whose input has vanished. */}
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        type="search"
+        placeholder="Search widgets…"
+        aria-label="Search widgets"
+        className={cn(
+          "mx-1 mb-1 rounded-md border border-line bg-surface px-2 py-1.5 text-caption2 text-fg",
+          "placeholder:text-fg-subtle outline-none focus-visible:ring-2 focus-visible:ring-focus",
+        )}
+      />
       {onToggleHideUnconfigured && (
         <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-caption2 text-fg-muted">
           <Checkbox
@@ -162,6 +177,11 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed, hideUnco
           />
           Hide widgets whose integration is not set up
         </label>
+      )}
+      {byGroup.length === 0 && (
+        <p className="p-3 text-caption2 text-fg-subtle">
+          Nothing matches the current filter.
+        </p>
       )}
       {byGroup.map(({ group, items }) => (
         <div key={group}>

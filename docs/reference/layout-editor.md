@@ -26,10 +26,68 @@ showing the time needs no source — rather than left as an empty heading.
 
 See [Widget reference](widgets.md) for what each widget's Content settings mean.
 
+## Starting from something
+
+A custom view can start blank or from a built-in layout. **Screens → New view →
+*Custom Layout*** offers **Start from**: *Blank canvas*, *Dashboard template*, or
+*Confidence Monitor template*. The two templates are the app's own dashboard and
+stage screen, built as ordinary editable objects rather than a fixed rendering —
+so they are a starting point you take apart, not a mode.
+
+Inside the editor, **Replace** does the same thing to a layout that already
+exists, and lists your **saved layouts** underneath. **Save as layout**, on the
+same toolbar, is what puts one there: a named copy of the whole canvas, global,
+and recallable onto any view.
+
+Replacing swaps the canvas outright, and **Undo** takes it back.
+
+## The object palette
+
+**Add widget** opens the palette, grouped by what a widget reads from, with a
+search box over it. **Hide widgets whose integration is not set up** removes the
+ones you have no gear for — from the palette and from the right-click Add menu
+alike. Left on, they stay listed but dimmed, which is the right default while you
+are still connecting things.
+
+Right-clicking the canvas offers the same catalogue as a menu.
+
+## Groups you reuse
+
+Select a container and press **Save as group** on the object toolbar. It keeps
+the container and everything in it under a name, in a global library, and the
+group list in the editor's sidebar inserts it into any view — the way a saved
+layout works, for a piece of one rather than the whole thing.
+
+Useful for the block you build once and want on four screens: a clock, a
+countdown and a section chip arranged the way your team reads them.
+
 ## Placing objects
 
 Objects are stored as fractions of the canvas (0–1), never pixels, so a layout
 looks the same on a 1080p screen and a 4K one.
+
+### The object toolbar
+
+Above the inspector, for the selected object: **Snap to grid**, **Lock**,
+**Save as group** (containers only), bring to front / forward / backward / back,
+**Duplicate**, and **Delete**. A child of a container also gets **Move out of
+container**, which is the only way back out once something is nested.
+
+**Lock** freezes an object's position and size — it can still be selected,
+restyled and reconfigured, but not dragged, resized, snapped or deleted. Locking
+a container locks everything inside it. The layer list beside the canvas carries
+an eye per object, which hides it while you work on what is underneath.
+
+### Canvas shape
+
+The **Canvas** popover sets the design canvas, either from a preset —
+
+Landscape 16:9 · Portrait 9:16 · Standard 4:3 · Widescreen 16:10 ·
+Ultrawide 21:9 · Super ultrawide 32:9 · Square 1:1 · 3:2 · 5:4
+
+— or by typing a width and height. Only the **shape** matters: the renderer
+scales the design canvas to whatever screen it lands on, so a 16:9 layout is not
+a 1080p layout. The **fit** below is chosen in the same popover.
 
 ### Grid
 

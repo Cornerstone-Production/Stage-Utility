@@ -66,6 +66,44 @@ const APPLIES = {
   showNextCue: { "pvp-now": true, "home-pvp-now": true },
 } satisfies { [K in ToggleKey]: Record<TypesWith<K>, true> };
 
+/**
+ * Settings that are a CHOICE FROM A LIST this file cannot know.
+ *
+ * `game` names one of the teams the scores integration is following, which is
+ * config the operator edits in Settings and this module has no business
+ * fetching. So the menu builds the options (see gameOptions) and this file keeps
+ * the one thing it is for: which widgets support the setting, checked by the
+ * compiler. A config member that carries `game` and is not named here fails the
+ * build, exactly as for a toggle.
+ *
+ * Not folded into SPECS: every entry there is a two-way flip with a `next` value
+ * computed from the current one, and a list of nine teams is not that.
+ */
+const PICKS = {
+  game: { scores: true, "home-scores": true },
+} satisfies { [K in PickKey]: Record<TypesWith<K>, true> };
+
+type PickKey = "game";
+
+/** Every setting Home's menu can write into a card's config. */
+export type SettingKey = ToggleKey | PickKey;
+
+/**
+ * This card's value for a picked setting, or null if it does not have one.
+ *
+ * Null rather than a thrown error or a bare boolean, because the menu asks
+ * before it knows: it calls this for every card and only draws the submenu when
+ * an answer comes back.
+ */
+export function pickedValue(card: LayoutObject, key: PickKey): string | null {
+  const config = card.config as Config;
+  if (!((config.type as string) in PICKS[key])) return null;
+  const value = config[key];
+  // "auto" is the fallback for `game` on both widgets, and it is what a card
+  // saved before the field existed was already doing.
+  return typeof value === "string" ? value : "auto";
+}
+
 type ToggleKey =
   | "showSeconds"
   | "format"
@@ -189,7 +227,7 @@ export function togglesFor(card: LayoutObject): CardToggle[] {
  *  it through the same save path every other Home edit uses. */
 export function withToggle(
   card: LayoutObject,
-  key: ToggleKey,
+  key: SettingKey,
   next: boolean | string,
 ): LayoutObject {
   return { ...card, config: { ...(card.config as Config), [key]: next } as LayoutObject["config"] };

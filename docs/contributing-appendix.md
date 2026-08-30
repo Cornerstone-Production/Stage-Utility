@@ -7,29 +7,34 @@ Orientation for working in the codebase.
 ```
 .
 ├── server.ts                  # Backend entry point
-├── index.html                 # Kiosk display (Vite entry)
-├── app.html                   # Operator app (Vite entry)
+├── index.html                 # Kiosk display bundle (Vite entry)
+├── app.html                   # Operator app bundle (Vite entry)
 ├── vite.config.ts             # Multi-page build + dev proxy + React Compiler
 ├── main/                      # Backend
 │   ├── services/              # stage-controller, remote-server, pco-service,
-│   │                          #   live-poller, propresenter-service, prodcom-service,
-│   │                          #   wireless/device managers, integration-manager,
-│   │                          #   stores (settings/slots/views/presets/layout-templates),
-│   │                          #   slot-resolver, encryption, broadcaster, app-paths, …
-│   ├── providers/wireless/    # Shure (ULX-D/Axient/PSM) + Sennheiser (EW-DX/EW-G4/Spectera) drivers + registry
-│   └── types/                 # Backend type contracts (stage.ts: View/Output/LayoutDTO…)
+│   │   │                      #   live-poller, one <id>-service.ts per integration,
+│   │   │                      #   integration-manager, the automation engine,
+│   │   │                      #   the recorders, the stores, encryption, broadcaster
+│   │   ├── routes/            # One module per slice of the HTTP surface
+│   │   ├── archive/           # Raw-sample CSVs: write, read, export, import
+│   │   └── update/            # Track detection, install kind, per-kind strategies
+│   ├── providers/wireless/    # Shure (ULX-D/Axient/PSM/SBC) + Sennheiser
+│   │                          #   (ewG4/EW-DX/Spectera) drivers + registry
+│   └── types/                 # Backend type contracts (views.ts: View/Output/LayoutDTO…)
 ├── renderer/                  # Frontend (React)
-│   ├── main/                  # Displays: stage-view (router/picker) → slot grid,
-│   │                          #   dashboard-view, stage-display-view, transcription-view,
+│   ├── app/                   # The operator app: router, rail, context bar,
+│   │                          #   destinations, Home, Screens
+│   ├── main/                  # Displays: stage-view → slot grid, dashboard-view,
+│   │                          #   stage-display-view, transcription-view,
 │   │                          #   layout-renderer (custom layouts); hooks + pco-timer
-│   ├── settings/              # Section components rendered by app/ routes
-│   │                          #   (outputs-section, view-detail, slots-section,
-│   │                          #   layout-editor, …)
+│   ├── editor/                # The layout editor: canvas, palette, inspector
+│   ├── settings/sections/     # Settings and tool pages rendered by app/ routes
 │   ├── components/            # Shared components + ui/ primitives
-│   ├── fonts/                 # Self-hosted Outfit (brand title)
 │   └── lib/api.ts             # REST + SSE client
-├── public/control.html        # Standalone phone remote
-├── scripts/                   # install.sh / uninstall.sh
+├── public/                    # App icon, web manifest, and a fallback remote page
+├── packaging/homebrew/        # The Homebrew formula
+├── scripts/                   # Install and update scripts, the kiosk agent
+│                              #   installers, release tooling, hardware probes
 └── INSTALL.md                 # Server deployment guide
 ```
 
@@ -40,7 +45,8 @@ Orientation for working in the codebase.
 | `npm run dev` | Vite dev server (frontend) on `:3000` |
 | `npm run server` | Backend via `tsx server.ts` on `:8788` (dev) |
 | `npm start` | Backend via `node --import tsx server.ts` (production) |
-| `npm run build` | Build the renderer into `build/renderer/` |
+| `npm run build` | Build both bundles into `build/renderer/` |
+| `npm test` | The whole suite, on Node's test runner |
 | `npm run type-check` | `tsc --noEmit` |
 | `npm run lint` | ESLint (flat config + react-hooks) |
 | `npm run format` | Format with `oxfmt` |

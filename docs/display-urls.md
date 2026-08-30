@@ -1,4 +1,8 @@
-# Display URLs and tool links
+# Display URLs
+
+Every address the server answers on: the screens, and the operator pages they
+must not collide with. What those operator pages do is
+[The operator app](features/operator-app.md).
 
 ## Permanent addresses
 
@@ -22,59 +26,72 @@ Slugs are rejected, with the reason shown on the card, if they are reserved, sta
 with `preview-`, collide with another display's id or slug, or contain anything
 outside `a-z`, `0-9` and `-`.
 
-Reserved: `settings`, `log`, `photos`, `baptism`, `history`, `patch`, `scriptview`,
-the empty path, and the `preview-` prefix. These are pages in their own right — a
-display slugged `history` would render the History page rather than the display.
+Reserved: the empty path, `settings`, `log`, `photos`, `enroll`, and every
+operator page below — `history`, `baptism`, `patch`, `scriptview`, `automation`,
+`plan`, `screens`, `consoles`, `views`, `displays` — plus the `preview-` prefix.
+These are pages in their own right: a display slugged `history` would render the
+History page rather than the display.
+
+The reserved list is derived from the app's own route table rather than written
+out a second time, so a page added to the app is reserved the moment it is
+routed.
 
 Where both exist, the id wins, so a display is always reachable at its permanent
 address.
 
-## Operator surfaces
+## Operator pages
 
-These render in the operator app: one page with navigation and a live service
-context bar, rather than the separate chrome-free pages they used to be. They
-follow the light/dark theme, unlike the always-dark display URLs above.
+These render in the operator app: one page with a sidebar and the live service
+[context bar](features/context-bar.md), rather than separate chrome-free pages.
+They follow the light/dark theme, unlike the always-dark display URLs above.
 
 | URL | What it is |
 | --- | --- |
-| `/history` | Service history, timing and attendance — read-only |
-| `/patch` | This week's stage patch, for volunteers |
+| `/` | Home |
+| `/screens` | Screens and the views they show |
 | `/scriptview` | Rundown viewer |
-| `/baptism` | Baptism operator |
+| `/patch` | This week's stage patch, for volunteers |
 | `/automation` | Automation rules |
-| `/integrations` | Connected devices and services |
+| `/plan` | Which service and plan this machine follows |
+| `/history` | Service history, timing and attendance — read-only |
+| `/baptism` | Baptism operator |
+| `/settings/integrations` | Connected devices and services |
+| `/settings/branding` | App name, logos, accent colour |
+| `/settings/advanced` | Updates, network, backups, kiosk devices |
+
+Plus the pages reached from those: `/screens/<view id>/edit` (the layout
+editor), `/consoles/<view id>` (a console you built), `/patch/edit`,
+`/scriptview/presets`, `/scriptview/<service type>/<layout>`, and
+`/history/manage`.
 
 Moving between them does not reload the page, so the event stream and cached
 plan data survive a navigation.
 
-`/settings` remains its own page for now.
+`/log` is not one of them. It is a plain page the server renders itself — an
+operator diagnostic rather than a destination, reachable from
+**Settings → Advanced → Open log**, and gated behind a token when one is set.
+
+`/settings` on its own lands on Integrations. `/views` and `/displays` redirect
+to `/screens`, and the old `#hash` deep links into the settings window resolve
+to their new routes — bookmarks and printed links keep working.
 
 `/history` is **read-only**: it is a link handed to people outside Production, so
 it shows the record without the controls that change it. The operator's own
 history — edit recorded times, merge a split service, delete one — is
-`/history/manage`, in the rail under Services.
+`/history/manage`, in the sidebar under Services.
 
-## Tool links
+## QR codes
 
-The tool pages — `/baptism`, `/patch`, `/scriptview`, `/history`, `/log` — are
-listed under **Settings → Connect → Tools**, with the same copy-to-clipboard
-treatment display links get.
+A QR encodes the `/<id>` address and never a slug, since a printed code outlives
+the session it was made in. Codes are for screens you mount; the operator pages
+above are links you send someone, so they have none.
 
-The display picker at `/` tiles `/scriptview`, `/baptism`, `/patch` and `/history`.
-`/log` is deliberately not there — it is an operator diagnostic, not a volunteer
-destination.
-
-Tools have no QR codes of their own; they are links you send someone rather than
-codes you print and mount. Where a QR does appear it encodes the `/<id>` address
-and never a slug, since a printed code outlives the session it was made in.
-
-They are not on the Screens page, which answers a different question: which view a
-physical screen shows.
+Turning the connect QR on and off is **Settings → Branding → Show connect QR on
+displays**, and it is global rather than per screen.
 
 ## Icon colors
 
 Every display icon can be retinted by clicking it on the Screens page. Colors are
-keyed to the display id, so a colour set in one place shows everywhere including
-the picker.
+keyed to the display id, so a colour set in one place shows everywhere.
 
 Untinted icons use the theme accent. Clearing a color returns it to that default.
