@@ -269,6 +269,25 @@ export type LayoutObjectConfig =
       aheadColor?: string | null;
       behindColor?: string | null;
       caption?: string | null;
+      /**
+       * Lead with the wall-clock time the service is PROJECTED TO END instead of
+       * the drift figure.
+       *
+       * The same question the drift answers, asked the way an operator asks it:
+       * "when do we get out of here". The drift moves to the sub-line under
+       * `showLabel`, so the two settings stay orthogonal —
+       *
+       * As value over sub-line, for each combination of the two:
+       *
+       *   off / off   3:20                    (what every existing object does)
+       *   off / on    3:20    over "behind"
+       *   on  / off   11:32
+       *   on  / on    11:32   over "3:20 behind"
+       *
+       * ABSENT means off, so nothing anybody has already placed changes. See
+       * projectedServiceEndMs for what the time is and when there isn't one.
+       */
+      showProjectedEnd?: boolean;
     }
   // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
   // instance to read (omitted / "default" = the primary) — lets separate custom
