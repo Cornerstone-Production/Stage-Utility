@@ -94,6 +94,29 @@ match on something prose cannot satisfy (an assignment, not a bare constructor
 name), and assert an EXACT count rather than a floor — a floor with slack is how
 three config stores went missing from every backup with the suite green.
 
+## Ship the docs and the log line with the change
+
+A change is not done when the code works. Before you open the PR, ask both
+questions and answer them in the PR body:
+
+**Does anything in `docs/` now describe this wrongly, or fail to describe it at
+all?** A feature documented nowhere gets used by nobody — that is the failure,
+not a tidiness problem. A new integration, a new layout object, a new route, a
+new setting, a changed default, a removed capability: each lands in the same
+commit as its docs. Follow the voice already there — concise reference for a
+stranger who found this repo on GitHub, describing what the thing does now,
+never a before/after narrative.
+
+**Would an operator debugging this at 9am on a Sunday have anything to read?**
+New subsystems have shipped here logging nothing, so the only evidence of a
+failure was a blank widget. If a thing can fail, retry, reconnect, skip work or
+silently do nothing, it says so on a tagged line (`[sensource]`, `[updater]`),
+and the `/log` page surfaces it. Do not log every success — log the decisions
+and the failures.
+
+"No docs needed" and "nothing worth logging" are both legitimate answers. Say
+which you chose, so the next reader knows it was a decision.
+
 ## Do not swallow a failure
 
 A new `catch` either rethrows or returns the failure to its caller. A `catch` that

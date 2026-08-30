@@ -134,6 +134,18 @@ CI runs the same four. There is one long-standing lint warning
 Chain them with `&&`, not `;`. With `;` a failure scrolls past and the commit
 lands anyway — that is how a type error once reached `beta`.
 
+Green is not finished. Two more questions, answered in the PR body:
+
+- **Do the docs still describe this correctly?** A new integration, layout
+  object, route, setting or changed default lands in the same commit as its
+  entry in `docs/`. A capability documented nowhere gets used by nobody.
+- **Does it log anything?** If it can fail, retry, reconnect or silently skip
+  work, it says so on a tagged line the `/log` page surfaces. Log the decisions
+  and the failures, not every success.
+
+"No docs needed" and "nothing worth logging" are fine answers — say which, so
+it reads as a decision rather than an omission.
+
 ## React state
 
 Do not mirror a prop or a server value into state with an effect:
