@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { LayoutDTO, LayoutObject } from "@main/types/views";
+import { HOME_VIEW_ID } from "@main/services/home-view";
 
 import { ObjectContent, boxStyle, useLayoutData } from "../../main/layout-renderer";
 import type { LayoutRenderCtx } from "../../main/layout-renderer";
@@ -153,7 +154,11 @@ const NOMINAL_H = ROW_PX * 6;
  * efficiency rule every other surface follows.
  */
 function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
-  const d = useLayoutData(layout);
+  // HOME_VIEW_ID, matching `embedChain` below: the gate walks embedded layouts
+  // under the same cycle/depth limiter the renderer uses, so seeding it with
+  // nothing would give the gate one more level of budget than the render and
+  // subscribe for a tile Home refuses to draw.
+  const d = useLayoutData(layout, HOME_VIEW_ID);
   // No state yet — the caller renders nothing rather than a grid of dashes.
   if (!d.state) return null;
   // Assembled exactly as LayoutRenderer assembles it — the three renamed fields
@@ -184,6 +189,9 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     integrations: d.integrationsSnap.states,
     integrationLabels: d.integrationsSnap.labels,
     wireless: d.wireless,
+    // Real presence, from the heartbeat — Home's screens count and its readiness
+    // list are two of the three things in the app that draw it.
+    onlineOutputIds: d.onlineOutputIds,
     now: d.now,
     skewMs: d.skewMs,
     ndiSource: null,
@@ -193,6 +201,10 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     // And it IS Home — the flag the streaming cards read to know they are tiles
     // on a page of tiles rather than widgets on a wall.
     home: true,
+    // Home IS the outermost view, so it is ON the chain rather than absent from
+    // it: a card embedding Home would otherwise draw a second Home inside itself
+    // and only the depth cap would stop it.
+    embedChain: [HOME_VIEW_ID],
     placed: undefined,
   };
 }

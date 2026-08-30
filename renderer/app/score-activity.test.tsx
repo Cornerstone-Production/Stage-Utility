@@ -73,7 +73,7 @@ function status(over: Partial<ScoresStatusDTO> = {}): ScoresStatusDTO {
   return {
     connected: true,
     games: [game()],
-    rev: 0,
+    scoreRev: 0,
     lastEvents: [],
     fetchedAt: "2026-08-14T18:30:00.000Z",
     error: null,

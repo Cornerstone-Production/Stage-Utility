@@ -1,3 +1,5 @@
+import type { RevisionedStatus } from "./live.js";
+
 // scores.ts — the shapes the scores integration speaks.
 //
 // Every field here was observed in a real ESPN response on 2026-08-29; see
@@ -156,7 +158,7 @@ export interface ScoreEvent {
   to: number;
 }
 
-export interface ScoresStatusDTO {
+export interface ScoresStatusDTO extends RevisionedStatus {
   connected: boolean;
   /** Followed games for today, sorted by start time then eventId — see sortGames. */
   games: ScoreGameDTO[];
@@ -167,9 +169,16 @@ export interface ScoresStatusDTO {
    * what drives the auto-open. Same idiom as the presence work: a monotonic
    * counter, because comparing DTOs in the client is a second place for the
    * change rule to live and drift.
+   *
+   * NOT the same counter as `rev` from RevisionedStatus, and the names are kept
+   * apart on purpose. `rev` advances whenever a frame is broadcast — which for
+   * this DTO includes a game clock ticking — and exists so a hydrate read cannot
+   * overwrite a newer push. Keying the auto-open off it would pop the Live
+   * Activity open every time a clock moved. `scoreRev` advances only on a scoring
+   * event, which is the thing worth interrupting an operator for.
    */
-  rev: number;
-  /** The scoring changes carried by the poll that last bumped `rev`. */
+  scoreRev: number;
+  /** The scoring changes carried by the poll that last bumped `scoreRev`. */
   lastEvents: ScoreEvent[];
   /** ISO-8601 of the last successful poll, or null. */
   fetchedAt: string | null;
@@ -186,7 +195,7 @@ export interface ScoresStatusDTO {
 export const SCORES_OFFLINE: ScoresStatusDTO = {
   connected: false,
   games: [],
-  rev: 0,
+  scoreRev: 0,
   lastEvents: [],
   fetchedAt: null,
   error: null,

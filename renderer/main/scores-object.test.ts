@@ -43,7 +43,7 @@ function status(games: ScoreGameDTO[], over: Partial<ScoresStatusDTO> = {}): Sco
   return {
     connected: true,
     games,
-    rev: 0,
+    scoreRev: 0,
     lastEvents: [],
     fetchedAt: null,
     error: null,

@@ -296,7 +296,7 @@ export function scoresChanged(prev: ScoresStatusDTO, next: ScoresStatusDTO): boo
   return (
     prev.connected !== next.connected ||
     prev.error !== next.error ||
-    prev.rev !== next.rev ||
+    prev.scoreRev !== next.scoreRev ||
     JSON.stringify(prev.games) !== JSON.stringify(next.games)
   );
 }

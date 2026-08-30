@@ -48,12 +48,20 @@ switches.
 | **Recent services** | Attendance, length and start time, recently averaged | Recorded history |
 | **Plan file** | A page from a file attached to the plan | Planning Center attachments |
 | **Embedded view** | Another view, drawn inside this one | This app |
+| **Embedded screen** | What another screen is showing, following its routing | This app |
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
 **Service pacing** carries slippage forward from earlier items and keeps growing
 while the current item runs long, so it answers "are we going to finish on time",
 not "was that item long". It needs a recorded service timeline; without one it
 shows nothing.
+
+**Embedded view** and **Embedded screen** can be expanded: on an operator
+surface each tile carries a control in its bottom-right corner that grows it to
+fill the window, and Escape or the panel's close button brings it back. Nothing
+navigates, so there is no page to return from. A screen showing the same layout
+gets no such control — an overlay opened by a passer-by would stay open until
+somebody walked over to it.
 
 **Service order** is superseded by ScriptView — see
 [ScriptView and Baptisms](../features/scriptview-and-baptisms.md). It is kept so

@@ -1864,6 +1864,7 @@ export function LayoutEditor({
             <ShapePreview
               shape={previewShape}
               layout={{ version: 1, canvas, objects }}
+              viewId={view.id}
               ndiSource={view.ndiSource ?? null}
               surface={viewSurface(view)}
               avail={previewAvail}
@@ -1882,7 +1883,7 @@ export function LayoutEditor({
               // `home` is the VIEW's identity, not the editor's: editing Home's
               // own layout must preview Home's cards, and editing anything else
               // must preview what that surface will draw.
-              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
+              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, embedChain: [view.id], integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}

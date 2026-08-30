@@ -5,6 +5,7 @@ import type { BaptismAutoStart, DisplayInfo, Output } from "../types/stage.js";
 import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
+import { ID_KINDS, initialFloor, nextId, type IdKind } from "./id-allocator.js";
 
 export interface SettingsData {
   /** Whether and how the baptism timer starts itself from the plan. */
@@ -25,6 +26,19 @@ export interface SettingsData {
   displays: DisplayInfo[];
   /** Physical screens + their View routing (canonical once migrated). */
   outputs?: Output[];
+  /**
+   * High-water marks for id allocation — the next number each kind may use.
+   *
+   * Persisted because a deleted item leaves no trace in the live list, and
+   * `max(existing) + 1` therefore hands its id to the next thing created. Ids
+   * are permanent by contract: slots.json is keyed by output id, and Pis,
+   * bookmarks and QR codes point at `/<id>`.
+   *
+   * Absent means "not recorded yet", and the allocator falls back to the
+   * collision check alone — so an install that upgrades into this keeps working
+   * and starts recording from its current maximum.
+   */
+  idFloors?: { view?: number; output?: number };
   /** Allowlisted service type IDs for auto mode. Empty = all allowed. */
   allowedServiceTypeIds: string[];
   /** Polling/metering interval (ms) applied to all wireless gear. */
@@ -154,6 +168,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   integrationEnabled: {},
   showQr: true,
   displays: [{ id: "display-1", name: "Display 1" }],
+  idFloors: {},
   // Empty, which every reader treats as "all allowed". Seeding it with ids
   // restricts a fresh install to service types that exist in no other org.
   allowedServiceTypeIds: [],
@@ -205,10 +220,13 @@ export const settingsStore = {
     return syncTimeZone(await store.load());
   },
 
-  async save(data: SettingsData): Promise<void> {
-    syncTimeZone(data);
-    return store.save(data);
-  },
+  // There is deliberately no `save`. A whole-object write is a read-modify-write
+  // that is not serialized against anything, so it undoes every field written
+  // between the read and the write -- and one of those fields is idFloors, the
+  // high-water mark that stops a deleted view or display id being reissued.
+  // `patch` is a serialized read-modify-write and takes only the fields that
+  // actually changed. Removed rather than documented so the type checker is what
+  // stops the next caller.
 
   async get(): Promise<SettingsData> {
     return syncTimeZone(await store.load());
@@ -224,5 +242,95 @@ export const settingsStore = {
     // live poller advancing the plan while the operator changes display routing)
     // from clobbering this one's fields.
     return syncTimeZone(await store.update((current) => ({ ...current, ...clean })));
+  },
+
+  /**
+   * Allocate one or more ids AND advance the floor as one serialized
+   * read-modify-write.
+   *
+   * Atomic by construction rather than by luck. Allocation reads a floor and
+   * writes it back, and its callers await in between — so with a cold settings
+   * cache two concurrent creates could both read the same floor and be handed
+   * the same id. Doing the whole read-allocate-write inside `store.update` puts
+   * it on the same write queue as every other settings write, which is the only
+   * thing that makes the pair indivisible. Nothing else in the code states that
+   * dependency, so it must not be left implicit.
+   *
+   * `allocate` runs INSIDE that queue and must therefore be SYNCHRONOUS —
+   * awaiting in there would hold every other settings write for as long as it
+   * took. It is handed a `next` it may call as many times as it needs (a view
+   * bundle mints one id per imported view), each call passing the ids taken so
+   * far so the collision check stays honest across the batch.
+   *
+   * `alsoWrite` turns what was allocated into settings fields to write in the
+   * SAME file write — `addOutput`'s outputs list, which cannot be built until
+   * the id exists. It must not produce branding-image fields: this path does not
+   * externalize data URLs the way `patch` does.
+   */
+  async allocateIds<R>(
+    kind: IdKind,
+    allocate: (next: (existingIds: readonly string[]) => string) => R,
+    alsoWrite: (allocated: R) => Partial<SettingsData> = () => ({}),
+  ): Promise<R> {
+    const { prefix, first } = ID_KINDS[kind];
+    let allocated!: R;
+    // Wrapped like every other write path, so the "no caller can forget"
+    // invariant syncTimeZone documents stays literally true.
+    syncTimeZone(await store.update((current) => {
+      let floor = Math.max(current.idFloors?.[kind] ?? first, first);
+      allocated = allocate((existingIds) => {
+        const minted = nextId(prefix, existingIds, floor);
+        floor = minted.nextFloor;
+        return minted.id;
+      });
+      return {
+        ...current,
+        ...alsoWrite(allocated),
+        // Monotonic against `current`, not against the floor read above: a floor
+        // that went backwards is the id-reuse bug again.
+        idFloors: { ...current.idFloors, [kind]: Math.max(current.idFloors?.[kind] ?? 0, floor) },
+      };
+    }));
+    return allocated;
+  },
+
+  /**
+   * Bring every floor up to at least one past the highest id on disk. Boot's
+   * repair pass for a floor that is missing or too low.
+   *
+   * MISSING is the install that upgraded into id floors: nothing writes a floor
+   * until an id is issued, so it has ids and no floor, and the fallback for a
+   * missing floor is the collision check alone — `max(existing) + 1`, the
+   * original bug.
+   *
+   * TOO LOW is anything that put ids on disk without going through the
+   * allocator: a settings.json edited by hand, a data directory assembled by
+   * copying files, an older build. A restore USED to be the main way in — a
+   * pre-feature snapshot carries no floors, and the merge had only the live
+   * floor to keep — but config-snapshot.ts now raises the floor past the ids in
+   * the bundle as it writes, so the floor is correct before this ever runs. This
+   * is the backstop, not the thing that closes that hole.
+   *
+   * RAISING, not overwriting, is what makes recomputing from the live list safe.
+   * A stored floor knows about ids that were spent and then deleted, which the
+   * live list cannot; taking the max keeps that knowledge and adds the ids the
+   * floor did not know about. It can only ever move a floor up. (This used to
+   * skip any floor that was present, on the reasoning that recomputing could
+   * only lower it — true of an overwrite, and the reason a restore reissued ids.)
+   */
+  async seedIdFloors(seeds: Record<IdKind, readonly string[]>): Promise<void> {
+    syncTimeZone(await store.update((current) => {
+      const floors = { ...current.idFloors };
+      let changed = false;
+      for (const kind of Object.keys(seeds) as IdKind[]) {
+        const raised = Math.max(floors[kind] ?? 0, initialFloor(kind, seeds[kind]));
+        if (raised === floors[kind]) continue;
+        floors[kind] = raised;
+        changed = true;
+      }
+      // Reference-equal means "nothing changed", which DataStore.update honours
+      // by not writing — so a normal boot costs no disk write.
+      return changed ? { ...current, idFloors: floors } : current;
+    }));
   },
 };

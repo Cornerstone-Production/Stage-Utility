@@ -768,13 +768,22 @@ class IntegrationManager {
     }
 
     // Persist non-secret config.
+    //
+    // patch, not load-mutate-save. Saving the whole object writes back every
+    // field as it was read, so anything written in between is undone -- and one
+    // of those fields is idFloors, the high-water mark that stops a deleted view
+    // or display id being handed out again. Creating a view while this saved
+    // would have rolled the floor back to before it existed.
     const settings = await settingsStore.load();
-    settings.integrationConfigs ??= {};
-    settings.integrationConfigs[id] = {
-      ...(settings.integrationConfigs?.[id] ?? {}),
-      ...nonSecretConfig,
-    };
-    await settingsStore.save(settings);
+    // Built once and used for BOTH the write and the mask below. The masked
+    // config used to be read back off the object this mutated in place, so
+    // dropping the mutation without this would leave the state holding the
+    // PREVIOUS config -- which is credentials saved and the integration never
+    // started.
+    const merged = { ...(settings.integrationConfigs?.[id] ?? {}), ...nonSecretConfig };
+    await settingsStore.patch({
+      integrationConfigs: { ...settings.integrationConfigs, [id]: merged },
+    });
 
     // Persist secrets (merge with existing so unchanged ones survive).
     if (Object.keys(newSecrets).length > 0) {
@@ -784,9 +793,7 @@ class IntegrationManager {
 
     // Rebuild masked config for state.
     const allSecrets = await secretsStore.getSecrets(id);
-    const maskedConfig: Record<string, unknown> = {
-      ...(settings.integrationConfigs?.[id] ?? {}),
-    };
+    const maskedConfig: Record<string, unknown> = { ...merged };
     for (const key of secretKeys) {
       maskedConfig[key] = allSecrets[key] ? "••••" : "";
     }
@@ -832,10 +839,13 @@ class IntegrationManager {
 
     this.states.set(id, { ...state, enabled });
 
+    // patch, for the reason spelled out in the config save above: a whole-object
+    // save undoes anything written between the read and the write, id floors
+    // included.
     const settings = await settingsStore.load();
-    settings.integrationEnabled ??= {};
-    settings.integrationEnabled[id] = enabled;
-    await settingsStore.save(settings);
+    await settingsStore.patch({
+      integrationEnabled: { ...settings.integrationEnabled, [id]: enabled },
+    });
 
     if (id === "wireless") {
       // Master toggle: re-apply connections without reloading from disk.

@@ -308,7 +308,7 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
   const games = scores?.games ?? [];
   const isOpen = open && games.length > 0;
   const clamped = focus >= 0 && focus < games.length ? focus : 0;
-  const rev = scores?.rev ?? 0;
+  const rev = scores?.scoreRev ?? 0;
   // Read at render, so the panel honours a setting changed mid-session on the
   // very next frame rather than on the next reload.
   const motion = !prefersReducedMotion();
@@ -329,14 +329,14 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
     if (!scores) return;
     if (!seeded.current) {
       seeded.current = true;
-      scoreActivity.seed(scores.rev);
+      scoreActivity.seed(scores.scoreRev);
       return;
     }
-    if (scores.rev === 0) return;
+    if (scores.scoreRev === 0) return;
     const at = scores.games.findIndex((g) =>
       scores.lastEvents.some((e) => e.eventId === g.eventId),
     );
-    scoreActivity.scored(scores.rev, at < 0 ? 0 : at);
+    scoreActivity.scored(scores.scoreRev, at < 0 ? 0 : at);
   }, [scores]);
 
   const relayout = useCallback(() => {

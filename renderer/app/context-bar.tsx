@@ -397,7 +397,7 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
         <ScoreCapsule
           game={view.game}
           scored={scored}
-          rev={ctx.scores?.rev ?? 0}
+          rev={ctx.scores?.scoreRev ?? 0}
           preview={ctx.preview}
         />
       );

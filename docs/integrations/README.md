@@ -31,13 +31,18 @@ REAPER is the cleanest end-to-end template for a polling integration — see
 [reaper.md](reaper.md) for the full file map. The pattern:
 
 1. Service singleton in `main/services/<id>-service.ts` (`configure`, `getLatest`,
-   `setConnectionListener`, change-driven `broadcast("<id>:status", …)`).
+   `setConnectionListener`, change-driven `broadcast("<id>:status", …)`). Extend
+   `StatusIntegration` and publish through its `emit()`; if you override `emit()`
+   to throttle or de-duplicate, call `this.bumpRev()` and send
+   `this.stamped(snapshot)` at your own broadcast — see the version contract below.
 2. Descriptor + `apply<Id>()` + `get<Id>Target()` + `test()` in
    `integration-manager.ts`; secret keys in `SECRET_KEYS`.
-3. DTO in `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`).
+3. DTO in `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`), extending
+   `RevisionedStatus`.
 4. SSE hydrate + `GET /api/<id>/status` in `remote-server.ts`; `api.ts` invoke case.
-5. Live hook `renderer/main/use-<id>-state.ts`; layout object render case +
-   inspector; `object-integration.ts` mapping; category in `integrations-panel.tsx`.
+5. Live hook `renderer/main/use-<id>-state.ts`, built on `useStatusChannel`;
+   layout object render case + inspector; `object-integration.ts` mapping;
+   category in `integrations-panel.tsx`.
 
 Most integrations describe their settings as `ConfigField`s and the panel renders
 them. One does not: Live scores' only setting is WHICH TEAMS, and a searchable
@@ -48,6 +53,24 @@ second place for a settings page to drift.
 
 Build integrations efficiency-first: change-driven broadcasts, reuse the shared
 SSE stream, gate polling on subscribers, back off when unreachable.
+
+### The snapshot version
+
+A status channel broadcasts only when its value changes, and a display hydrates
+with a one-shot read alongside it. If the push landed first, the older read used
+to overwrite it — and with no further broadcast until the next real change, the
+wrong value stood for as long as the building stayed quiet.
+
+So every status snapshot carries `rev`, a counter the integration advances only
+when a frame actually goes out. The hydrate read (`getLatest()`) and the pushed
+frame carry the same counter, and `useStatusChannel` applies the read unless it is
+strictly older than a push already applied. Pushes always apply, which is also how
+a client recovers when the server restarts and the counter returns to 0.
+
+`rev` is additive: a consumer that has never heard of it — the Bitfocus Companion
+module reads several of these channels from its own repository — simply does not
+read it, and nothing else about these payloads changed. A payload arriving without
+a `rev` skips the comparison entirely.
 
 ## Automation
 

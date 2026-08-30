@@ -324,7 +324,7 @@ describe("scoresChanged", () => {
     assert.equal(scoresChanged(snapshot(), snapshot({ error: "ESPN unreachable" })), true);
   });
 
-  test("a scoring event bumping rev IS a broadcast", () => {
-    assert.equal(scoresChanged(snapshot(), snapshot({ rev: 1 })), true);
+  test("a scoring event bumping scoreRev IS a broadcast", () => {
+    assert.equal(scoresChanged(snapshot(), snapshot({ scoreRev: 1 })), true);
   });
 });

@@ -723,7 +723,13 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     const sig = JSON.stringify([snapshot.connected, snapshot.total, snapshot.zones]);
     if (sig === this.lastCountSig) return;
     this.lastCountSig = sig;
-    broadcast(this.channel, this.last);
+    // Stamped, and bumped only here — past the unchanged-count return above, so
+    // the version advances exactly when a real change is published. The hydrate
+    // read answers from getLatest(), which carries the same counter, letting a
+    // display drop a read that is older than a push it already applied. `sig` is
+    // taken from the UNSTAMPED snapshot so the change test is unaffected.
+    this.bumpRev();
+    broadcast(this.channel, this.stamped(this.last));
   }
 }
 

@@ -60,7 +60,7 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
   private favourites: ScoreFavourite[] = [];
   private baseline: ScoreBaseline = new Map();
   private seeded = false;
-  private rev = 0;
+  private scoreRev = 0;
   /** One league's team list, cached for the picker. Teams change about once a
    *  decade; re-opening a dropdown must not re-fetch 30 rows. */
   private teamCache = new Map<LeagueId, { at: number; teams: ScoreFavourite[] }>();
@@ -135,7 +135,7 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
     this.baseline = baselineOf(sorted);
     this.seeded = true;
 
-    if (events.length > 0) this.rev++;
+    if (events.length > 0) this.scoreRev++;
     if (!this.last.connected) {
       this.resetBackoff();
       this.report("connected", `Following ${this.favourites.length} team(s)`);
@@ -147,9 +147,9 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
     this.emitIfChanged({
       connected: true,
       games: sorted,
-      rev: this.rev,
+      scoreRev: this.scoreRev,
       // Carried only on the poll that produced them. A client reads them when
-      // `rev` moves and ignores them otherwise.
+      // `scoreRev` moves and ignores them otherwise.
       lastEvents: events,
       fetchedAt: new Date().toISOString(),
       error: failures.length > 0 ? failures.join("; ") : null,

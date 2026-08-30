@@ -20,7 +20,7 @@ import {
 
 import { AppLink } from "../app-link";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
-import { readinessChecks, outstanding, type ReadinessCheck } from "./readiness";
+import { readinessChecks, outstanding, splitByPresence, type ReadinessCheck } from "./readiness";
 import { usePlanChecklist } from "../../main/use-plan-checklist";
 import type { LayoutObjectConfig } from "@main/types/views";
 /**
@@ -590,7 +590,6 @@ export function SplCard() {
   return <Stat label="SPL" value={loud.value} sub={loud.sub} />;
 }
 
-/** How many displays are connected, of how many exist. */
 /**
  * Followed scores, in Home's voice.
  *
@@ -688,7 +687,23 @@ function ScoresRow({ team, trailing }: { team: ScoreTeamDTO; trailing: boolean }
   );
 }
 
-export function ScreensCard({ online, total }: { online: number; total: number }) {
+/**
+ * How many screens have a browser attached, of how many exist.
+ *
+ * Takes the screens and the presence set rather than two numbers, so the
+ * intersection cannot be skipped at a call site. Handed a count, this card once
+ * read "3/2 connected": presence is not a subset of the screens that exist, and
+ * a page left open on a deleted one keeps heartbeating.
+ */
+export function ScreensCard({
+  outputs,
+  onlineOutputIds,
+}: {
+  outputs: readonly Output[];
+  onlineOutputIds: readonly string[];
+}) {
+  const online = splitByPresence(outputs, onlineOutputIds).online.length;
+  const total = outputs.length;
   return (
     <Stat
       label="Screens"
@@ -698,17 +713,6 @@ export function ScreensCard({ online, total }: { online: number; total: number }
       tone={online === total ? undefined : "danger"}
     />
   );
-}
-
-/**
- * Which screens are currently showing something, from a state snapshot.
- *
- * The fallback for callers with no presence hook: an object on a wall display
- * has no business subscribing to presence, and a count that lags by a poll beats
- * one that only works inside the shell.
- */
-export function onlineFromState(state: StageState): string[] {
-  return (state.outputs ?? []).filter((o) => o.viewId).map((o) => o.id);
 }
 
 /**
@@ -733,10 +737,14 @@ export function HomeCard({
   pcoLive: PcoLiveDTO | null;
   now: number;
   skewMs: number;
-  /** Output ids currently connected, from `onlineFromState` — the single
-   *  supplier, on every path. A `useOutputPresence` hook that subscribed to the
-   *  `displays:presence` SSE channel was written for this and never wired to
-   *  anything; it is gone rather than left looking like a second route in. */
+  /**
+   * Output ids with a live heartbeat, from `useDisplayPresence` by way of
+   * `LayoutRenderCtx.onlineOutputIds` — the single supplier, on every path.
+   *
+   * This used to be `outputs.filter(o => o.viewId)`, which is ROUTED, not
+   * connected: a screen that was routed and unplugged counted as online for
+   * ever, so "all connected" on the front page meant nothing at all.
+   */
   onlineOutputIds: readonly string[];
   secondsToStart: number | null;
 }) {
@@ -760,7 +768,7 @@ export function HomeCard({
     case "home-spl":
       return <SplCard />;
     case "home-screens":
-      return <ScreensCard online={onlineOutputIds.length} total={(state.outputs ?? []).length} />;
+      return <ScreensCard outputs={state.outputs ?? []} onlineOutputIds={onlineOutputIds} />;
     case "home-next-service":
       return <NextServiceCard state={state} secondsToStart={secondsToStart} />;
     case "home-readiness":
