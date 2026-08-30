@@ -1071,9 +1071,14 @@ button.score-capsule:focus-visible {
    scores on Screens and every card slid down the screen. A panel that moves the
    page is a panel you cannot open while reading the page.
    The anchor is the piece that stays in flow, and it is zero pixels tall: it
-   marks where the panel starts without occupying anything. `min-height: 0` is not
-   optional — a flex item's automatic minimum is its content, so without it this
-   would be exactly as tall as the panel it holds and nothing would have changed.
+   marks where the panel starts without occupying anything.
+   A `min-height: 0` sat here for a while, with a comment claiming a flex item's
+   automatic minimum would otherwise make this as tall as the panel. That was
+   wrong twice over — the host is absolutely positioned, so there is no in-flow
+   content to be as tall as, and the automatic minimum is capped by a definite
+   `height` anyway. Measured both ways in a browser: the anchor is 0 with it and 0
+   with `min-height: auto` forced on. It is gone rather than kept as insurance,
+   because a line nobody can make fail is a line the next reader has to re-derive.
    z-index over the sticky headers inside the scrolling pane (the tallest is
    patch-section's `top-1 z-30`), which is what "above everything" means here.
    Portalled dialogs and menus are `fixed z-50`/`z-[100]` on the body and still
@@ -1081,7 +1086,6 @@ button.score-capsule:focus-visible {
 .score-anchor {
   position: relative;
   height: 0;
-  min-height: 0;
   z-index: 40;
 }
 
@@ -1172,7 +1176,14 @@ button.score-capsule:focus-visible {
   /* The one box in the floating panel that takes a press — see the host's
      `pointer-events: none`. It is exactly the cards' own box: the stack inside is
      `position: relative` with its height written from the same measurement that
-     places the cards, so this is the painted panel and nothing more. */
+     places the cards, so this is the painted panel and nothing more.
+     WHILE OPEN ONLY. The two halves of a close run at different lengths on
+     purpose — the shell fades out in 260ms and the height trails it, finishing at
+     680ms — and `opacity: 0` does not stop hit testing. In flow that cost nothing,
+     because the shell's box never covered anything. Floating, it left a fully
+     transparent 640px box over the page for the 420ms in between, eating the
+     press an operator makes right after dismissing the panel. Which is the bug
+     this whole change was meant to remove, arriving from the other side. */
   pointer-events: auto;
   transform-origin: top center;
   opacity: 0;
@@ -1183,6 +1194,11 @@ button.score-capsule:focus-visible {
   opacity: 1;
   transform: none;
   transition: opacity 300ms var(--score-ease), transform 620ms var(--score-spring);
+}
+/* Closed, closing, and every frame of both: the page underneath takes the press.
+   Nothing here is animated, so this cannot affect the motion. */
+.score-host:not(.is-open) .score-shell {
+  pointer-events: none;
 }
 
 /* The ONE exception to rule 2, and it is deliberately the neutral-grey centre:

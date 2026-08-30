@@ -19,15 +19,18 @@
 // The third case below is the red one held permanently: the same navigation with
 // the option taken away, failing with the number this bug is made of.
 //
-// KNOWN GAP, stated rather than left to be found: nothing here renders the shell,
-// so nothing here would notice the `data-scroll-restoration-id` attribute being
-// deleted from its `<main>`. The selector and the attribute cannot drift (they
-// are one exported constant, which the type checker enforces), but the element
-// losing it entirely is only caught by driving a browser. That was done for this
-// change and the numbers are in the PR.
+// The shell itself is NOT rendered here, and the reason is worth stating: it
+// mounts the live wiring, whose SSE reconnect loop never settles, so a render of
+// it hangs rather than fails. The `<main>` that carries the name is therefore
+// checked by reading shell.tsx for the attribute ASSIGNMENT - the weakest check
+// in this file, and the one the browser run covers properly.
 
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { installDom } from "../test-dom.js";
 
@@ -58,7 +61,10 @@ w.scrollY = 0;
 w.scrollTo = () => {};
 
 const { setupScrollRestoration, storageKey } = await import("@tanstack/router-core");
-const { PAGE_SCROLLER_ID, PAGE_SCROLLER_SELECTOR, scrollPageToTop } = await import("./route-reset.js");
+const React = (await import("react")).default;
+const { render, cleanup, act } = await import("@testing-library/react");
+const { PAGE_SCROLLER_ID, PAGE_SCROLLER_SELECTOR, resetCurrentRoute, scrollPageToTop, useRouteResetKey } =
+  await import("./route-reset.js");
 const { router } = await import("./router.js");
 
 after(() => {
@@ -214,14 +220,53 @@ describe("a tab opens at the top", () => {
     assert.equal(el.scrollTop, 380, "Back no longer returns to where the page was left");
   });
 
-  test("re-selecting the rail item you are on also returns to the top", () => {
+  test("re-selecting the rail item you are on also returns to the top", async () => {
     // The second seam, and it is not a navigation at all: the reset remounts the
     // route through a key, and the scroller sits OUTSIDE that keyed subtree. Its
     // docblock claimed the remount restored scroll position; it never could.
+    //
+    // Driven through the REAL event and the REAL hook, not by calling the helper.
+    // A first draft called scrollPageToTop() directly, which meant deleting the
+    // call inside the hook - the entire fix - left this green. Both halves are
+    // asserted, because the remount and the scroll reset are two separate things
+    // the rail needs and either can be dropped without the other noticing.
     const el = pane();
+    const keys: number[] = [];
+    function Probe() {
+      keys.push(useRouteResetKey());
+      return null;
+    }
+    render(React.createElement(Probe));
     el.scrollTop = 512;
-    scrollPageToTop();
+
+    await act(async () => { resetCurrentRoute(); });
+
     assert.equal(el.scrollTop, 0, "re-selecting the active rail item left the page scrolled");
+    assert.notEqual(keys.at(-1), keys[0], "re-selecting the active rail item no longer remounts the route");
+    cleanup();
+  });
+
+  test("the shell names its scrolling pane", () => {
+    // The weakest check here, and deliberately narrow: it matches the ASSIGNMENT
+    // of the shared constant onto an element, which prose in a comment cannot
+    // satisfy, and requires EXACTLY one - a second named scroller would give the
+    // router two elements answering to one selector.
+    const shell = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "shell.tsx"),
+      "utf8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const assigned = [...shell.matchAll(/data-scroll-restoration-id=\{PAGE_SCROLLER_ID\}/g)];
+    assert.equal(
+      assigned.length,
+      1,
+      "the shell does not name exactly one scrolling pane, so the router's reset has nothing to find",
+    );
+    // On the element that actually scrolls, not a wrapper beside it.
+    assert.match(
+      shell,
+      /data-scroll-restoration-id=\{PAGE_SCROLLER_ID\}[\s\S]{0,200}?overflow-y-auto/,
+      "the name is not on the element that scrolls",
+    );
   });
 
   test("the reset finds the pane by the router's own selector", () => {

@@ -27,6 +27,9 @@
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, mock, test } from "node:test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { installDom } from "../test-dom.js";
 
@@ -419,5 +422,81 @@ describe("a score replays the animation on the game that scored, and only that o
     );
 
     assert.ok(away() !== wasAway, "switching to a different game reused the old side's node");
+  });
+});
+
+
+// ---- the panel floats -------------------------------------------------------
+
+/**
+ * The stylesheet with its comments removed.
+ *
+ * Load-bearing: the reasoning above each rule below quotes the very declarations
+ * this reads, so matching raw text would find the prose and be satisfied by it.
+ * CSS comments do not nest and this sheet has no `content:` string carrying those
+ * characters, so the strip is exact rather than hopeful.
+ */
+function stylesheet(): string {
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "styles.css"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+/** The body of one rule, by selector. */
+function rule(selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = stylesheet().match(new RegExp(`(?:^|\\})\\s*${escaped}\\s*\\{([^}]*)\\}`));
+  assert.ok(m, `the rule "${selector}" is gone`);
+  return m[1];
+}
+
+describe("the panel floats over the page rather than pushing it down", () => {
+  test("the host hangs off an anchor, which is the whole fix", () => {
+    // Structural, and driven through the real component: delete the wrapper in
+    // score-activity.tsx and the host is back in the shell's flex column, where
+    // its height comes out of the page and opening it on Screens slides every
+    // card down. That is the report this change came from.
+    const { container } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    assert.ok(
+      container.querySelector(".score-anchor > .score-host"),
+      "the score host is not inside its anchor, so the panel is back in the page's flow",
+    );
+    // And exactly one anchor: two would be two overlays at the same offset.
+    assert.equal(container.querySelectorAll(".score-anchor").length, 1);
+  });
+
+  test("the anchor takes no room and the host is out of flow", () => {
+    // The pixels are a browser claim - jsdom lays nothing out, so every
+    // offsetHeight here reads 0 whatever the sheet says, and a test written on
+    // them would pass with the fix reverted. The declarations are what can be
+    // checked; the measured page positions are in the PR.
+    const anchor = rule(".score-anchor");
+    assert.match(anchor, /position:\s*relative/, "the anchor is not a containing block, so the host escapes to the viewport");
+    // The lookbehind is not decoration: `min-height: 0` sits in this same rule and
+    // ends with the word this is looking for, so a loose pattern matched it and
+    // passed with the anchor given a real height - watched do exactly that.
+    assert.match(anchor, /(?<!min-)height:\s*0/, "the anchor occupies space, so the panel still pushes the page down");
+    const host = rule(".score-host");
+    assert.match(host, /position:\s*absolute/, "the host is back in the page's flow");
+    // The mechanism the panel's whole animation is built on, and which moving it
+    // out of flow was required not to disturb.
+    assert.match(host, /grid-template-rows:\s*0fr/, "the height animation's collapsed state is gone");
+  });
+
+  test("only the painted panel takes a press, and only while it is open", () => {
+    // An overlay that eats clicks is a worse bug than the one being fixed, and it
+    // has two halves. SIDEWAYS: the clip is full width while the panel is capped
+    // at 640px, so the air beside it would swallow presses meant for the page.
+    // IN TIME: a close fades the shell out in 260ms and finishes collapsing at
+    // 680ms, and `opacity: 0` still hit-tests - so without the closed-state rule
+    // there is a transparent 640px box over the page for the 420ms in between.
+    assert.match(rule(".score-host"), /pointer-events:\s*none/, "the empty air beside the panel eats presses meant for the page");
+    assert.match(rule(".score-shell"), /pointer-events:\s*auto/, "the panel itself cannot be pressed");
+    assert.match(
+      rule(".score-host:not(.is-open) .score-shell"),
+      /pointer-events:\s*none/,
+      "a dismissed panel keeps eating presses while it fades - the 420ms hole between the fade and the collapse",
+    );
   });
 });
