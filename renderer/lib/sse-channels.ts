@@ -32,6 +32,9 @@ export const HYDRATED_CHANNELS = [
   "baptism:state",
   "obs:status",
   "reaper:status",
+  // Scores are STATE, not events. A display opened mid-game must show the score
+  // it is already at, not sit blank until somebody happens to score again.
+  "scores:status",
   "resi:status",
   "youtube:status",
   "update:status",

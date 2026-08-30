@@ -31,6 +31,51 @@ const LIVE_ITEM: PcoLiveDTO = {
   serviceTimeStartsAt: "2026-08-14T13:30:00.000Z",
 } as PcoLiveDTO;
 
+/** A followed game actually in progress. The capsule is the only bar item whose
+ *  non-idle branch is a control rather than a reading, so it needs its own
+ *  fixture to be walked at all. */
+const LIVE_GAME = {
+  eventId: "e1",
+  league: "mlb",
+  sport: "baseball",
+  state: "in",
+  delayed: false,
+  detail: "Top 3rd",
+  shortDetail: "Top 3rd",
+  clock: "0:00",
+  startsAt: "2026-08-14T18:05:00.000Z",
+  venue: "Wrigley Field",
+  away: {
+    id: "17",
+    abbreviation: "CIN",
+    name: "Reds",
+    displayName: "Cincinnati Reds",
+    color: "#c6011f",
+    logo: null,
+    record: "70-64",
+    score: 2,
+  },
+  home: {
+    id: "16",
+    abbreviation: "CHC",
+    name: "Cubs",
+    displayName: "Chicago Cubs",
+    color: "#0e3386",
+    logo: null,
+    record: "78-56",
+    score: 6,
+  },
+  situation: {
+    kind: "baseball",
+    onFirst: false,
+    onSecond: true,
+    onThird: false,
+    balls: 1,
+    strikes: 0,
+    outs: 2,
+  },
+} as ScoreGameDTO;
+
 describe("context bar state", () => {
   test("reports not-live when there is no live payload at all", () => {
     const s = contextBarState(null, Date.parse("2026-08-14T14:05:00.000Z"), 0);
@@ -142,7 +187,16 @@ describe("nothing appears or disappears", () => {
     integrations: { states: [], labels: {} },
     resi: null,
     youtube: null,
+    scores: null,
   };
+
+  test("the registry is the list, and it has grown by the score capsule", () => {
+    // The count is asserted EXACTLY, not as a floor: the three loops below walk
+    // Object.keys(BAR_ITEMS), so an item that never reached the registry is an
+    // item they silently do not cover.
+    assert.equal(ALL.length, 8);
+    assert.ok(ALL.includes("scores"), "the score capsule is not a bar item");
+  });
 
   test("every item renders with no service, no recorder and no integrations", () => {
     for (const id of ALL) {
@@ -172,6 +226,28 @@ describe("nothing appears or disappears", () => {
     };
     for (const id of ALL) {
       assert.notEqual(renderBarItem(id, rolling as never), null, `${id} vanishes with a recorder stopped`);
+    }
+  });
+
+  test("every item renders with a followed game in play", () => {
+    // The fourth state, added with the score capsule: the three fixtures above
+    // all leave `scores` null, which is the item's IDLE branch. Without this the
+    // one branch that is not a plain reading -- the capsule itself -- would be
+    // walked by nothing.
+    const playing = {
+      ...idle,
+      bar: contextBarState(LIVE_ITEM, NOW, 0),
+      scores: {
+        connected: true,
+        games: [LIVE_GAME],
+        rev: 4,
+        lastEvents: [],
+        fetchedAt: "2026-08-14T14:05:00.000Z",
+        error: null,
+      },
+    };
+    for (const id of ALL) {
+      assert.notEqual(renderBarItem(id, playing as never), null, `${id} vanishes with a game in play`);
     }
   });
 });

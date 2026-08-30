@@ -11,6 +11,8 @@ import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService, configComplete, type YouTubeConfig } from "./youtube-service.js";
 import { reaperService } from "./reaper-service.js";
+import { scoresService } from "./scores-service.js";
+import { scoresStore } from "./scores-store.js";
 import { oscManager } from "./osc-manager.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
 import { prodcomService } from "./prodcom-service.js";
@@ -445,6 +447,21 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// Live scores — follows chosen teams on ESPN's public scoreboard API. No account
+// and no key: the endpoints are public and unauthenticated, which is also why
+// there is no contract and why the poll runs on a schedule rather than a fixed
+// interval. `configSchema` is empty because the only setting is WHICH TEAMS, and
+// a searchable multi-league team picker is not expressible as a ConfigField —
+// ScoresTeamsPanel renders it instead (see integrations-panel.tsx).
+const SCORES_DESCRIPTOR: IntegrationDescriptor = {
+  id: "scores",
+  kind: "control",
+  label: "Live scores",
+  description:
+    "Follows your teams' live scores from ESPN's public scoreboard and shows them in the context bar, on Home, and on a stage display. No account or key is needed. ESPN does not document or support this API, so it can change without notice, and the app polls on a schedule to stay well inside what a free public endpoint will tolerate.",
+  configSchema: [],
+};
+
 const DESCRIPTORS: IntegrationDescriptor[] = [
   PCO_DESCRIPTOR,
   WIRELESS_DESCRIPTOR,
@@ -460,6 +477,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   ROSSTALK_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
   ROSS_TSL_DESCRIPTOR,
+  SCORES_DESCRIPTOR,
 ];
 
 /** Derived from the descriptors rather than listed again, so an integration
@@ -499,6 +517,8 @@ const SECRET_KEYS: Record<string, string[]> = {
   smaart: ["password"],
   obs: ["password"],
   reaper: [],
+  // No account, no key. ESPN's scoreboard endpoints are public and unauthenticated.
+  scores: [],
   resi: ["password"],
   youtube: ["apiKey", "clientSecret", "refreshToken"],
   sensource: ["clientSecret", "apiToken"],
@@ -565,6 +585,8 @@ class IntegrationManager {
     await this.applyObs();
     // Start the REAPER web-interface poller if enabled + configured.
     await this.applyReaper();
+    // Start the ESPN scores poller if enabled + at least one team is followed.
+    await this.applyScores();
     await this.applyResi();
     await this.applyYouTube();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
@@ -713,6 +735,7 @@ class IntegrationManager {
       smaart: () => this.applySmaart(),
       obs: () => this.applyObs(),
       reaper: () => this.applyReaper(),
+      scores: () => this.applyScores(),
       resi: () => this.applyResi(),
       youtube: () => this.applyYouTube(),
       sensource: () => this.applySensource(),
@@ -946,6 +969,13 @@ class IntegrationManager {
         return result;
       }
 
+      if (id === "scores") {
+        const result = await scoresService.test();
+        this.setConnectionState("scores", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
       if (id === "resi") {
         const { username, password } = await this.getResiConfig();
         if (!username || !password) {
@@ -1172,6 +1202,40 @@ class IntegrationManager {
       const { host, port } = this.getReaperTarget();
       return host && port
         ? { connecting: `Connecting ${host}:${port}`, start: () => reaperService.configure(host, port) }
+        : null;
+    });
+  }
+
+  /**
+   * Re-apply the scores poll after the followed teams changed.
+   *
+   * Public because the favourites live in their own store rather than in
+   * `integrationConfigs`, so saving them does not go through setConfig. It must
+   * still go through the applier and not straight to `configure()`: the applier
+   * is what honours the integration's ENABLED flag, and calling configure()
+   * directly would start polling ESPN for an operator who had deliberately
+   * switched the integration off.
+   */
+  async refreshScores(): Promise<void> {
+    await this.applyScores();
+  }
+
+  /**
+   * Start/stop the ESPN scores poll to match enabled + configured state.
+   *
+   * "Configured" here means at least one followed team, so the store is loaded
+   * first — an empty favourites list must read as not-configured rather than as
+   * a poller with nothing to ask about.
+   */
+  private async applyScores(): Promise<void> {
+    await scoresStore.init();
+    await this.applyService("scores", scoresService, () => {
+      const favourites = scoresStore.get().favourites;
+      return favourites.length > 0
+        ? {
+            connecting: `Following ${favourites.length} team(s)`,
+            start: () => scoresService.configure(favourites),
+          }
         : null;
     });
   }

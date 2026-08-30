@@ -452,6 +452,30 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  // Followed scores on the operator's own Home page. A quiet composition, NOT
+  // the wall strip: a Home tile sits beside a readiness list and a next-service
+  // card, and a panel of brand colour would out-shout every one of them. The
+  // team colour survives as the chip.
+  // No size/when here, unlike the plan's snippet: Home's size and visibility live
+  // on LayoutObject.home (HomePlacement), which is where the editor writes them
+  // and the grid reads them. Every sibling home-* member omits them for the same
+  // reason, and a config field nothing ever fills is a branch never exercised.
+  | { type: "home-scores" }
+  // A followed team's live score, from the ESPN scores integration
+  // (`scores:status` channel). Renders the shared ScoreStrip -- the same strip
+  // the context-bar capsule and the Home card draw, at wall size.
+  | {
+      type: "scores";
+      /** Which followed game this object shows. `"auto"` follows whichever
+       *  followed game is live, preferring the one that scored most recently --
+       *  which is what a wall display wants, since nobody is there to pick.
+       *  Otherwise an ESPN TEAM id: the object resolves that team's game of the
+       *  day. Never an event id, which is a per-day value that means nothing next
+       *  week. */
+      game: "auto" | string;
+      /** Show the sport-specific centre, or just the score and the status. */
+      detail?: boolean;
+    }
   // A RossTalk control button. Tapping it (on a real display / operator surface,
   // never in the editor) fires `commandId` with `params` at `targetId`, or `raw`
   // when no catalogue command is chosen. No feedback bind: RossTalk is send-only,

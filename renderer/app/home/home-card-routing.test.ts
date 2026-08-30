@@ -22,7 +22,7 @@ const HOME_TYPES = Object.keys(LAYOUT_OBJECTS).filter((t) => t.startsWith("home-
 describe("routing a home card", () => {
   test("the registry has home cards to route", () => {
     // A guard over an empty list is green for the wrong reason.
-    assert.equal(HOME_TYPES.length, 12, "the home card set changed — update this count on purpose");
+    assert.equal(HOME_TYPES.length, 13, "the home card set changed — update this count on purpose");
   });
 
   test("every home- type in the registry is claimed by the card renderer", () => {

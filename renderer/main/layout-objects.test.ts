@@ -370,6 +370,11 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // `after: null` — each leads its own group, because each platform gets one.
   { type: "home-streaming-resi", label: "Resi status", group: "Resi", after: null },
   { type: "home-streaming-youtube", label: "YouTube status", group: "YouTube", after: null },
+  // Live scores, from ESPN's public scoreboard. In "Status" rather than a league
+  // group of its own: it is one widget reading one integration, and a group
+  // holding a single entry is a heading with nothing under it.
+  { type: "scores", label: "Live scores", group: "Status", after: "stream-status" },
+  { type: "home-scores", label: "Scores", group: "Status", after: "scores" },
 ];
 
 /**

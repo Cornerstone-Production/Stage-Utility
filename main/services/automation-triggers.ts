@@ -67,6 +67,7 @@ export const INTEGRATIONS: { id: string; label: string }[] = [
   { id: "resi", label: "Resi" },
   { id: "ross-tsl", label: "Ross TSL" },
   { id: "rosstalk", label: "RossTalk" },
+  { id: "scores", label: "Live scores" },
   { id: "sensource", label: "SenSource" },
   { id: "smaart", label: "Smaart" },
   { id: "youtube", label: "YouTube" },
