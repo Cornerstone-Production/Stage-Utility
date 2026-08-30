@@ -20,6 +20,7 @@ and every operator sees it.
 | **Integration health** | How many set-up integrations are disconnected. |
 | **Recording** | Whether OBS or REAPER is rolling. |
 | **Streaming** | Whether Resi, YouTube or OBS is live, and for how long. |
+| **Live scores** | A followed team's score while its game is being played. Click it for the full card. |
 
 An unconfigured bar shows the service type and plan, the current item, and the
 live state and timer.
@@ -31,6 +32,12 @@ so — `No item`, `All connected`, `Standby`, `Off air` — rather than
 vanishing and
 letting its neighbours slide across. The bar keeps one shape, so you learn where
 to look once.
+
+**Live scores is the exception, and the only one.** It draws nothing at all
+unless a followed game is actually in play, and takes no room while it is empty.
+The other seven always have something true to say, so their resting state is a
+reading; scores would spend most of the year showing a word that never changed.
+See [Live scores](../integrations/scores.md).
 
 Colour carries the state instead:
 

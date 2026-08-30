@@ -179,14 +179,17 @@ export function ContextBar() {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [configuring, setConfiguring] = useState(false);
 
-  // Rendered once each, in the operator's order, and EVERY item renders — an
-  // item with nothing to report says so rather than vanishing.
+  // Rendered once each, in the operator's order. An item with nothing to report
+  // says so rather than vanishing — with ONE deliberate exception, the score
+  // capsule, which is invisible unless a followed game is actually in play. See
+  // BarItem.canBeEmpty for why that one is different from the other seven.
   //
-  // Items used to return null when idle, which was quieter and wrong: the bar
-  // reflowed as the state changed. Integration health appeared only once
-  // something broke, so its arrival moved everything beside it; between services
-  // the whole right-hand group was absent and the bar packed left. An operator
-  // cannot learn where to look on a strip that rearranges itself.
+  // Items used to return null when idle across the board, which was quieter and
+  // wrong: the bar reflowed as the state changed. Integration health appeared
+  // only once something broke, so its arrival moved everything beside it;
+  // between services the whole right-hand group was absent and the bar packed
+  // left. An operator cannot learn where to look on a strip that rearranges
+  // itself.
   const rows = visibleBarItems(ctx.state?.barItems);
 
   const menuItems: ContextMenuItem[] = [
@@ -204,9 +207,16 @@ export function ContextBar() {
         {rows.map((id, i) => {
           if (id === BAR_SPACER) return <BarSpacerEl key={`${id}-${i}`} />;
           if (id === BAR_SPACE) return <BarSpaceEl key={`${id}-${i}`} />;
+          const content = renderBarItem(id, ctx);
+          // An item that renders nothing is DROPPED, not wrapped in an empty
+          // span. The strip is a flex row with a column gap, and gap is charged
+          // between items whatever their width — so a zero-width span would
+          // leave a doubled gap exactly where the capsule used to be, which is
+          // the stray hole this whole change was meant to remove.
+          if (content === null) return null;
           return (
             <span key={id} className={BAR_ITEM_CLASS}>
-              {renderBarItem(id, ctx)}
+              {content}
             </span>
           );
         })}
@@ -381,11 +391,14 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
     }
 
     case "scores": {
-      // Four states, in order of what is true — see capsuleView, which is where
-      // the ordering lives so it can be tested. Only a LIVE game is a capsule;
-      // the other three are readings like every other idle item on this bar.
+      // THE ONE ITEM THAT MAY RENDER NOTHING. Every other case above ends in a
+      // reading; this one ends in null when no followed game is in play, which
+      // is most of the year. The amendment to the no-reflow rule, and why it is
+      // right here and wrong for the other seven, is written out on
+      // BarItem.canBeEmpty in bar-items.tsx — the flag the guard reads, so the
+      // exception cannot spread by copy-paste.
       const view = capsuleView(ctx.scores);
-      if (view.kind === "idle") return <Idle>{view.text}</Idle>;
+      if (view.kind === "none") return null;
       // A score arriving is INVOLUNTARY motion — the viewer did not ask for it —
       // which is the category prefers-reduced-motion exists for most strongly.
       // Checked here, in JS: the global CSS override collapses a transition's

@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { INK_DARK, INK_LIGHT, contrastRatio, inkFor, inkSoft, luminance } from "./score-ink.js";
+import { DISC, INK_DARK, INK_LIGHT, contrastRatio, discInk, inkFor, luminance } from "./score-ink.js";
 
 /**
  * Real team colours, straight off ESPN payloads. Half of them need dark ink and
@@ -77,9 +77,58 @@ describe("contrastRatio", () => {
   });
 });
 
-describe("inkSoft", () => {
-  test("follows the ink it is given, so a chip never inverts against its own text", () => {
-    assert.match(inkSoft(INK_LIGHT), /^rgba\(255,255,255/);
-    assert.match(inkSoft(INK_DARK), /^rgba\(10,10,10/);
+describe("the disc behind every team mark", () => {
+  test("THE GUARD: it is LIGHT, so a navy or black logo has something to sit on", () => {
+    // The operator's report: ESPN ships `logos[0]` drawn for a light ground, and
+    // on this app's near-black cards the Yankees and the Packers were marks you
+    // could not see. Darken DISC and this fails.
+    assert.ok(
+      contrastRatio(DISC, "#161616") > 10,
+      `the disc ${DISC} does not stand off the near-black card it sits on`,
+    );
+    assert.ok(luminance(DISC) > 0.7, `the disc ${DISC} is not light`);
+  });
+
+  test("THE GUARD: it is the SAME disc for every team", () => {
+    // It used to be the inverse of the team's own ink, which put two clubs in
+    // one strip on opposite discs. DISC is a constant, not a function — this is
+    // the assertion that a per-team version cannot come back without failing.
+    assert.equal(typeof DISC, "string");
+    assert.match(DISC, /^#[0-9a-f]{6}$/i);
+  });
+
+  test("a dark brand colour keeps its own colour for the no-logo abbreviation", () => {
+    // 83 college football teams have no logo at all, and any church network that
+    // blocks the CDN puts every team here. The brand colour survives where it
+    // can be read.
+    assert.equal(discInk("#0e3386"), "#0e3386"); // Cubs navy
+    assert.equal(discInk("#204e32"), "#204e32"); // Packers green
+  });
+
+  test("THE GUARD: a LIGHT brand colour falls back to dark ink on the light disc", () => {
+    // Roughly one club in ten. Its own colour on a light disc is unreadable, and
+    // an identifier you cannot read is worse than one that is not on-brand.
+    assert.equal(discInk("#ffb612"), INK_DARK); // Packers gold
+    assert.equal(discInk("#fdb927"), INK_DARK); // Lakers gold
+    assert.equal(discInk("#ffffff"), INK_DARK); // observed on a college team
+    for (const c of [discInk("#ffb612"), discInk("#fdb927")]) {
+      assert.ok(contrastRatio(c, DISC) >= 4.5, `${c} is unreadable on the disc`);
+    }
+  });
+
+  test("no colour at all still reads", () => {
+    assert.equal(discInk(null), INK_DARK);
+    assert.notEqual(discInk(null), INK_LIGHT);
+  });
+
+  test("every colour it returns is legible on the disc", () => {
+    // The property, over the real team colours above: whatever comes back,
+    // reading it against the disc is never below AA for small text.
+    for (const c of TEAM_COLOURS) {
+      assert.ok(
+        contrastRatio(discInk(c), DISC) >= 4.5,
+        `${c} yielded ${discInk(c)}, which is unreadable on the disc`,
+      );
+    }
   });
 });

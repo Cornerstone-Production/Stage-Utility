@@ -248,7 +248,16 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
           // is a real control in the bar renders as a plain reading: a live
           // score capsule would toggle the panel behind this dialog on the very
           // press that was reaching for the row.
-          renderBarItem(row.id as BarItemId, { ...ctx, preview: true })
+          //
+          // NAME IT when it renders nothing. The score capsule is allowed to be
+          // invisible in the bar (see BarItem.canBeEmpty), and out of season it
+          // always is — but a row with no content is a chip with no width and no
+          // label, so the operator could neither see the item they placed nor
+          // get hold of it to move it. In here the fallback is the item's name,
+          // which is what you are dragging anyway.
+          (renderBarItem(row.id as BarItemId, { ...ctx, preview: true }) ?? (
+            <span className="text-footnote text-fg-subtle truncate">{label}</span>
+          ))
         )}
       </span>
 

@@ -91,37 +91,35 @@ export function liveIndex(
   return first;
 }
 
-export type ScoreCapsuleView =
-  | { kind: "idle"; text: string }
-  | { kind: "game"; game: ScoreGameDTO; index: number };
+export type ScoreCapsuleView = { kind: "none" } | { kind: "game"; game: ScoreGameDTO };
 
 /**
- * What the bar shows, in order of what is true.
+ * What the bar shows: a live game, or NOTHING AT ALL.
  *
- * Pure, and exported, because this is the whole item: the bar must never show a
- * hole, and each of these four states is a different thing to say. Rendering it
- * from a chain of `&&` in JSX is how one of them ends up unreachable.
+ * This item used to have four states, three of them words — "No teams", "No
+ * games", "Scores offline", or ESPN's own "7:05 PM ET" / "Final". They are gone
+ * on purpose, and the no-reflow rule the rest of the bar keeps is amended for
+ * this one item rather than routed around; the reasoning lives on
+ * BarItem.canBeEmpty in bar-items.tsx, which is what the guard reads.
+ *
+ * The short version: for most of the year nothing a church follows is playing,
+ * so a permanent "No games" is a word that never changes on a strip where every
+ * other entry means something. The honest rendering of "nothing is on" is
+ * nothing.
+ *
+ * A game today that has not started, and a game that finished this afternoon,
+ * both count as nothing: "active" is a game IN PLAY. The other surfaces — the
+ * Home card and the layout object — still say why they are empty, and rightly.
+ * A wall widget that draws nothing is indistinguishable from a broken one, and
+ * the operator who placed it is not in the room; a bar item is one reading among
+ * eight on a strip that is always on screen.
+ *
+ * Pure and exported so the item's whole decision can be tested without a DOM.
  */
 export function capsuleView(scores: ScoresStatusDTO | null): ScoreCapsuleView {
   const games = scores?.games ?? [];
-
-  if (games.length === 0) {
-    // A poll that failed is not the same statement as "no games today", and an
-    // operator being shown neither number deserves to know which one it is.
-    if (scores?.error) return { kind: "idle", text: "Scores offline" };
-    // Nobody followed, or the integration is switched off. The service holds the
-    // offline DTO in both, and in both there is nothing followed to show.
-    if (!scores?.connected) return { kind: "idle", text: "No teams" };
-    return { kind: "idle", text: "No games" };
-  }
-
   const live = liveIndex(games, scores?.lastEvents ?? []);
-  if (live >= 0) return { kind: "game", game: games[live], index: live };
-
-  // Something today, but not now. ESPN's own detail already says which — "7:05 PM
-  // ET", "Final" — and is more use than a word we would have invented.
-  const next = games.find((g) => g.state === "pre") ?? games[games.length - 1];
-  return { kind: "idle", text: next.shortDetail || "Scheduled" };
+  return live >= 0 ? { kind: "game", game: games[live] } : { kind: "none" };
 }
 
 /**

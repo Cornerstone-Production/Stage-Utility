@@ -7,12 +7,39 @@ import type { RevisionedStatus } from "./live.js";
 // not observe live are NOT in this file — a DTO field nothing ever fills is a
 // renderer branch that is never exercised.
 
-/** The leagues the picker offers. Adding one is a row here plus a fixture. */
+/**
+ * The leagues the picker offers. Adding one is a row here plus a fixture.
+ *
+ * The four college leagues reuse the pro `kind` values on purpose: ESPN serves
+ * them from the same sport paths and with the same `situation` keys, so
+ * parseScoreboard and the per-sport centre need no new arms. A new `kind` would
+ * be a new branch in both for a sport that is already drawn.
+ *
+ * College leagues are LARGE — 760 teams for college football against 32 for the
+ * NFL — which is why the picker asks for a league before a team, and why
+ * fetchTeams has to page past ESPN's default of 50. Following one costs nothing
+ * extra until it is followed: activeLeagues() polls only leagues a favourite
+ * names, so a church that follows the Cubs never asks about college baseball.
+ */
 export const LEAGUES = [
   { id: "mlb", path: "baseball/mlb", label: "MLB", kind: "baseball" },
   { id: "nfl", path: "football/nfl", label: "NFL", kind: "football" },
   { id: "nba", path: "basketball/nba", label: "NBA", kind: "basketball" },
   { id: "nhl", path: "hockey/nhl", label: "NHL", kind: "hockey" },
+  { id: "ncaaf", path: "football/college-football", label: "College football", kind: "football" },
+  {
+    id: "ncaam",
+    path: "basketball/mens-college-basketball",
+    label: "Men's college basketball",
+    kind: "basketball",
+  },
+  {
+    id: "ncaaw",
+    path: "basketball/womens-college-basketball",
+    label: "Women's college basketball",
+    kind: "basketball",
+  },
+  { id: "ncaabb", path: "baseball/college-baseball", label: "College baseball", kind: "baseball" },
 ] as const;
 
 export type LeagueId = (typeof LEAGUES)[number]["id"];
@@ -27,7 +54,14 @@ export function leagueById(id: string): (typeof LEAGUES)[number] | null {
  *
  * Keyed on ESPN's numeric `id`, NOT the abbreviation or the display name.
  * Abbreviations are unique only within a league and both names move on a
- * relocation or rebrand — exactly the season rollover this has to survive. The
+ * relocation or rebrand — exactly the season rollover this has to survive.
+ *
+ * The ID IS ONLY UNIQUE WITHIN A LEAGUE TOO. Measured across all eight leagues:
+ * 267 ids name DIFFERENT clubs in different leagues — id 16 is the Cubs, the
+ * Vikings, the Timberwolves, the Penguins and Sacramento State at once. So the
+ * identity is always the PAIR, and anything that stores one team on its own
+ * stores `league:teamId` — see teamPin in scores-object.tsx. The
+ * display fields are a CACHE for rendering the settings row before the first
  * display fields are a CACHE for rendering the settings row before the first
  * successful fetch; they are re-resolved from /teams, and the id is the thing
  * that is authoritative.

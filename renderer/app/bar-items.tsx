@@ -91,6 +91,31 @@ export interface BarItem {
   icon: LucideIcon;
   /** What it says about itself in the chooser, so the choice is informed. */
   hint: string;
+  /**
+   * THE EXCEPTION to "nothing appears or disappears". Set on `scores` alone.
+   *
+   * The rule the other seven keep is that an item with nothing to report says
+   * so, because a strip that rearranges itself is a strip an operator cannot
+   * learn the shape of. That rule is right for them: the clock, the plan, the
+   * timer, the health count, the recorders and the stream ALWAYS have something
+   * true to say, so their resting state is a reading, not an absence.
+   *
+   * Scores is not like them. For most of the year no followed team is playing,
+   * so a permanent "No games" is not a reading — it is a word that never
+   * changes, sitting on a strip where every other entry means something. The
+   * honest rendering of "nothing is on" is nothing.
+   *
+   * The reflow this re-admits is bounded in a way the old one was not: the
+   * capsule appears when a followed game goes live and leaves when it ends, a
+   * handful of times a season, rather than integration health arriving the
+   * moment something broke. context-bar.tsx drops the whole row when an item
+   * renders empty, so a vanishing item leaves no gap and no dangling separator.
+   *
+   * The guard in context-bar.test.tsx reads THIS FLAG: every item without it
+   * must still be proven never to vanish, and the set carrying it is asserted
+   * exactly, so a second item cannot quietly join the exception.
+   */
+  canBeEmpty?: true;
 }
 
 /**
@@ -147,7 +172,10 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
     id: "scores",
     label: "Live scores",
     icon: TrophyIcon,
-    hint: "A followed team's score. Click it for the full card.",
+    hint: "A followed team's score while the game is on. Click it for the full card. Shows nothing the rest of the time.",
+    // The one item allowed to render nothing. See canBeEmpty for why this is an
+    // amendment to the no-reflow rule rather than an escape from it.
+    canBeEmpty: true,
   },
 };
 

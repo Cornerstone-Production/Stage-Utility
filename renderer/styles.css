@@ -659,6 +659,11 @@ body {
   /* Restrained overshoot, only where the motion means "something just happened". */
   --score-spring: cubic-bezier(.22, 1.06, .36, 1);
   --score-ease: cubic-bezier(.2, .6, .2, 1);
+  /* The disc behind every team mark. Kept out of the .score-strip token block
+     below because the settings picker draws the same disc on the same logos and
+     is nowhere near a strip. Mirrors DISC in score-ink.ts, which is where the
+     reasoning is written down. */
+  --score-disc: #f2f2f2;
 }
 
 /* The card these sit on is neutral dark whatever the app theme: a stage display
@@ -740,6 +745,20 @@ body {
   padding: 8px 11px;
 }
 
+/* THE DISC BEHIND EVERY TEAM MARK, and the one class that draws it: the strip,
+   the capsule and the settings picker all use this, so the disc cannot end up
+   meaning three different things.
+
+   It is the same light disc for every team, never the inverse of that team's
+   ink. Making it conditional put two clubs in one strip on opposite discs, and
+   still lost a dark mark whenever the club's brand colour was light but its logo
+   was not — the Yankees and the Packers. The reasoning, and why LIGHT is the
+   right constant for ESPN's `500/` logos, is on DISC in score-ink.ts.
+
+   `color` is only reached by a team with NO logo, where the abbreviation stands
+   in for the mark. score-ink.ts picks that per team, because a light brand
+   colour on a light disc is unreadable; the fallback is for the picker, which
+   handles its own no-logo case and never sets the variable. */
 .score-logo {
   width: 32px;
   height: 32px;
@@ -751,8 +770,8 @@ body {
   font-variant-numeric: tabular-nums;
   font-size: 10px;
   font-weight: 600;
-  background: var(--score-ink-soft);
-  color: var(--score-team);
+  background: var(--score-disc);
+  color: var(--score-disc-ink, #0a0a0a);
 }
 .score-strip-compact .score-logo {
   width: 22px;

@@ -174,8 +174,19 @@ describe("nothing appears or disappears", () => {
   //
   // This walks the REAL renderer over every registered id, so an idle branch
   // deleted from any one of them fails here by name.
+  //
+  // THE RULE IS NOW NARROWED, NOT WEAKENED. Exactly one item — the score capsule
+  // — is allowed to render nothing, because for most of the year no followed
+  // team is playing and a permanent "No games" is a word that never changes on a
+  // strip where every other reading means something. The exception is declared
+  // on the item itself (BarItem.canBeEmpty, which carries the full reasoning),
+  // read from there rather than hard-coded here, and its membership is asserted
+  // EXACTLY below — so a second item cannot quietly join it, and the other seven
+  // are still proven never to vanish in any of the four fixtures.
   const NOW = Date.parse("2026-08-14T14:05:00.000Z");
   const ALL = Object.keys(BAR_ITEMS) as (keyof typeof BAR_ITEMS)[];
+  /** The items still bound by the rule: every one without the exception flag. */
+  const MUST_RENDER = ALL.filter((id) => !BAR_ITEMS[id].canBeEmpty);
 
   /** The deadest state the app has: no service, no recorder, no integrations. */
   const idle = {
@@ -191,28 +202,39 @@ describe("nothing appears or disappears", () => {
   };
 
   test("the registry is the list, and it has grown by the score capsule", () => {
-    // The count is asserted EXACTLY, not as a floor: the three loops below walk
+    // The count is asserted EXACTLY, not as a floor: the loops below walk
     // Object.keys(BAR_ITEMS), so an item that never reached the registry is an
     // item they silently do not cover.
     assert.equal(ALL.length, 8);
     assert.ok(ALL.includes("scores"), "the score capsule is not a bar item");
   });
 
-  test("every item renders with no service, no recorder and no integrations", () => {
-    for (const id of ALL) {
+  test("THE GUARD: exactly one item is exempt from the no-reflow rule", () => {
+    // The narrowing is the whole point. Flag a second item as canBeEmpty and
+    // this fails by name before its idle branch can be deleted — which is what
+    // stops "scores may vanish" being read as "any item may vanish".
+    assert.deepEqual(
+      ALL.filter((id) => BAR_ITEMS[id].canBeEmpty),
+      ["scores"],
+    );
+    assert.equal(MUST_RENDER.length, 7);
+  });
+
+  test("every item bound by the rule renders with no service, no recorder and no integrations", () => {
+    for (const id of MUST_RENDER) {
       assert.notEqual(renderBarItem(id, idle), null, `${id} vanishes when there is nothing to report`);
     }
   });
 
-  test("every item still renders mid-service", () => {
+  test("every item bound by the rule still renders mid-service", () => {
     // The other half. An item that only renders when idle is the same bug.
     const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW, 0) };
-    for (const id of ALL) {
+    for (const id of MUST_RENDER) {
       assert.notEqual(renderBarItem(id, live), null, `${id} vanishes during a live service`);
     }
   });
 
-  test("every item renders while a recorder is connected but stopped", () => {
+  test("every item bound by the rule renders while a recorder is connected but stopped", () => {
     // The state the bar exists to surface, and the one that reaches the
     // branches an idle-only fixture never touches.
     const rolling = {
@@ -224,31 +246,75 @@ describe("nothing appears or disappears", () => {
         labels: { obs: "OBS" },
       },
     };
-    for (const id of ALL) {
+    for (const id of MUST_RENDER) {
       assert.notEqual(renderBarItem(id, rolling as never), null, `${id} vanishes with a recorder stopped`);
     }
   });
 
-  test("every item renders with a followed game in play", () => {
-    // The fourth state, added with the score capsule: the three fixtures above
-    // all leave `scores` null, which is the item's IDLE branch. Without this the
-    // one branch that is not a plain reading -- the capsule itself -- would be
-    // walked by nothing.
-    const playing = {
-      ...idle,
-      bar: contextBarState(LIVE_ITEM, NOW, 0),
-      scores: {
-        connected: true,
-        games: [LIVE_GAME],
-        rev: 4,
-        lastEvents: [],
-        fetchedAt: "2026-08-14T14:05:00.000Z",
-        error: null,
-      },
-    };
+  const scoresCtx = (games: ScoreGameDTO[], over: Record<string, unknown> = {}) => ({
+    ...idle,
+    bar: contextBarState(LIVE_ITEM, NOW, 0),
+    scores: {
+      connected: true,
+      games,
+      scoreRev: 0,
+      lastEvents: [],
+      fetchedAt: "2026-08-14T14:05:00.000Z",
+      error: null,
+      ...over,
+    },
+  });
+
+  test("EVERY item, the capsule included, renders with a followed game in play", () => {
+    // The fourth state: the three fixtures above all leave `scores` null, which
+    // is now the capsule's EMPTY branch. Without this the one branch that is not
+    // a plain reading -- the capsule itself -- would be walked by nothing, and
+    // "the capsule may be empty" would be satisfied by a capsule that is always
+    // empty.
     for (const id of ALL) {
-      assert.notEqual(renderBarItem(id, playing as never), null, `${id} vanishes with a game in play`);
+      assert.notEqual(
+        renderBarItem(id, scoresCtx([LIVE_GAME]) as never),
+        null,
+        `${id} vanishes with a game in play`,
+      );
     }
+  });
+
+  test("THE GUARD: the capsule renders NOTHING when no team is followed", () => {
+    // The operator's report. This item used to print "No teams" every day of the
+    // year on a strip whose other seven readings all mean something. Restore any
+    // of the four idle texts and this fails.
+    assert.equal(
+      renderBarItem("scores", idle),
+      null,
+      "the score capsule still draws something with no followed team",
+    );
+  });
+
+  test("THE GUARD: the capsule renders NOTHING when every followed game is Final", () => {
+    // The case that made it noise rather than merely quiet: teams ARE followed,
+    // the poll succeeded, and the games all finished hours ago.
+    const done = { ...LIVE_GAME, state: "post" as const, shortDetail: "Final" };
+    assert.equal(
+      renderBarItem("scores", scoresCtx([done]) as never),
+      null,
+      "a finished game still draws a capsule",
+    );
+  });
+
+  test("and nothing when a followed game has not started yet", () => {
+    const soon = { ...LIVE_GAME, state: "pre" as const, shortDetail: "7:05 PM ET" };
+    assert.equal(renderBarItem("scores", scoresCtx([soon]) as never), null);
+  });
+
+  test("and nothing when the poll itself failed", () => {
+    // A failed poll with no games to keep leaves nothing to say either. The
+    // failure still reaches the operator, on the Integrations card and in the
+    // panel's own "Last update failed" line -- not as a permanent word up here.
+    assert.equal(
+      renderBarItem("scores", scoresCtx([], { connected: false, error: "timeout" }) as never),
+      null,
+    );
   });
 });
 

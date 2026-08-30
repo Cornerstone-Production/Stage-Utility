@@ -171,41 +171,66 @@ describe("the panel opens itself once per score, and lets go when told", () => {
   });
 });
 
-describe("what the bar says when there is no live game", () => {
-  // Four different statements, and each of them is a different fact. Collapsing
-  // any two loses the one thing the operator needs to know: whether they have
-  // set it up, whether there is anything on today, or whether we simply could
-  // not ask.
-  test("nothing loaded, or nobody followed, reads as no teams", () => {
-    assert.deepEqual(capsuleView(null), { kind: "idle", text: "No teams" });
-    assert.deepEqual(capsuleView(status({ connected: false, games: [] })), {
-      kind: "idle",
-      text: "No teams",
-    });
+describe("the bar shows a live game, or nothing at all", () => {
+  // This used to be four different idle statements — "No teams", "No games",
+  // "Scores offline", and ESPN's own "7:05 PM ET". They were each true, and
+  // together they were a word that never changed on a strip whose other seven
+  // readings all mean something. They are deliberately gone: the bar item is now
+  // invisible unless a followed game is IN PLAY.
+  //
+  // The distinctions themselves are not lost. The Home card and the layout
+  // object still keep those four facts apart in their own words, because a wall
+  // widget drawing nothing is indistinguishable from a broken one and the
+  // operator who placed it is not in the room. Their tests cover that; this one
+  // covers the bar, where the honest rendering of "nothing is on" is nothing.
+  test("THE GUARD: nothing loaded, or nobody followed, is NOTHING", () => {
+    assert.deepEqual(capsuleView(null), { kind: "none" });
+    assert.deepEqual(capsuleView(status({ connected: false, games: [] })), { kind: "none" });
   });
 
-  test("a failed poll with nothing to show says so, rather than 'no games'", () => {
-    // THE GUARD. "No games" for a failed request tells the operator a factual
-    // lie about their teams' schedule. It has to be distinguishable.
-    assert.deepEqual(capsuleView(status({ connected: false, games: [], error: "timeout" })), {
-      kind: "idle",
-      text: "Scores offline",
-    });
+  test("a failed poll with nothing to show is nothing here", () => {
+    // The failure is not swallowed — it is on the integration's card and in the
+    // expanded panel's "Last update failed" line. It is simply not a permanent
+    // word in the operator's status strip.
+    assert.deepEqual(
+      capsuleView(status({ connected: false, games: [], error: "timeout" })),
+      { kind: "none" },
+    );
   });
 
-  test("followed teams with nothing on today reads as no games", () => {
-    assert.deepEqual(capsuleView(status({ games: [] })), { kind: "idle", text: "No games" });
+  test("followed teams with nothing on today is nothing", () => {
+    assert.deepEqual(capsuleView(status({ games: [] })), { kind: "none" });
   });
 
-  test("a game today that has not started shows ESPN's own detail", () => {
-    const view = capsuleView(status({ games: [game({ state: "pre", shortDetail: "7:05 PM ET" })] }));
-    assert.deepEqual(view, { kind: "idle", text: "7:05 PM ET" });
+  test("THE GUARD: a game today that has not started yet is still nothing", () => {
+    assert.deepEqual(
+      capsuleView(status({ games: [game({ state: "pre", shortDetail: "7:05 PM ET" })] })),
+      { kind: "none" },
+    );
   });
 
-  test("a live game is the capsule", () => {
+  test("THE GUARD: a game that has finished is nothing", () => {
+    // The operator's case: teams followed, the poll fine, every game Final. A
+    // capsule reading "Final" all evening is the noise this removed.
+    assert.deepEqual(
+      capsuleView(status({ games: [game({ state: "post", shortDetail: "Final" })] })),
+      { kind: "none" },
+    );
+  });
+
+  test("a live game IS the capsule", () => {
+    // The other half, and the one that stops "may be empty" becoming "always
+    // empty": the capsule still has to appear when a game is actually on.
     const view = capsuleView(status());
     assert.equal(view.kind, "game");
     assert.equal(view.kind === "game" && view.game.eventId, "e1");
+  });
+
+  test("a live game beside a finished one is still the capsule", () => {
+    const view = capsuleView(
+      status({ games: [game({ eventId: "done", state: "post" }), game({ eventId: "on" })] }),
+    );
+    assert.equal(view.kind === "game" && view.game.eventId, "on");
   });
 });
 

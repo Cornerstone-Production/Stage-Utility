@@ -39,7 +39,19 @@ export function fetchScoreboard(league: LeaguePath, dates?: string): Promise<unk
   return getJson(`${BASE}/${league}/scoreboard${q}`);
 }
 
+/**
+ * How many teams to ask for.
+ *
+ * `/teams` PAGES AT 50 and says nothing about it: college football answers with
+ * 50 of its 760 and the envelope looks exactly like a complete one, so the
+ * default silently returns a seventh of the league and reads as working. 1000
+ * clears the largest league by a wide margin — measured on 2026-08-30:
+ * college football 760, college baseball 437, each college basketball 362, and
+ * every professional league under 33.
+ */
+const TEAMS_PAGE_LIMIT = 1000;
+
 /** One league's teams — for the picker, and to re-resolve cached display fields. */
 export function fetchTeams(league: LeaguePath): Promise<unknown> {
-  return getJson(`${BASE}/${league}/teams`);
+  return getJson(`${BASE}/${league}/teams?limit=${TEAMS_PAGE_LIMIT}`);
 }

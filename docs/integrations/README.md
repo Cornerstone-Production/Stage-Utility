@@ -47,11 +47,11 @@ REAPER is the cleanest end-to-end template for a polling integration — see
    category in `integrations-panel.tsx`.
 
 Most integrations describe their settings as `ConfigField`s and the panel renders
-them. One does not: Live scores' only setting is WHICH TEAMS, and a searchable
-multi-league team picker is not a config field, so its descriptor carries an empty
-schema and `integrations-panel.tsx` renders a panel of its own for it. Reach for
-that only when the setting genuinely cannot be a field — a bespoke panel is a
-second place for a settings page to drift.
+them. One does not: Live scores' only setting is WHICH TEAMS, and a two-step
+sport-then-team picker over ~2,000 clubs is not a config field, so its descriptor
+carries an empty schema and `integrations-panel.tsx` renders a panel of its own
+for it. Reach for that only when the setting genuinely cannot be a field — a
+bespoke panel is a second place for a settings page to drift.
 
 Build integrations efficiency-first: change-driven broadcasts, reuse the shared
 SSE stream, gate polling and broadcasting on demand, back off when unreachable.

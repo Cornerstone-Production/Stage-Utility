@@ -27,21 +27,34 @@ endpoints are public and unauthenticated.
 
 ## Choosing teams
 
-**Settings → Integrations → Information → Live scores.** "Add a team" searches
-every league at once by name or abbreviation; the leagues offered are MLB, NFL,
-NBA and NHL.
+**Settings → Integrations → Information → Live scores.** "Add a team" asks for a
+sport first, then lists that sport's teams with a search box over them, by name
+or abbreviation. Eight leagues are offered:
 
-A team is stored by ESPN's numeric id, not by name or abbreviation — both of
-those move on a relocation or a rebrand, and the id survives it. The display name,
-the abbreviation, the logo and the team colour are cached alongside it so a
-display never fetches anything from ESPN's CDN itself, and they are refreshed
-whenever the team list is read.
+| Professional | College |
+|---|---|
+| MLB, NFL, NBA, NHL | College football, men's and women's college basketball, college baseball |
+
+The sport comes first because the college leagues are large — college football
+alone is 760 clubs, and all eight together are about 2,000. One flat list of them
+is not a list anybody can read, and the search narrows the chosen sport for the
+same reason: "Chicago" across every league is seven teams in five sports.
+
+Only the sport you open is fetched, and only when you open it.
+
+A team is stored by ESPN's numeric id together with its league, not by name or
+abbreviation — both of those move on a relocation or a rebrand, and the id
+survives it. The league is part of the key because the id alone is not unique:
+across these eight leagues, 267 ids name different clubs in different ones. The
+display name, the abbreviation, the logo and the team colour are cached alongside
+it so a display never fetches anything from ESPN's CDN itself, and they are
+refreshed whenever the team list is read.
 
 ## Where it shows
 
 | Surface | What it shows |
 |---|---|
-| Context bar | A capsule: two logos and two scores. Click it for the full card. |
+| Context bar | A capsule while a followed game is being played: two logos and two scores. Click it for the full card. **Nothing at all** the rest of the time. |
 | Live activity | The capsule expands in place into one card per followed game. |
 | Custom layout | The **Live scores** object — one game, at wall size. |
 | Home | The **Scores** card — a quieter reading for your own page. |
@@ -51,6 +64,17 @@ The context-bar item is opt-in: right-click the bar, **Configure bar…**, and d
 few seconds after a score; tapping the capsule, pressing anywhere else, or Escape
 all close it, and any of those cancels the countdown so a dismissal is never
 undone.
+
+**The bar item is the one that disappears.** Every other reading on that strip
+says something even at rest, and stays put so you can learn where to look. The
+capsule does not: unless a followed game is actually in play it draws nothing and
+takes no room, because for most of the year "no games" is a word that would never
+change. The other three surfaces still say why they are empty — a wall widget
+drawing nothing is indistinguishable from a broken one, and whoever placed it is
+not in the room to check.
+
+The layout object can be pinned to one followed team, and offers the teams you
+follow with their league beside them.
 
 Wall displays get scores only if you place the layout object on one. The bar a
 wall draws is fixed and has no capsule.
@@ -69,6 +93,10 @@ One timer, and the cadence depends on what is actually happening:
 Only leagues with a followed team are asked at all, and one league failing does
 not blank the others. Broadcasts go out on change only, so a poll that found
 nothing new is not an update to every display.
+
+That is what keeps the college leagues free: eight leagues on offer costs nothing
+until one is followed, and each followed league adds one request per poll — so a
+church following the Cubs never asks about college baseball.
 
 A consequence worth knowing: the game clock shown is ESPN's last reported value,
 not a ticking one. It advances when a poll brings a new value, so during a live

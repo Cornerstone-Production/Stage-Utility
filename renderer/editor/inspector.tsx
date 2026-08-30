@@ -58,6 +58,8 @@ import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { screensListViews } from "@main/services/home-view";
+import { leagueById } from "@main/types/scores";
+import { teamPin } from "../main/scores-object";
 import { formatClock } from "../lib/clock-format";
 import {
   isKnownObjectType,
@@ -1018,7 +1020,15 @@ export function Inspector({
               value={c.game}
               options={[
                 { value: "auto", label: "Any followed team" },
-                ...favourites.map((f) => ({ value: f.teamId, label: f.displayName })),
+                // league:teamId, never the bare id. ESPN reuses ids across
+                // leagues — 267 of them name different clubs in different ones —
+                // so following the Cubs and the Vikings, both id 16, would give
+                // this select two options with the SAME value and pin the object
+                // to whichever game happened to be live. See teamPin.
+                ...favourites.map((f) => ({
+                  value: teamPin(f.league, f.teamId),
+                  label: `${f.displayName} · ${leagueById(f.league)?.label ?? f.league}`,
+                })),
               ]}
               onChange={(v) => onConfig({ ...c, game: v })}
             />
