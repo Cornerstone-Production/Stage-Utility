@@ -787,9 +787,28 @@ body {
   height: 22px;
   font-size: 8px;
 }
+/* THE MARK IS INSCRIBED IN THE DISC, not stretched across it.
+   It used to be `width: 100%; height: 100%`, which sizes a SQUARE image box to
+   the disc's bounding square — and the disc is the circle inscribed in that
+   square. A mark that fills its own box then touches the circle at four points
+   and crosses it everywhere else, so `overflow: hidden` + `border-radius: 50%`
+   took the ends off it. Nothing was ever cropping the image: `object-fit` is
+   already `contain`. The box was simply bigger than the circle it sat in.
+   The factor is the only one that cannot clip ANY source: a square of side s
+   fits inside a circle of diameter d exactly when s <= d/sqrt(2), so
+   70.71% is the largest safe box. Anything above it clips a mark with ink in its
+   own corners, and ESPN's marks have no shared safe area to bet on — some are
+   tight to the edge (a letter mark), some already carry their own padding (a
+   round crest), and there is no per-logo measurement available at render time to
+   tell them apart. So the geometry decides rather than an eyeballed number.
+   As a PERCENTAGE, so it holds at all three sizes this chip is drawn at — 32px in
+   a card, 22px compact, 18px in the capsule — and at whatever the capsule becomes
+   next. The clip stays as the backstop it always was; the mark can no longer
+   reach it. Read by score-logo-fit.test.ts, which checks the arithmetic. */
 .score-logo img {
-  width: 100%;
-  height: 100%;
+  --score-logo-fit: 70.71%;
+  width: var(--score-logo-fit);
+  height: var(--score-logo-fit);
   object-fit: contain;
 }
 
