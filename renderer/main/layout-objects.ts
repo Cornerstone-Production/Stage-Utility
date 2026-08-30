@@ -32,6 +32,7 @@ export const PALETTE_GROUP_ORDER = [
   "REAPER",
   "Resi",
   "YouTube",
+  "ProVideoPlayer",
   "Control",
   "Status",
 ] as const;
@@ -136,6 +137,7 @@ export const HOST_FRAMED_TYPES = new Set<LayoutObjectType>([
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl",
   "home-screens", "home-streaming", "home-streaming-resi", "home-streaming-youtube",
+  "home-pvp",
   "home-scores",
 ]);
 
@@ -626,6 +628,30 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: () => PILL({ fontWeight: 700, uppercase: true }),
     homeSize: "s",
     integration: { id: "reaper", label: "REAPER" },
+  },
+
+  // ProVideoPlayer
+  "pvp-layers": {
+    label: "ProVideoPlayer layers",
+    blurb: "What ProVideoPlayer has on each layer, and how long is left",
+    group: "ProVideoPlayer",
+    config: () => ({ type: "pvp-layers", show: "with-content", layerName: null, showProgress: true, hideWhenEmpty: false }),
+    style: () => CARD({ fontSize: 0.05 }),
+    homeSize: "m",
+    integration: { id: "pvp", label: "ProVideoPlayer" },
+  },
+  "home-pvp": {
+    label: "ProVideoPlayer",
+    blurb: "What is on screen now, and how long is left",
+    group: "ProVideoPlayer",
+    config: () => ({ type: "home-pvp" }),
+    style: BARE,
+    // "m" rather than "s": the card carries a media name and a time, and the
+    // observed media names are long file names. "s" is a square, and a square
+    // would truncate the one thing the card exists to show.
+    homeSize: "m",
+    stylingOnly: true,
+    integration: { id: "pvp", label: "ProVideoPlayer" },
   },
 
   // Control

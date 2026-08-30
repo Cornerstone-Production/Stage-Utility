@@ -208,6 +208,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>("/api/obs/status");
     case "reaper:getStatus":
       return apiFetch<T>("/api/reaper/status");
+    case "pvp:getStatus":
+      return apiFetch<T>("/api/pvp/status");
 
     case "scores:getStatus":
       return apiFetch<T>("/api/scores/status");
@@ -814,7 +816,7 @@ const sseListeners: SseListener[] = [];
  *
  * That hydrate fires once, at connect — so a component that mounts later (any
  * settings tab, for instance) misses it and then only hears about *changes*. In a
- * steady state there are none, which is how the Displays tab could sit on
+ * steady state there are none, which is how the Screens page could sit on
  * "Offline" while the server knew the screen was connected.
  *
  * The last payload for each of these is kept and replayed to a late subscriber.

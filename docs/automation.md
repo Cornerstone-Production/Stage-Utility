@@ -52,6 +52,11 @@ poll after.
 | The service runs over plan by | cumulative overrun across finished items passes your margin — checked as each item ends |
 | An update becomes available | a new release appears, not repeatedly while one waits |
 | Before a rehearsal or service | a set number of minutes before any rehearsal or service time on the plan |
+| A cue starts on a ProVideoPlayer layer | a layer starts showing different media. The same clip looping round is not a new cue |
+| A ProVideoPlayer layer clears | a layer that was showing something now holds nothing. PVP going unreachable does not count |
+| A ProVideoPlayer clip stops rolling | a clip has stopped, ended or been paused |
+| A ProVideoPlayer layer is hidden / unhidden | the layer's hidden flag flips |
+| A ProVideoPlayer layer is muted / unmuted | the layer's mute flag flips |
 
 Every trigger fires on an **edge** — the moment something changes — never on a
 state that merely persists. The channels carry state snapshots, re-sent
@@ -63,12 +68,20 @@ so a pack dropping off the network is not a low battery, an unreachable OBS is
 not "stopped streaming", and an integration vanishing from a payload is not a
 disconnect.
 
+ProVideoPlayer layers, playlists and cues are matched **by name, not by id** — an
+id is opaque and changes when a workspace is rebuilt from a template. **Renaming
+the layer in ProVideoPlayer stops the rule**, silently. Nothing else will tell
+you. A name that is only digits cannot be used at all: PVP reads an all-digits
+value as a position rather than a name.
+
 ## Conditions
 
 **A service is live**, **service type is**, **day of week**, **time is between**,
 **baptism phase is**, **OBS is recording**, **REAPER is recording**, **Resi is
-streaming**, **YouTube is streaming**, and *X* **is connected** for each
-integration. All selected conditions must hold.
+streaming**, **YouTube is streaming**, **a ProVideoPlayer layer has content**,
+**is playing a video**, **is hidden** or **is muted**, **ProVideoPlayer has
+something on screen**, and *X* **is connected** for each integration. All
+selected conditions must hold.
 
 They keep triggers simple: "when occupancy rises above 50" would also fire for a
 Tuesday meeting, so you add "and a service is live".
@@ -80,7 +93,11 @@ way to act the moment recording begins. Use the matching trigger for that.
 A time window may cross midnight, and day-of-week and time-of-day both read the
 app's time zone (Settings → Advanced), not the server's clock. An unconfigured
 condition holds rather than blocking, so a half-built rule does not silently never
-fire. "Baptism phase is" does not hold at all until the timer has run — including
+fire — with one deliberate exception: a ProVideoPlayer layer condition with no
+layer named does **not** hold, because "some layer, I did not say which" would
+qualify a rule against a layer nobody chose. That question is **ProVideoPlayer has
+something on screen**, which exists separately. None of them hold while PVP has
+never connected, either: unreachable is unknown, not empty. "Baptism phase is" does not hold at all until the timer has run — including
 for "idle", because before it runs we do not know that it is idle.
 
 ## Actions
@@ -93,6 +110,23 @@ for "idle", because before it runs we do not know that it is idle.
 | Advance PCO Live one item | steps the live plan forward once |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
+| Fire a ProVideoPlayer cue | a cue from a playlist. ProVideoPlayer always plays it on the cue's own layer |
+| Clear a ProVideoPlayer layer | takes whatever is on that layer off screen |
+| Clear every ProVideoPlayer layer | blanks every screen PVP is driving |
+| Hide / unhide a ProVideoPlayer layer | the layer's hidden flag |
+| Mute / unmute a ProVideoPlayer layer | the layer's mute flag |
+| Set a ProVideoPlayer layer's opacity | 0 is invisible, 100 is fully opaque |
+
+> ProVideoPlayer answers every command with "OK" whether or not it acted on it, so
+> every ProVideoPlayer action above reads PVP's state back to confirm what it did.
+> A command that was accepted and ignored is recorded as a **failure**, not a
+> success — which is the opposite of what the log would otherwise show.
+>
+> There is no action for firing a cue onto a layer you choose, because
+> ProVideoPlayer does not offer one: its layer-addressed endpoint accepts the
+> argument and ignores it, playing the cue on its own configured layer. Which
+> layer a cue uses is set in ProVideoPlayer, not here. See
+> [ProVideoPlayer](integrations/provideoplayer.md).
 
 ## Firing an item on time
 

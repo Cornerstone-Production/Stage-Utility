@@ -366,10 +366,10 @@ Then work through the sidebar:
    password, SenSource Vea client ID + secret (people counting), Ross MultiViewer
    TSL port (pushes people counts). OSC targets are set per **OSC button** in the
    custom-layout editor.
-4. **Plan**, **Views**, **Displays** — pick a plan (or Auto) and toggle which
+4. **Plan**, **Screens** — pick a plan (or Auto) and toggle which
    **Active Service Types** auto-selection considers, build views (slots, dashboard,
    stage, captions, script, SPL rundown, or a custom visual layout), and route each
-   display to a view.
+   screen to a view.
 5. **ScriptView** *(optional)* — choose which service types appear on the `/scriptview`
    landing page and define global column layouts (Audio/Video/Lighting/…). **History**
    (SPL + attendance + item timing) and **Baptisms** appear once there's data.

@@ -23,6 +23,7 @@ import { signalStore } from "./signal-store.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
+import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
@@ -236,12 +237,20 @@ class AutomationEngine {
     const state = stageController.getState();
     const integrations: Record<string, string> = {};
     for (const s of integrationManager.getStates()) integrations[s.id] = s.connection;
+    // Read ONCE. Two getLatest() calls could straddle a poll and hand the
+    // conditions a `connected` from one snapshot and layers from the next.
+    const pvp = pvpService.getLatest();
     return {
       pcoLive: live ? { mode: live.mode, serviceTimeId: live.serviceTimeId ?? null } : null,
       serviceTypeId: state.serviceTypeId ?? null,
       integrations,
       obsRecording: obsService.getLatest().recording === true,
       reaperRecording: reaperService.getLatest().recording === true,
+      // null, not [], when PVP has never connected. An empty workspace and an
+      // integration that is switched off look identical as a list, and "the
+      // workspace has nothing on screen" must not hold for a machine we have
+      // never spoken to.
+      pvpLayers: pvp.connected ? pvp.layers : null,
       resiStreaming: resiService.getLatest().live === true,
       youtubeStreaming: youtubeService.getLatest().live === true,
       baptismPhase: baptismTimerService.getState()?.phase ?? null,
@@ -317,6 +326,19 @@ const CONDITION_CHANNELS: Record<string, string> = {
   "reaper.is-recording": "reaper:status",
   "resi.is-streaming": "resi:status",
   "youtube.is-streaming": "youtube:status",
+  // ProVideoPlayer and baptisms, added when their features merged. A condition
+  // needs a line here even when its channel is ALSO a trigger channel: the loop
+  // above registers demand for the channels a rule TRIGGERS on, and a rule can
+  // perfectly well trigger on PCO and merely ASK about a PVP layer. That rule
+  // would read a snapshot at the idle cadence -- which for PVP, whose whole
+  // point is driving content from a rule on a booth appliance with no browser
+  // open, is the case that matters most.
+  "pvp.layer-has-content": "pvp:status",
+  "pvp.layer-is-hidden": "pvp:status",
+  "pvp.layer-is-muted": "pvp:status",
+  "pvp.layer-is-playing": "pvp:status",
+  "pvp.workspace-has-content": "pvp:status",
+  "baptism.phase-is": "baptism:state",
 };
 for (const [conditionId, channel] of Object.entries(CONDITION_CHANNELS)) {
   addChannelDemandSource(channel, () => automationEngine.wantsCondition(conditionId));

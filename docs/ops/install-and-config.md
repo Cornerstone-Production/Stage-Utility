@@ -309,11 +309,10 @@ Manual pins one, and its picker also lists the last 30 days so you can point the
 screens at a service that has already happened. Active Service Types limits which
 types Auto considers.
 
-**Views** — the content you build. A view is a slot grid, dashboard, stage screen,
-captions, script rundown, SPL rundown, or a custom layout you design on a canvas.
-Build once, route to any number of screens.
-
-**Displays** — your physical screens. Each has its own URL and points at one view.
+**Screens** — build the content and route it to your physical screens. A view is a
+slot grid, dashboard, stage screen, captions, script rundown, SPL rundown, or a
+custom layout you design on a canvas; build once and route it to any number of
+screens, each with its own URL.
 
 **Branding, Automation, History, Baptisms, Patch** — appearance, event-driven
 rules, recorded services, the baptism timer and the stage patch sheet.
