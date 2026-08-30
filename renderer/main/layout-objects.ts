@@ -32,6 +32,7 @@ export const PALETTE_GROUP_ORDER = [
   "REAPER",
   "Resi",
   "YouTube",
+  "ProVideoPlayer",
   "Control",
   "Status",
 ] as const;
@@ -615,6 +616,17 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: () => PILL({ fontWeight: 700, uppercase: true }),
     homeSize: "s",
     integration: { id: "reaper", label: "REAPER" },
+  },
+
+  // ProVideoPlayer
+  "pvp-layers": {
+    label: "ProVideoPlayer layers",
+    blurb: "What ProVideoPlayer has on each layer, and how long is left",
+    group: "ProVideoPlayer",
+    config: () => ({ type: "pvp-layers", show: "with-content", layerName: null, showProgress: true, hideWhenEmpty: false }),
+    style: () => CARD({ fontSize: 0.05 }),
+    homeSize: "m",
+    integration: { id: "pvp", label: "ProVideoPlayer" },
   },
 
   // Control

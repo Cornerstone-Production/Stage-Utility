@@ -407,6 +407,37 @@ export type LayoutObjectConfig =
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
     }
+  // ProVideoPlayer layer state (from the PVP integration, `pvp:status` channel).
+  //
+  // A LIST, not a status slab: PVP is up to eleven layers and the useful question
+  // is which of them are showing something. `show` filters, because eleven rows
+  // do not fit a wall tile at wall-legible type and two of eleven was the
+  // observed steady state.
+  //
+  // There is no picture option because PVP has no preview, thumbnail or frame
+  // endpoint of any kind. Every reading here is a name, a state or a time.
+  //
+  // The keys are `hideWhenEmpty` and `showProgress` rather than the recorders'
+  // `hideWhenIdle` / `showPosition` deliberately: card-toggles.ts declares an
+  // exhaustive record over every type carrying those keys, and reusing one to
+  // inherit a free Home toggle would put two different meanings behind one word.
+  // PVP's "nothing on this layer" is not a recorder's "nothing is going out".
+  | {
+      type: "pvp-layers";
+      /** "with-content" is the default: it turns an eleven-row list into a
+       *  two-row one and is the question an operator glancing at a wall is
+       *  actually asking. "one" needs `layerName`. */
+      show?: "with-content" | "all" | "one";
+      /** For `show: "one"`. Matched on the layer's NAME, not its uuid: a uuid is
+       *  opaque in an inspector, and a workspace rebuilt from a template has new
+       *  uuids for the same layers. */
+      layerName?: string | null;
+      /** Draw the progress bar and the time remaining under a rolling clip. */
+      showProgress?: boolean;
+      /** Render nothing at all when no layer matches — a tally light rather than
+       *  an empty box. */
+      hideWhenEmpty?: boolean;
+    }
   // A RossTalk control button. Tapping it (on a real display / operator surface,
   // never in the editor) fires `commandId` with `params` at `targetId`, or `raw`
   // when no catalogue command is chosen. No feedback bind: RossTalk is send-only,

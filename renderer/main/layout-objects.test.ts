@@ -366,6 +366,8 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // `after: null` — each leads its own group, because each platform gets one.
   { type: "home-streaming-resi", label: "Resi status", group: "Resi", after: null },
   { type: "home-streaming-youtube", label: "YouTube status", group: "YouTube", after: null },
+  // ProVideoPlayer. `after: null` — it leads its own new group.
+  { type: "pvp-layers", label: "ProVideoPlayer layers", group: "ProVideoPlayer", after: null },
 ];
 
 /**

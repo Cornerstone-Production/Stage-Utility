@@ -48,6 +48,7 @@ import { useSplState } from "../main/use-spl-state";
 import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsState } from "../main/use-obs-state";
+import { usePvpState } from "../main/use-pvp-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useOscTargets } from "../main/use-osc-state";
 import { useStageState } from "../main/use-stage-state";
@@ -322,6 +323,7 @@ export function Inspector({
   const { data: wirelessChannels = [] } = useWirelessChannels();
   const obs = useObsState();
   const reaper = useReaperState();
+  const pvp = usePvpState();
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
   // RossTalk targets + command catalogue for the rosstalk-button inspector. Loaded
@@ -918,6 +920,42 @@ export function Inspector({
             <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? FILL_WHEN_ACTIVE} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             <RowSwitch label="Show position" checked={c.showPosition ?? false} onChange={(v) => onConfig({ ...c, showPosition: v })} />
             <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+          </>
+        );
+      })()}
+      {c.type === "pvp-layers" && (() => {
+        const withContent = (pvp?.layers ?? []).filter((l) => l.state !== "empty").length;
+        const live = !pvp?.connected
+          ? "Not connected"
+          : `${pvp.layers.length} layers, ${withContent} with content`;
+        return (
+          <>
+            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{live}</span></Row>
+            <RowSelect
+              label="Show"
+              value={c.show ?? "with-content"}
+              options={[
+                { value: "with-content", label: "Layers with content" },
+                { value: "all", label: "All layers" },
+                { value: "one", label: "One layer" },
+              ]}
+              onChange={(v) => onConfig({ ...c, show: v as "with-content" | "all" | "one" })}
+            />
+            {(c.show ?? "with-content") === "one" && (
+              /* A free text field, not a select. A dropdown would be populated
+                 only while PVP is connected, so an operator building a layout on
+                 a laptop away from the machine would find it empty and have no
+                 way to type the name they already know. The live first layer name
+                 is the placeholder instead. */
+              <RowText
+                label="Layer name"
+                value={c.layerName ?? ""}
+                placeholder={pvp?.layers[0]?.name ?? "Layer name"}
+                onChange={(v) => onConfig({ ...c, layerName: v })}
+              />
+            )}
+            <RowSwitch label="Show progress" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
+            <RowSwitch label="Hide when nothing is on screen" checked={c.hideWhenEmpty ?? false} onChange={(v) => onConfig({ ...c, hideWhenEmpty: v })} />
           </>
         );
       })()}

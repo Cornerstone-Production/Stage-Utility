@@ -71,6 +71,9 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   "plan-attachment": ["readout"],
   "pp-timer": ["readout"],
   "reaper-status": ["readout"],
+  // Not "drilldown": a test asserts CAPABILITIES and the DRILLDOWN route table
+  // agree in both directions, so declaring one without the other fails.
+  "pvp-layers": ["readout"],
   "record-status": ["readout"],
   "section-chip": ["readout"],
   "service-order": ["readout"],
