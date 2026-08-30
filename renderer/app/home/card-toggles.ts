@@ -53,6 +53,17 @@ const APPLIES = {
   },
   fillWhenLive: { "stream-status": true, "home-streaming": true, "home-streaming-resi": true, "home-streaming-youtube": true },
   fillWhenRecording: { "record-status": true, "obs-status": true, "reaper-status": true },
+  // ProVideoPlayer's hairline progress rule, on all four PVP widgets. ONE name
+  // for one idea, so an operator learns it once — and the exhaustive record is
+  // what makes that a promise rather than an intention: a fifth type carrying
+  // `showProgress` and not listed here fails the build.
+  //
+  // These two are the first entries that a Home card actually READS. Every
+  // setting above is written into the object and ignored by the card that drew
+  // it, because HomeCard only ever received a type; it takes the whole config
+  // now, so a switch here changes what Home draws.
+  showProgress: { "pvp-layers": true, "home-pvp": true, "pvp-now": true, "home-pvp-now": true },
+  showNextCue: { "pvp-now": true, "home-pvp-now": true },
 } satisfies { [K in ToggleKey]: Record<TypesWith<K>, true> };
 
 type ToggleKey =
@@ -65,7 +76,9 @@ type ToggleKey =
   | "warnStates"
   | "hideWhenIdle"
   | "fillWhenLive"
-  | "fillWhenRecording";
+  | "fillWhenRecording"
+  | "showProgress"
+  | "showNextCue";
 
 /** What to call each setting, and what "on" means for it. `format` is the only
  *  one that is not a boolean. */
@@ -78,6 +91,16 @@ const SPECS: {
    *  what layout-renderer actually does, or an untouched widget shows a tick for
    *  a setting it is not using. */
   fallback: boolean | string;
+  /**
+   * Per-type overrides, for a setting whose fallback is not the same everywhere.
+   *
+   * `showProgress` is the case: the hairline rule is OFF on a list of layers,
+   * where four of them stacked in a tile is a texture, and ON in the single
+   * readout, where there is exactly one and it is part of the composition. One
+   * fallback for both would make the menu wrong on one of them, and "the menu
+   * agrees with the renderer" is the only job this field has.
+   */
+  fallbackFor?: Record<string, boolean | string>;
 }[] = [
   { key: "showSeconds", label: "Seconds", fallback: true },
   { key: "format", label: "24-hour", choice: { on: "24h", off: "12h" }, fallback: "12h" },
@@ -93,6 +116,17 @@ const SPECS: {
   // the menu lying about the config it writes.
   { key: "fillWhenLive", label: "Fill the card when live", fallback: true },
   { key: "fillWhenRecording", label: "Fill the card when recording", fallback: true },
+  // The fallbacks agree with the renderer, which is what this field is for. The
+  // rule is OFF on a list and ON in the single readout, and both cards default
+  // to what their own renderer does — a tick that disagreed would be the menu
+  // lying about the config it writes.
+  {
+    key: "showProgress",
+    label: "Progress bar",
+    fallback: false,
+    fallbackFor: { "pvp-now": true, "home-pvp-now": true },
+  },
+  { key: "showNextCue", label: "Next cue", fallback: true },
 ];
 
 export interface CardToggle {
@@ -117,7 +151,7 @@ export function togglesFor(card: LayoutObject): CardToggle[] {
   const type = config.type as string;
   const supports = (key: ToggleKey) => type in (APPLIES[key] as Record<string, true>);
   const valueOf = (spec: (typeof SPECS)[number]) =>
-    spec.key in config ? config[spec.key] : spec.fallback;
+    spec.key in config ? config[spec.key] : spec.fallbackFor?.[type] ?? spec.fallback;
 
   // Found by key, not by index. This read `SPECS[1]`, which was the `format`
   // spec only because it happened to sit second in the list: inserting or

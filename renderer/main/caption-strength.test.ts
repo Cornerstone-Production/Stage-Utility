@@ -39,8 +39,15 @@ describe("the caption", () => {
 
 describe("the reading", () => {
   test("carries the dim itself", () => {
-    // Both halves of it: a sub-line is part of the same reading.
-    assert.equal((CODE.match(/opacity: dim \? 0\.45 : 1/g) ?? []).length, 2);
+    // THREE of them, which is every element that reports something: the value,
+    // the sub-line, and the progress rule. Was two before the rule was added;
+    // each new reporting element has to opt in here on purpose, which is what
+    // the exact count is for.
+    //
+    // The footer is deliberately NOT one of them: it is a qualified answer and
+    // is already quieter than the sub-line, so it dims from 0.7 rather than 1.
+    assert.equal((CODE.match(/opacity: dim \? 0\.45 : 1/g) ?? []).length, 3);
+    assert.match(CODE, /opacity: dim \? 0\.35 : 0\.7/, "the footer stopped dimming at all");
   });
 
   test("still dims at the strength the rest of the app uses", () => {

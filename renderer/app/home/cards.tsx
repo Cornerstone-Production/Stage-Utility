@@ -44,6 +44,7 @@ import { useObsState } from "../../main/use-obs-state";
 import { usePvpState, usePvpSkewMs } from "../../main/use-pvp-state";
 import { PvpLayerRow } from "../../main/pvp-layer-row";
 import { visibleLayers } from "../../main/pvp-object";
+import { PvpNowObject } from "../../main/pvp-now";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
 import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl } from "../recording-status";
@@ -77,6 +78,7 @@ const HOME_CARD_TYPES: Record<HomeCardType, true> = {
   "home-scores": true,
   "home-screens": true,
   "home-pvp": true,
+  "home-pvp-now": true,
 };
 
 export function isHomeCard(
@@ -595,23 +597,31 @@ export function SplCard() {
 }
 
 /**
- * ProVideoPlayer, at a glance.
+ * ProVideoPlayer's layers, at a glance.
  *
- * Up to three layers with content, compact. `visibleLayers` is the SAME filter
- * the wall object uses and PvpLayerRow is the same row, so the two surfaces
- * cannot disagree about whether a layer is live — which matters here more than
- * usual, because the field that would make them disagree (`playingItem`) never
- * clears and was wrong on four layers out of five at rest.
+ * Up to three layers with content. `visibleLayers` is the SAME filter the wall
+ * object uses and PvpLayerRow is the same row, so the two surfaces cannot
+ * disagree about whether a layer is live — which matters here more than usual,
+ * because the field that would make them disagree (`playingItem`) never clears
+ * and was wrong on four layers out of five at rest.
+ *
+ * IT CARRIES A CAPTION, which is the reason this card was rebuilt. Every other
+ * card on the page says what it is — ProPresenter, Recording, People — and this
+ * one was three rows of bare text that could have belonged to any integration in
+ * the building. The tally on the right sits where Readiness puts "2 to sort out"
+ * and where Recording and Streaming put their state.
  *
  * No preview image, and there is no version of this card that has one: PVP
  * exposes no thumbnail or frame endpoint at all.
  */
-export function PvpCard({ now }: { now: number }) {
+export function PvpCard({ now, showProgress = false }: { now: number; showProgress?: boolean }) {
   const pvp = usePvpState();
   // PVP's own clock offset rather than the PCO-derived one this card is handed:
   // the countdown below must not go wrong because Planning Center is down.
   const skewMs = usePvpSkewMs(pvp);
   const rows = visibleLayers(pvp?.layers ?? [], { type: "pvp-layers", show: "with-content" });
+  // playbackRate, never isPlaying — the one rule this integration turns on.
+  const rolling = rows.filter((l) => l.playbackRate > 0).length;
 
   // Three different nothings, for the reason the wall object's emptyReason
   // exists: one is a machine to go and look at, one is not, and one is that we
@@ -624,22 +634,81 @@ export function PvpCard({ now }: { now: number }) {
     // STAT_CARD, matching the Stat fallbacks above: home-pvp is a BARE type, so
     // nothing upstream supplies the chrome, and without this the card lost its
     // box at exactly the moment it had something to show.
-    <div className={`${STAT_CARD} flex flex-col gap-1 min-w-0`}>
+    <div className={`${STAT_CARD} min-w-0`}>
+      <div className="flex shrink-0 items-baseline gap-2">
+        <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+          ProVideoPlayer
+        </h2>
+        {/* "on screen", NOT "playing".
+            `rows` is the with-content filter, which counts a paused clip and a
+            still — and this whole widget exists because ProVideoPlayer's own
+            "playing" flag says true for a graphic that is not moving. The tally
+            would have read "3 of 11 playing" with nothing rolling, in green,
+            which is the same lie one level up. The colour follows the same rule:
+            it is live only when something actually is. */}
+        <span
+          className={cn(
+            "ml-auto font-mono text-caption2 tabular-nums",
+            rolling > 0 ? "text-live-11" : "text-fg-subtle",
+          )}
+        >
+          {rows.length} of {pvp.layers.length} on screen
+        </span>
+      </div>
       {/* Three, not all of them. A Home tile is a glance; the wall object is
           where an operator goes to see the whole stack. */}
-      {rows.slice(0, 3).map((l) => (
-        <PvpLayerRow
-          key={l.uuid}
-          layer={l}
-          sampledAt={pvp.sampledAt}
-          now={now}
-          skewMs={skewMs}
-          compact
-        />
-      ))}
-      {rows.length > 3 && (
-        <span className="text-caption2 text-fg-subtle">+{rows.length - 3} more</span>
-      )}
+      {/* text-fg, not inheritance. Home's grid is a kiosk surface that is
+          near-black in BOTH themes, and a row with no colour of its own came out
+          black on black there — measured at 1.06:1 on two other spans before
+          this. The rows themselves inherit, so the same component still takes a
+          wall object's chosen colour. */}
+      <div className="mt-1.5 flex min-w-0 flex-col gap-0.5 text-caption1 text-fg">
+        {rows.slice(0, 3).map((l) => (
+          <PvpLayerRow
+            key={l.uuid}
+            layer={l}
+            sampledAt={pvp.sampledAt}
+            now={now}
+            skewMs={skewMs}
+            showProgress={showProgress}
+          />
+        ))}
+        {rows.length > 3 && (
+          <span className="text-caption2 text-fg-subtle">+{rows.length - 3} more</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ProVideoPlayer as ONE reading — what is up right now, and how long is left.
+ *
+ * The SAME component the wall object draws, so the two cannot disagree about
+ * which layer is chosen, when a still gets a countdown (never), or what "next"
+ * means. Home supplies only the card and `uniform`, which is what makes this a
+ * tile in a grid of same-height tiles rather than a widget filling its box.
+ */
+export function PvpNowCard({
+  now,
+  showProgress = true,
+  showNextCue = true,
+}: {
+  now: number;
+  showProgress?: boolean;
+  showNextCue?: boolean;
+}) {
+  const pvp = usePvpState();
+  const skewMs = usePvpSkewMs(pvp);
+  return (
+    <div className={STAT_CARD}>
+      <PvpNowObject
+        config={{ showProgress, showNextCue }}
+        status={pvp}
+        now={now}
+        skewMs={skewMs}
+        uniform
+      />
     </div>
   );
 }
@@ -778,7 +847,7 @@ export function ScreensCard({
  * page.
  */
 export function HomeCard({
-  type,
+  config,
   state,
   pcoLive,
   now,
@@ -786,7 +855,15 @@ export function HomeCard({
   onlineOutputIds,
   secondsToStart,
 }: {
-  type: HomeCardType;
+  /**
+   * The card's WHOLE config, not just its type.
+   *
+   * It was the type alone, and that made every setting Home's own card menu
+   * writes a no-op: `togglesFor` offered "Elapsed time" on a streaming card and
+   * wrote it into the object, and the card that drew it never looked. The menu
+   * and the inspector both write here, so both have to be readable from here.
+   */
+  config: Extract<LayoutObjectConfig, { type: HomeCardType }>;
   state: StageState;
   pcoLive: PcoLiveDTO | null;
   now: number;
@@ -802,7 +879,8 @@ export function HomeCard({
   onlineOutputIds: readonly string[];
   secondsToStart: number | null;
 }) {
-  switch (type) {
+  const c = config;
+  switch (c.type) {
     case "home-live-status":
       return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
     case "home-recording":
@@ -822,7 +900,15 @@ export function HomeCard({
     case "home-spl":
       return <SplCard />;
     case "home-pvp":
-      return <PvpCard now={now} />;
+      return <PvpCard now={now} showProgress={c.showProgress ?? false} />;
+    case "home-pvp-now":
+      return (
+        <PvpNowCard
+          now={now}
+          showProgress={c.showProgress ?? true}
+          showNextCue={c.showNextCue ?? true}
+        />
+      );
     case "home-screens":
       return <ScreensCard outputs={state.outputs ?? []} onlineOutputIds={onlineOutputIds} />;
     case "home-next-service":
@@ -832,7 +918,7 @@ export function HomeCard({
     case "home-recent-services":
       return <RecentServicesCard state={state} />;
     default: {
-      const _never: never = type;
+      const _never: never = c;
       void _never;
       return null;
     }

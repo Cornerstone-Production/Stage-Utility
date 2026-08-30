@@ -6,6 +6,7 @@
 // established by watching a live workspace over 702 samples, not by reading the
 // vendor documentation — see docs/superpowers/research/2026-08-29-provideoplayer.md.
 
+import { hasContent } from "../types/pvp.js";
 import type { PvpLayerDTO, PvpLayerState, PvpStatusDTO } from "../types/pvp.js";
 
 const rec = (v: unknown): Record<string, unknown> =>
@@ -90,6 +91,11 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
       // the only field that can confirm a trigger action landed; PvpLayerRow is
       // the single place that decides whether to draw it.
       lastCueName: str(rec(t.playingItem).name),
+      lastCueUuid: str(rec(t.playingItem).uuid),
+      // The playlist tree is a SEPARATE request, so this parser cannot know it.
+      // withNextCues fills it in once the service has a cached tree; null here
+      // means "not looked up", which renders identically to "unknown".
+      nextCueName: null,
       hidden: layer.isHidden === true,
       muted: layer.isMuted === true,
       // Absent means fully opaque. Defaulting to 0 would render every layer of a
@@ -104,6 +110,98 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
     });
   });
   return out;
+}
+
+/**
+ * Is this actually PVP's playlist tree?
+ *
+ * Same job as isWorkspaceResponse, and for the same reason: `cueSuccessors`
+ * answers an empty map both for a workspace with no playlists and for a response
+ * that was never a playlist tree, and the caller has to tell those apart before
+ * it caches one for five minutes.
+ */
+export function isPlaylistsResponse(json: unknown): boolean {
+  const p = rec(json).playlist;
+  return p !== undefined && typeof p === "object" && p !== null && !Array.isArray(p);
+}
+
+/**
+ * Every cue in the tree, mapped to the NAME of the entry after it.
+ *
+ * `GET /api/0/data/playlists` returns one root playlist whose `children` are the
+ * real playlists, each with an ordered `items` array of `{ uuid, name }`; the
+ * format nests further and the walk is recursive for that reason, even though
+ * the observed workspace is one level deep.
+ *
+ * Three things are encoded here that a shorter version gets wrong:
+ *
+ *  - The LAST entry of a playlist maps to `null`, and is PRESENT in the map. A
+ *    cue that is simply absent means "this tree has not heard of it", which is
+ *    the service's signal to refresh a stale cache. Collapsing the two would
+ *    make the end of every playlist look like a cache miss and refetch the tree
+ *    on a loop.
+ *  - Successors never cross a playlist boundary. The last cue of PreService is
+ *    not followed by the first cue of PreRoll; PVP does not advance that way.
+ *  - The FIRST occurrence of a uuid wins. All 26 entries of the observed tree
+ *    have distinct uuids, so this never fired there, but nothing in the format
+ *    promises it and a later duplicate silently rewriting an earlier answer is
+ *    not a behaviour worth having.
+ */
+export function cueSuccessors(json: unknown): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+
+  const walk = (node: unknown): void => {
+    const n = rec(node);
+    const items = Array.isArray(n.items) ? n.items : [];
+    items.forEach((item, i) => {
+      const uuid = str(rec(item).uuid);
+      if (!uuid || out.has(uuid)) return;
+      out.set(uuid, i + 1 < items.length ? str(rec(items[i + 1]).name) : null);
+    });
+    const children = Array.isArray(n.children) ? n.children : [];
+    for (const child of children) walk(child);
+  };
+
+  walk(rec(json).playlist);
+  return out;
+}
+
+/**
+ * The same layers, each carrying the cue that follows the one it last played.
+ *
+ * PURE and separate from the fetch so the derivation is testable against a saved
+ * tree. Returns a new array rather than mutating: `emitIfChanged` keeps the
+ * previous snapshot and compares against it, and mutating the layers in place
+ * would edit that snapshot too.
+ */
+export function withNextCues(
+  layers: readonly PvpLayerDTO[],
+  successors: ReadonlyMap<string, string | null>,
+): PvpLayerDTO[] {
+  return layers.map((l) => {
+    const next = l.lastCueUuid ? successors.get(l.lastCueUuid) ?? null : null;
+    return l.nextCueName === next ? l : { ...l, nextCueName: next };
+  });
+}
+
+/**
+ * Is a layer that is SHOWING something playing a cue this tree cannot explain?
+ *
+ * The service's cue to refetch the tree: a cue the cache has never heard of is
+ * either from a playlist created since the last read, or from a cache that was
+ * never loaded. Empty layers are excluded because their `playingItem` is
+ * residual — it names a cue that may have been deleted from the tree hours ago,
+ * and chasing it would refetch for ever.
+ *
+ * `hasContent`, not `state !== "empty"` written out again. That rule has one
+ * home for the reason its own doc gives: written out at each call site, one of
+ * them eventually gets written the other way.
+ */
+export function hasUnknownCue(
+  layers: readonly PvpLayerDTO[],
+  successors: ReadonlyMap<string, string | null>,
+): boolean {
+  return layers.some((l) => hasContent(l) && l.lastCueUuid !== null && !successors.has(l.lastCueUuid));
 }
 
 /**
@@ -123,11 +221,16 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
  *
  * `mediaName` is out too, but for a different reason: the uuid beside it is the
  * identity, and a name change under a stable uuid is a relabel, not a cue.
+ *
+ * `nextCueName` IS in, and costs nothing: it is derived from `lastCueUuid` and a
+ * cached tree, so it moves only when the cue moves — which is already a reason
+ * to send a frame — or when somebody edits a playlist, which is rare and is
+ * exactly the change a display should be told about.
  */
 export function layerSignature(layers: readonly PvpLayerDTO[]): string {
   return JSON.stringify(
     layers.map((l) => [
-      l.uuid, l.name, l.index, l.state, l.mediaUuid, l.lastCueName,
+      l.uuid, l.name, l.index, l.state, l.mediaUuid, l.lastCueName, l.lastCueUuid, l.nextCueName,
       l.hidden, l.muted, l.opacity, l.playbackRate,
     ]),
   );

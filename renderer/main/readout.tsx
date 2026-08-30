@@ -112,6 +112,24 @@ function useShrinkToWidth(deps: unknown[]): {
   return { wrapRef, elRef, scale };
 }
 
+/**
+ * The three pieces of a line that carries an end slot.
+ *
+ * Written once rather than inline twice: the caption row and the sub-line row
+ * are the same shape, and the first version of them had drifted apart before it
+ * was even reviewed.
+ */
+const ROW: CSSProperties = { display: "flex", alignItems: "baseline", gap: "0.6em" };
+const ELLIPSIS: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" };
+const END_SLOT: CSSProperties = {
+  marginLeft: "auto",
+  flexShrink: 0,
+  // Its own case and spacing: a state word set in the caption's caps and
+  // letterspacing reads as a second caption rather than as a reading.
+  textTransform: "none",
+  letterSpacing: "0.02em",
+};
+
 export interface ReadoutProps {
   /** What this is — "SERVICE STARTS IN", "OBS". Absent on objects that predate
    *  captions, in which case the composition is value + sub. */
@@ -174,6 +192,28 @@ export interface ReadoutProps {
    * device that is merely unplugged.
    */
   dim?: boolean;
+  /**
+   * The right end of the CAPTION row — a short state word, as Home's Readiness
+   * header already uses for "2 to sort out".
+   *
+   * Costs no height: the caption line exists either way and this rides in it, so
+   * it is not in `fitComposition`'s budget. Drawn only when the caption is, so it
+   * cannot float alone over a value in a box too short for a caption.
+   *
+   * A ReactNode rather than a `{ text, color }` shape: this is a slot, and what
+   * a state word should look like belongs to the widget that knows what state it
+   * is reporting, not to the composition.
+   */
+  captionEnd?: ReactNode;
+  /** The right end of the SUB-LINE — the number the sub-line names. Rides in the
+   *  sub-line, so it also costs no height. */
+  subEnd?: ReactNode;
+  /** 0..1. A hairline progress rule under the sub-line. Null draws nothing.
+   *  Unlike the two slots above this DOES take height, so it is budgeted. */
+  meter?: number | null;
+  /** The quietest line, under everything: a secondary or qualified answer that
+   *  must never compete with the value. First to be dropped in a short box. */
+  footer?: ReactNode;
 }
 
 /**
@@ -197,6 +237,10 @@ export function Readout({
   dim = false,
   align,
   uniform = false,
+  captionEnd,
+  subEnd,
+  meter = null,
+  footer = null,
 }: ReadoutProps) {
   const side = align ?? DEFAULT_READOUT_ALIGN;
   // One value drives BOTH the flex cross-axis and text-align. The lines are
@@ -206,7 +250,13 @@ export function Readout({
   const [ref, boxH, boxW] = useBoxSize();
   // Lines are dropped rather than clipped when the box cannot hold them — see
   // fitComposition. A caption cut in half is not a caption.
-  const { captionPx, valuePx, subPx } = fitComposition(boxH, !!caption, !!sub, uniform);
+  const { captionPx, valuePx, subPx, meterPx, footerPx } = fitComposition(
+    boxH,
+    !!caption,
+    !!sub,
+    uniform,
+    { meter: meter != null, footer: !!footer },
+  );
   const { wrapRef, elRef, scale } = useShrinkToWidth([value, valuePx, mono]);
 
   const filled = !!fill;
@@ -289,7 +339,16 @@ export function Readout({
           style={{ position: "absolute", inset: 0, background: fill!, borderRadius: "inherit" }}
         />
       ) : null}
-      {caption && captionPx > 0 ? <span style={{ ...captionStyle, position: "relative" }}>{caption}</span> : null}
+      {caption && captionPx > 0 ? (
+        /* One row, two ends. `width: 100%` is already on captionStyle, so the row
+           spans the box and the end slot sits against the far edge whatever the
+           caption's own alignment is — the caption names the box, the end slot
+           reports it, and they belong at opposite ends. */
+        <span style={{ ...captionStyle, position: "relative", ...(captionEnd != null ? ROW : null) }}>
+          <span style={ELLIPSIS}>{caption}</span>
+          {captionEnd != null ? <span style={END_SLOT}>{captionEnd}</span> : null}
+        </span>
+      ) : null}
       <div ref={wrapRef} style={{ width: "100%", minHeight: 0, overflow: "hidden", position: "relative", textAlign: side }}>
         <span
           ref={elRef}
@@ -316,8 +375,82 @@ export function Readout({
         </span>
       </div>
       {sub && subPx > 0 ? (
-        <span style={{ ...subStyle, position: "relative", opacity: dim ? 0.45 : 1 }} title={sub}>
-          {sub}
+        <span
+          style={{ ...subStyle, position: "relative", opacity: dim ? 0.45 : 1, ...(subEnd != null ? ROW : null) }}
+          title={sub}
+        >
+          <span style={ELLIPSIS}>{sub}</span>
+          {subEnd != null ? (
+            /* The number the sub-line names. Mono and tabular whatever the value
+               is set in: it ticks once a second, and proportional digits are
+               different widths, so the text would physically move every tick —
+               the one thing a wall readout must not do. */
+            <span
+              style={{
+                ...END_SLOT,
+                fontFamily: "var(--font-mono)",
+                fontVariantNumeric: "tabular-nums",
+                fontWeight: 600,
+                color: filled ? "#ffffff" : "var(--readout-value-color, var(--color-fg))",
+              }}
+            >
+              {subEnd}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+      {meter != null && meterPx > 0 ? (
+        <span
+          data-readout-meter
+          aria-hidden="true"
+          style={{
+            position: "relative",
+            width: "100%",
+            height: `${meterPx}px`,
+            borderRadius: `${meterPx}px`,
+            overflow: "hidden",
+            flexShrink: 0,
+            // The TRACK is derived from the same ink as the bar, not from a
+            // neutral token. A widget on a stage canvas sets its own colour and
+            // is not inside .kiosk-surface, so --color-fg-faint resolved to the
+            // LIGHT theme's #b8bec6 there — a pale grey track under a white bar
+            // on a black card, measured in the editor. color-mix keeps the two
+            // in the same family whatever ink the object is using.
+            background: filled
+              ? "rgba(255,255,255,0.25)"
+              : "color-mix(in srgb, var(--readout-value-color, var(--color-fg)) 22%, transparent)",
+            opacity: dim ? 0.45 : 1,
+          }}
+        >
+          <span
+            style={{
+              display: "block",
+              height: "100%",
+              borderRadius: "inherit",
+              // Clamped here as well as at the source: a fraction outside 0..1 —
+              // a stale anchor on a display that was asleep — would otherwise
+              // draw a bar wider than its own track.
+              width: `${Math.min(100, Math.max(0, meter * 100))}%`,
+              background: filled ? "#ffffff" : "var(--readout-value-color, var(--color-fg))",
+            }}
+          />
+        </span>
+      ) : null}
+      {footer && footerPx > 0 ? (
+        <span
+          style={{
+            ...subStyle,
+            fontSize: `${footerPx}px`,
+            position: "relative",
+            // Quieter than the sub-line, deliberately. This line is a QUALIFIED
+            // answer — the next playlist entry is only what plays next while the
+            // playlist keeps auto-advancing — and it must never read as
+            // confidently as the value above it.
+            opacity: dim ? 0.35 : 0.7,
+          }}
+          title={typeof footer === "string" ? footer : undefined}
+        >
+          {footer}
         </span>
       ) : null}
     </div>

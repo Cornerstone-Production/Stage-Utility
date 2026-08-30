@@ -30,6 +30,7 @@ import { useIntegrations } from "./use-integration-states";
 import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
+import { PvpNowObject } from "./pvp-now";
 import { ActionButton } from "./action-button";
 import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
@@ -764,7 +765,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     return (
       <div className={live ? "w-full h-full" : "w-full h-full pointer-events-none"}>
         <HomeCard
-          type={c.type}
+          config={c}
           state={ctx.state}
           pcoLive={ctx.pcoLive}
           now={ctx.now}
@@ -1182,7 +1183,24 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       });
     }
     case "pvp-layers":
-      return <PvpObject config={c} status={ctx.pvp} now={ctx.now} skewMs={ctx.pvpSkewMs} />;
+      return <PvpObject config={c} status={ctx.pvp} now={ctx.now} skewMs={ctx.pvpSkewMs} H={ctx.H} />;
+
+    // `home-pvp-now` is NOT here: isHomeCard catches it above and draws it
+    // through PvpNowCard, which renders this same component inside Home's card.
+    // The two types differ only in whether a layer can be named — a Home card's
+    // settings are a short menu of switches, and a text field there would be a
+    // control the card can never reach.
+    case "pvp-now":
+      return (
+        <PvpNowObject
+          config={c}
+          status={ctx.pvp}
+          now={ctx.now}
+          skewMs={ctx.pvpSkewMs}
+          align={o.style?.textAlign}
+          uniform={ctx.home}
+        />
+      );
 
     case "rosstalk-button":
       return (
@@ -2729,7 +2747,11 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // Gated harder than most: the channel's DEMAND is what decides the poll cadence
   // at the server, so an ungated hook would hold PVP at 1 Hz for a wall screen
   // showing a clock.
-  const pvp = usePvpState(want(["pvp-layers"]));
+  // The two WALL types only. The Home cards subscribe for themselves inside
+  // PvpCard and PvpNowCard, so naming them here would open a second subscription
+  // on the channel whose demand sets the server's poll rate — the exact thing
+  // the note above is about.
+  const pvp = usePvpState(want(["pvp-layers", "pvp-now"]));
   // PVP's own clock offset. The shared skewMs below is PCO-derived and is 0
   // whenever PCO is off, which would leave every PVP bar comparing a server
   // timestamp against the browser's clock.

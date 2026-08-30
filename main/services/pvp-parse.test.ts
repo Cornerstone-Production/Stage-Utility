@@ -2,11 +2,17 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { parseWorkspace, layerSignature, anchorDriftSec, driftedLayers } from "./pvp-parse.js";
+import {
+  parseWorkspace, layerSignature, anchorDriftSec, driftedLayers,
+  cueSuccessors, hasUnknownCue, isPlaylistsResponse, withNextCues,
+} from "./pvp-parse.js";
 import type { PvpLayerDTO, PvpStatusDTO } from "../types/pvp.js";
 
 const FIXTURE: unknown = JSON.parse(
   readFileSync(new URL("./fixtures/pvp-workspace.json", import.meta.url), "utf8"),
+);
+const PLAYLISTS: unknown = JSON.parse(
+  readFileSync(new URL("./fixtures/pvp-playlists.json", import.meta.url), "utf8"),
 );
 
 function byName(layers: PvpLayerDTO[], name: string): PvpLayerDTO {
@@ -273,5 +279,152 @@ describe("driftedLayers", () => {
     const stills = base.filter((l) => l.state !== "video");
     const later = "2026-08-30T13:00:00.000Z";
     assert.deepEqual(driftedLayers(at(T0, stills), at(later, stills), 1), []);
+  });
+});
+
+// ── The playlist tree, and the one thing it is asked ────────────────────────
+//
+// "What plays after this?" is a QUALIFIED answer and the qualification is the
+// point: it is the next entry in the playlist, which is what plays next only
+// while the playlist keeps auto-advancing. Everything below is about not
+// overstating it.
+//
+// ABOUT THE FIXTURE, plainly: pvp-playlists.json is HAND-WRITTEN, not captured.
+// It is small enough to read, and it carries the three shapes the parser has to
+// get right that a capture happened not to contain — a nested playlist, a
+// duplicate cue uuid, and a cue at the end of its list.
+//
+// What that costs is the thing a capture would give: it cannot fail on a shape
+// the parser got wrong, because it was written to match the parser. So the
+// shape was checked against the real device on 2026-08-30 instead, and it holds:
+// `{ playlist: { name, uuid, children: [ { uuid, name, items: [{ uuid, name }],
+// children: [] } ] } }`, 26 entries across 6 playlists, every uuid distinct even
+// where two entries share a name.
+//
+// The derivation was verified there too: the live `playingItem` uuid matched
+// index 1 of a playlist and the entry after it was the one this function names.
+
+describe("isPlaylistsResponse", () => {
+  test("accepts the real tree", () => {
+    assert.equal(isPlaylistsResponse(PLAYLISTS), true);
+  });
+
+  test("rejects a workspace, and anything else that answered 200", () => {
+    // The setup mistake this integration warns about twice: PVP serves its API
+    // DOCUMENTATION on a different port, which answers 200 with JSON. Caching an
+    // empty map from that would look like a workspace with no playlists at all.
+    assert.equal(isPlaylistsResponse(FIXTURE), false);
+    assert.equal(isPlaylistsResponse({}), false);
+    assert.equal(isPlaylistsResponse({ playlist: [] }), false);
+    assert.equal(isPlaylistsResponse(null), false);
+  });
+});
+
+describe("cueSuccessors", () => {
+  const map = cueSuccessors(PLAYLISTS);
+
+  test("a cue maps to the entry AFTER it, not to itself and not to the first", () => {
+    // The bug this replaces: an off-by-one that names the current cue reads as a
+    // widget repeating itself, and one that names index 0 reads as a playlist
+    // about to restart.
+    assert.equal(map.get("cue-0000"), "MAIN GRAPHIC");
+    assert.equal(map.get("cue-0001"), "CLEAR GRAPHIC");
+  });
+
+  test("the LAST entry of a playlist maps to null, and is present", () => {
+    // Present-with-null is "this is the end"; absent is "never heard of it".
+    // Collapsing the two would make the end of every playlist look like a cache
+    // miss and refetch the tree on a loop.
+    assert.equal(map.has("cue-0009"), true);
+    assert.equal(map.get("cue-0009"), null);
+  });
+
+  test("a successor NEVER crosses a playlist boundary", () => {
+    // cue-0009 ends Masters and cue-0002 opens Pre-service. PVP does not advance
+    // that way, and a widget that said so would name a cue from another part of
+    // the service.
+    assert.notEqual(map.get("cue-0009"), "LOWER THIRD");
+  });
+
+  test("nested playlists are walked, because the format allows them", () => {
+    assert.equal(map.get("cue-0010"), "NESTED TWO");
+    assert.equal(map.get("cue-0011"), null);
+  });
+
+  test("a cue in no playlist is absent, not null", () => {
+    assert.equal(map.has("cue-nope"), false);
+  });
+
+  test("the first occurrence of a uuid wins", () => {
+    const dup = cueSuccessors({
+      playlist: {
+        children: [
+          { items: [{ uuid: "x", name: "X" }, { uuid: "y", name: "FIRST" }] },
+          { items: [{ uuid: "x", name: "X" }, { uuid: "z", name: "SECOND" }] },
+        ],
+      },
+    });
+    assert.equal(dup.get("x"), "FIRST");
+  });
+
+  test("garbage is an empty map, never a throw", () => {
+    // It is a response from a build we do not control, and a parser that threw
+    // would take the poll down and be reported as "unreachable".
+    assert.equal(cueSuccessors(null).size, 0);
+    assert.equal(cueSuccessors({ playlist: { children: "nope" } }).size, 0);
+  });
+});
+
+describe("withNextCues", () => {
+  const map = cueSuccessors(PLAYLISTS);
+  const base = parseWorkspace(FIXTURE);
+
+  test("a live layer gets the cue after the one it last played", () => {
+    const out = withNextCues(base, map);
+    assert.equal(byName(out, "Graphics").nextCueName, "CLEAR GRAPHIC");
+    assert.equal(byName(out, "Lower third").nextCueName, null, "cue-0002 ends its playlist");
+  });
+
+  test("it never mutates the layers it was given", () => {
+    // emitIfChanged keeps the previous snapshot and compares against it. Editing
+    // in place would edit that snapshot too, and the comparison would find
+    // nothing changed.
+    const before = JSON.stringify(base);
+    withNextCues(base, map);
+    assert.equal(JSON.stringify(base), before);
+  });
+
+  test("an unknown cue leaves null rather than guessing", () => {
+    assert.equal(withNextCues(base, new Map())[0].nextCueName, null);
+  });
+});
+
+describe("hasUnknownCue", () => {
+  const base = parseWorkspace(FIXTURE);
+
+  test("true when a live layer plays a cue the cache has never heard of", () => {
+    assert.equal(hasUnknownCue(base, new Map()), true);
+  });
+
+  test("IGNORES an empty layer's residual cue", () => {
+    // The guard that stops a refetch loop. An idle layer's `playingItem` names a
+    // cue that may have been deleted from the tree hours ago; chasing it would
+    // refetch the playlist tree for ever.
+    const idle = base.filter((l) => l.state === "empty");
+    assert.ok(idle.length > 0, "the fixture has no empty layer to test with");
+    assert.ok(idle.some((l) => l.lastCueUuid), "the empty layers carry no residual cue to ignore");
+    assert.equal(hasUnknownCue(idle, new Map()), false);
+  });
+
+  test("a known cue is not a miss, including one at the end of its playlist", () => {
+    assert.equal(hasUnknownCue(base, cueSuccessors(PLAYLISTS)), false);
+  });
+});
+
+describe("layerSignature and the next cue", () => {
+  test("a changed next cue sends a frame, because a display must be told", () => {
+    const base = parseWorkspace(FIXTURE);
+    const moved = base.map((l) => ({ ...l, nextCueName: "SOMETHING ELSE" }));
+    assert.notEqual(layerSignature(base), layerSignature(moved));
   });
 });

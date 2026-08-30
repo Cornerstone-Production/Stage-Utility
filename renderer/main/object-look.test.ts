@@ -34,7 +34,7 @@ const BARE = [
   // inset a newly added widget further than one added before the change.
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl", "home-screens",
-  "home-streaming", "home-streaming-resi", "home-streaming-youtube", "home-pvp",
+  "home-streaming", "home-streaming-resi", "home-streaming-youtube", "home-pvp", "home-pvp-now",
   "home-scores",
   // Retired, and left exactly as it shipped.
   "service-order",
@@ -61,8 +61,11 @@ describe("a widget you just added", () => {
     // and add it here or to BARE — do not bump the number.
 
     const all = Object.keys(LAYOUT_OBJECTS);
-    assert.equal(all.length, 59);
-    assert.equal(all.filter(hasCard).length, 31);
+    // 59/31 before the two ProVideoPlayer "what is on now" widgets: `pvp-now`
+    // is carded like every other wall readout, `home-pvp-now` is bare because
+    // Home's grid frames it.
+    assert.equal(all.length, 61);
+    assert.equal(all.filter(hasCard).length, 32);
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });
 

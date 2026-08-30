@@ -71,8 +71,8 @@ export function emptyReason(status: PvpStatusDTO | null, c: Config): string {
  * render first.
  *
  * It counts rows whose bottom falls outside the box rather than dividing
- * heights, because rows are not all the same height: one with a cue line and a
- * progress bar is twice the height of an empty one.
+ * heights, because rows are not all the same height: one carrying a progress
+ * rule is half again the height of one that is not.
  */
 function useClippedRows(container: React.RefObject<HTMLDivElement | null>, rowShape: string): number {
   const [clipped, setClipped] = useState(0);
@@ -95,10 +95,10 @@ function useClippedRows(container: React.RefObject<HTMLDivElement | null>, rowSh
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-    // rowShape, not a row COUNT. Row heights vary by a factor of three — an
-    // empty layer is one line, a rolling clip with a cue name and a bar is
-    // three — so four layers gaining content re-flows the stack without
-    // changing how many there are. Keyed on the count, the observer would never
+    // rowShape, not a row COUNT. Row heights vary — a plain row is one line, a
+    // rolling clip with the progress rule under it is more — so four layers
+    // gaining content, or the rule being switched on, re-flows the stack without
+    // changing how many rows there are. Keyed on the count, the observer would never
     // fire (the container is a fixed box inside the layout, so it does not
     // resize with its content) and the chip would go stale in both directions:
     // silent clipping again, or a "+4 more" that outlived what it counted.
@@ -106,19 +106,29 @@ function useClippedRows(container: React.RefObject<HTMLDivElement | null>, rowSh
   return clipped;
 }
 
-export function PvpObject({ config, status, now, skewMs }: {
+export function PvpObject({ config, status, now, skewMs, H }: {
   config: Config;
   status: PvpStatusDTO | null;
   now: number;
   skewMs: number;
+  /** The canvas height in layout pixels, for the row gap. */
+  H: number;
 }) {
   const rows = visibleLayers(status?.layers ?? [], config);
+  const showProgress = config.showProgress ?? false;
   const ref = useRef<HTMLDivElement | null>(null);
   // Everything that changes a row's HEIGHT, not just how many rows there are.
+  //
+  // `showProgress` IS IN HERE, and it belongs to the class of bug this signature
+  // was written for: turning the bar on adds a rule to every rolling row, which
+  // reflows the stack without changing how many rows there are. Left out, the
+  // "+N more" chip would keep counting the pre-toggle layout until the next real
+  // cue change — a count that outlived what it counted, which is the same
+  // silent-clipping failure with an extra step.
   const clipped = useClippedRows(
     ref,
-    `${config.showProgress ?? true}|` +
-      rows.map((l) => `${l.uuid}:${l.state}:${l.lastCueName ?? ""}:${l.durationSec ?? ""}:${l.hidden}${l.muted}${l.opacity}`).join("|"),
+    `${showProgress}|` +
+      rows.map((l) => `${l.uuid}:${l.state}:${l.durationSec ?? ""}:${l.hidden}${l.muted}${l.opacity}`).join("|"),
   );
 
   if (rows.length === 0) {
@@ -127,7 +137,15 @@ export function PvpObject({ config, status, now, skewMs }: {
   }
 
   return (
-    <div ref={ref} className="relative flex flex-col gap-[0.35em] w-full h-full overflow-hidden">
+    <div
+      ref={ref}
+      className="relative flex flex-col w-full h-full overflow-hidden min-w-0"
+      // A fraction of the CANVAS height, the way charger-battery spaces its bays
+      // and the way every length in a layout is expressed — so one object reads
+      // the same on a phone card and on a 1080p wall without a second set of
+      // numbers.
+      style={{ gap: `${0.012 * H}px` }}
+    >
       {rows.map((l) => (
         <PvpLayerRow
           key={l.uuid}
@@ -135,8 +153,7 @@ export function PvpObject({ config, status, now, skewMs }: {
           sampledAt={status?.sampledAt ?? null}
           now={now}
           skewMs={skewMs}
-          showProgress={config.showProgress ?? true}
-          compact={false}
+          showProgress={showProgress}
         />
       ))}
       {clipped > 0 && (

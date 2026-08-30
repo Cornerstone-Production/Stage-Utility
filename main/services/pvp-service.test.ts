@@ -488,3 +488,64 @@ describe("a stale read cannot broadcast backwards over a newer one", () => {
     assert.equal(frames[1].layers[0].mediaUuid, "m-2");
   });
 });
+
+// ── When the playlist tree is read again ────────────────────────────────────
+//
+// The tree is a SECOND request that exists to name one line, so every reason to
+// make it is behind a clock. This is the half of the integration that can loop,
+// and it loops against a machine in a live service.
+//
+// THE DEFECT THIS EXISTS FOR: `hasCache === false || ageMs >= TTL`
+// short-circuited the clock in exactly the case that needs it. A PVP whose
+// playlist endpoint does not answer never gets a cache, so the never-loaded
+// branch fired on EVERY poll for ever — a second doomed request a second, with
+// one console line for the whole outage. And because the read is awaited inside
+// connect(), an endpoint that hangs rather than refusing added the 4s request
+// timeout to every poll, stretching the 1 Hz cadence that automation triggers
+// ride on toward 5s.
+
+describe("when the playlist tree is read again", () => {
+  const MINUTE = 60_000;
+
+  test("the FIRST read happens straight away", () => {
+    // playlistsReadAtMs starts at 0, so the age on the first poll is the whole
+    // epoch. A cold start must not wait out a cooldown.
+    assert.equal(PvpService.shouldReadPlaylists(false, Date.now(), false), true);
+  });
+
+  test("A FAILING ENDPOINT IS RETRIED ON THE COOLDOWN, NOT ON EVERY POLL", () => {
+    // The guard. `false` is "we have never got a tree", which is the state a
+    // broken endpoint leaves us in permanently.
+    assert.equal(PvpService.shouldReadPlaylists(false, 0, false), false, "retried in the same tick");
+    assert.equal(PvpService.shouldReadPlaylists(false, 1000, false), false, "retried a second later");
+    assert.equal(PvpService.shouldReadPlaylists(false, 29_000, false), false);
+    assert.equal(PvpService.shouldReadPlaylists(false, 30_000, false), true);
+  });
+
+  test("a good cache is left alone for five minutes", () => {
+    assert.equal(PvpService.shouldReadPlaylists(true, 0, false), false);
+    assert.equal(PvpService.shouldReadPlaylists(true, 4 * MINUTE, false), false);
+    assert.equal(PvpService.shouldReadPlaylists(true, 5 * MINUTE, false), true);
+  });
+
+  test("a cue the cache cannot explain jumps the TTL — but not the cooldown", () => {
+    // A playlist built mid-service should show its next cue within the cooldown
+    // rather than in five minutes. A cue that is in NO playlist — PVP can play
+    // an item since deleted from the tree — must not refetch on every poll for
+    // as long as it stays up.
+    assert.equal(PvpService.shouldReadPlaylists(true, 1000, true), false, "no cooldown on the miss path");
+    assert.equal(PvpService.shouldReadPlaylists(true, 30_000, true), true);
+    assert.equal(PvpService.shouldReadPlaylists(true, 30_000, false), false, "refetched with nothing to look up");
+  });
+
+  test("costs at most two requests a minute in the worst case", () => {
+    // The whole point of the cooldown, stated as the number an operator would
+    // measure on the wire.
+    let reads = 0;
+    for (let ms = 0; ms < MINUTE; ms += 1000) {
+      // A poll every second against a PVP whose tree never loads.
+      if (PvpService.shouldReadPlaylists(false, ms % 30_000 === 0 ? 30_000 : ms % 30_000, false)) reads++;
+    }
+    assert.equal(reads, 2, `read the tree ${reads} times in a minute`);
+  });
+});

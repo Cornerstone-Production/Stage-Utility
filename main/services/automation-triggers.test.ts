@@ -557,7 +557,7 @@ describe("service pacing and updates", () => {
 describe("ProVideoPlayer triggers", () => {
   const layer = (over: Partial<PvpLayerDTO> = {}): PvpLayerDTO => ({
     uuid: "l1", name: "Graphics", index: 0, state: "video",
-    mediaName: "loop_a.mp4", mediaUuid: "m1", lastCueName: "MAIN GRAPHIC",
+    mediaName: "loop_a.mp4", mediaUuid: "m1", lastCueName: "MAIN GRAPHIC", lastCueUuid: "c1", nextCueName: null,
     hidden: false, muted: false, opacity: 1, playbackRate: 1,
     anchorElapsedSec: 1, durationSec: 20,
     ...over,

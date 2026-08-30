@@ -210,3 +210,109 @@ describe("a uniform grid of tiles", () => {
     }
   });
 });
+
+// ── The optional rule and footer, and what they may cost ────────────────────
+//
+// They are OFF by default, so every widget that shipped before them must get
+// exactly the composition it got before. When they are on they take their room
+// from the VALUE — there is nowhere else, because CONTENT_SCALE was derived for
+// the three-line composition and leaves less spare than the footer wants.
+//
+// TWO DEFECTS THESE EXIST FOR, one in each direction:
+//
+//   1. Refusing to touch the value. `used` then exceeded `avail` at every size,
+//      the drop-a-line loop gave the footer up every time, and the footer
+//      rendered at NO box height between 1 and 2000px — while the inspector
+//      switch and the Home card toggle both wrote a setting for it.
+//   2. Charging the extras to `used` AND subtracting them from the value. The
+//      two cancelled exactly, `used` came out invariant to them, the loop never
+//      fired, and the value silently absorbed the whole cost — falling below its
+//      own sub-line, and to font-size 0 around a 60px box.
+//
+// Both were green under a "the footer is dropped in order" assertion, which is
+// satisfied by a footer that is dropped ALWAYS. The tests below assert it is
+// kept as well.
+
+describe("the readout's optional rule and footer", () => {
+  const BOTH = { meter: true, footer: true } as const;
+
+  test("change nothing at all when they are off", () => {
+    // The whole safety of the addition: fifteen widget types go through this
+    // function and none of them asks for an extra.
+    for (const box of [12, 28, 54, 120, 200, 480]) {
+      for (const [caption, sub] of [[true, true], [true, false], [false, false]] as const) {
+        for (const uniform of [false, true]) {
+          const plain = fitComposition(box, caption, sub, uniform);
+          const explicit = fitComposition(box, caption, sub, uniform, { meter: false, footer: false });
+          assert.deepEqual(explicit, plain, `${box}px box drifted with the extras explicitly off`);
+        }
+      }
+    }
+  });
+
+  test("ARE ACTUALLY DRAWN, at every size a widget is really placed at", () => {
+    // Defect 1, as an assertion. 159 is the short side of the dashboard tile the
+    // browser sweep uses; 300 and 640 are wall sizes; 112 is the Home card the
+    // composition was approved at.
+    for (const box of [112, 159, 200, 300, 480, 640, 1080]) {
+      const f = fitComposition(box, true, true, false, BOTH);
+      assert.ok(f.footerPx > 0, `${box}px box drew no footer, so "next cue" is a setting nothing renders`);
+      assert.ok(f.meterPx > 0, `${box}px box drew no progress rule`);
+    }
+  });
+
+  test("and the value still outranks every line under it", () => {
+    // Defect 2, as an assertion. Whenever an extra is actually drawn, the value
+    // is the biggest thing in the composition — that is what makes it the value.
+    for (let box = 12; box <= 1200; box += 4) {
+      const f = fitComposition(box, true, true, false, BOTH);
+      if (f.footerPx === 0 && f.meterPx === 0) continue;
+      assert.ok(f.valuePx > 0, `${box}px box rendered the value at font-size 0`);
+      assert.ok(
+        f.valuePx >= f.subPx,
+        `${box}px box: value ${f.valuePx.toFixed(1)} is smaller than its sub-line ${f.subPx.toFixed(1)}`,
+      );
+      assert.ok(
+        f.valuePx >= f.footerPx,
+        `${box}px box: value ${f.valuePx.toFixed(1)} is smaller than the footer ${f.footerPx.toFixed(1)}`,
+      );
+    }
+  });
+
+  test("are given up in order: the footer, then the rule, then the sub-line", () => {
+    // The footer is a QUALIFIED answer and goes first; the rule restates a
+    // number that is already written out; the sub-line qualifies the value.
+    let sawFooterDropped = false;
+    let sawMeterDropped = false;
+    for (let box = 1200; box >= 8; box -= 4) {
+      const f = fitComposition(box, true, true, false, BOTH);
+      if (f.footerPx === 0) sawFooterDropped = true;
+      if (f.meterPx === 0) sawMeterDropped = true;
+      assert.ok(!(f.footerPx > 0 && f.meterPx === 0), `${box}px kept the footer and dropped the rule`);
+      assert.ok(!(f.meterPx > 0 && f.subPx === 0), `${box}px kept the rule and dropped the sub-line`);
+    }
+    // Otherwise the loop above is green because nothing was ever dropped — and
+    // the test above is what stops it being green because nothing was ever kept.
+    assert.ok(sawFooterDropped, "the footer was never dropped at any size, so the order is untested");
+    assert.ok(sawMeterDropped, "the rule was never dropped at any size, so the order is untested");
+  });
+
+  test("never overflow the box, extras included", () => {
+    for (const box of [8, 12, 20, 28, 40, 54, 120, 200, 480]) {
+      for (const extras of [{ meter: true }, { footer: true }, BOTH]) {
+        const { captionPx, valuePx, subPx, meterPx, footerPx } = fitComposition(box, true, true, false, extras);
+        const gap = box * 0.03;
+        const used =
+          valuePx * 1.05 +
+          (captionPx > 0 ? captionPx * 1.1 + gap : 0) +
+          (subPx > 0 ? subPx * 1.2 + gap : 0) +
+          (meterPx > 0 ? meterPx + gap : 0) +
+          (footerPx > 0 ? footerPx * 1.2 + gap : 0);
+        assert.ok(
+          used <= box - 2 * box * PAD_SCALE + 0.01,
+          `${box}px box overflowed with ${JSON.stringify(extras)}: ${used}`,
+        );
+      }
+    }
+  });
+});

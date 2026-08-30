@@ -180,20 +180,51 @@ YouTube reports a real broadcast start, so its elapsed time is exact. See
 | Widget | What it shows | Source |
 |---|---|---|
 | **ProVideoPlayer layers** | What ProVideoPlayer has on each layer, and how long is left | PVP Network API |
-| **ProVideoPlayer** *(Home)* | What is on screen now, and how long is left | PVP Network API |
+| **ProVideoPlayer** *(Home)* | Every layer holding something, and how long is left | PVP Network API |
+| **ProVideoPlayer now** | What is on screen right now, and how long is left | PVP Network API |
+| **On screen now** *(Home)* | The one thing ProVideoPlayer has up, and how long is left | PVP Network API |
+
+There is no preview image on any of them: ProVideoPlayer's network API offers no
+thumbnail or frame of any kind, so these report names, states and times only.
+
+### The layer list
+
+One row per layer: the layer's name on the left, then the file it is holding and
+how much of it is left. A layer with nothing on it reads **empty**.
+
+The word after the time says what is unusual — **still** for a graphic, which has
+no duration to count and so shows no time at all; **paused** for a clip that has
+stopped where it was; **hidden** or **muted** for live content nobody can see or
+hear; and a percentage for a layer that has been faded.
 
 **Show** chooses between every layer, only the layers holding something (the
-default), and one layer by name. There is no preview image: ProVideoPlayer's
-network API offers no thumbnail or frame of any kind, so this reports names,
-states and times only.
+default), and one layer by name. **Progress bar** adds a hairline rule under each
+rolling clip; it is off by default, because the time remaining is always shown
+and four rules stacked in one tile is a lot of chrome for a glance.
 
 A layer list longer than its widget is clipped — a screen cannot scroll — so the
 widget says **+N more** in the corner rather than dropping the tail silently. The
 Home card shows up to three layers and does the same.
 
-The cue name under a layer is the **last cue that touched it**, which is the only
-thing PVP reports — it never clears. Stage draws it only on a layer that actually
-holds something, so an idle layer does not claim a cue it is not showing. See
+### ProVideoPlayer now
+
+The same data as one reading rather than a list: the file that is up, how long is
+left, and a state word — playing, paused, still or empty — beside the caption.
+**Layer** picks which layer it reads; left empty it follows whichever layer has
+something on it. A layer with nothing on it says so rather than counting down to
+nothing.
+
+**Next cue** names the entry after the current one in its playlist. Read the
+caveat before you rely on it: **that is the next playlist entry, which is what
+plays next only while the playlist keeps auto-advancing.** Fire a cue by hand and
+this line is wrong until the next poll. It is the quietest line on the widget for
+that reason, it is never drawn without a current cue to anchor it, and it can be
+switched off.
+
+The **last cue** a layer played is deliberately not shown on any of these. PVP
+reports it and it never clears, so four idle layers were observed all naming the
+same cue while showing nothing — and it disagrees with the file that is actually
+up even on a layer that is playing. See
 [ProVideoPlayer](../integrations/provideoplayer.md).
 
 ## ProPresenter
