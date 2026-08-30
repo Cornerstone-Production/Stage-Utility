@@ -106,6 +106,21 @@ describe("what is on the page", () => {
     const shown = visibleCards(list, "live");
     assert.deepEqual(shown.map((o) => o.id), ["a", "b", "d"]);
   });
+
+  test("the card list cannot be computed from a mode nobody knows yet", () => {
+    // A COMPILE-time guard, and the reason homeMode returns HomeModeOrUnknown
+    // rather than defaulting to "idle": there is no filtering to be done before
+    // the live channel has answered, so this call must not type-check. Widen
+    // visibleCards to accept "unknown" and tsc fails on the unused directive,
+    // which is the point — the flash on Home was a filtered grid built from a
+    // mode that had not arrived.
+    //
+    // Runtime-asserted too, so this is a test rather than a bare comment: the
+    // narrowing is what makes the cast below necessary in the first place.
+    // @ts-expect-error "unknown" is not a HomeMode and must never be filterable
+    const forced = visibleCards(list, "unknown");
+    assert.deepEqual(forced.map((o) => o.id), ["a"]);
+  });
 });
 
 describe("editing", () => {

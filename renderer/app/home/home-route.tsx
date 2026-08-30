@@ -47,7 +47,7 @@ import { HomeGrid } from "./home-grid";
 import { AddWidgetSheet, CardChrome } from "./home-editor";
 
 export function HomeRoute() {
-  const { pcoLive } = useDashboardState();
+  const { pcoLive, pcoLiveKnown } = useDashboardState();
   const s = useStageSettings();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -170,7 +170,7 @@ export function HomeRoute() {
   // countdown it produces rather than parsing targetAt again.
   const timer = computePcoTimer(pcoLive, now, skewMs);
   const secondsToStart = timer?.mode === "preservice" ? timer.seconds : null;
-  const mode = homeMode(pcoLive, secondsToStart);
+  const mode = homeMode(pcoLiveKnown, pcoLive, secondsToStart);
 
   const home = (state.views ?? []).find((v) => v.id === HOME_VIEW_ID);
   // A Home whose layout was cleared (a hand-edited views.json, a kind change)
@@ -275,7 +275,16 @@ export function HomeRoute() {
   // Editing shows EVERY card, including ones whose mood is not the current one —
   // you cannot arrange what the page is hiding from you. Off the editor, Home
   // shows only what belongs to right now.
-  const cards = editing ? objects : visibleCards(objects, mode);
+  //
+  // Null while the live channel has not answered: the grid is HELD, not guessed
+  // at. pco:live hydrates separately from the stage state the spinner above
+  // waits on, so without this the first paint of every visit filtered on
+  // "idle" — and mid-service that drew the whole rest-of-the-week set and then
+  // took it away a frame later. There is nothing true to draw yet, so nothing
+  // is drawn; measured at 8-20ms, and bounded by the read's own timeout even if
+  // the server never answers.
+  const cards: LayoutObject[] | null =
+    editing ? objects : mode === "unknown" ? null : visibleCards(objects, mode);
 
   // The card the open menu belongs to, read fresh. A card removed from under an
   // open menu closes it rather than leaving a menu of dead actions.
@@ -305,7 +314,7 @@ export function HomeRoute() {
    *  while dragging, so the cards move out of the way before the drop rather
    *  than after it. */
   const previewBoxes: Box[] | undefined = (() => {
-    if (!dragId || !dropCell) return undefined;
+    if (!dragId || !dropCell || !cards) return undefined;
     const boxes = boxesOf(cards);
     const moving = boxes.find((b) => b.id === dragId);
     if (!moving) return undefined;
@@ -406,7 +415,7 @@ export function HomeRoute() {
         />
       )}
 
-      {home?.layout && (
+      {home?.layout && cards && (
         <HomeGrid
           layout={{ ...home.layout, objects: cards }}
           cards={cards}
