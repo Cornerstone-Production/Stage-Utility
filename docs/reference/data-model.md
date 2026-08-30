@@ -136,9 +136,10 @@ A routed view isn't the only thing a display can render. In order of precedence:
 - **View missing** — a live preview (`/preview-<id>`) whose view has since been
   deleted. Distinct from unrouted: a view WAS assigned here, and it's the view
   that's gone rather than the routing.
-- **Not configured** — the routed view needs Planning Center (a Slots view, or
-  any kind this build doesn't recognize) and the install has no PCO credentials
-  configured yet.
+- **Not configured** — a **Slots** view (or a kind this build doesn't recognize)
+  on an install with no Planning Center credentials yet. It applies to the slots
+  path only: a custom view with nothing drawn on it resolves to Empty first,
+  because the custom arm returns before Planning Center is ever consulted.
 - **Empty** — the routed view is a Slots view with no slots configured, or a
   Custom layout with nothing drawn on it.
 

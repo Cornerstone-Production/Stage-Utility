@@ -287,7 +287,7 @@ function KioskUnrouted({ state, displayName, locked }: { state: StageState; disp
         <MonitorIcon className="size-12 text-gray-7" />
         <p className="text-title3 text-gray-9 font-semibold">Display not configured</p>
         <p className="text-body text-gray-7">
-          No view is assigned to this display. Assign one under Settings → Screens.
+          No view is assigned to this display. Assign one under Screens.
         </p>
       </div>
     </div>
@@ -319,7 +319,7 @@ function KioskViewMissing({ state, displayName, locked }: { state: StageState; d
         <MonitorIcon className="size-12 text-gray-7" />
         <p className="text-title3 text-gray-9 font-semibold">View not found</p>
         <p className="text-body text-gray-7">
-          The view this preview points at has been deleted. Pick another under Settings → Screens.
+          The view this preview points at has been deleted. Pick another under Screens.
         </p>
       </div>
     </div>
@@ -404,7 +404,7 @@ export function StageView() {
     });
   }, [displayId]);
 
-  // Presence heartbeat: tell the server this screen is alive so Settings → Screens
+  // Presence heartbeat: tell the server this screen is alive so the Screens page
   // can show a Connected/Offline dot. Fast cadence near/during a PCO service, slow
   // otherwise (no point pinging every 20s during a dead week); a sendBeacon on unload
   // flips the dot offline at once, and the server TTL catches ungraceful deaths.

@@ -466,8 +466,19 @@ describe("StageView keeps controls dead unless the screen is a panel", () => {
         objects: [{ id: "o1", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "live-controls" } }],
       },
     }],
-    outputs: [{ id: "display-1", name: "Stage left", viewId: "v1", ...(mode ? { mode } : {}) }],
-    resolvedByOutput: { "display-1": resolved({ kind: "custom" }) },
+    // An Output at the PREVIEW slug too, and this is load-bearing rather than
+    // tidiness: "a preview of a panel is still inert" loads /preview-v1, so with
+    // only display-1 here the lookup misses whether or not the preview rule
+    // exists, and the test passes with that rule deleted. It was green under
+    // both `isPreview: false` and an unconditional currentDisplay lookup.
+    outputs: [
+      { id: "display-1", name: "Stage left", viewId: "v1", ...(mode ? { mode } : {}) },
+      { id: "preview-v1", name: "Preview", viewId: "v1", ...(mode ? { mode } : {}) },
+    ],
+    resolvedByOutput: {
+      "display-1": resolved({ kind: "custom" }),
+      "preview-v1": resolved({ kind: "custom" }),
+    },
   });
 
   test("a display's controls are inert", async () => {
