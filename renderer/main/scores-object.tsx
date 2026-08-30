@@ -12,6 +12,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 import { clamp } from "@main/services/clamp";
+import { leagueById } from "@main/types/scores";
 import { ScoreStrip } from "./score-strip";
 import { liveIndex } from "../app/score-activity";
 
@@ -33,6 +34,35 @@ export function teamPin(league: string, teamId: string): string {
   return `${league}:${teamId}`;
 }
 
+/**
+ * The choices a "which game" picker offers.
+ *
+ * ONE list for BOTH surfaces that have such a picker — the layout inspector's
+ * select and Home's own card menu — because the two would otherwise each spell
+ * out the pin format and the label, and a menu whose values disagreed with the
+ * select's would pin a card to a key nothing resolves.
+ *
+ * ONLY the configured favourites, never all 122 teams. Offering a team the
+ * integration does not follow is a control that silently does nothing: the poll
+ * never asks about that team, so the box would stay empty for ever with no way
+ * to tell why.
+ *
+ * Every value is `league:teamId`, never the bare id — ESPN reuses ids across
+ * leagues, so a church following both the Cubs and the Vikings (both id 16)
+ * would otherwise get two options with the SAME value. See teamPin.
+ */
+export function gameOptions(
+  favourites: readonly ScoreFavourite[],
+): { value: string; label: string }[] {
+  return [
+    { value: "auto", label: "Any followed team" },
+    ...favourites.map((f) => ({
+      value: teamPin(f.league, f.teamId),
+      label: `${f.displayName} · ${leagueById(f.league)?.label ?? f.league}`,
+    })),
+  ];
+}
+
 function parsePin(pin: string): { league: string | null; teamId: string } {
   const at = pin.indexOf(":");
   // A BARE ID IS A PRE-COLLEGE CONFIG and still resolves, by team id in any
@@ -51,10 +81,29 @@ function parsePin(pin: string): { league: string | null; teamId: string } {
  * back to the next one to start, so the object says "7:05 PM" rather than going
  * blank on the afternoon of a game.
  *
- * Anything else is a TEAM PIN — see teamPin. It resolves to that team's game
- * today. Pinning an EVENT id is deliberately not offered: an event id is a
- * per-day value that means nothing next week, so a wall would go blank every
- * Monday.
+ * Anything else is a TEAM PIN — see teamPin. Pinning an EVENT id is deliberately
+ * not offered: an event id is a per-day value that means nothing next week, so a
+ * wall would go blank every Monday.
+ *
+ * A PIN IS A PREFERENCE, NOT A LOCK. "Why did my pinned team disappear" is the
+ * question this ordering exists to answer, so it is written down:
+ *
+ *  1. their game is being played  → that one.
+ *  2. their game has not started  → that one, so the tile says "7:05 PM".
+ *  3. their game is over AND something else followed is live or still to come
+ *                                 → hand over, and the next game takes the tile.
+ *  4. their game is over and NOTHING else is on
+ *                                 → keep their final. A result nobody has
+ *                                    replaced is still the thing worth showing,
+ *                                    and "we won 6-2" should not vanish the
+ *                                    instant the last out is recorded.
+ *  5. they are not playing today  → whatever `auto` would have shown. A pinned
+ *                                    tile that is blank six days a week is a
+ *                                    tile the operator deletes.
+ *
+ * Rules 3 and 5 are the change from a pin that meant "only ever this team": that
+ * left a wall showing an afternoon final all evening while another followed game
+ * was in play, and dead entirely on any day the pinned club was not scheduled.
  *
  * Exported and pure, because "which game" is the whole decision this object
  * makes and it is the part worth testing.
@@ -73,15 +122,18 @@ export function pickGame(
         (pin.league === null || g.league === pin.league) &&
         (g.away.id === pin.teamId || g.home.id === pin.teamId),
     );
-    if (mine.length === 0) return null;
     // A doubleheader is two games for one team on one day. Prefer the one being
-    // played; otherwise the earliest that has not finished; otherwise the last
-    // one, so a wall shows this evening's final rather than nothing.
-    return (
-      mine.find((g) => g.state === "in") ??
-      mine.find((g) => g.state === "pre") ??
-      mine[mine.length - 1]
-    );
+    // played; otherwise the earliest that has not started. Rules 1 and 2.
+    const theirs = mine.find((g) => g.state === "in") ?? mine.find((g) => g.state === "pre");
+    if (theirs) return theirs;
+    // Nothing of theirs is left to play. Anything still `in` or `pre` therefore
+    // belongs to somebody else, so this needs no "not mine" test to be the
+    // successor check rules 3 and 4 turn on.
+    const successor = games.some((g) => g.state === "in" || g.state === "pre");
+    // Rule 4: their final stays up while nothing has come along to replace it.
+    // Rule 5 skips this — with no game today there is no final to keep.
+    if (mine.length > 0 && !successor) return mine[mine.length - 1];
+    // Rules 3 and 5 both fall through to `auto` below.
   }
 
   const live = liveIndex(games, scores?.lastEvents ?? []);
@@ -115,7 +167,11 @@ export function ScoresObject({
     // failed request is a factual lie about the operator's schedule.
     if (scores?.error) return <Empty>Scores unavailable</Empty>;
     if (!scores?.connected) return <Empty>No teams followed</Empty>;
-    return <Empty>{config.game === "auto" ? "No games today" : "Not playing today"}</Empty>;
+    // No longer split by whether the object is pinned. A pin falls through to
+    // `auto` now, so the only way to reach here is an empty schedule — and
+    // "Not playing today" under a pin that has already handed over would name
+    // the wrong reason for the empty box.
+    return <Empty>No games today</Empty>;
   }
 
   return (

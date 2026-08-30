@@ -20,6 +20,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Loader2Icon, PencilIcon, CheckIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useDashboardState } from "../../main/use-dashboard-state";
 import { useStageSettings } from "../use-stage-settings";
@@ -34,7 +35,9 @@ import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
 import { addCard, removeCard, replaceCard, setSize, setWhen, visibleCards } from "./home-cards";
 import { SIZES, SIZE_ORDER, WHEN_LABELS, sizeOf, whenOf } from "./home-cards";
-import { togglesFor, withToggle } from "./card-toggles";
+import { pickedValue, togglesFor, withToggle } from "./card-toggles";
+import { gameOptions } from "../../main/scores-object";
+import { invoke } from "../../lib/api";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import type { HomeCardSize, HomeVisibility } from "@main/types/views";
@@ -108,6 +111,27 @@ export function HomeRoute() {
   });
 
   const hasHome = homeView != null;
+  /**
+   * The followed teams, for the "Game" submenu on a scores card.
+   *
+   * The SAME query key the settings panel and the layout inspector use, so
+   * following a team in Settings populates this menu without a reload.
+   *
+   * Only fetched once a card that can use it is on the page. Home is the front
+   * page every operator lands on, and firing an integration read there for a
+   * widget nobody placed is exactly the kind of always-on request this app tries
+   * not to make. Read from the operator's optimistic copy first so a scores card
+   * added a moment ago counts immediately.
+   */
+  const wantsFavourites = (pending ?? homeView?.layout?.objects ?? []).some(
+    (o) => pickedValue(o, "game") != null,
+  );
+  const { data: scoresConfig } = useQuery({
+    queryKey: ["scores:getFavourites"],
+    queryFn: () => invoke<ScoresConfig>("scores:getFavourites"),
+    enabled: wantsFavourites,
+    retry: 1,
+  });
   /** Has anything been placed by hand? */
   const arranged = (homeView?.layout?.objects ?? []).some((o) => isPlaced(o));
   // The controls live in the page HEADER, not on a row of their own — that row
@@ -239,6 +263,26 @@ export function HomeRoute() {
         onSelect: () => save((objs) => replaceCard(objs, withToggle(card, t.key, t.next))),
       });
     }
+    // The scores card's "which game", the same choice and the same options the
+    // layout inspector offers the wall object. A submenu rather than a row of
+    // ticks because the list is as long as the operator's favourites, and it
+    // sits with the toggles because it is a setting of the WIDGET, not of the
+    // card's place on the page like Size and Show below.
+    const pinned = pickedValue(card, "game");
+    if (pinned != null) {
+      items.push({
+        label: "Game",
+        items: gameOptions(scoresConfig?.favourites ?? []).map((o) => ({
+          label: o.label,
+          checked: pinned === o.value,
+          onSelect: () => {
+            save((objs) => replaceCard(objs, withToggle(card, "game", o.value)));
+            setMenu(null);
+          },
+        })),
+      });
+    }
+
     if (items.length) items.push({ separator: true });
 
     items.push({

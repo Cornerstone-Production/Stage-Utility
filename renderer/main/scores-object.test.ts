@@ -92,32 +92,141 @@ describe("a pinned TEAM resolves that team's game", () => {
     assert.equal(pickGame(status([home]), "7")?.eventId, "h");
   });
 
-  test("a team not playing today is null, not somebody else's game", () => {
-    // THE GUARD. Falling back to "auto" here would put a DIFFERENT team's score
-    // under a tile the operator pinned -- which reads as correct and is not.
-    const other = game({ eventId: "x", away: TEAM("1", 4), home: TEAM("2", 5) });
-    assert.equal(pickGame(status([other]), "7"), null);
-  });
-
   test("a doubleheader shows the half being played, not the first listed", () => {
     // THE GUARD. Both halves are that team's game today and the earlier one is
     // first in the list, so "the first match" shows a final all evening while
     // the second game is in play.
+    //
+    // A third game, live and scoring, so the pin cannot be satisfied by falling
+    // through to `auto` -- auto would take that one. Without it a build that
+    // ignored the pin whenever their first game had ended still passed here.
     const first = game({ eventId: "g1", state: "post", away: TEAM("7", 2), home: TEAM("2", 5) });
     const second = game({ eventId: "g2", state: "in", away: TEAM("7", 1), home: TEAM("2", 0) });
-    assert.equal(pickGame(status([first, second]), "7")?.eventId, "g2");
-  });
-
-  test("with both halves finished, the later one stays up", () => {
-    const first = game({ eventId: "g1", state: "post", away: TEAM("7", 2), home: TEAM("2", 5) });
-    const second = game({ eventId: "g2", state: "post", away: TEAM("7", 1), home: TEAM("2", 0) });
-    assert.equal(pickGame(status([first, second]), "7")?.eventId, "g2");
+    const elsewhere = game({ eventId: "x", state: "in", away: TEAM("3", 1), home: TEAM("4", 0) });
+    const s = status([first, second, elsewhere], {
+      lastEvents: [{ eventId: "x", teamId: "3", from: 0, to: 1 }],
+    });
+    assert.equal(pickGame(s, "7")?.eventId, "g2");
   });
 
   test("before either half starts, the earlier one is next", () => {
     const first = game({ eventId: "g1", state: "pre", away: TEAM("7", null), home: TEAM("2", null) });
     const second = game({ eventId: "g2", state: "pre", away: TEAM("7", null), home: TEAM("2", null) });
     assert.equal(pickGame(status([first, second]), "7")?.eventId, "g1");
+  });
+});
+
+describe("a pin is a preference, not a lock", () => {
+  // The five rules in pickGame's own comment, in its own order, over one table.
+  // A pin that meant "only ever this team" left a wall showing an afternoon
+  // final all evening with another followed game in play, and dead entirely on
+  // the six days a week the pinned club is not scheduled.
+  //
+  // Every row is the SAME pinned team (id 7) with a different day around it, so
+  // what changes between rows is only what is on -- which is the whole of the
+  // decision under test.
+  const mine = (eventId: string, state: ScoreState) =>
+    game({ eventId, state, away: TEAM("7", 6), home: TEAM("2", 2) });
+  const theirs = (eventId: string, state: ScoreState) =>
+    game({ eventId, state, away: TEAM("3", 1), home: TEAM("4", 0) });
+
+  const CASES: {
+    rule: string;
+    why: string;
+    games: ScoreGameDTO[];
+    /** Scoring elsewhere, so a row can make `auto` want a DIFFERENT game than
+     *  the rule under test. Without it a row where the pinned game is the one
+     *  auto would have picked anyway proves nothing. */
+    lastEvents?: ScoreEvent[];
+    want: string;
+  }[] = [
+    {
+      rule: "1. their game is live",
+      why: "a live pin is never handed over, however loud the rest of the day is",
+      games: [mine("mine-in", "in"), theirs("other-in", "in")],
+      // The other game just scored, so `auto` would take it. Drop this and the
+      // row passes for a build that ignores rule 1 entirely: measured, with no
+      // events auto returns the first live game, which is the pinned one.
+      lastEvents: [{ eventId: "other-in", teamId: "3", from: 0, to: 1 }],
+      want: "mine-in",
+    },
+    {
+      rule: "2. their game has not started",
+      why: "the tile says THEIR 7:05 PM, not the first kick-off of the evening",
+      // Somebody else's game starts first, which is what `auto` would offer. A
+      // pin that only honoured a LIVE game would fall through and take it.
+      games: [theirs("other-pre", "pre"), mine("mine-pre", "pre")],
+      want: "mine-pre",
+    },
+    {
+      rule: "3. their game is over, another is live",
+      why: "THE HANDOVER: the next game takes the tile once the pin's is finished",
+      games: [mine("mine-post", "post"), theirs("other-in", "in")],
+      want: "other-in",
+    },
+    {
+      rule: "3. their game is over, another is still to come",
+      why: "an upcoming game counts as a successor too, not only a live one",
+      games: [mine("mine-post", "post"), theirs("other-pre", "pre")],
+      want: "other-pre",
+    },
+    {
+      // THE PINNED GAME IS NOT LAST IN THE DAY, deliberately. With it last,
+      // `auto`'s own last resort -- the final game of the day -- happens to be
+      // the pinned one, and a blanket "always fall through once their game ends"
+      // passes this row by luck. Measured: with the rows the other way round the
+      // naive version was green.
+      rule: "4. their game is over and NOTHING else is on",
+      why: "THE ONE A BLANKET FALLTHROUGH GETS WRONG: keep their final, do not swap it for a stranger's",
+      games: [mine("mine-post", "post"), theirs("other-post", "post")],
+      want: "mine-post",
+    },
+    {
+      rule: "5. they are not playing today",
+      why: "a pinned tile that is dead six days a week is a tile the operator deletes",
+      games: [theirs("other-in", "in")],
+      want: "other-in",
+    },
+    {
+      rule: "5. they are not playing and nothing is on either",
+      why: "still not blank -- with no final of their own to keep, auto's is better than an empty box",
+      games: [theirs("other-post", "post")],
+      want: "other-post",
+    },
+  ];
+
+  for (const c of CASES) {
+    test(`${c.rule} -> ${c.want}`, () => {
+      const s = status(c.games, c.lastEvents ? { lastEvents: c.lastEvents } : {});
+      assert.equal(pickGame(s, "7")?.eventId, c.want, c.why);
+    });
+  }
+
+  test("rule 4 holds across a doubleheader: the LATER final of THEIRS stays up", () => {
+    // A third game after both halves, so "the last game of the day" is somebody
+    // else's -- otherwise auto's last resort is the right answer by accident and
+    // this says nothing about the pin.
+    const first = game({ eventId: "g1", state: "post", away: TEAM("7", 2), home: TEAM("2", 5) });
+    const second = game({ eventId: "g2", state: "post", away: TEAM("7", 1), home: TEAM("2", 0) });
+    const s = status([first, second, theirs("other-post", "post")]);
+    assert.equal(pickGame(s, "7")?.eventId, "g2");
+  });
+
+  test("the handover follows auto's own rule, not merely the first live game", () => {
+    // Rule 3 hands to `auto`, and auto prefers whichever game SCORED most
+    // recently. Handing to `games.find(g => g.state === "in")` instead would sit
+    // on a live game that had not moved while another one scored.
+    const s = status([mine("mine-post", "post"), theirs("a", "in"), theirs("b", "in")], {
+      lastEvents: [{ eventId: "b", teamId: "3", from: 0, to: 1 }],
+    });
+    assert.equal(pickGame(s, "7")?.eventId, "b");
+  });
+
+  test("an empty schedule is still null, whatever is pinned", () => {
+    // The one case that stays blank, and the caller says why. Falling through
+    // cannot invent a game out of nothing.
+    assert.equal(pickGame(status([]), "7"), null);
+    assert.equal(pickGame(null, "7"), null);
   });
 });
 
@@ -144,8 +253,16 @@ describe("a pin names a LEAGUE as well as a team", () => {
     assert.equal(pickGame(status([cubs, vikings]), teamPin("mlb", "16"))?.eventId, "cubs");
   });
 
-  test("a pin into a league with no game today is null, not the other league's", () => {
-    assert.equal(pickGame(status([cubs]), teamPin("nfl", "16")), null);
+  test("a pin into a league with no game today hands over rather than resolving the other league's by id", () => {
+    // Rule 5 hands to `auto`, which is why the LEAGUE half of the comparison
+    // still has to hold: the Cubs are what auto picks here, and they must be
+    // reached as "whatever is on" rather than as a match for an NFL pin. The
+    // assertion that carries the weight is the guard above, which has both
+    // leagues on at once.
+    assert.equal(pickGame(status([cubs]), teamPin("nfl", "16"))?.eventId, "cubs");
+    // With nothing on at all, an unmatched pin has no final of its own to keep.
+    const done: ScoreGameDTO = { ...cubs, state: "post" };
+    assert.equal(pickGame(status([done]), teamPin("nfl", "16"))?.eventId, "cubs");
   });
 
   test("teamPin writes the key the picker reads", () => {
