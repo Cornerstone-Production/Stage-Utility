@@ -247,35 +247,55 @@ while doing nothing at all:
 | `POST /opacity/layer/4` `{"value":5}` (out of range) | 200 | **Silently CLAMPED to 1.** Not rejected. |
 | `POST /opacity/layer/4` `{"nope":1}` (malformed) | 400 | Correctly rejected. |
 | `POST /hide/layer/99` (no such layer) | 400 | Correctly rejected. |
-| `POST /trigger/layer/4/playlist/PreService/cue/0` | 200 | **NOTHING HAPPENED.** |
-| `POST /trigger/playlist/PreService/cue/3` (by name) | 200 | **NOTHING HAPPENED.** |
-| `POST /trigger/playlist/{uuid}/cue/6` | 200 | **NOTHING HAPPENED.** |
-| `POST /trigger/playlist/1/cue/8` (by index) | 200 | **NOTHING HAPPENED.** |
-| `POST /trigger/cue/{n}` (current playlist) | 200 | Media changed — but see the caveat below. |
+| all five `trigger` forms | 200 | **ALL FIRE.** See the correction below. |
 
-The four no-ops were verified by reading `transportState` immediately before and
-immediately after: byte-identical `playingMedia`, including `timeRemaining`
-unchanged within the same second.
+### 4.2 CORRECTION — the trigger no-ops were MY measurement error
 
-**This is the single most important finding for automations.** An action that
-reports success while doing nothing is the worst failure mode there is: a rule
-would appear to run, log a success, and never touch a screen. Any PVP action in
-the automation engine **must verify by reading state back**, and must report a
-failure to the operator when the read does not confirm the write. It must never
-treat a 200 as proof.
+An earlier pass of this document claimed four of five trigger forms were proven
+no-ops. **That was wrong, and the error was in how it was measured.**
 
-**Caveat on `/trigger/cue/{n}`.** The pre-service playlist auto-advances every
-20 seconds, so a media change shortly after a trigger cannot be cleanly
-attributed to it. `/trigger/cue/{n}` was observed changing `playingMedia` once,
-but the confounding auto-advance means it is **suggestive, not proven**. The
-four playlist-qualified forms are proven no-ops because their before/after reads
-were identical.
+It compared `transportState` immediately before and immediately after each POST,
+within the same second, and read "identical `playingMedia`" as proof that
+nothing happened. PVP has **apply latency**: the change lands a beat later. The
+before/after reads were simply too close together to see it.
 
-Why the qualified forms no-op is unknown. All three addressing modes the vendor
-documents — name, uuid, index — were tried. It may require the playlist to be
-selected first, or the target layer to be configured for that cue, or it may
-simply be broken in this build. **A plan must not assume any trigger form works
-until it is proven against a workspace where auto-advance is off.**
+A second error compounded it. The retest asked "did the media change at all",
+which is unanswerable while the pre-service playlist auto-advances every 20
+seconds — a change may be the trigger or may be the loop. The right question is
+**"did the media become the media of the cue I asked for"**.
+
+Re-measured properly: move away to a known different cue, fire, then poll for
+three seconds and check the landing cue by name.
+
+| Form | Result |
+|---|---|
+| `/trigger/cue/{n}` (current playlist) | **FIRES** |
+| `/trigger/playlist/{name}/cue/{n}` | **FIRES** |
+| `/trigger/playlist/{uuid}/cue/{n}` | **FIRES** |
+| `/trigger/playlist/{index}/cue/{n}` | **FIRES** |
+| `/trigger/layer/{l}/playlist/{p}/cue/{c}` | **FIRES** |
+
+Controlled against the obvious alternative — that any trigger merely resets to
+the top of the playlist. Asked for cues 4, 9, 2 and 11 in turn; each landed on
+exactly the cue requested:
+
+```
+asked cue 4  ("…LoopGraphic_5_Merch")    -> playing …LoopGraphic_5_Merch.mp4
+asked cue 9  ("…LoopGraphic_10_Photos")  -> playing …LoopGraphic_10_Photos.mp4
+asked cue 2  ("…LoopGraphic_3_Photos")   -> playing …LoopGraphic_3_Photos.mp4
+asked cue 11 ("…LoopGraphic_12_Photos")  -> playing …LoopGraphic_12_Photos.mp4
+```
+
+**What still stands from the original finding, and it is the important half:**
+a POST returns 200 with an empty body whether or not anything happened. That is
+unchanged and remains the reason every action must verify by reading state back.
+What changed is only that triggers are usable — the verify-then-report design
+was built for the right reason and needs no revision.
+
+**The one genuine no-op remains:** `/trigger/layer/4/playlist/…` did not put
+content on the empty TAG layer. Whether the layer argument is ignored (the cue
+firing onto its own layer instead) or TAG rejects that media is **unverified**.
+Do not rely on the layer argument to redirect a cue until that is settled.
 
 `/clear/layer/{id}` returned 200 on an already-empty layer; clearing a layer with
 content was not tested.
@@ -364,10 +384,10 @@ demonstrates:
 
 Stated plainly so none of it becomes a bug in a plan:
 
-- **Whether ANY trigger form reliably fires.** Four addressing forms are proven
-  no-ops (§4.1); the fifth is confounded by playlist auto-advance. This must be
-  settled with auto-advance disabled before any automation action is designed
-  around it. It is the largest open risk in the whole integration.
+- **Whether the LAYER ARGUMENT of `/trigger/layer/{l}/playlist/{p}/cue/{c}`
+  actually redirects a cue.** All five forms fire (§4.2), but the one attempt to
+  send a cue to a specific empty layer did not put content there. Unknown whether
+  the argument is ignored or the layer refused the media.
 - **The untested POSTs**: blend mode, transitions, transition duration, effects,
   effects presets, layer presets, target sets, and the workspace-wide
   clear/mute/hide (not tested because they would blank every screen at once).
