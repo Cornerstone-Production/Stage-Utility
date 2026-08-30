@@ -31,10 +31,17 @@ Advanced prints the reasons above them.
 
 Guarded is not disabled. A live service can go wrong and the operator may need to
 restart in the middle of one, so each control still opens a confirm dialog whose
-only way forward is an explicit override (`POST /api/update/apply` refuses with
-`409 locked` unless the body carries `override: true`). What the lock changes is
-how the controls read: off the accent, an amber lock in place of the action's own
-icon, and a label that says pressing it now is an override.
+only way forward is an explicit override. `POST /api/update/apply` and
+`/api/update/track` enforce that on the server too, refusing with `409 locked`
+unless the body carries `override: true`; the two restart controls are guarded by
+the dialog alone.
+
+What the lock changes is how the controls read: an amber lock in place of the
+action's own icon, a label saying that pressing it now is an override, and — for
+the two that are normally the accent primary — a drop to the secondary weight.
+The guarded look follows being **pressable**, so a control its own rules have
+already disabled (mid-update, nothing to install, the track already selected)
+keeps its plain label: it cannot reach the override, so it does not offer one.
 
 ### When the reinstall and rebuild are skipped
 

@@ -97,35 +97,41 @@ function UpdateProgress({ step }: { step: UpdateStatus["step"] }) {
  * is nothing to worry about, so the warning above them was the only thing on
  * screen saying otherwise, and "Update now" in full accent said the opposite.
  *
- * Three signals, never colour alone — the same set for every guarded control:
- * off the accent down to the page's secondary weight, an amber lock in place of
- * the action's own icon, and a label that says pressing it now is an override.
+ * Locked, a control takes an amber lock in place of whatever icon it had and a
+ * label saying that pressing it now is an override; the two that are `accent`
+ * also drop to `filled`, off the encouraged primary weight. Never colour alone.
  * The tooltip repeats the reasons for a pointer user; it is never the only place
  * they are said.
+ *
+ * The guarded look follows being PRESSABLE, not the lock alone. A control its own
+ * rules have already disabled cannot reach the override, so promising "anyway" on
+ * it would be the same lie pointing the other way. That is also what keeps the
+ * deferred-update banner honest: it is the one control nothing else disables, so
+ * it stays guarded even mid-update, when the others have gone quiet behind their
+ * own `disabled`. Tying this to `updating` instead left exactly that button
+ * clickable, in full accent, on an active lock.
  */
 function GuardedButton({
-  locked,
-  reasons,
-  variant = "filled",
+  guard,
+  variant,
   icon,
   label,
   lockedLabel,
   ...props
-}: Omit<ButtonProps, "children"> & {
-  /** Is the update lock active right now? Never feeds `disabled`. */
-  locked: boolean;
-  /** What the lock is protecting, for the tooltip. */
-  reasons: string[];
+}: Omit<ButtonProps, "children" | "tooltip"> & {
+  /** Why the lock is active, or null when it is not. Never feeds `disabled`. */
+  guard: string[] | null;
   /** The action's own icon, shown when nothing is locked. */
   icon?: ReactNode;
-  label: ReactNode;
+  label: string;
   lockedLabel: string;
 }) {
+  const locked = guard !== null && !props.disabled;
   return (
     <Button
       {...props}
       variant={locked ? "filled" : variant}
-      tooltip={locked ? `Locked — ${reasons.join(" · ")}. You'll be asked to confirm.` : ""}
+      tooltip={locked ? `Locked — ${guard.join(" · ")}. You'll be asked to confirm.` : ""}
     >
       {locked ? <LockIcon className="size-3.5 text-amber-11" /> : icon}
       {locked ? lockedLabel : label}
@@ -185,11 +191,10 @@ export function UpdatesPanel({
       offs.forEach((off) => off());
     };
   }, []);
-  // Presentation only. Every control below stays clickable while this is true —
-  // the override is the point — it changes how they READ. Hidden mid-update for
-  // the same reason the warning is: the update is already the thing happening.
-  const guarded = (lock?.active ?? false) && !updating;
-  const lockReasons = lock?.reasons ?? [];
+  // Presentation only — the same fact the three handlers below read. Passed as
+  // the reasons or null, rather than a flag plus a list, so a control cannot
+  // render "locked" with nothing to name.
+  const guard = lock?.active ? lock.reasons : null;
 
   async function onUpdateNow() {
     if (lock?.active) {
@@ -419,8 +424,7 @@ export function UpdatesPanel({
               Check now
             </Button>
             <GuardedButton
-              locked={guarded}
-              reasons={lockReasons}
+              guard={guard}
               variant="accent"
               size="small"
               onClick={onUpdateNow}
@@ -430,8 +434,8 @@ export function UpdatesPanel({
               lockedLabel="Update anyway"
             />
             <GuardedButton
-              locked={guarded}
-              reasons={lockReasons}
+              guard={guard}
+              variant="filled"
               size="small"
               onClick={onRestart}
               disabled={updating}
@@ -467,8 +471,8 @@ export function UpdatesPanel({
               {/* Locked too: a track switch reinstalls, rebuilds and restarts,
                   and onSwitchTrack already asks for the same override. */}
               <GuardedButton
-                locked={guarded}
-                reasons={lockReasons}
+                guard={guard}
+                variant="filled"
                 size="small"
                 disabled={updating || (trackSel ?? s.branch) === s.branch}
                 onClick={onSwitchTrack}
@@ -494,8 +498,7 @@ export function UpdatesPanel({
                 live service or an active recording — a deferred update must not be
                 the thing that finally interrupts one. */}
             <GuardedButton
-              locked={guarded}
-              reasons={lockReasons}
+              guard={guard}
               variant="accent"
               size="small"
               onClick={() => void onRestart()}

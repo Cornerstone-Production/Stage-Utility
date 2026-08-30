@@ -16,7 +16,8 @@
 // production bundle in Chrome, in both themes:
 //   - that the demoted button actually looks quieter than the accent one. jsdom
 //     loads no stylesheet, so every colour resolves to the default. Measured:
-//     accent #2e6691 / white text unlocked, versus the neutral fill locked.
+//     accent rgb(46,102,145) on white text unlocked, versus the neutral fill —
+//     rgba(0,0,0,.06) light, rgba(255,255,255,.07) dark — locked.
 //   - that the lock glyph renders amber rather than the inherited foreground.
 //     Measured: rgb(171,100,0) light and rgb(255,202,22) dark, the same value
 //     the lock warning above the buttons resolves to in each theme.
@@ -128,17 +129,25 @@ async function mount(over: Partial<UpdateStatus> = {}) {
 }
 
 /**
- * The guarded buttons, by the label each shows in the state under test.
+ * Every control the lock guards, and the label each shows in either state.
+ *
+ * One table rather than parallel lists, because the parity check below compares
+ * the two states position by position and a list that drifted out of order would
+ * still pass. `nth` disambiguates the two that share a locked name.
  *
  * Named rather than found by a class so a rename cannot silently drop one from
  * the sweep — the whole point of doing all four together.
  */
-const LOCKED_LABELS = ["Update anyway", "Restart anyway", "Switch anyway"];
-const UNLOCKED_LABELS = ["Update now", "Restart", "Switch", "Restart now"];
+const CONTROLS = [
+  { open: "Update now", shut: "Update anyway", nth: 0 },
+  { open: "Restart", shut: "Restart anyway", nth: 0 },
+  { open: "Switch", shut: "Switch anyway", nth: 0 },
+  { open: "Restart now", shut: "Restart anyway", nth: 1 },
+] as const;
 
+/** Strict: throws rather than silently taking the first of several matches. */
 function button(name: string): HTMLButtonElement {
-  const hits = screen.getAllByRole("button", { name });
-  return hits[0] as HTMLButtonElement;
+  return screen.getByRole("button", { name }) as HTMLButtonElement;
 }
 
 /**
@@ -159,22 +168,22 @@ describe("update lock affordance", () => {
   test("locked: the guarded buttons are NOT disabled — the override is the point", async () => {
     lockReply = { active: true, reasons: ["A service is live", "Attendance is recording"] };
     await mount();
+    pickOtherTrack();
 
     // "Restart anyway" appears twice — the row button and the restart-pending
     // banner — and both must stay live.
     const restarts = screen.getAllByRole("button", { name: "Restart anyway" }) as HTMLButtonElement[];
     assert.equal(restarts.length, 2, "both restart controls should be guarded");
 
-    for (const el of [button("Update anyway"), ...restarts]) {
+    for (const el of [button("Update anyway"), button("Switch anyway"), ...restarts]) {
       assert.equal(el.disabled, false, `${el.textContent} must stay clickable while locked`);
     }
-    // Switch is disabled by its own rule (no other track picked), not by the lock.
-    assert.equal(button("Switch anyway").disabled, true);
   });
 
   test("locked: Update drops off the accent and says what pressing it means", async () => {
     lockReply = { active: true, reasons: ["A service is live"] };
     await mount();
+    pickOtherTrack();
 
     const update = button("Update anyway");
     assert.ok(
@@ -186,15 +195,17 @@ describe("update lock affordance", () => {
     assert.ok(update.innerHTML.includes("lucide-lock"), "expected the lock glyph on the button");
     assert.ok(!update.innerHTML.includes("lucide-download"), "the download glyph should have given way");
 
-    // Every locked label is on screen, and none of the unlocked ones survives.
-    for (const name of LOCKED_LABELS) assert.ok(screen.getAllByRole("button", { name }).length > 0, name);
-    for (const name of ["Update now", "Restart", "Switch"]) {
-      assert.equal(screen.queryAllByRole("button", { name }).length, 0, `"${name}" should have been replaced`);
+    // Every locked label is on screen, and not one unlocked label survives —
+    // "Restart now" included, which is the one an earlier version let through.
+    for (const c of CONTROLS) {
+      assert.ok(screen.getAllByRole("button", { name: c.shut }).length > c.nth, c.shut);
+      assert.equal(screen.queryAllByRole("button", { name: c.open }).length, 0, `"${c.open}" should have been replaced`);
     }
   });
 
   test("unlocked: nothing changes — the normal case is the regression risk", async () => {
     await mount();
+    pickOtherTrack();
 
     const update = button("Update now");
     assert.ok(update.className.includes("bg-accent"), "unlocked, Update now is still the primary action");
@@ -202,45 +213,62 @@ describe("update lock affordance", () => {
     assert.ok(update.innerHTML.includes("lucide-download"));
     assert.ok(!update.innerHTML.includes("lucide-lock"), "no lock glyph when nothing is locked");
 
-    for (const name of UNLOCKED_LABELS) assert.ok(screen.getAllByRole("button", { name }).length > 0, name);
-    for (const name of LOCKED_LABELS) {
-      assert.equal(screen.queryAllByRole("button", { name }).length, 0, `"${name}" should not be shown`);
+    for (const c of CONTROLS) {
+      assert.ok(screen.getAllByRole("button", { name: c.open }).length > 0, c.open);
+      assert.equal(screen.queryAllByRole("button", { name: c.shut }).length, 0, `"${c.shut}" should not be shown`);
     }
   });
 
   test("the lock never becomes the reason a button is disabled", async () => {
-    // The whole claim in one shape: every guarded control's `disabled` reads the
-    // same locked as unlocked, both with a release waiting and with nothing to
-    // install. Whatever disables one of these, it is never the lock.
-    for (const over of [{}, { releasesBehind: 0, behind: 0, behindUserFacing: 0, targetTag: "v9.9.9" }]) {
+    // The whole claim in one shape, and compared by POSITION rather than by
+    // label: the guarded controls change their names between the two states, so
+    // looking them up by name would have to know the answer in advance. The lock
+    // adds and removes no buttons, so the panel's buttons line up one-for-one and
+    // every `disabled` in it must read the same either way — not just the four.
+    const disabledStates = () =>
+      (screen.getAllByRole("button") as HTMLButtonElement[]).map((b) => b.disabled);
+
+    for (const over of [
+      {},
+      { releasesBehind: 0, behind: 0, behindUserFacing: 0, targetTag: "v9.9.9" },
+      { phase: "updating", step: "build" } as Partial<UpdateStatus>,
+    ]) {
       lockReply = { active: false, reasons: [] };
       await mount(over);
       pickOtherTrack();
-      const open = UNLOCKED_LABELS.map((n) => button(n).disabled);
+      const open = disabledStates();
       cleanup();
 
       lockReply = { active: true, reasons: ["A service is live"] };
       await mount(over);
       pickOtherTrack();
-      // The same four controls in the same order. "Restart anyway" twice — the
-      // row button and the banner — exactly as "Restart" and "Restart now" were.
-      const shut = ["Update anyway", "Restart anyway", "Switch anyway", "Restart anyway"].map((n, i) => {
-        const hits = screen.getAllByRole("button", { name: n }) as HTMLButtonElement[];
-        return (i === 3 ? hits[1] : hits[0]).disabled;
-      });
+      const shut = disabledStates();
       cleanup();
 
       assert.deepEqual(shut, open, `the lock changed a disabled state (${JSON.stringify(over)})`);
     }
+  });
 
-    // Mid-update, WITH the lock still active (lockReply is deliberately left set
-    // from the block above — that is what makes this assertion mean anything):
-    // everything is disabled and the guarded look stands down, because the update
-    // IS the thing happening, so "anyway" would be a lie.
+  test("mid-update, the one control nothing else disables is still guarded", async () => {
+    // The hole an earlier version of this fix left open. Tying the guarded look
+    // to `!updating` was safe for the three controls that `updating` disables —
+    // and wrong for the deferred-restart banner, which nothing disables. In
+    // `updating` + `restartPending` + locked it rendered clickable, in full
+    // accent, with no lock, on a press that opens the destructive override.
+    lockReply = { active: true, reasons: ["A service is live"] };
     await mount({ phase: "updating", step: "build" });
+
+    const banner = button("Restart anyway");
+    assert.equal(banner.disabled, false, "the banner restart is the one nothing else disables");
+    assert.ok(!banner.className.includes("bg-accent"), "and mid-update it must still not read as encouraged");
+    assert.ok(banner.innerHTML.includes("lucide-lock"), "expected the lock glyph mid-update");
+    assert.equal(screen.queryAllByRole("button", { name: "Restart now" }).length, 0);
+
+    // Its three siblings are disabled by their own rules, so they say what they
+    // are doing rather than promising an override they cannot reach.
     assert.equal(button("Updating…").disabled, true);
     assert.equal(button("Restart").disabled, true);
-    assert.equal(screen.queryAllByRole("button", { name: "Update anyway" }).length, 0);
+    assert.equal(button("Switch").disabled, true);
   });
 
   test("locked: pressing it still opens the override dialog, and confirming still updates", async () => {
