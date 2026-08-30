@@ -58,8 +58,7 @@ import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { screensListViews } from "@main/services/home-view";
-import { leagueById } from "@main/types/scores";
-import { teamPin } from "../main/scores-object";
+import { gameOptions } from "../main/scores-object";
 import { formatClock } from "../lib/clock-format";
 import {
   isKnownObjectType,
@@ -1045,30 +1044,21 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "scores" && (() => {
+      {/* Both scores widgets, because both carry `game` and it means the same
+          thing on each. The sport-detail switch below is the wall object's
+          alone — the Home card draws a list of rows, not a strip with a
+          sport-specific centre. */}
+      {(c.type === "scores" || c.type === "home-scores") && (() => {
         const favourites = scoresConfig?.favourites ?? [];
         return (
           <>
-            {/* ONLY the configured favourites, never all 122 teams. An object
-                offering a team the integration does not follow is a control that
-                silently does nothing -- the poll never asks about that team, so
-                the box would stay empty for ever with no way to tell why. */}
+            {/* Options from gameOptions, shared with Home's card menu, so the two
+                pickers cannot write different keys for the same team. */}
             <RowSelect
               label="Game"
-              hint="Which followed game this shows. Any team follows whichever one is live."
-              value={c.game}
-              options={[
-                { value: "auto", label: "Any followed team" },
-                // league:teamId, never the bare id. ESPN reuses ids across
-                // leagues — 267 of them name different clubs in different ones —
-                // so following the Cubs and the Vikings, both id 16, would give
-                // this select two options with the SAME value and pin the object
-                // to whichever game happened to be live. See teamPin.
-                ...favourites.map((f) => ({
-                  value: teamPin(f.league, f.teamId),
-                  label: `${f.displayName} · ${leagueById(f.league)?.label ?? f.league}`,
-                })),
-              ]}
+              hint="Which followed game this shows. A pinned team hands over once their game is finished and another is on."
+              value={c.game ?? "auto"}
+              options={gameOptions(favourites)}
               onChange={(v) => onConfig({ ...c, game: v })}
             />
             {favourites.length === 0 && (
@@ -1076,12 +1066,14 @@ export function Inspector({
                 No teams followed yet. Choose them in Settings, Integrations, Live scores.
               </p>
             )}
-            <RowSwitch
-              label="Show sport detail"
-              hint="Bases and count, down and distance, the game clock. Off leaves the score and the status line."
-              checked={c.detail ?? true}
-              onChange={(v) => onConfig({ ...c, detail: v })}
-            />
+            {c.type === "scores" && (
+              <RowSwitch
+                label="Show sport detail"
+                hint="Bases and count, down and distance, the game clock. Off leaves the score and the status line."
+                checked={c.detail ?? true}
+                onChange={(v) => onConfig({ ...c, detail: v })}
+              />
+            )}
           </>
         );
       })()}

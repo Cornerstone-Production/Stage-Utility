@@ -52,7 +52,7 @@ import { useResiState, useYouTubeState } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
 import { useScoresState } from "../../main/use-scores-state";
 import { inkFor } from "../../main/score-ink";
-import { liveIndex } from "../score-activity";
+import { pickGame } from "../../main/scores-object";
 
 /**
  * The same set as a VALUE, so a renderer can ask before it starts matching.
@@ -732,12 +732,17 @@ export function PvpNowCard({
  * card louder than its neighbours; making the loser quieter says the same thing
  * and leaves the card where it sits.
  */
-export function ScoresCard() {
+export function ScoresCard({ game = "auto" }: { game?: "auto" | string }) {
   const scores = useScoresState();
-  const games = scores?.games ?? [];
-  // The one whose status heads the card: whatever is live and scored last, else
-  // the next one on. The same rule the capsule follows, from the same function.
-  const featured = games[Math.max(0, liveIndex(games, scores?.lastEvents ?? []))] ?? null;
+  const all = scores?.games ?? [];
+  // The one whose status heads the card. THE SAME function the wall object uses,
+  // so "auto" and a pinned team mean the same thing on both surfaces and a pin
+  // hands over at the same moment on each.
+  const featured = pickGame(scores, game);
+  // Led by the game the card is about, the rest behind it in start order. The
+  // list was the first three by start time, which on a pinned card is three
+  // games that need not include the pinned one.
+  const games = featured ? [featured, ...all.filter((g) => g !== featured)] : all;
 
   if (games.length === 0) {
     // Three different facts, kept apart. "No games today" for a failed request
@@ -892,7 +897,7 @@ export function HomeCard({
     case "home-streaming":
       return <StreamingCard now={now} />;
     case "home-scores":
-      return <ScoresCard />;
+      return <ScoresCard game={c.game ?? "auto"} />;
     case "home-streaming-resi":
       return <StreamingCard platform="Resi" now={now} />;
     case "home-streaming-youtube":
