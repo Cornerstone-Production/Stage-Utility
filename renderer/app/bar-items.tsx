@@ -280,3 +280,64 @@ export function normalizeBarRows(rows: readonly BarRowId[]): BarRowId[] {
   const out = collapseSpacers(rows);
   return out.includes(BAR_SPACER) ? out : [...out, BAR_SPACER];
 }
+
+/**
+ * Has the phone been given a set of its own?
+ *
+ * An empty list means FOLLOW THE DESKTOP BAR — the same convention `barItems`
+ * already uses, where empty means "nobody has configured this". It cannot
+ * collide with a deliberately empty phone bar, because `normalizeBarRows`
+ * guarantees at least a spacer in anything the configurator writes, so a saved
+ * mobile set is never `[]`.
+ *
+ * This is also the whole of the upgrade story: every install that exists today
+ * has no `mobileItems`, reads as "follows desktop", and its bar does not move.
+ */
+export function hasMobileBar(saved: readonly string[] | undefined): boolean {
+  return (saved ?? []).length > 0;
+}
+
+/**
+ * The rows to render, for a viewport.
+ *
+ * ONE function, used by the bar and by the configurator's preview, so what the
+ * operator arranges is what appears — a preview that resolved the set by its own
+ * rule would be a preview of a bar nobody has.
+ */
+export function barRowsFor(
+  desktop: readonly string[] | undefined,
+  mobile: readonly string[] | undefined,
+  isMobile: boolean,
+): BarRowId[] {
+  return visibleBarItems(isMobile && hasMobileBar(mobile) ? mobile : desktop);
+}
+
+/**
+ * Items whose reading is PROSE — a name somebody wrote, of no predictable
+ * length — and what to call the part of them that gets cut.
+ *
+ * They are the reason a strip cannot always fit: the service type and the plan
+ * title together measured 219px on a test plan, and a live plan item can be
+ * longer than either. Every other item on the bar is a number, a mark, or a word
+ * from a fixed vocabulary, and so has a width the ladder can reason about.
+ *
+ * Named here rather than inside the fitter because the CONFIGURATOR is the one
+ * that has to act on it: on a phone these are what the operator curates out, and
+ * a set that keeps one is warned that a narrow phone will have to cut it.
+ *
+ * The value is a SECOND name, not the item's label, because the two are
+ * different things and only one of them is true. The item is called "Service
+ * type and plan"; what a narrow phone cuts is the plan title, and the service
+ * type is already gone by then. A warning built from the labels read "service
+ * type and plan and current plan item will be cut short", which names the wrong
+ * thing twice and reads like a fault in the sentence.
+ */
+export const BAR_PROSE_ITEMS = {
+  plan: "the plan title",
+  "current-item": "the item name",
+} as const satisfies Partial<Record<BarItemId, string>>;
+
+/** Does this row show prose, and so give way at the floor? */
+export function isProseItem(id: BarRowId): id is keyof typeof BAR_PROSE_ITEMS {
+  return id in BAR_PROSE_ITEMS;
+}

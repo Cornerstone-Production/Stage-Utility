@@ -4,6 +4,7 @@ import { afterEach, describe, test } from "node:test";
 import {
   DEFAULT_HOUR_CYCLE,
   clockOptions,
+  clockParts,
   displayHourCycle,
   formatClock,
   setDisplayHourCycle,
@@ -119,5 +120,54 @@ describe("the Intl options", () => {
     // Intl implementation; omit it properly.
     assert.ok(!("timeZone" in clockOptions({})));
     assert.equal(clockOptions({ timeZone: "UTC" }).timeZone, "UTC");
+  });
+});
+
+describe("splitting the seconds off, for the context bar's fit ladder", () => {
+  // The bar hides the seconds at level 1 without reformatting the rest. It can
+  // only do that if the split is exact — and "exact" has to mean both cycles,
+  // because in 12h the day period comes AFTER the seconds, so the naive
+  // implementation (cut the string at the last colon) leaves "8:45 PM" reading
+  // "8:45:30" with " PM" orphaned onto the wrong side.
+  const AT = Date.parse("2026-08-14T20:45:30.000Z");
+  const ZONE = "UTC";
+
+  for (const cycle of ["24h", "12h"] as const) {
+    test(`THE GUARD: head + seconds + tail is exactly the full clock (${cycle})`, () => {
+      const p = clockParts(AT, { hourCycle: cycle, timeZone: ZONE });
+      assert.equal(
+        p.head + p.seconds + p.tail,
+        formatClock(AT, { seconds: true, hourCycle: cycle, timeZone: ZONE }),
+        "the split does not reassemble into the clock it came from",
+      );
+    });
+
+    test(`and head + tail is exactly the clock without seconds (${cycle})`, () => {
+      // The other half, and the one that matters on screen: what is LEFT once
+      // the seconds are hidden has to be a clock, not a clock with a dangling
+      // colon or a lost " PM".
+      const p = clockParts(AT, { hourCycle: cycle, timeZone: ZONE });
+      assert.equal(
+        p.head + p.tail,
+        formatClock(AT, { seconds: false, hourCycle: cycle, timeZone: ZONE }),
+        "hiding the seconds leaves something that is not the app's own clock",
+      );
+    });
+
+    test(`the seconds carry their own separator (${cycle})`, () => {
+      const p = clockParts(AT, { hourCycle: cycle, timeZone: ZONE });
+      assert.match(p.seconds, /^\D?30$/, `seconds were ${JSON.stringify(p.seconds)}`);
+      assert.doesNotMatch(p.head, /:\s*$/, "the separator was left behind on the head");
+    });
+  }
+
+  test("12-hour keeps the day period on the tail, where it belongs", () => {
+    const p = clockParts(AT, { hourCycle: "12h", timeZone: ZONE });
+    assert.match(p.tail, /(AM|PM)/i, `tail was ${JSON.stringify(p.tail)}`);
+  });
+
+  test("nothing to format is three empty strings, not the word Invalid", () => {
+    assert.deepEqual(clockParts(null), { head: "", seconds: "", tail: "" });
+    assert.deepEqual(clockParts("not a time"), { head: "", seconds: "", tail: "" });
   });
 });

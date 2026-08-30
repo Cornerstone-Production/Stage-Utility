@@ -32,13 +32,18 @@ const GUTTER = "px-5 max-sm:px-3";
 /**
  * Every file allowed to carry it, and why.
  *
- * Both live OUTSIDE <main>: the shell's own header and the context bar are
- * siblings of the scroll container, so they get no padding from it. Anything
- * else in this list is a bug — a route inside <main> that pads itself doubles.
+ * The shell's own header lives OUTSIDE <main> — it is a sibling of the scroll
+ * container, so it gets no padding from it. Anything else in this list is a bug:
+ * a route inside <main> that pads itself doubles.
+ *
+ * The context bar was the second entry and is not any more. It sits outside
+ * <main> too and still carries the same gutter, but it declares it in CSS rather
+ * than in utilities, because its fit ladder tightens the edge padding at level 2
+ * and a rung that has to out-specify a Tailwind class to do it stops working the
+ * first time somebody reorders the class list. See `.context-strip`.
  */
 const ALLOWED = new Set([
   "app/shell.tsx",
-  "app/context-bar.tsx",
 ]);
 
 function walk(dir: string, out: string[] = []): string[] {

@@ -30,6 +30,9 @@ export interface StageState {
   slotsByView: Record<string, Slot[]>;
   /** Context-bar item ids in display order. Empty = the renderer's default. */
   barItems: string[];
+  /** The phone's own context-bar set. Empty = follow `barItems`. See
+   *  bar-config-store.ts for why empty means inherit rather than "show nothing". */
+  barMobileItems: string[];
   /** Colours the operator has kept, newest first. Global, like the bar: the same
    *  person mixes a colour on a laptop and reaches for it on a tablet. */
   savedColors: string[];

@@ -577,24 +577,141 @@ body {
   margin-left: 0;
 }
 
-/* A status strip that never collides.
-   The context bar is a flex row of independent readings. Letting its items
-   shrink squeezed them past their own content on a phone, so "3 disconnected"
-   and "REC stopped" printed on top of each other — the items overlapped rather
-   than overflowing, which reads as a broken layout rather than a full one.
-   Items keep their width now and the bar wraps on a phone; from sm up it is one
-   row again, and scrolls in the rare case that row still does not fit. Nothing
-   is ever dropped: every reading on it is one somebody put there on purpose. */
+/* ── The context bar's fit ladder ────────────────────────────────────────────
+   ONE ROW AT EVERY WIDTH, from 320px up. Never wraps, never scrolls. It used to
+   do both — wrap below 640px, scroll above — and each was a fix that traded the
+   problem for a worse one: the wrap spent a second band of the screen with the
+   least of it to spare, and the scroll put "6 disconnected" past the right edge,
+   where an alert is not an alert.
+
+   It gives up WORDS instead, in a fixed order, and it does that here. bar-fit.ts
+   measures the strip, walks the rungs, and writes the one that fits to
+   `data-fit`; everything below is what each rung means. Splitting it that way is
+   deliberate — the arithmetic is testable off a browser and the geometry is not,
+   so neither has to pretend to be the other.
+
+   The ladder may never remove a number, never remove a state colour, and never
+   drop an item. Every rule below takes a word, a qualifier or a decoration.
+
+   `overflow: hidden` is the backstop, not the mechanism: at the floor prose
+   ellipsises, so the strip always fits and nothing is ever actually clipped. It
+   is here so that a bug in the fitter reads as a truncated bar rather than as
+   items printed over the page beside them. */
 .context-strip {
-  scrollbar-width: none; /* Firefox */
+  column-gap: 12px;
+  padding-inline: 20px;
+  overflow: hidden;
 }
-@media (min-width: 640px) {
+
+@media (max-width: 639px) {
   .context-strip {
-    overflow-x: auto;
+    padding-inline: 12px;
   }
 }
-.context-strip::-webkit-scrollbar {
+
+/* The configurator's editing strip, and NOTHING else.
+   The bar never scrolls; this is not the bar. It is the surface the operator
+   drags rows on, and inside a dialog on a phone it is narrower than the bar it
+   speaks for — so an arrangement that fits the phone perfectly still runs past
+   the edge in here, and `overflow: hidden` would leave the last rows unreachable
+   and un-removable.
+   Horizontal only, and the row geometry is untouched: the drop maths reads the
+   rows' midpoints in viewport coordinates, so it survives a scroll but would not
+   survive a wrap. */
+.context-strip.bar-editor {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+}
+.context-strip.bar-editor::-webkit-scrollbar {
   display: none;
+}
+
+/* Level 1 — qualifiers. Context the operator already has: the clock's seconds,
+   the service-type name that is the same every week, the capsule's inning, the
+   pre-service label beside a countdown that is plainly a countdown.
+
+   CLIPPED, NOT REMOVED. `display: none` would take the word out of the
+   accessibility tree with it, so a screen reader would lose a reading that a
+   sighted reader still has in the item beside it. This is the sr-only clip:
+   out of the layout, still in the document. */
+.context-strip[data-fit="1"] .bar-drop-1,
+.context-strip[data-fit="2"] .bar-drop-1,
+.context-strip[data-fit="3"] .bar-drop-1,
+.context-strip[data-fit="2"] .bar-drop-2,
+.context-strip[data-fit="3"] .bar-drop-2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Level 2 — the compact bar. Every idle word becomes that item's own mark (the
+   `.bar-drop-2` rule above), gaps and edge padding tighten, and the capsule
+   gives up the space around its logos. Counts keep their digits: the plug
+   appears BESIDE the 6, never instead of it. */
+.context-strip[data-fit="2"],
+.context-strip[data-fit="3"] {
+  column-gap: 8px;
+  padding-inline: 8px;
+}
+.context-strip[data-fit="2"] .bar-glyph,
+.context-strip[data-fit="3"] .bar-glyph {
+  display: block;
+}
+.bar-glyph {
+  display: none;
+  flex-shrink: 0;
+}
+
+/* The capsule at level 2. Smaller marks and smaller figures, and a shorter
+   runway for the team colour to fade across — but every digit of both scores is
+   still there, at a size that is still the largest type on the strip. */
+.context-strip[data-fit="2"] .score-capsule .score-side,
+.context-strip[data-fit="3"] .score-capsule .score-side {
+  gap: 5px;
+  padding: 4px 7px;
+}
+.context-strip[data-fit="2"] .score-capsule .score-side-away,
+.context-strip[data-fit="3"] .score-capsule .score-side-away {
+  padding-right: 14px;
+}
+.context-strip[data-fit="2"] .score-capsule .score-side-home,
+.context-strip[data-fit="3"] .score-capsule .score-side-home {
+  padding-left: 14px;
+}
+.context-strip[data-fit="2"] .score-capsule .score-logo,
+.context-strip[data-fit="3"] .score-capsule .score-logo {
+  width: 15px;
+  height: 15px;
+  font-size: 7px;
+}
+.context-strip[data-fit="2"] .score-capsule .score-value,
+.context-strip[data-fit="3"] .score-capsule .score-value {
+  font-size: 13px;
+}
+
+/* Level 3 — THE FLOOR, and the only rung that costs the reader anything they
+   cannot get back by looking somewhere else. Prose — a plan title, a live item's
+   title — gives up its width and ellipsises.
+
+   It is not meant to be reached. A phone has its own item set (see
+   bar-items.ts) so prose can be curated off it, and the configurator says which
+   arrangements land here while you are still arranging them. A bar carrying no
+   prose item cannot land here at all.
+
+   It exists because a strip that has run out of room has to do SOMETHING, and of
+   the four things available — ellipsise, wrap, scroll, or clip — only this one
+   keeps one row, keeps every number, and tells the reader a word was cut. */
+.context-strip[data-fit="3"] .bar-prose,
+.context-strip[data-fit="3"] .bar-item:has(> .bar-prose) {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 /* ── Mic slot photo ──────────────────────────────────────────────────────────

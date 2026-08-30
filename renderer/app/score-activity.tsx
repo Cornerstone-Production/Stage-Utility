@@ -305,7 +305,12 @@ export function ScoreCapsule({
   const inner = (
     <>
       <ScoreSide key={scoreKey(game, "away")} team={game.away} side="away" size="capsule" scored={scored === "away"} />
-      <span className="score-capsule-mid">{game.shortDetail}</span>
+      {/* "Bot 7th" is the first thing the capsule gives up when the bar runs out
+          of room — it is the widest part of the capsule that is not a score, and
+          the panel behind it says the same thing at length. The scores either
+          side of it never go and never shorten: a shortened score is a different
+          number. See bar-fit.ts. */}
+      <span className="score-capsule-mid bar-drop-1">{game.shortDetail}</span>
       <ScoreSide key={scoreKey(game, "home")} team={game.home} side="home" size="capsule" scored={scored === "home"} />
     </>
   );
