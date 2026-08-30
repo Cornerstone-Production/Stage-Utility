@@ -610,6 +610,27 @@ export type LayoutObjectConfig =
        */
       autoScroll?: boolean;
     }
+  | {
+      /**
+       * A SCREEN, not a view: shows whatever that display is currently routed
+       * to, and follows it when somebody changes the routing mid-service.
+       *
+       * The producer primitive. A view-embed pins one view for ever, which is
+       * right for a fixed reference panel and wrong for "what is on that screen
+       * right now". It is also the only way dashboard, stage and SPL-rundown
+       * kinds can be embedded at all, because all three are configured per
+       * display.
+       *
+       * `outputId` null = nothing chosen yet.
+       */
+      type: "screen-embed";
+      outputId: string | null;
+      /** The screen's name across the top of the tile. Absent = on. */
+      showLabel?: boolean;
+      /** A dot beside that name: lit while the screen is showing its view, dark
+       *  while it is unrouted or blacked out. Absent = on. */
+      showStatus?: boolean;
+    }
   | { type: "container" };
 
 export type LayoutObjectType = LayoutObjectConfig["type"];

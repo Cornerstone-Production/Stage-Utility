@@ -21,9 +21,10 @@ View kinds:
 | **Calendar** | a month of [Planning Center Calendar](../integrations/planning-center.md#calendar) events, filtered by calendar and tag |
 | **Custom** | a layout you design in the visual editor |
 
-**Calendar** and **Script** are the two kinds that also render inside a custom
-layout, through the **Embedded view** widget. The rest assume they own the whole
-screen.
+Every kind also renders inside a custom layout, through the **Embedded view**
+widget — **Calendar** among them. Dashboard, Stage and SPL Rundown are configured
+per display rather than per view, so those three are reached with **Embedded
+screen** instead.
 
 ## Surfaces: displays and consoles
 

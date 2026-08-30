@@ -57,7 +57,9 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 
 `GET /api/displays` returns each output joined with its routed view's kind, for
 clients that want a flat list. `POST /api/displays/refresh` reloads connected
-screens.
+screens. `GET /api/displays/presence` returns `{connected: [outputId]}` — the
+screens with a browser attached, which each display page reports by heartbeat
+(the same set the `displays:presence` SSE channel broadcasts on change).
 
 **Integrations & wireless**
 | Method | Path | Purpose |

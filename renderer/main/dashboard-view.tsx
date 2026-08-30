@@ -15,6 +15,9 @@ interface DashboardViewProps {
   displayId: string;
 }
 
+/** Sizes to h-full, never the viewport: this renders both on a display and
+ *  inside an embed tile. The screen height and the safe-area insets belong to
+ *  the kiosk route — see stage-view.tsx. */
 export function DashboardView({ displayId }: DashboardViewProps) {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript();
@@ -38,7 +41,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
+      <div className="flex flex-col items-center justify-center h-full kiosk-surface gap-3">
         <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
         <p className="text-headline text-fg-subtle">Loading…</p>
       </div>
@@ -46,7 +49,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   }
   if (error || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3 px-12 text-center">
+      <div className="flex flex-col items-center justify-center h-full kiosk-surface gap-3 px-12 text-center">
         <p className="text-title3 text-fg-muted font-semibold">Could not load dashboard</p>
         {error && <p className="text-caption1 text-fg-subtle">{error}</p>}
       </div>
@@ -72,7 +75,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   const proConnected = !!pro?.connected;
 
   return (
-    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overscroll-none kiosk-surface">
       {/* Brand top bar — same as kiosk, no plan/context label. */}
       <div
         className="relative flex items-center h-10 shrink-0"

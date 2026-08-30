@@ -22,6 +22,9 @@ function splColor(db: number | null): string {
  * section headers as dividers, the live item highlighted, and the current live
  * SPL in the header.
  */
+/** Sizes to h-full, never the viewport: this renders both on a display and
+ *  inside an embed tile. The screen height and the safe-area insets belong to
+ *  the kiosk route — see stage-view.tsx. */
 export function SplRundownView({ displayId }: SplRundownViewProps) {
   const { state, isLoading, error, pcoLive } = useDashboardState();
   const plan = usePlanItems();
@@ -43,14 +46,14 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] kiosk-surface">
+      <div className="flex items-center justify-center h-full kiosk-surface">
         <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
       </div>
     );
   }
   if (error || !state) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] kiosk-surface text-fg-subtle">
+      <div className="flex items-center justify-center h-full kiosk-surface text-fg-subtle">
         Could not load rundown
       </div>
     );
@@ -65,7 +68,7 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
   const items = plan?.items ?? [];
 
   return (
-    <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overflow-hidden kiosk-surface">
       <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-line bg-black/40">
         <div className="flex items-center gap-2 min-w-0">
           {state.appLogo && <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-6 rounded" />}

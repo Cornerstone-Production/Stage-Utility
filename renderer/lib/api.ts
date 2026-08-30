@@ -398,6 +398,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "displays:refresh":
       return post<T>("/api/displays/refresh", p);
 
+    // Which outputs have a browser attached right now. The "displays:presence"
+    // SSE channel broadcasts only on CHANGE, so a subscriber that mounts into a
+    // quiet building needs one read to know where it stands.
+    case "displays:getPresence":
+      return apiFetch<T>("/api/displays/presence");
+
     // ── Kiosk devices ─────────────────────────────────────────────────────
     case "stage:setKioskDiscovery":
       return post<T>("/api/kiosk-discovery", p);

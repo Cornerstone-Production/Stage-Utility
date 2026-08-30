@@ -48,6 +48,7 @@ switches.
 | **Recent services** | Attendance, length and start time, recently averaged | Recorded history |
 | **Plan file** | A page from a file attached to the plan | Planning Center attachments |
 | **Embedded view** | Another view, drawn inside this one | This app |
+| **Embedded screen** | What another screen is showing, following its routing | This app |
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
 **Service pacing** carries slippage forward from earlier items and keeps growing
@@ -55,14 +56,22 @@ while the current item runs long, so it answers "are we going to finish on time"
 not "was that item long". It needs a recorded service timeline; without one it
 shows nothing.
 
+**Embedded view** and **Embedded screen** can be expanded: on an operator
+surface each tile carries a control in its bottom-right corner that grows it to
+fill the window, and Escape or the panel's close button brings it back. Nothing
+navigates, so there is no page to return from. A screen showing the same layout
+gets no such control — an overlay opened by a passer-by would stay open until
+somebody walked over to it.
+
 **Service order** is superseded by ScriptView — see
 [ScriptView and Baptisms](../features/scriptview-and-baptisms.md). It is kept so
 existing screens do not break.
 
-**Embedded view** offers every view kind but draws only the two that can size
-themselves to a box: **Script** and **Calendar**. The rest say so rather than
-rendering broken, and a Custom view is never offered — refusing it is what makes
-an embed unable to reach another embed.
+**Embedded view** offers every view kind and draws every one of them, **Calendar**
+included. Dashboard, Stage and SPL Rundown are configured per display rather than
+per view, so an Embedded view pointed at one says so and Embedded screen is the
+way to bring it into a tile — see
+[Multiviews](layout-editor.md#multiviews).
 
 A **Calendar** view draws the current month as six weeks, marks today, and
 highlights the one timed event running right now. A day that will not fit shows

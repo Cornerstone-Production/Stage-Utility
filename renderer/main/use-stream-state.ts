@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 
-import { invoke, onNotification } from "../lib/api";
+import { invoke } from "../lib/api";
+import { useStatusChannel } from "./use-status-channel";
 
 /**
  * Channel names as LITERALS, not built from the platform id.
@@ -26,35 +27,16 @@ const CHANNELS = {
  *
  * Hydrates once on mount because the channel only broadcasts on change: a
  * display opened mid-service would otherwise sit blank until something moved.
+ * Ordering between that hydrate and the first push is useStatusChannel's job —
+ * see the note there for the staleness this used to have.
  */
 export function useStreamState(
   platform: "resi" | "youtube",
   enabled = true,
 ): StreamStatusDTO | null {
-  const [state, setState] = useState<StreamStatusDTO | null>(null);
   const { get, push } = CHANNELS[platform];
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    invoke<StreamStatusDTO>(get)
-      .then((s) => {
-        if (!cancelled && s) setState(s);
-      })
-      .catch(() => {
-        /* not configured yet — ignore */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, get]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    return onNotification(push, (p) => setState(p as StreamStatusDTO));
-  }, [enabled, push]);
-
-  return state;
+  const read = useCallback(() => invoke<StreamStatusDTO>(get), [get]);
+  return useStatusChannel<StreamStatusDTO>(read, push, enabled);
 }
 
 export const useResiState = (enabled = true) => useStreamState("resi", enabled);

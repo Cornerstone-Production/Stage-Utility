@@ -134,6 +134,25 @@ function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
 // so the event loop isn't saturated, while keeping the RF bars visually live.
 const DEVICE_STATUS_FLUSH_MS = 150;
 
+/**
+ * How often the roster is re-pulled while a service window is open.
+ *
+ * A roster change is a human editing a plan in Planning Center — a substitution
+ * typed in minutes before doors, at worst. One minute is under the granularity at
+ * which those edits actually happen, so it turns "up to two hours behind" into
+ * "about a minute behind" and there is nothing to gain from going tighter.
+ *
+ * The cost is one request per tick against an API that allows roughly 100 per 20
+ * seconds: about 240 requests across a default four-hour window, a few hundred a
+ * week, and none at all outside a window. Faster would buy no freshness a person
+ * could produce.
+ *
+ * Independent of the cache TTL in either direction: the tick invalidates the
+ * roster entry before reading (`fresh: true`), so this cadence is exactly this
+ * number and does not become an accident of whatever TTL a later release picks.
+ */
+export const ROSTER_WINDOW_INTERVAL_MS = 60_000;
+
 /** Deep-clone a layout, minting fresh object ids so copies stay independent. */
 /** Normalize a user-entered base URL: trim, default to http:// if no scheme,
  *  strip a trailing slash. Returns null for blank input. */
@@ -294,6 +313,10 @@ export class StageController {
   /** Remembered so pauseBackgroundWork can restart at the same cadence. */
   private autoRefreshIntervalMs = 60 * 60 * 1000;
   private isRefreshing = false;
+  /** Roster-only re-pull, and only while a service window is open. */
+  private rosterRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  /** A roster tick is in flight — a slow one must not overlap the next. */
+  private rosterRefreshing = false;
 
   // ── Init ─────────────────────────────────────────────────────────────
 
@@ -317,6 +340,15 @@ export class StageController {
     const kioskDiscovery = settings.kioskDiscovery ?? false;
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
+
+    // Every install that predates id floors has ids and no floor, and a missing
+    // floor falls back to `max(existing) + 1` — the bug. Seeding here, from what
+    // was just loaded, is what stops the FIRST delete-then-create after an update
+    // reissuing the highest id. Only kinds with no floor recorded are touched.
+    await settingsStore.seedIdFloors({
+      view: views.map((v) => v.id),
+      output: outputs.map((o) => o.id),
+    });
 
     // An EMPTY list means "all allowed" and is passed through as such.
     //
@@ -1982,7 +2014,7 @@ export class StageController {
     kind: ViewKind = "slots",
     surface: ViewSurface = "display",
   ): Promise<StageState> {
-    const id = this.nextViewId();
+    const id = await this.allocateViewId();
     // Only a custom View has an editable layout, so only a custom View has
     // anywhere to put a control. Anything else asked for as a console would be
     // a console that cannot carry one - a promise the UI could not keep.
@@ -2173,7 +2205,7 @@ export class StageController {
   async duplicateView(id: string, name?: string): Promise<StageState> {
     const src = this.state.views.find((v) => v.id === id);
     if (!src) throw new Error(`views:duplicate — view ${id} not found`);
-    const newId = this.nextViewId();
+    const newId = await this.allocateViewId();
     // Deep-clone the layout, recording old→new object ids so inline mic-slots can
     // be carried over to the copy.
     const cloned = src.layout ? cloneLayoutWithMap(src.layout) : null;
@@ -2328,17 +2360,26 @@ export class StageController {
     name?: string,
     viewId?: string | null,
   ): Promise<{ state: StageState; output: Output }> {
-    const id = this.nextOutputId();
-    const num = parseInt(id.replace("display-", ""), 10);
-    const output: Output = {
-      id,
-      name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
-      viewId: viewId ?? null,
-    };
-    console.log(`[stage-controller] addOutput id=${scrub(id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
-    const outputs = [...this.state.outputs, output];
+    // One write: the id, the floor that stops it ever coming back, and the
+    // outputs list that could not be built until the id existed. The whole
+    // read-allocate-write happens inside the settings write queue, so two
+    // concurrent adds cannot be handed the same id.
+    const { output, outputs } = await settingsStore.allocateIds(
+      "output",
+      (next): { output: Output; outputs: Output[] } => {
+        const id = next(this.state.outputs.map((o) => o.id));
+        const num = parseInt(id.replace("display-", ""), 10);
+        const created: Output = {
+          id,
+          name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
+          viewId: viewId ?? null,
+        };
+        return { output: created, outputs: [...this.state.outputs, created] };
+      },
+      (allocated) => ({ outputs: allocated.outputs }),
+    );
+    console.log(`[stage-controller] addOutput id=${scrub(output.id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
     this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
     this.recomputeResolved();
     this.broadcast();
     return { state: this.state, output };
@@ -2645,6 +2686,19 @@ export class StageController {
     this.autoRefreshTimer = setInterval(() => {
       void this.autoRefreshTick();
     }, intervalMs);
+    // The roster timer ticks at a fixed cadence but only does work inside a
+    // service window, so it costs nothing the rest of the week (see
+    // rosterRefreshTick).
+    this.rosterRefreshTimer = setInterval(() => {
+      // The process boundary, where autoRefreshTick and updateCheckTick also
+      // report and continue. There is no caller to hand a failure back to, and an
+      // unhandled rejection out of a timer would take the server down mid-service.
+      // The roster read itself already reports its own failure and keeps the
+      // last-known names on screen rather than blanking them.
+      void this.rosterRefreshTick().catch((err) => {
+        console.error("[stage-controller] roster refresh failed:", err);
+      });
+    }, ROSTER_WINDOW_INTERVAL_MS);
   }
 
   /**
@@ -2677,6 +2731,10 @@ export class StageController {
       clearInterval(this.autoRefreshTimer);
       this.autoRefreshTimer = null;
     }
+    if (this.rosterRefreshTimer) {
+      clearInterval(this.rosterRefreshTimer);
+      this.rosterRefreshTimer = null;
+    }
   }
 
   private async autoRefreshTick(): Promise<void> {
@@ -2690,6 +2748,58 @@ export class StageController {
       console.error("[stage-controller] auto-refresh failed:", err);
     } finally {
       this.isRefreshing = false;
+    }
+  }
+
+  /**
+   * Re-pull JUST the roster, and only while a service window is open.
+   *
+   * The roster was the stalest thing the app showed. It moved only on the plan
+   * refresh, which an operator may have set to two hours — so a last-minute
+   * substitution could take two hours to reach a stage display, and the display is
+   * the whole reason the name is there. Everything else the app reads from PCO is
+   * either cached in minutes or, for the live timer, not cached at all.
+   *
+   * Gated on `serviceWindow`, the app's ONE definition of "near a service": PCO
+   * plan times widened by the operator's configured lead and tail. Deliberately
+   * not a second definition. It compares instants against plan times, so there is
+   * no calendar-date or hour-of-day question and no host-vs-app-time-zone trap.
+   *
+   * It ignores `reconnectSchedule.enabled`, which governs integration reconnect
+   * back-off rather than how fresh PCO data is. Turning that switch off does not
+   * stale the roster back out; the lead and tail under it still shape the window.
+   *
+   * Outside a window this returns having made no request, so the cost away from a
+   * service is one no-op timer callback a minute and zero PCO traffic. That also
+   * means it fails CLOSED where the window set is unknown (no credentials, or a
+   * failed schedule fetch): the roster then moves on the operator's configured
+   * interval, exactly as it did before this existed.
+   */
+  private async rosterRefreshTick(): Promise<void> {
+    if (!serviceWindow.isActive()) return;
+    // A full refresh is already re-pulling the roster, and a previous tick may
+    // still be in flight — listTeamMembers paginates and backs off on a 429, so a
+    // slow window can outlast the 60s cadence. Either way, two writers racing over
+    // this.teamMembers is what we are avoiding.
+    if (this.isRefreshing || this.rosterRefreshing) return;
+    if (!this.state.pcoConfigured || !this.pcoAppId || !this.pcoSecret) return;
+    const { serviceTypeId, planId } = this.state;
+    if (!serviceTypeId || !planId) return;
+
+    this.rosterRefreshing = true;
+    try {
+      const before = JSON.stringify(this.teamMembers);
+      await this.fetchTeamMembers(serviceTypeId, planId, { fresh: true });
+      if (JSON.stringify(this.teamMembers) === before) return;
+      // broadcast() already drops an identical state, so the saving here is
+      // recomputeResolved(), which re-resolves every view, every inline slots grid
+      // and every view-sourced grid. That runs every minute for hours inside a
+      // window, and almost every one of those minutes the roster has not changed.
+      console.log("[stage-controller] roster changed mid-window — re-resolving");
+      this.recomputeResolved();
+      this.broadcast();
+    } finally {
+      this.rosterRefreshing = false;
     }
   }
 
@@ -2830,23 +2940,20 @@ export class StageController {
     return target; // already a view id, or an id we do not know
   }
 
-  private nextViewId(): string {
-    const nums = this.state.views
-      .map((v) => parseInt(v.id.replace("view-", ""), 10))
-      .filter((n) => !Number.isNaN(n));
-    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-    return `view-${next}`;
-  }
-
-  private nextOutputId(): string {
-    const nums = this.state.outputs
-      .map((o) => parseInt(o.id.replace("display-", ""), 10))
-      .filter((n) => !Number.isNaN(n));
-    // display-1 is reserved as the primary/default output (PRIMARY_DISPLAY_ID), so
-    // dynamically-created outputs start at display-2 when none exist yet. (Views,
-    // which have no reserved id, start at view-1.)
-    const next = nums.length > 0 ? Math.max(...nums) + 1 : 2;
-    return `display-${next}`;
+  /**
+   * Allocate a view id, recording the floor BEFORE the view exists.
+   *
+   * The floor lives in settings.json and views live in views.json, so there is
+   * no save here to fold it into — it is its own write, and an AWAITED one. A
+   * fire-and-forget floor that never reached disk would hand the same id out
+   * again after a restart, which is the whole bug this exists to stop.
+   *
+   * Written first on purpose: if the floor write fails, nothing is created; if
+   * the view save afterwards fails, the only cost is a number nobody used. Ids
+   * are permanent, not contiguous.
+   */
+  private allocateViewId(): Promise<string> {
+    return settingsStore.allocateIds("view", (next) => next(this.state.views.map((v) => v.id)));
   }
 
   private assertPco(): void {
@@ -2879,15 +2986,38 @@ export class StageController {
     this.broadcast();
   }
 
-  private async fetchTeamMembers(serviceTypeId: string, planId: string): Promise<void> {
+  /**
+   * @param opts.fresh drop this plan's cached roster first, so the read is a real
+   * request. The in-window roster tick needs that: its cadence must be its own,
+   * not an accident of whatever the cache TTL happens to be that release.
+   */
+  private async fetchTeamMembers(
+    serviceTypeId: string,
+    planId: string,
+    opts: { fresh?: boolean } = {},
+  ): Promise<void> {
     const key = `${serviceTypeId}:${planId}`;
+    if (opts.fresh) pcoService.clearTeamMembersCache(this.pcoAppId!, serviceTypeId, planId);
     try {
-      this.teamMembers = await pcoService.listTeamMembers(
+      const fetched = await pcoService.listTeamMembers(
         this.pcoAppId!,
         this.pcoSecret!,
         serviceTypeId,
         planId,
       );
+      // The plan can move WHILE this request is in flight — auto plan-mode rolls
+      // from the 9am plan to the 11am one, and inside a service window the roster
+      // tick is firing every minute, so the two overlap by design. Writing a
+      // resolved-too-late roster here would put the previous service's names on
+      // every stage display until the next tick. A stale success is discarded,
+      // not applied.
+      if (this.state.serviceTypeId !== serviceTypeId || this.state.planId !== planId) {
+        console.log(
+          `[stage-controller] discarding a roster for a plan that is no longer selected (${scrub(key)})`,
+        );
+        return;
+      }
+      this.teamMembers = fetched;
       this.teamMembersKey = key;
       console.log(`[stage-controller] fetched ${scrub(this.teamMembers.length)} team members`);
     } catch (err) {

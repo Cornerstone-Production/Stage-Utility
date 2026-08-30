@@ -57,6 +57,9 @@ function SectionChip({ section, size = "md" }: { section: ProSection | null; siz
   );
 }
 
+/** Sizes to h-full, never the viewport: this renders both on a display and
+ *  inside an embed tile. The screen height and the safe-area insets belong to
+ *  the kiosk route — see stage-view.tsx. */
 export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript();
@@ -75,7 +78,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
+      <div className="flex flex-col items-center justify-center h-full kiosk-surface gap-3">
         <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
         <p className="text-headline text-fg-subtle">Loading…</p>
       </div>
@@ -83,7 +86,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   }
   if (error || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3 px-12 text-center">
+      <div className="flex flex-col items-center justify-center h-full kiosk-surface gap-3 px-12 text-center">
         <p className="text-title3 text-fg-muted font-semibold">Could not load stage display</p>
         {error && <p className="text-caption1 text-fg-subtle">{error}</p>}
       </div>
@@ -113,7 +116,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const runningTimers = pro?.timers ?? [];
 
   return (
-    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface text-fg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overscroll-none kiosk-surface text-fg">
       {/* Brand top bar */}
       <div
         className="relative flex items-center h-10 shrink-0"

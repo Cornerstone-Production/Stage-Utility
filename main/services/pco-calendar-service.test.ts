@@ -320,20 +320,22 @@ describe("the API version pin", () => {
     );
   });
 
-  it("does not put the pin on a /services/v2 request", async () => {
-    // Named for what it checks. The pin is threaded as an OPTIONAL argument so
-    // the live-service path keeps the header set it had, and this is the
-    // regression that would show if the argument ever became mandatory or got a
-    // default — one endpoint, one absent header. It is NOT a proof that every
-    // /services/v2 request is byte-identical; that comes from the argument being
-    // absent at all fifteen call sites, which the type checker enforces, plus
-    // the existing suites for those endpoints.
+  it("pins a /services/v2 request from the Services constant, not from this argument", async () => {
+    // INVERTED, exactly as the note that stood here predicted. This used to
+    // assert that a /services/v2 request grew NO version header: the pin arrived
+    // as an optional argument so the live-service path would keep the header set
+    // it already had, and the note said "when fix/pco-freshness lands it pins
+    // /services/v2 too, and this expectation inverts with it". It landed.
     //
-    // When fix/pco-freshness lands it pins /services/v2 too, and this
-    // expectation inverts with it.
+    // What is left to check is that the two products are pinned INDEPENDENTLY.
+    // The Services path takes the Services constant, and the calendar's argument
+    // is an override for one product rather than the thing that decides this
+    // header. That the override actually reaches the wire is the other half, and
+    // lives in pco-api-version.test.ts where a version unlike either constant can
+    // be asked for and looked for.
     const seen = await captureHeaders(() => pcoService.listServiceTypes("app", "secret"));
     assert.equal(seen.length, 1);
-    assert.equal(seen[0].get("X-PCO-API-Version"), null, "a /services/v2 request grew the pin");
+    assert.equal(seen[0].get("X-PCO-API-Version"), "2018-11-01", "a /services/v2 request lost the pin");
     assert.ok(seen[0].get("Authorization")?.startsWith("Basic "), "the auth header is still built the same way");
   });
 });
