@@ -18,6 +18,7 @@ import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
+import { resolveScreen, type StageScreen } from "./stage-screen";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
 // form (/display-1), falling back to the legacy ?display= query, then default.
@@ -84,7 +85,7 @@ interface KioskTopBarProps {
   appName: string;
   appLogo: string | null;
   appLogoMonochrome: boolean;
-  /** This output is locked (from its Displays-tab toggle) — strip the nav escape
+  /** This output is locked (from its Screens-page toggle) — strip the nav escape
    *  hatches even without the ?kiosk=1 URL override. */
   locked?: boolean;
 }
@@ -287,7 +288,39 @@ function KioskUnrouted({ state, displayName, locked }: { state: StageState; disp
         <MonitorIcon className="size-12 text-gray-7" />
         <p className="text-title3 text-gray-9 font-semibold">Display not configured</p>
         <p className="text-body text-gray-7">
-          No view is assigned to this display. Assign one under Settings → Displays.
+          No view is assigned to this display. Assign one under Screens.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Shown when a preview points at a View that no longer exists.
+//
+// Its own screen rather than the unrouted one: a view WAS chosen here, and
+// saying "no view is assigned" would send the operator looking for a routing
+// problem that is not there. Before this existed the same state fell through to
+// the slots kind and drew an empty mic-slot grid, which said nothing at all.
+function KioskViewMissing({ state, displayName, locked }: { state: StageState; displayName: string | null; locked?: boolean }) {
+  return (
+    <div className="flex flex-col h-[100dvh] kiosk-surface">
+      <KioskTopBar
+        serviceTypeName={state.serviceTypeName}
+        planSeriesTitle={state.planSeriesTitle}
+        planTitle={state.planTitle}
+        showQr={state.showQr}
+        remoteUrl={state.remoteUrl}
+        displayName={displayName}
+        appName={state.appName}
+        appLogo={state.appLogo}
+        appLogoMonochrome={state.appLogoMonochrome}
+        locked={locked}
+      />
+      <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
+        <MonitorIcon className="size-12 text-gray-7" />
+        <p className="text-title3 text-gray-9 font-semibold">View not found</p>
+        <p className="text-body text-gray-7">
+          The view this preview points at has been deleted. Pick another under Screens.
         </p>
       </div>
     </div>
@@ -371,11 +404,15 @@ export function StageView() {
   const previewViewId = displayId.startsWith("preview-") ? displayId.slice("preview-".length) : null;
   const previewDraftSlots = usePreviewDraftSlots(previewViewId);
 
+  // What this screen shows. Pure, and computed here rather than below the effects
+  // so the tab title can read the same answer the top bar draws — this used to be
+  // a second `outputs.find` with its own fallback, which is how the tab of a
+  // preview came to be titled after the URL it was opened at.
+  const screen = resolveScreen({ state, isLoading, error, displayId, previewViewId });
+
   // Keep the browser tab title in sync with the brand + this display's name, so
   // renaming a display (Settings) updates its kiosk tab too.
-  const titleDisplay = (state?.outputs?.length ?? 0) > 1
-    ? (state?.outputs?.find((o) => o.id === displayId)?.name ?? displayId)
-    : null;
+  const titleDisplay = "displayName" in screen ? screen.displayName : null;
   useEffect(() => {
     const appName = state?.appName?.trim() || "Stage Utility";
     document.title = titleDisplay ? `${appName} — ${titleDisplay}` : appName;
@@ -392,7 +429,7 @@ export function StageView() {
     });
   }, [displayId]);
 
-  // Presence heartbeat: tell the server this screen is alive so Settings → Displays
+  // Presence heartbeat: tell the server this screen is alive so the Screens page
   // can show a Connected/Offline dot. Fast cadence near/during a PCO service, slow
   // otherwise (no point pinging every 20s during a dead week); a sendBeacon on unload
   // flips the dot offline at once, and the server TTL catches ungraceful deaths.
@@ -449,269 +486,237 @@ export function StageView() {
     };
   }, [displayId]);
 
-  if (isLoading) return <KioskLoading />;
-  if (error) return <KioskError message={error} />;
-  if (!state) return <KioskError message="State is unavailable." />;
-
-  // Preview mode: a "/preview-<viewId>" slug renders a View's content directly,
-  // regardless of any output routing (used by the settings live preview).
-  // previewViewId is computed above (before the early returns).
-  const previewView = previewViewId
-    ? (state.views?.find((v) => v.id === previewViewId) ?? null)
-    : null;
-
-  const multiDisplay = (state.outputs?.length ?? 0) > 1;
-  // Name comes from the Output, kind from the View it is routed to — the same two
-  // places the `displays` shim was assembled from before it was dropped.
-  const currentDisplay = previewViewId ? null : (state.outputs?.find((o) => o.id === displayId) ?? null);
-  const kind: ViewKind = previewView?.kind ?? state.resolvedByOutput?.[displayId]?.kind ?? "slots";
-  const displayName = previewView ? null : (multiDisplay ? (currentDisplay?.name ?? displayId) : null);
-
-  // A real output (not a preview) with no View routed to it is unconfigured —
-  // show a clear "no view assigned" screen rather than an empty slot grid.
-  const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
-  // Per-output kiosk lock (Displays-tab toggle) — never in the settings preview iframe.
-  const outputLocked = !previewViewId && (resolved?.locked ?? false);
-
-  // Blackout: a true black screen on command (Companion / Displays page), taking
-  // priority over the routed View. Toggling it off restores the View instantly.
-  if (!previewViewId && resolved?.blackout) {
-    return <div className="fixed inset-0 z-50 bg-black" />;
-  }
-
-  const isUnrouted = !previewViewId && (!resolved || resolved.viewId === null);
-  if (isUnrouted) {
+  // The three screens that draw nothing from the state, first — they are the only
+  // ones reachable without one.
+  if (screen.k === "loading") return <KioskLoading />;
+  if (screen.k === "error") return <KioskError message={screen.message} />;
+  // Not a state failure: the state loaded fine and this build simply cannot draw
+  // the kind it names, so the wording has to say that rather than send somebody
+  // looking for a server problem that is not there.
+  if (screen.k === "unknown-kind") {
     return (
-      <StageErrorBoundary>
-        <KioskUnrouted state={state} displayName={displayName} locked={outputLocked} />
-      </StageErrorBoundary>
+      <KioskError
+        title="This build cannot draw this view"
+        message={`The screen is routed to a "${screen.kind}" view, which this version does not know. Update this screen, or route it to another view.`}
+      />
     );
   }
+  // Blackout: a true black screen on command (Companion), taking
+  // priority over the routed View. Toggling it off restores the View instantly.
+  if (screen.k === "blackout") return <div className="fixed inset-0 z-50 bg-black" />;
+  // Unreachable: resolveScreen turns a missing state into the error screen above,
+  // and every arm below draws the kiosk chrome from it. A guard rather than a
+  // `state!` cast, so an invariant that ever does break says so on the wall
+  // instead of leaving it dark.
+  if (!state) return <KioskError message="State is unavailable." />;
 
-  // Every view kind, in ONE switch, with a `default` the type checker enforces.
-  //
-  // This was an if-chain with the slots body sitting after it as the implicit
-  // fallback, so a kind with no arm did not blank and did not throw — it drew
-  // MIC SLOTS. An eighth kind added by somebody who missed this file would have
-  // put a department's slot grid on an office wall, silently, and the first
-  // report of it would have come from whoever was standing in front of it.
-  //
-  // The guards above (blackout, unrouted) stay above: they hold whatever the
-  // kind is, and folding them in would make each of seven arms repeat them.
-  switch (kind) {
-    // Custom-layout views render the visual-editor layout below the same kiosk
-    // top bar (brand + plan context + connect QR) the other views show.
-    case "custom": {
-      const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
-      if (activeView?.layout) {
-        return (
-          <StageErrorBoundary>
-            <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-              <KioskTopBar
-                serviceTypeName={state.serviceTypeName}
-                planSeriesTitle={state.planSeriesTitle}
-                planTitle={state.planTitle}
-                showQr={state.showQr}
-                remoteUrl={state.remoteUrl}
-                displayName={displayName}
-                appName={state.appName}
-                appLogo={state.appLogo}
-                appLogoMonochrome={state.appLogoMonochrome}
-                locked={outputLocked}
-              />
-              <div className="flex-1 min-h-0">
-                {/* Controls are live only where the operator deliberately made
-                    them so. A screen is a read-only display unless it was set to
-                    panel mode, and a "/preview-…" iframe is always a display —
-                    otherwise the Screens page could advance the service by being
-                    looked at, since every card renders one. */}
-                <LayoutRenderer
-                  layout={activeView.layout}
-                  viewId={activeView.id}
-                  ndiSource={activeView.ndiSource ?? null}
-                  interactive={capabilityLive(
-                    contextForOutput(currentDisplay?.mode, !!previewViewId),
-                    "control",
-                  )}
-                  surface={viewSurface(activeView)}
-                />
-              </div>
-            </div>
-          </StageErrorBoundary>
-        );
+  const body = ((): ReactNode => {
+    switch (screen.k) {
+      case "unrouted":
+        return <KioskUnrouted state={state} displayName={screen.displayName} locked={screen.locked} />;
+      case "view-missing":
+        return <KioskViewMissing state={state} displayName={screen.displayName} locked={screen.locked} />;
+      case "not-configured":
+        return <KioskNotConfigured state={state} displayName={screen.displayName} locked={screen.locked} />;
+      case "empty":
+        return <KioskEmpty state={state} displayName={screen.displayName} locked={screen.locked} />;
+      case "view":
+        return renderView(screen, state, previewViewId, previewDraftSlots);
+      default: {
+        const _never: never = screen;
+        void _never;
+        return null;
       }
+    }
+  })();
+
+  return <StageErrorBoundary>{body}</StageErrorBoundary>;
+}
+
+/**
+ * What a routed View draws, once resolveScreen has decided a View is what this
+ * screen shows.
+ *
+ * A plain function rather than a component, so the rendered tree is exactly the
+ * one the chain of returns produced — nothing new between the kiosk shell and
+ * the view.
+ */
+function renderView(
+  screen: Extract<StageScreen, { k: "view" }>,
+  state: StageState,
+  previewViewId: string | null,
+  previewDraftSlots: Slot[] | null,
+): ReactNode {
+  const { kind, view: activeView, displayId, displayName, locked, isPreview, outputMode } = screen;
+
+  switch (kind) {
+    // Custom-layout views render the visual-editor layout below the same kiosk top
+    // bar (brand + plan context + connect QR) the other views show.
+    case "custom": {
+      const layout = activeView?.layout;
+      // resolveScreen sends a custom View with nothing drawn on it to the empty
+      // screen, so a layout is always here. Falling back to that same screen keeps
+      // an impossible state from going dark; it is not a second opinion about
+      // what a blank custom View shows.
+      if (!layout) return <KioskEmpty state={state} displayName={displayName} locked={locked} />;
       return (
-        <StageErrorBoundary>
-          <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
-        </StageErrorBoundary>
+        <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          <KioskTopBar
+            serviceTypeName={state.serviceTypeName}
+            planSeriesTitle={state.planSeriesTitle}
+            planTitle={state.planTitle}
+            showQr={state.showQr}
+            remoteUrl={state.remoteUrl}
+            displayName={displayName}
+            appName={state.appName}
+            appLogo={state.appLogo}
+            appLogoMonochrome={state.appLogoMonochrome}
+            locked={locked}
+          />
+          <div className="flex-1 min-h-0">
+            {/* Controls are live only where the operator deliberately made
+                them so. A screen is a read-only display unless it was set to
+                panel mode, and a "/preview-…" iframe is always a display —
+                otherwise the Screens page could advance the service by being
+                looked at, since every card renders one. */}
+            <LayoutRenderer
+              layout={layout}
+              // The View this layout belongs to, which seeds the embed chain: an
+              // embed tile inside it refuses to descend back into an ancestor,
+              // and the presence channel opens only where a screen tile really
+              // is. Null would read as "no ancestor" and lose both.
+              viewId={activeView?.id ?? null}
+              ndiSource={activeView?.ndiSource ?? null}
+              interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
+              surface={viewSurface(activeView)}
+            />
+          </div>
+        </div>
       );
     }
 
-    // Dashboard- and stage-kind displays render entirely different views.
+    // Dashboard- and stage-kind displays render entirely different views. All
+    // five size to h-full so they can also live inside an embed tile, so the
+    // viewport height and the safe-area insets come from KioskFrame here.
     case "dashboard":
       return (
-        <StageErrorBoundary>
-          <KioskFrame>
-            <DashboardView displayId={displayId} />
-          </KioskFrame>
-        </StageErrorBoundary>
+        <KioskFrame>
+          <DashboardView displayId={displayId} />
+        </KioskFrame>
       );
-
     case "stage":
       return (
-        <StageErrorBoundary>
-          <KioskFrame>
-            <StageDisplayView displayId={displayId} />
-          </KioskFrame>
-        </StageErrorBoundary>
+        <KioskFrame>
+          <StageDisplayView displayId={displayId} />
+        </KioskFrame>
       );
-
     case "transcription":
       return (
-        <StageErrorBoundary>
-          <KioskFrame>
-            <TranscriptionView displayId={displayId} />
-          </KioskFrame>
-        </StageErrorBoundary>
+        <KioskFrame>
+          <TranscriptionView displayId={displayId} />
+        </KioskFrame>
       );
-
-    case "script": {
-      const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
+    case "script":
       return (
-        <StageErrorBoundary>
-          <KioskFrame>
-            <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} />
-          </KioskFrame>
-        </StageErrorBoundary>
+        <KioskFrame>
+          <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} />
+        </KioskFrame>
       );
-    }
-
     case "spl-rundown":
       return (
-        <StageErrorBoundary>
-          <KioskFrame>
-            <SplRundownView displayId={displayId} />
-          </KioskFrame>
-        </StageErrorBoundary>
+        <KioskFrame>
+          <SplRundownView displayId={displayId} />
+        </KioskFrame>
       );
 
     case "calendar":
       return (
-        <StageErrorBoundary>
-          <KioskFrame>
-            {/* CalendarMonth sizes to h-full so the same component can live
-                inside a layout object; the screen height and the safe-area
-                insets belong to this route, which is what KioskFrame is. */}
-            <CalendarView
-              viewId={resolved?.viewId ?? previewViewId ?? null}
-              pcoConfigured={state.pcoConfigured ?? false}
-              // The same answer every control on every surface uses. False on a
-              // wall display, so it gets no chevrons and cannot be left on the
-              // wrong month by a passer-by.
-              interactive={capabilityLive(
-                contextForOutput(currentDisplay?.mode, !!previewViewId),
-                "control",
-              )}
-            />
-          </KioskFrame>
-        </StageErrorBoundary>
+        <KioskFrame>
+          {/* CalendarMonth sizes to h-full so the same component can live inside
+              a layout object; the screen height and the safe-area insets belong
+              to this route, which is what KioskFrame is.
+
+              The View is the one resolveScreen already resolved -- a preview
+              answers with its own, a real output with its routed one -- so this
+              arm does not re-derive it the way the pre-resolver code did. */}
+          <CalendarView
+            viewId={activeView?.id ?? null}
+            pcoConfigured={state.pcoConfigured ?? false}
+            // The same answer every control on every surface uses. False on a
+            // wall display, so it gets no chevrons and cannot be left on the
+            // wrong month by a passer-by.
+            interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
+          />
+        </KioskFrame>
       );
 
-    case "slots": {
-      // Slots are the only kind whose content comes from Planning Center, so
-      // this check lives HERE rather than above the switch — where it sat while
-      // slots was the fallthrough, and where it would now wrongly gate a clock
-      // wall on a PCO connection nothing on it needs.
-      if (!state.pcoConfigured) {
-        return (
-          <StageErrorBoundary>
-            <KioskNotConfigured state={state} displayName={displayName} locked={outputLocked} />
-          </StageErrorBoundary>
-        );
-      }
-
-      // A preview reads the View's slots directly; a real output reads its own
-      // routed slots (no fallback to the primary display). In preview mode, an
-      // unsaved draft pushed from the Views editor (already resolved) takes
-      // precedence so edits show live; null draft falls back to saved state.
-      const displaySlots = previewViewId
-        ? (previewDraftSlots ?? state.slotsByView?.[previewViewId] ?? [])
-        // Derived rather than read from a second copy: slotsByDisplay held exactly
-        // slotsByView[thisOutput's View], and shipping both put ~6 KB of duplicate
-        // slot data in every state broadcast to every display.
-        : (state.slotsByView?.[state.resolvedByOutput?.[displayId]?.viewId ?? ""] ?? []);
-      const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
-
-      // Physical alignment: when the View has a slotsLayout, columns are sized in
-      // inches (against the monitor's active width) so they line up with the chargers.
-      const slotsView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
-      const slotsLayout = slotsView?.slotsLayout ?? null;
-
-      if (sortedSlots.length === 0) {
-        return (
-          <StageErrorBoundary>
-            <KioskEmpty state={state} displayName={displayName} locked={outputLocked} />
-          </StageErrorBoundary>
-        );
-      }
-
-      return (
-        <StageErrorBoundary>
-          <div className="flex flex-col h-[100dvh] overscroll-none overflow-hidden bg-transparent pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-            <KioskTopBar
-              serviceTypeName={state.serviceTypeName}
-              planSeriesTitle={state.planSeriesTitle}
-              planTitle={state.planTitle}
-              showQr={state.showQr}
-              remoteUrl={state.remoteUrl}
-              displayName={displayName}
-              appName={state.appName}
-              appLogo={state.appLogo}
-              appLogoMonochrome={state.appLogoMonochrome}
-              locked={outputLocked}
-            />
-            {/* Desktop / kiosk: fill-height columns (stacked slots share a column).
-                With a slotsLayout, columns are inch-sized and centered so they line up
-                with the chargers; otherwise they share width equally. */}
-            <SlotsColumns
-              slots={sortedSlots}
-              slotsLayout={slotsLayout}
-              emptySlotLogo={state.emptySlotLogo}
-              defaultAvatar={state.defaultAvatar}
-              className="flex-1 max-sm:hidden"
-            />
-
-            {/* Phone: 2-up card grid, scrolls when it overflows (weekly-setup check).
-                container-type makes the card's cqw-based sizing scale to the card. */}
-            <div className="hidden max-sm:grid grid-cols-2 auto-rows-max content-start gap-2 p-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
-              {sortedSlots.filter((slot) => slot.link.kind !== "spacer").map((slot) => (
-                <div key={slot.id} className="aspect-[3/4] flex [container-type:inline-size]">
-                  <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} defaultAvatar={state.defaultAvatar} overlay />
-                </div>
-              ))}
-            </div>
-          </div>
-        </StageErrorBoundary>
-      );
-    }
-
+    case "slots":
+      break;
     default: {
-      // Exhaustive: add a ViewKind without an arm above and this line stops
-      // compiling, which is the whole point of the switch.
+      // Adding a ViewKind without an arm above fails the BUILD here. An
+      // unrecognised kind never reaches this function at runtime — resolveScreen
+      // answers "unknown-kind" for one, and StageView draws the error before it
+      // gets here — so there is nothing to fall through TO.
       const _never: never = kind;
       void _never;
-      // Still REACHABLE at runtime, and not theoretically: `kind` comes off
-      // server state, and the app ships a beta/main track switch — so a view
-      // kind written by a beta build and read by a main build is a real path.
-      // An error beats the mic slots this used to fall through to, but it has to
-      // name the actual problem: the state loaded fine, this build just cannot
-      // draw that kind.
-      return (
-        <KioskError
-          title="This build cannot draw this view"
-          message={`The screen is routed to a "${String(kind)}" view, which this version does not know. Update this screen, or route it to another view.`}
-        />
-      );
+      break;
     }
   }
+
+  // Slots-kind: a preview reads the View's slots directly; a real output reads
+  // its own routed slots (no fallback to the primary display). In preview mode,
+  // an unsaved draft pushed from the Views editor (already resolved) takes
+  // precedence so edits show live; null draft falls back to saved state.
+  const displaySlots = previewViewId
+    ? (previewDraftSlots ?? state.slotsByView?.[previewViewId] ?? [])
+    // Derived rather than read from a second copy: slotsByDisplay held exactly
+    // slotsByView[thisOutput'sView], and shipping both put ~6 KB of duplicate slot
+    // data in every state broadcast to every display.
+    : (state.slotsByView?.[state.resolvedByOutput?.[displayId]?.viewId ?? ""] ?? []);
+  const sortedSlots = [...displaySlots].sort((a, b) => a.order - b.order);
+
+  // Physical alignment: when the View has a slotsLayout, columns are sized in
+  // inches (against the monitor's active width) so they line up with the chargers.
+  const slotsLayout = activeView?.slotsLayout ?? null;
+
+  if (sortedSlots.length === 0) {
+    return <KioskEmpty state={state} displayName={displayName} locked={locked} />;
+  }
+
+  return (
+    <div className="flex flex-col h-[100dvh] overscroll-none overflow-hidden bg-transparent pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      <KioskTopBar
+        serviceTypeName={state.serviceTypeName}
+        planSeriesTitle={state.planSeriesTitle}
+        planTitle={state.planTitle}
+        showQr={state.showQr}
+        remoteUrl={state.remoteUrl}
+        displayName={displayName}
+        appName={state.appName}
+        appLogo={state.appLogo}
+        appLogoMonochrome={state.appLogoMonochrome}
+        locked={locked}
+      />
+      {/* Desktop / kiosk: fill-height columns (stacked slots share a column).
+          With a slotsLayout, columns are inch-sized and centered so they line up
+          with the chargers; otherwise they share width equally. */}
+      <SlotsColumns
+        slots={sortedSlots}
+        slotsLayout={slotsLayout}
+        emptySlotLogo={state.emptySlotLogo}
+        defaultAvatar={state.defaultAvatar}
+        className="flex-1 max-sm:hidden"
+      />
+
+      {/* Phone: 2-up card grid, scrolls when it overflows (weekly-setup check).
+          container-type makes the card's cqw-based sizing scale to the card. */}
+      <div className="hidden max-sm:grid grid-cols-2 auto-rows-max content-start gap-2 p-2 flex-1 min-h-0 overflow-y-auto overscroll-contain">
+        {sortedSlots.filter((slot) => slot.link.kind !== "spacer").map((slot) => (
+          <div key={slot.id} className="aspect-[3/4] flex [container-type:inline-size]">
+            <SlotPanel slot={slot} emptySlotLogo={state.emptySlotLogo} defaultAvatar={state.defaultAvatar} overlay />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

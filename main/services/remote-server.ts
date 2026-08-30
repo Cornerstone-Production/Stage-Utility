@@ -961,7 +961,7 @@ export class RemoteServer {
       return;
     }
     // Display presence heartbeat — a kiosk page reports it's alive (or leaving).
-    // Powers the Connected/Offline dot on Settings → Displays.
+    // Powers the Connected/Offline dot on the Screens page.
     if (method === "POST" && pathname === "/api/displays/presence") {
       const body = await readBodyOrEmpty(req);
       const outputId = typeof body.outputId === "string" ? body.outputId : null;

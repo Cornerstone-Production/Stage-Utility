@@ -14,7 +14,7 @@ const DEFAULT_TINT = "var(--su-accent)";
  * An item's icon, click to retint.
  *
  * Colors are stored in one map keyed by display id ("display-1") or tool path
- * ("/baptism"), so a color set on the Displays tab or on Connect also shows on
+ * ("/baptism"), so a color set on the Screens page or on Connect also shows on
  * the picker at "/" — the icon belongs to the thing, not to the screen it happens
  * to be rendered on.
  *
