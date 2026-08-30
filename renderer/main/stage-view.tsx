@@ -326,11 +326,18 @@ function KioskViewMissing({ state, displayName, locked }: { state: StageState; d
   );
 }
 
-function KioskError({ message }: { message: string }) {
+/**
+ * @param title what went wrong, in the operator's words. Defaults to the state
+ *   failure this component was written for — and is a PARAMETER because it is
+ *   now also reached when the state loaded perfectly and the view kind on it is
+ *   one this build has never heard of. A wall display reading "Could not load
+ *   stage state" sends somebody looking for a server problem that is not there.
+ */
+function KioskError({ message, title = "Could not load stage state" }: { message: string; title?: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-4 px-12 text-center">
       <AlertCircleIcon className="size-10 text-red-10" />
-      <p className="text-title3 text-gray-9 font-semibold">Could not load stage state</p>
+      <p className="text-title3 text-gray-9 font-semibold">{title}</p>
       <p className="text-caption1 text-gray-7">{message}</p>
     </div>
   );
@@ -364,6 +371,23 @@ function usePreviewDraftSlots(previewViewId: string | null): Slot[] | null {
 }
 
 // ---- main view --------------------------------------------------------------
+
+/**
+ * The screen a full-page View is drawn on.
+ *
+ * Every one of these views sizes itself to h-full, because each also renders
+ * inside an embed tile — so the viewport height and the safe-area insets belong
+ * to the ROUTE, not to the component. Five kinds needed the identical wrapper;
+ * this is it, rather than five copies to keep in step the next time a phone adds
+ * an inset.
+ */
+function KioskFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      {children}
+    </div>
+  );
+}
 
 export function StageView() {
   const { state, isLoading, error } = useStageState();
@@ -465,6 +489,17 @@ export function StageView() {
   // ones reachable without one.
   if (screen.k === "loading") return <KioskLoading />;
   if (screen.k === "error") return <KioskError message={screen.message} />;
+  // Not a state failure: the state loaded fine and this build simply cannot draw
+  // the kind it names, so the wording has to say that rather than send somebody
+  // looking for a server problem that is not there.
+  if (screen.k === "unknown-kind") {
+    return (
+      <KioskError
+        title="This build cannot draw this view"
+        message={`The screen is routed to a "${screen.kind}" view, which this version does not know. Update this screen, or route it to another view.`}
+      />
+    );
+  }
   // Blackout: a true black screen on command (Companion), taking
   // priority over the routed View. Toggling it off restores the View instantly.
   if (screen.k === "blackout") return <div className="fixed inset-0 z-50 bg-black" />;
@@ -545,6 +580,11 @@ function renderView(
                 looked at, since every card renders one. */}
             <LayoutRenderer
               layout={layout}
+              // The View this layout belongs to, which seeds the embed chain: an
+              // embed tile inside it refuses to descend back into an ancestor,
+              // and the presence channel opens only where a screen tile really
+              // is. Null would read as "no ancestor" and lose both.
+              viewId={activeView?.id ?? null}
               ndiSource={activeView?.ndiSource ?? null}
               interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
               surface={viewSurface(activeView)}
@@ -554,31 +594,47 @@ function renderView(
       );
     }
 
-    // Dashboard- and stage-kind displays render entirely different views.
+    // Dashboard- and stage-kind displays render entirely different views. All
+    // five size to h-full so they can also live inside an embed tile, so the
+    // viewport height and the safe-area insets come from KioskFrame here.
     case "dashboard":
-      return <DashboardView displayId={displayId} />;
+      return (
+        <KioskFrame>
+          <DashboardView displayId={displayId} />
+        </KioskFrame>
+      );
     case "stage":
-      return <StageDisplayView displayId={displayId} />;
+      return (
+        <KioskFrame>
+          <StageDisplayView displayId={displayId} />
+        </KioskFrame>
+      );
     case "transcription":
-      return <TranscriptionView displayId={displayId} />;
+      return (
+        <KioskFrame>
+          <TranscriptionView displayId={displayId} />
+        </KioskFrame>
+      );
     case "script":
       return (
-        // ScriptView sizes to h-full so it can also live inside a layout object;
-        // the screen height and the safe-area insets belong to this route.
-        <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <KioskFrame>
           <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} />
-        </div>
+        </KioskFrame>
       );
     case "spl-rundown":
-      return <SplRundownView displayId={displayId} />;
+      return (
+        <KioskFrame>
+          <SplRundownView displayId={displayId} />
+        </KioskFrame>
+      );
 
     case "slots":
       break;
     default: {
-      // Adding a ViewKind without an arm above fails the BUILD here. At runtime an
-      // unrecognised kind still falls through to the slots path, exactly as the
-      // chain of `if`s did — a newer server routing a kind this build predates
-      // must not black out the screen.
+      // Adding a ViewKind without an arm above fails the BUILD here. An
+      // unrecognised kind never reaches this function at runtime — resolveScreen
+      // answers "unknown-kind" for one, and StageView draws the error before it
+      // gets here — so there is nothing to fall through TO.
       const _never: never = kind;
       void _never;
       break;

@@ -19,7 +19,7 @@
 // runner is not configured for.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, describe, test } from "node:test";
+import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
 
@@ -66,6 +66,7 @@ let stateMode: StateMode = "ok";
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { StageView } = await import("./stage-view.js");
+const { __resetForTests } = await import("./use-stage-state.js");
 const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
@@ -77,6 +78,12 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false 
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { cleanup(); await settle(); teardown(); });
+// `useStageState` caches the StageState at MODULE level and deliberately keeps
+// it after the last consumer unmounts, so without this drop a case would
+// inherit the previous one's state and pass or fail on test ORDER — the first
+// case here leaves a request pending, which is how every later screen came to
+// render the loading spinner.
+beforeEach(() => { cleanup(); __resetForTests(); });
 afterEach(async () => { cleanup(); await settle(); });
 
 // ---- fixtures ---------------------------------------------------------------
@@ -127,6 +134,12 @@ async function showScreen(
   window.history.replaceState({}, "", path);
   stateBody = state;
   stateMode = mode;
+  // Every call models opening the kiosk fresh at `path`. `useStageState` caches
+  // the StageState at MODULE level and keeps it after the last consumer
+  // unmounts, so without this drop a second showScreen in one case would read
+  // the FIRST call's state and assert against it — which is what a blackout, a
+  // lock and a second display each silently did.
+  __resetForTests();
   let container!: HTMLElement;
   await act(async () => {
     container = render(
@@ -361,16 +374,22 @@ describe("StageView renders each view kind", () => {
     assert.ok(says(c, "Max SPL per item"), c.textContent ?? "");
   });
 
-  test("a kind this build does not recognise lands on a screen, never a blank one", async () => {
-    // Not a hypothetical: a newer server may route a View kind this build has
-    // never heard of. The chain has no arm for it, so it falls through to the
-    // slots path — which must still draw something an operator can read.
+  test("a kind this build does not recognise says so, never draws slots", async () => {
+    // Not a hypothetical: the app ships a beta/main track switch, so a View kind
+    // written by a beta build and read by a main build is a real path.
+    //
+    // This used to fall through to the slots path and draw somebody's MIC SLOTS,
+    // with nothing on screen to say the build could not draw what it was routed
+    // to. The screen must still say something an operator can read — and it must
+    // name the kind, so they know which screen to re-route.
     const c = await showScreen("/display-1", stageState({
       views: [{ id: "v1", name: "From the future", kind: "holodeck" }],
       resolvedByOutput: { "display-1": resolved({ kind: "holodeck" }) },
     }));
     assert.ok((c.textContent ?? "").length > 0, "an unknown kind rendered nothing at all");
-    assert.ok(says(c, "No mic slots assigned yet"), c.textContent ?? "");
+    assert.ok(says(c, "This build cannot draw this view"), c.textContent ?? "");
+    assert.ok(says(c, "holodeck"), c.textContent ?? "");
+    assert.ok(!says(c, "No mic slots assigned yet"), "an unknown kind fell through to slots");
   });
 });
 

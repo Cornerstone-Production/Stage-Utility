@@ -8,7 +8,7 @@
 // leaving beacon. Presence is ephemeral: purely in-memory, never persisted.
 //
 // The connected set is broadcast on "displays:presence" only when it changes, so
-// the the Screens page page can light a per-display Connected/Offline dot.
+// the Screens page can light a per-display Connected/Offline dot.
 
 import { broadcast } from "./broadcaster.js";
 
@@ -21,6 +21,15 @@ const lastSeen = new Map<string, number>();
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 let lastSig = "";
 
+// Which broadcast a payload belongs to, so a client can order two deliveries of
+// the same truth. A consumer hydrates with a GET and subscribes to the channel;
+// without this it cannot tell whether a set that arrived while its read was in
+// flight is newer than the read or older, and guessing wrong leaves it wrong
+// until the next change -- which, on a channel that only broadcasts on change,
+// can be hours. Bumped only when the set actually changes, so it also tells a
+// client that nothing has happened.
+let rev = 0;
+
 function connectedNow(): string[] {
   const cutoff = Date.now() - TTL_MS;
   const out: string[] = [];
@@ -28,9 +37,11 @@ function connectedNow(): string[] {
   return out.sort();
 }
 
-/** Current connected-output snapshot — pushed to a client when its SSE opens. */
-export function presenceSnapshot(): { connected: string[] } {
-  return { connected: connectedNow() };
+/** Current connected-output snapshot — pushed to a client when its SSE opens,
+ *  and served by GET /api/displays/presence. `rev` is the last broadcast this
+ *  set is at least as new as; see the declaration above. */
+export function presenceSnapshot(): { connected: string[]; rev: number } {
+  return { connected: connectedNow(), rev };
 }
 
 // Broadcast only when the connected set actually changes (change-driven, per the
@@ -40,7 +51,8 @@ function maybeBroadcast(): void {
   const sig = conn.join(",");
   if (sig === lastSig) return;
   lastSig = sig;
-  broadcast("displays:presence", { connected: conn });
+  rev += 1;
+  broadcast("displays:presence", { connected: conn, rev });
 }
 
 function ensureSweep(): void {

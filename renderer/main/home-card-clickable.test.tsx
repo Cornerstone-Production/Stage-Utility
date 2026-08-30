@@ -40,6 +40,7 @@ class StubEventSource {
 const { render, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { ObjectContent } = await import("./layout-renderer.js");
+const { makeRenderCtx } = await import("./test-render-ctx.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
@@ -48,16 +49,7 @@ afterEach(async () => { cleanup(); await settle(); });
 
 /** Enough of a context to render one card; only the two flags under test vary. */
 function ctxWith(home: boolean, interactive: boolean) {
-  return {
-    state: { outputs: [], views: [], captionChannelColors: {} },
-    propresenter: null, propInstances: [], pcoLive: null, planItems: null,
-    transcript: [], spl: null, obs: null, reaper: null, resi: null, youtube: null,
-    osc: null, peopleCount: null, serviceLow: null, serviceAttendance: null,
-    servicePeak: null, servicePeakAttendance: null, baptism: null,
-    serviceTimeline: null, integrations: {}, integrationLabels: {}, wireless: [],
-    now: 0, skewMs: 0, ndiSource: null, H: 1080, placed: undefined,
-    home, interactive,
-  } as never;
+  return makeRenderCtx({ home, interactive });
 }
 
 /**

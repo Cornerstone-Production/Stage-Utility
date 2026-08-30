@@ -356,12 +356,15 @@ describe("the view kind", () => {
     });
   });
 
-  test("a kind this build does not recognise still reaches a screen", () => {
-    // Not hypothetical: a newer server can route a View kind this build has
-    // never heard of. The chain has no arm for it, so it must fall through to
-    // the Planning-Center check and the slots arm — never off the end into a
-    // blank screen. This is why the fall-through is a fall-through and not
-    // `if (kind === "slots")`.
+  test("a kind this build does not recognise says so, rather than drawing slots", () => {
+    // Not hypothetical: the app ships a beta/main track switch, so a View kind
+    // written by a beta build and read by a main build is a real path.
+    //
+    // This used to fall through to the Planning-Center check and the slots arm,
+    // because slots was the end of the chain rather than a case of its own. A
+    // kind with no arm therefore drew somebody's MIC SLOTS — an office wall
+    // showing a department's slot grid, with nothing on screen to say the build
+    // simply could not draw what it was routed to.
     const unknown = "holodeck" as ViewKind;
     const routed = resolveScreen(input({
       state: stageState({
@@ -369,9 +372,14 @@ describe("the view kind", () => {
         resolvedByOutput: { "display-1": resolvedOutput({ kind: unknown }) },
       }),
     }));
-    assert.equal(routed.k, "view");
-    assert.equal(routed.k === "view" && routed.kind, unknown);
+    assert.equal(routed.k, "unknown-kind");
+    // The kind is carried so the screen can name it — "a holodeck view" tells an
+    // operator which screen to re-route; "something went wrong" does not.
+    assert.equal(routed.k === "unknown-kind" && routed.kind, unknown);
 
+    // Planning Center gates SLOTS, not everything past the known kinds. An
+    // unrecognised kind is unrecognised whether or not PCO is connected, and
+    // saying "connect Planning Center" here would be a false lead.
     const noPco = resolveScreen(input({
       state: stageState({
         pcoConfigured: false,
@@ -379,7 +387,7 @@ describe("the view kind", () => {
         resolvedByOutput: { "display-1": resolvedOutput({ kind: unknown }) },
       }),
     }));
-    assert.equal(noPco.k, "not-configured");
+    assert.equal(noPco.k, "unknown-kind");
   });
 
   test("carries the output's mode, and never a preview's", () => {

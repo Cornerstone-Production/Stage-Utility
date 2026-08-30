@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke, onNotification } from "../lib/api";
 import { useStageState } from "./use-stage-state";
+import { useStatusChannel } from "./use-status-channel";
 
 interface UseDashboardStateResult {
   state: StageState | null;
@@ -18,32 +19,23 @@ interface UseDashboardStateResult {
 export function useDashboardState(): UseDashboardStateResult {
   const { state, isLoading, error } = useStageState();
   const [pcoLive, setPcoLive] = useState<PcoLiveDTO | null>(null);
-  const [propresenter, setPropresenter] = useState<ProPresenterStatusDTO | null>(null);
 
-  // Hydrate immediately on mount — these channels only broadcast on change, so a
-  // freshly-loaded dashboard would otherwise show "offline" / blank until the next
-  // slide change or poll tick. Fetch the current values right away.
+  // ProPresenter is a StatusIntegration, so its hydrate and its pushes are
+  // version-stamped and ordered by useStatusChannel — see the note there.
+  const readPro = useCallback(() => invoke<ProPresenterStatusDTO>("propresenter:getStatus"), []);
+  const propresenter = useStatusChannel<ProPresenterStatusDTO>(readPro, "propresenter:status");
+
+  // pco:live is NOT one: it comes from the live controller, not an integration,
+  // and carries no rev. It keeps the plain hydrate-then-subscribe shape.
   useEffect(() => {
     let cancelled = false;
-    invoke<ProPresenterStatusDTO>("propresenter:getStatus")
-      .then((s) => { if (!cancelled && s) setPropresenter(s); })
-      .catch(() => { /* not configured yet — ignore */ });
     invoke<PcoLiveDTO | null>("pco:getLive")
       .then((l) => { if (!cancelled && l) setPcoLive(l); })
       .catch(() => { /* ignore */ });
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    const unsubLive = onNotification("pco:live", (p) => setPcoLive(p as PcoLiveDTO));
-    const unsubPro = onNotification("propresenter:status", (p) =>
-      setPropresenter(p as ProPresenterStatusDTO),
-    );
-    return () => {
-      unsubLive();
-      unsubPro();
-    };
-  }, []);
+  useEffect(() => onNotification("pco:live", (p) => setPcoLive(p as PcoLiveDTO)), []);
 
   return { state, isLoading, error, pcoLive, propresenter };
 }

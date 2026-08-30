@@ -6,6 +6,7 @@ import { scheduleItems } from "./automation-item-schedule.js";
 import type { PlanNoteDTO } from "./plan-note-checklist.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
 import { pickServiceTime } from "./pick-service-time.js";
+import { serviceWindow } from "./service-window.js";
 
 /**
  * PCO rejected the credentials (401).
@@ -24,6 +25,33 @@ export class PcoAuthError extends Error {
 import { scrub } from "./scrub.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
+
+/**
+ * The Services API version this client is written against.
+ *
+ * PCO versions each product by DATE, selected with an `X-PCO-API-Version:
+ * YYYY-MM-DD` request header and resolved by an equal-or-earlier match. Send no
+ * header at all — which this client did until now — and the version is whatever
+ * is configured as the app's default in PCO's developer console: a setting that
+ * lives outside this repository, differs between installs, and is older than
+ * whatever the code was written against. Pinning here makes the contract a
+ * property of the code rather than of one org's console.
+ *
+ * Deliberately an exact date, never a "give me the newest" sentinel. A floating
+ * request would let a PCO release change field names, defaults or pagination
+ * under a running install with no change in this repository.
+ *
+ * Chosen 2026-08-29. Services publishes exactly two versions — 2018-08-01,
+ * withdrawn 2 April 2024, and 2018-11-01 — so this is both the newest and the
+ * only one still served. The one documented difference between them is that
+ * 2018-11-01 makes the `/people` endpoint respect the "Can view people not on My
+ * Teams" permission; this client calls no `/people` endpoint.
+ *
+ * To bump: open https://api.planningcenteronline.com/docs/apps/services, take the
+ * newest date from the version selector, read its changelog entry for field or
+ * pagination changes, then change this string.
+ */
+const PCO_API_VERSION = "2018-11-01";
 
 /**
  * Is `candidate` an absolute URL on the same origin as `base`?
@@ -107,27 +135,105 @@ export function withOffset(url: string, offset: number): string {
  */
 export function pcoUrlFrom(candidate: unknown, base: string): string | null {
   if (!sameOrigin(candidate, base)) return null;
-  let path: string;
   try {
     const parsed = new URL(candidate);
-    path = `${parsed.pathname}${parsed.search}`;
+    // Built by ASSIGNMENT, never by `new URL(path, origin)`.
+    //
+    // The two-argument constructor RE-PARSES its first argument, and a pathname
+    // beginning with `//` is read as a protocol-relative AUTHORITY, not a path.
+    // So a candidate of
+    //     https://api.planningcenteronline.com//attacker.example/steal
+    // passes sameOrigin (its origin really is PCO's), yields a pathname of
+    // `//attacker.example/steal`, and rebuilds as https://attacker.example/steal
+    // -- off-origin, with pcoFetch about to attach the app id and secret to it.
+    //
+    // The setters write one component each and cannot touch the origin.
+    const rebuilt = new URL(base);
+    rebuilt.pathname = parsed.pathname;
+    rebuilt.search = parsed.search;
+    return rebuilt.toString();
   } catch {
     return null;
   }
-  // The origin is the CONSTANT's, never the candidate's.
-  return new URL(path, new URL(base).origin).toString();
 }
+/**
+ * The one URL that reaches `fetch`, forced onto PCO's own origin.
+ *
+ * Defence in depth rather than a second opinion: every caller already builds on
+ * PCO_BASE, so for correct callers this returns the same string it was given.
+ * It exists so that "the host cannot be moved" is enforced at the point the
+ * credentials are attached, instead of being a property every call site has to
+ * remember. A caller that hands over something off-origin gets PCO's host and
+ * that caller's path, never the other host.
+ *
+ * Throwing is deliberate: an unparseable URL here means a caller built one
+ * wrong, and a request that quietly went somewhere else with the operator's app
+ * id and secret on it is not a failure to swallow.
+ */
+export function pinnedToPco(url: string): string {
+  const base = new URL(PCO_BASE);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`pcoFetch was handed a URL it cannot parse: ${scrub(url)}`);
+  }
+  base.pathname = parsed.pathname;
+  base.search = parsed.search;
+  return base.toString();
+}
+
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
 // everything, which re-pulled it constantly (the live timer polls every 1–4s and
 // the auto-advance check reads plan times every tick). Split by volatility:
 //   LONG   — effectively static within a service day (service types, note
 //            categories, team positions, plan service times).
 //   MEDIUM — plan content that can still be edited up to service time (plan list,
-//            plan items, team members, attachments).
+//            plan items, team members, attachments). Context-dependent: shorter
+//            inside a service window, see mediumTtlMs.
 //   getLive() stays UNCACHED — it's the live timer and must be real-time.
 const CACHE_TTL_MS = 30_000; // default / fallback
 const TTL_LONG_MS = 15 * 60_000;
 const TTL_MEDIUM_MS = 3 * 60_000;
+/**
+ * The MEDIUM tier while a service window is open.
+ *
+ * Three minutes is right for the 95% of the week that is not a service: plan
+ * content barely moves and every re-pull is a request against a rate-limited
+ * cloud API. It is wrong for the hours either side of a service, which is
+ * precisely when someone is editing the plan and a stage display is showing the
+ * result. 45s is short enough that an edit lands before the next thing happens on
+ * stage and long enough that the live timer's ~1 Hz reads still coalesce onto one
+ * request.
+ */
+const TTL_MEDIUM_WINDOW_MS = 45_000;
+
+/**
+ * The MEDIUM TTL for right now — read when an entry is READ, not when it is
+ * written (see `cacheGet`).
+ *
+ * Evaluating at write time would stamp an absolute expiry onto the entry and
+ * freeze the decision: an entry written three minutes before a window opens would
+ * live out its full three minutes inside the window, and the tightening would not
+ * take effect until the entry it was meant to shorten had already expired on its
+ * own. Read-time evaluation means an entry that is READ inside a window is judged
+ * by the window's TTL however long ago it was written. (An entry written inside a
+ * window and not read until after it closed gets the full three minutes — correct,
+ * and asserted in pco-window-ttl.test.ts.)
+ *
+ * "In a window" is `serviceWindow`'s definition — PCO plan times plus the
+ * operator's configured lead and tail — and not a second one. It compares instants
+ * against plan times, so there is no calendar-date or hour-of-day question here
+ * and nothing that could disagree with the app time zone.
+ *
+ * Note this ignores `reconnectSchedule.enabled`, which switches the integration
+ * reconnect back-off, not the freshness of PCO data. See the roster tick, which
+ * reads the window the same way.
+ */
+function mediumTtlMs(): number {
+  return serviceWindow.isActive() ? TTL_MEDIUM_WINDOW_MS : TTL_MEDIUM_MS;
+}
+
 // A request that FAILED is cached for this long, and no longer. Not caching a
 // failure at all was the other half of the mistake: getLive() calls getPlanTimes
 // on every live tick (~1/s during a service), and its only rate limiter is this
@@ -146,6 +252,11 @@ const MAX_CONCURRENT = 4;
 // Per-request PCO logging (~2 lines per uncached /live, ~1 Hz during a service) is
 // off unless STAGE_UTILITY_DEBUG=1 — keeps an unrotated stdout log from ballooning.
 const DEBUG_PCO = process.env.STAGE_UTILITY_DEBUG === "1";
+
+/** One place, so the roster reader and the targeted invalidator cannot drift. */
+function teamMembersCacheKey(appId: string, serviceTypeId: string, planId: string): string {
+  return `team:${appId}:${serviceTypeId}:${planId}`;
+}
 
 /** True for PCO's auto-generated "initials" placeholder avatar (served at
  *  …/uploads/initials/AB.png when a person has no uploaded photo). Real photos
@@ -182,9 +293,18 @@ function toPlanDTO(item: PcoNode): PlanDTO {
   };
 }
 
+/**
+ * A cached value and how long it lives.
+ *
+ * `ttl` may be a function, which is resolved on every READ rather than stamped
+ * into an absolute expiry at write time. That is what lets the MEDIUM tier
+ * shorten the moment a service window opens, including for entries already
+ * sitting in the cache.
+ */
 interface CacheEntry<T> {
   value: T;
-  expiresAt: number;
+  writtenAt: number;
+  ttl: number | (() => number);
 }
 
 /** A plan's "service" plan_time — one per service occurrence (e.g. 9am, 11am). */
@@ -263,20 +383,24 @@ class PcoService {
   private cacheGet<T>(key: string): T | null {
     const entry = this.cache.get(key);
     if (!entry) return null;
-    if (Date.now() > entry.expiresAt) {
+    // Resolved HERE, not at write time, so a tier whose TTL depends on context
+    // (MEDIUM, which tightens inside a service window) applies to entries that
+    // were already in the cache when the context changed.
+    const ttlMs = typeof entry.ttl === "function" ? entry.ttl() : entry.ttl;
+    if (Date.now() - entry.writtenAt > ttlMs) {
       this.cache.delete(key);
       return null;
     }
     return entry.value as T;
   }
 
-  private cacheSet<T>(key: string, value: T, ttlMs: number = CACHE_TTL_MS): void {
+  private cacheSet<T>(key: string, value: T, ttl: number | (() => number) = CACHE_TTL_MS): void {
     // Bound cache to 200 entries to avoid unbounded growth.
     if (this.cache.size >= 200) {
       const firstKey = this.cache.keys().next().value;
       if (firstKey !== undefined) this.cache.delete(firstKey);
     }
-    this.cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    this.cache.set(key, { value, writtenAt: Date.now(), ttl });
   }
 
   /** Invalidate every cache entry scoped to one plan (its items, team, service
@@ -287,13 +411,61 @@ class PcoService {
     }
   }
 
+  /**
+   * Drop just one plan's ROSTER, so the next read is a real request.
+   *
+   * Narrower than clearPlanCache on purpose. The in-window roster tick runs every
+   * minute for hours, and clearing the plan's items, notes, attachments and times
+   * alongside it would turn one request a minute into a handful.
+   *
+   * Must build the same key `listTeamMembers` writes.
+   */
+  clearTeamMembersCache(appId: string, serviceTypeId: string, planId: string): void {
+    this.cache.delete(teamMembersCacheKey(appId, serviceTypeId, planId));
+  }
+
   clearCache(): void {
     this.cache.clear();
   }
 
-  private makeAuthHeader(appId: string, secret: string): string {
+  /**
+   * Every header a PCO request carries.
+   *
+   * One builder rather than three copies of the same object literal: the GET, the
+   * Live control POST and the attachment-open POST had drifted into three
+   * hand-written copies of the auth header, and a version pin is only a pin if it
+   * is on all of them.
+   */
+  private pcoHeaders(appId: string, secret: string): Record<string, string> {
     const creds = Buffer.from(`${appId}:${secret}`).toString("base64");
-    return `Basic ${creds}`;
+    return {
+      Authorization: `Basic ${creds}`,
+      "Content-Type": "application/json",
+      "X-PCO-API-Version": PCO_API_VERSION,
+    };
+  }
+
+  /**
+   * THE call to `fetch` for the PCO API. There should never be a second one.
+   *
+   * Three hand-written header literals is how the version pin could have been
+   * added to one site and missed on two, which is this repository's most expensive
+   * recurring mistake. Rather than fix it in three places and test all three, the
+   * headers are now unskippable: a new endpoint gets them by construction, because
+   * there is no other way to reach the network from here.
+   *
+   * `url` is always one this client BUILT (see pcoUrlFrom / withOffset) — no string
+   * from a PCO response body reaches here. This function no longer TRUSTS that:
+   * it re-pins the origin itself, so the promise holds even if a future caller
+   * forgets it. The credentials go out as headers on this request; anything that
+   * moved the host would take them along.
+   *
+   * Written as an assignment onto the constant's URL, never `new URL(path, base)`
+   * — that constructor re-parses its first argument and reads a leading `//` as
+   * an authority, which is the exact bug fixed one commit ago.
+   */
+  private pcoFetch(url: string, appId: string, secret: string, init: RequestInit = {}): Promise<Response> {
+    return fetch(pinnedToPco(url), { ...init, headers: this.pcoHeaders(appId, secret) });
   }
 
   private sleep(ms: number): Promise<void> {
@@ -355,12 +527,7 @@ class PcoService {
     for (let attempt = 0; ; attempt++) {
       let response: Response;
       try {
-        response = await fetch(url, {
-          headers: {
-            Authorization: this.makeAuthHeader(appId, secret),
-            "Content-Type": "application/json",
-          },
-        });
+        response = await this.pcoFetch(url, appId, secret);
       } catch (err) {
         if (attempt >= MAX_RETRIES) throw err;
         await this.sleep(this.backoffMs(attempt, null));
@@ -391,13 +558,7 @@ class PcoService {
   // live object or 204). Surfaces PCO's error text so the UI can toast it.
   private async postAction(url: string, appId: string, secret: string): Promise<void> {
     console.log(`[pco] POST ${scrub(url)}`);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: this.makeAuthHeader(appId, secret),
-        "Content-Type": "application/json",
-      },
-    });
+    const response = await this.pcoFetch(url, appId, secret, { method: "POST" });
     if (response.status === 401) {
       throw new PcoAuthError();
     }
@@ -478,13 +639,7 @@ class PcoService {
     secret: string,
   ): Promise<PcoResponse<T>> {
     console.log(`[pco] POST ${scrub(url)}`);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: this.makeAuthHeader(appId, secret),
-        "Content-Type": "application/json",
-      },
-    });
+    const response = await this.pcoFetch(url, appId, secret, { method: "POST" });
     if (response.status === 401) {
       throw new PcoAuthError();
     }
@@ -576,7 +731,7 @@ class PcoService {
       seenOffset = offset ?? seenOffset;
     }
 
-    this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, out, mediumTtlMs);
     return out;
   }
 
@@ -654,7 +809,7 @@ class PcoService {
 
     const result: PlanDTO[] = items.map(toPlanDTO);
 
-    this.cacheSet(cacheKey, result, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, result, mediumTtlMs);
     return result;
   }
 
@@ -689,7 +844,7 @@ class PcoService {
         return Number.isFinite(t) && t >= cutoff;
       });
 
-    this.cacheSet(cacheKey, result, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, result, mediumTtlMs);
     return result;
   }
 
@@ -830,7 +985,7 @@ class PcoService {
       console.warn(`[pco] plan ${scrub(planId)} returned a full page of notes; any beyond 100 are not shown`);
     }
 
-    this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, out, mediumTtlMs);
     return out;
   }
 
@@ -918,7 +1073,7 @@ class PcoService {
     }
 
     out.sort((a, b) => a.sequence - b.sequence);
-    this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, out, mediumTtlMs);
     return out;
   }
 
@@ -971,7 +1126,7 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
   ): Promise<TeamMemberDTO[]> {
-    const cacheKey = `team:${appId}:${serviceTypeId}:${planId}`;
+    const cacheKey = teamMembersCacheKey(appId, serviceTypeId, planId);
     const cached = this.cacheGet<TeamMemberDTO[]>(cacheKey);
     if (cached) return cached;
 
@@ -1061,7 +1216,7 @@ class PcoService {
       return s !== "D" && s !== "DECLINED";
     });
 
-    this.cacheSet(cacheKey, attending, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, attending, mediumTtlMs);
     return attending;
   }
 

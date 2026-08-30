@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
-import { readinessChecks, outstanding } from "./readiness.js";
+import { readinessChecks, outstanding, splitByPresence } from "./readiness.js";
 
 const ready = {
   pcoConfigured: true,
@@ -90,9 +90,43 @@ describe("readiness", () => {
     assert.doesNotThrow(() => readinessChecks(partial, []));
   });
 
+  test("a routed screen with no heartbeat is NOT online", () => {
+    // The check read the routed set until Aug 2026, which made "all connected"
+    // true of a room with every screen switched off. `d1` is routed to `v1` and
+    // nothing has reported in.
+    const checks = readinessChecks(ready, []);
+    const online = checks.find((c) => c.id === "online")!;
+    assert.equal(online.ok, false, "a screen nobody has opened counted as online");
+    assert.match(online.detail, /Mic board not connected/);
+  });
+
   test("ids are unique and every check has a label", () => {
     const checks = readinessChecks(ready, ["d1"]);
     assert.equal(new Set(checks.map((c) => c.id)).size, checks.length);
     for (const c of checks) assert.ok(c.label.length > 0, `${c.id} has no label`);
+  });
+});
+
+describe("splitByPresence", () => {
+  const outputs = [
+    { id: "d1", name: "Left" },
+    { id: "d2", name: "Right" },
+  ] as unknown as Output[];
+
+  test("an id that is not a screen is not counted as one", () => {
+    // Presence is not a subset of the screens that exist: a page left open on a
+    // deleted screen keeps heartbeating. Counting the raw set showed Home
+    // "3/2 connected" on a real server.
+    const { online, offline } = splitByPresence(outputs, ["d1", "ghost"]);
+    assert.deepEqual(online.map((o) => o.id), ["d1"]);
+    assert.deepEqual(offline.map((o) => o.id), ["d2"]);
+  });
+
+  test("a screen nobody has ever opened is offline, not absent", () => {
+    // It appears in no presence set at all, so it can only be found from the
+    // screens themselves.
+    const { online, offline } = splitByPresence(outputs, []);
+    assert.deepEqual(online, []);
+    assert.deepEqual(offline.map((o) => o.id), ["d1", "d2"]);
   });
 });

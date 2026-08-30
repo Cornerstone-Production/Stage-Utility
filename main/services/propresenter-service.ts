@@ -489,7 +489,14 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     const json = JSON.stringify(status);
     if (json === this.lastJson) return;
     this.lastJson = json;
-    broadcast(this.channel, status);
+    // Stamped, and bumped only here — past the unchanged-frame return above, so
+    // the version advances exactly when a real change is published. The hydrate
+    // read answers from getLatest(), which carries the same counter, letting a
+    // dashboard drop a read that is older than a push it already applied.
+    // `lastJson` is taken from the UNSTAMPED status so the change test is
+    // unaffected by the counter.
+    this.bumpRev();
+    broadcast(this.channel, this.stamped(status));
     this.onEmitCb?.();
   }
 }

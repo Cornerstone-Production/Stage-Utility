@@ -163,15 +163,18 @@ describe("StatusIntegration", () => {
     serviceWindow.setWindows([{ open: now - 60_000, close: now + 600_000 }]);
   });
 
+  // getLatest() stamps the published version onto the snapshot it answers, so
+  // these compare against the DTO plus its `rev`. See "publish ordering" below
+  // for what the counter is for.
   test("getLatest starts at the OFFLINE snapshot", () => {
-    assert.deepEqual(new Fake().getLatest(), OFFLINE);
+    assert.deepEqual(new Fake().getLatest(), { ...OFFLINE, rev: 0 });
   });
 
   test("getLatest reflects the last emit, so a new display hydrates immediately", async () => {
     const f = new Fake();
     f.start();
     await Promise.resolve();
-    assert.deepEqual(f.getLatest(), { connected: true, value: 1 });
+    assert.deepEqual(f.getLatest(), { connected: true, value: 1, rev: 1 });
     f.stop();
   });
 
@@ -180,7 +183,11 @@ describe("StatusIntegration", () => {
     f.start();
     await Promise.resolve();
     f.stop();
-    assert.deepEqual(f.getLatest(), OFFLINE, "a stopped integration must not look connected");
+    assert.deepEqual(
+      f.getLatest(),
+      { ...OFFLINE, rev: 2 },
+      "a stopped integration must not look connected",
+    );
   });
 
   test("goOffline does not re-broadcast when already offline", async () => {
@@ -214,6 +221,6 @@ describe("StatusIntegration", () => {
     f.stop(); // -> goOffline emits OFFLINE
 
     assert.equal(sent.length, 2, "expected a connected snapshot then an offline one");
-    assert.deepEqual(sent[1], OFFLINE);
+    assert.deepEqual(sent[1], { ...OFFLINE, rev: 2 });
   });
 });

@@ -26,6 +26,11 @@ export type StageScreen =
   | { k: "view-missing"; displayName: string | null; locked: boolean }
   | { k: "not-configured"; displayName: string | null; locked: boolean }
   | { k: "empty"; displayName: string | null; locked: boolean }
+  /** A view kind this build has no arm for. Reachable in earnest, not just in
+   *  theory: `kind` comes off server state and the app ships a beta/main track
+   *  switch, so a kind written by a beta build and read by a main build lands
+   *  here. It used to land on the slots grid instead, silently. */
+  | { k: "unknown-kind"; kind: string }
   | {
       k: "view";
       kind: ViewKind;
@@ -158,14 +163,27 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     return view();
   }
 
-  // Slots-kind (and anything a newer server routes that this build does not
-  // know) falls through to here, where Planning Center is the prerequisite.
-  if (!state.pcoConfigured) {
-    return { k: "not-configured", displayName, locked: outputLocked };
+  // Slots are the only kind whose content comes from Planning Center, so this
+  // check lives HERE rather than above, gating slots alone. While slots was the
+  // catch-all it sat above everything and would now wrongly gate a clock wall on
+  // a PCO connection nothing on it needs.
+  //
+  // Which slots — and whether there are none, making the screen empty — depends
+  // on the unsaved preview draft, which only the component holds, so that last
+  // step stays there.
+  if (kind === "slots") {
+    if (!state.pcoConfigured) {
+      return { k: "not-configured", displayName, locked: outputLocked };
+    }
+    return view();
   }
 
-  // Slots-kind. Which slots — and whether there are none, making the screen
-  // empty — depends on the unsaved preview draft, which only the component
-  // holds, so that last step stays there.
-  return view();
+  // Every kind is now accounted for, so adding a ViewKind without an arm above
+  // fails the BUILD here. Slots used to be the implicit fallback that caught an
+  // unhandled kind, which meant an eighth kind added by somebody who missed this
+  // file would have put a department's mic-slot grid on an office wall, silently,
+  // and the first report of it would have come from whoever stood in front of it.
+  const _never: never = kind;
+  void _never;
+  return { k: "unknown-kind", kind: String(kind) };
 }

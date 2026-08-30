@@ -1,34 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 
-import { invoke, onNotification } from "../lib/api";
+import { invoke } from "../lib/api";
+import { useStatusChannel } from "./use-status-channel";
 
 /**
  * Live REAPER transport state, pushed on the "reaper:status" channel. Hydrates
  * once on mount (the channel only broadcasts on change) then stays live. Shared
  * by the custom-layout "REAPER status" object and its editor inspector.
+ *
+ * Ordering between the hydrate and the first push is useStatusChannel's job —
+ * see the note there for the staleness this used to have.
  */
 export function useReaperState(enabled = true): ReaperStatusDTO | null {
-  const [reaper, setReaper] = useState<ReaperStatusDTO | null>(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    invoke<ReaperStatusDTO>("reaper:getStatus")
-      .then((s) => {
-        if (!cancelled && s) setReaper(s);
-      })
-      .catch(() => {
-        /* not configured yet — ignore */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    return onNotification("reaper:status", (p) => setReaper(p as ReaperStatusDTO));
-  }, [enabled]);
-
-  return reaper;
+  const read = useCallback(() => invoke<ReaperStatusDTO>("reaper:getStatus"), []);
+  return useStatusChannel<ReaperStatusDTO>(read, "reaper:status", enabled);
 }

@@ -136,12 +136,18 @@ A routed view isn't the only thing a display can render. In order of precedence:
 - **View missing** — a live preview (`/preview-<id>`) whose view has since been
   deleted. Distinct from unrouted: a view WAS assigned here, and it's the view
   that's gone rather than the routing.
-- **Not configured** — a **Slots** view (or a kind this build doesn't recognize)
-  on an install with no Planning Center credentials yet. It applies to the slots
-  path only: a custom view with nothing drawn on it resolves to Empty first,
-  because the custom arm returns before Planning Center is ever consulted.
+- **Not configured** — a **Slots** view on an install with no Planning Center
+  credentials yet. Slots are the only kind whose content comes from Planning
+  Center, so this gates that kind alone: a dashboard or clock wall renders
+  without a PCO connection, and a custom view with nothing drawn on it resolves
+  to Empty first.
 - **Empty** — the routed view is a Slots view with no slots configured, or a
   Custom layout with nothing drawn on it.
+- **Unknown kind** — the view is a kind this build has no way to draw. Not
+  hypothetical: the app ships a [beta/main track switch](../ops/distribution.md),
+  so a view created by a beta build can be read by a main build. The screen names
+  the kind rather than blanking, and rather than quietly drawing mic slots the
+  way it once did.
 
 A **locked** display (set on Screens) strips the escape hatches a kiosk
 otherwise shows. A **preview** ignores blackout and the lock and renders the
