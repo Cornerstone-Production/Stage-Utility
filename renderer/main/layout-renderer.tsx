@@ -37,7 +37,7 @@ import { RossTalkButton } from "./rosstalk-button";
 import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
-import { computePcoTimer, fmtDuration } from "./pco-timer";
+import { computePcoTimer, fmtDuration, projectedServiceEndMs } from "./pco-timer";
 import { EmbeddedView, EmbedFontBox, EmbedNotice } from "./embedded-view";
 import { useEmbedBoxHeight } from "./embed-box";
 import { childChain, embedRefusal } from "./embed-chain";
@@ -832,10 +832,48 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           deltaSec = (serverNow - startMs) / 1000 - plannedElapsed;
         }
       }
-      if (deltaSec == null) return (c.hideWhenIdle ?? false) ? null : readout("—");
-      const behind = deltaSec > tol;
-      const ahead = deltaSec < -tol;
+      // Ahead/behind is derived from the drift where there IS one. In projected-
+      // end mode the drift is optional — the timeline recorder may not be
+      // running — so these stay false and the clock reads in the neutral colour.
+      const behind = deltaSec != null && deltaSec > tol;
+      const ahead = deltaSec != null && deltaSec < -tol;
       const color = behind ? c.behindColor ?? "var(--red-10)" : ahead ? c.aheadColor ?? "var(--green-10)" : null;
+      // Nothing to report. The two branches below reach it on different
+      // conditions — one has no drift, the other no projection — and each
+      // answers the operator's "hide when idle" the same way.
+      const nothingToSay = () => ((c.hideWhenIdle ?? false) ? null : readout("—"));
+
+      if (c.showProjectedEnd ?? false) {
+        // The wall-clock time the plan runs out. Its own idle test: the
+        // projection comes from PCO Live + the plan rundown, so it can answer
+        // while the drift cannot (nothing recording), and it can decline while
+        // the drift can (plan lengths unset). Either way a null is a dash, never
+        // a made-up time.
+        const endMs = projectedServiceEndMs(ctx.pcoLive, ctx.planItems, serverNow);
+        if (endMs == null) return nothingToSay();
+        // The zone the app REASONS in when the operator has set one — a display
+        // driven from a UTC box must read the venue's clock, not the box's. Unset
+        // falls back to the viewer's own zone rather than the server's host zone,
+        // which is what fmtClock does for ScriptView's projected times: an
+        // unconfigured UTC server would otherwise put every screen an hour(s) out.
+        // hourCycle is deliberately not passed — formatClock reads the app-wide
+        // 12h/24h setting, the same as every other clock in the app.
+        const drift =
+          deltaSec == null
+            ? null
+            : behind || ahead
+              ? `${fmtDuration(Math.abs(deltaSec))} ${behind ? "behind" : "ahead"}`
+              : "on plan";
+        return readout(formatClock(endMs, { timeZone: ctx.state.timezone }), {
+          valueColor: color,
+          // `showLabel` keeps one meaning across both modes — "say ahead or
+          // behind" — and here the figure comes with it, because the figure is
+          // no longer the value.
+          sub: (c.showLabel ?? false) ? drift : null,
+        });
+      }
+
+      if (deltaSec == null) return nothingToSay();
       const text = !behind && !ahead ? "0:00" : fmtSignedDuration(deltaSec);
       // "behind" / "ahead" moves to the sub-line. It was an inline 0.6em span
       // riding on the number, which is the composition the idiom replaces: a

@@ -48,6 +48,22 @@ describe("what a widget offers", () => {
     const keys = togglesFor(card({ type: "obs-status" })).map((t) => t.key);
     assert.deepEqual(keys, ["showTimecode", "hideWhenIdle", "fillWhenRecording"]);
   });
+
+  test("service-pacing offers the projected end time, off by default", () => {
+    // The setting an operator reaches for on their own front page — "when do we
+    // get out of here" — so it belongs in this short list rather than only in
+    // the layout editor. Off is what every pacing card already on a Home page
+    // does, and the fallback has to agree with the renderer or the tick lies.
+    const keys = togglesFor(card({ type: "service-pacing" })).map((t) => t.key);
+    assert.deepEqual(keys, ["showProjectedEnd", "hideWhenIdle"]);
+    const t = togglesFor(card({ type: "service-pacing" })).find((x) => x.key === "showProjectedEnd");
+    assert.equal(t?.checked, false);
+    assert.equal(t?.next, true);
+    assert.equal(
+      (withToggle(card({ type: "service-pacing" }), "showProjectedEnd", true).config as { showProjectedEnd?: boolean }).showProjectedEnd,
+      true,
+    );
+  });
 });
 
 describe("the state a toggle reports", () => {

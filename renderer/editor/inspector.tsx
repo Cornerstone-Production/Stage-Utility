@@ -730,7 +730,7 @@ export function Inspector({
       {c.type === "service-pacing" && (
         <>
           <div className="px-1 pb-1 text-xs text-fg-subtle">
-            Shows how far ahead or behind the whole schedule the service is running right now — carries over slippage from earlier items and grows live if the current item runs long. Needs a service-timeline recording.
+            Shows how far ahead or behind the whole schedule the service is running right now — carries over slippage from earlier items and grows live if the current item runs long. The drift needs a service-timeline recording; the projected end time below needs only a live item with a planned length.
           </div>
           <Row label="Ahead color">
             <div className="flex items-center gap-2">
@@ -744,6 +744,7 @@ export function Inspector({
               {c.behindColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, behindColor: null })}>Reset</button>}
             </div>
           </Row>
+          <RowSwitch label="Projected end time" hint="Lead with the wall-clock time the plan runs out — &quot;when do we get out of here&quot; — instead of the drift figure. The drift moves under it when the ahead/behind label is on. Needs a live item with a planned length; shows a dash when there is nothing to project from." checked={c.showProjectedEnd ?? false} onChange={(v) => onConfig({ ...c, showProjectedEnd: v })} />
           <RowSwitch label="Show ahead/behind label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           <RowSwitch label="Show dash when idle" checked={!(c.hideWhenIdle ?? false)} onChange={(v) => onConfig({ ...c, hideWhenIdle: !v })} />
         </>

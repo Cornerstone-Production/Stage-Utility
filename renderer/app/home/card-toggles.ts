@@ -38,6 +38,7 @@ const APPLIES = {
   showTimecode: { "obs-status": true },
   showPosition: { "reaper-status": true },
   showElapsed: { "stream-status": true, "home-streaming": true, "home-streaming-resi": true, "home-streaming-youtube": true },
+  showProjectedEnd: { "service-pacing": true },
   warnStates: { "pp-timer": true },
   hideWhenIdle: {
     "countdown-timer": true,
@@ -111,6 +112,7 @@ type ToggleKey =
   | "showTimecode"
   | "showPosition"
   | "showElapsed"
+  | "showProjectedEnd"
   | "warnStates"
   | "hideWhenIdle"
   | "fillWhenLive"
@@ -146,6 +148,9 @@ const SPECS: {
   { key: "showTimecode", label: "Timecode", fallback: false },
   { key: "showPosition", label: "Position", fallback: false },
   { key: "showElapsed", label: "Elapsed time", fallback: true },
+  // `false` to agree with the renderer: absent means the pacing card leads with
+  // the drift, which is what every card already on a Home page does.
+  { key: "showProjectedEnd", label: "Projected end time", fallback: false },
   { key: "warnStates", label: "Colour on warning", fallback: true },
   { key: "hideWhenIdle", label: "Hide when idle", fallback: false },
   // `true` to agree with the renderer. Home draws these cards as Stats and

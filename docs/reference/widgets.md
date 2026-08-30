@@ -42,7 +42,7 @@ switches.
 | **Next item** | What comes after it | Planning Center Live |
 | **PCO Prev/Next** | Buttons that move the service on | Planning Center Live (writes) |
 | **Service timer** | The running item's clock, and what is next | Planning Center Live |
-| **Service pacing** | How far ahead or behind the whole plan the service is | Recorded service timeline |
+| **Service pacing** | How far ahead or behind the whole plan the service is, or when it is projected to end | Recorded service timeline · Planning Center Live |
 | **Next service** | The next plan, its series and when it starts | Planning Center |
 | **Readiness** | What still needs doing before the next service, including the plan's own checklist ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center + integration states |
 | **Recent services** | Attendance, length and start time, recently averaged | Recorded history |
@@ -55,6 +55,16 @@ switches.
 while the current item runs long, so it answers "are we going to finish on time",
 not "was that item long". It needs a recorded service timeline; without one it
 shows nothing.
+
+Turn on **Projected end time** and the same widget leads with the wall-clock time
+the plan runs out instead of the drift figure. The drift moves under it when
+**Show ahead/behind label** is on. The projection needs a live item with a planned
+length, so it works with no recording running — but where it cannot answer it
+shows a dash rather than a time: no service live, the service already past its
+SERVICE END marker, or a plan whose lengths are not filled in. Items Planning
+Center marks as post-service are left out. The time renders in the app's time zone
+and 12/24-hour setting ([Settings → Advanced](../ops/install-and-config.md#time-zone)),
+so a screen driven from a UTC server still reads the venue's clock.
 
 **Embedded view** and **Embedded screen** can be expanded: on an operator
 surface each tile carries a control in its bottom-right corner that grows it to
