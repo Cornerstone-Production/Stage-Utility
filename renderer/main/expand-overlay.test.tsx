@@ -378,8 +378,17 @@ describe("prefers-reduced-motion", () => {
 // inside the EXPANDED panel it is a tile in its own right and offers a control
 // that works. See `insideEmbedTile` on LayoutRenderCtx for why.
 //
-// Both inner kinds, because the gate lives at two call sites and a suite that
-// only ever nested a `view-embed` would let `screen-embed`'s copy stay open.
+// EVERY PAIRING of outer and inner kind — four, not two. Two things are being
+// proven and they live in different places:
+//
+//   THE GATE (`!ctx.insideEmbedTile`) is per object, so looping the INNER kind
+//   covers it. That much a two-case loop did.
+//   WHICH COPY IS WHICH — the "tile"/"panel" literal each object hands its body
+//   — belongs to the OUTER object, and a suite whose outer tile was always a
+//   `view-embed` never ran screen-embed's pair at all. Both of its literals
+//   could be inverted with the whole suite green, which would have shipped a
+//   producer wall built from a screen tile that expands and then offers no way
+//   to drill in. That is the mutation this 2x2 exists for.
 
 /** The view a nested tile bottoms out at. */
 const leafView: View = {
@@ -392,12 +401,14 @@ const leafView: View = {
 const expandLabels = (root: ParentNode) =>
   [...root.querySelectorAll('button[aria-label^="Expand "]')].map((b) => b.getAttribute("aria-label"));
 
-/** A view-embed of a view whose only object is another embed of `inner` kind. */
-async function renderNested(inner: Kind) {
+/** An embed of a view whose only object is another embed — both kinds, either
+ *  end. A screen tile is routed to the same view its view-embed twin names, so
+ *  the four cases differ only in the object under test. */
+async function renderNested(outer: Kind, inner: Kind) {
   const innerTileObject: LayoutObject = {
     id: "o-inner", x: 0, y: 0, w: 1, h: 1, z: 0,
     config: inner === "screen-embed"
-      ? { type: "screen-embed", outputId: "out-1", showLabel: true }
+      ? { type: "screen-embed", outputId: "out-leaf", showLabel: true }
       : { type: "view-embed", viewId: "v-leaf" },
     style: {},
   };
@@ -407,31 +418,41 @@ async function renderNested(inner: Kind) {
   };
   const outerTileObject: LayoutObject = {
     id: "o-outer", x: 0, y: 0, w: 1, h: 1, z: 0,
-    config: { type: "view-embed", viewId: "v-outer" }, style: {},
+    config: outer === "screen-embed"
+      ? { type: "screen-embed", outputId: "out-outer", showLabel: true }
+      : { type: "view-embed", viewId: "v-outer" },
+    style: {},
   };
   const ctx = makeRenderCtx({
     state: {
       ...STATE,
       views: [outerView, leafView],
-      // Present for both kinds: a `view-embed` inner tile ignores it, and one
-      // fixture that serves both is one fewer thing that can differ between
-      // the two runs of the same assertions.
-      outputs: [{ id: "out-1", name: "Left Display", viewId: "v-leaf", blackout: false }],
+      // Both screens exist in all four cases: a view-embed end ignores its one,
+      // and one fixture serving every pairing is one fewer thing that can
+      // differ between runs of the same assertions.
+      outputs: [
+        { id: "out-outer", name: "Outer Screen", viewId: "v-outer", blackout: false },
+        { id: "out-leaf", name: "Leaf Screen", viewId: "v-leaf", blackout: false },
+      ],
     },
     interactive: true,
   });
 
   const { container } = await draw(tree(outerTileObject, ctx));
-  return { container, innerLabel: `Expand ${titleFor(inner, "Left Display", "Leaf Wall")}` };
+  return {
+    container,
+    outerLabel: `Expand ${titleFor(outer, "Outer Screen", "Outer Wall")}`,
+    innerLabel: `Expand ${titleFor(inner, "Leaf Screen", "Leaf Wall")}`,
+  };
 }
 
-/** Both panels open, outer first — the state the two tests below start from. */
-async function openNestedPanels(inner: Kind) {
-  const { container, innerLabel } = await renderNested(inner);
+/** Both panels open, outer first — the state the tests below start from. */
+async function openNestedPanels(outer: Kind, inner: Kind) {
+  const { container, outerLabel, innerLabel } = await renderNested(outer, inner);
   // BY NAME rather than through `openOverlay`, which takes the first button in
   // the container: these tests are about which control belongs to which box, so
   // naming each one is the assertion, not a convenience.
-  const outerBtn = container.querySelector<HTMLButtonElement>(`[aria-label="Expand Outer Wall"]`);
+  const outerBtn = container.querySelector<HTMLButtonElement>(`[aria-label="${outerLabel}"]`);
   assert.ok(outerBtn, "the outer tile offered no way to expand");
   await act(async () => { fireEvent.click(outerBtn); await settle(); });
 
@@ -443,31 +464,36 @@ async function openNestedPanels(inner: Kind) {
   const innerBtn = ov.querySelector<HTMLButtonElement>(`[aria-label="${innerLabel}"]`);
   assert.ok(innerBtn, "the nested control vanished between the two reads");
   await act(async () => { fireEvent.click(innerBtn); await settle(); });
-  return { container, innerLabel };
+  return { container, outerLabel, innerLabel };
 }
 
-for (const inner of KINDS) {
-  describe(`a ${inner} nested inside an embedded view`, () => {
-    test("the tile offers one control, the outer one", async () => {
-      const { container } = await renderNested(inner);
-      // The tile really drew its content, so "one control" is a suppressed inner
-      // affordance rather than a tile that failed to render at all.
-      assert.match(container.textContent ?? "", new RegExp(VIEW_MARKER), "the nested tile drew nothing");
-      assert.deepEqual(
-        expandLabels(container), ["Expand Outer Wall"],
-        "the nested embed drew a second expand control over the tile's own — the operator sees one tile and gets one control",
-      );
-    });
+for (const outer of KINDS) {
+  for (const inner of KINDS) {
+    describe(`a ${inner} nested inside a ${outer}`, () => {
+      test("the tile offers one control, the outer one", async () => {
+        const { container, outerLabel } = await renderNested(outer, inner);
+        // The tile really drew its content, so "one control" is a suppressed
+        // inner affordance rather than a tile that failed to render at all.
+        assert.match(container.textContent ?? "", new RegExp(VIEW_MARKER), "the nested tile drew nothing");
+        assert.deepEqual(
+          expandLabels(container), [outerLabel],
+          "the nested embed drew a second expand control over the tile's own — the operator sees one tile and gets one control",
+        );
+      });
 
-    test("and the nested control comes back inside the expanded panel", async () => {
-      // The other half of the rule, so the fix cannot be "delete the inner
-      // control": at full size the nested tile IS a tile, and expanding it is
-      // what a producer wall inside a producer wall is for. The helper asserts
-      // the control is there and named; this asserts pressing it did something.
-      await openNestedPanels(inner);
-      assert.equal(overlays(), 2, "the nested control did not expand anything");
+      test("and the nested control comes back inside the expanded panel", async () => {
+        // The other half of the rule, so the fix cannot be "delete the inner
+        // control": at full size the nested tile IS a tile, and expanding it is
+        // what a producer wall inside a producer wall is for. The helper asserts
+        // the control is there and named; this asserts pressing it did
+        // something — and, because it is the OUTER object's panel copy that has
+        // to say "panel" for the inner control to exist at all, it is what
+        // pins that literal down for both outer kinds.
+        await openNestedPanels(outer, inner);
+        assert.equal(overlays(), 2, "the nested control did not expand anything");
+      });
     });
-  });
+  }
 }
 
 describe("a panel nested inside another expanded panel", () => {
@@ -475,7 +501,7 @@ describe("a panel nested inside another expanded panel", () => {
     // Each level runs its own `useExpand`, and each attaches its own document
     // keydown listener; one Escape used to collapse every level because all of
     // them reacted to the same key press.
-    await openNestedPanels("view-embed");
+    await openNestedPanels("view-embed", "view-embed");
     assert.equal(overlays(), 2, "the two panels this test is about never both opened");
 
     await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); await settle(); });
