@@ -7,13 +7,16 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, json, readBody } from "./context.js";
+import { type RouteCtx, error, json, readBody } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { integrationManager } from "../integration-manager.js";
 import { obsService } from "../obs-service.js";
 import { resiService } from "../resi-service.js";
 import { youtubeService } from "../youtube-service.js";
 import { reaperService } from "../reaper-service.js";
+import { scoresService } from "../scores-service.js";
+import { scoresStore } from "../scores-store.js";
+import { leagueById, type ScoreFavourite } from "../../types/scores.js";
 import { oscManager } from "../osc-manager.js";
 import { sensourceService } from "../sensource-service.js";
 import { smaartService } from "../smaart-service.js";
@@ -47,6 +50,54 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
     }
     if (method === "GET" && pathname === "/api/reaper/status") {
       json(res, reaperService.getLatest());
+      return;
+    }
+
+    // ── Live scores ────────────────────────────────────────────────────────
+    if (method === "GET" && pathname === "/api/scores/status") {
+      json(res, scoresService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/scores/favourites") {
+      await scoresStore.init();
+      json(res, scoresStore.get());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/scores/favourites") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      if (!Array.isArray(body.favourites)) {
+        error(res, "body.favourites (array) required");
+        return;
+      }
+      // Only entries naming a league this build knows and a team id survive. A
+      // favourite for a league that no longer exists would make every poll ask
+      // for a path ESPN does not serve.
+      const favourites = (body.favourites as ScoreFavourite[]).filter(
+        (f) => f && typeof f.teamId === "string" && f.teamId !== "" && leagueById(f.league),
+      );
+      const saved = await scoresStore.setFavourites(favourites);
+      // Through the manager, not scoresService.configure() directly: the applier
+      // is what honours the enabled flag, and configuring the service straight
+      // from here would start polling for an operator who switched scores off.
+      await integrationManager.refreshScores();
+      json(res, saved);
+      return;
+    }
+    if (method === "GET" && pathname === "/api/scores/teams") {
+      const league = c.url.searchParams.get("league") ?? "";
+      const meta = leagueById(league);
+      if (!meta) {
+        error(res, `Unknown league ${JSON.stringify(league)}`);
+        return;
+      }
+      try {
+        json(res, await scoresService.listTeams(meta.id));
+      } catch (err) {
+        // 502, not an empty list. An empty dropdown and a failed request look
+        // identical to the operator, and the panel is required to say which
+        // league could not be loaded.
+        json(res, { error: errorMessage(err) }, 502);
+      }
       return;
     }
 

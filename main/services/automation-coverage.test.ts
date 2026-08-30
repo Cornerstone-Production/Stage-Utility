@@ -23,6 +23,7 @@ import { INTEGRATION_IDS } from "./integration-ids.js";
 const BROADCAST_CHANNELS = new Set([
   "attendance:history",
   "baptism:state",
+  "calendar:grid",
   "displays:presence",
   "integrations:state-changed",
   "obs:status",
@@ -34,6 +35,7 @@ const BROADCAST_CHANNELS = new Set([
   "propresenter:instances",
   "reaper:status",
   "resi:status",
+  "scores:status",
   "service-timeline:history",
   "slots:devices",
   "spl:history",

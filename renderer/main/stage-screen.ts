@@ -158,7 +158,11 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     kind === "stage" ||
     kind === "transcription" ||
     kind === "script" ||
-    kind === "spl-rundown"
+    kind === "spl-rundown" ||
+    // Calendar is NOT gated on Planning Center here, unlike slots: the component
+    // takes pcoConfigured as a prop and says so on its own face, rather than the
+    // whole screen becoming the not-configured one.
+    kind === "calendar"
   ) {
     return view();
   }

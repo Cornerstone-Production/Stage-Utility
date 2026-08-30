@@ -1,0 +1,26 @@
+# gitleaks configuration.
+#
+# The default ruleset, plus one narrow allowlist. `useDefault` matters: without
+# it this file REPLACES the built-in rules rather than adding to them, which
+# would turn the secret scan into a scanner for nothing at all while still
+# reporting a pass — the one failure mode secret-scan.yml's own comments say a
+# scanner must not have.
+[extend]
+useDefault = true
+
+# An IANA time zone identifier is not a credential.
+#
+# `generic-api-key` matches on entropy and on the surrounding text, and
+# "America/Chicago" sitting inside a call to something ending `Key(` scores
+# 3.5 and reads to it as an assigned secret. It failed the scan on
+# app-timezone.test.ts, whose whole subject is zone names.
+#
+# Scoped to the IANA "Area/Location" shape, so it cannot hide a real key: the
+# area is one of a closed set the tz database defines, and a credential that
+# happens to look like "Europe/London" is not a credential anyone would lose.
+[[rules]]
+id = "generic-api-key"
+[rules.allowlist]
+regexes = [
+  '''(America|Europe|Asia|Africa|Australia|Pacific|Atlantic|Indian|Antarctica|Arctic|Etc)/[A-Za-z_+-]+''',
+]

@@ -12,6 +12,7 @@ import { StageDisplayView } from "./stage-display-view";
 import { TranscriptionView } from "./transcription-view";
 import { ScriptView } from "./script-view";
 import { SplRundownView } from "./spl-rundown-view";
+import { CalendarView } from "./calendar-view";
 import { LayoutRenderer } from "./layout-renderer";
 import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface } from "@main/types/views";
@@ -625,6 +626,27 @@ function renderView(
       return (
         <KioskFrame>
           <SplRundownView displayId={displayId} />
+        </KioskFrame>
+      );
+
+    case "calendar":
+      return (
+        <KioskFrame>
+          {/* CalendarMonth sizes to h-full so the same component can live inside
+              a layout object; the screen height and the safe-area insets belong
+              to this route, which is what KioskFrame is.
+
+              The View is the one resolveScreen already resolved -- a preview
+              answers with its own, a real output with its routed one -- so this
+              arm does not re-derive it the way the pre-resolver code did. */}
+          <CalendarView
+            viewId={activeView?.id ?? null}
+            pcoConfigured={state.pcoConfigured ?? false}
+            // The same answer every control on every surface uses. False on a
+            // wall display, so it gets no chevrons and cannot be left on the
+            // wrong month by a passer-by.
+            interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
+          />
         </KioskFrame>
       );
 

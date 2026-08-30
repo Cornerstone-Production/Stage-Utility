@@ -32,6 +32,7 @@ import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
 import { reaperService } from "./reaper-service.js";
+import { scoresService } from "./scores-service.js";
 import { oscManager } from "./osc-manager.js";
 import { signalStore } from "./signal-store.js";
 import { propresenterService, propresenterManager } from "./propresenter-service.js";
@@ -66,6 +67,8 @@ import { randomUUID } from "node:crypto";
 import { systemRoutes } from "./routes/system-routes.js";
 import { brandingRoutes } from "./routes/branding-routes.js";
 import { presetRoutes } from "./routes/preset-routes.js";
+import { calendarRoutes } from "./routes/calendar-routes.js";
+import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 
 /**
  * Route modules, in dispatch order. Order is load-bearing: a module that
@@ -94,6 +97,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   systemRoutes,
   brandingRoutes,
   presetRoutes,
+  calendarRoutes,
 ] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
@@ -871,6 +875,9 @@ export class RemoteServer {
       sseWrite(res, "baptism:state", baptismTimerService.getState());
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "reaper:status", reaperService.getLatest());
+      // Scores hydrate for the same reason: a display opened at half time shows
+      // the score it is already at rather than waiting for the next one.
+      sseWrite(res, "scores:status", scoresService.getLatest());
       // Streaming state hydrates for the same reason recording does: a display
       // that loads mid-service must show the truth immediately, not wait for
       // the next poll to notice nothing has changed.
@@ -900,6 +907,14 @@ export class RemoteServer {
       // so once made the scan find a channel named by prose, which is the same
       // trap from the other side.
       sseWrite(res, "wireless:channels" satisfies typeof WIRELESS_STATUS_CHANNEL, stageController.wirelessChannelStatuses());
+      // A calendar is STATE, not an event: a display opened in the middle of a
+      // month must show it at once, not sit blank until somebody moves a booking
+      // — which on this channel can be days.
+      // The LITERAL with `satisfies`, matching the wireless line above: the
+      // hydrated-channels scan can only see a quoted channel name, and the
+      // `satisfies` is what makes renaming CALENDAR_CHANNEL stop compiling here
+      // rather than silently leaving this burst writing to a dead channel.
+      sseWrite(res, "calendar:grid" satisfies typeof CALENDAR_CHANNEL, calendarBroadcaster.getLatest());
       sseWrite(res, "displays:presence", presenceSnapshot());
       sseClients.add(res);
       // Correlate this stream to its client id so POST /api/events/subscribe can set

@@ -18,7 +18,13 @@ View kinds:
 | **Captions** | full-screen auto-scrolling transcription |
 | **Script** | the full rundown with note columns, headers, lengths, live countdown |
 | **SPL Rundown** | a compact item-plus-level list for the live service |
+| **Calendar** | a month of [Planning Center Calendar](../integrations/planning-center.md#calendar) events, filtered by calendar and tag |
 | **Custom** | a layout you design in the visual editor |
+
+Every kind also renders inside a custom layout, through the **Embedded view**
+widget — **Calendar** among them. Dashboard, Stage and SPL Rundown are configured
+per display rather than per view, so those three are reached with **Embedded
+screen** instead.
 
 ## Surfaces: displays and consoles
 

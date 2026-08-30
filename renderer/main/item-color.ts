@@ -1,4 +1,5 @@
 import type { PcoItemTypeColor } from "../../main/types/stage.js";
+import { parseColor } from "../components/ui/color-math";
 
 /** PCO stores #ffffff to mean "no color" — it is the shipped default on Media. */
 const UNSET = "#ffffff";
@@ -85,12 +86,19 @@ export function washFor(color: string): string {
   return `hsl(${Math.round(h)} 42% 15%)`;
 }
 
-/** Hue in degrees, or null when the color is effectively neutral. */
+/**
+ * Hue in degrees, or null when the color is effectively neutral.
+ *
+ * The PARSE is shared (color-math's parseColor); the 0.04 neutral cutoff is not,
+ * and neither is the six-digit gate. parseColor also accepts #rgb and rgba(),
+ * and a three-digit colour that reads as neutral today must not start reporting
+ * a hue — that would repaint rows in the rundown.
+ */
 function hueOf(hex: string): number | null {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return null;
-  const n = parseInt(m[1], 16);
-  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  if (!/^#[0-9a-f]{6}$/i.test(hex.trim())) return null;
+  const c = parseColor(hex.trim());
+  if (!c) return null;
+  const r = c.r / 255, g = c.g / 255, b = c.b / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
   const d = max - min;
   // A near-gray (PCO's Header #eaebeb) has no hue worth keeping.

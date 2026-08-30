@@ -9,7 +9,7 @@ countdown, so the app needs it.
 
 | Integration | What it surfaces |
 |---|---|
-| [Planning Center](planning-center.md) | Service plans, live rundown, pre-service countdown |
+| [Planning Center](planning-center.md) | Service plans, live rundown, pre-service countdown, room and event calendar |
 | [ProPresenter](propresenter.md) | Current/next slide, section, thumbnails |
 | [ProdCom](prodcom.md) | Live production transcription strip |
 | [Smaart](smaart.md) | FOH SPL meters (Smaart v8) |
@@ -23,11 +23,12 @@ countdown, so the app needs it.
 | [SenSource Vea](sensource.md) | People counts (attendance / occupancy) |
 | [Ross MultiViewer (TSL)](ross-tsl.md) | Pushes a count onto a multiviewer tile |
 | [RossTalk (Carbonite / Ultrix)](rosstalk.md) | Commands to Ross gear — custom controls, switching, routing, salvos |
+| [Live scores](scores.md) | Followed teams' live scores (ESPN public scoreboard) |
 
 ## Adding a new integration
 
-The REAPER integration (added most recently) is the cleanest end-to-end
-template — see [reaper.md](reaper.md) for the full file map. The pattern:
+REAPER is the cleanest end-to-end template for a polling integration — see
+[reaper.md](reaper.md) for the full file map. The pattern:
 
 1. Service singleton in `main/services/<id>-service.ts` (`configure`, `getLatest`,
    `setConnectionListener`, change-driven `broadcast("<id>:status", …)`). Extend
@@ -42,6 +43,13 @@ template — see [reaper.md](reaper.md) for the full file map. The pattern:
 5. Live hook `renderer/main/use-<id>-state.ts`, built on `useStatusChannel`;
    layout object render case + inspector; `object-integration.ts` mapping;
    category in `integrations-panel.tsx`.
+
+Most integrations describe their settings as `ConfigField`s and the panel renders
+them. One does not: Live scores' only setting is WHICH TEAMS, and a searchable
+multi-league team picker is not a config field, so its descriptor carries an empty
+schema and `integrations-panel.tsx` renders a panel of its own for it. Reach for
+that only when the setting genuinely cannot be a field — a bespoke panel is a
+second place for a settings page to drift.
 
 Build integrations efficiency-first: change-driven broadcasts, reuse the shared
 SSE stream, gate polling on subscribers, back off when unreachable.
