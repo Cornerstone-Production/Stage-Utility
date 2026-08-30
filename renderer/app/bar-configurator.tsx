@@ -625,8 +625,13 @@ export function BarConfigurator({
       <DialogContent className="max-w-5xl max-sm:p-4">
         <DialogHeader>
           <DialogTitle>Configure the context bar</DialogTitle>
+          {/* NO CLAIM ABOUT WHO SEES WHAT. This used to end "Everyone sees the
+              same bar", which was true of one bar and is false of two: the
+              switch immediately below hands a phone a set of its own. The
+              switch and the line beside it already say which set is which, so
+              this says what the dialog is for and stops. */}
           <DialogDescription>
-            Drag items into the bar. Drag one out to remove it. Everyone sees the same bar.
+            Drag items into the bar, along it to reorder, and out of it to remove.
           </DialogDescription>
         </DialogHeader>
 
