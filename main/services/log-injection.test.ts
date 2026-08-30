@@ -34,7 +34,16 @@ function requestFacingFiles(): string[] {
   const inRoutes = readdirSync(routes)
     .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
     .map((f) => path.join(routes, f));
-  return [path.join(HERE, "stage-controller.ts"), path.join(HERE, "pco-service.ts"), ...inRoutes];
+  return [
+    path.join(HERE, "stage-controller.ts"),
+    path.join(HERE, "pco-service.ts"),
+    // Rule names are typed into an HTTP body and action detail carries whatever a
+    // provider or device said back, so the engine is request-facing in exactly the
+    // sense this scan means. It logged nothing at all until a failed rule started
+    // being surfaced on /log, which is when it acquired the exposure.
+    path.join(HERE, "automation-engine.ts"),
+    ...inRoutes,
+  ];
 }
 
 /** `${…}` inside a console call, without scrub() around it. */
@@ -62,6 +71,10 @@ describe("log injection at the request boundary", () => {
     assert.ok(
       files.some((f) => f.endsWith("stage-controller.ts")),
       "stage-controller.ts is the file this test was written for and it is not in the list",
+    );
+    assert.ok(
+      files.some((f) => f.endsWith("automation-engine.ts")),
+      "automation-engine.ts logs operator-authored rule names to /log and must be scanned",
     );
   });
 

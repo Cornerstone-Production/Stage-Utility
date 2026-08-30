@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { getUserDataPath } from "./app-paths.js";
-import { addLogLine, setLogSink, type LogLine } from "./log-buffer.js";
+import { addLogLine, setLogSink, type StoredLogLine } from "./log-buffer.js";
 import { trimFileToLastBytes } from "./trim-file.js";
 
 /** Roughly 10k lines at typical length, hard-capped by bytes rather than count so
@@ -38,8 +38,11 @@ export function serverLogPath(): string {
   return path.join(getUserDataPath(), "server.log");
 }
 
-/** Queue one line. Never throws, never touches the disk on the caller's thread. */
-export function persistLogLine(line: LogLine): void {
+/** Queue one line. Never throws, never touches the disk on the caller's thread.
+ *
+ *  Takes a StoredLogLine, not a LogLine: the seq is per-process and deliberately
+ *  not written, so accepting the narrower shape says so in the signature. */
+export function persistLogLine(line: StoredLogLine): void {
   // A tab-separated head keeps the parse on replay unambiguous even when the
   // message itself contains spaces or colons.
   queue.push(`${line.t}\t${line.level}\t${line.msg.replace(/\n/g, "\\n")}`);
@@ -63,14 +66,14 @@ function trim(): void {
 }
 
 /** Last `maxLines` persisted lines, oldest → newest. */
-export function readServerLogTail(maxLines = REPLAY_LINES): LogLine[] {
+export function readServerLogTail(maxLines = REPLAY_LINES): StoredLogLine[] {
   let raw: string;
   try {
     raw = fs.readFileSync(serverLogPath(), "utf8");
   } catch {
     return []; // nothing persisted yet
   }
-  const out: LogLine[] = [];
+  const out: StoredLogLine[] = [];
   for (const l of raw.split("\n").filter(Boolean).slice(-maxLines)) {
     const a = l.indexOf("\t");
     const b = a >= 0 ? l.indexOf("\t", a + 1) : -1;
@@ -78,7 +81,7 @@ export function readServerLogTail(maxLines = REPLAY_LINES): LogLine[] {
       out.push({ t: "", level: "log", msg: l }); // pre-format or hand-edited line
       continue;
     }
-    const level = l.slice(a + 1, b) as LogLine["level"];
+    const level = l.slice(a + 1, b) as StoredLogLine["level"];
     out.push({
       t: l.slice(0, a),
       level: ["log", "info", "warn", "error"].includes(level) ? level : "log",

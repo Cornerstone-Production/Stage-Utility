@@ -323,8 +323,9 @@ a newer push — see [Integrations](../integrations/README.md#the-snapshot-versi
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/photos?u=…` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy |
-| GET | `/log` | The server's recent output, as a page. Token-gated when `STAGE_UTILITY_LOG_TOKEN` is set |
-| GET | `/api/log` | The same lines as JSON. Same gate |
+| GET | `/log` | The server's recent output, as a page, with a health strip and level/source filters. Token-gated when `STAGE_UTILITY_LOG_TOKEN` is set |
+| GET | `/logs` | Redirects to `/log`, query string intact. Same gate, checked before the redirect — an unauthorised request is a 401, never a 302 into one |
+| GET | `/api/log[?since=N]` | `{ lines, reset, latestSeq, checks }`. Same gate. Omit `since` for the whole buffer; pass the previous `latestSeq` to get only what is newer. `reset: true` means replace rather than append — the buffer rolled past your cursor, or you asked for everything. `checks` is the health snapshot the page draws: version, uptime, app time zone, warning and error counts, and one entry per configured integration |
 | GET | `/enroll?device=…&token=…` | Where a kiosk device asks which screen it is. Redirects to that screen, or shows a holding page |
 | GET | `/kiosk/install-linux.sh` \| `install-macos.sh` \| `install-windows.ps1` | The kiosk agent installers, with this server's address already in them |
 | GET | `/layout-images/:name` \| `/branding-images/:name` | Uploaded images, content-addressed and served immutable |

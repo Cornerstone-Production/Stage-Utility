@@ -145,7 +145,13 @@ describe("the production route list", () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const { fileURLToPath } = await import("node:url");
-    const { ROUTE_MODULES } = await import("../remote-server.js");
+    // Two lists, because a page the server draws itself has to be dispatched
+    // BEFORE the static build is offered or the SPA fallback swallows it. Both
+    // are real loops in handleRequest, so membership of either is proof of
+    // dispatch — which is what lets this stay an exact-count check rather than
+    // acquiring a by-name exception the moment a route needs different ordering.
+    const { ROUTE_MODULES, EARLY_ROUTE_MODULES } = await import("../remote-server.js");
+    const ALL_DISPATCHED = [...EARLY_ROUTE_MODULES, ...ROUTE_MODULES];
 
     // Recursive, and matching both declaration forms. The first version read one
     // directory and only saw `export async function xRoutes(` — the same
@@ -171,13 +177,17 @@ describe("the production route list", () => {
     };
     walk(dir);
 
-    const dispatched = new Set(ROUTE_MODULES.map((fn) => fn.name));
+    const dispatched = new Set(ALL_DISPATCHED.map((fn) => fn.name));
     const missing = [...declared].filter((n) => !dispatched.has(n));
     assert.deepEqual(
       missing,
       [],
       `these route modules exist but are never dispatched, so their paths 404:\n  ${missing.join("\n  ")}`,
     );
-    assert.equal(declared.size, ROUTE_MODULES.length, "declared route modules and dispatched ones disagree in count");
+    assert.equal(
+      declared.size,
+      ALL_DISPATCHED.length,
+      "declared route modules and dispatched ones disagree in count",
+    );
   });
 });

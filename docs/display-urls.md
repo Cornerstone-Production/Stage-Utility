@@ -69,7 +69,10 @@ plan data survive a navigation.
 
 `/log` is not one of them. It is a plain page the server renders itself — an
 operator diagnostic rather than a destination, reachable from
-**Settings → Advanced → Open log**, and gated behind a token when one is set.
+**Settings → Advanced → Open log**, and gated behind a token when one is set. It
+also answers on `/logs`, which redirects to `/log` with the query string intact;
+both spellings are reserved, so neither can be taken as a display slug. `/log`
+is canonical — it is what the app links to and what these docs quote.
 
 `/settings` on its own lands on Integrations. `/views` and `/displays` redirect
 to `/screens`, and the old `#hash` deep links into the settings window resolve
