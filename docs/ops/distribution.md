@@ -71,8 +71,9 @@ compilation step per platform.
 ## Installing
 
 See [install-and-config.md](install-and-config.md). Installers download the archive
-for the platform they are running on, verify it, and register a service (systemd,
-launchd, or a Windows service).
+for the platform they are running on, verify it, and register it to start on its
+own — a systemd unit on Linux, a launchd daemon on macOS, a scheduled task on
+Windows.
 
 The expected hash comes from the **releases API**, which publishes a SHA-256 digest
 per asset. It has to come from outside the archive: a checksum shipped inside the

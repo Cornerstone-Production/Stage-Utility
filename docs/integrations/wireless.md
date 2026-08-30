@@ -14,10 +14,26 @@ and carries its own host / port / channel-count config:
 - `DeviceManager` reconciles one live provider instance per enabled connection,
   namespaces each provider's channels as `${connectionId}::${channelId}`, and feeds
   their status into `StageController`.
-- Shure drivers talk ASCII-over-TCP (port 2202 for ULX-D / Axient / PSM); Shure SBC
-  chargers, Sennheiser ewG4 / EW-DX / Spectera each have their own driver. Providers
-  named "None" (and any not-yet-shipped driver) are placeholders that connect to
-  nothing and report "driver arrives in a future update".
+- Each provider talks its own protocol on its own port. Providers named "None"
+  (and any not-yet-shipped driver) are placeholders that connect to nothing and
+  report "driver arrives in a future update".
+
+| Provider | Talks | Port |
+|---|---|---|
+| Shure ULX-D | ASCII over TCP | 2202 |
+| Shure Axient Digital | ASCII over TCP | 2202 |
+| Shure PSM (In-Ear) | ASCII over TCP | 2202 |
+| Shure SBC Charger | ASCII over TCP | 2202 |
+| Sennheiser ewG4 (SSC) | SSC, JSON over UDP | 45 |
+| Sennheiser EW-DX | SSC, JSON over UDP | 45 |
+| Sennheiser Spectera | SSCv2 over HTTPS | 443 |
+
+Most ask for a host, a port and a channel count, prefilled with the values above.
+**EW-DX** asks for a **model** instead of a channel count — *EM4* (4 channels),
+*EM2* (2 channels) or *CHG 70N* (2 charging bays) — which is what decides how its
+telemetry is read. **Spectera** needs an **API password**: set one on the base
+station in its WebUI or LinkDesk first, because its API stays disabled until one
+exists. The username is fixed and not asked for.
 
 State broadcasts on the `wireless:connections-changed` SSE channel (connection
 list + runtime status). Charger bays flow through the shared stage state.
