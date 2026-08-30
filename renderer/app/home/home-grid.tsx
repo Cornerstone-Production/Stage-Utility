@@ -8,7 +8,7 @@
 // what makes "add any widget to Home" a real sentence rather than a promise
 // about a second widget set.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { LayoutDTO, LayoutObject } from "@main/types/views";
 import { HOME_VIEW_ID } from "@main/services/home-view";
 
@@ -16,69 +16,7 @@ import { ObjectContent, boxStyle, useLayoutData } from "../../main/layout-render
 import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { COLUMNS, SIZES, sizeOf } from "./home-cards";
 import { boxesOf, rowsNeeded, type Box } from "./home-placement";
-
-/**
- * Slide every card that moved, from where it was to where it now is.
- *
- * Grid lines do not animate — a card that changes cells jumps. This is the
- * standard FLIP: measure before the paint, apply the inverse as a transform so
- * the card appears not to have moved, then release it on the next frame and let
- * a transition carry it across. Without it, "the other widgets move out of the
- * way" is a teleport, which reads as the page glitching rather than as the page
- * making room.
- */
-function useSlideOnMove(deps: unknown, enabled: boolean) {
-  const host = useRef<HTMLDivElement | null>(null);
-  const last = useRef(new Map<string, DOMRect>());
-
-  useLayoutEffect(() => {
-    const el = host.current;
-    if (!el) return;
-    const cards = [...el.querySelectorAll<HTMLElement>("[data-card-id]")];
-    const now = new Map<string, DOMRect>();
-    for (const card of cards) {
-      const id = card.dataset.cardId!;
-      const rect = card.getBoundingClientRect();
-      now.set(id, rect);
-      const before = last.current.get(id);
-      if (!enabled || !before) continue;
-      const dx = before.left - rect.left;
-      const dy = before.top - rect.top;
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
-      card.style.transition = "none";
-      card.style.transform = `translate(${dx}px, ${dy}px)`;
-      // Two frames: one to let the browser take the inverted position as the
-      // start, one to release it. A single frame is sometimes coalesced with the
-      // style write above, and the card jumps anyway.
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          card.style.transition = "transform 180ms cubic-bezier(0.2, 0, 0, 1)";
-          card.style.transform = "";
-        });
-      });
-    }
-    last.current = now;
-  }, [deps, enabled]);
-
-  // Nothing half-animated survives the end of a drag.
-  useEffect(() => {
-    if (enabled) return;
-    const el = host.current;
-    if (!el) return;
-    for (const card of el.querySelectorAll<HTMLElement>("[data-card-id]")) {
-      card.style.transition = "";
-      card.style.transform = "";
-    }
-  }, [enabled]);
-
-  // A setter rather than the ref itself: the grid also hands its element to the
-  // caller, and assigning to a hook's ref from outside it is exactly what the
-  // immutability rule is there to stop.
-  const setHost = useCallback((el: HTMLDivElement | null) => {
-    host.current = el;
-  }, []);
-  return setHost;
-}
+import { useSlideOnMove } from "../../lib/use-slide-on-move";
 
 /**
  * The widget's own styling MINUS everything Home supplies itself: the frame AND
@@ -246,7 +184,7 @@ export function HomeGrid({
   // A signature rather than the array: the effect must run when a card MOVES,
   // and an array identity changes on every render.
   const signature = boxes.map((b) => `${b.id}:${b.col}:${b.row}`).join("|");
-  const setHost = useSlideOnMove(signature, animate);
+  const { setHost } = useSlideOnMove(signature, animate);
   if (!ctx) return null;
 
   return (
