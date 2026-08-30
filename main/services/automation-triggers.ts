@@ -54,7 +54,7 @@ const asStates = (v: unknown): IntState[] => (Array.isArray(v) ? (v as IntState[
 const connOf = (v: unknown, id: string): string | null =>
   asStates(v).find((s) => s.id === id)?.connection ?? null;
 
-/** Labels for the twelve, so a rule reads "OBS connects" rather than an id.
+/** One label per integration, so a rule reads "OBS connects" rather than an id.
  *  Exported so the conditions read the same list and the two cannot diverge. */
 export const INTEGRATIONS: { id: string; label: string }[] = [
   { id: "companion", label: "Companion" },
@@ -63,6 +63,7 @@ export const INTEGRATIONS: { id: string; label: string }[] = [
   { id: "planning-center", label: "Planning Center" },
   { id: "prodcom", label: "ProdCom" },
   { id: "propresenter", label: "ProPresenter" },
+  { id: "pvp", label: "ProVideoPlayer" },
   { id: "reaper", label: "REAPER" },
   { id: "resi", label: "Resi" },
   { id: "ross-tsl", label: "Ross TSL" },
@@ -74,7 +75,7 @@ export const INTEGRATIONS: { id: string; label: string }[] = [
 ];
 
 /** Connect/disconnect pair for one integration. Generated rather than written out
- *  twelve times over, because the entries are mechanically identical — only the
+ *  once per integration, because the entries are mechanically identical — only the
  *  label differs, and that comes from the list above. */
 function connectionTriggers(id: string, label: string): Record<string, TriggerDef> {
   return {

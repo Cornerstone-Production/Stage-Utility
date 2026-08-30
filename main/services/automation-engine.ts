@@ -25,6 +25,7 @@ import { sensourceService } from "./sensource-service.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
+import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
@@ -289,3 +290,8 @@ sensourceService.addDemandSource(() => automationEngine.wantsChannel("people:cou
 // after the stream started. A rule reading the channel is a watcher.
 resiService.addDemandSource(() => automationEngine.wantsChannel("resi:status"));
 youtubeService.addDemandSource(() => automationEngine.wantsChannel("youtube:status"));
+// PVP is the one where this matters most: its whole point is driving content
+// from a rule, and a booth appliance with no browser open is exactly where that
+// is wanted. Without this registration its inDemand gate is decorative, and
+// every PVP rule would see the five-second idle cadence at best.
+pvpService.addDemandSource(() => automationEngine.wantsChannel("pvp:status"));

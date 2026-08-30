@@ -10,6 +10,7 @@ import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService, configComplete, type YouTubeConfig } from "./youtube-service.js";
+import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
@@ -278,6 +279,43 @@ const REAPER_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// ProVideoPlayer — polls PVP's Network API (Preferences → Network → Network API)
+// for the transport state of every layer, shown by the custom-layout
+// "ProVideoPlayer layers" object and drivable from automation rules.
+//
+// PVP has no thumbnail, preview or frame endpoint of any kind, so nothing here
+// can ever show a picture of what is on screen — only its name, its state and how
+// much of it is left. The description says so, because an operator setting this
+// up is entitled to know that before they go looking for a preview.
+const PVP_DESCRIPTOR: IntegrationDescriptor = {
+  id: "pvp",
+  kind: "control",
+  label: "ProVideoPlayer",
+  description:
+    "Shows what ProVideoPlayer has on each layer, and lets automation rules fire cues and clear, hide, mute and fade layers. Polls PVP's Network API over your LAN. Turn it on under ProVideoPlayer → Preferences → Network → Network API, note the port shown there, and enter it below. That port is not the same one PVP serves its API documentation on. If Require Authentication is on, paste the generated token. PVP offers no preview image of any kind, so this reports names, states and times, never a picture.",
+  configSchema: [
+    { key: "host", label: "ProVideoPlayer Host", type: "text", placeholder: "192.168.1.50" },
+    {
+      key: "port",
+      label: "Network API Port",
+      type: "number",
+      help: "From Preferences → Network → Network API. Not the documentation port.",
+    },
+    {
+      key: "https",
+      label: "Use HTTPS",
+      type: "select",
+      options: [
+        { value: "off", label: "Off" },
+        { value: "on", label: "On" },
+      ],
+      default: "off",
+      help: "Match PVP's own 'Use HTTPS Connection' setting. PVP normally uses a self-signed certificate, which this app will not accept.",
+    },
+    { key: "token", label: "API Token", type: "password", help: "Only if Require Authentication is on in PVP." },
+  ],
+};
+
 /**
  * Resi — is the encoder streaming, and since when.
  *
@@ -454,6 +492,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   SMAART_DESCRIPTOR,
   OBS_DESCRIPTOR,
   REAPER_DESCRIPTOR,
+  PVP_DESCRIPTOR,
   RESI_DESCRIPTOR,
   YOUTUBE_DESCRIPTOR,
   OSC_DESCRIPTOR,
@@ -498,6 +537,7 @@ const SECRET_KEYS: Record<string, string[]> = {
   prodcom: ["apiKey"],
   smaart: ["password"],
   obs: ["password"],
+  pvp: ["token"],
   reaper: [],
   resi: ["password"],
   youtube: ["apiKey", "clientSecret", "refreshToken"],
@@ -565,6 +605,7 @@ class IntegrationManager {
     await this.applyObs();
     // Start the REAPER web-interface poller if enabled + configured.
     await this.applyReaper();
+    await this.applyPvp();
     await this.applyResi();
     await this.applyYouTube();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
@@ -653,7 +694,7 @@ class IntegrationManager {
    * changed.
    *
    * A map rather than a ladder because there were TWO ladders -- one in
-   * setConfig, one in setEnabled -- listing the same nine integrations in the
+   * setConfig, one in setEnabled -- listing the same integrations in the
    * same order. Adding Resi and YouTube meant remembering both, and an
    * integration added to only one would save its config and never reconnect, or
    * reconnect on a toggle and not on a save. Neither failure says which half was
@@ -712,6 +753,7 @@ class IntegrationManager {
       prodcom: () => this.applyProdcom(),
       smaart: () => this.applySmaart(),
       obs: () => this.applyObs(),
+      pvp: () => this.applyPvp(),
       reaper: () => this.applyReaper(),
       resi: () => this.applyResi(),
       youtube: () => this.applyYouTube(),
@@ -936,6 +978,21 @@ class IntegrationManager {
         return result;
       }
 
+      if (id === "pvp") {
+        const { host, port, https } = this.getPvpTarget();
+        if (!host || !port) {
+          return {
+            ok: false,
+            message: "Host and Port are required. The port is the one in PVP's Preferences → Network → Network API.",
+          };
+        }
+        const secrets = await secretsStore.getSecrets("pvp");
+        const result = await pvpService.test(host, port, https, secrets.token ?? null);
+        this.setConnectionState("pvp", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
       if (id === "resi") {
         const { username, password } = await this.getResiConfig();
         if (!username || !password) {
@@ -1130,7 +1187,7 @@ class IntegrationManager {
    */
   private hostPort(
     id: ConnectionManagedId,
-    defaultPort: number,
+    defaultPort: number | null,
   ): { host: string | null; port: number | null } {
     const cfg = this.states.get(id)?.config ?? {};
     const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
@@ -1141,9 +1198,14 @@ class IntegrationManager {
         : typeof rawPort === "string" && rawPort.trim()
           ? parseInt(rawPort, 10)
           : NaN;
-    // Only default the port when a host was given: no host is "not configured",
-    // and returning a port for it would read as configured.
-    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? defaultPort : null };
+    // Only default the port when a host was given AND there is a default worth
+    // giving: no host is "not configured", and an integration whose port has no
+    // conventional value (PVP's is whatever its Preferences pane shows) must not
+    // be reported as configured on the strength of a guess.
+    return {
+      host,
+      port: Number.isFinite(port) && port > 0 ? port : host && defaultPort != null ? defaultPort : null,
+    };
   }
 
   /** obs-websocket's standard port. */
@@ -1154,6 +1216,29 @@ class IntegrationManager {
   /** REAPER's suggested web-interface port. */
   private getReaperTarget() {
     return this.hostPort("reaper", 8080);
+  }
+
+  /** PVP's Network API port is whatever its Preferences pane shows; the research
+   *  never recorded a default, and inventing one would let "configured" point at
+   *  a port nothing is listening on. So the port is required, not defaulted. */
+  private getPvpTarget() {
+    const { host, port } = this.hostPort("pvp", null);
+    return { host, port, https: this.states.get("pvp")?.config.https === "on" };
+  }
+
+  /** Start/stop the ProVideoPlayer poll to match enabled + configured state. */
+  private async applyPvp(): Promise<void> {
+    await this.applyService("pvp", pvpService, async () => {
+      const { host, port, https } = this.getPvpTarget();
+      if (!host || !port) return null;
+      // The state map holds secrets MASKED, so anything that dials has to read
+      // the real value back out of the secrets store.
+      const secrets = await secretsStore.getSecrets("pvp");
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => pvpService.configure(host, port, https, secrets.token ?? null),
+      };
+    });
   }
 
   /** Start/stop the REAPER web-interface poll to match enabled + configured state. */

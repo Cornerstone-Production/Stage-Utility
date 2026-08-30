@@ -32,6 +32,10 @@ export const HYDRATED_CHANNELS = [
   "baptism:state",
   "obs:status",
   "reaper:status",
+  // PVP broadcasts only when a layer changes, and a workspace holding one still
+  // between services changes nothing for hours — so a display opened in that
+  // window would show dashes indefinitely without a hydrate.
+  "pvp:status",
   "resi:status",
   "youtube:status",
   "update:status",

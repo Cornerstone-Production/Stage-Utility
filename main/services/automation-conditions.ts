@@ -7,7 +7,7 @@
 // The list stays short on purpose. If a rule needs something narrower, the answer
 // is a better trigger, not a query language. The one bulk exception is the
 // per-integration "is connected" set, which is generated from one list rather than
-// hand-written twelve times — see INTEGRATIONS in automation-triggers.ts.
+// hand-written once per integration — see INTEGRATIONS in automation-triggers.ts.
 
 import type { ConditionCtx, ConditionDef } from "../types/automation.js";
 import { zonedMinuteOfDay, zonedParts } from "./app-timezone.js";

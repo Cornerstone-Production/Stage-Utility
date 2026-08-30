@@ -31,6 +31,7 @@ import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
+import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { oscManager } from "./osc-manager.js";
 import { signalStore } from "./signal-store.js";
@@ -871,6 +872,7 @@ export class RemoteServer {
       sseWrite(res, "baptism:state", baptismTimerService.getState());
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "reaper:status", reaperService.getLatest());
+      sseWrite(res, "pvp:status", pvpService.getLatest());
       // Streaming state hydrates for the same reason recording does: a display
       // that loads mid-service must show the truth immediately, not wait for
       // the next poll to notice nothing has changed.

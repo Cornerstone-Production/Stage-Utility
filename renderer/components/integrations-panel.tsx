@@ -985,7 +985,7 @@ const CATEGORY_ORDER: { title: string; ids: string[] }[] = [
   { title: "People", ids: ["sensource"] },
   { title: "Wireless", ids: ["wireless"] },
   { title: "Streaming", ids: ["resi", "youtube"] },
-  { title: "Control & output", ids: ["obs", "reaper", "osc", "rosstalk", "ross-tsl"] },
+  { title: "Control & output", ids: ["obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"] },
 ];
 
 /** Two integrations that present as one card. RossTalk (commands, TCP 7788) and

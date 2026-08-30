@@ -32,6 +32,7 @@ const BROADCAST_CHANNELS = new Set([
   "people:count",
   "prodcom:transcript",
   "propresenter:instances",
+  "pvp:status",
   "reaper:status",
   "resi:status",
   "service-timeline:history",
