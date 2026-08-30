@@ -57,9 +57,21 @@ scripts/survival/.survival-*.log
 # the decision, and nothing in a PR review is better for having it.
 .superpowers/
 
-# Playwright screenshots taken while driving the app during development.
+# Screenshots taken while driving the app during development.
+#
+# The `*.playwright.png` rule was too narrow: a screenshot saved under any other
+# name was committable, and one was — a mic-slots display carrying ten real
+# faces and names, including children, into this PUBLIC repo, where it rode 38
+# release tags. Root-level raster files are always debris here, so ignore them
+# by location rather than by filename. Images that belong in the product live
+# under public/ or docs/ and are unaffected.
 *.playwright.png
 .playwright-mcp/
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
 
 # Probe captures. These are live pulls off a real account -- encoder and
 # schedule uuids, service names, the church's own name. One reached beta in
