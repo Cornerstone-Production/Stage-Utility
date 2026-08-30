@@ -81,8 +81,58 @@ reload the page onto the new assets (guarded so only one fires):
 ## The /log page
 
 `/log` shows the server's recent console output — an in-memory ring buffer
-(`log-buffer.ts`, last 500 lines). It's LAN-open by default; set
+(`log-buffer.ts`, last 10,000 lines). It's LAN-open by default; set
 `STAGE_UTILITY_LOG_TOKEN` to require `?token=…`.
+
+`/logs` is an alias: it redirects to `/log`, carrying the query string across, so
+a token typed against either spelling works. `/log` is the canonical URL and is
+what the app itself links to. Both are reserved, so neither can be taken as a
+display slug.
+
+The token gate covers `/log`, `/logs` and `/api/log` alike. A 401 on any of them
+means the token is missing or wrong, not that the server is down. An unauthorised
+`/logs` answers 401 rather than redirecting, so a client that does not follow
+redirects cannot read the refusal as an open page.
+
+### What the page shows
+
+A health strip across the top, then the lines.
+
+The strip is state, not text scraped from the log: the running version, uptime,
+the time zone every timestamp is drawn in, how many warnings and errors the
+buffer holds, and one chip per **configured** integration with its connection
+state and message, worst first. Integrations nobody has set up are left out.
+This matters because a connection that has been retrying for days is silent by
+design — the services log the first failure and then back off quietly — so the
+log alone cannot tell you a box is unreachable.
+
+The lines carry a date heading whenever the date changes, a source dropdown built
+from the `[tag]` each line opens with, a level filter, a text filter, and copy and
+download buttons. Only the newest 2,000 matching lines are drawn; filtering still
+runs over all of them, and the count says so.
+
+Timestamps are drawn in the **app time zone** (Settings → Advanced), which the
+header names. Not the server's UTC and not the viewer's browser zone: a log is
+read against a service that happened at a wall-clock time in the building.
+
+### Timestamps that run backwards
+
+The buffer is not chronological, and cannot be. On boot the previous run's
+`server.log` tail is replayed with its original timestamps, and then `update.log`
+is replayed after it — with timestamps that predate lines already above it. The
+page marks the step down with
+
+```
+↑ earlier than the line above — replayed from before a restart
+```
+
+and draws a date heading at every date change, so a jump back across midnight is
+visible rather than looking like a clock fault. Filter by full date, never by
+time of day.
+
+Nothing is re-sorted. The replayed blocks are meaningful as blocks, and
+interleaving them by timestamp would scatter one update's output through
+unrelated lines.
 
 ### Diagnosing a failed (or slow) update
 

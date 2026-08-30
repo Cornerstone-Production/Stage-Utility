@@ -153,3 +153,14 @@ Two things to know:
 | GET | `/api/events` | Multiplexed Server-Sent Events stream with per-connection channel filtering. Channels: `stage:state-changed`, `pco:live`, `propresenter:status`, `prodcom:transcript`, `spl:metrics`, `spl:history`, `people:count`, `attendance:history`, `service-timeline:history`, `obs:status`, `osc:feedback`, `baptism`, `integrations:state-changed`, `wireless:connections-changed`, `wireless:channels` |
 | POST | `/api/events/subscribe` | Set the channels a connection wants (channel filtering) |
 | GET | `/photos?u=…` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy |
+
+**Diagnostics** — read-only, and the three worth reaching for when something is
+wrong in production. `/log`, `/logs` and `/api/log` are gated by `?token=…` when
+`STAGE_UTILITY_LOG_TOKEN` is set; a 401 there means a missing token, not a dead
+server. See [Updates and logs](../ops/updates-and-logs.md).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/version` | Running code version. Never cached |
+| GET | `/log` | The log viewer. `/logs` redirects here, query string intact |
+| GET | `/api/log[?since=N]` | `{ lines, reset, latestSeq, checks }`. Omit `since` for the whole buffer; pass the previous `latestSeq` to get only what is newer. `reset: true` means replace rather than append — the buffer has rolled past your cursor, or you asked for everything. `checks` is the health snapshot the viewer draws: version, uptime, app time zone, warning/error counts, and one entry per configured integration |

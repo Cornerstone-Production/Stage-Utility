@@ -64,6 +64,11 @@ The display picker at `/` tiles `/scriptview`, `/baptism`, `/patch` and `/histor
 `/log` is deliberately not there — it is an operator diagnostic, not a volunteer
 destination.
 
+`/logs` redirects to `/log` and is reserved alongside it, so neither spelling can
+be taken as a display slug. `/log` stays the canonical address: it is what the
+app links to and what the docs quote. See
+[Updates and logs](ops/updates-and-logs.md).
+
 Tools have no QR codes of their own; they are links you send someone rather than
 codes you print and mount. Where a QR does appear it encodes the `/<id>` address
 and never a slug, since a printed code outlives the session it was made in.

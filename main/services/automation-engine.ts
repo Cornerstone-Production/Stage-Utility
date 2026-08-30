@@ -10,6 +10,7 @@
 
 import { errorMessage } from "./errors.js";
 import { randomUUID } from "node:crypto";
+import { scrub } from "./scrub.js";
 
 import type { AutomationSettings, ConditionCtx, Rule } from "../types/automation.js";
 import { addBroadcastListener, addChannelDemandSource, broadcast } from "./broadcaster.js";
@@ -218,6 +219,20 @@ class AutomationEngine {
       outcome,
       detail,
     });
+    // A rule that FAILED is the one automation outcome that belongs in the server
+    // log as well. Everything the engine does is recorded — but only in its own
+    // store, read only by /automation, so an action that errored was invisible
+    // from /log, which is the page you are on when you are working out why the
+    // building is not doing what it should. Fires, simulations and suppressions
+    // stay out: in a normal service there are dozens of them and they would bury
+    // the failure this line exists to surface.
+    //
+    // Both halves go through scrub(): the rule name is typed by the operator into
+    // an HTTP body and the detail carries whatever a device or provider said back,
+    // so a newline in either forges a log line on a LAN-visible page.
+    if (outcome === "failed") {
+      console.warn(`[automation] rule "${scrub(rule.name)}" failed: ${scrub(detail)}`);
+    }
     // Mirror into the raw layer, but only while a service is being recorded — the
     // archive is per-service, and a rule firing on a Tuesday belongs to no service.
     // The open SPL record is the authority on which occurrence that is.

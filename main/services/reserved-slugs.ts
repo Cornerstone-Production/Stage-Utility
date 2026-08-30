@@ -14,6 +14,7 @@
 // renderer code pull in node-dependent backend modules. The settings UI fetches
 // this list instead of keeping a copy that can drift.
 
+import { LOG_PAGE_PATHS } from "./routes/log-paths.js";
 import { OPERATOR_PATHS } from "./routes/operator-paths.js";
 
 /**
@@ -29,8 +30,12 @@ import { OPERATOR_PATHS } from "./routes/operator-paths.js";
 export const RESERVED_SLUGS: readonly string[] = [
   "", // the display picker
   "settings",
-  "log",
   "photos",
+  // Both spellings of the log viewer, DERIVED for the same reason the operator
+  // paths are: `/logs` was added as an alias of `/log` and reserving it by hand
+  // is exactly the step that gets missed. A display slugged "logs" would resolve
+  // to the redirect and never render.
+  ...LOG_PAGE_PATHS.map((p) => p.replace(/^\//, "")),
   // The one URL every kiosk device opens. An output slug of "enroll" would
   // shadow it and leave every unclaimed screen showing that output instead.
   "enroll",

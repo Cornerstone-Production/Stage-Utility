@@ -21,8 +21,8 @@ import { execFileSync } from "node:child_process";
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
-import { getLogLines } from "./log-buffer.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
+import { logRoutes } from "./routes/log-routes.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
@@ -100,6 +100,21 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   presetRoutes,
   calendarRoutes,
 ] as const;
+
+/**
+ * Route modules that must run BEFORE the static renderer build is offered.
+ *
+ * ROUTE_MODULES above is dispatched after it, which is right for /api/* but
+ * wrong for a PAGE the server draws itself: the static arm serves the SPA shell
+ * for any unknown path, so /log would be swallowed by it and never reach a
+ * handler placed later.
+ *
+ * A list and a loop, not one hand-written call, for the same reason ROUTE_MODULES
+ * is: dispatch.test.ts walks routes/ and requires every module it finds to be in
+ * one of these two lists, and a module dispatched by a bespoke line would have to
+ * be excused by name — which is how a coverage scan stops covering anything.
+ */
+export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [logRoutes] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged
@@ -181,43 +196,6 @@ export function isCrossOrigin(origin: string | undefined, host: string | undefin
 /** Methods that change server state, and so must be same-origin. */
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-/** Self-contained /log viewer page — polls /api/log every 2s, filter + autoscroll.
- *  No framework/build; served directly so it works even if the renderer bundle is
- *  missing. Carries any ?token through to its fetches. */
-function renderLogPage(): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stage Utility — Server log</title>
-<style>
-:root{color-scheme:dark}*{box-sizing:border-box}
-body{margin:0;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0b0c0e;color:#d6d9de}
-header{position:sticky;top:0;display:flex;gap:.75rem;align-items:center;padding:.6rem .8rem;background:#121418;border-bottom:1px solid #23262c}
-header h1{font:600 14px system-ui;margin:0;color:#e8ebef}.sp{flex:1}
-input,button{font:inherit;background:#1a1d22;color:#d6d9de;border:1px solid #2a2e35;border-radius:6px;padding:.3rem .5rem}button{cursor:pointer}
-#log{padding:.5rem .8rem;white-space:pre-wrap;word-break:break-word}.ln{padding:.5px 0}.t{color:#6b7280}.warn{color:#f5c451}.error{color:#f2777a}.muted{color:#6b7280}
-</style></head><body>
-<header><h1>Server log</h1><span class="muted" id="count"></span><span class="sp"></span>
-<input id="filter" placeholder="filter…" autocomplete="off"><label class="muted"><input type="checkbox" id="auto" checked> auto</label><button id="refresh">refresh</button></header>
-<div id="log"></div>
-<script>
-var token=new URLSearchParams(location.search).get('token');var q=token?('?token='+encodeURIComponent(token)):'';
-var logEl=document.getElementById('log'),filterEl=document.getElementById('filter'),autoEl=document.getElementById('auto'),countEl=document.getElementById('count');var lines=[];
-function esc(s){return String(s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
-/* Lines are stamped as UTC ISO. Slicing characters 11-19 out of that string
-   printed UTC verbatim, so an operator west of Greenwich read timestamps hours
-   adrift from the wall clock they were comparing against. Parse and format
-   instead, which renders in the VIEWER's zone - this page is served to whoever
-   opens it, so the browser's zone is the right one, not the server's. */
-function fmtT(iso){var d=new Date(iso);if(isNaN(d.getTime()))return esc(iso).slice(11,19);
-return d.toLocaleTimeString(undefined,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}
-function render(){var f=filterEl.value.toLowerCase();var atBottom=(window.innerHeight+window.scrollY)>=(document.body.scrollHeight-40);
-var shown=lines.filter(function(l){return !f||l.msg.toLowerCase().indexOf(f)>=0||l.level.indexOf(f)>=0});
-countEl.textContent=shown.length+' / '+lines.length+' lines';
-logEl.innerHTML=shown.map(function(l){return '<div class="ln '+l.level+'"><span class="t">'+fmtT(l.t)+'</span> '+esc(l.msg)+'</div>'}).join('');
-if(autoEl.checked&&atBottom)window.scrollTo(0,document.body.scrollHeight)}
-function load(){fetch('/api/log'+q).then(function(r){return r.json()}).then(function(d){lines=d.lines||[];render()}).catch(function(){})}
-filterEl.oninput=render;document.getElementById('refresh').onclick=load;load();setInterval(function(){if(autoEl.checked)load()},2000);
-</script></body></html>`;
-}
-
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
 // Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
@@ -271,13 +249,6 @@ function sseWrite(res: http.ServerResponse, event: string, data: unknown): boole
 // Per-request logging is off unless STAGE_UTILITY_DEBUG=1 — it's one line per HTTP
 // request and the launchd/systemd stdout log is often unrotated (grows until reboot).
 const DEBUG_HTTP = process.env.STAGE_UTILITY_DEBUG === "1";
-// Optional token gate for the /log viewer. The app has no auth (LAN-trusted), so
-// /log is open by default like everything else; set STAGE_UTILITY_LOG_TOKEN to
-// require ?token=… on /log + /api/log (logs can carry internal detail).
-const LOG_TOKEN = process.env.STAGE_UTILITY_LOG_TOKEN || null;
-function logAuthed(url: URL): boolean {
-  return !LOG_TOKEN || url.searchParams.get("token") === LOG_TOKEN;
-}
 const COMPRESSIBLE = new Set([".html", ".js", ".mjs", ".css", ".svg", ".json", ".webmanifest"]);
 const gzipCache = new Map<string, Buffer>();
 function acceptsGzip(acceptEncoding: string | undefined): boolean {
@@ -786,25 +757,10 @@ export class RemoteServer {
       return;
     }
 
-    // ── Server log viewer ─────────────────────────────────────────────────
-    // Handled before static serving so the SPA fallback doesn't swallow /log.
-    if (method === "GET" && pathname === "/log") {
-      if (!logAuthed(_url)) {
-        res.writeHead(401, { "Content-Type": "text/plain" });
-        res.end("Unauthorized — append ?token=…");
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-      res.end(renderLogPage());
-      return;
-    }
-    if (method === "GET" && pathname === "/api/log") {
-      if (!logAuthed(_url)) {
-        error(res, "unauthorized", 401);
-        return;
-      }
-      json(res, { lines: getLogLines() });
-      return;
+    // ── Modules that must run before static serving ───────────────────────
+    for (const routeModule of EARLY_ROUTE_MODULES) {
+      await routeModule({ req, res, pathname, url: _url, method });
+      if (res.headersSent) return;
     }
 
     // ── Serve renderer static build (standalone mode) ─────────────────────
