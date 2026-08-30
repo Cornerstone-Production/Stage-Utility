@@ -381,6 +381,16 @@
       animation-duration: 1.4s !important;
       animation-iteration-count: infinite !important;
     }
+    /* The readout's progress rule is the other exception, and a deliberate one.
+       It is not decoration: it is a READING, and the number behind it advances
+       once a second, so collapsing the interpolation does not remove motion —
+       it replaces a smooth hairline with one that jumps a step every second,
+       which is more motion to notice, not less. So it keeps the duration the
+       component chose, which is already 0 whenever the value is not simply
+       advancing: a clip change, a scrub and a paused clip all snap here too. */
+    .su-meter-fill {
+      transition-duration: var(--su-meter-ms, 0ms) !important;
+    }
     .su-flash {
       animation: none;
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent);

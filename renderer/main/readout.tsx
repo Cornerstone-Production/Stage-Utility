@@ -24,6 +24,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode }
 import {
   GAP_SCALE, CAPTION_LEADING, VALUE_LEADING, SUB_LEADING, PAD_SCALE, fitComposition,
 } from "./readout-size";
+import { MeterFill } from "./readout-meter";
 import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import type { LayoutHAlign } from "@main/types/views";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
@@ -211,6 +212,19 @@ export interface ReadoutProps {
   /** 0..1. A hairline progress rule under the sub-line. Null draws nothing.
    *  Unlike the two slots above this DOES take height, so it is budgeted. */
   meter?: number | null;
+  /**
+   * Identity of the thing `meter` is measuring — a clip, a cue, an item.
+   *
+   * The rule glides between values rather than stepping between them, and a
+   * glide is only true of consecutive readings of the SAME thing. When this
+   * changes the fill snaps, because the two fractions either side of the change
+   * measure different clips and a bar sliding between them would draw a passage
+   * of time that did not happen.
+   *
+   * Optional, and null is honest: a rule with no identity still snaps on the two
+   * discontinuities the fractions themselves reveal — see readout-meter.ts.
+   */
+  meterKey?: string | null;
   /** The quietest line, under everything: a secondary or qualified answer that
    *  must never compete with the value. First to be dropped in a short box. */
   footer?: ReactNode;
@@ -240,6 +254,7 @@ export function Readout({
   captionEnd,
   subEnd,
   meter = null,
+  meterKey = null,
   footer = null,
 }: ReadoutProps) {
   const side = align ?? DEFAULT_READOUT_ALIGN;
@@ -357,7 +372,44 @@ export function Readout({
           {captionEnd != null ? <span style={END_SLOT}>{captionEnd}</span> : null}
         </span>
       ) : null}
-      <div ref={wrapRef} style={{ width: "100%", minHeight: 0, overflow: "hidden", position: "relative", textAlign: side }}>
+      <div
+        ref={wrapRef}
+        data-readout-value
+        style={{
+          width: "100%",
+          minHeight: 0,
+          overflow: "hidden",
+          position: "relative",
+          textAlign: side,
+          // THE WRAPPER'S OWN LINE BOX, not the page's — and it must not shrink.
+          //
+          // Without these two the wrapper inherited the app's leading (24px at
+          // the 16px root), so a composition `fitComposition` had budgeted
+          // `valuePx * VALUE_LEADING` for actually demanded 24px of strut. Every
+          // other line carries `flexShrink: 0`, so this wrapper was the only
+          // child flexbox could take the overrun out of — and it took ALL of it
+          // from the one line the widget exists for.
+          //
+          // Measured on a real display at a 42px box: the wrapper was squeezed
+          // to 8.8px around a 24px line box whose text sat at y=12, and
+          // `overflow: hidden` clipped the value away ENTIRELY while the
+          // caption, the sub-line, the rule and the footer all survived. A
+          // ProVideoPlayer widget reading "remaining" with nothing above it.
+          //
+          // Matching the strut to the budget removes the overrun; `flexShrink: 0`
+          // means that if anything ever overruns again the box clips its ENDS —
+          // the caption and the footer — instead of blanking the middle.
+          //
+          // The one thing that can still overrun is a `value` ReactNode carrying
+          // a line box of its own — an icon or a nested element with a pixel
+          // height. Every caller passes a string or a span that inherits from
+          // here, and one that did not would clip the caption and the footer
+          // rather than itself, which is the trade this file wants.
+          fontSize: `${valuePx * scale}px`,
+          lineHeight: VALUE_LEADING,
+          flexShrink: 0,
+        }}
+      >
         <span
           ref={elRef}
           style={{
@@ -430,17 +482,14 @@ export function Readout({
             opacity: dim ? 0.45 : 1,
           }}
         >
-          <span
-            style={{
-              display: "block",
-              height: "100%",
-              borderRadius: "inherit",
-              // Clamped here as well as at the source: a fraction outside 0..1 —
-              // a stale anchor on a display that was asleep — would otherwise
-              // draw a bar wider than its own track.
-              width: `${Math.min(100, Math.max(0, meter * 100))}%`,
-              background: filled ? "#ffffff" : "var(--readout-value-color, var(--color-fg))",
-            }}
+          <MeterFill
+            // Raw. A fraction outside 0..1 — a stale anchor on a display that
+            // was asleep — is clamped inside, in the one place both rules go
+            // through, rather than at each call site where one of them can be
+            // forgotten.
+            fraction={meter}
+            seriesKey={meterKey}
+            fill={filled ? "#ffffff" : "var(--readout-value-color, var(--color-fg))"}
           />
         </span>
       ) : null}

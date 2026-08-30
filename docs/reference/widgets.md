@@ -214,6 +214,11 @@ left, and a state word — playing, paused, still or empty — beside the captio
 something on it. A layer with nothing on it says so rather than counting down to
 nothing.
 
+**Progress bar** draws a hairline rule under the time. It advances smoothly
+rather than a step a second, and snaps instead of sliding whenever the change is
+not a tick — a cue change, a scrub, or a display waking up. A paused clip holds
+its bar where it stopped.
+
 **Next cue** names the entry after the current one in its playlist. Read the
 caveat before you rely on it: **that is the next playlist entry, which is what
 plays next only while the playlist keeps auto-advancing.** Fire a cue by hand and

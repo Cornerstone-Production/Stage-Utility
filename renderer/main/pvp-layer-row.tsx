@@ -23,7 +23,8 @@
 // — so "what is on this layer" is answerable only as a name, a state and a time.
 
 import { fmtDuration } from "./pco-timer";
-import { computePvpProgress } from "./pvp-progress";
+import { computePvpProgress, pvpMeterKey } from "./pvp-progress";
+import { MeterFill } from "./readout-meter";
 import { hasContent, type PvpLayerDTO } from "@main/types/pvp";
 
 export interface PvpLayerRowProps {
@@ -129,7 +130,15 @@ export function PvpLayerRow({ layer, sampledAt, now, skewMs, showProgress = fals
           className="h-[0.14em] w-full rounded-full overflow-hidden mt-[0.15em]"
           style={{ background: "color-mix(in srgb, currentColor 18%, transparent)" }}
         >
-          <div className="h-full rounded-full bg-current" style={{ width: `${progress.fraction * 100}%` }} />
+          {/* The SAME fill the readout composition's rule uses, not a second
+              copy of it. Both are fed by computePvpProgress on a 1 Hz tick, so
+              both stepped once a second, and fixing one of two identical rules
+              is how this repo has shipped drifting copies before. */}
+          <MeterFill
+            fraction={progress.fraction}
+            seriesKey={pvpMeterKey(layer)}
+            fill="currentColor"
+          />
         </div>
       )}
     </div>
