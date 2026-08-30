@@ -16,6 +16,7 @@ countdown, so the app needs it.
 | [Wireless](wireless.md) | Wireless mic RF/battery/charger status |
 | [OBS Studio](obs.md) | Recording / streaming / virtual-cam state |
 | [REAPER](reaper.md) | Recording state (Web Interface poll) |
+| [ProVideoPlayer](provideoplayer.md) | What is on each PVP layer, and control of layers from rules |
 | [OSC](osc.md) | Control buttons to LAN gear + feedback |
 | [Resi](resi.md) | Whether Resi is streaming, and for how long |
 | [YouTube](youtube.md) | Whether you are live on YouTube, and for how long |
@@ -26,14 +27,15 @@ countdown, so the app needs it.
 
 ## Adding a new integration
 
-The REAPER integration (added most recently) is the cleanest end-to-end
+The REAPER integration is the cleanest end-to-end
 template — see [reaper.md](reaper.md) for the full file map. The pattern:
 
 1. Service singleton in `main/services/<id>-service.ts` (`configure`, `getLatest`,
    `setConnectionListener`, change-driven `broadcast("<id>:status", …)`).
 2. Descriptor + `apply<Id>()` + `get<Id>Target()` + `test()` in
    `integration-manager.ts`; secret keys in `SECRET_KEYS`.
-3. DTO in `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`).
+3. DTO in its own module under `main/types/` (`live.ts`, `pvp.ts`), re-exported
+   from `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`).
 4. SSE hydrate + `GET /api/<id>/status` in `remote-server.ts`; `api.ts` invoke case.
 5. Live hook `renderer/main/use-<id>-state.ts`; layout object render case +
    inspector; `object-integration.ts` mapping; category in `integrations-panel.tsx`.
