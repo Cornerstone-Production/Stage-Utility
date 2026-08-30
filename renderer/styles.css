@@ -1053,13 +1053,41 @@ button.score-capsule:focus-visible {
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 620ms var(--score-ease) 60ms;
+
+  /* How far a card's drop shadow reaches OUTSIDE its own box, which is the room
+     the clip below has to leave it. The biggest is the focused card's
+     `0 18px 44px` (see .score-card.is-focused) and a CSS blur reaches half its
+     radius past the edge: 22px sideways, 22 − 18 = 4px up, 22 + 18 = 40px down.
+     Rounded up, so the clip's edge is never the last visible pixel of the
+     shadow. The extra at the bottom also covers layoutStack sizing the stack
+     from `offsetHeight`, which rounds to whole pixels and left the card's real
+     bottom up to 2.25px past the height the stack was given.
+     Measured on the shipped build at 320/360/390/430/768 in both themes: the
+     shadow escaped the clip by 22px on the left, 2px on the right, 4px above
+     and 28.25px below. */
+  --score-shadow-x: 24px;
+  --score-shadow-t: 6px;
+  --score-shadow-b: 48px;
 }
 .score-host.is-open {
   grid-template-rows: 1fr;
   transition: grid-template-rows 560ms var(--score-spring);
 }
+
+/* THE CLIP AND THE SHADOW PULL AGAINST EACH OTHER, and both win here.
+   `overflow: hidden` is what makes the height reveal a reveal rather than a
+   card sliding over the page, so it cannot go — but it also sliced the cards'
+   shadows off on every side. The resolution is room: the clip is given more of
+   it than the shadow can reach, so the edge that clips is never an edge the
+   shadow arrives at. */
 .score-clip {
   overflow: hidden;
+  /* Sideways room as PADDING, and deliberately not `padding-block` as well:
+     preflight makes every box border-box, and a border-box element cannot be
+     shorter than its own padding — so block padding here would give the
+     collapsed `0fr` row a permanent height and the panel could never close.
+     Top and bottom are held off by the shell's own margins instead. */
+  padding-inline: var(--score-shadow-x);
 }
 
 /* Origin is the top, so growth pushes downward from where the capsule sits.
@@ -1073,7 +1101,17 @@ button.score-capsule:focus-visible {
      end of the bar where the item lands, the capsule stays the thing that
      opened. */
   max-width: 640px;
-  margin: 0 20px 14px auto;
+  /* The side gutter is the CLIP's padding, so it is EQUAL on both sides and the
+     panel is centred whenever it fills the space — which is every phone, since
+     the cap above is wider than the viewport. `margin-left: auto` only bites
+     once there is slack left over, which is the console case the cap exists for,
+     and there it still parks the panel under the capsule at the bar's right end.
+     This used to be `margin: 0 20px 14px auto` — a right margin with `auto` on
+     the left. `auto` resolves to ZERO when there is no slack, so on a phone the
+     panel sat hard against the left edge with a 20px gap on the right, which is
+     the off-centre panel that was reported. */
+  margin-block: var(--score-shadow-t) var(--score-shadow-b);
+  margin-inline: auto 0;
   transform-origin: top center;
   opacity: 0;
   transform: translateY(-10px) scaleY(.68) scaleX(.86);
