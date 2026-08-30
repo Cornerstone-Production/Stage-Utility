@@ -64,7 +64,10 @@ function PinGrid({
               }
               className={cn(
                 "size-5 rounded-sm transition-colors",
-                on ? "bg-accent" : "bg-fill hover:bg-fill-strong",
+                // hover:bg-fill-active, not bg-fill-strong: there is no
+                // fill-strong token, so Tailwind emitted nothing and these cells
+                // had no hover state at all.
+                on ? "bg-accent" : "bg-fill hover:bg-fill-active",
               )}
             />
           );

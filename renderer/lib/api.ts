@@ -167,6 +167,23 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "pco:getPlanItems":
       return apiFetch<T>("/api/pco/plan-items");
 
+    // The month grid, already bucketed into days in the app time zone. The
+    // browser is never given raw instants to bucket — see calendar-grid.ts.
+    case "calendar:getGrid": {
+      const viewId = typeof p.viewId === "string" ? p.viewId : null;
+      // `month` is YYYY-MM and is omitted for the current month, which is the
+      // only one the pushed channel carries.
+      const month = typeof p.month === "string" ? p.month : null;
+      const qs = new URLSearchParams();
+      if (viewId) qs.set("viewId", viewId);
+      if (month) qs.set("month", month);
+      const q = qs.toString();
+      return apiFetch<T>(`/api/pco/calendar${q ? `?${q}` : ""}`);
+    }
+    // The org's calendars and tags, for a calendar View's two pickers.
+    case "calendar:sources":
+      return apiFetch<T>("/api/pco/calendar-sources");
+
     // The pre-service checklist, read from the plan's notes in Planning Center.
     case "checklist:get":
       return apiFetch<T>("/api/pco/checklist");
@@ -481,6 +498,17 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "views:setScriptViewLayout": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { scriptViewLayoutId: p.scriptViewLayoutId });
+    }
+
+    // Both lists, always together: the server refuses one without the other,
+    // because a request carrying half of them is a client that has lost state
+    // rather than a partial update.
+    case "views:setCalendarFilters": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, {
+        calendarSources: p.calendarSources,
+        calendarTags: p.calendarTags,
+      });
     }
 
     case "views:setSlots": {

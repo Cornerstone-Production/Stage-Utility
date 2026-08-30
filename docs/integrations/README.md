@@ -9,7 +9,7 @@ countdown, so the app needs it.
 
 | Integration | What it surfaces |
 |---|---|
-| [Planning Center](planning-center.md) | Service plans, live rundown, pre-service countdown |
+| [Planning Center](planning-center.md) | Service plans, live rundown, pre-service countdown, room and event calendar |
 | [ProPresenter](propresenter.md) | Current/next slide, section, thumbnails |
 | [ProdCom](prodcom.md) | Live production transcription strip |
 | [Smaart](smaart.md) | FOH SPL meters (Smaart v8) |

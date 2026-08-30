@@ -211,15 +211,28 @@ export async function readBodyOrEmpty(
   }
 }
 
+/**
+ * Every ViewKind, as a record so the TYPE CHECKER refuses a missing one.
+ *
+ * This was a chain of `v === "..."` comparisons, which compiles perfectly well
+ * with a kind left out — and a kind left out here is a kind the API silently
+ * refuses to create, rejecting the request as malformed. A Record<ViewKind, true>
+ * is the same check the compiler already does for the new-view dialog's labels.
+ */
+const VIEW_KINDS: Record<ViewKind, true> = {
+  slots: true,
+  dashboard: true,
+  stage: true,
+  transcription: true,
+  custom: true,
+  script: true,
+  "spl-rundown": true,
+  calendar: true,
+};
+
 /** Narrow an untrusted body value to a ViewKind. */
 export function isDisplayKind(v: unknown): v is ViewKind {
-  return (
-    v === "slots" ||
-    v === "dashboard" ||
-    v === "stage" ||
-    v === "transcription" ||
-    v === "custom" ||
-    v === "script" ||
-    v === "spl-rundown"
-  );
+  // hasOwn rather than `in`: the value is untrusted, and "toString" is `in`
+  // every object.
+  return typeof v === "string" && Object.hasOwn(VIEW_KINDS, v);
 }

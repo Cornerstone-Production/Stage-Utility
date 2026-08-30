@@ -80,6 +80,6 @@ describe("copyText in a non-secure context", () => {
   test("leaves no textarea behind", async () => {
     document.execCommand = () => true;
     await copyText("http://stage.local/display-1");
-    assert.equal(document.querySelector("textarea"), null);
+    assert.ok(document.querySelector("textarea") === null, "the fallback textarea was left in the document");
   });
 });

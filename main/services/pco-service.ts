@@ -126,6 +126,23 @@ export function withOffset(url: string, offset: number): string {
  * that sends the credentials somewhere else, including through a redirect chain
  * or a URL parser disagreement.
  *
+ * That sentence was FALSE for two years, and the guard written to prove it did
+ * not notice. The path and query used to be spliced back together as a STRING
+ * and handed to `new URL(path, origin)` -- and a path beginning `//` is not a
+ * path to that constructor, it is a PROTOCOL-RELATIVE URL. So
+ * `https://api.planningcenteronline.com//attacker.test/x` passed sameOrigin
+ * honestly (the origin really does match), produced the pathname
+ * `//attacker.test/x`, and re-resolved to `https://attacker.test/x` -- with the
+ * operator's App ID and secret attached. `\\attacker.test` reached the same
+ * place, because WHATWG folds a backslash to a slash for a special scheme, so no
+ * check on the RAW string would have caught it either.
+ *
+ * The fix is to stop round-tripping through a string. Assigning `.pathname` on a
+ * URL object sets a component; it cannot reach the origin, where the two-argument
+ * constructor can. Latent rather than live when found -- nothing was passing a
+ * response-body string in -- but the boundary is the entire justification for
+ * `requestProduct` being public, so it has to be true rather than nearly true.
+ *
  * It also gives static analysis something it can see. CodeQL reads a
  * user-defined type predicate as an ordinary boolean, so the guarded string
  * stayed tainted and js/request-forgery fired at critical on the release PR;
@@ -345,15 +362,17 @@ export function resolvePlanCurrentNext(
   return { currentItemTitle: current?.title ?? null, nextItemTitle: next?.title ?? null };
 }
 
-// Generic JSON:API node from PCO
-interface PcoNode {
+// Generic JSON:API node from PCO. Exported because every PCO product speaks the
+// same JSON:API dialect, so a client for another one (Calendar) parses the same
+// shape rather than declaring its own copy of it.
+export interface PcoNode {
   id: string;
   type?: string;
   attributes: Record<string, unknown>;
   relationships?: Record<string, { data: { id: string; type: string } | null | { id: string; type: string }[] }>;
 }
 
-interface PcoResponse<T extends PcoNode = PcoNode> {
+export interface PcoResponse<T extends PcoNode = PcoNode> {
   data: T | T[];
   included?: PcoNode[];
 }
@@ -436,12 +455,18 @@ class PcoService {
    * hand-written copies of the auth header, and a version pin is only a pin if it
    * is on all of them.
    */
-  private pcoHeaders(appId: string, secret: string): Record<string, string> {
+  private pcoHeaders(appId: string, secret: string, apiVersion: string = PCO_API_VERSION): Record<string, string> {
     const creds = Buffer.from(`${appId}:${secret}`).toString("base64");
     return {
       Authorization: `Basic ${creds}`,
       "Content-Type": "application/json",
-      "X-PCO-API-Version": PCO_API_VERSION,
+      // Defaulted, never optional. Services is the overwhelming majority of the
+      // traffic and pins to PCO_API_VERSION; a caller reaching ANOTHER PCO
+      // product states its own version, because PCO versions each product on its
+      // own date line and the Services date means nothing to Calendar. Sending
+      // no header at all is what this pin exists to stop, so the parameter
+      // cannot express it.
+      "X-PCO-API-Version": apiVersion,
     };
   }
 
@@ -464,8 +489,14 @@ class PcoService {
    * — that constructor re-parses its first argument and reads a leading `//` as
    * an authority, which is the exact bug fixed one commit ago.
    */
-  private pcoFetch(url: string, appId: string, secret: string, init: RequestInit = {}): Promise<Response> {
-    return fetch(pinnedToPco(url), { ...init, headers: this.pcoHeaders(appId, secret) });
+  private pcoFetch(
+    url: string,
+    appId: string,
+    secret: string,
+    init: RequestInit = {},
+    apiVersion?: string,
+  ): Promise<Response> {
+    return fetch(pinnedToPco(url), { ...init, headers: this.pcoHeaders(appId, secret, apiVersion) });
   }
 
   private sleep(ms: number): Promise<void> {
@@ -484,6 +515,7 @@ class PcoService {
     url: string,
     appId: string,
     secret: string,
+    apiVersion?: string,
   ): Promise<PcoResponse<T>> {
     // Every PCO call queues here. Retrying a 429 does not help if the burst that
     // caused it is still in flight, so the cap is what actually prevents one —
@@ -491,10 +523,53 @@ class PcoService {
     // be small.
     const release = await this.acquireSlot();
     try {
-      return await this.requestInner<T>(url, appId, secret);
+      return await this.requestInner<T>(url, appId, secret, apiVersion);
     } finally {
       release();
     }
+  }
+
+  /**
+   * A GET against ANOTHER Planning Center product's API — Calendar, today —
+   * carried by this client's transport.
+   *
+   * PCO's rate limit is per APP, not per product, so a second client with its own
+   * concurrency gate would not be a second budget: it would be the same budget
+   * spent twice as fast, and the cap that exists to prevent a 429 would stop
+   * capping anything. Sharing the transport is the only way the ceiling stays a
+   * ceiling. The retry budget, the backoff, the auth header and the scrubbed
+   * logging come along for the same reason — none of them is worth a second copy.
+   *
+   * `apiVersion` is REQUIRED here, unlike on the internal `request`. PCO versions
+   * each product by date and resolves the header to the newest published version
+   * at or before it; send nothing and you get whatever is configured as the app's
+   * default in a developer console outside this repository. A caller reaching a
+   * new product must therefore state which contract it was written against.
+   *
+   * `url` is REBUILT on the constant's origin before it is used, exactly as
+   * pcoUrlFrom does for a link out of a response body. Every request from here
+   * carries the operator's App ID and secret, and this is the first PUBLIC way
+   * into the credentialed fetch — until now the invariant "no outside string
+   * reaches it" held because `request` was private and every URL was built in
+   * this file. A docstring asking callers to behave would have traded that for a
+   * rule someone has to remember; rebuilding the host from the constant keeps it
+   * a property of the code, and is the documented remediation for the
+   * js/request-forgery alerts this file has already collected once.
+   *
+   * @throws when `url` is not on PCO's origin, rather than sending credentials.
+   */
+  async requestProduct<T extends PcoNode = PcoNode>(
+    url: string,
+    appId: string,
+    secret: string,
+    apiVersion: string,
+  ): Promise<PcoResponse<T>> {
+    // The origin is the CONSTANT's; only the path and query come from the
+    // caller. There is no string it can pass that sends the credentials
+    // elsewhere, including through a parser disagreement.
+    const safe = pcoUrlFrom(url, PCO_BASE);
+    if (!safe) throw new Error(`[pco] refusing to send credentials to ${scrub(url)}`);
+    return this.request<T>(safe, appId, secret, apiVersion);
   }
 
   /** Wait for a free request slot; resolves with the function that frees it. */
@@ -519,6 +594,7 @@ class PcoService {
     url: string,
     appId: string,
     secret: string,
+    apiVersion?: string,
   ): Promise<PcoResponse<T>> {
     if (DEBUG_PCO) console.log(`[pco] GET ${scrub(url)}`);
     // Retry transient failures (429 rate-limit, 5xx, network) with backoff. PCO
@@ -527,7 +603,7 @@ class PcoService {
     for (let attempt = 0; ; attempt++) {
       let response: Response;
       try {
-        response = await this.pcoFetch(url, appId, secret);
+        response = await this.pcoFetch(url, appId, secret, {}, apiVersion);
       } catch (err) {
         if (attempt >= MAX_RETRIES) throw err;
         await this.sleep(this.backoffMs(attempt, null));

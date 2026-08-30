@@ -119,3 +119,51 @@ export function zonedMinuteOfDay(ms: number, tz: TimeZone = appTimeZone()): numb
   const p = zonedParts(ms, tz);
   return p.hour * 60 + p.minute;
 }
+
+/** The zone's offset from UTC at `ms`, in milliseconds (east of UTC is positive). */
+function zoneOffsetMs(ms: number, tz: TimeZone): number {
+  const p = zonedParts(ms, tz);
+  // zonedParts resolves to the minute, so compare against a minute-truncated
+  // instant or every offset comes out seconds wrong.
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute) - Math.floor(ms / 60_000) * 60_000;
+}
+
+/**
+ * The instant local midnight begins on `dateKey` ("YYYY-MM-DD") in `tz`.
+ *
+ * The inverse of {@link zonedDateKey}, and the reason it lives here rather than
+ * beside its caller: turning a wall-clock date back into a point in time needs
+ * the zone's offset AT THAT DATE, and a second private implementation of that is
+ * exactly the kind of copy this repository has watched drift.
+ *
+ * The offset is read twice because the first read happens at the wrong instant
+ * whenever the guess lands on the far side of a DST change. Both candidates are
+ * then checked against the zone, because a handful of zones (Santiago, Beirut)
+ * SKIP midnight on the spring-forward date — there is no 00:00 that day, and the
+ * day begins at the instant the clocks jumped.
+ *
+ * @throws if `dateKey` is not a bare YYYY-MM-DD. An instant would silently work
+ *   under the regexless version of this and place the day an offset away.
+ */
+export function startOfZonedDay(dateKey: string, tz: TimeZone = appTimeZone()): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!m) throw new Error(`startOfZonedDay expects a YYYY-MM-DD date, got "${dateKey}"`);
+  const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+
+  // Exactly two candidates, because there are exactly two offsets in play: the
+  // one in force at the naive guess, and the one in force where that guess
+  // lands. They are equal on all but two days a year.
+  const naive = wall - zoneOffsetMs(wall, tz);
+  const corrected = wall - zoneOffsetMs(naive, tz);
+  const earlier = Math.min(naive, corrected);
+  const later = Math.max(naive, corrected);
+
+  // The EARLIEST instant that reads as this date locally — on a fall-back date
+  // that is the first of the two 00:00s, not the second.
+  if (zonedDateKey(earlier, tz) === dateKey) return earlier;
+  if (zonedDateKey(later, tz) === dateKey) return later;
+  // Neither reads as this date, which happens only where the zone SKIPS midnight
+  // (Santiago, Beirut): the day has no 00:00 and begins when the clocks jumped,
+  // so the later candidate is the first instant on it.
+  return later;
+}

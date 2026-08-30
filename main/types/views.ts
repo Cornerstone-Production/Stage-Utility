@@ -8,6 +8,8 @@
 // re-exported from stage.ts, so no import anywhere had to change.
 
 
+import type { CalendarSelection } from "./calendar.js";
+
 export type ViewKind =
   | "slots"
   | "dashboard"
@@ -15,7 +17,30 @@ export type ViewKind =
   | "transcription"
   | "custom"
   | "script"
-  | "spl-rundown";
+  | "spl-rundown"
+  | "calendar";
+
+/** Empty only when `T` names every ViewKind; otherwise `never`, which nothing
+ *  can be assigned to. */
+type Exhaustive<T extends readonly ViewKind[]> = Exclude<ViewKind, T[number]> extends never ? T : never;
+
+/**
+ * Identity over a list of kinds, but it will not compile unless the list names
+ * EVERY ViewKind.
+ *
+ * A `ViewKind[]` annotation refuses a kind that does not exist and says nothing
+ * about one left out — and one left out is the failure that has actually
+ * happened here: the new-view dialog's order list was retyped from memory, lost
+ * "stage" and "spl-rundown", and two kinds became uncreatable with nothing
+ * failing to say so. Wrap the list in this and the build names the kind that was
+ * forgotten.
+ *
+ * Adding a kind to {@link ViewKind} should break every call site. That is the
+ * point: each one is a place a kind has to be handled.
+ */
+export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Exhaustive<T>): T {
+  return kinds;
+}
 
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
@@ -115,6 +140,26 @@ export interface View {
    * about it.
    */
   scriptViewLayoutId?: string | null;
+  /**
+   * Which of the org's calendars a "calendar" View draws. ABSENT OR EMPTY MEANS
+   * EVERY CALENDAR.
+   *
+   * On the VIEW rather than in settings, so two calendar views on two screens
+   * can show two departments. That is the whole point of the filter: the busiest
+   * observed day held thirteen events unfiltered and three under one department's
+   * tag.
+   *
+   * Empty meaning "everything" is the OPPOSITE of the checklist's rule, where
+   * nothing chosen means the feature is off. The difference is deliberate: a
+   * checklist that fills itself with every note on the plan is noise, while a
+   * calendar view showing nothing is simply broken, and a View is created before
+   * anyone has opened its settings.
+   */
+  calendarSources?: CalendarSelection[] | null;
+  /** Which tags a "calendar" View draws. Absent or empty means every tag, for
+   *  the reason above. PCO composes several tags as OR within a tag group and
+   *  AND across groups, which is why the picker groups them. */
+  calendarTags?: CalendarSelection[] | null;
   /**
    * Bumped on every layout save. An editor sends back the revision it opened, so
    * a save built on a layout someone else has since replaced can be detected

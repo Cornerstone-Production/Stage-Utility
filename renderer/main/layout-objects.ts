@@ -795,6 +795,7 @@ export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = [
   "custom",
   "script",
   "spl-rundown",
+  "calendar",
 ];
 
 export function isEmbeddableViewKind(kind: ViewKind): boolean {

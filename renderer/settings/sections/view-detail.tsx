@@ -27,6 +27,7 @@ import { SlotEditor } from "./slots-section";
 import { LayoutEditor } from "../../editor/layout-editor";
 import { ViewPreview } from "./view-preview";
 import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
+import { CalendarSources } from "./calendar-sources";
 import { viewSurface } from "@main/types/views";
 
 const PREVIEW_ASPECTS = [
@@ -300,6 +301,17 @@ export function ViewDetail({
             The Script view renders the active plan's rundown — the same table as the ScriptView
             pages, following whichever plan the app is set to. Max SPL per item lives on the
             SPL rundown view.
+          </p>
+        </>
+      ) : view.kind === "calendar" ? (
+        <>
+          <Separator />
+          <CalendarSources view={view} pcoConfigured={stageState.pcoConfigured ?? false} />
+          <p className="text-caption2 text-fg-muted">
+            The calendar view draws this month from Planning Center Calendar, six weeks at a time,
+            and marks whatever is running now. There is no booking-versus-event distinction because
+            Planning Center does not model one — a room or a van reserved for a meeting carries the
+            tag of whoever reserved it, so no rule separates them.
           </p>
         </>
       ) : (

@@ -13,7 +13,7 @@ import { Dialog, Input, Radio, RadioGroup, Select, SelectTrigger, SelectContent,
 import { cn } from "../../lib/cn";
 import { dashboardTemplate, confidenceMonitorTemplate } from "../../editor/layout-editor";
 import type { SectionHandlers } from "../types";
-import type { ViewSurface } from "@main/types/views";
+import { everyViewKind, type ViewSurface } from "@main/types/views";
 
 /** What a custom view is FOR, in the operator's words rather than the schema's.
  *  Data rather than two hand-written blocks: they had drifted to differing
@@ -42,8 +42,23 @@ const KIND_LABELS: Record<ViewKind, string> = {
   custom: "Custom Layout",
   script: "Script",
   "spl-rundown": "SPL Rundown",
+  calendar: "Calendar",
 };
-const KIND_ORDER: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "script", "spl-rundown", "custom"];
+// KIND_ORDER is the list the dialog actually renders, and it used to be a plain
+// ViewKind[] - a list a kind can drop out of with nothing failing, which is
+// precisely what happened to "stage" and "spl-rundown". everyViewKind refuses to
+// compile if a kind is missing. The source-text scan in new-view-dialog.test.ts
+// stays as a second, independent net.
+const KIND_ORDER = everyViewKind([
+  "slots",
+  "dashboard",
+  "stage",
+  "transcription",
+  "script",
+  "spl-rundown",
+  "calendar",
+  "custom",
+]);
 
 type StartFrom = "blank" | "dashboard" | "confidence";
 

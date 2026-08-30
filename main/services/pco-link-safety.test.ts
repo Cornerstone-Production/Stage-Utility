@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { sameOrigin, pcoUrlFrom, nextOffset, withOffset, pinnedToPco } from "./pco-service.js";
+import { sameOrigin, pcoUrlFrom, nextOffset, pcoService, withOffset, pinnedToPco } from "./pco-service.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -160,7 +160,6 @@ describe("the URL actually handed to fetch()", () => {
     // from a PCO body that reaches fetch(). pcoUrlFrom survives only to compare
     // against, for a log line.
     const src = fs.readFileSync(path.join(HERE, "pco-service.ts"), "utf8");
-    const isComment = (l: string) => /^\s*(\/\/|\*|\/\*)/.test(l);
     const assignments = src
       .split("\n")
       .filter((l) => !isComment(l))
@@ -175,22 +174,272 @@ describe("the URL actually handed to fetch()", () => {
   });
 });
 
-describe("scrub coverage in pco-service.ts", () => {
-  it("every console line interpolates only scrubbed values", () => {
-    // Matched on the interpolation, not on the word "scrub": a comment saying the
-    // right thing cannot satisfy this. An EXACT check over every log site, so a
-    // newly-added unscrubbed one fails rather than riding along under a floor.
-    const src = fs.readFileSync(path.join(HERE, "pco-service.ts"), "utf8");
-    const lines = src.split("\n");
-    const offenders: string[] = [];
-    lines.forEach((line, i) => {
-      if (!/console\.(log|warn|error)\(/.test(line)) return;
-      // Every `${...}` in the line must have scrub( inside it.
-      for (const m of line.matchAll(/\$\{([^}]*)\}/g)) {
-        if (!m[1].includes("scrub(")) offenders.push(`${i + 1}: ${line.trim()}`);
+/**
+ * Every PCO client, not just the first one.
+ *
+ * These scans used to name pco-service.ts and nothing else. A second client
+ * (/calendar/v2) arrived, and a copy of the rules arrived with it in that
+ * client's own test file — with a comment-stripping regex and a line filter that
+ * had already drifted from these, so the rule had two definitions and two
+ * coverages on its first day. That is the repeated-pattern drift CLAUDE.md calls
+ * this repo's most expensive recurring mistake, arriving inside a guard written
+ * to prevent it. ONE definition, applied to a list; a third client is one
+ * filename.
+ */
+const PCO_CLIENTS = ["pco-service.ts", "pco-calendar-service.ts"] as const;
+
+/** A line that is only prose. Not a wholesale comment strip — stripping is how a
+ *  scan in this repo once swallowed real code and hid a route that existed. */
+const isComment = (l: string) => /^\s*(\/\/|\*|\/\*)/.test(l);
+
+function linesOf(file: string): string[] {
+  return fs.readFileSync(path.join(HERE, file), "utf8").split("\n");
+}
+
+/**
+ * One console call as SOURCE TEXT, however many lines it spans.
+ *
+ * This scan used to look at single lines, which meant a call written as
+ *
+ *   console.warn(
+ *     `[pco] ... ${value} ...`,
+ *   );
+ *
+ * was invisible to it: the line matching `console.warn(` holds no interpolation,
+ * and the line holding the interpolation does not match. Both PCO clients
+ * contain exactly such a call, so the rule had a shape it structurally could not
+ * see -- found by breaking one on purpose and watching the guard stay green,
+ * which is the only way any of these have ever been found here.
+ *
+ * The block runs to the first line containing `);`, capped. Over-inclusion is
+ * deliberate: sweeping in an extra line can only ever ADD an interpolation to
+ * check, so the error direction is a false FAILURE, which someone reads. Ending
+ * the block early would drop one, which nobody does.
+ */
+function consoleCalls(lines: string[]): { line: number; text: string }[] {
+  const calls: { line: number; text: string }[] = [];
+  lines.forEach((line, i) => {
+    if (isComment(line)) return;
+    if (!/console\.(log|warn|error)\s*\(/.test(line)) return;
+    const block: string[] = [];
+    for (let j = i; j < lines.length && j < i + 10; j++) {
+      block.push(lines[j]);
+      if (lines[j].includes(");")) break;
+    }
+    calls.push({ line: i + 1, text: block.join("\n") });
+  });
+  return calls;
+}
+
+describe("scrub coverage in every PCO client", () => {
+  for (const file of PCO_CLIENTS) {
+    it(`${file}: every console call interpolates only scrubbed values`, () => {
+      // Matched on the interpolation, not on the word "scrub": a comment saying
+      // the right thing cannot satisfy this. An EXACT check over every log site,
+      // so a newly-added unscrubbed one fails rather than riding along under a
+      // floor.
+      const offenders: string[] = [];
+      for (const call of consoleCalls(linesOf(file))) {
+        // Every `${...}` in the call must have scrub( inside it.
+        for (const m of call.text.matchAll(/\$\{([^}]*)\}/g)) {
+          if (!m[1].includes("scrub(")) offenders.push(`${call.line}: ${m[0]}`);
+        }
       }
+      assert.deepEqual(offenders, [], `${file}: these log sites interpolate unscrubbed values`);
     });
-    assert.deepEqual(offenders, [], "these log sites interpolate unscrubbed values");
+  }
+
+  it("and the scan can actually SEE a call that spans several lines", () => {
+    // The guard on the guard. Both clients contain a multi-line console.warn; a
+    // line-based scan reports zero interpolations for it and passes on anything.
+    const seen = PCO_CLIENTS.map((f) => consoleCalls(linesOf(f)))
+      .flat()
+      .filter((c) => c.text.includes("\n"));
+    assert.ok(seen.length >= 2, `found ${seen.length} multi-line console calls; expected at least 2`);
+    for (const c of seen) {
+      assert.match(c.text, /\$\{/, `a multi-line call was captured without its body: ${c.text}`);
+    }
+  });
+});
+
+describe("pagination in every PCO client", () => {
+  for (const file of PCO_CLIENTS) {
+    it(`${file}: carries an integer, never a URL from the response body`, () => {
+      // An offset cannot carry a host, a path or a scheme. This is what makes
+      // following a page structurally safe rather than safe-because-checked.
+      // The line filter is the UNION of the two this file used to run, so
+      // widening it can only ever add coverage.
+      const offenders: string[] = [];
+      linesOf(file).forEach((line, i) => {
+        if (isComment(line)) return;
+        if (!/\burl\s*=\s*/.test(line)) return;
+        if (!/\blinks\b|\bnext\b|\boffset\b/.test(line)) return;
+        if (!line.includes("withOffset(")) offenders.push(`${i + 1}: ${line.trim()}`);
+      });
+      assert.deepEqual(offenders, [], `${file}: these build a request URL out of a response body`);
+    });
+  }
+});
+
+/**
+ * Candidates whose ORIGIN genuinely is PCO's, and whose PATH then tries to be a
+ * host.
+ *
+ * `sameOrigin` passes every one of these honestly. The hole was downstream:
+ * pcoUrlFrom used to splice pathname + search into a STRING and hand it to
+ * `new URL(path, origin)`, and a "path" beginning `//` is not a path to that
+ * constructor -- it is a protocol-relative URL, so the origin argument is
+ * ignored and the credentials follow the attacker's host.
+ *
+ * The list is deliberately wider than the one bug. The guard this replaces
+ * covered a look-alike host, an off-origin host, a scheme downgrade and a
+ * non-URL, and its author plainly believed that was exhaustive -- it was the
+ * tenth guard in this repo to pass on the exact defect it was written for. Four
+ * of the ten below got through before the fix. The other six never did, and are
+ * kept precisely because "we tried it and it was already safe" is the part that
+ * is otherwise lost the moment the session ends.
+ */
+const PATH_THAT_WANTS_TO_BE_A_HOST = [
+  // Leaked before the fix.
+  "//attacker.test/x",
+  "///attacker.test/x",
+  "//user:pw@attacker.test/x",
+  // Leaked before the fix, and no check on the RAW string would have caught it:
+  // WHATWG folds a backslash to a slash for a special scheme, so this ARRIVES as
+  // a `//` path however it was written.
+  "/\\\\attacker.test/x",
+  // Did not leak, before or after. Kept as evidence they were tried.
+  "/@attacker.test/x",
+  "/%2f%2fattacker.test/x",
+  "/%5c%5cattacker.test/x",
+  "/%0a//attacker.test/x",
+  "/../../attacker.test/x",
+  "/.//attacker.test/x",
+] as const;
+
+describe("a path that tries to be a host", () => {
+  it("never leaves PCO's origin, whatever the path looks like", () => {
+    for (const path of PATH_THAT_WANTS_TO_BE_A_HOST) {
+      const out = pcoUrlFrom(`https://api.planningcenteronline.com${path}`, PCO);
+      assert.ok(out, `pcoUrlFrom returned null for ${path}`);
+      assert.equal(
+        new URL(out).origin,
+        "https://api.planningcenteronline.com",
+        `credentials would go off-origin for ${path}: ${out}`,
+      );
+    }
+  });
+
+  it("and the whole way through requestProduct, to the URL fetch is handed", async () => {
+    // Asserted at the SINK. The unit test above pins the helper; this pins that
+    // nothing between it and fetch() undoes the work -- the helper was correct
+    // for two years by inspection and wrong in practice.
+    const realFetch = globalThis.fetch;
+    const asked: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      asked.push(url);
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      for (const path of PATH_THAT_WANTS_TO_BE_A_HOST) {
+        await pcoService.requestProduct(
+          `https://api.planningcenteronline.com${path}`,
+          "app",
+          "secret",
+          "2018-11-01",
+        );
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    assert.equal(asked.length, PATH_THAT_WANTS_TO_BE_A_HOST.length);
+    for (const url of asked) {
+      assert.equal(
+        new URL(url).origin,
+        "https://api.planningcenteronline.com",
+        `a credentialed request went to ${new URL(url).origin}`,
+      );
+    }
+  });
+});
+
+describe("requestProduct, the one PUBLIC way into a credentialed fetch", () => {
+  // Until a second PCO product needed the transport, "no outside string reaches
+  // a credentialed fetch" held because `request` was private and every URL in
+  // pco-service.ts was built from PCO_BASE. requestProduct is public on an
+  // exported singleton and takes a url, so the invariant has to be enforced
+  // rather than assumed: it rebuilds the host from the constant, exactly as
+  // pcoUrlFrom does, and refuses anything that is not PCO's.
+  //
+  // Driven for real. A docstring asking callers to behave would pass a source
+  // scan and protect nothing.
+
+  it("refuses to send credentials to a look-alike host", async () => {
+    const realFetch = globalThis.fetch;
+    let reached = false;
+    globalThis.fetch = (async () => {
+      reached = true;
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      for (const bad of [
+        "https://api.planningcenteronline.com.evil.example/calendar/v2/event_instances",
+        "https://evil.example/calendar/v2/event_instances",
+        "http://api.planningcenteronline.com/calendar/v2/event_instances",
+        "not a url",
+      ]) {
+        await assert.rejects(
+          () => pcoService.requestProduct(bad, "app", "secret", "2018-11-01"),
+          /refusing to send credentials/,
+          `credentials were sent to ${bad}`,
+        );
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    assert.equal(reached, false, "a request went out to a non-PCO host");
+  });
+
+  it("takes the host from the constant, not from the caller's string", async () => {
+    const realFetch = globalThis.fetch;
+    let asked = "";
+    globalThis.fetch = (async (url: string) => {
+      asked = url;
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      await pcoService.requestProduct(
+        "https://api.planningcenteronline.com/calendar/v2/calendars?per_page=100",
+        "app",
+        "secret",
+        "2018-11-01",
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    assert.equal(new URL(asked).origin, "https://api.planningcenteronline.com");
+    assert.equal(new URL(asked).pathname, "/calendar/v2/calendars");
+  });
+});
+
+describe("the calendar client owns no transport of its own", () => {
+  it("calls fetch() nowhere", () => {
+    // The gate, the retry budget and the backoff live in pco-service.ts and are
+    // shared, not copied — PCO's rate limit is per APP, so a second ungated
+    // request path would spend one budget twice as fast and the cap would stop
+    // capping anything. A direct fetch here is how that happens quietly.
+    const offenders: string[] = [];
+    linesOf("pco-calendar-service.ts").forEach((line, i) => {
+      if (isComment(line)) return;
+      if (/\bfetch\s*\(/.test(line)) offenders.push(`${i + 1}: ${line.trim()}`);
+    });
+    assert.deepEqual(offenders, [], "these bypass the shared PCO transport");
   });
 });
 
@@ -248,19 +497,6 @@ describe("no response-body URL is followed", () => {
   const src = fs.readFileSync(path.join(HERE, "pco-service.ts"), "utf8");
   const lines = src.split("\n");
 
-  it("pagination carries an integer, not a URL", () => {
-    // An offset cannot carry a host, a path, or a scheme. This is what makes
-    // following a page structurally safe rather than safe-because-checked.
-    const offenders: string[] = [];
-    lines.forEach((line, i) => {
-      if (!/\burl\s*=\s*/.test(line)) return;
-      if (!/\bnext\b|\boffset\b/.test(line)) return;
-      if (/^\s*(\/\/|\*)/.test(line)) return;
-      if (!line.includes("withOffset(")) offenders.push(`${i + 1}: ${line.trim()}`);
-    });
-    assert.deepEqual(offenders, [], "these build a request URL out of a response body");
-  });
-
   it("and there are exactly the three sites we know about", () => {
     // One live-action URL plus two pagination follows. A fourth appearing
     // without a guard fails the test above; a fourth appearing WITH one fails
@@ -294,7 +530,6 @@ describe("no response-body URL is followed", () => {
     // there, a comment SATISFIED a scan. Dropping comment lines rather than
     // stripping comments wholesale, because stripping is how a scan in this repo
     // once swallowed real code and hid a route that existed.
-    const isComment = (l: string) => /^\s*(\/\/|\*|\/\*)/.test(l);
     const body = lines.filter((l) => !isComment(l));
 
     // `\bfetch\(` is case-sensitive, so `this.pcoFetch(` is not counted here.

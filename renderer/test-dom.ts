@@ -28,6 +28,11 @@ const EXPOSED = [
   "HTMLButtonElement",
   "Element",
   "Node",
+  // Radix's focus scope walks the tree with document.createTreeWalker and passes
+  // NodeFilter.SHOW_ELEMENT, so ANY component that opens a popover, dialog or
+  // dropdown throws "NodeFilter is not defined" from inside Radix on mount —
+  // again pointing nowhere near the missing global.
+  "NodeFilter",
   "Event",
   "KeyboardEvent",
   "MouseEvent",

@@ -22,6 +22,7 @@ import { DashboardView } from "./dashboard-view";
 import { StageDisplayView } from "./stage-display-view";
 import { TranscriptionView } from "./transcription-view";
 import { SplRundownView } from "./spl-rundown-view";
+import { CalendarView } from "./calendar-view";
 import { SlotsColumns } from "../components/slots-columns";
 
 /**
@@ -140,6 +141,31 @@ export function EmbeddedView({
 
     case "spl-rundown":
       return perDisplay("SPL rundown", (id) => <SplRundownView displayId={id} />);
+
+    case "calendar":
+      // Configured per VIEW, not per display, so unlike the three above it draws
+      // in any tile — which is the point: a producer multiview should be able to
+      // carry the month beside everything else.
+      //
+      // now + skewMs, not Date.now(): this app has one clock, corrected against
+      // the server, and "which square is today" must be asked on that one. The
+      // component's own minute tick is skipped while a value is supplied, since
+      // ctx.now already ticks.
+      //
+      // No font-size opt-out is needed for the EmbedFontBox the callers wrap
+      // this in: every text node in the calendar carries its own absolute size
+      // (text-caption2 is 11px), so the inherited size reaches nothing. That is
+      // the property the six-row grid depends on — an inherited font large
+      // enough to read from a stage would overflow the squares rather than
+      // shrink them, and the grid is an office display read from a desk.
+      return (
+        <CalendarView
+          viewId={view.id}
+          pcoConfigured={ctx.state.pcoConfigured ?? false}
+          interactive={ctx.interactive}
+          nowMs={ctx.now + ctx.skewMs}
+        />
+      );
 
     case "custom": {
       const objects = [...(view.layout?.objects ?? [])]

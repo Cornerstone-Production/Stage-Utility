@@ -12,6 +12,7 @@ import { StageDisplayView } from "./stage-display-view";
 import { TranscriptionView } from "./transcription-view";
 import { ScriptView } from "./script-view";
 import { SplRundownView } from "./spl-rundown-view";
+import { CalendarView } from "./calendar-view";
 import { LayoutRenderer } from "./layout-renderer";
 import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface } from "@main/types/views";
@@ -590,6 +591,28 @@ export function StageView() {
         <StageErrorBoundary>
           <KioskFrame>
             <SplRundownView displayId={displayId} />
+          </KioskFrame>
+        </StageErrorBoundary>
+      );
+
+    case "calendar":
+      return (
+        <StageErrorBoundary>
+          <KioskFrame>
+            {/* CalendarMonth sizes to h-full so the same component can live
+                inside a layout object; the screen height and the safe-area
+                insets belong to this route, which is what KioskFrame is. */}
+            <CalendarView
+              viewId={resolved?.viewId ?? previewViewId ?? null}
+              pcoConfigured={state.pcoConfigured ?? false}
+              // The same answer every control on every surface uses. False on a
+              // wall display, so it gets no chevrons and cannot be left on the
+              // wrong month by a passer-by.
+              interactive={capabilityLive(
+                contextForOutput(currentDisplay?.mode, !!previewViewId),
+                "control",
+              )}
+            />
           </KioskFrame>
         </StageErrorBoundary>
       );
