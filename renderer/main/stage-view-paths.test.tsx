@@ -68,16 +68,24 @@ let stateMode: StateMode = "ok";
   return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
 };
 
-/** Six weeks of empty squares — the smallest thing CalendarMonth can draw. */
+/**
+ * Six weeks of empty squares — the smallest thing CalendarMonth can draw.
+ *
+ * Real consecutive dates spanning the month boundaries, the way the endpoint
+ * answers, because CalendarMonth keys its squares by date: a wrapping `i % 31`
+ * repeated eleven of them and put 22 React duplicate-key warnings into every run
+ * of the whole suite. The squares outside August carry inMonth false, which is
+ * what the renderer dims.
+ */
 const CALENDAR_GRID = {
   monthLabel: "August 2026",
   zone: "America/Chicago",
   unplaceable: 0,
-  days: Array.from({ length: 42 }, (_, i) => ({
-    date: `2026-08-${String((i % 31) + 1).padStart(2, "0")}`,
-    inMonth: true,
-    events: [],
-  })),
+  // Sun 26 Jul 2026 through Sat 5 Sep — six weeks starting on a Sunday.
+  days: Array.from({ length: 42 }, (_, i) => {
+    const date = new Date(Date.UTC(2026, 6, 26) + i * 86_400_000).toISOString().slice(0, 10);
+    return { date, inMonth: date.startsWith("2026-08"), events: [] };
+  }),
 };
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -550,8 +558,12 @@ describe("StageView keeps controls dead unless the screen is a panel", () => {
 describe("StageView honours a display's hidden top bar", () => {
   // The bar has SIX render sites in this component. Gating one of them is how
   // five walls keep a bar the operator turned off and nobody notices for a
-  // month — so this is a TABLE over every screen a display can land on, not a
-  // spot check on whichever one happened to be edited.
+  // month — so this is a TABLE over every screen a real display can land on,
+  // not a spot check on whichever one happened to be edited.
+  //
+  // Five of the six are below. The sixth, view-missing, is preview-only and so
+  // can never see the flag set; it has its own case after the table, which says
+  // why rather than leaving it looking like a hole.
   //
   // The observable is the bar's own context label, "<service>: <plan>", which
   // nothing else on any of these screens draws. Not a class and not a test id:
@@ -647,6 +659,27 @@ describe("StageView honours a display's hidden top bar", () => {
       resolvedByOutput: { "preview-v1": resolved({ hideTopBar: true }) },
     }));
     assert.equal(hasTopBar(c), true, "a preview lost its bar to an output's toggle");
+  });
+
+  test("the view-missing screen keeps its bar, which is the sixth render site", async () => {
+    // The one KioskTopBar site the table above cannot reach, and the reason is
+    // worth stating rather than leaving as an apparent hole: `view-missing` is
+    // reachable ONLY from a "/preview-…" slug, and in a preview `resolved` is
+    // null, so hideTopBar is forced false there. Its gate can never fire true.
+    //
+    // So this asserts the half that CAN regress — that the screen still draws a
+    // bar at all. Route hideTopBar off the raw output instead of the
+    // preview-nulled `resolved` and this is the screen that loses one.
+    const c = await showScreen("/preview-gone", stageState({
+      views: [],
+      outputs: [
+        { id: "display-1", name: "Stage left", viewId: "v1" },
+        { id: "preview-gone", name: "Not a real screen", viewId: null },
+      ],
+      resolvedByOutput: { "preview-gone": resolved({ viewId: null, hideTopBar: true }) },
+    }));
+    assert.ok(says(c, "View not found"), c.textContent ?? "");
+    assert.equal(hasTopBar(c), true, "the view-missing screen lost its bar to an output's toggle");
   });
 
   test("a hidden bar is not a lock, and a lock is not a hidden bar", async () => {

@@ -18,10 +18,12 @@
 /**
  * The kiosk chrome a screen draws around whatever it is showing.
  *
- * One shape rather than the same fields repeated on five arms: every arm that
- * draws a top bar gets all of it or none of it, so a sixth cannot be added
- * half-wired. `hideTopBar` was added here for exactly that reason — the bar had
- * six render sites, and gating one of them is how five walls keep it.
+ * One shape rather than the same fields repeated on five arms. It is not the
+ * type alone that stops a sixth arm being added half-wired — the single
+ * ScreenTopBar below is — but an arm that omits this shape cannot be handed to
+ * it without failing the build, which is the half worth having. `hideTopBar`
+ * was added here for that reason: the bar had six render sites, and gating one
+ * of them is how five walls keep a bar the operator turned off.
  */
 export interface ScreenChrome {
   displayName: string | null;

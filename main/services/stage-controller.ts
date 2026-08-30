@@ -2391,8 +2391,41 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:rename — output ${id} not found`);
     }
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, name: trimmed } : o));
-    console.log(`[stage-controller] renameOutput id=${scrub(id)} name="${scrub(trimmed)}"`);
+    return this.commitOutputPatch(
+      id,
+      { name: trimmed },
+      `[stage-controller] renameOutput id=${scrub(id)} name="${scrub(trimmed)}"`,
+    );
+  }
+
+  /**
+   * Write fields onto one Output and push the result everywhere it has to go.
+   *
+   * The tail every single-field output mutator shared, verbatim, in SIX places:
+   * patch the array, persist, re-resolve so each kiosk's ResolvedOutput
+   * descriptor follows, broadcast, return. Extracted when "hide the top bar"
+   * would have made it a seventh — the duplication this repository pays for
+   * most, and the one whose copies drift. A caller that refuses some values
+   * (setOutputView, setOutputMode, setOutputSlug) validates first and then comes
+   * here.
+   *
+   * Deliberately NOT used by the three remaining `settingsStore.patch({ outputs })`
+   * calls: the legacy migration writes views alongside, removeView unroutes many
+   * outputs at once and touches slots, and removeOutput filters the array rather
+   * than patching one entry. Folding those in would mean a flag argument per
+   * caller, which is how a helper stops being simpler than what it replaced.
+   *
+   * `recomputeResolved` is not optional and not a caller's choice: an Output
+   * field the kiosk reads lives on ResolvedOutput too, so skipping it leaves
+   * every display rendering the previous value.
+   */
+  private async commitOutputPatch(
+    id: string,
+    patch: Partial<Output>,
+    logLine: string,
+  ): Promise<StageState> {
+    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, ...patch } : o));
+    console.log(logLine);
     this.state = { ...this.state, outputs };
     await settingsStore.patch({ outputs });
     this.recomputeResolved();
@@ -2425,15 +2458,11 @@ export class StageController {
     const verdict = validateSlug(trimmed, taken);
     if (!verdict.ok) throw new Error(verdict.reason);
 
-    const outputs = this.state.outputs.map((o) =>
-      o.id === id ? { ...o, slug: trimmed === "" ? undefined : trimmed } : o,
+    return this.commitOutputPatch(
+      id,
+      { slug: trimmed === "" ? undefined : trimmed },
+      `[stage-controller] setOutputSlug id=${scrub(id)} slug="${scrub(trimmed)}"`,
     );
-    console.log(`[stage-controller] setOutputSlug id=${scrub(id)} slug="${scrub(trimmed)}"`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
   }
 
   /** Route an output to a View (or null to unroute). The recall operation. */
@@ -2468,13 +2497,11 @@ export class StageController {
         );
       }
     }
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, viewId } : o));
-    console.log(`[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitOutputPatch(
+      id,
+      { viewId },
+      `[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`,
+    );
   }
 
   /**
@@ -2498,13 +2525,11 @@ export class StageController {
       }
     }
 
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, mode } : o));
-    console.log(`[stage-controller] setOutputMode output=${scrub(id)} → ${scrub(mode)}`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitOutputPatch(
+      id,
+      { mode },
+      `[stage-controller] setOutputMode output=${scrub(id)} → ${scrub(mode)}`,
+    );
   }
 
   /**
@@ -2542,13 +2567,11 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:setBlackout — output ${id} not found`);
     }
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, blackout } : o));
-    console.log(`[stage-controller] setOutputBlackout output=${scrub(id)} → ${scrub(blackout ? "ON" : "off")}`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitOutputPatch(
+      id,
+      { blackout },
+      `[stage-controller] setOutputBlackout output=${scrub(id)} → ${scrub(blackout ? "ON" : "off")}`,
+    );
   }
 
   /** Lock/unlock an output's kiosk chrome (hides the QR/settings + home logo links
@@ -2557,13 +2580,11 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:setLocked — output ${id} not found`);
     }
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, locked } : o));
-    console.log(`[stage-controller] setOutputLocked output=${scrub(id)} → ${scrub(locked ? "LOCKED" : "unlocked")}`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitOutputPatch(
+      id,
+      { locked },
+      `[stage-controller] setOutputLocked output=${scrub(id)} → ${scrub(locked ? "LOCKED" : "unlocked")}`,
+    );
   }
 
   /** Show or hide an output's kiosk top bar (brand, plan context and QR). Per
@@ -2573,13 +2594,11 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:setHideTopBar — output ${id} not found`);
     }
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, hideTopBar } : o));
-    console.log(`[stage-controller] setOutputHideTopBar output=${scrub(id)} → ${scrub(hideTopBar ? "HIDDEN" : "shown")}`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitOutputPatch(
+      id,
+      { hideTopBar },
+      `[stage-controller] setOutputHideTopBar output=${scrub(id)} → ${scrub(hideTopBar ? "HIDDEN" : "shown")}`,
+    );
   }
 
   /** Reorder outputs to match the given id order (drag-and-drop). */
