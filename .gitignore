@@ -1,5 +1,9 @@
 # Dependencies
-node_modules/
+# No trailing slash, deliberately. `node_modules/` matches a DIRECTORY only, so a
+# symlink named node_modules slips straight past it -- which is how one pointing
+# at an absolute path on a developer's machine was committed to beta by a
+# `git add -A`. Without the slash this matches both.
+node_modules
 
 # Build output
 build/
