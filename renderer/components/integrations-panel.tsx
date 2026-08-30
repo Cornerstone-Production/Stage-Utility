@@ -1,6 +1,5 @@
 import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
-import { Tooltip } from "./ui/tooltip";
 import { useStageState } from "../main/use-stage-state";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { usePropInstances } from "../main/use-dashboard-state";
@@ -15,6 +14,8 @@ import { ScoresTeamsPanel } from "../settings/panels/scores-teams-panel";
 import { RossTalkTargetsPanel } from "./rosstalk-targets-panel";
 import { CompanionInfoPanel } from "./companion-info-panel";
 import { CaptionColorsPanel } from "./caption-colors-panel";
+import { ConnectionBadge } from "./connection-badge";
+import { IpListField } from "./ip-list-field";
 import {
   Button,
   Field,
@@ -53,106 +54,6 @@ const MASKED_PASSWORD = "••••••••";
 
 function isPasswordMasked(value: string): boolean {
   return /^•+$/.test(value);
-}
-
-// ---- sub-components ---------------------------------------------------------
-
-interface IpListFieldProps {
-  value: string[];
-  onChange: (v: string[]) => void;
-  placeholder?: string;
-}
-
-function IpListField({ value, onChange, placeholder }: IpListFieldProps) {
-  function update(idx: number, v: string) {
-    const next = [...value];
-    next[idx] = v;
-    onChange(next);
-  }
-  function remove(idx: number) {
-    onChange(value.filter((_, i) => i !== idx));
-  }
-  function add() {
-    onChange([...value, ""]);
-  }
-
-  return (
-    <div className="flex flex-col gap-1 w-full">
-      {value.map((ip, idx) => (
-        <div key={idx} className="flex items-center gap-1">
-          <Input
-            value={ip}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => update(idx, e.target.value)}
-            placeholder={placeholder ?? "192.168.1.x"}
-            className="flex-1 min-w-0"
-          />
-          <Button
-            variant="transparent"
-            size="small"
-            iconOnly
-            onClick={() => remove(idx)}
-            aria-label="Remove"
-          >
-            <TrashIcon className="size-3.5 text-gray-9" />
-          </Button>
-        </div>
-      ))}
-      <Button variant="transparent" size="small" onClick={add} className="self-start">
-        <PlusIcon className="size-3.5 text-gray-9" />
-        Add IP
-      </Button>
-    </div>
-  );
-}
-
-// ---- connection badge -------------------------------------------------------
-
-function ConnectionBadge({
-  connection,
-  message,
-  inbound,
-}: {
-  connection: ConnectionState;
-  message?: string | null;
-  /** Nothing dials out, so "disconnected" would name a fault where there is
-   *  only an empty room. A listener with no client yet is waiting, not down. */
-  inbound?: boolean;
-}) {
-  if (connection === "connected") {
-    return (
-      <span className="flex items-center gap-1">
-        <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
-        <span className="text-caption1 text-green-10">Connected</span>
-      </span>
-    );
-  }
-  if (connection === "connecting") {
-    return (
-      <span className="flex items-center gap-1">
-        <Loader2Icon className="size-3.5 text-accent animate-spin shrink-0" />
-        <span className="text-caption1 text-accent">Connecting…</span>
-      </span>
-    );
-  }
-  if (connection === "error") {
-    // Truncate a long error (e.g. "Can't reach 192.168.x.x — ECONNREFUSED…") so it
-    // never overflows its row; the full text shows on hover via the native title.
-    return (
-      <Tooltip label={message ?? "Error"}>
-        <span className="flex items-center gap-1 min-w-0 max-w-[9rem] sm:max-w-md" aria-label={message ?? "Error"}>
-          <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-          <span className="text-caption1 text-red-10 truncate min-w-0">{message ?? "Error"}</span>
-        </span>
-      </Tooltip>
-    );
-  }
-  // disconnected
-  return (
-    <span className="flex items-center gap-1">
-      <Status variant={inbound ? "neutral" : "warning"} />
-      <span className="text-caption1 text-gray-9">{inbound ? "No clients yet" : "Disconnected"}</span>
-    </span>
-  );
 }
 
 // ---- single integration card ------------------------------------------------
