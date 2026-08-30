@@ -40,6 +40,9 @@ import { useSlideOnMove } from "../../lib/use-slide-on-move";
  * painted by Readout's filled variant, inside the card, not by this background.
  * Colour that is decoration does not survive onto Home — one grid of tiles that
  * reads in both themes beats per-widget tinting that only works in one.
+ *
+ * Subtracts, with ONE addition: `position: relative`, which is what makes
+ * "inside the card" true rather than aspirational. See the note on it below.
  */
 export function cardFrame(o: LayoutObject, H: number): CSSProperties {
   const {
@@ -48,7 +51,64 @@ export function cardFrame(o: LayoutObject, H: number): CSSProperties {
     background: _writtenForABlackWall,
     ...rest
   } = boxStyle(o, H);
-  return rest;
+  // POSITIONED, so that "inside the card" above is true rather than aspirational.
+  //
+  // Readout lays its whole composition out `position: absolute; inset: 0`, and
+  // paints the filled ground inset:0 inside THAT — so the pair reach whatever
+  // box the composition resolves against, which is the nearest POSITIONED
+  // ancestor. On a canvas that is the object's own wrapper, so the ground lands
+  // in the wrapper's PADDING box and the card's hairline stays drawn outside it.
+  //
+  // This frame was static, so on Home the composition resolved against the grid
+  // cell OUTSIDE it — the frame's BORDER box — and the ground covered the
+  // border on all four sides: a recording widget lost the edge its unfilled
+  // neighbour in the next tile still had. Measured in a browser: frame and
+  // ground both 437x120 at the same origin, against 435x118 after this.
+  //
+  // The frame's own `overflow: hidden` did not save it. An absolutely positioned
+  // element whose containing block is an ANCESTOR of the clipping box is not
+  // clipped by it.
+  //
+  // Every child of the frame moves, not only the filled ones — an unfilled
+  // composition was simply overlapping a 1px border invisibly.
+  //
+  // Home's OWN cards get this from a Tailwind class instead — see STAT_CARD in
+  // cards.tsx, whose comment says the same thing. It is an inline style here
+  // because that is the half a test can read: jsdom loads no stylesheet, so a
+  // `relative` in the className resolves to "static" and a containing-block
+  // guard over it would pass on the bug.
+  return { ...rest, position: "relative" };
+}
+
+/**
+ * The element a Home widget's card is drawn on, and the containing block for
+ * everything the widget draws inside it.
+ *
+ * A component rather than a div spelled out in the grid, so the guard in
+ * card-frame-containing-block.test.tsx renders the REAL frame. Written inline,
+ * the only thing tying `cardFrame` to the element that needs it was a spread
+ * somebody could drop with every test still green.
+ *
+ * boxStyle is what paints a widget's frame — background, hairline, radius. On a
+ * canvas the object wrapper applies it; rendering ObjectContent alone left every
+ * Home card transparent and edge-to-edge, which read as "the card look did not
+ * ship" rather than "Home forgot the box".
+ *
+ * The FRAME itself comes from Home, not from the object. Radius and border width
+ * on a canvas are fractions of canvas height, so a widget landed at 10.66px
+ * radius and a 0.08 hairline while Home's own cards used the app's 12px and
+ * 0.09 — measured, and visible as tiles whose edges do not agree. Colour still
+ * comes from the object, so a red-preset widget stays red.
+ */
+export function CardFrame({ o, children }: { o: LayoutObject; children: ReactNode }) {
+  return (
+    <div
+      className="rounded-xl border border-line bg-surface"
+      style={{ ...cardFrame(o, NOMINAL_H), width: "100%", height: "100%", overflow: "hidden" }}
+    >
+      {children}
+    </div>
+  );
 }
 
 /** One grid row, in pixels. Two of these plus a gap is a Large or an XL. */
@@ -231,24 +291,9 @@ export function HomeGrid({
               data-card-id={o.id}
               onContextMenu={onCardContextMenu ? (e) => onCardContextMenu(o, e) : undefined}
             >
-              {/* boxStyle is what paints the widget's own frame — background,
-                  hairline, radius, padding. On a canvas the object wrapper
-                  applies it; rendering ObjectContent alone left every Home card
-                  transparent and edge-to-edge, which read as "the card look did
-                  not ship" rather than "Home forgot the box".
-
-                  The FRAME comes from Home, not from the object. Radius and
-                  border width on a canvas are fractions of canvas height, so a
-                  widget landed at 10.66px radius and a 0.08 hairline while
-                  Home's own cards used the app's 12px and 0.09 — measured, and
-                  visible as tiles whose edges do not agree. Colour still comes
-                  from the object, so a red-preset widget stays red. */}
-              <div
-                className="rounded-xl border border-line bg-surface"
-                style={{ ...cardFrame(o, NOMINAL_H), width: "100%", height: "100%", overflow: "hidden" }}
-              >
+              <CardFrame o={o}>
                 <ObjectContent o={o} ctx={ctx} />
-              </div>
+              </CardFrame>
               {chrome?.(o)}
             </div>
           );

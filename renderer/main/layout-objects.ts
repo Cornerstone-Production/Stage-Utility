@@ -935,6 +935,36 @@ export function isKnownObjectType(t: LayoutObjectType): boolean {
   return findLayoutObjectSpec(t) !== null;
 }
 
+/**
+ * Does this type answer a widget search?
+ *
+ * Three fields, because an operator looking for a widget knows one of three
+ * things about it: what it is called ("SPL"), what it does ("how loud"), or the
+ * name the app uses for it ("spl-meter" — what a support answer or a config file
+ * spells it as). Matching the label alone means a search for "loud" finds
+ * nothing while the blurb underneath says "how loud the room is".
+ *
+ * ONE predicate for both palettes. Home's add-widget sheet and the layout
+ * editor's palette read the same registry and offer the same search box; two
+ * copies would be two rules that drift, and the same search would find different
+ * widgets depending on which sheet was open.
+ *
+ * The query is normalised here rather than by the caller: a caller that forgets
+ * to lowercase gets a search that silently matches nothing for a capital letter,
+ * which is exactly the sort of thing nobody notices until a service.
+ */
+export function widgetMatchesQuery(t: LayoutObjectType, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  const spec = findLayoutObjectSpec(t);
+  if (!spec) return t.toLowerCase().includes(needle);
+  return (
+    spec.label.toLowerCase().includes(needle) ||
+    t.toLowerCase().includes(needle) ||
+    spec.blurb.toLowerCase().includes(needle)
+  );
+}
+
 // Fallbacks are chosen so an unknown object is INERT rather than plausible: it
 // keeps its place in the layout and names itself, and every capability query
 // answers "no" so nothing tries to configure something it cannot describe.

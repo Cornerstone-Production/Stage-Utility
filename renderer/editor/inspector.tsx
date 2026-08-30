@@ -58,14 +58,12 @@ import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { screensListViews } from "@main/services/home-view";
-import { leagueById } from "@main/types/scores";
-import { teamPin } from "../main/scores-object";
+import { gameOptions } from "../main/scores-object";
 import { formatClock } from "../lib/clock-format";
 import {
   isKnownObjectType,
   isOfferableInEmbedPicker,
   objectRetired,
-  defaultStyle,
   isStylingOnly,
   typeLabel,
   usesPropInstance,
@@ -74,7 +72,7 @@ import { IDIOM_TYPES, DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
-  ImageConfig, NumberField, NumberInput, PixelField,
+  ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { cn } from "../lib/cn";
@@ -145,8 +143,6 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
     </>
   );
 }
-
-const WEIGHTS = [300, 400, 500, 600, 700, 800];
 
 /**
  * Binding + framing controls for a plan-attachment object: a filename match (so it
@@ -1045,30 +1041,21 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "scores" && (() => {
+      {/* Both scores widgets, because both carry `game` and it means the same
+          thing on each. The sport-detail switch below is the wall object's
+          alone — the Home card draws a list of rows, not a strip with a
+          sport-specific centre. */}
+      {(c.type === "scores" || c.type === "home-scores") && (() => {
         const favourites = scoresConfig?.favourites ?? [];
         return (
           <>
-            {/* ONLY the configured favourites, never all 122 teams. An object
-                offering a team the integration does not follow is a control that
-                silently does nothing -- the poll never asks about that team, so
-                the box would stay empty for ever with no way to tell why. */}
+            {/* Options from gameOptions, shared with Home's card menu, so the two
+                pickers cannot write different keys for the same team. */}
             <RowSelect
               label="Game"
-              hint="Which followed game this shows. Any team follows whichever one is live."
-              value={c.game}
-              options={[
-                { value: "auto", label: "Any followed team" },
-                // league:teamId, never the bare id. ESPN reuses ids across
-                // leagues — 267 of them name different clubs in different ones —
-                // so following the Cubs and the Vikings, both id 16, would give
-                // this select two options with the SAME value and pin the object
-                // to whichever game happened to be live. See teamPin.
-                ...favourites.map((f) => ({
-                  value: teamPin(f.league, f.teamId),
-                  label: `${f.displayName} · ${leagueById(f.league)?.label ?? f.league}`,
-                })),
-              ]}
+              hint="Which followed game this shows. A pinned team hands over once their game is finished and another is on."
+              value={c.game ?? "auto"}
+              options={gameOptions(favourites)}
               onChange={(v) => onConfig({ ...c, game: v })}
             />
             {favourites.length === 0 && (
@@ -1076,12 +1063,14 @@ export function Inspector({
                 No teams followed yet. Choose them in Settings, Integrations, Live scores.
               </p>
             )}
-            <RowSwitch
-              label="Show sport detail"
-              hint="Bases and count, down and distance, the game clock. Off leaves the score and the status line."
-              checked={c.detail ?? true}
-              onChange={(v) => onConfig({ ...c, detail: v })}
-            />
+            {c.type === "scores" && (
+              <RowSwitch
+                label="Show sport detail"
+                hint="Bases and count, down and distance, the game clock. Off leaves the score and the status line."
+                checked={c.detail ?? true}
+                onChange={(v) => onConfig({ ...c, detail: v })}
+              />
+            )}
           </>
         );
       })()}
@@ -1467,17 +1456,9 @@ export function Inspector({
       {isText && (
         <>
 
-          {/* Fall back to THIS type's own default, not a blanket 0.05. An object
-              whose default differs (an embedded view starts at 0.016) otherwise
-              reported a size it was not rendering at, so the first nudge of the
-              stepper jumped it to a number it had never been. */}
-          <Row label="Font size"><NumberField value={pxOf(s.fontSize, defaultStyle(c.type).fontSize ?? 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
-          <Row label="Weight">
-            <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
-            </Select>
-          </Row>
+          {/* Size and weight — or, for a readout that fits itself to its box,
+              the reason there are none. See sizesTypeFromItsBox. */}
+          <TypeSizeRows type={c.type} style={s} canvasHeight={canvas.height} onStyle={onStyle} />
           {/* Text, so no opacity: a translucent word over a wall is not a
               softer word, it is a harder one to read. */}
           <Row label="Color"><ColorField label="Text colour" allowAlpha={false} value={s.color ?? "#ffffff"} onChange={(v) => onStyle({ color: v })} /></Row>
@@ -1521,7 +1502,11 @@ export function Inspector({
           the thing that made small widgets clip, because the readout draws its
           own. Anything an object needs at a size is the composition's job, not
           five sliders'. */}
-      {isText && (
+      {/* Not for a readout: `upper` is decided per composition inside the idiom
+          and `style.uppercase` reaches nothing there, so this was the third dead
+          control in the block. Hiding the whole disclosure, not just its child —
+          a "More options" that opens onto nothing is worse than no disclosure. */}
+      {isText && !sizesTypeFromItsBox(c.type) && (
         <MoreControls>
           <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
         </MoreControls>
