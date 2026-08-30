@@ -380,6 +380,10 @@ export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor
           // The preview iframe sets pointer-events:none, so the click lands here.
           <LazyPreview
             viewId={output.viewId}
+            // This card IS a screen, so its preview speaks for that screen and
+            // not merely for the View behind it. It is what makes "Hide top bar"
+            // below visibly do something: the card loses its bar too.
+            outputId={output.id}
             onExpand={onEditLayout}
             expandLabel={`Edit what ${output.name} shows`}
           />

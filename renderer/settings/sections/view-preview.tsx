@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
+import { previewSrc } from "@renderer/main/preview-url";
 
 const DESIGN_W = 1280;
 
@@ -22,10 +23,28 @@ const READY_MSG = "stage-utility:preview-ready";
  */
 export function ViewPreview({
   viewId,
+  outputId = null,
   aspect = 16 / 9,
   draftSlots = null,
 }: {
   viewId: string;
+  /**
+   * The Output this preview is STANDING IN FOR, when it is standing in for one.
+   *
+   * The route is `/preview-<viewId>` — a View, not a screen — so without this the
+   * iframe cannot know which of the screens showing that View it is a picture of,
+   * and per-screen settings have nothing to resolve against. Two screens can show
+   * one View with the top bar hidden on only one of them.
+   *
+   * Rides in the query rather than the path: the path segment IS the view id
+   * (`preview-` is a reserved slug prefix, see reserved-slugs.ts), and a second
+   * segment would be a second thing for every reader of that slug to parse. The
+   * kiosk already reads a legacy `?display=` this way.
+   *
+   * Null on a preview that is not a screen — the View editor's own preview, and
+   * the "not on a screen" card, neither of which has an Output to speak for.
+   */
+  outputId?: string | null;
   aspect?: number;
   draftSlots?: Slot[] | null;
 }) {
@@ -84,7 +103,12 @@ export function ViewPreview({
       <iframe
         ref={iframeRef}
         key={`${viewId}:${designH}`}
-        src={`/preview-${encodeURIComponent(viewId)}`}
+        // The output id is part of the address, so it survives a reload and needs
+        // no handshake — but it is NOT in the key above, because it never changes
+        // for a given card. What the flag it resolves is set to changes all the
+        // time; that arrives inside the iframe over the state stream, and hiding
+        // a screen's top bar must not cost the card an iframe reload.
+        src={previewSrc(viewId, outputId)}
         title="View preview"
         tabIndex={-1}
         onLoad={() => postDraft(iframeRef.current?.contentWindow)}

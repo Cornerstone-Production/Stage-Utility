@@ -42,6 +42,7 @@ function input(over: Partial<ScreenInput> = {}): ScreenInput {
     error: null,
     displayId: "display-1",
     previewViewId: null,
+    previewOutputId: null,
     ...over,
   };
 }
@@ -127,6 +128,68 @@ describe("output state", () => {
       state: stageState({ resolvedByOutput: { "preview-v1": resolvedOutput({ locked: true }) } }),
     }));
     assert.equal(preview.k === "view" && preview.locked, false);
+  });
+
+  test("a preview standing in for a screen takes its hidden bar, and nothing else", () => {
+    // The three per-output flags used to travel together on one nulled
+    // `resolved`, and this is the failure that split creates: unpicking the
+    // wrong one leaks a screen's blackout or its lock into a console full of
+    // thumbnails. All three arms, each naming what leaked.
+    const preview = resolveScreen(input({
+      displayId: "preview-v1",
+      previewViewId: "v1",
+      previewOutputId: "display-1",
+      state: stageState({
+        resolvedByOutput: {
+          "display-1": resolvedOutput({ blackout: true, locked: true, hideTopBar: true }),
+        },
+      }),
+    }));
+    assert.notEqual(preview.k, "blackout", "the output's BLACKOUT reached the preview — the Screens page is a grid of black rectangles");
+    assert.equal(preview.k === "view" && preview.locked, false, "the output's LOCK reached the preview — the console's own preview cannot navigate");
+    assert.equal(preview.k === "view" && preview.hideTopBar, true, "the preview did not take the screen's hidden top bar — the Screens card shows nothing when the operator hides it");
+  });
+
+  test("a preview standing in for nothing keeps its bar", () => {
+    // The View editor's own preview and the "not on a screen" card: there is no
+    // screen behind them, so no screen's setting applies.
+    const preview = resolveScreen(input({
+      displayId: "preview-v1",
+      previewViewId: "v1",
+      state: stageState({ resolvedByOutput: { "display-1": resolvedOutput({ hideTopBar: true }) } }),
+    }));
+    assert.equal(preview.k === "view" && preview.hideTopBar, false);
+  });
+
+  test("a preview never reads a screen's settings off its own slug", () => {
+    // `preview-v1` as an OUTPUT id. `resolved` is still null in a preview, and
+    // the stand-in is named explicitly or not at all.
+    const preview = resolveScreen(input({
+      displayId: "preview-v1",
+      previewViewId: "v1",
+      state: stageState({ resolvedByOutput: { "preview-v1": resolvedOutput({ hideTopBar: true }) } }),
+    }));
+    assert.equal(preview.k === "view" && preview.hideTopBar, false);
+  });
+
+  test("a real display never takes a stand-in named in its own URL", () => {
+    // A wall screen's address is its identity. previewOutputId is ignored off a
+    // real display — the reader (preview-url.ts) refuses to produce one, and the
+    // resolver would ignore it anyway.
+    const screen = resolveScreen(input({
+      previewOutputId: "display-2",
+      state: stageState({
+        outputs: [
+          { id: "display-1", name: "Stage left", viewId: "v1" },
+          { id: "display-2", name: "Stage right", viewId: "v1" },
+        ],
+        resolvedByOutput: {
+          "display-1": resolvedOutput(),
+          "display-2": resolvedOutput({ hideTopBar: true }),
+        },
+      } as Partial<StageState>),
+    }));
+    assert.equal(screen.k === "view" && screen.hideTopBar, false, "a display took another screen's settings from a query param");
   });
 
   test("the lock reaches the unrouted and not-configured screens too", () => {

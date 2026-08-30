@@ -171,9 +171,24 @@ otherwise shows. Its only effect is on the bar, so the Screens card offers it
 only where there is a bar to strip. A display with its **top bar hidden** (also
 set on Screens) draws no top bar at all — no brand, plan context or QR — and its
 content fills the strip instead; the two are independent, since a lock keeps the
-bar and only removes its links. A **preview** ignores blackout, the lock and the
-hidden top bar, and renders the previewed view directly, regardless of what is
-actually routed to that output.
+bar and only removes its links.
+
+A **preview** — the live thumbnail on a Screens card, at `/preview-<viewId>` —
+renders the previewed view directly, regardless of what is actually routed to
+that output, and answers the three per-screen settings differently:
+
+| Setting | In a preview | Why |
+| --- | --- | --- |
+| Blackout | Ignored | The Screens page would be a grid of black rectangles. |
+| Lock | Ignored | The preview lives inside the console, whose navigation must keep working. |
+| Hidden top bar | **Honoured** | Purely visual, and showing what the screen will look like is what the card is for. |
+
+The hidden top bar is honoured only when the preview knows which screen it
+stands in for. The route names a *view*, and two screens can show one view with
+the bar hidden on only one of them, so a Screens card appends the screen it
+belongs to — `/preview-<viewId>?output=<outputId>`. A preview opened without it
+(the View editor's own, and the "not on a screen" card) speaks for no screen and
+keeps its bar.
 
 ## Object capabilities
 

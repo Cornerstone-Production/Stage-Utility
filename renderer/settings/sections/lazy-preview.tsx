@@ -56,11 +56,16 @@ function release(token: symbol): void {
 
 export function LazyPreview({
   viewId,
+  outputId = null,
   aspect,
   onExpand,
   expandLabel,
 }: {
   viewId: string;
+  /** The Output this preview stands in for — passed straight through to
+   *  ViewPreview, which documents what it is for. Null when the card is a View
+   *  rather than a screen. */
+  outputId?: string | null;
   aspect?: number;
   /** When set, a STREAMING preview becomes a button that opens the editor.
    *  Only the streaming branch: the paused placeholder is already a button whose
@@ -138,7 +143,7 @@ export function LazyPreview({
             aria-label={expandLabel}
             className="group relative block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
-            <ViewPreview viewId={viewId} aspect={aspect} />
+            <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />
             <span
               className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
               aria-hidden="true"
@@ -152,7 +157,7 @@ export function LazyPreview({
             </span>
           </button>
         ) : (
-          <ViewPreview viewId={viewId} aspect={aspect} />
+          <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />
         )
       ) : (
         <button

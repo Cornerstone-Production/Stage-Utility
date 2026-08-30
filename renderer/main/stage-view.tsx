@@ -18,6 +18,7 @@ import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
+import { previewOutputId } from "./preview-url";
 import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
@@ -419,13 +420,23 @@ export function StageView() {
   // Preview slug → view id (null on a real display). Computed before any early
   // return so the draft-bridge hook is called unconditionally.
   const previewViewId = displayId.startsWith("preview-") ? displayId.slice("preview-".length) : null;
+  // Which screen this preview is a picture of, when it is a picture of one. See
+  // preview-url.ts — the path names the View, so the Output has to ride beside it.
+  const previewOutput = previewOutputId(window.location.search, previewViewId);
   const previewDraftSlots = usePreviewDraftSlots(previewViewId);
 
   // What this screen shows. Pure, and computed here rather than below the effects
   // so the tab title can read the same answer the top bar draws — this used to be
   // a second `outputs.find` with its own fallback, which is how the tab of a
   // preview came to be titled after the URL it was opened at.
-  const screen = resolveScreen({ state, isLoading, error, displayId, previewViewId });
+  const screen = resolveScreen({
+    state,
+    isLoading,
+    error,
+    displayId,
+    previewViewId,
+    previewOutputId: previewOutput,
+  });
 
   // Keep the browser tab title in sync with the brand + this display's name, so
   // renaming a display (Settings) updates its kiosk tab too.
