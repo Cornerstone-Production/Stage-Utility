@@ -15,7 +15,7 @@ import { SplRundownView } from "./spl-rundown-view";
 import { CalendarView } from "./calendar-view";
 import { LayoutRenderer } from "./layout-renderer";
 import { capabilityLive, contextForOutput } from "./render-context";
-import { viewSurface } from "@main/types/views";
+import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
 import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
@@ -366,14 +366,43 @@ function usePreviewDraftSlots(previewViewId: string | null): Slot[] | null {
  *
  * Every one of these views sizes itself to h-full, because each also renders
  * inside an embed tile — so the viewport height and the safe-area insets belong
- * to the ROUTE, not to the component. Five kinds needed the identical wrapper;
- * this is it, rather than five copies to keep in step the next time a phone adds
+ * to the ROUTE, not to the component. Six kinds needed the identical wrapper;
+ * this is it, rather than six copies to keep in step the next time a phone adds
  * an inset.
+ *
+ * It also owns the top bar for every kind it wraps, so that "does this kind get
+ * a bar" is a lookup and not a per-arm decision. See KIND_DRAWS_TOP_BAR.
  */
-function KioskFrame({ children }: { children: ReactNode }) {
+function KioskFrame({
+  state,
+  screen,
+  kind,
+  children,
+}: {
+  state: StageState;
+  screen: ScreenChrome;
+  kind: ViewKind;
+  children: ReactNode;
+}) {
+  // Whether this kind gets a bar is NOT decided here. KIND_DRAWS_TOP_BAR is the
+  // one declaration; every kind routed through this frame obeys it, so turning a
+  // kind's bar on is an edit to that map and not a seventh render site. The two
+  // kinds with bespoke shells (slots, custom) read the same map, and
+  // stage-view-paths.test.tsx renders all of them against it.
+  if (!KIND_DRAWS_TOP_BAR[kind]) {
+    return (
+      <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        {children}
+      </div>
+    );
+  }
+  // The bar is a shrink-0 row over a flex-1 body — the same shape the custom
+  // shell uses, so a view that sizes to h-full fills exactly what is left rather
+  // than overflowing the viewport by the height of the bar.
   return (
-    <div className="h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      {children}
+    <div className="flex flex-col h-[100dvh] overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      <ScreenTopBar state={state} screen={screen} />
+      <div className="flex-1 min-h-0">{children}</div>
     </div>
   );
 }
@@ -573,42 +602,44 @@ function renderView(
     }
 
     // Dashboard- and stage-kind displays render entirely different views. All
-    // five size to h-full so they can also live inside an embed tile, so the
-    // viewport height and the safe-area insets come from KioskFrame here.
+    // six size to h-full so they can also live inside an embed tile, so the
+    // viewport height, the safe-area insets and the top bar come from
+    // KioskFrame here — `kind={kind}` and not a literal, so an arm copied to
+    // make the next one cannot silently claim its neighbour's bar setting.
     case "dashboard":
       return (
-        <KioskFrame>
+        <KioskFrame state={state} screen={screen} kind={kind}>
           <DashboardView displayId={displayId} />
         </KioskFrame>
       );
     case "stage":
       return (
-        <KioskFrame>
+        <KioskFrame state={state} screen={screen} kind={kind}>
           <StageDisplayView displayId={displayId} />
         </KioskFrame>
       );
     case "transcription":
       return (
-        <KioskFrame>
+        <KioskFrame state={state} screen={screen} kind={kind}>
           <TranscriptionView displayId={displayId} />
         </KioskFrame>
       );
     case "script":
       return (
-        <KioskFrame>
+        <KioskFrame state={state} screen={screen} kind={kind}>
           <ScriptView scriptViewLayoutId={activeView?.scriptViewLayoutId ?? null} />
         </KioskFrame>
       );
     case "spl-rundown":
       return (
-        <KioskFrame>
+        <KioskFrame state={state} screen={screen} kind={kind}>
           <SplRundownView displayId={displayId} />
         </KioskFrame>
       );
 
     case "calendar":
       return (
-        <KioskFrame>
+        <KioskFrame state={state} screen={screen} kind={kind}>
           {/* CalendarMonth sizes to h-full so the same component can live inside
               a layout object; the screen height and the safe-area insets belong
               to this route, which is what KioskFrame is.

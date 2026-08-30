@@ -22,6 +22,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
+import { KIND_DRAWS_TOP_BAR, everyViewKind, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
 
@@ -590,7 +591,7 @@ describe("StageView honours a display's hidden top bar", () => {
     },
     { name: "a custom view with nothing drawn on it", bar: true, state: () => ofKind("custom") },
     { name: "an unrouted display", bar: true, state: () => stageState({ resolvedByOutput: { "display-1": resolved({ viewId: null }) } }) },
-    { name: "dashboard", bar: false, state: () => ofKind("dashboard") },
+    { name: "dashboard", bar: true, state: () => ofKind("dashboard") },
     { name: "stage", bar: false, state: () => ofKind("stage") },
     { name: "transcription", bar: false, state: () => ofKind("transcription") },
     { name: "script", bar: false, state: () => ofKind("script", { scriptViewLayoutId: "sl1" }) },
@@ -723,6 +724,51 @@ describe("StageView honours a display's hidden top bar", () => {
       withoutBar,
       withBar - 1,
       `the kiosk shell went from ${withBar} children to ${withoutBar}: the bar left something behind`,
+    );
+  });
+});
+
+describe("KIND_DRAWS_TOP_BAR is what the arms actually render", () => {
+  // The anti-drift guard. `stage-view.tsx` decides a bar in two places — the
+  // KioskFrame arms read the map, the slots and custom shells are bespoke — and
+  // `outputs-section.tsx` reads the map to decide whether its two bar menu items
+  // are worth offering. Nothing keeps those in step except this.
+  //
+  // It loops the MAP, not a hand-written list, so a ViewKind added tomorrow is
+  // rendered here the moment it is given a value — there is no row to forget.
+  // The map's type already refuses a kind with no value at all.
+  const TOP_BAR = "Weekend: A plan";
+  const hasTopBar = (c: HTMLElement) => says(c, TOP_BAR);
+
+  /** What each kind needs on its View before its arm will draw anything. */
+  const EXTRAS: Partial<Record<ViewKind, Record<string, unknown>>> = {
+    custom: { layout: { canvas: { width: 1920, height: 1080, background: null }, objects: [] } },
+    script: { scriptViewLayoutId: "sl1" },
+  };
+
+  for (const [kind, draws] of Object.entries(KIND_DRAWS_TOP_BAR) as [ViewKind, boolean][]) {
+    test(`${kind} draws ${draws ? "a" : "no"} top bar`, async () => {
+      const c = await showScreen("/display-1", {
+        ...ofKind(kind, EXTRAS[kind] ?? {}),
+        slotsByView: { v1: [slot("Pastor")] },
+      });
+      assert.equal(
+        hasTopBar(c),
+        draws,
+        draws
+          ? `KIND_DRAWS_TOP_BAR says ${kind} draws a bar and it did not: its arm does not read the map`
+          : `${kind} drew a bar the map does not declare — an arm decided for itself`,
+      );
+    });
+  }
+
+  test("every ViewKind is covered, so a new kind cannot slip past", () => {
+    // Belt to the Record's braces: the type stops a kind with no value, this
+    // stops the map being widened to `Record<string, boolean>` some day and the
+    // loop above quietly shrinking to whatever happens to be listed.
+    assert.deepEqual(
+      Object.keys(KIND_DRAWS_TOP_BAR).sort(),
+      [...everyViewKind(["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown", "calendar"])].sort(),
     );
   });
 });
