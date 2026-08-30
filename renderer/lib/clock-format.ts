@@ -117,10 +117,23 @@ export function formatClock(when: number | string | Date | null | undefined, o: 
   if (when === null || when === undefined) return "";
   const d = when instanceof Date ? when : new Date(when);
   if (Number.isNaN(d.getTime())) return "";
+  // ONE path, shared with clockParts: both join `formatToParts`, so a split can
+  // never disagree with the whole it came from.
+  //
+  // `toLocaleTimeString` is the obvious call and the wrong one. On Node 24 — what
+  // `engines` pins and what CI runs — it emits U+0020 before the day period where
+  // `formatToParts` emits U+202F, a narrow no-break space. So "8:45:30 PM" and
+  // "8:45:30 PM" compared unequal, the split's own guard failed on CI, and it
+  // passed on a newer Node where the two APIs happen to agree. Browsers agree
+  // today too, which is exactly why this would have sat here unnoticed.
+  //
+  // Assembling a clock two ways gives it two answers. One way, then.
+  const joinParts = (opts: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat(undefined, opts).formatToParts(d).map((p) => p.value).join("");
   try {
-    return d.toLocaleTimeString(undefined, clockOptions(o));
+    return joinParts(clockOptions(o));
   } catch {
     // An invalid timeZone from a saved layout should not blank the whole panel.
-    return d.toLocaleTimeString(undefined, clockOptions({ ...o, timeZone: null }));
+    return joinParts(clockOptions({ ...o, timeZone: null }));
   }
 }
