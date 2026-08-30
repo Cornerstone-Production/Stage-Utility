@@ -87,9 +87,15 @@ describe("configuration", () => {
 });
 
 describe("startOfZonedDay", () => {
+  // Named rather than written inline twice. gitleaks' generic-api-key rule reads
+  // a high-entropy string literal sitting inside a call to something ending
+  // "Key(" as a credential, and failed the secret scan on this line. A constant
+  // is clearer anyway, and beats loosening the scanner repo-wide for a zone name.
+  const ZONE = "America/Chicago";
+
   it("is the inverse of zonedDateKey", () => {
     for (const key of ["2026-01-15", "2026-07-04", "2026-11-01"]) {
-      assert.equal(zonedDateKey(startOfZonedDay(key, "America/Chicago"), "America/Chicago"), key, key);
+      assert.equal(zonedDateKey(startOfZonedDay(key, ZONE), ZONE), key, key);
     }
   });
 
