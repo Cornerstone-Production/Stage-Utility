@@ -65,7 +65,6 @@ import {
   isKnownObjectType,
   isOfferableInEmbedPicker,
   objectRetired,
-  defaultStyle,
   isStylingOnly,
   typeLabel,
   usesPropInstance,
@@ -74,7 +73,7 @@ import { IDIOM_TYPES, DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
-  ImageConfig, NumberField, NumberInput, PixelField,
+  ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { cn } from "../lib/cn";
@@ -145,8 +144,6 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
     </>
   );
 }
-
-const WEIGHTS = [300, 400, 500, 600, 700, 800];
 
 /**
  * Binding + framing controls for a plan-attachment object: a filename match (so it
@@ -1467,17 +1464,9 @@ export function Inspector({
       {isText && (
         <>
 
-          {/* Fall back to THIS type's own default, not a blanket 0.05. An object
-              whose default differs (an embedded view starts at 0.016) otherwise
-              reported a size it was not rendering at, so the first nudge of the
-              stepper jumped it to a number it had never been. */}
-          <Row label="Font size"><NumberField value={pxOf(s.fontSize, defaultStyle(c.type).fontSize ?? 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
-          <Row label="Weight">
-            <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
-            </Select>
-          </Row>
+          {/* Size and weight — or, for a readout that fits itself to its box,
+              the reason there are none. See sizesTypeFromItsBox. */}
+          <TypeSizeRows type={c.type} style={s} canvasHeight={canvas.height} onStyle={onStyle} />
           {/* Text, so no opacity: a translucent word over a wall is not a
               softer word, it is a harder one to read. */}
           <Row label="Color"><ColorField label="Text colour" allowAlpha={false} value={s.color ?? "#ffffff"} onChange={(v) => onStyle({ color: v })} /></Row>
@@ -1521,7 +1510,11 @@ export function Inspector({
           the thing that made small widgets clip, because the readout draws its
           own. Anything an object needs at a size is the composition's job, not
           five sliders'. */}
-      {isText && (
+      {/* Not for a readout: `upper` is decided per composition inside the idiom
+          and `style.uppercase` reaches nothing there, so this was the third dead
+          control in the block. Hiding the whole disclosure, not just its child —
+          a "More options" that opens onto nothing is worse than no disclosure. */}
+      {isText && !sizesTypeFromItsBox(c.type) && (
         <MoreControls>
           <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
         </MoreControls>
