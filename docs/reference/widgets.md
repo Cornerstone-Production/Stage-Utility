@@ -63,6 +63,12 @@ navigates, so there is no page to return from. A screen showing the same layout
 gets no such control — an overlay opened by a passer-by would stay open until
 somebody walked over to it.
 
+A tile whose view holds embeds of its own carries **one** control, the outer
+one: what is drawn inside it is that tile's content, not a tile in its own
+right. Expand it and the tiles inside the panel get their own controls back, so
+a multiview inside a multiview still drills down one level at a time; Escape
+closes one level per press.
+
 **Service order** is superseded by ScriptView — see
 [ScriptView and Baptisms](../features/scriptview-and-baptisms.md). It is kept so
 existing screens do not break.

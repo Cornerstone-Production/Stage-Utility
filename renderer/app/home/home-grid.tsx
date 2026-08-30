@@ -205,6 +205,9 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     // it: a card embedding Home would otherwise draw a second Home inside itself
     // and only the depth cap would stop it.
     embedChain: [HOME_VIEW_ID],
+    // Home is a page of tiles, not a tile inside somebody else's, so a card that
+    // embeds a view carries its own expand control.
+    insideEmbedTile: false,
     placed: undefined,
   };
 }
