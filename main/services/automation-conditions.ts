@@ -1,4 +1,4 @@
-// automation-conditions.ts — the four cross-cutting qualifiers.
+// automation-conditions.ts — the cross-cutting qualifiers.
 //
 // The test for whether something belongs here rather than as a trigger param: does
 // it apply across triggers? "Which PCO item" only means something to the plan
@@ -10,6 +10,7 @@
 // hand-written once per integration — see INTEGRATIONS in automation-triggers.ts.
 
 import type { ConditionCtx, ConditionDef } from "../types/automation.js";
+import type { PvpLayerDTO } from "../types/pvp.js";
 import { zonedMinuteOfDay, zonedParts } from "./app-timezone.js";
 import { INTEGRATIONS } from "./automation-triggers.js";
 
@@ -34,6 +35,51 @@ function isConnectedCondition(id: string, label: string): ConditionDef {
   };
 }
 
+/**
+ * A ProVideoPlayer layer condition.
+ *
+ * Generated from one predicate because the four differ only in the question and
+ * the words, and hand-writing them four times is how one of them ends up reading
+ * `lastCueName` — the residual field that never clears, and that four idle
+ * layers were observed all naming at once.
+ *
+ * Two rules hold for every one of them:
+ *
+ *  - A null workspace NEVER holds. null means PVP has never connected, and an
+ *    unreachable machine must not make "nothing is on screen" true and gate a
+ *    rule on a fiction. Unknown is not a value.
+ *  - A BLANK layer name does not hold. Deliberately unlike the triggers, where
+ *    blank means "any": a condition is a qualifier, and "some layer, I did not
+ *    say which" is the workspace condition, which exists separately and says so
+ *    in its own label.
+ */
+function pvpLayerCondition(
+  id: string,
+  label: string,
+  holds: (l: PvpLayerDTO) => boolean,
+): ConditionDef {
+  return {
+    id,
+    label,
+    params: [
+      {
+        key: "layer",
+        label: "Layer",
+        type: "string",
+        help: "The layer's name in ProVideoPlayer. Renaming the layer in PVP stops the rule.",
+      },
+    ],
+    holds: (ctx, params) => {
+      const layers = ctx.pvpLayers;
+      if (!layers) return false;
+      const want = String(params.layer ?? "").trim().toLowerCase();
+      if (!want) return false;
+      const l = layers.find((x) => x.name.trim().toLowerCase() === want);
+      return !!l && holds(l);
+    },
+  };
+}
+
 export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   ...Object.fromEntries(
     INTEGRATIONS.map((i) => [`${i.id}.is-connected`, isConnectedCondition(i.id, i.label)]),
@@ -44,6 +90,40 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
     label: "OBS is recording",
     params: [],
     holds: (ctx) => ctx.obsRecording === true,
+  },
+
+  "pvp.layer-has-content": pvpLayerCondition(
+    "pvp.layer-has-content",
+    "A ProVideoPlayer layer has content",
+    // The PRESENCE of media, which parseWorkspace derived from the presence of
+    // the playingMedia key. Never the cue name: it is residual and four idle
+    // layers were observed all still naming the same cue.
+    (l) => l.state !== "empty",
+  ),
+  "pvp.layer-is-playing": pvpLayerCondition(
+    "pvp.layer-is-playing",
+    "A ProVideoPlayer layer is playing a video",
+    // playbackRate, not isPlaying: a still image reports isPlaying true.
+    (l) => l.state === "video",
+  ),
+  "pvp.layer-is-hidden": pvpLayerCondition(
+    "pvp.layer-is-hidden",
+    "A ProVideoPlayer layer is hidden",
+    (l) => l.hidden,
+  ),
+  "pvp.layer-is-muted": pvpLayerCondition(
+    "pvp.layer-is-muted",
+    "A ProVideoPlayer layer is muted",
+    (l) => l.muted,
+  ),
+
+  "pvp.workspace-has-content": {
+    id: "pvp.workspace-has-content",
+    label: "ProVideoPlayer has something on screen",
+    // Deliberately no layer param — this is the "any layer at all" question, and
+    // giving it one would duplicate pvp.layer-has-content with a worse label.
+    params: [],
+    holds: (ctx) => !!ctx.pvpLayers && ctx.pvpLayers.some((l) => l.state !== "empty"),
   },
 
   "reaper.is-recording": {

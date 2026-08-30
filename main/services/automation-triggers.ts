@@ -48,6 +48,97 @@ function def(t: TriggerDef): TriggerDef {
   return t;
 }
 
+// ── ProVideoPlayer ──────────────────────────────────────────────────────────
+//
+// Structurally typed against PvpLayerDTO rather than importing it: every trigger
+// here reads a payload that arrived over a socket, so the type is a claim about
+// what we hope is there, not a guarantee. Every field is optional and every read
+// is defended.
+
+type PvpLayer = {
+  uuid?: string;
+  name?: string;
+  state?: string;
+  mediaUuid?: string | null;
+  hidden?: boolean;
+  muted?: boolean;
+  playbackRate?: number;
+};
+type PvpSnap = { connected?: boolean; layers?: unknown };
+
+const asPvp = (v: unknown): PvpLayer[] => {
+  const raw = (v && typeof v === "object" ? (v as PvpSnap).layers : null) ?? null;
+  return Array.isArray(raw) ? raw.filter((l): l is PvpLayer => !!l && typeof l === "object") : [];
+};
+
+/** PVP is reachable in this snapshot. A dropped connection reports an empty
+ *  workspace, and every "it stopped" trigger below refuses to read that as an
+ *  event — unreachable is unknown, not stopped. */
+const pvpUp = (v: unknown): boolean => (v && typeof v === "object" ? (v as PvpSnap).connected !== false : false);
+
+/** Does this layer match the rule's `layer` param? Blank matches ANY layer, so an
+ *  unconfigured rule fires rather than silently never firing. Matched on the
+ *  NAME: a uuid is opaque in a rule editor and changes when a workspace is
+ *  rebuilt from a template. */
+const pvpNamed = (l: PvpLayer, want: unknown): boolean => {
+  const w = String(want ?? "").trim().toLowerCase();
+  return !w || (l.name ?? "").trim().toLowerCase() === w;
+};
+
+/** Pairs of (before, after) for layers present in BOTH snapshots, matched on
+ *  uuid. A layer in only one is skipped: a layer that has appeared or vanished is
+ *  unknown, not an edge, and reading a vanished layer as "cleared" would fire an
+ *  end-of-cue rule because PVP restarted. On uuid rather than position, so an
+ *  operator reordering layers does not read as every layer changing at once. */
+function pvpPairs(prev: unknown, next: unknown): { before: PvpLayer; after: PvpLayer }[] {
+  const before = new Map(asPvp(prev).map((l) => [l.uuid, l]));
+  const out: { before: PvpLayer; after: PvpLayer }[] = [];
+  for (const after of asPvp(next)) {
+    const b = after.uuid != null ? before.get(after.uuid) : undefined;
+    if (b) out.push({ before: b, after });
+  }
+  return out;
+}
+
+const PVP_LAYER_PARAM: ParamDef = {
+  key: "layer",
+  label: "Layer",
+  type: "string",
+  optional: true,
+  help: "The layer's name in ProVideoPlayer. Leave blank for any layer. Renaming the layer in PVP stops the rule.",
+};
+
+/**
+ * A boolean layer flag flipping one way. Generated rather than written out four
+ * times over, because hidden and muted are mechanically identical and only the
+ * words differ.
+ */
+function pvpFlagTriggers(
+  key: "hidden" | "muted",
+  onLabel: string,
+  offLabel: string,
+): Record<string, TriggerDef> {
+  const make = (id: string, label: string, want: boolean): TriggerDef =>
+    def({
+      id,
+      label,
+      channel: "pvp:status",
+      params: [PVP_LAYER_PARAM],
+      didFire: (prev, next, params) => {
+        if (prev === null) return false;
+        if (!pvpUp(next)) return false;
+        return pvpPairs(prev, next).some(
+          ({ before, after }) =>
+            pvpNamed(after, params.layer) && before[key] !== want && after[key] === want,
+        );
+      },
+    });
+  return {
+    [`pvp.layer-${onLabel}`]: make(`pvp.layer-${onLabel}`, `A ProVideoPlayer layer is ${onLabel}`, true),
+    [`pvp.layer-${offLabel}`]: make(`pvp.layer-${offLabel}`, `A ProVideoPlayer layer is ${offLabel}`, false),
+  };
+}
+
 /** Live states arrive as an array on "integrations:state-changed". */
 type IntState = { id?: string; connection?: string };
 const asStates = (v: unknown): IntState[] => (Array.isArray(v) ? (v as IntState[]) : []);
@@ -320,6 +411,71 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
 
   ...streamTriggers("resi", "resi:status", "Resi"),
   ...streamTriggers("youtube", "youtube:status", "YouTube"),
+
+  ...pvpFlagTriggers("hidden", "hidden", "unhidden"),
+  ...pvpFlagTriggers("muted", "muted", "unmuted"),
+
+  "pvp.cue-started": def({
+    id: "pvp.cue-started",
+    label: "A cue starts on a ProVideoPlayer layer",
+    channel: "pvp:status",
+    params: [PVP_LAYER_PARAM],
+    help: "Fires when a layer starts showing DIFFERENT media. The same clip looping round is not a new cue and does not fire.",
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      if (!pvpUp(next)) return false;
+      // The media UUID, not the name: the observed workspace had seven files
+      // whose names differed only by a trailing digit, and two cues in different
+      // playlists can point at the same file.
+      //
+      // The `!== null` on the AFTER side is what stops a CLEAR reading as a new
+      // cue: going from media to nothing changes the uuid too.
+      return pvpPairs(prev, next).some(
+        ({ before, after }) =>
+          pvpNamed(after, params.layer) &&
+          (after.mediaUuid ?? null) !== null &&
+          (before.mediaUuid ?? null) !== (after.mediaUuid ?? null),
+      );
+    },
+  }),
+
+  "pvp.layer-cleared": def({
+    id: "pvp.layer-cleared",
+    label: "A ProVideoPlayer layer clears",
+    channel: "pvp:status",
+    params: [PVP_LAYER_PARAM],
+    help: "A layer that was showing something now holds nothing. PVP going unreachable does not count — that is unknown, not empty.",
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      if (!pvpUp(next)) return false;
+      return pvpPairs(prev, next).some(
+        ({ before, after }) =>
+          pvpNamed(after, params.layer) && before.state !== "empty" && after.state === "empty",
+      );
+    },
+  }),
+
+  "pvp.playback-stopped": def({
+    id: "pvp.playback-stopped",
+    label: "A ProVideoPlayer clip stops rolling",
+    channel: "pvp:status",
+    params: [PVP_LAYER_PARAM],
+    // Why this and not "the clip reached its end": timeElapsed and timeRemaining
+    // move on every poll, so they are deliberately excluded from the broadcast —
+    // otherwise a 1 Hz poll would be a 1 Hz SSE frame to every display. The
+    // engine only ever sees broadcast frames, so it cannot watch a countdown
+    // cross zero. "Stops rolling" is the same moment on the wall and it IS
+    // observable on a frame this design sends.
+    help: "A clip that was playing has stopped, ended or been paused. PVP going unreachable does not count.",
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      if (!pvpUp(next)) return false;
+      return pvpPairs(prev, next).some(
+        ({ before, after }) =>
+          pvpNamed(after, params.layer) && (before.playbackRate ?? 0) > 0 && (after.playbackRate ?? 0) === 0,
+      );
+    },
+  }),
 
   "pco.before-plan-time": def({
     id: "pco.before-plan-time",

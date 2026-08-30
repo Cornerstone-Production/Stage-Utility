@@ -239,12 +239,20 @@ class AutomationEngine {
     const state = stageController.getState();
     const integrations: Record<string, string> = {};
     for (const s of integrationManager.getStates()) integrations[s.id] = s.connection;
+    // Read ONCE. Two getLatest() calls could straddle a poll and hand the
+    // conditions a `connected` from one snapshot and layers from the next.
+    const pvp = pvpService.getLatest();
     return {
       pcoLive: live ? { mode: live.mode, serviceTimeId: live.serviceTimeId ?? null } : null,
       serviceTypeId: state.serviceTypeId ?? null,
       integrations,
       obsRecording: obsService.getLatest().recording === true,
       reaperRecording: reaperService.getLatest().recording === true,
+      // null, not [], when PVP has never connected. An empty workspace and an
+      // integration that is switched off look identical as a list, and "the
+      // workspace has nothing on screen" must not hold for a machine we have
+      // never spoken to.
+      pvpLayers: pvp.connected ? pvp.layers : null,
       resiStreaming: resiService.getLatest().live === true,
       youtubeStreaming: youtubeService.getLatest().live === true,
       baptismPhase: baptismTimerService.getState()?.phase ?? null,
