@@ -206,7 +206,14 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
     // inDemand, not hasSubscribers: the automation engine consumes this channel
     // in-process, so the subscriber check could not see it and spl.crossed-above
     // rules never fired unless a browser happened to be rendering a meter.
-    if (this.inDemand) broadcast(this.channel, snapshot);
+    // Stamped with a fresh version, like the base emit() — the hydrate read
+    // answers from getLatest() and the client compares the two to drop a read
+    // that is older than a push it already applied. Bumped only when a frame
+    // really goes out, so a skipped push does not advance the counter.
+    if (this.inDemand) {
+      this.bumpRev();
+      broadcast(this.channel, this.stamped(snapshot));
+    }
   }
 }
 
