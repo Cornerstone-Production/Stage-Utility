@@ -21,6 +21,28 @@ result file, sleeps briefly, then **kills the server** — the service manager
 relaunches it on the new build. On failure it writes the result and leaves the
 server running on the old build.
 
+### The update lock
+
+While a Planning Center service is live, or any recorder is open (SPL, attendance,
+service history), `GET /api/update/lock` reports `active` with the reasons. Every
+control that would restart the server — **Update now**, **Restart**, the update
+**track switch**, and the **Restart now** on a deferred update — is guarded, and
+Advanced prints the reasons above them.
+
+Guarded is not disabled. A live service can go wrong and the operator may need to
+restart in the middle of one, so each control still opens a confirm dialog whose
+only way forward is an explicit override. `POST /api/update/apply` and
+`/api/update/track` enforce that on the server too, refusing with `409 locked`
+unless the body carries `override: true`; the two restart controls are guarded by
+the dialog alone.
+
+What the lock changes is how the controls read: an amber lock in place of the
+action's own icon, a label saying that pressing it now is an override, and — for
+the two that are normally the accent primary — a drop to the secondary weight.
+The guarded look follows being **pressable**, so a control its own rules have
+already disabled (mid-update, nothing to install, the track already selected)
+keeps its plain label: it cannot reach the override, so it does not offer one.
+
 ### When the reinstall and rebuild are skipped
 
 `npm ci` and the build only run when they are actually needed; a backend-only update
