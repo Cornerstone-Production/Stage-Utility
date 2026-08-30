@@ -1,10 +1,13 @@
 # App shell redesign
 
-**Status: design, not yet built.** This document describes intended behaviour, not
-current behaviour. Nothing in it ships until the phase implementing it does.
+**Status: built.** Every phase described here has shipped. This document is kept
+for the reasoning behind the shape, not as a description of the app — where the
+two differ, the app is right and this is history.
 
-All six sections are settled. Implementation plans are written one phase at a
-time, against this document.
+For what the shell actually does now, read
+[The operator app](../features/operator-app.md),
+[The context bar](../features/context-bar.md) and
+[Layout editor](../reference/layout-editor.md).
 
 **Goal:** Stage Utility's features behave like separate applications that happen
 to share a server. This redesign gives the operator surfaces one shell with real
