@@ -9,7 +9,7 @@
 
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { SplitView } from "../components/ui/split-view";
-import { useRouteResetKey } from "./route-reset";
+import { PAGE_SCROLLER_ID, useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
 import { PageActionsProvider, PageActionsSlot, usePageActionsSlot } from "./page-actions";
 import { ContextBar } from "./context-bar";
@@ -100,7 +100,14 @@ export function Shell() {
           {/* Page gutter, applied ONCE here rather than by each route. Routes were
                 padding themselves individually and the ones added recently did not,
                 so the editor and Screens sat flush against the right edge. */}
-          <main className="flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3">
+          {/* The app's ONE scroller, and the only one the router knows by name —
+              see PAGE_SCROLLER_ID. Without the id, TanStack identifies it by an
+              `nth-child` path, which changes when PageHeader renders nothing or
+              the scores panel adds a sibling above. */}
+          <main
+            data-scroll-restoration-id={PAGE_SCROLLER_ID}
+            className="flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3"
+          >
             {/* Keyed so re-selecting the active rail item remounts the route,
                 returning it to its top view. */}
             <div key={resetKey} className="contents">

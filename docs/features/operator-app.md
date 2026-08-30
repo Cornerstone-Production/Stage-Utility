@@ -38,6 +38,11 @@ Consoles you have built get a row each, above the groups — see
 its right edge to resize it, or collapse it to icons; on a phone it becomes a
 drawer.
 
+A page you open arrives at the top, whatever you were reading before it. Picking
+the page you are already on does the same, and resets it to its top view. Back
+and Forward are the exception: they return you to where you were on that page,
+because that is what going back means.
+
 Addresses for these pages, and the rules about display slugs that must not
 collide with them, are in [Display URLs](../display-urls.md).
 

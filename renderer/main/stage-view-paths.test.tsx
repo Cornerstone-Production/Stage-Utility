@@ -648,10 +648,45 @@ describe("StageView honours a display's hidden top bar", () => {
     assert.equal(hasTopBar(on), true, "hiding one display's bar hid another's — the flag is not per display");
   });
 
-  test("the settings preview keeps its bar however the output is set", async () => {
-    // The same rule the lock and the blackout follow: the preview iframe lives
-    // in the settings console and is not the wall screen the toggle is about.
-    const c = await showScreen("/preview-v1", stageState({
+  test("the settings preview keeps its bar unless it is standing in for the screen", async () => {
+    // A preview no longer follows one rule for all three per-output flags, so
+    // this asserts all three at once. The failure it exists for is a PARTIAL
+    // split: the three used to travel together on a single nulled `resolved`,
+    // and unpicking the wrong one leaks a screen's blackout or its lock into a
+    // console full of thumbnails. Each arm names what broke.
+    const withScreen = (over: Record<string, unknown> = {}) => stageState({
+      slotsByView: { v1: [slot("Pastor")] },
+      outputs: [{ id: "display-1", name: "Stage left", viewId: "v1" }],
+      resolvedByOutput: {
+        "display-1": resolved({ blackout: true, locked: true, hideTopBar: true, ...over }),
+      },
+    });
+
+    // Standing in for display-1: it takes that screen's hidden bar — the whole
+    // point, because the Screens card is the only feedback the operator gets —
+    // and neither of the other two.
+    const card = await showScreen("/preview-v1?output=display-1", withScreen());
+    assert.equal(hasTopBar(card), false, "the preview kept its bar for a screen with the bar hidden — the Screens card is not the feedback it exists to be");
+    assert.ok(says(card, "Pastor"), "the output's BLACKOUT reached the preview — the Screens page is now a grid of black rectangles");
+    cleanup();
+
+    // Same card, bar shown: the lock is still on, and the preview still has its
+    // way out. A blacked-out lock cannot be read off the bar that is gone above,
+    // which is why this half asserts against a screen whose bar is showing.
+    const unhidden = await showScreen("/preview-v1?output=display-1", withScreen({ hideTopBar: false }));
+    assert.equal(hasTopBar(unhidden), true, "the preview lost its bar to something other than hideTopBar");
+    assert.equal(hasHomeLink(unhidden), true, "the output's LOCK reached the preview — the console's own preview cannot navigate");
+    cleanup();
+
+    // Standing in for nothing — the View editor's preview and the "not on a
+    // screen" card. No screen is named, so no screen's setting applies.
+    const orphan = await showScreen("/preview-v1", withScreen());
+    assert.equal(hasTopBar(orphan), true, "a preview that speaks for no screen lost its bar");
+    cleanup();
+
+    // And it never reads a screen's settings off its own slug: `preview-v1` as
+    // an Output id is still not this preview's stand-in.
+    const impostor = await showScreen("/preview-v1", stageState({
       slotsByView: { v1: [slot("Pastor")] },
       outputs: [
         { id: "display-1", name: "Stage left", viewId: "v1" },
@@ -659,28 +694,30 @@ describe("StageView honours a display's hidden top bar", () => {
       ],
       resolvedByOutput: { "preview-v1": resolved({ hideTopBar: true }) },
     }));
-    assert.equal(hasTopBar(c), true, "a preview lost its bar to an output's toggle");
+    assert.equal(hasTopBar(impostor), true, "a preview took its settings from an output named after its own slug");
   });
 
-  test("the view-missing screen keeps its bar, which is the sixth render site", async () => {
-    // The one KioskTopBar site the table above cannot reach, and the reason is
-    // worth stating rather than leaving as an apparent hole: `view-missing` is
-    // reachable ONLY from a "/preview-…" slug, and in a preview `resolved` is
-    // null, so hideTopBar is forced false there. Its gate can never fire true.
-    //
-    // So this asserts the half that CAN regress — that the screen still draws a
-    // bar at all. Route hideTopBar off the raw output instead of the
-    // preview-nulled `resolved` and this is the screen that loses one.
-    const c = await showScreen("/preview-gone", stageState({
+  test("the view-missing screen is the sixth render site, and its gate really does fire", async () => {
+    // The one KioskTopBar site the table above cannot reach: `view-missing` is
+    // reachable ONLY from a "/preview-…" slug. Its gate used to be unreachable
+    // too — a preview's hideTopBar was forced false — so this could assert only
+    // that the screen drew a bar at all. Now a preview standing in for a screen
+    // takes that screen's hidden bar on EVERY arm, this one included, so both
+    // halves are real and both are checked.
+    const missing = (hideTopBar: boolean) => stageState({
       views: [],
-      outputs: [
-        { id: "display-1", name: "Stage left", viewId: "v1" },
-        { id: "preview-gone", name: "Not a real screen", viewId: null },
-      ],
-      resolvedByOutput: { "preview-gone": resolved({ viewId: null, hideTopBar: true }) },
-    }));
-    assert.ok(says(c, "View not found"), c.textContent ?? "");
-    assert.equal(hasTopBar(c), true, "the view-missing screen lost its bar to an output's toggle");
+      outputs: [{ id: "display-1", name: "Stage left", viewId: "v1" }],
+      resolvedByOutput: { "display-1": resolved({ viewId: null, hideTopBar }) },
+    });
+
+    const shown = await showScreen("/preview-gone?output=display-1", missing(false));
+    assert.ok(says(shown, "View not found"), shown.textContent ?? "");
+    assert.equal(hasTopBar(shown), true, "the view-missing screen draws no bar at all any more");
+    cleanup();
+
+    const hidden = await showScreen("/preview-gone?output=display-1", missing(true));
+    assert.ok(says(hidden, "View not found"), hidden.textContent ?? "");
+    assert.equal(hasTopBar(hidden), false, "the sixth render site is not gated — a screen with the bar hidden keeps one here");
   });
 
   test("a hidden bar is not a lock, and a lock is not a hidden bar", async () => {

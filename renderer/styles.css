@@ -787,9 +787,28 @@ body {
   height: 22px;
   font-size: 8px;
 }
+/* THE MARK IS INSCRIBED IN THE DISC, not stretched across it.
+   It used to be `width: 100%; height: 100%`, which sizes a SQUARE image box to
+   the disc's bounding square — and the disc is the circle inscribed in that
+   square. A mark that fills its own box then touches the circle at four points
+   and crosses it everywhere else, so `overflow: hidden` + `border-radius: 50%`
+   took the ends off it. Nothing was ever cropping the image: `object-fit` is
+   already `contain`. The box was simply bigger than the circle it sat in.
+   The factor is the only one that cannot clip ANY source: a square of side s
+   fits inside a circle of diameter d exactly when s <= d/sqrt(2), so
+   70.71% is the largest safe box. Anything above it clips a mark with ink in its
+   own corners, and ESPN's marks have no shared safe area to bet on — some are
+   tight to the edge (a letter mark), some already carry their own padding (a
+   round crest), and there is no per-logo measurement available at render time to
+   tell them apart. So the geometry decides rather than an eyeballed number.
+   As a PERCENTAGE, so it holds at all three sizes this chip is drawn at — 32px in
+   a card, 22px compact, 18px in the capsule — and at whatever the capsule becomes
+   next. The clip stays as the backstop it always was; the mark can no longer
+   reach it. Read by score-logo-fit.test.ts, which checks the arithmetic. */
 .score-logo img {
-  width: 100%;
-  height: 100%;
+  --score-logo-fit: 70.71%;
+  width: var(--score-logo-fit);
+  height: var(--score-logo-fit);
   object-fit: contain;
 }
 
@@ -1047,12 +1066,54 @@ button.score-capsule:focus-visible {
   z-index: 1;
 }
 
+/* THE PANEL FLOATS. It used to be a flex item in the shell's content column, so
+   growing it pushed the page header and the whole scrolling pane down — open the
+   scores on Screens and every card slid down the screen. A panel that moves the
+   page is a panel you cannot open while reading the page.
+   The anchor is the piece that stays in flow, and it is zero pixels tall: it
+   marks where the panel starts without occupying anything.
+   A `min-height: 0` sat here for a while, with a comment claiming a flex item's
+   automatic minimum would otherwise make this as tall as the panel. That was
+   wrong twice over — the host is absolutely positioned, so there is no in-flow
+   content to be as tall as, and the automatic minimum is capped by a definite
+   `height` anyway. Measured both ways in a browser: the anchor is 0 with it and 0
+   with `min-height: auto` forced on. It is gone rather than kept as insurance,
+   because a line nobody can make fail is a line the next reader has to re-derive.
+   z-index over the sticky headers inside the scrolling pane (the tallest is
+   patch-section's `top-1 z-30`), which is what "above everything" means here.
+   Portalled dialogs and menus are `fixed z-50`/`z-[100]` on the body and still
+   win, which is right: a modal belongs over a panel. */
+.score-anchor {
+  position: relative;
+  height: 0;
+  z-index: 40;
+}
+
 /* The host clips; the shell scales. Height leads on the way in and trails on the
-   way out, so the panel is never clipped mid-flight in either direction. */
+   way out, so the panel is never clipped mid-flight in either direction.
+   OUT OF FLOW, in the anchor above — a change of containing block, not of
+   mechanism. The row still goes 0fr -> 1fr on the same element over the same
+   curve, and `inset-inline: 0` gives it the same width it had as a block in the
+   column, so the shell's cap and its `margin-inline: auto 0` still park it under
+   the capsule at the bar's right end and still centre it on a phone. */
 .score-host {
+  position: absolute;
+  top: 0;
+  inset-inline: 0;
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 620ms var(--score-ease) 60ms;
+
+  /* AN OVERLAY MUST NOT SWALLOW THE PAGE. The clip is full-width, but the panel
+     drawn inside it is capped at 640px and pushed to one side, so most of that
+     width is empty air sitting over content the operator can still see. In flow
+     that air cost nothing; over the page it would eat every click that landed on
+     it. Only the shell — which is exactly the cards' box — takes pointer events.
+     This is also what keeps the document-level close handler honest: a press on
+     the empty air now reports the page element underneath as its target, so
+     `closest(".score-host")` is false and the panel closes, which is what
+     pressing away from a panel should do. */
+  pointer-events: none;
 
   /* How far a card's drop shadow reaches OUTSIDE its own box, which is the room
      the clip below has to leave it. The biggest is the focused card's
@@ -1112,6 +1173,18 @@ button.score-capsule:focus-visible {
      the off-centre panel that was reported. */
   margin-block: var(--score-shadow-t) var(--score-shadow-b);
   margin-inline: auto 0;
+  /* The one box in the floating panel that takes a press — see the host's
+     `pointer-events: none`. It is exactly the cards' own box: the stack inside is
+     `position: relative` with its height written from the same measurement that
+     places the cards, so this is the painted panel and nothing more.
+     WHILE OPEN ONLY. The two halves of a close run at different lengths on
+     purpose — the shell fades out in 260ms and the height trails it, finishing at
+     680ms — and `opacity: 0` does not stop hit testing. In flow that cost nothing,
+     because the shell's box never covered anything. Floating, it left a fully
+     transparent 640px box over the page for the 420ms in between, eating the
+     press an operator makes right after dismissing the panel. Which is the bug
+     this whole change was meant to remove, arriving from the other side. */
+  pointer-events: auto;
   transform-origin: top center;
   opacity: 0;
   transform: translateY(-10px) scaleY(.68) scaleX(.86);
@@ -1121,6 +1194,11 @@ button.score-capsule:focus-visible {
   opacity: 1;
   transform: none;
   transition: opacity 300ms var(--score-ease), transform 620ms var(--score-spring);
+}
+/* Closed, closing, and every frame of both: the page underneath takes the press.
+   Nothing here is animated, so this cannot affect the motion. */
+.score-host:not(.is-open) .score-shell {
+  pointer-events: none;
 }
 
 /* The ONE exception to rule 2, and it is deliberately the neutral-grey centre:

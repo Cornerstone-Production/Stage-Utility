@@ -55,7 +55,7 @@ refreshed whenever the team list is read.
 | Surface | What it shows |
 |---|---|
 | Context bar | A capsule while a followed game is being played: two logos and two scores. Click it for the full card. **Nothing at all** the rest of the time. |
-| Live activity | The capsule expands in place into one card per followed game. |
+| Live activity | The capsule expands in place into one card per followed game, floating over the page. |
 | Custom layout | The **Live scores** object — one game, at wall size. |
 | Home | The **Scores** card — a quieter reading for your own page. |
 
@@ -64,6 +64,13 @@ The context-bar item is opt-in: right-click the bar, **Configure bar…**, and d
 few seconds after a score; tapping the capsule, pressing anywhere else, or Escape
 all close it, and any of those cancels the countdown so a dismissal is never
 undone.
+
+It **floats over the page** rather than pushing it down. Nothing below the bar
+moves when a score arrives, and the page underneath stays where you left it —
+opening the panel on Screens used to slide the whole grid of cards down the
+screen. Only the panel itself takes a press; the empty space beside it belongs to
+the page, so a click there reaches what it looks like it will reach and closes
+the panel on the way.
 
 **The bar item is the one that disappears.** Every other reading on that strip
 says something even at rest, and stays put so you can learn where to look. The

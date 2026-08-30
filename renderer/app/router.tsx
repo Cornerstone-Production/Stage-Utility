@@ -10,6 +10,7 @@ import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations";
 import { SettingsIndexRoute } from "./settings-index";
 import { MOVED_ROUTES, makeRedirect } from "./redirects";
 import { ErrorBoundaryView } from "../components/ui/error-boundary-view";
+import { PAGE_SCROLLER_SELECTOR } from "./route-reset";
 
 const rootRoute = createRootRoute({
   component: Shell,
@@ -69,7 +70,31 @@ export const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 });
 
-export const router = createRouter({ routeTree, scrollRestoration: true });
+// A NEW PAGE OPENS AT THE TOP. `scrollRestoration: true` alone did not do that,
+// and the reason is worth writing down because the option reads as if it would.
+//
+// The router tracks whatever scrolls, and in this app exactly one thing does: the
+// shell's `<main>` (`html`/`body`/`#root` are all `overflow: hidden`). On a
+// forward navigation it copies the previous location's entry for every tracked
+// non-window scroller onto the new location — skipping only elements named in
+// `scrollToTopSelectors`, which was unset — and then applies it. Its own
+// scroll-to-top call goes to `window`, which cannot scroll here, so it does
+// nothing. The net effect was that every page inherited the scroll offset of the
+// page before it.
+//
+// It read as intermittent because the browser clamps a scrollTop to what the
+// content allows: a short page silently zeroed the carried offset, and a tall one
+// kept it. The tall ones are every settings-shaped page, which all end in
+// `pb-[50vh]` — Integrations and History among them, the two reported.
+//
+// Naming the pane here restores the intended split: forward navigation resets it,
+// Back and Forward still restore where you were, and a deliberate in-page jump
+// still wins because it runs two frames later (see flash.ts).
+export const router = createRouter({
+  routeTree,
+  scrollRestoration: true,
+  scrollToTopSelectors: [PAGE_SCROLLER_SELECTOR],
+});
 
 // No `declare module "@tanstack/react-router" { interface Register }` here.
 // renderer/main/router.tsx (the kiosk) already registers, and the augmentation

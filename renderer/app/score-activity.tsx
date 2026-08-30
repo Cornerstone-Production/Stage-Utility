@@ -443,20 +443,36 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
   }, [isOpen]);
 
   return (
-    <div className={cn("score-host", isOpen && "is-open")}>
-      <div className="score-clip" ref={clipRef}>
-        <div className="score-shell">
-          <div className="score-stack" ref={stackRef}>
-            {games.map((game, i) => (
-              <ScoreCard
-                key={game.eventId}
-                game={game}
-                index={i}
-                focused={i === clamped}
-                scored={motion ? scoredSide(game, scores?.lastEvents ?? []) : null}
-                error={scores?.error ?? null}
-              />
-            ))}
+    // The ANCHOR is the only part of this in the page's flow, and it is zero
+    // pixels tall. Everything below it hangs off that: the panel floats over the
+    // page instead of pushing it down, which is what it does now and did not do
+    // before — opening it on Screens slid the whole grid of cards down.
+    //
+    // A zero-height positioned parent, rather than `position: absolute` straight
+    // on the host: the host's top has to be the bottom of the context strip, and
+    // that is not a number anyone can write down — the strip WRAPS on a phone.
+    // An empty flow element sitting exactly where the panel already sat carries
+    // the offset for free, and carries it through every width.
+    //
+    // The animation is untouched. The host is still the grid whose single row
+    // goes 0fr -> 1fr, the clip still hides the overflow, the shell still scales:
+    // out of flow is a change of containing block, not of mechanism.
+    <div className="score-anchor">
+      <div className={cn("score-host", isOpen && "is-open")}>
+        <div className="score-clip" ref={clipRef}>
+          <div className="score-shell">
+            <div className="score-stack" ref={stackRef}>
+              {games.map((game, i) => (
+                <ScoreCard
+                  key={game.eventId}
+                  game={game}
+                  index={i}
+                  focused={i === clamped}
+                  scored={motion ? scoredSide(game, scores?.lastEvents ?? []) : null}
+                  error={scores?.error ?? null}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </div>

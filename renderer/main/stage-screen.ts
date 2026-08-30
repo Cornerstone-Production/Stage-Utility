@@ -75,10 +75,14 @@ export interface ScreenInput {
   displayId: string;
   /** Preview slug → view id (null on a real display). */
   previewViewId: string | null;
+  /** The Output a preview is standing in for — the Screens card the iframe sits
+   *  in. Null on a real display, and null for a preview that is not a screen (the
+   *  View editor's own). See preview-url.ts for how it travels. */
+  previewOutputId: string | null;
 }
 
 export function resolveScreen(input: ScreenInput): StageScreen {
-  const { state, isLoading, error, displayId, previewViewId } = input;
+  const { state, isLoading, error, displayId, previewViewId, previewOutputId } = input;
 
   if (isLoading) return { k: "loading" };
   if (error) return { k: "error", message: error };
@@ -108,19 +112,45 @@ export function resolveScreen(input: ScreenInput): StageScreen {
   // A real output (not a preview) with no View routed to it is unconfigured —
   // show a clear "no view assigned" screen rather than an empty slot grid.
   //
-  // NULL IN A PREVIEW, and that is load-bearing: it is the single line that
-  // keeps an output's blackout and its kiosk lock out of the settings preview
-  // iframe. The three checks below read it and do not re-test previewViewId.
+  // NULL IN A PREVIEW, and that is load-bearing: it is the line that keeps an
+  // output's blackout and its kiosk lock out of the settings preview iframe.
+  // Those two checks read it and do not re-test previewViewId.
   const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
-  // The kiosk chrome every arm below carries, built once. Both Screens-page
-  // toggles read off the resolved output, so both inherit its preview rule:
-  // `resolved` is null in a preview, and that is the single line keeping an
-  // output's lock — and now its hidden top bar — out of the settings preview
-  // iframe, which needs its navigation and its context.
+
+  // AND THIS IS THE OTHER HALF, because a per-output flag now has two possible
+  // answers in a preview and the difference is not a detail:
+  //
+  //   `resolved`   — the output this screen IS. A preview is not any screen, so
+  //                  it is null there and stays null.
+  //   `standingIn` — the output this screen is a PICTURE OF: the Screens card the
+  //                  iframe sits in, named in the query (see preview-url.ts).
+  //                  On a real display the two are the same thing.
+  //
+  // Which one a flag reads is the whole decision, and it is decided by what the
+  // flag would DO to a console full of thumbnails:
+  //
+  //   blackout   -> `resolved`.   The Screens page must not become a grid of
+  //                               black rectangles with nothing to click.
+  //   locked     -> `resolved`.   Its only effect is stripping the bar's escape
+  //                               hatches, and the preview lives inside the
+  //                               console, which needs its navigation.
+  //   hideTopBar -> `standingIn`. Purely visual, and showing what a screen will
+  //                               look like is the entire job of the card. Left
+  //                               on `resolved` the operator hides the bar, the
+  //                               card they are looking at does not change, and
+  //                               the control reads as broken.
+  //
+  // A new per-output flag picks a side here. "Would the Screens page still be
+  // usable if every card did this at once" is the question that decides it.
+  const standingIn = previewViewId
+    ? (previewOutputId ? state.resolvedByOutput?.[previewOutputId] : null)
+    : resolved;
+
+  // The kiosk chrome every arm below carries, built once.
   const chrome: ScreenChrome = {
     displayName,
     locked: resolved?.locked ?? false,
-    hideTopBar: resolved?.hideTopBar ?? false,
+    hideTopBar: standingIn?.hideTopBar ?? false,
   };
 
   // Blackout: a true black screen on command (Companion), taking
