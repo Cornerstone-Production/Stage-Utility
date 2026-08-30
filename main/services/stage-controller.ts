@@ -310,6 +310,15 @@ export class StageController {
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
 
+    // Every install that predates id floors has ids and no floor, and a missing
+    // floor falls back to `max(existing) + 1` — the bug. Seeding here, from what
+    // was just loaded, is what stops the FIRST delete-then-create after an update
+    // reissuing the highest id. Only kinds with no floor recorded are touched.
+    await settingsStore.seedIdFloors({
+      view: views.map((v) => v.id),
+      output: outputs.map((o) => o.id),
+    });
+
     // An EMPTY list means "all allowed" and is passed through as such.
     //
     // This used to substitute four hardcoded ids for an empty list, which made
@@ -1867,7 +1876,7 @@ export class StageController {
     kind: ViewKind = "slots",
     surface: ViewSurface = "display",
   ): Promise<StageState> {
-    const id = this.nextViewId();
+    const id = await this.allocateViewId();
     // Only a custom View has an editable layout, so only a custom View has
     // anywhere to put a control. Anything else asked for as a console would be
     // a console that cannot carry one - a promise the UI could not keep.
@@ -2058,7 +2067,7 @@ export class StageController {
   async duplicateView(id: string, name?: string): Promise<StageState> {
     const src = this.state.views.find((v) => v.id === id);
     if (!src) throw new Error(`views:duplicate — view ${id} not found`);
-    const newId = this.nextViewId();
+    const newId = await this.allocateViewId();
     // Deep-clone the layout, recording old→new object ids so inline mic-slots can
     // be carried over to the copy.
     const cloned = src.layout ? cloneLayoutWithMap(src.layout) : null;
@@ -2213,17 +2222,26 @@ export class StageController {
     name?: string,
     viewId?: string | null,
   ): Promise<{ state: StageState; output: Output }> {
-    const id = this.nextOutputId();
-    const num = parseInt(id.replace("display-", ""), 10);
-    const output: Output = {
-      id,
-      name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
-      viewId: viewId ?? null,
-    };
-    console.log(`[stage-controller] addOutput id=${scrub(id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
-    const outputs = [...this.state.outputs, output];
+    // One write: the id, the floor that stops it ever coming back, and the
+    // outputs list that could not be built until the id existed. The whole
+    // read-allocate-write happens inside the settings write queue, so two
+    // concurrent adds cannot be handed the same id.
+    const { output, outputs } = await settingsStore.allocateIds(
+      "output",
+      (next): { output: Output; outputs: Output[] } => {
+        const id = next(this.state.outputs.map((o) => o.id));
+        const num = parseInt(id.replace("display-", ""), 10);
+        const created: Output = {
+          id,
+          name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
+          viewId: viewId ?? null,
+        };
+        return { output: created, outputs: [...this.state.outputs, created] };
+      },
+      (allocated) => ({ outputs: allocated.outputs }),
+    );
+    console.log(`[stage-controller] addOutput id=${scrub(output.id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
     this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
     this.recomputeResolved();
     this.broadcast();
     return { state: this.state, output };
@@ -2715,23 +2733,20 @@ export class StageController {
     return target; // already a view id, or an id we do not know
   }
 
-  private nextViewId(): string {
-    const nums = this.state.views
-      .map((v) => parseInt(v.id.replace("view-", ""), 10))
-      .filter((n) => !Number.isNaN(n));
-    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-    return `view-${next}`;
-  }
-
-  private nextOutputId(): string {
-    const nums = this.state.outputs
-      .map((o) => parseInt(o.id.replace("display-", ""), 10))
-      .filter((n) => !Number.isNaN(n));
-    // display-1 is reserved as the primary/default output (PRIMARY_DISPLAY_ID), so
-    // dynamically-created outputs start at display-2 when none exist yet. (Views,
-    // which have no reserved id, start at view-1.)
-    const next = nums.length > 0 ? Math.max(...nums) + 1 : 2;
-    return `display-${next}`;
+  /**
+   * Allocate a view id, recording the floor BEFORE the view exists.
+   *
+   * The floor lives in settings.json and views live in views.json, so there is
+   * no save here to fold it into — it is its own write, and an AWAITED one. A
+   * fire-and-forget floor that never reached disk would hand the same id out
+   * again after a restart, which is the whole bug this exists to stop.
+   *
+   * Written first on purpose: if the floor write fails, nothing is created; if
+   * the view save afterwards fails, the only cost is a number nobody used. Ids
+   * are permanent, not contiguous.
+   */
+  private allocateViewId(): Promise<string> {
+    return settingsStore.allocateIds("view", (next) => next(this.state.views.map((v) => v.id)));
   }
 
   private assertPco(): void {

@@ -6,6 +6,10 @@ A display is reached at `/<id>` — `/display-1`, `/display-2`. That id is assig
 once and never changes. Slot configuration is keyed by it, and Raspberry Pis,
 bookmarks and printed QR codes point at it, so it stays stable.
 
+Nor is an id ever handed out twice: deleting a display retires its id for good, so
+a new one created afterwards cannot inherit the old one's slots or answer a
+bookmark meant for it. View ids work the same way.
+
 ## Friendly URLs
 
 A display can also carry a **slug**: set `left-mic` on `display-1` and `/left-mic`
