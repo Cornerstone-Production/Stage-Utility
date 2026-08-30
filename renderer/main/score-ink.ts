@@ -39,7 +39,40 @@ export function inkFor(hex: string | null): string {
   return contrastRatio(hex, INK_LIGHT) >= contrastRatio(hex, INK_DARK) ? INK_LIGHT : INK_DARK;
 }
 
-/** The ink at reduced strength, for a logo chip's fill behind the team colour. */
-export function inkSoft(ink: string): string {
-  return ink === INK_LIGHT ? "rgba(255,255,255,.93)" : "rgba(10,10,10,.9)";
+/**
+ * The disc every team mark sits on. FIXED, and light for every team.
+ *
+ * ESPN's logos are PNGs in the club's own colours, and a great many of them are
+ * navy, black or dark green — the Yankees and the Packers were the pair that
+ * made the point — so on this app's dark cards the mark simply is not there.
+ *
+ * It is light rather than dark because that is the background ESPN drew these
+ * for: the CDN publishes `.../500/nyy.png` for light grounds and a separate
+ * `.../500-dark/nyy.png` for dark ones, and `logos[0]` — the one cached at
+ * selection time — is the light-ground version.
+ *
+ * UNIFORM, not per team. It used to be the inverse of the ink chosen for the
+ * team's colour, which made two clubs in one strip carry opposite discs, and it
+ * still left a dark mark on a dark disc whenever a club's brand colour was light
+ * but its logo was not. Choosing per image would need the image's own pixels,
+ * which nothing here has.
+ *
+ * Kept just off white: pure white against the near-black card is a harder edge
+ * than the mark inside it, and the disc is meant to be the ground, not the
+ * subject.
+ */
+export const DISC = "#f2f2f2";
+
+/**
+ * The team's abbreviation on that disc, for a team with no logo — 83 of college
+ * football's teams, and any team whose CDN this church's network will not reach.
+ *
+ * The brand colour when it is legible on the disc, and the dark ink when it is
+ * not. A team colour is chosen against ESPN's chrome, not ours: roughly one club
+ * in ten is light enough that its own colour on a light disc is unreadable, and
+ * an identifier you cannot read is worse than one that is not on-brand.
+ */
+export function discInk(color: string | null): string {
+  if (!color) return INK_DARK;
+  return contrastRatio(color, DISC) >= 4.5 ? color : INK_DARK;
 }

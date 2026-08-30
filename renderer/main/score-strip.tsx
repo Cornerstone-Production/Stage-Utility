@@ -12,18 +12,19 @@
 // why it is not on the element.
 
 import { ScoreCenter } from "./score-center";
-import { inkFor, inkSoft } from "./score-ink";
+import { discInk, inkFor } from "./score-ink";
 import { cn } from "../lib/cn";
 
 /** A team's colour and the ink chosen for it, as CSS custom properties. */
 function sideVars(team: ScoreTeamDTO): React.CSSProperties {
-  const ink = inkFor(team.color);
   return {
     // No colour means no colour: the side stays the neutral card and the ink is
     // the light one, rather than inventing a brand colour ESPN did not send.
     "--score-team": team.color ?? "transparent",
-    "--score-ink": ink,
-    "--score-ink-soft": inkSoft(ink),
+    "--score-ink": inkFor(team.color),
+    // Only for a team with NO logo: the abbreviation standing in for the mark on
+    // the disc. The disc itself is the same for every team — see DISC.
+    "--score-disc-ink": discInk(team.color),
   } as React.CSSProperties;
 }
 

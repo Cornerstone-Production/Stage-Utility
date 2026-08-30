@@ -91,27 +91,109 @@ describe("TeamPicker", () => {
     fireEvent.click(ui.getByRole("button", { name: "Add a team" }));
   }
 
-  function picker() {
-    return render(
-      <TeamPicker
-        catalogue={{ teams: TEAMS, errors: [] }}
-        loading={false}
-        selected={new Set<string>()}
-        onToggle={() => {}}
-        onOpen={() => {}}
-      />,
-    );
+  /**
+   * A picker wired to real state, the way the panel wires it.
+   *
+   * The league is CONTROLLED by the parent — that is what lets the parent fetch
+   * one league instead of eight — so a test that stubbed onLeague with a no-op
+   * would render a picker whose sport step never advances, and would pass on a
+   * back button that goes nowhere. This re-renders on the change, as the panel
+   * does.
+   */
+  function picker(
+    over: { teams?: ScoreFavourite[]; loading?: boolean; error?: string | null } = {},
+  ) {
+    let league: LeagueId | null = null;
+    const ui = render(<span />);
+    const draw = () =>
+      ui.rerender(
+        <TeamPicker
+          league={league}
+          onLeague={(next) => {
+            league = next;
+            draw();
+          }}
+          teams={league === null ? [] : (over.teams ?? TEAMS.filter((t) => t.league === league))}
+          loading={over.loading ?? false}
+          error={over.error ?? null}
+          selected={new Set<string>()}
+          onToggle={() => {}}
+        />,
+      );
+    draw();
+    return ui;
   }
 
-  test("THE GUARD: the query resets when the popover closes", async () => {
-    // Without the reset, re-opening shows a list still filtered by a query the
-    // operator cannot see — the field is there but the previous search is still
-    // narrowing it. They see four teams, believe that is every team, and cannot
-    // find the one they came back for.
+  const toMlb = (ui: ReturnType<typeof render>) =>
+    fireEvent.click(ui.getByRole("button", { name: /MLB/ }));
+
+  test("THE GUARD: it asks for a sport BEFORE it lists any team", async () => {
+    // The whole reason for the two steps. One flat list was fine at 124 teams
+    // and unusable at ~2,000 once college arrived. Collapse it back to a single
+    // list and this fails: the teams would be on screen with no sport chosen.
     const ui = picker();
     open(ui);
-    const search = ui.getByLabelText("Search teams") as HTMLInputElement;
-    fireEvent.change(search, { target: { value: "yankees" } });
+    assert.ok(ui.queryByText("Choose a sport"), "the sport step is missing");
+    assert.equal(
+      ui.queryByText("New York Yankees"),
+      null,
+      "teams were listed before a sport was chosen",
+    );
+    assert.equal(ui.queryByLabelText("Search teams"), null, "the search box belongs to step two");
+    ui.unmount();
+    await settle();
+  });
+
+  test("choosing a sport lists THAT sport's teams and no others", async () => {
+    const ui = picker();
+    open(ui);
+    toMlb(ui);
+    assert.ok(ui.queryByText("New York Yankees"), "the chosen league's teams are missing");
+    assert.equal(
+      ui.queryByText("Chicago Bears"),
+      null,
+      "an NFL team was listed under MLB — the list is not scoped to the league",
+    );
+    ui.unmount();
+    await settle();
+  });
+
+  test("THE GUARD: the search narrows the CHOSEN league, not every league", async () => {
+    // "Chicago" across all eight leagues is the Cubs, the White Sox, the Bears,
+    // the Bulls, the Blackhawks and a fistful of colleges. Scoped to MLB it is
+    // the Cubs.
+    const ui = picker();
+    open(ui);
+    toMlb(ui);
+    fireEvent.change(ui.getByLabelText("Search teams"), { target: { value: "chicago" } });
+    assert.ok(ui.queryByText("Chicago Cubs"));
+    assert.equal(ui.queryByText("Chicago Bears"), null, "the search reached outside the league");
+    ui.unmount();
+    await settle();
+  });
+
+  test("there is a way back to the sports", async () => {
+    const ui = picker();
+    open(ui);
+    toMlb(ui);
+    assert.equal(ui.queryByText("Choose a sport"), null);
+    fireEvent.click(ui.getByLabelText("Back to sports"));
+    assert.ok(ui.queryByText("Choose a sport"), "the back control did not return to the sport step");
+    assert.equal(ui.queryByText("New York Yankees"), null, "the team list survived going back");
+    ui.unmount();
+    await settle();
+  });
+
+  test("THE GUARD: the query AND the league reset when the popover closes", async () => {
+    // Without the reset, re-opening shows a list still filtered by a query the
+    // operator cannot see — the field is there but the previous search is still
+    // narrowing it. They see one team, believe that is every team, and cannot
+    // find the one they came back for. The league resets with it, so re-opening
+    // starts where the operator expects rather than deep inside a sport.
+    const ui = picker();
+    open(ui);
+    toMlb(ui);
+    fireEvent.change(ui.getByLabelText("Search teams"), { target: { value: "yankees" } });
     assert.equal((ui.getByLabelText("Search teams") as HTMLInputElement).value, "yankees");
     assert.equal(ui.queryByText("Chicago Cubs"), null, "the filter should be in effect");
 
@@ -119,6 +201,8 @@ describe("TeamPicker", () => {
     fireEvent.click(ui.getByRole("button", { name: "Add a team" }));
     open(ui);
 
+    assert.ok(ui.queryByText("Choose a sport"), "re-opening did not return to the sport step");
+    toMlb(ui);
     assert.equal((ui.getByLabelText("Search teams") as HTMLInputElement).value, "");
     assert.ok(ui.queryByText("Chicago Cubs"), "every team must be listed again after reopening");
     ui.unmount();
@@ -128,6 +212,7 @@ describe("TeamPicker", () => {
   test("an empty result shows the empty state, not a bare list", async () => {
     const ui = picker();
     open(ui);
+    toMlb(ui);
     fireEvent.change(ui.getByLabelText("Search teams"), { target: { value: "zzzz" } });
     assert.ok(ui.queryByText("No teams match"));
     ui.unmount();
@@ -136,17 +221,21 @@ describe("TeamPicker", () => {
 
   test("a league that failed to load is NAMED, not silently missing", async () => {
     // An empty dropdown and a failed request look identical to the operator.
-    const ui = render(
-      <TeamPicker
-        catalogue={{ teams: TEAMS, errors: ["NHL could not be loaded — ESPN returned HTTP 503"] }}
-        loading={false}
-        selected={new Set<string>()}
-        onToggle={() => {}}
-        onOpen={() => {}}
-      />,
-    );
+    const ui = picker({ teams: [], error: "ESPN returned HTTP 503" });
     open(ui);
-    assert.ok(ui.queryByText(/NHL could not be loaded/));
+    toMlb(ui);
+    assert.ok(ui.queryByText(/MLB could not be loaded/));
+    assert.ok(ui.queryByText(/HTTP 503/));
+    ui.unmount();
+    await settle();
+  });
+
+  test("a league still loading says so rather than reading as empty", async () => {
+    const ui = picker({ teams: [], loading: true });
+    open(ui);
+    toMlb(ui);
+    assert.ok(ui.queryByText("Loading teams…"));
+    assert.equal(ui.queryByText("No teams available"), null);
     ui.unmount();
     await settle();
   });

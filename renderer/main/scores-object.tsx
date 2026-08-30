@@ -16,6 +16,33 @@ import { ScoreStrip } from "./score-strip";
 import { liveIndex } from "../app/score-activity";
 
 /**
+ * What a pinned team is stored as: `league:teamId`, e.g. "mlb:16".
+ *
+ * ESPN'S TEAM IDS ARE ONLY UNIQUE WITHIN A LEAGUE. Measured across the eight
+ * leagues the picker offers, 267 ids name different clubs in different ones —
+ * id 16 alone is the Cubs, the Vikings, the Timberwolves, the Penguins and
+ * Sacramento State. An object pinned to a bare "16" by a church that follows two
+ * of those matches both games and shows whichever happens to be live, which is
+ * the wrong sport on the wall with nothing to say it went wrong.
+ *
+ * Exported so the inspector writes the same key this reads. Splitting on the
+ * first colon, not `split(":")`, so an id containing one could never lose its
+ * tail — none does today, and this is an undocumented API.
+ */
+export function teamPin(league: string, teamId: string): string {
+  return `${league}:${teamId}`;
+}
+
+function parsePin(pin: string): { league: string | null; teamId: string } {
+  const at = pin.indexOf(":");
+  // A BARE ID IS A PRE-COLLEGE CONFIG and still resolves, by team id in any
+  // league — exactly what it did before. Migrating saved layouts would mean
+  // guessing a league for an id that names up to five clubs, which is the
+  // ambiguity this format exists to avoid inventing.
+  return at < 0 ? { league: null, teamId: pin } : { league: pin.slice(0, at), teamId: pin.slice(at + 1) };
+}
+
+/**
  * Which of today's followed games this object is for.
  *
  * `"auto"` is the wall-display case and is the default: nobody is standing at a
@@ -24,9 +51,10 @@ import { liveIndex } from "../app/score-activity";
  * back to the next one to start, so the object says "7:05 PM" rather than going
  * blank on the afternoon of a game.
  *
- * Anything else is an ESPN TEAM id, and it resolves to that team's game today.
- * Pinning an EVENT id is deliberately not offered: an event id is a per-day value
- * that means nothing next week, so a wall would go blank every Monday.
+ * Anything else is a TEAM PIN — see teamPin. It resolves to that team's game
+ * today. Pinning an EVENT id is deliberately not offered: an event id is a
+ * per-day value that means nothing next week, so a wall would go blank every
+ * Monday.
  *
  * Exported and pure, because "which game" is the whole decision this object
  * makes and it is the part worth testing.
@@ -39,7 +67,12 @@ export function pickGame(
   if (games.length === 0) return null;
 
   if (game !== "auto") {
-    const mine = games.filter((g) => g.away.id === game || g.home.id === game);
+    const pin = parsePin(game);
+    const mine = games.filter(
+      (g) =>
+        (pin.league === null || g.league === pin.league) &&
+        (g.away.id === pin.teamId || g.home.id === pin.teamId),
+    );
     if (mine.length === 0) return null;
     // A doubleheader is two games for one team on one day. Prefer the one being
     // played; otherwise the earliest that has not finished; otherwise the last

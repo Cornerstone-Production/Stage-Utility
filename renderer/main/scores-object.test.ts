@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-const { pickGame } = await import("./scores-object.js");
+const { pickGame, teamPin } = await import("./scores-object.js");
 
 const TEAM = (id: string, score: number | null): ScoreTeamDTO => ({
   id,
@@ -118,5 +118,53 @@ describe("a pinned TEAM resolves that team's game", () => {
     const first = game({ eventId: "g1", state: "pre", away: TEAM("7", null), home: TEAM("2", null) });
     const second = game({ eventId: "g2", state: "pre", away: TEAM("7", null), home: TEAM("2", null) });
     assert.equal(pickGame(status([first, second]), "7")?.eventId, "g1");
+  });
+});
+
+describe("a pin names a LEAGUE as well as a team", () => {
+  // ESPN's team ids repeat across leagues: measured over the eight leagues the
+  // picker offers, 267 ids name DIFFERENT clubs in different ones. Id 16 alone
+  // is the Cubs, the Vikings, the Timberwolves, the Penguins and Sacramento
+  // State. A church that follows two of those and pinned a tile to one was
+  // getting whichever game happened to be live — the wrong sport on the wall,
+  // with nothing to say it went wrong.
+  const cubs = game({ eventId: "cubs", league: "mlb", away: TEAM("16", 3), home: TEAM("2", 1) });
+  const vikings = game({
+    eventId: "vikings",
+    league: "nfl",
+    sport: "football",
+    away: TEAM("16", 21),
+    home: TEAM("9", 17),
+  });
+
+  test("THE GUARD: a league-qualified pin resolves inside that league only", () => {
+    // Drop the league half of the comparison and this returns the Cubs for an
+    // NFL tile: both are live and the Cubs game is first in the list.
+    assert.equal(pickGame(status([cubs, vikings]), teamPin("nfl", "16"))?.eventId, "vikings");
+    assert.equal(pickGame(status([cubs, vikings]), teamPin("mlb", "16"))?.eventId, "cubs");
+  });
+
+  test("a pin into a league with no game today is null, not the other league's", () => {
+    assert.equal(pickGame(status([cubs]), teamPin("nfl", "16")), null);
+  });
+
+  test("teamPin writes the key the picker reads", () => {
+    assert.equal(teamPin("ncaaf", "130"), "ncaaf:130");
+    assert.equal(
+      pickGame(
+        status([
+          game({ eventId: "mich", league: "ncaaf", sport: "football", away: TEAM("130", 7) }),
+        ]),
+        teamPin("ncaaf", "130"),
+      )?.eventId,
+      "mich",
+    );
+  });
+
+  test("a BARE id from a layout saved before this still resolves", () => {
+    // No migration: an id on its own names up to five clubs, so guessing a
+    // league for it would invent the very ambiguity the pin format removes. Old
+    // configs keep exactly the behaviour they had.
+    assert.equal(pickGame(status([cubs]), "16")?.eventId, "cubs");
   });
 });
