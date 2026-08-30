@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { sameOrigin, pcoUrlFrom, nextOffset, withOffset } from "./pco-service.js";
+import { sameOrigin, pcoUrlFrom, nextOffset, withOffset, pinnedToPco } from "./pco-service.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -94,6 +94,34 @@ describe("the URL actually handed to fetch()", () => {
   // Proven red in the session that wrote it: restoring
   // `new URL(`${parsed.pathname}${parsed.search}`, new URL(base).origin)`
   // fails this with "walked off-origin to https://attacker.example/steal".
+  // THE GUARD for the last line of defence.
+  //
+  // pcoFetch no longer trusts its callers: it re-pins the origin at the point
+  // the app id and secret are attached. This asserts the pin holds even when a
+  // caller hands over a host that is not PCO's -- the case the docblock above it
+  // says can no longer matter.
+  //
+  // Proven red: return `url` unchanged from pinnedToPco and this fails with
+  // "https://attacker.example/steal kept its own host".
+  it("pins every fetched URL onto PCO's origin, whatever the caller passes", () => {
+    const origin = new URL(PCO).origin;
+    for (const rogue of [
+      "https://attacker.example/steal",
+      "http://attacker.example/steal?x=1",
+      `${origin}//attacker.example/steal`,
+    ]) {
+      const out = pinnedToPco(rogue);
+      assert.equal(new URL(out).origin, origin, `${rogue} kept its own host`);
+    }
+  });
+
+  it("refuses a URL it cannot parse rather than fetching it", () => {
+    // Not a silent fall back to the base: a caller that built a broken URL has a
+    // bug, and a request that quietly went somewhere else carrying the operator's
+    // credentials is not a failure to swallow.
+    assert.throws(() => pinnedToPco("not a url at all"), /cannot parse/);
+  });
+
   it("cannot be walked off-origin by a pathname that starts //", () => {
     const origin = new URL(PCO).origin;
     for (const hostile of [
@@ -273,7 +301,15 @@ describe("no response-body URL is followed", () => {
     const fetches = body.filter((l) => /\bfetch\(/.test(l));
     assert.equal(fetches.length, 1, `expected exactly 1 raw fetch site (pcoFetch), found ${fetches.length}:\n  ${fetches.join("\n  ")}`);
     for (const f of fetches) {
-      assert.match(f, /fetch\(url\b/, `fetch takes something other than the checked url: ${f.trim()}`);
+      // STRICTER than it was. It used to accept `fetch(url`, which passed the
+      // caller's string through untouched. The one fetch must now go through
+      // pinnedToPco, so the origin is forced at the point the credentials are
+      // attached rather than trusted from every call site.
+      assert.match(
+        f,
+        /fetch\(pinnedToPco\(url\)/,
+        `the one fetch must pin its origin, and does not: ${f.trim()}`,
+      );
     }
 
     const callers = body.filter((l) => /\bthis\.pcoFetch\(/.test(l));

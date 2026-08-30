@@ -156,6 +156,33 @@ export function pcoUrlFrom(candidate: unknown, base: string): string | null {
     return null;
   }
 }
+/**
+ * The one URL that reaches `fetch`, forced onto PCO's own origin.
+ *
+ * Defence in depth rather than a second opinion: every caller already builds on
+ * PCO_BASE, so for correct callers this returns the same string it was given.
+ * It exists so that "the host cannot be moved" is enforced at the point the
+ * credentials are attached, instead of being a property every call site has to
+ * remember. A caller that hands over something off-origin gets PCO's host and
+ * that caller's path, never the other host.
+ *
+ * Throwing is deliberate: an unparseable URL here means a caller built one
+ * wrong, and a request that quietly went somewhere else with the operator's app
+ * id and secret on it is not a failure to swallow.
+ */
+export function pinnedToPco(url: string): string {
+  const base = new URL(PCO_BASE);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`pcoFetch was handed a URL it cannot parse: ${scrub(url)}`);
+  }
+  base.pathname = parsed.pathname;
+  base.search = parsed.search;
+  return base.toString();
+}
+
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
 // everything, which re-pulled it constantly (the live timer polls every 1–4s and
 // the auto-advance check reads plan times every tick). Split by volatility:
@@ -428,10 +455,17 @@ class PcoService {
    * there is no other way to reach the network from here.
    *
    * `url` is always one this client BUILT (see pcoUrlFrom / withOffset) — no string
-   * from a PCO response body reaches here.
+   * from a PCO response body reaches here. This function no longer TRUSTS that:
+   * it re-pins the origin itself, so the promise holds even if a future caller
+   * forgets it. The credentials go out as headers on this request; anything that
+   * moved the host would take them along.
+   *
+   * Written as an assignment onto the constant's URL, never `new URL(path, base)`
+   * — that constructor re-parses its first argument and reads a leading `//` as
+   * an authority, which is the exact bug fixed one commit ago.
    */
   private pcoFetch(url: string, appId: string, secret: string, init: RequestInit = {}): Promise<Response> {
-    return fetch(url, { ...init, headers: this.pcoHeaders(appId, secret) });
+    return fetch(pinnedToPco(url), { ...init, headers: this.pcoHeaders(appId, secret) });
   }
 
   private sleep(ms: number): Promise<void> {
