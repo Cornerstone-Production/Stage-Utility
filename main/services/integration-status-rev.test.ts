@@ -146,9 +146,37 @@ describe("every status channel publishes a version", () => {
       import("./propresenter-service.js").then(
         (m) => ["propresenter:status", m.propresenterService] as const,
       ),
+      import("./pvp-service.js").then((m) => ["pvp:status", m.pvpService] as const),
+      import("./scores-service.js").then((m) => ["scores:status", m.scoresService] as const),
     ]);
 
-    assert.equal(services.length, 7, "the set of status integrations changed — update this list");
+    // DISCOVERED, not declared. This used to assert `services.length === 7`
+    // against the array three lines above it — a test counting its own literal,
+    // which cannot fail. It missed `scoresService` and `pvpService` in turn, so
+    // by the time it was noticed the repo had NINE status integrations and this
+    // still said seven, green the whole way. That is exactly the drift the
+    // comment above it claims to catch.
+    //
+    // The set now comes off the filesystem, matching on `extends
+    // StatusIntegration` — an assignment a docblock cannot satisfy — so a new
+    // integration that is not wired in below fails HERE rather than shipping a
+    // channel nobody checks.
+    const serviceDir = path.dirname(fileURLToPath(import.meta.url));
+    const onDisk = fs
+      .readdirSync(serviceDir)
+      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+      .filter((f) => /extends\s+StatusIntegration\b/.test(fs.readFileSync(path.join(serviceDir, f), "utf8")))
+      .sort();
+
+    const wired = services.map(([, svc]) => svc.constructor.name).sort();
+    assert.equal(
+      services.length,
+      onDisk.length,
+      `${onDisk.length} StatusIntegration subclasses exist but ${services.length} are checked here.\n` +
+        `  on disk: ${onDisk.join(", ")}\n` +
+        `  wired:   ${wired.join(", ")}\n` +
+        "  Add the missing one above — its rev is unchecked until you do.",
+    );
 
     const unstamped = services
       .filter(([, svc]) => typeof svc.getLatest().rev !== "number")
