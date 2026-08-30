@@ -138,12 +138,74 @@ describe("PVP actions verify rather than trusting a 200", () => {
   });
 
   test("firing a cue succeeds when SOME layer picks it up", async () => {
+    // The pre-image (from pvpDeps.readLayers) carries lastCueName "MAIN GRAPHIC"
+    // on a layer holding m1, so a confirmation needs the cue to have MOVED.
+    pvpDeps.readLayers = async () => [layer({ lastCueName: "SOMETHING ELSE" })];
     after = [layer({ lastCueName: "SOMETHING ELSE" })];
     assert.equal((await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, false);
     after = [layer({ lastCueName: "MAIN GRAPHIC" })];
     const r = await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" });
     assert.equal(r.ok, true, r.detail);
     assert.equal(posted[1].path, "/trigger/playlist/PreService/cue/MAIN%20GRAPHIC");
+  });
+
+  test("RE-FIRING THE CUE A LAYER IS ALREADY CARRYING IS NOT SELF-CONFIRMING", async () => {
+    // THE bug this predicate is most likely to have. `lastCueName` is RESIDUAL —
+    // it names the last cue that touched the layer and never clears — so a
+    // verify that only asked "is the cue there" would find it already there from
+    // an earlier firing and report success against a PVP that did nothing. On a
+    // layer that has since been CLEARED, that means reporting "fired" at a black
+    // screen.
+    const stale = layer({ lastCueName: "MAIN GRAPHIC", state: "empty", mediaUuid: null, mediaName: null, anchorElapsedSec: null });
+    pvpDeps.readLayers = async () => [stale];
+    after = [stale]; // PVP answered 200 and changed nothing.
+    const r = await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" });
+    assert.equal(r.ok, false, `reported success against an unchanged workspace: ${r.detail}`);
+
+    const onLayer = await run("pvp.trigger-cue-on-layer", { layer: "Graphics", playlist: "PreService", cue: "MAIN GRAPHIC" });
+    assert.equal(onLayer.ok, false, `reported success against an unchanged workspace: ${onLayer.detail}`);
+  });
+
+  test("a re-fire IS confirmed when the media changes or the clip restarts", async () => {
+    // The other half: the same cue genuinely firing again must still confirm.
+    // Two signals do it — different media under the same cue name, or the clip's
+    // clock jumping backwards.
+    const before = layer({ lastCueName: "MAIN GRAPHIC", mediaUuid: "m1", anchorElapsedSec: 18 });
+    pvpDeps.readLayers = async () => [before];
+
+    after = [layer({ lastCueName: "MAIN GRAPHIC", mediaUuid: "m2", anchorElapsedSec: 1 })];
+    assert.equal((await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, true, "media changed");
+
+    after = [layer({ lastCueName: "MAIN GRAPHIC", mediaUuid: "m1", anchorElapsedSec: 0.4 })];
+    assert.equal((await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, true, "clip restarted");
+  });
+
+  test("a cue landing on a layer that was not there before is confirmed", async () => {
+    // No pre-image for that layer means it cannot have been carrying the cue
+    // already, so its arrival IS the evidence.
+    pvpDeps.readLayers = async () => [layer({ lastCueName: "SOMETHING ELSE" })];
+    after = [layer({ lastCueName: "SOMETHING ELSE" }), layer({ uuid: "l9", name: "New", lastCueName: "MAIN GRAPHIC" })];
+    assert.equal((await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, true);
+  });
+
+  test("a trigger whose pre-image cannot be read is NOT sent", async () => {
+    // Without a pre-image there is no way to tell a fresh firing from a residual
+    // cue, so firing anyway would be a command that can never be confirmed.
+    readThrows = new Error("connect ECONNREFUSED");
+    const r = await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" });
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /ECONNREFUSED/);
+    assert.deepEqual(posted, []);
+  });
+
+  test("the message says when only a restart could confirm it", async () => {
+    // Said rather than hidden: an operator whose rule reports failed deserves to
+    // know the verify was working with a residual field.
+    const stale = layer({ lastCueName: "MAIN GRAPHIC" });
+    pvpDeps.readLayers = async () => [stale];
+    after = [stale];
+    const r = await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" });
+    assert.match(r.detail, /already the last cue/);
   });
 
   test("firing a cue ON A LAYER fails when it landed somewhere else", async () => {

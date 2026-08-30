@@ -79,6 +79,27 @@ describe("parseWorkspace", () => {
     assert.equal(byName(parseWorkspace(FIXTURE), "Exit screen").lastCueName, "MAIN GRAPHIC");
   });
 
+  test("A PAUSED CLIP KEEPS ITS DURATION, so its bar freezes rather than vanishing", () => {
+    // A still and a paused clip both report playbackRate 0. Only timeRemaining
+    // tells them apart. Reading the rate alone called a paused clip a still,
+    // which dropped its duration, which made computePvpProgress return null and
+    // PvpLayerRow drop the bar and the countdown entirely — so pausing mid-clip
+    // made the reading DISAPPEAR off a wall instead of holding where it was.
+    const l = parseWorkspace({
+      data: [{
+        transportState: {
+          isPlaying: true, playbackRate: 0, timeElapsed: 10, timeRemaining: 10,
+          playingMedia: { name: "clip.mp4", uuid: "m1" },
+          layer: { uuid: "p1", name: "Paused" },
+        },
+      }],
+    })[0];
+    assert.equal(l.state, "video", "a loaded clip with time left is not a still");
+    assert.equal(l.durationSec, 20);
+    assert.equal(l.anchorElapsedSec, 10);
+    assert.equal(l.playbackRate, 0, "and it is still reported as not advancing");
+  });
+
   test("duration is elapsed + remaining for a video, and null for a still", () => {
     const layers = parseWorkspace(FIXTURE);
     assert.equal(byName(layers, "Graphics").durationSec, 20);

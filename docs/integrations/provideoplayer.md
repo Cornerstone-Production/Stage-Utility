@@ -97,6 +97,15 @@ for. An earlier reading that four of them did nothing was a measurement error �
 the state was read back within the same second as the request, before PVP had
 applied it.
 
+**Firing a cue confirms that the cue MOVED, not just that it is named.** The cue
+name PVP reports is residual, so a cue that has already played on a layer stays
+named there forever — a check that only asked "is the cue there" would confirm a
+repeat trigger instantly, against a PVP that did nothing, even on a layer since
+cleared to black. Stage takes a reading before the command and requires something
+to have changed: a different cue, different media, or the clip restarting. The one
+case it cannot confirm is re-firing a still that is already the last cue on its
+layer, and it says so in the failure rather than guessing.
+
 **One thing is genuinely unsettled: whether the layer argument redirects a cue.**
 Sending a cue to a specific empty layer did not put content on it, and it is not
 known whether PVP ignores the argument or that layer refused the media. **Fire a
@@ -108,6 +117,15 @@ Two more things ship unverified against a real instance, both safe because they
 confirm themselves: clearing a layer that is holding content, and clearing the
 whole workspace. So does reading a hidden, muted or part-faded layer back — every
 layer observed live was visible, unmuted and fully opaque.
+
+Clearing a layer that is already empty reports success. That is deliberate: the
+action's promise is "this layer now holds nothing", not "I removed something".
+
+**Test connection checks the SHAPE of the answer, not just that one came back.**
+The documentation port answers 200 with JSON, so a check that only looked for a
+200 would confirm the wrong port as working — the one control that exists to
+catch that mistake. A response that is not a workspace is reported as such, and
+names the likely cause.
 
 One limit that cannot be closed through this API: on a layer whose playlist
 auto-advances, the cue can change on its own between the command and the

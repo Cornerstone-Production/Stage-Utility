@@ -11,7 +11,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import { PvpLayerRow } from "./pvp-layer-row";
 import type { LayoutObjectConfig } from "@main/types/stage";
-import type { PvpLayerDTO, PvpStatusDTO } from "@main/types/pvp";
+import { hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
 
 type Config = Extract<LayoutObjectConfig, { type: "pvp-layers" }>;
 
@@ -31,7 +31,7 @@ export function visibleLayers(layers: readonly PvpLayerDTO[], c: Config): PvpLay
     if (!want) return [];
     return layers.filter((l) => l.name.trim().toLowerCase() === want);
   }
-  return layers.filter((l) => l.state !== "empty");
+  return layers.filter(hasContent);
 }
 
 /**
@@ -43,7 +43,11 @@ export function visibleLayers(layers: readonly PvpLayerDTO[], c: Config): PvpLay
  * would go looking for a fault in the wrong machine.
  */
 export function emptyReason(status: PvpStatusDTO | null, c: Config): string {
-  if (!status?.connected) return "ProVideoPlayer offline";
+  // null is "no snapshot yet", not "PVP is down" — the same distinction the rest
+  // of this function exists to preserve. It lasts only until the first hydrate,
+  // and an unconfigured PVP hydrates to connected:false, so this does not linger.
+  if (!status) return "\u2014";
+  if (!status.connected) return "ProVideoPlayer offline";
   if (c.show === "one") {
     return (c.layerName ?? "").trim() ? `No layer named ${c.layerName}` : "No layer chosen";
   }
@@ -70,7 +74,7 @@ export function emptyReason(status: PvpStatusDTO | null, c: Config): string {
  * heights, because rows are not all the same height: one with a cue line and a
  * progress bar is twice the height of an empty one.
  */
-function useClippedRows(container: React.RefObject<HTMLDivElement | null>, rowCount: number): number {
+function useClippedRows(container: React.RefObject<HTMLDivElement | null>, rowShape: string): number {
   const [clipped, setClipped] = useState(0);
   useLayoutEffect(() => {
     const el = container.current;
@@ -91,8 +95,15 @@ function useClippedRows(container: React.RefObject<HTMLDivElement | null>, rowCo
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [container, rowCount]);
-  return Math.min(clipped, rowCount);
+    // rowShape, not a row COUNT. Row heights vary by a factor of three — an
+    // empty layer is one line, a rolling clip with a cue name and a bar is
+    // three — so four layers gaining content re-flows the stack without
+    // changing how many there are. Keyed on the count, the observer would never
+    // fire (the container is a fixed box inside the layout, so it does not
+    // resize with its content) and the chip would go stale in both directions:
+    // silent clipping again, or a "+4 more" that outlived what it counted.
+  }, [container, rowShape]);
+  return clipped;
 }
 
 export function PvpObject({ config, status, now, skewMs }: {
@@ -103,7 +114,11 @@ export function PvpObject({ config, status, now, skewMs }: {
 }) {
   const rows = visibleLayers(status?.layers ?? [], config);
   const ref = useRef<HTMLDivElement | null>(null);
-  const clipped = useClippedRows(ref, rows.length);
+  // Everything that changes a row's HEIGHT, not just how many rows there are.
+  const clipped = useClippedRows(
+    ref,
+    rows.map((l) => `${l.uuid}:${l.state}:${l.lastCueName ?? ""}:${l.durationSec ?? ""}:${l.hidden}${l.muted}${l.opacity}`).join("|"),
+  );
 
   if (rows.length === 0) {
     if (config.hideWhenEmpty ?? false) return null;

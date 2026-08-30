@@ -99,7 +99,10 @@ describe("shouldEmit", () => {
 // way PVP was observed to: 200 with an empty body, whatever it did or did not do.
 
 const realFetch = globalThis.fetch;
+/** Every service a test started, so none is left polling after it ends. */
+const started: PvpService[] = [];
 afterEach(() => {
+  while (started.length) started.pop()?.stop();
   globalThis.fetch = realFetch;
 });
 
@@ -119,19 +122,25 @@ function stubPvp(readBody: () => string): { posts: string[]; gets: number } {
   return log;
 }
 
-/** A configured service with its poll timer stopped, so only the call under test
- *  touches the transport.
+/**
+ * A configured, RUNNING service — the state an action actually runs in.
  *
- *  configure() starts the poll, and the poll's first fetch would otherwise reach
- *  the real network — so a rejecting stub goes in FIRST. A test suite that dials
- *  out is a test suite that fails on an aeroplane. */
+ * Deliberately not stopped afterwards, even though a stopped one would make the
+ * background poll go away: an action refuses to touch PVP unless the integration
+ * is switched on, so a stopped service is the wrong fixture for testing what an
+ * action does. afterEach stops it instead.
+ *
+ * configure() starts the poll immediately, and its first fetch would otherwise
+ * reach the real network — so a rejecting stub goes in FIRST. A test suite that
+ * dials out is a test suite that fails on an aeroplane.
+ */
 function serviceUnderTest(token: string | null = null): PvpService {
   globalThis.fetch = (async () => {
     throw new Error("no transport stub installed");
   }) as typeof fetch;
   const svc = new PvpService();
   svc.configure("pvp.invalid", 1, false, token);
-  svc.stop();
+  started.push(svc);
   return svc;
 }
 
@@ -214,7 +223,80 @@ describe("command() proves the write landed", () => {
     const svc = new PvpService();
     const res = await svc.command("/clear/workspace", undefined, { what: "x", holds: () => true });
     assert.equal(res.ok, false);
-    assert.match(res.detail, /not configured/);
+    assert.match(res.detail, /not connected/);
+  });
+
+  test("A SWITCHED-OFF INTEGRATION DOES NOT STILL DRIVE PVP", async () => {
+    // Switching the integration off calls stop(), which clears `running` but
+    // leaves `target` set — nothing re-runs configure(). A guard on `target`
+    // alone would let an armed rule go on clearing layers after the operator had
+    // switched PVP off, which is a switch that appears to do something and does
+    // not.
+    const svc = new PvpService();
+    const log = stubPvp(() => FIXTURE_TEXT);
+    svc.configure("pvp.invalid", 1, false, null);
+    svc.stop();
+
+    const res = await svc.command("/clear/workspace", undefined, { what: "x", holds: () => true });
+    assert.equal(res.ok, false);
+    assert.match(res.detail, /not connected/);
+    await assert.rejects(() => svc.readLayers(), /not connected/);
+    assert.deepEqual(log.posts, [], "a POST went out while the integration was switched off");
+  });
+
+  test("THREE CLEAN READS SHOWING NO CHANGE OUTRANK A FOURTH THAT FAILED", async () => {
+    // The two failure messages answer different questions, and this is the
+    // direction that hides a failure: if reads 1-3 came back clean and showed
+    // nothing had changed, we KNOW the write did not land. Letting the fourth
+    // read's timeout overwrite that hands the operator "we could not check",
+    // which points them at the network instead of at PVP ignoring the command.
+    const svc = serviceUnderTest();
+    let reads = 0;
+    globalThis.fetch = (async (_i: unknown, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "POST") return new Response("", { status: 200 });
+      reads++;
+      if (reads >= 4) throw new Error("connect ETIMEDOUT");
+      return new Response(FIXTURE_TEXT, { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const res = await svc.command("/clear/layer/layer-0001", undefined, {
+      what: "layer Graphics cleared",
+      holds: (layers) => layers.find((l) => l.uuid === "layer-0001")?.state === "empty",
+    });
+    assert.equal(res.ok, false);
+    assert.match(res.detail, /did not take effect/);
+    assert.ok(!/^sent, but could not read/.test(res.detail), res.detail);
+    // The later failure is mentioned, not hidden — just not used as the verdict.
+    assert.match(res.detail, /ETIMEDOUT/);
+  });
+
+  test("A 200 THAT IS NOT A WORKSPACE IS NOT A CONNECTION", async () => {
+    // The setup mistake this integration warns about twice: PVP serves its API
+    // DOCUMENTATION on a different port, and that port answers 200 with JSON.
+    // parseWorkspace returns [] for it, which is indistinguishable from a real
+    // empty workspace — so without a shape check, Test connection would report
+    // "Connected — 0 layers" for the exact wrong port it exists to catch.
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ openapi: "3.0.0", paths: {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    const probe = await new PvpService().test("pvp.invalid", 1, false, null);
+    assert.equal(probe.ok, false, probe.message);
+    assert.match(probe.message ?? "", /not a ProVideoPlayer workspace/);
+    assert.match(probe.message ?? "", /documentation/);
+  });
+
+  test("but a genuinely EMPTY workspace still connects", async () => {
+    // `{ data: [] }` is a real answer from a real PVP with nothing loaded, and
+    // must not be swept up by the check above.
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    const probe = await new PvpService().test("pvp.invalid", 1, false, null);
+    assert.equal(probe.ok, true, probe.message);
+    assert.match(probe.message ?? "", /0 layers/);
   });
 
   test("a 404 says the port may be the documentation port, not the API port", async () => {
@@ -250,6 +332,6 @@ describe("readLayers", () => {
   test("an unconfigured service throws rather than returning an empty workspace", async () => {
     // Empty is a real state — "PVP has nothing on screen". Returning it for
     // "we never spoke to PVP" would make an action verify against a fiction.
-    await assert.rejects(() => new PvpService().readLayers(), /not configured/);
+    await assert.rejects(() => new PvpService().readLayers(), /not connected/);
   });
 });

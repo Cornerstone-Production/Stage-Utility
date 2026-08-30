@@ -50,10 +50,12 @@ function def(t: TriggerDef): TriggerDef {
 
 // ── ProVideoPlayer ──────────────────────────────────────────────────────────
 //
-// Structurally typed against PvpLayerDTO rather than importing it: every trigger
-// here reads a payload that arrived over a socket, so the type is a claim about
-// what we hope is there, not a guarantee. Every field is optional and every read
-// is defended.
+// Structurally typed against PvpLayerDTO rather than importing it, and NOT
+// because the payload crossed a socket — it did not; the broadcaster hands
+// listeners the same in-process object pvp-service constructed. The registry is
+// deliberately decoupled from the DTOs so a shape change cannot silently alter
+// what a saved rule fires on, and the same defensive reads (asObs, asLive,
+// asRec) are how every other integration in this file is written.
 
 type PvpLayer = {
   uuid?: string;
@@ -115,8 +117,8 @@ const PVP_LAYER_PARAM: ParamDef = {
  */
 function pvpFlagTriggers(
   key: "hidden" | "muted",
-  onLabel: string,
-  offLabel: string,
+  on: { slug: string; label: string },
+  off: { slug: string; label: string },
 ): Record<string, TriggerDef> {
   const make = (id: string, label: string, want: boolean): TriggerDef =>
     def({
@@ -133,9 +135,14 @@ function pvpFlagTriggers(
         );
       },
     });
+  // The slug and the words are SEPARATE arguments, the way obsOutputTriggers
+  // already keeps them, because the slug is a persisted rule id: a saved rule
+  // stores `pvp.layer-hidden`, so deriving the id from the label would mean that
+  // rewording the sentence an operator reads silently stops resolving every rule
+  // they had already built on it.
   return {
-    [`pvp.layer-${onLabel}`]: make(`pvp.layer-${onLabel}`, `A ProVideoPlayer layer is ${onLabel}`, true),
-    [`pvp.layer-${offLabel}`]: make(`pvp.layer-${offLabel}`, `A ProVideoPlayer layer is ${offLabel}`, false),
+    [`pvp.layer-${on.slug}`]: make(`pvp.layer-${on.slug}`, on.label, true),
+    [`pvp.layer-${off.slug}`]: make(`pvp.layer-${off.slug}`, off.label, false),
   };
 }
 
@@ -412,8 +419,16 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
   ...streamTriggers("resi", "resi:status", "Resi"),
   ...streamTriggers("youtube", "youtube:status", "YouTube"),
 
-  ...pvpFlagTriggers("hidden", "hidden", "unhidden"),
-  ...pvpFlagTriggers("muted", "muted", "unmuted"),
+  ...pvpFlagTriggers(
+    "hidden",
+    { slug: "hidden", label: "A ProVideoPlayer layer is hidden" },
+    { slug: "unhidden", label: "A ProVideoPlayer layer is unhidden" },
+  ),
+  ...pvpFlagTriggers(
+    "muted",
+    { slug: "muted", label: "A ProVideoPlayer layer is muted" },
+    { slug: "unmuted", label: "A ProVideoPlayer layer is unmuted" },
+  ),
 
   "pvp.cue-started": def({
     id: "pvp.cue-started",

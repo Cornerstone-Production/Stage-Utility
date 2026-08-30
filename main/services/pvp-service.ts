@@ -21,8 +21,8 @@
 
 import { errorMessage } from "./errors.js";
 import { StatusIntegration } from "./integration-base.js";
-import { driftedLayers, layerSignature, parseWorkspace } from "./pvp-parse.js";
-import { PVP_OFFLINE, type PvpLayerDTO, type PvpStatusDTO } from "../types/pvp.js";
+import { driftedLayers, isWorkspaceResponse, layerSignature, parseWorkspace } from "./pvp-parse.js";
+import { PVP_OFFLINE, hasContent, type PvpLayerDTO, type PvpStatusDTO } from "../types/pvp.js";
 
 /** Active cadence. Governs how fast a cue change reaches a rule, not how smooth
  *  the progress bar is — the bar is interpolated on the client. A 20-second loop
@@ -70,6 +70,18 @@ export interface PvpTarget {
 class PvpService extends StatusIntegration<PvpStatusDTO> {
   private target: PvpTarget | null = null;
   private lastBroadcastAtMs = 0;
+  /**
+   * When the freshest read that has reached the channel was STARTED.
+   *
+   * The poll is serial with itself, but command()'s verify reads run beside it,
+   * and two requests to the same box can come back out of order. Without this a
+   * poll begun before a trigger could resolve after the verify read and
+   * broadcast the OLD workspace over the new one — which the automation engine,
+   * comparing consecutive frames, would read as a layer clearing and then the
+   * same cue starting a second time. One command, one phantom "layer cleared"
+   * and one duplicated "cue started".
+   */
+  private freshestReadAtMs = 0;
 
   constructor() {
     super("pvp", "pvp:status", PVP_OFFLINE);
@@ -139,14 +151,43 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
    *  action can verify itself against exactly the same fold the poll uses. */
   private async fetchWorkspace(t: PvpTarget): Promise<PvpLayerDTO[]> {
     const res = await this.request(t, "/transportState/workspace");
-    return parseWorkspace(await res.json());
+    const body: unknown = await res.json();
+    // A 200 is not enough. parseWorkspace answers [] both for a workspace with
+    // no layers and for a response that was never a workspace, and treating the
+    // second as the first is how "Connected — 0 layers" would be reported for
+    // the API DOCUMENTATION port — the exact setup mistake this integration
+    // warns about, confirmed as working by the one control meant to catch it.
+    if (!isWorkspaceResponse(body)) {
+      throw new Error(
+        "answered, but the response was not a ProVideoPlayer workspace. Check the port is the Network API port from Preferences -> Network -> Network API, not the port PVP serves its API documentation on.",
+      );
+    }
+    return parseWorkspace(body);
+  }
+
+  /**
+   * The target an ACTION may use, or null.
+   *
+   * `running` as well as `target`, and the difference is a real bug rather than
+   * belt and braces: switching the integration off calls stop(), which clears
+   * `running` but leaves `target` set, because nothing re-runs configure(). A
+   * check on `target` alone would let an armed rule go on driving PVP after the
+   * operator had switched it off — a switch that appears to do something and
+   * does not. RossTalk refuses a disabled target for the same reason.
+   *
+   * test() deliberately does NOT come through here: it takes its target as
+   * arguments, because Test connection has to work before the switch is on.
+   */
+  private get liveTarget(): PvpTarget | null {
+    return this.running ? this.target : null;
   }
 
   /** Current layer state, straight from PVP. Throws on a transport failure — the
    *  caller decides what to tell the operator. */
   async readLayers(): Promise<PvpLayerDTO[]> {
-    if (!this.target) throw new Error("ProVideoPlayer is not configured");
-    return await this.fetchWorkspace(this.target);
+    const t = this.liveTarget;
+    if (!t) throw new Error("ProVideoPlayer is not connected — check it is switched on under Settings -> Integrations");
+    return await this.fetchWorkspace(t);
   }
 
   /** One-shot reachability check for the Integrations "Test connection" button. */
@@ -159,7 +200,7 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
     const t: PvpTarget = { host, port, https, token };
     try {
       const layers = await this.fetchWorkspace(t);
-      const withContent = layers.filter((l) => l.state !== "empty").length;
+      const withContent = layers.filter(hasContent).length;
       return {
         ok: true,
         message: `Connected to ProVideoPlayer at ${host}:${port} — ${layers.length} layers, ${withContent} with content`,
@@ -182,6 +223,9 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
   protected async connect(): Promise<void> {
     const t = this.target;
     if (!this.running || !t) return;
+    // Stamped before the request, so a slow poll cannot overwrite a verify read
+    // that started later and finished sooner.
+    const startedAtMs = Date.now();
     try {
       const layers = await this.fetchWorkspace(t);
       if (!this.running) return;
@@ -189,7 +233,7 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
         this.resetBackoff();
         this.report("connected", `Connected to ProVideoPlayer at ${t.host}:${t.port}`);
       }
-      this.emitIfChanged({ connected: true, layers, sampledAt: new Date().toISOString() });
+      this.emitFresh(layers, startedAtMs);
       // inDemand, not hasSubscribers: a rule reading this channel is a watcher,
       // and an appliance with no browser attached is exactly where "nobody is
       // looking" is permanent.
@@ -219,8 +263,10 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
    * whole method exists to prevent.
    */
   async command(path: string, body: unknown, verify: PvpVerify): Promise<{ ok: boolean; detail: string }> {
-    const t = this.target;
-    if (!t) return { ok: false, detail: "ProVideoPlayer is not configured" };
+    const t = this.liveTarget;
+    if (!t) {
+      return { ok: false, detail: "ProVideoPlayer is not connected — check it is switched on under Settings -> Integrations" };
+    }
 
     try {
       await this.request(t, path, {
@@ -235,8 +281,15 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
     // indistinguishable — which is exactly how the research's first pass
     // concluded four working trigger forms were no-ops.
     let lastReadError: string | null = null;
+    // Tracked SEPARATELY from the last error, because they answer different
+    // questions. If three reads came back clean showing no change and the fourth
+    // timed out, we KNOW the write did not land — reporting "could not read the
+    // state back" would hand the operator the softer message and point them away
+    // from the conclusion three clean reads had already established.
+    let sawCleanRead = false;
     for (let i = 0; i < VERIFY_ATTEMPTS; i++) {
       await delay(VERIFY_INTERVAL_MS);
+      const readAtMs = Date.now();
       let layers: PvpLayerDTO[];
       try {
         layers = await this.fetchWorkspace(t);
@@ -244,19 +297,33 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
         lastReadError = errorMessage(err);
         continue;
       }
-      lastReadError = null;
+      sawCleanRead = true;
       // The read is free state — fold it back into the channel so a command does
       // not leave every display a poll behind.
-      this.emitIfChanged({ connected: true, layers, sampledAt: new Date().toISOString() });
+      this.emitFresh(layers, readAtMs);
       if (verify.holds(layers)) return { ok: true, detail: verify.what };
     }
 
-    if (lastReadError) {
-      // The write may well have landed. We cannot say, and saying "sent" when we
-      // cannot see the result is the failure this path exists to prevent.
+    if (lastReadError && !sawCleanRead) {
+      // Nothing was ever read back. The write may well have landed; we cannot
+      // say, and saying "sent" when we cannot see the result is the failure this
+      // path exists to prevent.
       return { ok: false, detail: `sent, but could not read the state back to confirm it: ${lastReadError}` };
     }
-    return { ok: false, detail: `PVP answered 200 but ${verify.what} did not take effect` };
+    const trailing = lastReadError ? ` (a later read also failed: ${lastReadError})` : "";
+    return { ok: false, detail: `PVP answered 200 but ${verify.what} did not take effect${trailing}` };
+  }
+
+  /**
+   * Fold a read into the channel, unless something newer already got there.
+   *
+   * `readAtMs` is taken BEFORE the request goes out, so a response that overtook
+   * a newer one is dropped rather than broadcast backwards.
+   */
+  private emitFresh(layers: PvpLayerDTO[], readAtMs: number): void {
+    if (readAtMs < this.freshestReadAtMs) return;
+    this.freshestReadAtMs = readAtMs;
+    this.emitIfChanged({ connected: true, layers, sampledAt: new Date().toISOString() });
   }
 
   /**

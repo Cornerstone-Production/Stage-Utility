@@ -20,11 +20,31 @@ const num = (v: unknown, fallback: number): number =>
 const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
 
 /**
+ * Is this actually a PVP workspace response?
+ *
+ * `parseWorkspace` answers `[]` both for a workspace with no layers and for a
+ * response that was never a workspace at all, and the caller has to be able to
+ * tell those apart. It is not hypothetical: the setup mistake this integration
+ * warns about twice is pointing at the port PVP serves its API DOCUMENTATION on,
+ * which answers 200 with JSON — so without this, Test connection would report
+ * "Connected — 0 layers" for the exact wrong port it exists to catch, and the
+ * poll would sit reporting a healthy, idle PVP it had never parsed a word from.
+ *
+ * `{ data: [] }` is a real, empty workspace and passes.
+ */
+export function isWorkspaceResponse(json: unknown): boolean {
+  return Array.isArray(rec(json).data);
+}
+
+/**
  * Fold `GET /api/0/transportState/workspace` into one DTO per layer.
  *
  * Degrades rather than throws. The response is 11.5 KB of nested objects from a
  * build we do not control, and a parser that threw would take the whole poll
  * down — reported to the operator as "unreachable", which would be a lie.
+ *
+ * Callers that need to distinguish "empty workspace" from "not a workspace" ask
+ * isWorkspaceResponse FIRST; this one answers [] for both.
  */
 export function parseWorkspace(json: unknown): PvpLayerDTO[] {
   const data = rec(json).data;
@@ -48,10 +68,16 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
     const hasMedia = "playingMedia" in t;
 
     const playbackRate = num(t.playbackRate, 0);
-    const state: PvpLayerState = !hasMedia ? "empty" : playbackRate > 0 ? "video" : "still";
-
     const elapsed = num(t.timeElapsed, 0);
     const remaining = num(t.timeRemaining, 0);
+
+    // A still and a PAUSED CLIP both report playbackRate 0, and only
+    // timeRemaining tells them apart: a still has none, a paused clip still has
+    // the rest of itself to play. Reading rate alone called a paused clip a
+    // still, which dropped its duration, which made its progress bar and its
+    // countdown VANISH mid-service rather than freezing where they were.
+    const timed = hasMedia && remaining > 0;
+    const state: PvpLayerState = !hasMedia ? "empty" : playbackRate > 0 || timed ? "video" : "still";
 
     out.push({
       uuid,
@@ -72,8 +98,9 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
       playbackRate,
       anchorElapsedSec: state === "empty" ? null : elapsed,
       // A still reports timeRemaining 0, so its "duration" would be a meaningless
-      // echo of its elapsed. Only a rolling clip has one.
-      durationSec: state === "video" && remaining > 0 ? elapsed + remaining : null,
+      // echo of its elapsed. Keyed on the remaining time rather than on the rate,
+      // so a PAUSED clip keeps its bar instead of losing it the moment it stops.
+      durationSec: timed ? elapsed + remaining : null,
     });
   });
   return out;

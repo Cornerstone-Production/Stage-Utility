@@ -10,7 +10,7 @@
 // hand-written once per integration — see INTEGRATIONS in automation-triggers.ts.
 
 import type { ConditionCtx, ConditionDef } from "../types/automation.js";
-import type { PvpLayerDTO } from "../types/pvp.js";
+import { hasContent, type PvpLayerDTO } from "../types/pvp.js";
 import { zonedMinuteOfDay, zonedParts } from "./app-timezone.js";
 import { INTEGRATIONS } from "./automation-triggers.js";
 
@@ -98,7 +98,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
     // The PRESENCE of media, which parseWorkspace derived from the presence of
     // the playingMedia key. Never the cue name: it is residual and four idle
     // layers were observed all still naming the same cue.
-    (l) => l.state !== "empty",
+    hasContent,
   ),
   "pvp.layer-is-playing": pvpLayerCondition(
     "pvp.layer-is-playing",
@@ -123,7 +123,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
     // Deliberately no layer param — this is the "any layer at all" question, and
     // giving it one would duplicate pvp.layer-has-content with a worse label.
     params: [],
-    holds: (ctx) => !!ctx.pvpLayers && ctx.pvpLayers.some((l) => l.state !== "empty"),
+    holds: (ctx) => !!ctx.pvpLayers && ctx.pvpLayers.some(hasContent),
   },
 
   "reaper.is-recording": {

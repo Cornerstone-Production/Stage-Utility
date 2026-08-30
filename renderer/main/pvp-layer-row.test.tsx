@@ -101,13 +101,17 @@ describe("PvpLayerRow", () => {
     assert.ok(!draw(layer()).includes("100%"), draw(layer()));
   });
 
-  test("compact drops the bar and the cue line, and keeps the media name", () => {
+  test("compact drops the bar and the cue line, and KEEPS the time left", () => {
     // Home's tile carries up to three of these. Three bars is a texture, not a
-    // reading, and the cue line would double the height of every row.
+    // reading, and the cue line would double the height of every row — but "how
+    // long is left" is the thing worth having, and the Home card's own blurb
+    // promises it, so dropping the time along with the bar would have made that
+    // blurb a lie.
     const html = draw(layer(), true);
     assert.ok(html.includes("loop_a.mp4"), html);
     assert.ok(!html.includes("data-pvp-bar"), html);
     assert.ok(!html.includes("MAIN GRAPHIC"), html);
+    assert.ok(html.includes("0:10"), `compact lost the time remaining:\n${html}`);
   });
 });
 
@@ -153,10 +157,13 @@ describe("emptyReason", () => {
   const c = (over: Partial<Config> = {}): Config => ({ type: "pvp-layers", ...over });
   const up: PvpStatusDTO = { connected: true, layers: [], sampledAt: T };
 
-  test("an unreachable PVP does not read as an idle one", () => {
-    // "—" for both would send an operator looking for a fault in the wrong
-    // machine, or none at all.
-    assert.equal(emptyReason(null, c()), "ProVideoPlayer offline");
+  test("offline, idle and not-yet-heard are THREE different answers", () => {
+    // One message for all of them would send an operator looking for a fault in
+    // the wrong machine, or none at all. null is the one that is easiest to get
+    // wrong: it means "no snapshot yet", not "PVP is down", and calling it
+    // offline would make every display accuse PVP for the moment before its
+    // first hydrate.
+    assert.equal(emptyReason(null, c()), "\u2014");
     assert.equal(emptyReason({ ...up, connected: false }, c()), "ProVideoPlayer offline");
     assert.equal(emptyReason(up, c()), "Nothing on screen");
   });
@@ -194,7 +201,10 @@ describe("PvpObject", () => {
   });
 
   test("without hideWhenEmpty it says why it is empty", () => {
-    assert.ok(render({ type: "pvp-layers", show: "with-content" }, null).includes("ProVideoPlayer offline"));
+    const offline: PvpStatusDTO = { connected: false, layers: [], sampledAt: null };
+    assert.ok(render({ type: "pvp-layers", show: "with-content" }, offline).includes("ProVideoPlayer offline"));
+    // And before the first snapshot it does not accuse PVP of anything.
+    assert.ok(!render({ type: "pvp-layers", show: "with-content" }, null).includes("offline"));
   });
 
   test("EVERY visible layer is rendered, never a slice of them", () => {

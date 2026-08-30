@@ -606,9 +606,11 @@ export function PvpCard({ now, skewMs }: { now: number; skewMs: number }) {
   const pvp = usePvpState();
   const rows = visibleLayers(pvp?.layers ?? [], { type: "pvp-layers", show: "with-content" });
 
-  // Offline and idle say different things, for the reason the wall object's
-  // emptyReason exists: one is a machine to go and look at, the other is not.
-  if (!pvp?.connected) return <Stat label="ProVideoPlayer" value="Offline" />;
+  // Three different nothings, for the reason the wall object's emptyReason
+  // exists: one is a machine to go and look at, one is not, and one is that we
+  // have not heard yet.
+  if (!pvp) return <Stat label="ProVideoPlayer" value="\u2014" />;
+  if (!pvp.connected) return <Stat label="ProVideoPlayer" value="Offline" />;
   if (rows.length === 0) return <Stat label="ProVideoPlayer" value="Nothing on screen" />;
 
   return (
@@ -622,7 +624,6 @@ export function PvpCard({ now, skewMs }: { now: number; skewMs: number }) {
           sampledAt={pvp.sampledAt}
           now={now}
           skewMs={skewMs}
-          showProgress
           compact
         />
       ))}

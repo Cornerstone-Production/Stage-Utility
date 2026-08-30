@@ -18,7 +18,7 @@
 
 import { errorMessage } from "./errors.js";
 import type { ActionDef, ActionResult } from "../types/automation.js";
-import type { PvpLayerDTO } from "../types/pvp.js";
+import { hasContent, type PvpLayerDTO } from "../types/pvp.js";
 import { pvpService } from "./pvp-service.js";
 
 const ok = (detail: string): ActionResult => ({ ok: true, detail });
@@ -120,10 +120,52 @@ function nameSegment(raw: unknown, what: string): { value: string } | { error: s
   return { value: encodeURIComponent(v) };
 }
 
-/** After a successful trigger, playingItem holds the cue we asked for. It is a
- *  liability everywhere else in this integration and an asset exactly here. */
-const cueLanded = (l: PvpLayerDTO | undefined, cue: string): boolean =>
-  !!l && (l.lastCueName ?? "").trim().toLowerCase() === cue.trim().toLowerCase();
+const sameName = (a: string | null, b: string): boolean =>
+  (a ?? "").trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Did THIS trigger land, as opposed to having landed at some point in the past?
+ *
+ * `lastCueName` alone cannot answer that, and getting this wrong is the exact
+ * failure the whole integration is built against. It is RESIDUAL — it names the
+ * last cue that touched the layer and never clears, so after a rule has once
+ * fired "MAIN GRAPHIC", every later attempt to fire "MAIN GRAPHIC" would find it
+ * already there and confirm instantly, even against a PVP that answered 200 and
+ * did nothing, and even on a layer that has since been cleared to black.
+ *
+ * So it takes a PRE-IMAGE and requires the cue to be there AND something to have
+ * observably moved: the cue name changed, the media changed, or the clip's clock
+ * jumped backwards (a restart). A layer we had never seen before counts as
+ * moved, because it cannot have been carrying this cue already.
+ */
+function cueLandedSince(before: PvpLayerDTO | undefined, after: PvpLayerDTO | undefined, cue: string): boolean {
+  if (!after || !sameName(after.lastCueName, cue)) return false;
+  if (!before) return true;
+  if (!sameName(before.lastCueName, cue)) return true;
+  if (before.mediaUuid !== after.mediaUuid) return true;
+  // A restart: PVP was further into the clip before the POST than after it.
+  return (
+    before.anchorElapsedSec != null &&
+    after.anchorElapsedSec != null &&
+    after.anchorElapsedSec < before.anchorElapsedSec
+  );
+}
+
+/** A snapshot to compare the verify read against, keyed by layer uuid. */
+const byUuidMap = (layers: readonly PvpLayerDTO[]): Map<string, PvpLayerDTO> =>
+  new Map(layers.map((l) => [l.uuid, l]));
+
+/**
+ * The whole workspace, or a failure. Every trigger action needs a pre-image, and
+ * a trigger that cannot take one cannot be confirmed, so it must not be sent.
+ */
+async function readWorkspace(): Promise<{ layers: PvpLayerDTO[] } | { error: string }> {
+  try {
+    return { layers: await pvpDeps.readLayers() };
+  } catch (e) {
+    return { error: `could not read ProVideoPlayer's layers: ${errorMessage(e)}` };
+  }
+}
 
 /**
  * Hide / unhide / mute / unmute. One function because the four are mechanically
@@ -176,7 +218,7 @@ export const PVP_ACTIONS: Record<string, ActionDef> = {
         // residual and survives a clear on every layer we have seen — a verify
         // that asked about the cue would report a working clear as failed
         // forever.
-        holds: (layers) => byUuid(layers, r.layer.uuid)?.state === "empty",
+        holds: (layers) => { const l = byUuid(layers, r.layer.uuid); return !!l && !hasContent(l); },
       });
     },
   },
@@ -195,7 +237,7 @@ export const PVP_ACTIONS: Record<string, ActionDef> = {
         what: "every layer cleared",
         // `layers.length > 0` is load-bearing: every() is vacuously true on an
         // empty read, so a workspace we failed to read would report success.
-        holds: (layers) => layers.length > 0 && layers.every((l) => l.state === "empty"),
+        holds: (layers) => layers.length > 0 && !layers.some(hasContent),
       });
     },
   },
@@ -252,12 +294,23 @@ export const PVP_ACTIONS: Record<string, ActionDef> = {
       if ("error" in cue) return fail(cue.error);
       const cueName = String(params.cue).trim();
       if (ctx.simulate) return ok(`would fire cue "${cueName}"`);
+      // A pre-image, BEFORE the POST. Without it the residual cue name makes a
+      // repeat trigger confirm itself instantly against a PVP that did nothing.
+      const pre = await readWorkspace();
+      if ("error" in pre) return fail(pre.error);
+      const before = byUuidMap(pre.layers);
+      // Said in the message rather than hidden: if some layer is already carrying
+      // this cue, only a restart or a media change can confirm a fresh trigger,
+      // so a still already sitting on it cannot be confirmed at all.
+      const stale = pre.layers.some((l) => sameName(l.lastCueName, cueName));
       return await pvpDeps.command(`/trigger/playlist/${playlist.value}/cue/${cue.value}`, undefined, {
-        what: `cue "${cueName}" fired`,
+        what: stale
+          ? `cue "${cueName}" fired (it was already the last cue here, so only a restart can confirm it)`
+          : `cue "${cueName}" fired`,
         // ANY layer, because this form does not say which one it will land on —
         // PVP decides that from the cue. Asking about a specific layer here would
         // report a working trigger as failed.
-        holds: (layers) => layers.some((l) => cueLanded(l, cueName)),
+        holds: (layers) => layers.some((l) => cueLandedSince(before.get(l.uuid), l, cueName)),
       });
     },
   },
@@ -282,14 +335,21 @@ export const PVP_ACTIONS: Record<string, ActionDef> = {
       if ("error" in r) return fail(r.error);
       const cueName = String(params.cue).trim();
       if (ctx.simulate) return ok(`would fire cue "${cueName}" on layer ${r.layer.name}`);
+      // resolveLayer already read the workspace, so the pre-image is free — and
+      // it is not optional: lastCueName is residual, so without it a repeat
+      // trigger confirms itself against a PVP that did nothing.
+      const before = r.layer;
+      const stale = sameName(before.lastCueName, cueName);
       // The layer by UUID, not the name the operator typed: a rename between the
       // write and the read cannot then make a failed trigger look successful.
       return await pvpDeps.command(
         `/trigger/layer/${r.layer.uuid}/playlist/${playlist.value}/cue/${cue.value}`,
         undefined,
         {
-          what: `cue "${cueName}" fired on layer ${r.layer.name}`,
-          holds: (layers) => cueLanded(byUuid(layers, r.layer.uuid), cueName),
+          what: stale
+            ? `cue "${cueName}" fired on layer ${r.layer.name} (it was already the last cue there, so only a restart can confirm it)`
+            : `cue "${cueName}" fired on layer ${r.layer.name}`,
+          holds: (layers) => cueLandedSince(before, byUuid(layers, r.layer.uuid), cueName),
         },
       );
     },

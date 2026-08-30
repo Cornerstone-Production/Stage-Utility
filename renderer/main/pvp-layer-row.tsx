@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
 
 import { fmtDuration } from "./pco-timer";
 import { computePvpProgress } from "./pvp-progress";
-import type { PvpLayerDTO } from "@main/types/pvp";
+import { hasContent, type PvpLayerDTO } from "@main/types/pvp";
 
 export interface PvpLayerRowProps {
   layer: PvpLayerDTO;
@@ -21,8 +21,13 @@ export interface PvpLayerRowProps {
   sampledAt: string | null;
   now: number;
   skewMs: number;
-  showProgress: boolean;
-  /** Home's card is tighter than a wall tile: one line, no bar. */
+  /** Draw the progress bar. Defaults on; `compact` suppresses the bar anyway, so
+   *  passing both was one decision encoded twice. */
+  showProgress?: boolean;
+  /** Home's card is tighter than a wall tile: no cue line, and the time without
+   *  the bar — three bars on a three-row tile is a texture, not a reading, but
+   *  "how long is left" is the thing worth having and the card's own blurb
+   *  promises it. */
   compact: boolean;
 }
 
@@ -32,9 +37,9 @@ function Badge({ children }: { children: ReactNode }) {
   );
 }
 
-export function PvpLayerRow({ layer, sampledAt, now, skewMs, showProgress, compact }: PvpLayerRowProps) {
-  const empty = layer.state === "empty";
-  const progress = showProgress && !compact ? computePvpProgress(layer, sampledAt, now, skewMs) : null;
+export function PvpLayerRow({ layer, sampledAt, now, skewMs, showProgress = true, compact }: PvpLayerRowProps) {
+  const empty = !hasContent(layer);
+  const progress = showProgress ? computePvpProgress(layer, sampledAt, now, skewMs) : null;
 
   // THE RULE. `lastCueName` is the last cue that TOUCHED this layer and it never
   // clears — four idle layers were observed simultaneously naming the same cue
@@ -59,9 +64,11 @@ export function PvpLayerRow({ layer, sampledAt, now, skewMs, showProgress, compa
 
       {progress && (
         <div className="flex items-center gap-[0.4em]">
-          <div data-pvp-bar className="h-[0.18em] flex-1 min-w-0 rounded-full overflow-hidden bg-fg/15">
-            <div className="h-full rounded-full bg-fg" style={{ width: `${progress.fraction * 100}%` }} />
-          </div>
+          {!compact && (
+            <div data-pvp-bar className="h-[0.18em] flex-1 min-w-0 rounded-full overflow-hidden bg-fg/15">
+              <div className="h-full rounded-full bg-fg" style={{ width: `${progress.fraction * 100}%` }} />
+            </div>
+          )}
           <span className="text-[0.8em] text-fg-subtle tabular-nums shrink-0">
             {fmtDuration(progress.remainingSec)}
           </span>

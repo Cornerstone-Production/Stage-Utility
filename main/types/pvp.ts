@@ -88,3 +88,15 @@ export interface PvpStatusDTO {
 }
 
 export const PVP_OFFLINE: PvpStatusDTO = { connected: false, layers: [], sampledAt: null };
+
+/**
+ * Is this layer showing anything?
+ *
+ * The DTO's most important rule, given a name so it has ONE place to live. It is
+ * decided by `state`, which parseWorkspace derived from the PRESENCE of the
+ * `playingMedia` key — never from `isPlaying` (a still reports it true) and never
+ * from `lastCueName` (residual; four idle layers were observed all naming the
+ * same cue). Written out at each of its call sites, one of them would eventually
+ * be written the other way.
+ */
+export const hasContent = (l: PvpLayerDTO): boolean => l.state !== "empty";
