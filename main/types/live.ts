@@ -75,8 +75,29 @@ export interface PlanTimeDTO {
   startsAt: string;
 }
 
+/**
+ * The published-snapshot version every StatusIntegration stamps on what it sends.
+ *
+ * A status hook hydrates with a one-shot read and subscribes to a change-driven
+ * channel. When a push landed before the read resolved, the older read overwrote
+ * the newer push, and — because these channels broadcast only on change — the
+ * wrong value then stuck until the next real change. `rev` is bumped only when a
+ * frame actually goes out, and both the hydrate read (`getLatest()`) and the
+ * pushed frame carry it, so a client can drop a read that is older than a push it
+ * already applied.
+ *
+ * Optional, and additive on purpose: it is a field an existing consumer that has
+ * never heard of it simply does not read. Nothing else about these payloads moved.
+ * A client that sees no `rev` behaves exactly as it did before.
+ */
+export interface RevisionedStatus {
+  /** Monotonic per integration, from 0. Comparable only within one channel and
+   *  one server run — it resets when the process restarts. */
+  rev?: number;
+}
+
 /** Live ProPresenter status (pushed on "propresenter:status"). */
-export interface ProPresenterStatusDTO {
+export interface ProPresenterStatusDTO extends RevisionedStatus {
   connected: boolean;
   /** Active presentation name (the simple dashboard's "current item"). */
   currentItem: string | null;
@@ -139,7 +160,7 @@ export interface SplMeterDTO {
 }
 
 /** Live SPL state (pushed on "spl:metrics"). `meters` is keyed "device::channel". */
-export interface SplMetricsDTO {
+export interface SplMetricsDTO extends RevisionedStatus {
   connected: boolean;
   /** Negotiated Smaart API version ("3", "4", …) or null when offline. */
   apiVersion: string | null;
@@ -149,7 +170,7 @@ export interface SplMetricsDTO {
 /** Live OBS Studio output state (pushed on "obs:status"). `connected` is the
  *  obs-websocket link; the rest reflect OBS's outputs. v1 surfaces recording for
  *  the layout object, but streaming/virtual-cam are carried for future objects. */
-export interface ObsStatusDTO {
+export interface ObsStatusDTO extends RevisionedStatus {
   connected: boolean;
   recording: boolean;
   recordPaused: boolean;
@@ -162,7 +183,7 @@ export interface ObsStatusDTO {
 /** Live REAPER transport state (pushed on "reaper:status"). `connected` is the
  *  web-interface HTTP link; the rest reflect REAPER's transport. v1 surfaces
  *  recording for the layout object. */
-export interface ReaperStatusDTO {
+export interface ReaperStatusDTO extends RevisionedStatus {
   connected: boolean;
   recording: boolean;
   recordPaused: boolean;
@@ -188,7 +209,7 @@ export interface ReaperStatusDTO {
  * time is genuinely unknown, and the surfaces show the state without a duration
  * rather than inventing 0:00.
  */
-export interface StreamStatusDTO {
+export interface StreamStatusDTO extends RevisionedStatus {
   connected: boolean;
   live: boolean;
   startedAt: string | null;
@@ -217,7 +238,7 @@ export interface PeopleHistoryPoint {
   attendance: number;
   occupancy: number;
 }
-export interface PeopleCountDTO {
+export interface PeopleCountDTO extends RevisionedStatus {
   connected: boolean;
   /** ISO timestamp of the last successful poll, or null. */
   updatedAt: string | null;

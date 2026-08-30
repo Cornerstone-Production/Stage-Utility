@@ -57,8 +57,8 @@ describe("a widget you just added", () => {
     // and add it here or to BARE — do not bump the number.
 
     const all = Object.keys(LAYOUT_OBJECTS);
-    assert.equal(all.length, 56);
-    assert.equal(all.filter(hasCard).length, 30);
+    assert.equal(all.length, 57);
+    assert.equal(all.filter(hasCard).length, 31);
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });
 

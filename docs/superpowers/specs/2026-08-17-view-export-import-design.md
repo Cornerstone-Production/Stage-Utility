@@ -29,7 +29,9 @@ kinds of thing outside the view, and the design turns on which of those travel.
 | Views this one embeds | `views.json` | `view-embed.viewId`, `slots-grid.sourceViewId` |
 
 **Stays behind:** wireless connections, integration configs, ProPresenter
-instances, SenSource zones and Smaart meters.
+instances, SenSource zones, Smaart meters and screens (outputs). A
+`screen-embed.outputId` names a screen on the source install, so it travels as
+rebind work (kind `output`) rather than as a carried reference.
 
 The reason is that the destination has **different hardware**, not that these are
 somehow less portable. A mobile deployment runs a duplicate set of gear — its own

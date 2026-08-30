@@ -938,6 +938,15 @@ export class RemoteServer {
       json(res, { ok: cid != null && channels != null });
       return;
     }
+    // The connected set, on demand. The SSE hello burst carries this too, but a
+    // client filters the channel out until something subscribes — so a page that
+    // starts drawing presence mid-session would otherwise sit on a connect-time
+    // snapshot until the set happened to change, which in a quiet building is
+    // never.
+    if (method === "GET" && pathname === "/api/displays/presence") {
+      json(res, presenceSnapshot());
+      return;
+    }
     // Display presence heartbeat — a kiosk page reports it's alive (or leaving).
     // Powers the Connected/Offline dot on Settings → Displays.
     if (method === "POST" && pathname === "/api/displays/presence") {

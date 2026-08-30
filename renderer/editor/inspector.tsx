@@ -346,11 +346,15 @@ export function Inspector({
   const planItems = usePlanItems();
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
-  const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
+  // ONE read of the state, shared by everything below that needs it. The hook
+  // fetches and subscribes per call, so the two separate calls this replaced
+  // were two `stage:getState` requests and two state streams for one panel.
+  const stageState = useStageState().state;
+  const captionChannels = Object.keys(stageState?.captionChannelColors ?? {});
   // Home excluded: its stored geometry is meaningless (it is a card list, not a
   // canvas), so embedding it would draw four cards stacked at whatever filler
   // coordinates happen to be in the file.
-  const embedViews = screensListViews(useStageState().state?.views ?? []);
+  const embedViews = screensListViews(stageState?.views ?? []);
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
@@ -528,17 +532,17 @@ export function Inspector({
       })()}
       {c.type === "view-embed" && (() => {
         // Both the picker and the renderer ask the same function — see
-        // isEmbeddableViewKind. Custom never appears, which IS the recursion
-        // guard; other kinds appear but say why they do not render yet.
+        // isEmbeddableViewKind. Every kind renders now; a view that would
+        // contain itself is refused at render time, per box, by embed-chain.ts.
         const embeddable = (embedViews ?? []).filter((v) => isOfferableInEmbedPicker(v.kind));
         return embeddable.length === 0 ? (
           <p className="text-caption2 text-fg-muted">
-            No embeddable views yet — make a Script view first, then point this at it.
+            No other views yet — make one, then point this at it.
           </p>
         ) : (
           <RowSelect
             label="View"
-            hint="Renders that view's content here, natively. Script views work today; other kinds are being converted."
+            hint="Renders that view's content here, natively. Dashboard, stage and SPL-rundown views are configured per screen, not per view — pick an Embedded screen for those instead. A view cannot contain itself, and nesting stops after three levels."
             value={c.viewId ?? ""}
             options={[{ value: "", label: "None" }, ...embeddable.map((v) => ({ value: v.id, label: `${v.name} (${v.kind})` }))]}
             onChange={(v) => onConfig({ ...c, viewId: v || null })}
@@ -558,6 +562,37 @@ export function Inspector({
           hint="Scrolls the rundown to keep Planning Center's live item on screen, so a service that runs past the bottom of the box does not need anyone to touch the display. Only ever scrolls this object, never the rest of the layout. Turn off for a box parked on the top of the plan."
           checked={c.autoScroll ?? true}
           onChange={(v) => onConfig({ ...c, autoScroll: v })}
+        />
+      )}
+      {c.type === "screen-embed" && (() => {
+        const outputs = stageState?.outputs ?? [];
+        return outputs.length === 0 ? (
+          <p className="text-caption2 text-fg-muted">
+            No screens yet — add one under Screens, then point this at it.
+          </p>
+        ) : (
+          <RowSelect
+            label="Screen"
+            hint="Shows whatever this screen is showing, and follows it when the routing changes."
+            value={c.outputId ?? ""}
+            options={[{ value: "", label: "None" }, ...outputs.map((out) => ({ value: out.id, label: out.name }))]}
+            onChange={(v) => onConfig({ ...c, outputId: v || null })}
+          />
+        );
+      })()}
+      {c.type === "screen-embed" && c.outputId && (
+        <RowSwitch
+          label="Show the screen's name"
+          checked={c.showLabel ?? true}
+          onChange={(v) => onConfig({ ...c, showLabel: v })}
+        />
+      )}
+      {c.type === "screen-embed" && c.outputId && c.showLabel !== false && (
+        <RowSwitch
+          label="Show a status dot"
+          hint="Lit while a browser is actually open on that screen — even if its routed view was since deleted, since this tracks presence, not content. Dark once nothing has reported in for about ninety seconds. Not the routing — the tile itself already says what the screen is or is not showing."
+          checked={c.showStatus ?? true}
+          onChange={(v) => onConfig({ ...c, showStatus: v })}
         />
       )}
       {c.type === "service-order" && (

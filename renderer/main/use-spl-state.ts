@@ -1,36 +1,21 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { invoke, onNotification } from "../lib/api";
+import { useStatusChannel } from "./use-status-channel";
 
 /**
  * Live SPL state from Smaart, pushed on the "spl:metrics" channel. Hydrates once
  * on mount (the channel only broadcasts on change) then stays live. Shared by the
  * dashboard SPL card and the custom-layout SPL object.
+ *
+ * Ordering between the hydrate and the first push is useStatusChannel's job —
+ * see the note there for the staleness this used to have. Smaart in particular
+ * keeps its snapshot current between throttled broadcasts, so at an equal rev
+ * the read can be the fresher of the two and must still apply.
  */
 export function useSplState(enabled = true): SplMetricsDTO | null {
-  const [spl, setSpl] = useState<SplMetricsDTO | null>(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    invoke<SplMetricsDTO>("spl:getMetrics")
-      .then((s) => {
-        if (!cancelled && s) setSpl(s);
-      })
-      .catch(() => {
-        /* not configured yet — ignore */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    return onNotification("spl:metrics", (p) => setSpl(p as SplMetricsDTO));
-  }, [enabled]);
-
-  return spl;
+  const read = useCallback(() => invoke<SplMetricsDTO>("spl:getMetrics"), []);
+  return useStatusChannel<SplMetricsDTO>(read, "spl:metrics", enabled);
 }
 
 /**

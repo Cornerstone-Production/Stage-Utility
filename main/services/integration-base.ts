@@ -170,7 +170,7 @@ export abstract class ConnectionLifecycle {
 }
 
 /** An integration that publishes a status snapshot on its channel. */
-export abstract class StatusIntegration<T extends { connected: boolean }> extends ConnectionLifecycle {
+export abstract class StatusIntegration<T extends { connected: boolean; rev?: number }> extends ConnectionLifecycle {
   protected last: T;
 
   protected constructor(log: string, channel: string, protected readonly offline: T) {
@@ -178,10 +178,48 @@ export abstract class StatusIntegration<T extends { connected: boolean }> extend
     this.last = offline;
   }
 
+  /**
+   * Monotonic version of what this integration has published, bumped ONLY when a
+   * frame actually goes out on the channel.
+   *
+   * It exists to order the two ways a client learns the truth. A status hook
+   * hydrates with a one-shot read and subscribes to this channel; if a push lands
+   * before the read resolves, the older read overwrote the newer push — and
+   * because the channel broadcasts only on change, the wrong value then stuck
+   * until the next real change, which in a quiet building is hours.
+   *
+   * Both halves carry the same counter (`getLatest()` stamps it too, and every
+   * hydrate route answers from `getLatest()`), so the client can compare them and
+   * drop a read that is older than a push it already applied.
+   *
+   * "Only on a real change" is what makes the comparison meaningful: two frames
+   * with the same rev describe the same published value, whichever arrived first.
+   * A read may legitimately be FRESHER than the last push at the same rev —
+   * Smaart keeps `last` current between throttled broadcasts — which is why the
+   * client's rule is "apply unless strictly older" rather than "strictly newer".
+   *
+   * Deliberately NOT stored on `this.last`: emitIfChanged() compares every key of
+   * the DTO, so a rev living inside the snapshot would differ on every comparison
+   * and turn a change-driven channel into an unconditional one.
+   */
+  private rev = 0;
+
+  /** Copy of a snapshot stamped with the current published version. */
+  protected stamped(snapshot: T): T {
+    return { ...snapshot, rev: this.rev };
+  }
+
+  /** Advance to the next version. Call immediately before broadcasting a frame,
+   *  and only when the frame is a real change — see the note on `rev`. */
+  protected bumpRev(): void {
+    this.rev++;
+  }
+
   /** Latest snapshot — lets a freshly-loaded display hydrate immediately
-   *  instead of waiting for the next upstream event. */
+   *  instead of waiting for the next upstream event. Stamped, so the caller can
+   *  tell this read apart from a push it may already have applied. */
   getLatest(): T {
-    return this.last;
+    return this.stamped(this.last);
   }
 
   /**
@@ -215,7 +253,8 @@ export abstract class StatusIntegration<T extends { connected: boolean }> extend
    *  meters arrive many times a second). */
   protected emit(snapshot: T): void {
     this.last = snapshot;
-    broadcast(this.channel, snapshot);
+    this.bumpRev();
+    broadcast(this.channel, this.stamped(snapshot));
   }
 
   /** Drop to OFFLINE, but only if we were connected — avoids re-broadcasting

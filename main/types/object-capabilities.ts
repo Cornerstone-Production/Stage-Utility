@@ -76,6 +76,11 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   "pvp-layers": ["readout"],
   "home-pvp": ["readout"],
   "record-status": ["readout"],
+  // Readout only, deliberately. Expanding a tile to see a screen full size is a
+  // later phase of the producer multiview and is an overlay, not a route — so
+  // there is nowhere for `drilldown` to send anyone, and DRILLDOWN would refuse
+  // the entry anyway.
+  "screen-embed": ["readout"],
   "section-chip": ["readout"],
   "service-order": ["readout"],
   "service-pacing": ["readout"],

@@ -356,6 +356,16 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
     homeSize: "l",
   },
+  "screen-embed": {
+    label: "Embedded screen",
+    blurb: "What another screen is showing, live",
+    group: "PCO / service",
+    config: () => ({ type: "screen-embed", outputId: null, showLabel: true, showStatus: true }),
+    // Same starting size as the embedded VIEW above, and for the same reason:
+    // whatever the screen is routed to should look like it does on that screen.
+    style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
+    homeSize: "l",
+  },
   "home-readiness": {
     label: "Readiness",
     blurb: "What still needs doing before the next service",
@@ -791,28 +801,36 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
 /**
  * Which View kinds a `view-embed` object may render.
  *
- * ONE function, used by both the picker and the renderer, because the two
- * disagreeing is the whole hazard. Custom is excluded and that is the entire
- * recursion guard: a custom View is the only kind holding a layout, so refusing
- * it means an embed can never reach another embed — no depth counter to get
- * wrong. Every other kind is listed explicitly, so adding a View kind does not
- * silently make it embeddable before anyone has made it render in a box.
+ * Every kind. It used to be `["script"]`, with custom excluded from the picker
+ * as the entire recursion guard — and the picker offered four kinds it then
+ * refused to draw, which read as broken rather than as unfinished.
  *
- * A function rather than a comment or a filter written out at each call site:
- * the guard test calls THIS, so it fails on the behaviour changing rather than
- * on a string moving inside a 2,500-line file.
+ * The guard now lives in embed-chain.ts, where it is a cycle check over the
+ * ancestor chain plus a depth cap, rather than a whole kind being unavailable.
+ *
+ * Listed rather than derived, so adding a View kind is a deliberate decision to
+ * make it embeddable and not something that happens by accident. The list is
+ * every member of ViewKind today; EmbeddedView's switch is exhaustive, so a new
+ * kind is a compile error there whether or not anyone remembers this list.
  */
-export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = ["script"];
+export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = [
+  "slots",
+  "dashboard",
+  "stage",
+  "transcription",
+  "custom",
+  "script",
+  "spl-rundown",
+];
 
 export function isEmbeddableViewKind(kind: ViewKind): boolean {
   return EMBEDDABLE_VIEW_KINDS.includes(kind);
 }
 
-/** Offered in the embed picker: everything except custom, so an operator can see
- *  a kind exists and read why it is not renderable yet, rather than wondering
- *  where it went. Custom never appears — see isEmbeddableViewKind. */
+/** Offered in the embed picker. Every kind renders now, so the picker no longer
+ *  needs to offer kinds it cannot draw — the two lists are the same list. */
 export function isOfferableInEmbedPicker(kind: ViewKind): boolean {
-  return kind !== "custom";
+  return isEmbeddableViewKind(kind);
 }
 
 // ── Derived views over the registry ───────────────────────────────────────────

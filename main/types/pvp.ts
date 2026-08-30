@@ -10,6 +10,8 @@
 // not "time is advancing" — and a field whose name says the opposite of what it
 // means is one somebody will read wrongly. playbackRate answers the real question.
 
+import type { RevisionedStatus } from "./live.js";
+
 /**
  * What a layer is doing, as the UI actually needs it.
  *
@@ -73,7 +75,7 @@ export interface PvpLayerDTO {
   durationSec: number | null;
 }
 
-export interface PvpStatusDTO {
+export interface PvpStatusDTO extends RevisionedStatus {
   connected: boolean;
   layers: PvpLayerDTO[];
   /**

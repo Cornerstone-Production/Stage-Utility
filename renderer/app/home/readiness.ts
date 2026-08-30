@@ -24,16 +24,36 @@ export interface ReadinessCheck {
 }
 
 /**
+ * Which screens actually have a browser attached, and which do not.
+ *
+ * The intersection matters in both directions. Presence is a set of ids that
+ * reported in, and it is not guaranteed to be a subset of the screens that
+ * exist: a page left open on a deleted screen, or a bookmark to a path that was
+ * never one, keeps heartbeating. Counting the raw set gave Home "3/2 connected"
+ * on a real server. And a screen nobody has ever opened appears in no set at
+ * all, so it has to be found from `outputs` rather than from presence.
+ */
+export function splitByPresence(
+  outputs: readonly Output[],
+  onlineOutputIds: readonly string[],
+): { online: Output[]; offline: Output[] } {
+  const live = new Set(onlineOutputIds);
+  return {
+    online: outputs.filter((o) => live.has(o.id)),
+    offline: outputs.filter((o) => !live.has(o.id)),
+  };
+}
+
+/**
  * @param state  Current stage state.
- * @param onlineOutputIds  Output ids currently connected, from the
- *   `displays:presence` channel. Empty is a legitimate answer (nothing is on),
- *   not an error.
+ * @param onlineOutputIds  Output ids with a live heartbeat, from the
+ *   `displays:presence` channel by way of `useDisplayPresence`. Empty is a
+ *   legitimate answer (nothing is on), not an error.
  */
 export function readinessChecks(
   state: StageState,
   onlineOutputIds: readonly string[],
 ): ReadinessCheck[] {
-  const online = new Set(onlineOutputIds);
   const outputs = state.outputs ?? [];
   // Home excluded: it is seeded on every install, so counting it would tick "a
   // view of your own" before the operator had made one, and inflate the count
@@ -41,7 +61,7 @@ export function readinessChecks(
   const views = screensListViews(state.views ?? []);
 
   const unassigned = outputs.filter((o) => !o.viewId);
-  const offline = outputs.filter((o) => !online.has(o.id));
+  const { offline } = splitByPresence(outputs, onlineOutputIds);
 
   return [
     {
@@ -88,6 +108,11 @@ export function readinessChecks(
       route: "/screens",
     },
     {
+      // Genuinely connected — an output with a heartbeat inside the 90s TTL, not
+      // one that merely has a view routed to it. This check read the routed set
+      // until Aug 2026, which made it a second copy of "Every screen has a view"
+      // above and meant "all connected" was true of a room with every screen
+      // switched off.
       id: "online",
       label: "Screens online",
       detail:

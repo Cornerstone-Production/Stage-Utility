@@ -329,6 +329,10 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "rosstalk-button", label: "RossTalk button", group: "Control", after: "osc-button" },
   { type: "record-status", label: "Record status", group: "Status", after: null },
   { type: "view-embed", label: "Embedded view", group: "PCO / service", after: "next-service-item" },
+  // The producer primitive: a tile bound to a SCREEN rather than to one view, so
+  // it follows a routing change. Sits directly after the embedded view it is the
+  // sibling of, which moved `home-readiness` one place down on purpose.
+  { type: "screen-embed", label: "Embedded screen", group: "PCO / service", after: "view-embed" },
   // The general form of the two buttons above: bound to any entry in the
   // automation action registry rather than one integration.
   { type: "action-button", label: "Action button", group: "Control", after: "rosstalk-button" },
@@ -337,7 +341,7 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "checklist", label: "Checklist", group: "Control", after: "notes" },
   // Home's own cards, so Home is built from the same widget set as every other
   // surface rather than being a bespoke page (Phase 6, carrying a Phase 4 debt).
-  { type: "home-readiness", label: "Readiness", group: "PCO / service", after: "view-embed" },
+  { type: "home-readiness", label: "Readiness", group: "PCO / service", after: "screen-embed" },
   { type: "home-next-service", label: "Next service", group: "PCO / service", after: "home-readiness" },
   // The other two things Home draws. They existed as bespoke panels; making them
   // objects is what lets the Home tab's own editor govern the whole page with
