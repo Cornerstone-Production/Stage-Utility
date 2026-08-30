@@ -1047,12 +1047,50 @@ button.score-capsule:focus-visible {
   z-index: 1;
 }
 
+/* THE PANEL FLOATS. It used to be a flex item in the shell's content column, so
+   growing it pushed the page header and the whole scrolling pane down — open the
+   scores on Screens and every card slid down the screen. A panel that moves the
+   page is a panel you cannot open while reading the page.
+   The anchor is the piece that stays in flow, and it is zero pixels tall: it
+   marks where the panel starts without occupying anything. `min-height: 0` is not
+   optional — a flex item's automatic minimum is its content, so without it this
+   would be exactly as tall as the panel it holds and nothing would have changed.
+   z-index over the sticky headers inside the scrolling pane (the tallest is
+   patch-section's `top-1 z-30`), which is what "above everything" means here.
+   Portalled dialogs and menus are `fixed z-50`/`z-[100]` on the body and still
+   win, which is right: a modal belongs over a panel. */
+.score-anchor {
+  position: relative;
+  height: 0;
+  min-height: 0;
+  z-index: 40;
+}
+
 /* The host clips; the shell scales. Height leads on the way in and trails on the
-   way out, so the panel is never clipped mid-flight in either direction. */
+   way out, so the panel is never clipped mid-flight in either direction.
+   OUT OF FLOW, in the anchor above — a change of containing block, not of
+   mechanism. The row still goes 0fr -> 1fr on the same element over the same
+   curve, and `inset-inline: 0` gives it the same width it had as a block in the
+   column, so the shell's cap and its `margin-inline: auto 0` still park it under
+   the capsule at the bar's right end and still centre it on a phone. */
 .score-host {
+  position: absolute;
+  top: 0;
+  inset-inline: 0;
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 620ms var(--score-ease) 60ms;
+
+  /* AN OVERLAY MUST NOT SWALLOW THE PAGE. The clip is full-width, but the panel
+     drawn inside it is capped at 640px and pushed to one side, so most of that
+     width is empty air sitting over content the operator can still see. In flow
+     that air cost nothing; over the page it would eat every click that landed on
+     it. Only the shell — which is exactly the cards' box — takes pointer events.
+     This is also what keeps the document-level close handler honest: a press on
+     the empty air now reports the page element underneath as its target, so
+     `closest(".score-host")` is false and the panel closes, which is what
+     pressing away from a panel should do. */
+  pointer-events: none;
 
   /* How far a card's drop shadow reaches OUTSIDE its own box, which is the room
      the clip below has to leave it. The biggest is the focused card's
@@ -1112,6 +1150,11 @@ button.score-capsule:focus-visible {
      the off-centre panel that was reported. */
   margin-block: var(--score-shadow-t) var(--score-shadow-b);
   margin-inline: auto 0;
+  /* The one box in the floating panel that takes a press — see the host's
+     `pointer-events: none`. It is exactly the cards' own box: the stack inside is
+     `position: relative` with its height written from the same measurement that
+     places the cards, so this is the painted panel and nothing more. */
+  pointer-events: auto;
   transform-origin: top center;
   opacity: 0;
   transform: translateY(-10px) scaleY(.68) scaleX(.86);
