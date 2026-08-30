@@ -30,7 +30,7 @@ import type {
 
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
-import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
@@ -2827,13 +2827,19 @@ export class StageController {
     if (this.deviceStatusFlushTimer !== null) return;
     this.deviceStatusFlushTimer = setTimeout(() => {
       this.deviceStatusFlushTimer = null;
-      // Skip the expensive re-resolve + full-state broadcast when no display is
-      // watching (idle). Mark dirty so the next connecting client gets fresh state
-      // via ensureResolvedFresh() before hydration.
+      // Skip the expensive re-resolve + full-state broadcast when nothing is
+      // consuming it (idle). Mark dirty so the next connecting client gets fresh
+      // state via ensureResolvedFresh() before hydration.
+      //
+      // channelInDemand, not channelHasSubscribers: "slots:devices" is the channel
+      // the wireless.battery-below and wireless.rf-below triggers read, and the
+      // automation engine reads it in-process where no SSE check can see it. Asking
+      // only about browsers meant those two rules could never fire on an unattended
+      // box — the state an appliance is in for most of the week.
       if (
-        channelHasSubscribers("stage:state-changed") ||
-        channelHasSubscribers("slots:devices") ||
-        channelHasSubscribers(WIRELESS_STATUS_CHANNEL)
+        channelInDemand("stage:state-changed") ||
+        channelInDemand("slots:devices") ||
+        channelInDemand(WIRELESS_STATUS_CHANNEL)
       ) {
         this.recomputeResolved();
         this.broadcastDevices();
@@ -2874,7 +2880,15 @@ export class StageController {
       .sort((a, b) => a.channelId.localeCompare(b.channelId));
   }
 
-  /** Push wireless telemetry, on change and only while something is watching. */
+  /**
+   * Push wireless telemetry, on change and only while a browser is watching.
+   *
+   * Deliberately `channelHasSubscribers` and not `channelInDemand`, unlike the
+   * gate in applyDeviceStatus that reaches this: nothing in-process reads
+   * "wireless:channels". Automation's wireless triggers read "slots:devices", so
+   * a rule keeps THAT flowing without also paying for a channel only the wireless
+   * widgets render.
+   */
   private broadcastWirelessChannels(): void {
     if (!channelHasSubscribers(WIRELESS_STATUS_CHANNEL)) return;
     const channels = this.wirelessChannelStatuses();

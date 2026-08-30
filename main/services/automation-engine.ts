@@ -12,7 +12,7 @@ import { errorMessage } from "./errors.js";
 import { randomUUID } from "node:crypto";
 
 import type { AutomationSettings, ConditionCtx, Rule } from "../types/automation.js";
-import { addBroadcastListener, broadcast } from "./broadcaster.js";
+import { addBroadcastListener, addChannelDemandSource, broadcast } from "./broadcaster.js";
 import { AUTOMATION_ACTIONS } from "./automation-actions.js";
 import { allConditionsHold } from "./automation-conditions.js";
 import { sampleArchive } from "./archive/sample-archive.js";
@@ -20,8 +20,6 @@ import { automationLog } from "./automation-log.js";
 import { automationStore } from "./automation-store.js";
 import { integrationManager } from "./integration-manager.js";
 import { signalStore } from "./signal-store.js";
-import { smaartService } from "./smaart-service.js";
-import { sensourceService } from "./sensource-service.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
@@ -279,27 +277,69 @@ class AutomationEngine {
       (rule) => rule.enabled && AUTOMATION_TRIGGERS[rule.trigger.id]?.channel === channel,
     );
   }
+
+  /**
+   * Does any armed, enabled rule carry this condition?
+   *
+   * Conditions never touch the bus — conditionCtx() PULLS each one from its
+   * service's latest snapshot when a rule fires — so wantsChannel cannot see
+   * them. A condition reading a throttled poll is demand on that poll all the
+   * same: "REAPER is recording" qualifying a rule while REAPER polls at its idle
+   * cadence answers from a snapshot seconds old.
+   */
+  wantsCondition(conditionId: string): boolean {
+    if (this.settings.disarmed) return false;
+    return this.rules.some(
+      (rule) => rule.enabled && rule.conditions.some((c) => c.id === conditionId),
+    );
+  }
 }
 
 export const automationEngine = new AutomationEngine();
 
 // Keep the channels this engine evaluates flowing even with no browser attached.
 //
-// smaart-service skipped the broadcast entirely without SSE subscribers, so
-// spl.crossed-above / crossed-below never fired on an unattended box — the normal
-// state for an appliance. sensource's gate throttles polling rather than
-// broadcasting, so people.count triggers were evaluating counts up to a minute
-// stale. Registered here, at the consumer, matching how attendance-recorder and
-// tsl-service declare their own demand.
-smaartService.addDemandSource(() => automationEngine.wantsChannel("spl:metrics"));
-sensourceService.addDemandSource(() => automationEngine.wantsChannel("people:count"));
-// Same reasoning for the streaming polls: idle, Resi drops to two minutes and
-// YouTube to five, so "Resi goes live" on an unattended box would fire minutes
-// after the stream started. A rule reading the channel is a watcher.
-resiService.addDemandSource(() => automationEngine.wantsChannel("resi:status"));
-youtubeService.addDemandSource(() => automationEngine.wantsChannel("youtube:status"));
-// PVP is the one where this matters most: its whole point is driving content
-// from a rule, and a booth appliance with no browser open is exactly where that
-// is wanted. Without this registration its inDemand gate is decorative, and
-// every PVP rule would see the five-second idle cadence at best.
-pvpService.addDemandSource(() => automationEngine.wantsChannel("pvp:status"));
+// Several producers skip work when nothing is watching — smaart-service dropped
+// the push entirely, sensource and the streaming polls fell to their idle
+// cadence, stage-controller skipped the whole device re-resolve — and all of them
+// asked an SSE subscriber check, which cannot see this engine. The result was
+// enabled rules that had simply never run, with no error anywhere.
+//
+// Derived from the trigger registry rather than written out per service, because
+// the hand-written version covered four channels and missed slots:devices and
+// prodcom:transcript. A new trigger on a new channel is now covered the moment it
+// is registered; demand-gating.test.ts asserts that, exactly.
+for (const channel of new Set(Object.values(AUTOMATION_TRIGGERS).map((t) => t.channel))) {
+  addChannelDemandSource(channel, () => automationEngine.wantsChannel(channel));
+}
+
+/**
+ * Conditions, which arrive by pull rather than on the bus.
+ *
+ * conditionCtx() reads each of these from its service's latest snapshot at the
+ * moment a rule fires, so the trigger loop above cannot see the demand. The three
+ * whose channel already appears as a trigger channel are covered by that loop;
+ * REAPER's is not, and is the reason this table exists at all.
+ */
+const CONDITION_CHANNELS: Record<string, string> = {
+  "obs.is-recording": "obs:status",
+  "reaper.is-recording": "reaper:status",
+  "resi.is-streaming": "resi:status",
+  "youtube.is-streaming": "youtube:status",
+  // ProVideoPlayer and baptisms, added when their features merged. A condition
+  // needs a line here even when its channel is ALSO a trigger channel: the loop
+  // above registers demand for the channels a rule TRIGGERS on, and a rule can
+  // perfectly well trigger on PCO and merely ASK about a PVP layer. That rule
+  // would read a snapshot at the idle cadence -- which for PVP, whose whole
+  // point is driving content from a rule on a booth appliance with no browser
+  // open, is the case that matters most.
+  "pvp.layer-has-content": "pvp:status",
+  "pvp.layer-is-hidden": "pvp:status",
+  "pvp.layer-is-muted": "pvp:status",
+  "pvp.layer-is-playing": "pvp:status",
+  "pvp.workspace-has-content": "pvp:status",
+  "baptism.phase-is": "baptism:state",
+};
+for (const [conditionId, channel] of Object.entries(CONDITION_CHANNELS)) {
+  addChannelDemandSource(channel, () => automationEngine.wantsCondition(conditionId));
+}

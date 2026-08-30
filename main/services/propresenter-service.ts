@@ -316,8 +316,11 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
       this.report("connected", `Connected to ${host}:${port}`);
       this.resetBackoff(); // reconnected
-      // Fast poll only while a display/panel renders this instance; else keepalive.
-      this.scheduleIn(this.hasSubscribers ? this.pollMs : IDLE_INTERVAL_MS);
+      // Fast poll only while something consumes this instance; else keepalive.
+      // `inDemand` and not an SSE-subscriber check: nothing in-process reads this
+      // payload today, so the two are identical — but the moment one does, a
+      // browser-only check would quietly hand it five-second-old slides instead.
+      this.scheduleIn(this.inDemand ? this.pollMs : IDLE_INTERVAL_MS);
     } catch (err) {
       const msg = errorMessage(err);
       // Log only the first failure of an outage, then stay quiet until it recovers —
