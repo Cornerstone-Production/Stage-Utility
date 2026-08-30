@@ -45,10 +45,40 @@ describe("the bar registry", () => {
   });
 
   test("the default is the bar as it shipped", () => {
-    // plan on the left; the current item and the timer on the right.
-    assert.deepEqual(DEFAULT_BAR_ORDER, ["plan", "spacer", "current-item", "live-timer"]);
+    // The service type and the plan on the left; the current item and the timer
+    // on the right.
+    assert.deepEqual(DEFAULT_BAR_ORDER, [
+      "service-type",
+      "plan",
+      "spacer",
+      "current-item",
+      "live-timer",
+    ]);
     assert.ok(!DEFAULT_BAR_ORDER.includes("recording"), "recording is opt-in");
     assert.ok(!DEFAULT_BAR_ORDER.includes("integration-health"), "health is opt-in");
+  });
+
+  test("THE GUARD: the default still draws both halves of the old plan item", () => {
+    // `plan` used to draw the service-type name AND the plan title. It draws the
+    // title alone now, so a default that named only `plan` would take a reading
+    // off the bar of every install that never configured one — silently, and
+    // without anybody having asked for it.
+    assert.ok(DEFAULT_BAR_ORDER.includes("service-type"), "the default lost the service type");
+    assert.ok(DEFAULT_BAR_ORDER.includes("plan"), "the default lost the plan title");
+    assert.equal(
+      DEFAULT_BAR_ORDER.indexOf("service-type") + 1,
+      DEFAULT_BAR_ORDER.indexOf("plan"),
+      "the two halves are no longer side by side, in the order the one item drew them",
+    );
+  });
+
+  test("the two labels have to be tellable apart in the palette", () => {
+    // "Service type" beside "Service type and plan" was the trap this split had
+    // to avoid: one reads as a shorter spelling of the other rather than as a
+    // different item. Neither label may contain the other.
+    const a = BAR_ITEMS["service-type"].label;
+    const b = BAR_ITEMS.plan.label;
+    assert.ok(!a.includes(b) && !b.includes(a), `"${a}" and "${b}" read as the same tile`);
   });
 
   test("every default item exists in the registry", () => {
@@ -263,7 +293,12 @@ describe("which readings are prose", () => {
     // floor, and which ones the configurator warns a phone about. An item that
     // wandered in would start being cut without anyone deciding it could be; one
     // that wandered out would be cut with no warning that it would be.
-    assert.deepEqual(Object.keys(BAR_PROSE_ITEMS).sort(), ["current-item", "plan"]);
+    //
+    // The service type joined it when it became an item of its own: it is a name
+    // somebody wrote, it survives every rung now that it is somebody's choice,
+    // and an item that survives to the floor with nowhere to give would be
+    // clipped by the strip with no ellipsis to say so.
+    assert.deepEqual(Object.keys(BAR_PROSE_ITEMS).sort(), ["current-item", "plan", "service-type"]);
   });
 
   test("and every id in it is a real bar item", () => {

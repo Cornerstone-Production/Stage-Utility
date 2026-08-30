@@ -8,7 +8,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { contextBarState, renderBarItem, integrationHealth } = await import("./context-bar.js");
-const { BAR_ITEMS } = await import("./bar-items.js");
+const { BAR_ITEMS, BAR_PROSE_ITEMS } = await import("./bar-items.js");
 const { renderToStaticMarkup } = await import("react-dom/server");
 
 after(() => {
@@ -182,7 +182,7 @@ describe("nothing appears or disappears", () => {
   // strip where every other reading means something. The exception is declared
   // on the item itself (BarItem.canBeEmpty, which carries the full reasoning),
   // read from there rather than hard-coded here, and its membership is asserted
-  // EXACTLY below — so a second item cannot quietly join it, and the other seven
+  // EXACTLY below — so a second item cannot quietly join it, and the other eight
   // are still proven never to vanish in any of the four fixtures.
   const NOW = Date.parse("2026-08-14T14:05:00.000Z");
   const ALL = Object.keys(BAR_ITEMS) as (keyof typeof BAR_ITEMS)[];
@@ -206,8 +206,12 @@ describe("nothing appears or disappears", () => {
     // The count is asserted EXACTLY, not as a floor: the loops below walk
     // Object.keys(BAR_ITEMS), so an item that never reached the registry is an
     // item they silently do not cover.
-    assert.equal(ALL.length, 8);
+    assert.equal(ALL.length, 9);
     assert.ok(ALL.includes("scores"), "the score capsule is not a bar item");
+    // Two items, not one compound. The operator asked to be able to put the
+    // service type on the bar without the plan title.
+    assert.ok(ALL.includes("service-type"), "the service type is not a bar item of its own");
+    assert.ok(ALL.includes("plan"), "the plan title is not a bar item");
   });
 
   test("THE GUARD: exactly one item is exempt from the no-reflow rule", () => {
@@ -218,7 +222,7 @@ describe("nothing appears or disappears", () => {
       ALL.filter((id) => BAR_ITEMS[id].canBeEmpty),
       ["scores"],
     );
-    assert.equal(MUST_RENDER.length, 7);
+    assert.equal(MUST_RENDER.length, 8);
   });
 
   test("every item bound by the rule renders with no service, no recorder and no integrations", () => {
@@ -359,8 +363,9 @@ describe("what counts as an integration being down", () => {
 // markup is the rung, minus the pixels.
 //
 // The pixel half — one row, no scroll, no wrap, nothing cut — was checked in a
-// real browser at 320 / 360 / 390 / 430 / 640 / 768 / 1440px in both themes, and
-// the numbers are written down in docs/features/context-bar.md.
+// real browser at 320 / 390 / 640 / 1440px in both themes, over the service type
+// alone, the plan alone, the two together, an upgraded bar and every item at
+// once. The numbers are written down in docs/features/context-bar.md.
 
 describe("what a rung leaves behind", () => {
   const NOW = Date.parse("2026-08-14T14:05:00.000Z");
@@ -377,6 +382,16 @@ describe("what a rung leaves behind", () => {
     resi: null,
     youtube: null,
     scores: null,
+  };
+
+  /** A plan loaded, so the two readings that used to be one item both have
+   *  something to say. Both names are invented — this is a public repo. */
+  const SERVICE_TYPE = "Weekend Service";
+  const PLAN_TITLE = "Carry The Light";
+  const loaded = {
+    ...idle,
+    state: { serviceTypeName: SERVICE_TYPE, planTitle: PLAN_TITLE } as unknown as StageState,
+    bar: contextBarState(LIVE_ITEM, NOW, 0),
   };
 
   /**
@@ -466,11 +481,55 @@ describe("what a rung leaves behind", () => {
     // `truncate` is what puts the ellipsis there. A prose reading that lost it
     // would still be cut at the floor — by `overflow: hidden` on the strip —
     // but with nothing to tell the reader a word had gone.
-    const live = { ...idle, bar: contextBarState(LIVE_ITEM, NOW, 0) };
-    for (const [id, ctx] of [["current-item", live]] as const) {
-      const html = renderToStaticMarkup(renderBarItem(id, ctx) as never);
+    //
+    // Read off BAR_PROSE_ITEMS rather than listed here, so an item added to that
+    // set without a `.bar-prose` hook fails by name instead of being warned
+    // about in the configurator and then silently clipped in the bar.
+    for (const id of Object.keys(BAR_PROSE_ITEMS) as (keyof typeof BAR_PROSE_ITEMS)[]) {
+      const html = renderToStaticMarkup(renderBarItem(id, loaded) as never);
       assert.match(html, /bar-prose/, `${id} is prose but carries no bar-prose hook`);
       assert.match(html, /truncate/, `${id} can be cut at the floor with no ellipsis to show it`);
     }
+  });
+
+  test("THE GUARD: the service type survives every rung, because somebody chose it", () => {
+    // THE DECISION THIS SPLIT TURNED ON. While the service-type name was printed
+    // inside the plan item it carried `bar-drop-1`, and level 1 clipped it — the
+    // rung was shortening one item, not emptying one. As an item of its own it is
+    // the operator's choice, and clipping its only reading drops it: the row
+    // still renders, so the no-reflow guards above stay green, but it renders to
+    // zero width and the strip still charges it a gap.
+    //
+    // Put `bar-drop-1` back on that span and this goes red at level 1.
+    for (let level = 0; level <= 3; level++) {
+      assert.match(
+        visibleAt(level, renderBarItem("service-type", loaded)),
+        new RegExp(SERVICE_TYPE),
+        `the service type is gone at level ${level}`,
+      );
+    }
+  });
+
+  test("and so does the plan title beside it, at every rung", () => {
+    // The other half of the pair a migrated bar carries. Level 1 no longer has
+    // anything to take from either of them.
+    for (let level = 0; level <= 3; level++) {
+      assert.match(
+        visibleAt(level, renderBarItem("plan", loaded)),
+        new RegExp(PLAN_TITLE),
+        `the plan title is gone at level ${level}`,
+      );
+    }
+  });
+
+  test("a migrated bar reads exactly like the one item it replaced", () => {
+    // What an operator with `plan` in their saved bar saw before the split: the
+    // service-type name, then the plan title. The pair the migration writes has
+    // to say the same two things, in that order, at full width.
+    const pair = ["service-type", "plan"] as const;
+    assert.deepEqual(
+      pair.map((id) => visibleAt(0, renderBarItem(id, loaded))),
+      [SERVICE_TYPE, PLAN_TITLE],
+    );
   });
 });

@@ -27,12 +27,14 @@ import {
   RadioTowerIcon,
   MoveHorizontalIcon,
   SquareIcon,
+  TagIcon,
   TrophyIcon,
   type LucideIcon,
 } from "lucide-react";
 
 export type BarItemId =
   | "clock"
+  | "service-type"
   | "plan"
   | "live-timer"
   | "current-item"
@@ -132,11 +134,25 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
     icon: ClockIcon,
     hint: "The current time.",
   },
+  // TWO ITEMS, NOT ONE COMPOUND. They used to be a single "Service type and
+  // plan", which meant an operator who wanted only the service type — the
+  // reading that says WHICH Sunday morning this is — had to take the plan title
+  // with it, and the plan title is the longest thing on the strip.
+  //
+  // Their labels have to stay tellable apart in the palette. "Service type"
+  // beside "Service type and plan" would have been a trap: one reads as a
+  // shorter spelling of the other rather than as a different item.
+  "service-type": {
+    id: "service-type",
+    label: "Service type",
+    icon: TagIcon,
+    hint: "Which service this is — the same name most weeks.",
+  },
   plan: {
     id: "plan",
-    label: "Service type and plan",
+    label: "Service plan",
     icon: CalendarIcon,
-    hint: "Which service, and which plan is active.",
+    hint: "The title of the plan that is loaded.",
   },
   "live-timer": {
     id: "live-timer",
@@ -205,8 +221,18 @@ export const BAR_SPACE_ITEM: Omit<BarItem, "id"> = {
  * The arrangement the bar shipped with: the plan on the left, service state on
  * the right. Integration health and recording are opt-in rather than added to
  * everyone's bar without asking.
+ *
+ * The service type and the plan title are two entries here because they used to
+ * be one item that drew both. The default has to go on drawing both, or an
+ * install that never configured its bar would lose a reading to a refactor.
  */
-export const DEFAULT_BAR_ORDER: BarRowId[] = ["plan", BAR_SPACER, "current-item", "live-timer"];
+export const DEFAULT_BAR_ORDER: BarRowId[] = [
+  "service-type",
+  "plan",
+  BAR_SPACER,
+  "current-item",
+  "live-timer",
+];
 
 /**
  * Where the spacer goes in a bar saved before spacers existed.
@@ -321,18 +347,24 @@ export function barRowsFor(
  * longer than either. Every other item on the bar is a number, a mark, or a word
  * from a fixed vocabulary, and so has a width the ladder can reason about.
  *
+ * THE SERVICE TYPE IS IN HERE NOW, and that is the other half of it becoming its
+ * own item. It used to be a qualifier the ladder clipped whole at level 1, so it
+ * never had to shrink. An item the operator placed on purpose may not be dropped
+ * at any rung — so if it is going to survive to the floor, the floor has to have
+ * somewhere to put it, and that is an ellipsis. Left out of this set it would
+ * instead be clipped by `overflow: hidden` on the strip, with nothing to tell
+ * the reader a word had gone: the one failure this bar must not have quietly.
+ *
  * Named here rather than inside the fitter because the CONFIGURATOR is the one
  * that has to act on it: on a phone these are what the operator curates out, and
  * a set that keeps one is warned that a narrow phone will have to cut it.
  *
- * The value is a SECOND name, not the item's label, because the two are
- * different things and only one of them is true. The item is called "Service
- * type and plan"; what a narrow phone cuts is the plan title, and the service
- * type is already gone by then. A warning built from the labels read "service
- * type and plan and current plan item will be cut short", which names the wrong
- * thing twice and reads like a fault in the sentence.
+ * The value is a SECOND name, not the item's label, because a warning built from
+ * the labels reads about the wrong thing. "Service plan … will be cut short"
+ * names the item; what actually gets cut is the plan title inside it.
  */
 export const BAR_PROSE_ITEMS = {
+  "service-type": "the service type",
   plan: "the plan title",
   "current-item": "the item name",
 } as const satisfies Partial<Record<BarItemId, string>>;

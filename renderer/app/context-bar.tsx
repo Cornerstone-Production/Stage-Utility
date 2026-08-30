@@ -34,12 +34,14 @@ import { useResiState, useYouTubeState } from "../main/use-stream-state";
 import { DisconnectedPopover } from "./disconnected-popover";
 import { clockParts } from "../lib/clock-format";
 import {
+  CalendarIcon,
   CircleDotIcon,
   CircleOffIcon,
   ListIcon,
   PlugZapIcon,
   RadioOffIcon,
   RadioTowerIcon,
+  TagIcon,
   UnplugIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -337,27 +339,40 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       );
     }
 
+    case "service-type":
+      // IT SURVIVES EVERY RUNG, and that is a deliberate reversal. While this
+      // reading lived inside the plan item it was a QUALIFIER of it — the one
+      // thing on the strip that is the same every week — so level 1 clipped it
+      // and left the plan title behind. That was only ever defensible because
+      // nobody had chosen it: it came along with the plan title, and the ladder
+      // was shortening one item, not dropping one.
+      //
+      // As its own item it is something the operator put there. Clipping the
+      // only reading it has is dropping it — the row still renders, so the
+      // no-reflow guards stay green, but it renders to zero width and the strip
+      // still charges it a gap. A hole exactly where a reading used to be, which
+      // is the one thing the ladder may never do.
+      //
+      // So it gives way the way the other prose does, at the floor and only
+      // there, with an ellipsis to say a word went. And the operator who wants
+      // it gone from a narrow screen has a better instrument than a rung: the
+      // phone's own set, which can simply not carry it.
+      return state?.serviceTypeName ? (
+        <span className="bar-prose text-footnote text-fg-muted truncate">
+          {state.serviceTypeName}
+        </span>
+      ) : (
+        <Idle glyph={TagIcon}>No service type</Idle>
+      );
+
     case "plan":
-      // The service type is the one reading on this strip that is the same every
-      // week, so it is the first thing the ladder gives up — but ONLY when the
-      // plan title is there to be left behind. Dropping it from a bar with no
-      // plan loaded would leave the item with nothing to draw, and an item that
-      // renders to zero width still charges the strip a gap: a hole exactly
-      // where a reading used to be, which is the reflow this bar does not do.
-      return (
-        <>
-          <span
-            className={cn(
-              "text-footnote text-fg-muted shrink-0",
-              state?.planTitle && "bar-drop-1",
-            )}
-          >
-            {state?.serviceTypeName ?? "No service type"}
-          </span>
-          {state?.planTitle && (
-            <span className="bar-prose text-footnote text-fg truncate">{state.planTitle}</span>
-          )}
-        </>
+      // Just the plan title now. With no plan loaded this is the same kind of
+      // fact as "No item" beside it — a resting reading, not an absence — so it
+      // takes the same treatment and becomes the item's own mark at level 2.
+      return state?.planTitle ? (
+        <span className="bar-prose text-footnote text-fg truncate">{state.planTitle}</span>
+      ) : (
+        <Idle glyph={CalendarIcon}>No plan</Idle>
       );
 
     case "current-item":

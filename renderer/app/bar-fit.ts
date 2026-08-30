@@ -10,18 +10,26 @@
 // nothing else:
 //
 //   0  full          Everything at its full length.
-//   1  qualifiers    The clock's seconds; the service-type name beside the plan
-//                    title; the capsule's inning/period detail; the timer's
-//                    pre-service label. Each is context the operator already has.
+//   1  qualifiers    The clock's seconds; the capsule's inning/period detail;
+//                    the timer's pre-service label. Each is context the operator
+//                    already has, and none of them is an item's only reading.
 //   2  compact       Every idle WORD becomes that item's own mark, gaps and edge
 //                    padding tighten from 12px to 8px, and the score capsule
 //                    tightens. "6 disconnected" keeps its 6 and loses the word.
-//   3  floor         Prose — a plan title, a live item's title — ellipsises.
+//   3  floor         Prose — a service type, a plan title, a live item's title —
+//                    ellipsises.
 //
 // FOUR THINGS THE LADDER MAY NEVER DO. Never remove a number: a score, a count,
 // a countdown, a duration. Never remove a state colour: live green, overrun red.
 // Never drop an item: every reading on the strip is one somebody put there on
 // purpose. Never scroll and never wrap.
+//
+// "NEVER DROP AN ITEM" INCLUDES CLIPPING ITS ONLY READING. Level 1 used to take
+// the service-type name, which was legal while that name was a qualifier printed
+// inside the plan item — the rung shortened one item rather than emptying one.
+// Now that the service type is an item in its own right, taking it would leave a
+// row that renders to zero width and still charges the strip a gap. A rung may
+// only ever take a word an item can spare.
 //
 // LEVEL 3 IS A FLOOR, NOT A STEP. It exists because a strip that cannot fit has
 // to do SOMETHING, and of the four things it could do — ellipsise, wrap, scroll,
