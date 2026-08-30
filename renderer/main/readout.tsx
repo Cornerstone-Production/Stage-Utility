@@ -301,6 +301,13 @@ export function Readout({
         // The WHOLE object box, over the object's own padding — see PAD_SCALE.
         // Absolute against the object wrapper, which is the nearest positioned
         // ancestor at every nesting depth.
+        //
+        // THAT IS A REQUIREMENT ON THE HOST, not something this box can check.
+        // Three of them draw an object: the canvas wrapper and the editor's are
+        // `position: absolute`, and Home's card frame is `relative` — see
+        // cardFrame in app/home/home-grid.tsx, which was static, so on Home this
+        // box resolved against the grid CELL and every filled ground painted
+        // over the card's own border. A fourth host has to position its box too.
         position: "absolute",
         inset: 0,
         padding: `${boxH * PAD_SCALE}px ${Math.min(boxH, boxW) * PAD_SCALE}px`,
@@ -328,11 +335,12 @@ export function Readout({
       }}
     >
       {/* The filled ground.
-          ABSOLUTE against the OBJECT's box, not sized to this one: the nearest
-          positioned ancestor is the object wrapper, so inset:0 covers the
-          object's padding too. A ground that stops at the content box leaves the
-          object's own background drawing a ring around it — the exact bug the
-          recording fill was rewritten to avoid. */}
+          Absolute against THIS box, whose own padding it therefore covers —
+          which is the point: the composition above is itself inset:0 against the
+          object wrapper, so the two together reach the object's edge. A ground
+          that stops at the content box leaves the object's own background
+          drawing a ring around it — the exact bug the recording fill was
+          rewritten to avoid. */}
       {filled ? (
         <span
           aria-hidden="true"
