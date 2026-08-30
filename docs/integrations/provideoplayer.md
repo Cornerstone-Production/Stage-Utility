@@ -37,7 +37,7 @@ its **Network API** over HTTP:
 note the **port shown there**. Leave *Use HTTPS Connection* off (see below). If
 *Require Authentication* is on, copy the generated token.
 
-**In Stage:** Settings → Integrations → **Control & output → ProVideoPlayer** →
+**In Stage:** Settings → Integrations → **ProVideoPlayer** →
 enter the **Host** and the **Network API Port** — prefilled with 50742, PVP's
 usual port, so check it against what the preferences pane shows and change it if
 yours differs — paste the **API Token** if you use one, enable it, and

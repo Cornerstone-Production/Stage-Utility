@@ -28,7 +28,7 @@ and goes quiet when unreachable. The password is stored as an encrypted secret.
 server* → note the **Server Port** (default `4455`) → copy the **Server
 Password** (or turn authentication off and leave it blank).
 
-**In Stage:** Settings → Integrations → **Control & output → OBS Studio** →
+**In Stage:** Settings → Integrations → **OBS Studio** →
 enter the **Host** (the machine running OBS), **WebSocket Port** and **Server
 Password**, enable it, and **Test connection**.
 

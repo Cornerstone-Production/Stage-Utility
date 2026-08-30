@@ -30,7 +30,7 @@ port persist on disk (no secrets involved).
 feedback, point the device's OSC send/reply back at this server on the feedback
 port (default `9000`).
 
-**In Stage:** Settings → Integrations → **Control & output → OSC** → add a
+**In Stage:** Settings → Integrations → **OSC** → add a
 **target** (name, host, port; optional subscribe message) → **Test**. Set the
 feedback listen port if your gear replies on a non-default port.
 

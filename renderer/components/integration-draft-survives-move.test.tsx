@@ -1,148 +1,143 @@
 // What the operator types must survive the card moving.
 //
-// The Integrations page keeps unused integrations in a "Not set up" group at the
-// bottom and everything else in category groups above. Enabling one moves its
-// descriptor from one group to the other — a different parent in the React tree
-// — so React unmounts the card and mounts a new one. The reported bug: type an
-// IP into an integration at the bottom of the page, flick the enable switch, and
-// the card reappears at the top with the field EMPTY.
+// The reported bug: type an IP into an integration at the bottom of the page,
+// flick its enable switch, and the card reappears at the top with the field
+// EMPTY. Enabling moves the descriptor from the "Not set up" half to the half
+// above, a different parent in the React tree, so React unmounted the card and
+// mounted a new one — and everything typed lived in the old card's useState.
 //
-// Both halves of that are asserted here against the real IntegrationCard: a
-// remount at a different position in the tree (a changed `key` on the wrapper is
-// exactly what React does when a child moves parents), and the collapse/expand
-// case, which unmounts the body the same way — Collapsible renders
-// `{open && children}`.
+// It was patched with a module-level draft store, a focus-restore effect and a
+// preventScroll dance, about eighty lines. The form now lives in a dialog, a
+// sibling of the grid in a portal, so the grid can reflow underneath it and the
+// form is not remounted at all. This file guards that STRUCTURE: it fails if the
+// dialog is ever rendered from inside the tile, which is the only way the bug
+// class can come back.
 
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-// The DOM must exist before the component modules are evaluated - a `before`
-// hook runs after the module body, so a static import would render into nothing.
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { IntegrationCard } = await import("./integrations-panel.js");
-const { integrationDrafts } = await import("./integration-drafts.js");
+const { installFakeServer, withQueryClient, settle, assertAbsent } = await import(
+  "../test-fixtures/integrations-harness.js"
+);
+const { IntegrationsPanel } = await import("./integrations-panel.js");
 
-/** Radix and React both schedule work on later ticks; let it run while the DOM
- *  still exists, or it throws "window is not defined" after teardown. */
-const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
+let server = installFakeServer();
+
+beforeEach(() => {
+  cleanup();
+  server.restore();
+});
 
 after(async () => {
   cleanup();
   await settle();
+  server.restore();
   teardown();
 });
 
-beforeEach(() => {
-  cleanup();
-  integrationDrafts.clearAll();
-});
-
-/** A dormant integration with a plain host field — the shape the operator hit. */
-const DESCRIPTOR = {
-  id: "obs",
-  kind: "control",
-  label: "OBS Studio",
-  configSchema: [{ key: "host", label: "OBS Host", type: "text", placeholder: "192.168.1.50" }],
-} as IntegrationDescriptor;
-
-const DORMANT: IntegrationState = {
-  id: "obs",
-  enabled: false,
-  connection: "disconnected",
-  message: null,
-  config: {},
-  configured: false,
-};
-
-function card(state: IntegrationState) {
-  return <IntegrationCard descriptor={DESCRIPTOR} state={state} onStateChange={() => {}} />;
-}
-
-const hostField = (c: { container: HTMLElement }): HTMLInputElement => {
-  const el = c.container.querySelector<HTMLInputElement>('[data-config-field="host"] input');
-  assert.ok(el, "no host field rendered");
+const tile = (c: { container: HTMLElement }, id: string) => {
+  const el = c.container.querySelector<HTMLElement>(`[data-integration-card="${id}"]`);
+  assert.ok(el, `no card for ${id}`);
   return el;
 };
 
-describe("a draft config survives the card moving between groups", () => {
-  test("the typed host is still there after the card is remounted elsewhere", () => {
-    // Position in the tree, modelled the way React sees it: a different key at
-    // the same slot unmounts one card and mounts another, which is precisely what
-    // moving from the "Not set up" group into a category group does.
-    const c = render(<div key="not-set-up">{card(DORMANT)}</div>);
-    fireEvent.change(hostField(c), { target: { value: "192.168.1.77" } });
-    assert.equal(hostField(c).value, "192.168.1.77", "the field did not take the value at all");
+/** The settings dialog, which renders in a portal outside the container. */
+const dialog = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('[role="dialog"]');
 
-    // The switch has been flicked: the integration is enabled, so it belongs to a
-    // different group now.
-    c.rerender(<div key="control">{card({ ...DORMANT, enabled: true })}</div>);
+const hostField = (): HTMLInputElement => {
+  const el = dialog()?.querySelector<HTMLInputElement>('[data-config-field="host"] input');
+  assert.ok(el, "no host field in the dialog");
+  return el;
+};
 
+describe("a draft survives the card moving between groups", () => {
+  test("the typed host is still there after the switch moves the card", async () => {
+    // OBS starts dormant: the exact position the bug was reported from.
+    server = installFakeServer();
+    const c = render(withQueryClient(<IntegrationsPanel />));
+    await settle();
+
+    fireEvent.click(tile(c, "obs"));
+    await settle();
+    fireEvent.change(hostField(), { target: { value: "192.0.2.77" } });
+    assert.equal(hostField().value, "192.0.2.77", "the field did not take the value at all");
+
+    // The switch in the DIALOG header — the ordering that used to lose data,
+    // because the grid behind reflows while the form is still open.
+    const dialogSwitch = dialog()!.querySelector<HTMLElement>('[aria-label="Enable OBS Studio"]');
+    assert.ok(dialogSwitch, "no enable switch in the dialog header");
+    fireEvent.click(dialogSwitch);
+    await settle();
+
+    // The card really did move: it is now in the half above "Not set up".
+    assert.equal(server.states.get("obs")?.enabled, true, "the switch did not enable anything");
+    const order = [...c.container.querySelectorAll("[data-integration-card]")].map((el) =>
+      el.getAttribute("data-integration-card"),
+    );
+    assert.equal(order[0], "obs", "the card did not move to the in-use half");
+
+    assert.ok(dialog(), "the dialog was unmounted when the card moved");
     assert.equal(
-      hostField(c).value,
-      "192.168.1.77",
-      "the card came back empty — enabling an integration threw away what was typed",
+      hostField().value,
+      "192.0.2.77",
+      "the form came back empty — enabling an integration threw away what was typed",
     );
   });
 
-  test("and after the card is collapsed and reopened", () => {
-    // Collapsible renders {open && children}, so closing a card unmounts the form
-    // mid-edit. Same defect, same fix.
-    const c = render(<div>{card(DORMANT)}</div>);
-    fireEvent.change(hostField(c), { target: { value: "10.0.0.4" } });
+  test("the dialog is never remounted by the move", async () => {
+    // The invariant, stated as identity rather than as form contents: a dialog
+    // OWNED by a tile is torn down and rebuilt when that tile moves, and the
+    // fields come back from `state` rather than from what was typed. Note that
+    // DOM ancestry proves nothing here — Radix portals the content to <body>
+    // whichever component rendered it — so this compares the node itself.
+    server = installFakeServer();
+    const c = render(withQueryClient(<IntegrationsPanel />));
+    await settle();
+    fireEvent.click(tile(c, "obs"));
+    await settle();
 
-    c.rerender(<div>{null}</div>);
-    c.rerender(<div>{card(DORMANT)}</div>);
+    const before = dialog();
+    assert.ok(before, "no dialog opened");
 
-    assert.equal(hostField(c).value, "10.0.0.4", "collapsing the card threw away what was typed");
-  });
+    fireEvent.click(dialog()!.querySelector<HTMLElement>('[aria-label="Enable OBS Studio"]')!);
+    await settle();
 
-  test("focus goes back to the field that was being typed in", () => {
-    const c = render(<div key="not-set-up">{card(DORMANT)}</div>);
-    const before = hostField(c);
-    fireEvent.focus(before);
-    fireEvent.change(before, { target: { value: "192.168.1.77" } });
-
-    c.rerender(<div key="control">{card({ ...DORMANT, enabled: true })}</div>);
-
-    const after = hostField(c);
-    // Compared as a boolean, not as two nodes: assert.equal renders a diff of
-    // whatever it was given, and inspecting two jsdom elements takes long enough
-    // that the file is killed on a timeout instead of reporting the failure.
+    assert.equal(server.states.get("obs")?.enabled, true, "the switch did not enable anything");
     assert.equal(
-      document.activeElement === after,
+      dialog() === before,
       true,
-      "the operator was left with no caret anywhere after the card moved",
+      "the dialog was torn down and rebuilt when the card moved — it is owned by the tile",
     );
-    assert.equal(after.selectionStart, "192.168.1.77".length, "the caret was not left at the end");
   });
 
-  test("a card with nothing typed is seeded from the saved state, not a stale draft", () => {
-    // The store must not become a second source of truth: a clean form has no
-    // draft, so a state change from the backend still shows through.
-    const c = render(<div>{card(DORMANT)}</div>);
-    assert.equal(hostField(c).value, "");
-    assert.equal(integrationDrafts.get("obs"), undefined, "a clean form parked a draft");
+  test("nothing survives leaving the page — a draft lives as long as the dialog", async () => {
+    // The store this replaced outlived the card on purpose and had to be cleared
+    // by hand on unmount. Closing the dialog is the operator walking away from
+    // the edit, and a value that reappeared later would be a surprise.
+    server = installFakeServer();
+    const c = render(withQueryClient(<IntegrationsPanel />));
+    await settle();
 
-    c.rerender(<div>{null}</div>);
-    c.rerender(<div>{card({ ...DORMANT, config: { host: "192.168.1.9" } })}</div>);
-    assert.equal(hostField(c).value, "192.168.1.9");
-  });
+    fireEvent.click(tile(c, "obs"));
+    await settle();
+    fireEvent.change(hostField(), { target: { value: "192.0.2.9" } });
 
-  test("discarding an edit takes the draft with it", () => {
-    const c = render(<div>{card(DORMANT)}</div>);
-    fireEvent.change(hostField(c), { target: { value: "192.168.1.77" } });
-    assert.ok(integrationDrafts.get("obs"), "an edited form parked no draft");
+    // Discard, then close cleanly, then reopen.
+    const discard = [...dialog()!.querySelectorAll("button")].find((b) => b.textContent === "Discard")!;
+    fireEvent.click(discard);
+    await settle();
+    fireEvent.keyDown(dialog()!, { key: "Escape" });
+    await settle();
+    assertAbsent(dialog(), "the dialog did not close");
 
-    // Back to what is saved — the Discard button's effect.
-    fireEvent.change(hostField(c), { target: { value: "" } });
-    assert.equal(
-      integrationDrafts.get("obs"),
-      undefined,
-      "a form back in step with the saved config still held a draft",
-    );
+    fireEvent.click(tile(c, "obs"));
+    await settle();
+    assert.equal(hostField().value, "", "a discarded edit came back on the next open");
   });
 });

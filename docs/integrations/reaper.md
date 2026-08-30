@@ -26,7 +26,7 @@ LAN web interface runs without auth in the common setup.
 tick *Run web server on port* (e.g. `8080`) → leave *Username:password* blank →
 **Apply settings** (status must read "running"). Note the Access URL's IP.
 
-**In Stage:** Settings → Integrations → **Control & output → REAPER** → enter the
+**In Stage:** Settings → Integrations → **REAPER** → enter the
 **Host** (that IP) and **Port**, enable it, and **Test connection**.
 
 **On a layout:** add object → **REAPER → REAPER status**. Options: recording/idle/
