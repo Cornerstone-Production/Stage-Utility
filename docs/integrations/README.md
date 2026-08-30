@@ -52,7 +52,16 @@ that only when the setting genuinely cannot be a field — a bespoke panel is a
 second place for a settings page to drift.
 
 Build integrations efficiency-first: change-driven broadcasts, reuse the shared
-SSE stream, gate polling on subscribers, back off when unreachable.
+SSE stream, gate polling and broadcasting on demand, back off when unreachable.
+
+Gate on `inDemand`, never on an SSE-subscriber check. A subscriber check answers
+"is a BROWSER watching"; the automation engine reads these channels in-process,
+where no such check can see it. Gates written against subscribers alone left
+enabled rules that had simply never run on an unattended box, with no error
+anywhere — the state an appliance is in for most of the week. `inDemand` (and the
+`channelInDemand(channel)` behind it) counts both. A producer that is not an
+integration asks `channelInDemand` directly; a consumer that is not a browser
+declares itself with `addChannelDemandSource`.
 
 ### The snapshot version
 

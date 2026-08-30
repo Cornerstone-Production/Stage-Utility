@@ -111,8 +111,12 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
         this.report("connected", `Connected to REAPER at ${this.host}:${this.port}`);
       }
       this.emitIfChanged(parseTransport(body));
-      // Poll fast while a display is watching; idle slowly otherwise.
-      this.scheduleIn(this.hasSubscribers ? POLL_MS : IDLE_POLL_MS);
+      // Poll fast while anything is consuming this channel — a display OR an
+      // in-process reader the SSE check cannot see, such as an automation rule
+      // carrying the "REAPER is recording" condition. Asking only about browsers
+      // left that condition reading a snapshot up to IDLE_POLL_MS stale on the
+      // unattended box that is the whole point of automation.
+      this.scheduleIn(this.inDemand ? POLL_MS : IDLE_POLL_MS);
     } catch (err) {
       const msg = errorMessage(err);
       if (this.attempt === 0) console.warn(`[reaper] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);

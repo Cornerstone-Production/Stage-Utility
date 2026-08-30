@@ -14,7 +14,12 @@
 //                           freshly-loaded display via getLatest(), broadcast on
 //                           change, and fall back to an OFFLINE DTO on drop.
 
-import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import {
+  addChannelDemandSource,
+  broadcast,
+  channelHasSubscribers,
+  channelInDemand,
+} from "./broadcaster.js";
 import { serviceWindow } from "./service-window.js";
 
 /** Connection state as reported to the Integrations panel. */
@@ -102,36 +107,27 @@ export abstract class ConnectionLifecycle {
     this.reconnectAttempt = 0;
   }
 
-  /** Whether any client is watching this integration's channel. Polling
-   *  integrations use it to slow down when nobody is looking. */
-  protected get hasSubscribers(): boolean {
-    return channelHasSubscribers(this.channel);
-  }
-
-  /** In-process consumers that read this channel without an SSE subscription. */
-  private readonly demandSources: (() => boolean)[] = [];
+  // NOTE: there is deliberately no `hasSubscribers` here any more.
+  //
+  // It answered "is a BROWSER watching", every polling integration reached for it
+  // as if it meant "is anyone using this", and that is the whole bug: REAPER's
+  // cadence and ProPresenter's both ignored in-process consumers, as smaart's
+  // broadcast had before them. `inDemand` below is the question a subclass
+  // actually wants; a genuinely browser-only gate calls channelHasSubscribers
+  // directly, where reading it says so.
 
   /**
-   * Register a consumer that needs this channel broadcast even with no browser
-   * attached.
-   *
-   * An SSE subscriber check can only see browsers, and the automation engine is
-   * not one: it listens on the broadcast bus in-process, so gating a broadcast on
-   * `hasSubscribers` silently disabled every rule that reads it. An SPL threshold
-   * rule fired only while someone happened to have a meter open — which on an
-   * unattended appliance is never — and the operator saw an enabled rule that had
-   * simply never run, with no error anywhere.
-   *
-   * Same shape as sensourceService.addDemandSource, and a callback rather than an
-   * import because the consumer imports the service.
+   * Register a consumer that needs this channel produced even with no browser
+   * attached. Thin wrapper over the channel-keyed registry in broadcaster.ts —
+   * see `addChannelDemandSource` there for why this distinction exists at all.
    */
   addDemandSource(wantsBroadcast: () => boolean): void {
-    this.demandSources.push(wantsBroadcast);
+    addChannelDemandSource(this.channel, wantsBroadcast);
   }
 
   /** Is anything — a browser or an in-process consumer — actually using this? */
   protected get inDemand(): boolean {
-    return this.hasSubscribers || this.demandSources.some((wants) => wants());
+    return channelInDemand(this.channel);
   }
 
   /**
