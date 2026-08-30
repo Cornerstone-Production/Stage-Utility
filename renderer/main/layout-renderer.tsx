@@ -127,6 +127,28 @@ export interface LayoutRenderCtx {
   embedChain: readonly string[];
 
   /**
+   * This layout is drawn inside another embed's TILE — as its content, not as a
+   * surface of its own.
+   *
+   * What reads it is the expand control. The tile further out already carries
+   * one for everything painted in it, so an embed nested inside it must not draw
+   * a second: two 44px buttons landed in the same corner, eleven pixels apart,
+   * over one picture the operator reads as a single tile.
+   *
+   * False again inside an EXPANDED panel, which is the whole reason this is a
+   * flag and not a depth count off `embedChain`. Nesting depth is identical in
+   * the two cases; what differs is that the panel fills the screen, so the tile
+   * in it is a tile in its own right and gets its control back. A producer wall
+   * inside a producer wall is only usable that way.
+   *
+   * Required rather than optional, exactly like `home` and `embedChain` above:
+   * an optional field defaulting to false would let a surface forget, and a
+   * forgotten one reads as "nothing is offering a control above me" — the
+   * answer that puts the second button back.
+   */
+  insideEmbedTile: boolean;
+
+  /**
    * Screens with a browser actually attached, from the `displays:presence`
    * heartbeat — not screens that merely have a view routed.
    *
@@ -136,6 +158,15 @@ export interface LayoutRenderCtx {
    */
   onlineOutputIds: readonly string[];
 }
+
+/**
+ * Which copy of an embed's body is being drawn: the one in the tile, or the one
+ * filling the screen after the operator expanded it.
+ *
+ * A boolean would have read `body(h, h, false)` at four call sites, and "false
+ * what?" is the question a reader has to leave the file to answer.
+ */
+type EmbedCopy = "tile" | "panel";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -2229,7 +2260,11 @@ function ViewEmbedObject({
   // "expanded": the panel gone, no control to reopen it, a document keydown
   // listener still attached, and the panel springing back by itself if the view
   // came back. Two call sites, one shape, gated the same way at both.
-  const { tileRef, control, overlay } = useExpand(ctx.interactive && !!view);
+  //
+  // `insideEmbedTile` is the third term at both: a tile drawn as another tile's
+  // content is content, and the box the operator can actually expand is the one
+  // further out.
+  const { tileRef, control, overlay } = useExpand(ctx.interactive && !ctx.insideEmbedTile && !!view);
 
   const notice = (text: string) => <EmbedNotice text={text} />;
 
@@ -2244,11 +2279,16 @@ function ViewEmbedObject({
   // they stay separate parameters: see the note below for why the object's own
   // font size is the parent canvas here, and EmbedFontBox for why an expanded
   // copy has no parent canvas to be a fraction of.
-  const body = (canvasH: number, childH: number) => (
+  //
+  // `where` says which of the two is drawing. On the tile, everything inside is
+  // this tile's content and must not offer an expand control of its own; in the
+  // panel it is full size, so a nested tile is a tile again. See
+  // `insideEmbedTile` on LayoutRenderCtx.
+  const body = (canvasH: number, childH: number, where: EmbedCopy) => (
     <EmbedFontBox o={o} canvasH={canvasH}>
       <EmbeddedView
         view={view}
-        ctx={{ ...ctx, H: childH }}
+        ctx={{ ...ctx, H: childH, insideEmbedTile: where === "tile" }}
         showHeader={config.showHeader ?? false}
         autoScroll={config.autoScroll ?? true}
       />
@@ -2276,7 +2316,7 @@ function ViewEmbedObject({
   // height, so the box measurement below is untouched.
   return (
     <div ref={tileRef} className="relative w-full h-full">
-      <div ref={boxRef} className="w-full h-full">{body(ctx.H, boxH || ctx.H)}</div>
+      <div ref={boxRef} className="w-full h-full">{body(ctx.H, boxH || ctx.H, "tile")}</div>
       {/* Each object gates on the states IT resolves — a missing view here, an
           unrouted or blacked-out screen there. The notices EmbeddedView emits
           for itself (a per-display kind, a recursion refusal, an empty view) are
@@ -2285,7 +2325,7 @@ function ViewEmbedObject({
           Expanding one of those enlarges the same sentence, which is harmless;
           a screen tile's states are gated because they change mid-service. */}
       {control(view.name)}
-      {overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H), view.name)}
+      {overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H, "panel"), view.name)}
     </div>
   );
 }
@@ -2332,19 +2372,26 @@ function ScreenEmbedObject({
   // Guard clauses, in the order the screen itself resolves. Blackout comes BEFORE
   // the routing check because a blacked-out screen shows black whatever it is
   // routed to — read as an order, not counted out of nested ternary indentation.
-  const content = (childH: number) => {
+  const content = (childH: number, where: EmbedCopy) => {
     if (!config.outputId) return notice("Pick a screen to show");
     if (!output) return notice("That screen no longer exists");
     if (output.blackout) return notice("Blackout");
     if (!view) return notice(`"${output.name}" is not showing anything`);
-    return <EmbeddedView view={view} ctx={{ ...ctx, H: childH }} displayId={output.id} />;
+    return (
+      <EmbeddedView
+        view={view}
+        ctx={{ ...ctx, H: childH, insideEmbedTile: where === "tile" }}
+        displayId={output.id}
+      />
+    );
   };
 
   // The font box wraps the body rather than the whole tile: the overlay is a
   // portal to document.body and inherits nothing from this tile's wrapper,
-  // however the React tree reads. Same two heights view-embed takes.
-  const body = (canvasH: number, childH: number) => (
-    <EmbedFontBox o={o} canvasH={canvasH}>{content(childH)}</EmbedFontBox>
+  // however the React tree reads. Same two heights, and the same `where`,
+  // view-embed takes.
+  const body = (canvasH: number, childH: number, where: EmbedCopy) => (
+    <EmbedFontBox o={o} canvasH={canvasH}>{content(childH, where)}</EmbedFontBox>
   );
 
   // Only when there is something to enlarge. A blacked-out, unrouted or deleted
@@ -2358,7 +2405,9 @@ function ScreenEmbedObject({
   // listener still attached, and the panel springing back to full screen by
   // itself the moment the blackout cleared.
   const expandable = showing ? output : null;
-  const { tileRef, control, overlay } = useExpand(ctx.interactive && expandable !== null);
+  const { tileRef, control, overlay } = useExpand(
+    ctx.interactive && !ctx.insideEmbedTile && expandable !== null,
+  );
 
   return (
     <div
@@ -2391,10 +2440,10 @@ function ScreenEmbedObject({
           </span>
         </div>
       )}
-      <div ref={boxRef} className="min-h-0 flex-1">{body(ctx.H, boxH || ctx.H)}</div>
+      <div ref={boxRef} className="min-h-0 flex-1">{body(ctx.H, boxH || ctx.H, "tile")}</div>
       {expandable && control(expandable.name)}
       {expandable &&
-        overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H), expandable.name)}
+        overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H, "panel"), expandable.name)}
     </div>
   );
 }
@@ -2828,7 +2877,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

@@ -169,6 +169,12 @@ Views may be nested three deep, and a view cannot contain itself, directly or
 through another embed in between — a tile that would loop draws a notice
 explaining why instead of rendering.
 
+Only the outermost tile carries the expand button. A multiview nested inside
+another is that tile's content, so it offers no second control over the same
+corner; expand the outer tile and the tiles inside the panel get their own
+controls, which is how a multiview inside a multiview drills down one level at a
+time. Escape closes one level per press.
+
 ## Look: surface and tint
 
 Two independent questions, in that order.
