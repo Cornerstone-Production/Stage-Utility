@@ -285,3 +285,137 @@ describe("a pin names a LEAGUE as well as a team", () => {
     assert.equal(pickGame(status([cubs]), "16")?.eventId, "cubs");
   });
 });
+
+// ── The fit ──────────────────────────────────────────────────────────────────
+//
+// WHAT IS BROWSER-ONLY, AND WHY IT IS NOT GUARDED HERE.
+//
+// The defect these replace was three visual facts, and jsdom can see none of
+// them: it does not lay out, so it has no overflow, no clipping and no scaled
+// geometry. A test asserting "the home team is visible at 296px" would have
+// passed on the very bug it was written for — the strip was in the DOM the whole
+// time, sitting outside a box with `overflow: hidden`. So those three were
+// verified by driving the production bundle in a real browser and reading
+// getBoundingClientRect, and what is guarded here is the ARITHMETIC underneath
+// them, which is real in JS:
+//
+//   • that the laid-out size times the zoom IS the box — filling is what
+//     fitStrip returns, not something CSS happens to do;
+//   • that no box resolves to a zero or non-finite size, i.e. to "draw
+//     nothing", which on a wall is indistinguishable from a broken widget;
+//   • that the strip is never laid out narrower than the width its design is
+//     drawn at, which is what keeps the fix from being a redesign.
+
+const { fitStrip } = await import("./scores-object.js");
+
+/** The strip's measured natural height at its designed width, from the browser:
+ *  86px for baseball with the detail centre. */
+const NAT_H = 86;
+
+/** Every box the object is actually given, measured off the real app at a
+ *  1400px window: the five Home tiles, and the canvas tiles from the audit —
+ *  including the two that used to clip and blank. */
+const BOXES: [string, number, number][] = [
+  ["home s", 369, 118],
+  ["home m", 751, 118],
+  ["home l", 751, 250],
+  ["home xl", 1134, 250],
+  ["home tall", 1134, 514],
+  ["canvas wide", 1108, 400],
+  ["canvas 300", 300, 154],
+  ["canvas 166 (blanked)", 166, 89],
+  ["canvas 369 (clipped)", 369, 93],
+  ["canvas tall", 300, 481],
+];
+
+describe("the strip fills the box it is given", () => {
+  test("laid-out size times the zoom is the box, at every size", () => {
+    // THE GUARD, and the whole change in one line. Before, the strip was laid
+    // out at a FIXED 520 x natural and scaled: the width happened to come out
+    // right whenever the fit was width-limited, but the HEIGHT never did — which
+    // is the ~6:1 band floating in dead ground the operator reported. Pin the
+    // natural height back into `height` and this goes red on every row.
+    for (const [name, w, h] of BOXES) {
+      const fit = fitStrip(w, h, NAT_H);
+      assert.ok(
+        Math.abs(fit.width * fit.scale - w) < 0.01,
+        `${name}: ${fit.width} x ${fit.scale} = ${fit.width * fit.scale}, want width ${w}`,
+      );
+      assert.ok(
+        Math.abs(fit.height * fit.scale - h) < 0.01,
+        `${name}: ${fit.height} x ${fit.scale} = ${fit.height * fit.scale}, want height ${h}`,
+      );
+    }
+  });
+
+  test("still fills when the zoom hits either clamp", () => {
+    // The bounds cap how large the design may be DRAWN; they must not cap how
+    // much of the box it covers. A fit that stopped filling at the clamp would
+    // put the dead ground back at exactly the sizes where it is most obvious.
+    for (const [w, h] of [[40, 900], [4000, 60], [8, 8], [6000, 4000]]) {
+      const fit = fitStrip(w, h, NAT_H);
+      assert.ok(Math.abs(fit.width * fit.scale - w) < 0.01, `${w}x${h} width`);
+      assert.ok(Math.abs(fit.height * fit.scale - h) < 0.01, `${w}x${h} height`);
+    }
+  });
+});
+
+describe("no box resolves to drawing nothing", () => {
+  test("every size in a swept range is finite and positive", () => {
+    // A wall widget that renders nothing is indistinguishable from one that is
+    // broken — the failure this object's own Empty component exists to refuse,
+    // and exactly what a 166px tile did. Swept rather than sampled, because the
+    // sizes that broke were not ones anybody would have thought to pick.
+    for (let w = 1; w <= 2400; w += 7) {
+      for (let h = 1; h <= 1400; h += 11) {
+        const fit = fitStrip(w, h, NAT_H);
+        assert.ok(Number.isFinite(fit.scale) && fit.scale > 0, `${w}x${h}: scale ${fit.scale}`);
+        assert.ok(Number.isFinite(fit.width) && fit.width >= 1, `${w}x${h}: width ${fit.width}`);
+        assert.ok(Number.isFinite(fit.height) && fit.height >= 1, `${w}x${h}: height ${fit.height}`);
+      }
+    }
+  });
+
+  test("a box of zero, and an unmeasured natural height, still resolve", () => {
+    // The first frame, and jsdom. Neither may produce a NaN transform, which
+    // renders as nothing at all.
+    for (const [w, h, nat] of [[0, 0, 0], [0, 300, NAT_H], [300, 0, NAT_H], [300, 150, 0]]) {
+      const fit = fitStrip(w, h, nat);
+      assert.ok(Number.isFinite(fit.scale) && fit.scale > 0, `${w}x${h}/${nat}: scale`);
+      assert.ok(Number.isFinite(fit.width) && fit.width > 0, `${w}x${h}/${nat}: width`);
+      assert.ok(Number.isFinite(fit.height) && fit.height > 0, `${w}x${h}/${nat}: height`);
+    }
+  });
+});
+
+describe("filling the box is not a redesign", () => {
+  test("the strip is never laid out narrower than the width it is designed at", () => {
+    // THE GUARD against the obvious wrong fix. Stretching the strip to the tile
+    // — rather than laying it out at its designed width and zooming — reflows it
+    // at whatever width the tile happens to be, which drops the team names
+    // through .score-strip's own 460px container rule and re-proportions
+    // everything against a design drawn for 520.
+    for (const [name, w, h] of BOXES) {
+      const fit = fitStrip(w, h, NAT_H);
+      assert.ok(fit.width >= 520 - 0.01, `${name}: laid out at ${fit.width}, want >= 520`);
+    }
+  });
+
+  test("the zoom is unchanged from what the fixed-size fit already produced", () => {
+    // Measured off the shipped build BEFORE the change, in the browser. The
+    // operator approved how this looks; the fix is that it now fills its box,
+    // not that it is drawn at a different size. A change to NATURAL_W or to the
+    // bounds moves these, and should be argued rather than slipped in.
+    const zooms: [string, number, number, number][] = [
+      ["home s", 369, 118, 0.709615],
+      ["home m", 751, 118, 1.372093],
+      ["home l", 751, 250, 1.444231],
+      ["home xl", 1134, 250, 2.180769],
+      ["home tall", 1134, 514, 2.180769],
+    ];
+    for (const [name, w, h, was] of zooms) {
+      const got = fitStrip(w, h, NAT_H).scale;
+      assert.ok(Math.abs(got - was) < 0.001, `${name}: zoom ${got}, was ${was}`);
+    }
+  });
+});
