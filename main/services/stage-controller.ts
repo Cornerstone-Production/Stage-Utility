@@ -323,7 +323,16 @@ export class StageController {
 
   async init(): Promise<void> {
     await notesStore.init();
-    await barConfigStore.init();
+    // Returns the failure rather than throwing it: the bar's saved order is
+    // rewritten on the first start after the service type became an item of its
+    // own, and a data directory that has filled up must not take the server down
+    // over that. The rewrite is live in memory either way; the next start retries
+    // the write. Logged so an operator whose bar keeps re-migrating has something
+    // to read.
+    const barMigration = await barConfigStore.init();
+    if (barMigration) {
+      console.error("[bar-config] could not save the migrated bar; retrying next start:", barMigration.message);
+    }
     await savedColorsStore.init();
     console.log("[stage-controller] init");
     let settings = await settingsStore.load();

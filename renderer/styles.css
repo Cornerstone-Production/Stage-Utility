@@ -628,8 +628,10 @@ body {
 }
 
 /* Level 1 — qualifiers. Context the operator already has: the clock's seconds,
-   the service-type name that is the same every week, the capsule's inning, the
-   pre-service label beside a countdown that is plainly a countdown.
+   the capsule's inning, the pre-service label beside a countdown that is plainly
+   a countdown. Never an item's ONLY reading — the service-type name was taken
+   here while it was printed inside the plan item, and stopped being eligible the
+   day it became an item somebody places on its own.
 
    CLIPPED, NOT REMOVED. `display: none` would take the word out of the
    accessibility tree with it, so a screen reader would lose a reading that a

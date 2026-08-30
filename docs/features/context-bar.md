@@ -6,15 +6,16 @@ page, so `/patch` and `/history` know a service is live without carrying their
 own copy of the state.
 
 **Right-click the bar and choose "Configure bar"**, or use **Settings → Advanced
-→ Context bar**. Both open the same thing. The arrangement is shared — every
-operator sees the same bar — and a phone can be given a set of its own.
+→ Context bar**. Both open the same thing. There are two arrangements, both
+shared by everybody: the one above a desktop page, and the one a phone shows.
 
 ## What it can show
 
 | Item | Shows |
 |---|---|
 | **Clock** | The current time, with seconds. |
-| **Service type and plan** | Which service, and which plan is active. |
+| **Service type** | Which service this is — the same name most weeks. |
+| **Service plan** | The title of the plan that is loaded. |
 | **Live state and timer** | Whether a service is running, and the countdown. |
 | **Current plan item** | What Planning Center says is happening now. |
 | **Integration health** | How many set-up integrations are disconnected. |
@@ -22,20 +23,24 @@ operator sees the same bar — and a phone can be given a set of its own.
 | **Streaming** | Whether Resi, YouTube or OBS is live, and for how long. |
 | **Live scores** | A followed team's score while its game is being played. Click it for the full card. |
 
-An unconfigured bar shows the service type and plan, the current item, and the
+The service type and the plan are two items, so either can go on the bar without
+the other. A bar saved when they were one item keeps both, side by side, exactly
+as it drew them.
+
+An unconfigured bar shows the service type, the plan, the current item, and the
 live state and timer.
 
 ## Nothing appears or disappears
 
 Every item you turn on is always on screen. An item with nothing to report says
-so — `No item`, `All connected`, `Standby`, `Off air` — rather than
+so — `No plan`, `No item`, `All connected`, `Standby`, `Off air` — rather than
 vanishing and
 letting its neighbours slide across. The bar keeps one shape, so you learn where
 to look once.
 
 **Live scores is the exception, and the only one.** It draws nothing at all
 unless a followed game is actually in play, and takes no room while it is empty.
-The other seven always have something true to say, so their resting state is a
+The other eight always have something true to say, so their resting state is a
 reading; scores would spend most of the year showing a word that never changed.
 See [Live scores](../integrations/scores.md).
 
@@ -81,7 +86,7 @@ Every change saves as you make it. There is nothing to apply.
 
 ## A phone can have its own set
 
-A phone has room for four or five readings, not nine. So the bar has **two**
+A phone has room for four or five readings, not every item there is. So the bar has **two**
 arrangements: the one above a desktop page, and the one a phone shows. They are
 chosen independently, and both are shared — one desktop bar and one phone bar for
 everybody, like the rest of this app's config.
@@ -95,10 +100,10 @@ what splits the two apart; **Follow the desktop bar** puts them back together.
 becomes a drawer and the page header goes. It is one number for the whole app,
 not a second one the bar invented.
 
-Curating a phone's set is how you keep a reading whole rather than cut. The plan
-title and the current item are the only readings on the bar with no predictable
-length, and they are the only ones a narrow screen ever has to shorten — so
-taking one off the phone's bar is usually all it takes. The dialog measures your
+Curating a phone's set is how you keep a reading whole rather than cut. The
+service type, the plan title and the current item are the only readings on the
+bar with no predictable length, and they are the only ones a narrow screen ever
+has to shorten — so taking one off the phone's bar is usually all it takes. The dialog measures your
 arrangement at 320px and tells you which way it lands before you leave it.
 
 ## When it runs out of room
@@ -109,9 +114,9 @@ in a fixed order, and the order is the design:
 | | What goes |
 |---|---|
 | **Full** | Nothing. Everything at its full length. |
-| **Qualifiers** | The clock's seconds. The service-type name beside the plan title. The score capsule's inning or period. The label beside a pre-service countdown. |
+| **Qualifiers** | The clock's seconds. The score capsule's inning or period. The label beside a pre-service countdown. |
 | **Compact** | Every idle word becomes that item's own mark — `No item`, `Off air`, `Standby`, `All connected`. The word `LIVE` goes; its dot does not. Gaps and edge padding tighten. The score capsule tightens. |
-| **The floor** | The plan title and the current item's name give way and end in an ellipsis. |
+| **The floor** | Names somebody wrote — the service type, the plan title, the current item — give way and end in an ellipsis. |
 
 Four things it may never do:
 
@@ -122,8 +127,9 @@ Four things it may never do:
 - **Never remove a state colour.** Live green, overrun red and the amber on a
   disconnected count survive every step.
 - **Never drop an item.** Every reading on the strip is one somebody put there on
-  purpose. (Live scores is still the one item that draws nothing when no followed
-  game is on — see above.)
+  purpose — and shortening an item to nothing is dropping it, so no step takes an
+  item's only reading. (Live scores is still the one item that draws nothing when
+  no followed game is on — see above.)
 - **Never wrap and never scroll.**
 
 Every word taken is clipped out of the layout rather than deleted, so a screen
@@ -132,28 +138,30 @@ reader still reads the full reading at any width.
 **The floor is not meant to be reached.** It exists because a strip that has run
 out of room has to do *something*, and of the four things available — shorten the
 prose, wrap, scroll, or silently clip — only shortening keeps one row, keeps
-every number, and shows the reader that a word was cut. A bar with neither the
-plan nor the current item on it can never land there.
+every number, and shows the reader that a word was cut. A bar carrying none of
+the service type, the plan and the current item can never land there.
 
 ### Measured
 
-A nine-item bar, on a plan called "Hope Has A Name" under a service type called
-"Sunday Gathering", in both themes. `strip` is the room the bar actually has,
-which is narrower than the window once the sidebar is open.
+On a plan called "Carry The Light" under a service type called "Weekend Service",
+in both themes. `strip` is the room the bar actually has, which is narrower than
+the window once the sidebar is open.
 
-| Window | strip | Four items | Seven items | Everything |
-|---|---|---|---|---|
-| 320px | 320 | Qualifiers | Compact | Floor — title 103 of 106px |
-| 360px | 360 | Qualifiers | Compact | Compact |
-| 390px | 390 | Full | Compact | Compact |
-| 430px | 430 | Full | Compact | Compact |
-| 640px | 416 | Full | Compact | Compact |
-| 768px | 544 | Full | Qualifiers | Compact |
-| 1440px | 1216 | Full | Full | Full |
+Five arrangements: the service type on its own, the plan on its own, the two of
+them together, the bar an install upgrading into this change carries — the clock,
+the service type, the plan, the current item and the timer — and every item at
+once.
 
-One row, no scrolling and no wrapping in all 42 of those; the plan title is whole
-in 41 of them. Only a bar carrying every item, on the narrowest phone made,
-shortens anything — and it loses 3px of one title.
+| Window | strip | Type alone | Plan alone | Both | The upgraded bar | Everything |
+|---|---|---|---|---|---|---|
+| 320px | 320 | Full | Full | Full | Floor — plan title 87 of 88px | Floor — service type 65 of 100px, plan title 57 of 88px |
+| 390px | 390 | Full | Full | Full | Compact | Compact |
+| 640px | 416 | Full | Full | Full | Compact | Compact |
+| 1440px | 1216 | Full | Full | Full | Full | Full |
+
+One row, no scrolling and no wrapping in all 40 of those, and every reading whole
+in 36 of them. Only the narrowest phone made shortens anything, and only when the
+strip is carrying five readings or more.
 
 ## 12-hour or 24-hour
 

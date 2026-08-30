@@ -33,8 +33,13 @@ const saved = () => barConfigStore.get();
 
 describe("the context bar's two saved orders", () => {
   test("an unconfigured install has no phone set, which means it follows the desktop bar", async () => {
-    await barConfigStore.init();
-    assert.deepEqual(saved(), { items: [], mobileItems: [] });
+    // Stamped with the current schema even though there was nothing to migrate.
+    // Leaving a fresh install unstamped is what would make the FIRST bar it
+    // saves — one that may deliberately carry `plan` with no service type —
+    // look like a pre-split config on the next start. See
+    // bar-config-migration.test.ts for the rest of that argument.
+    assert.equal(await barConfigStore.init(), null);
+    assert.deepEqual(saved(), { items: [], mobileItems: [], schema: 1 });
   });
 
   test("THE GUARD: saving only the phone's set leaves the desktop bar alone", async () => {
