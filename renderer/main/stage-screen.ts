@@ -1,0 +1,193 @@
+// What a kiosk screen shows, decided in one place.
+//
+// StageView interleaved three unrelated kinds of decision — lifecycle
+// (loading/error/no state), output state (blackout/unrouted/locked) and view
+// kind — across fifteen returns and nine derived values. None of the outcomes
+// could be checked without opening a browser on a wall screen, which is how
+// every guard in that file was verified for its whole life.
+//
+// This is that decision and nothing else: state in, screen out. No React, no
+// DOM, no hooks — so each outcome is a test rather than a walk to the
+// auditorium. Rendering stays in the component; the arms it renders are named
+// here.
+//
+// The behaviour below is MOVED from StageView, not rewritten, comments
+// included. Where a comment records a bug that was fixed once, it travelled
+// with the line it guards.
+
+/** The screen a display should be showing, once every input is accounted for. */
+export type StageScreen =
+  | { k: "loading" }
+  | { k: "error"; message: string }
+  | { k: "blackout" }
+  | { k: "unrouted"; displayName: string | null; locked: boolean }
+  /** A preview whose View has been deleted. Distinct from `unrouted`: a View WAS
+   *  assigned here, and it is the View that is gone. */
+  | { k: "view-missing"; displayName: string | null; locked: boolean }
+  | { k: "not-configured"; displayName: string | null; locked: boolean }
+  | { k: "empty"; displayName: string | null; locked: boolean }
+  /** A view kind this build has no arm for. Reachable in earnest, not just in
+   *  theory: `kind` comes off server state and the app ships a beta/main track
+   *  switch, so a kind written by a beta build and read by a main build lands
+   *  here. It used to land on the slots grid instead, silently. */
+  | { k: "unknown-kind"; kind: string }
+  | {
+      k: "view";
+      kind: ViewKind;
+      /** The View the arm renders from, resolved once. Null when routing points
+       *  at a View that no longer exists. */
+      view: View | null;
+      displayId: string;
+      displayName: string | null;
+      locked: boolean;
+      isPreview: boolean;
+      /** How the Output renders — `panel` is the only surface whose controls are
+       *  live. Undefined on a preview and on an Output with no mode set, which
+       *  `contextForOutput` reads as `display`. Carried here rather than looked
+       *  up again by the caller: it comes from the same `outputs.find` the name
+       *  does, and a preview has to null it, which is a rule that must live in
+       *  exactly one place. */
+      outputMode: Output["mode"];
+    };
+
+export interface ScreenInput {
+  state: StageState | null;
+  isLoading: boolean;
+  error: string | null;
+  /** Canonical display id — already resolved from any friendly slug. */
+  displayId: string;
+  /** Preview slug → view id (null on a real display). */
+  previewViewId: string | null;
+}
+
+export function resolveScreen(input: ScreenInput): StageScreen {
+  const { state, isLoading, error, displayId, previewViewId } = input;
+
+  if (isLoading) return { k: "loading" };
+  if (error) return { k: "error", message: error };
+  if (!state) return { k: "error", message: "State is unavailable." };
+
+  // Preview mode: a "/preview-<viewId>" slug renders a View's content directly,
+  // regardless of any output routing (used by the settings live preview).
+  const previewView = previewViewId
+    ? (state.views?.find((v) => v.id === previewViewId) ?? null)
+    : null;
+
+  const multiDisplay = (state.outputs?.length ?? 0) > 1;
+  // Name comes from the Output, kind from the View it is routed to — the same two
+  // places the `displays` shim was assembled from before it was dropped.
+  const currentDisplay = previewViewId ? null : (state.outputs?.find((o) => o.id === displayId) ?? null);
+  // The Output's name, or NOTHING.
+  //
+  // This used to fall back to `displayId`, and a display id is whatever came out
+  // of the URL: a preview slug whose View had been deleted, or any path typed by
+  // hand, was drawn into the top bar as the screen's own name. A URL fragment on
+  // an auditorium wall reads as a bug and tells an operator less than blank does.
+  //
+  // No preview check is needed here: `currentDisplay` is already null in one, for
+  // the same reason `resolved` is.
+  const displayName = multiDisplay ? (currentDisplay?.name ?? null) : null;
+
+  // A real output (not a preview) with no View routed to it is unconfigured —
+  // show a clear "no view assigned" screen rather than an empty slot grid.
+  //
+  // NULL IN A PREVIEW, and that is load-bearing: it is the single line that
+  // keeps an output's blackout and its kiosk lock out of the settings preview
+  // iframe. The three checks below read it and do not re-test previewViewId.
+  const resolved = previewViewId ? null : state.resolvedByOutput?.[displayId];
+  // Per-output kiosk lock (Screens-page toggle) — never in the settings preview iframe.
+  const outputLocked = resolved?.locked ?? false;
+
+  // Blackout: a true black screen on command (Companion), taking
+  // priority over the routed View. Toggling it off restores the View instantly.
+  if (resolved?.blackout) {
+    return { k: "blackout" };
+  }
+
+  // Where the kind comes from. A preview answers with its own View; a real output
+  // answers with the routing the server resolved for it. Exactly one of the two
+  // applies — which is the one check that still needs previewViewId, since a
+  // preview has no resolved output at all and "no resolved output" is what
+  // unrouted means for everything else.
+  //
+  // When the source that applies is absent, this screen does not know what to
+  // show. That used to be written `?? "slots"`, so a preview of a View that had
+  // been DELETED drew somebody's mic-slot grid with nothing to say anything was
+  // wrong. There is no default kind any more: not knowing is its own screen.
+  const source: { kind: ViewKind } | null = previewViewId
+    ? previewView
+    : ((resolved && resolved.viewId !== null) ? resolved : null);
+  if (!source) {
+    // A preview gets its own wording. "No view assigned" would be false here —
+    // one was assigned; it is the View that is gone.
+    return previewViewId
+      ? { k: "view-missing", displayName, locked: outputLocked }
+      : { k: "unrouted", displayName, locked: outputLocked };
+  }
+  const kind: ViewKind = source.kind;
+
+  // The View the chosen arm renders from. StageView computed this same
+  // expression separately inside the custom arm, the script arm and the slots
+  // arm; resolved once here for all of them.
+  const activeView = previewView ?? (state.views?.find((v) => v.id === resolved?.viewId) ?? null);
+
+  const view = (): Extract<StageScreen, { k: "view" }> => ({
+    k: "view",
+    kind,
+    view: activeView,
+    displayId,
+    displayName,
+    locked: outputLocked,
+    isPreview: !!previewViewId,
+    outputMode: currentDisplay?.mode,
+  });
+
+  // Custom-layout views render the visual-editor layout below the same kiosk top
+  // bar (brand + plan context + connect QR) the other views show. A custom View
+  // with nothing drawn on it yet is empty, not broken.
+  if (kind === "custom") {
+    if (activeView?.layout) return view();
+    return { k: "empty", displayName, locked: outputLocked };
+  }
+
+  // Dashboard- and stage-kind displays render entirely different views, as do
+  // transcription, script and spl-rundown — each its own component, keyed only
+  // by the display id and (for script) the View it resolved to.
+  if (
+    kind === "dashboard" ||
+    kind === "stage" ||
+    kind === "transcription" ||
+    kind === "script" ||
+    kind === "spl-rundown" ||
+    // Calendar is NOT gated on Planning Center here, unlike slots: the component
+    // takes pcoConfigured as a prop and says so on its own face, rather than the
+    // whole screen becoming the not-configured one.
+    kind === "calendar"
+  ) {
+    return view();
+  }
+
+  // Slots are the only kind whose content comes from Planning Center, so this
+  // check lives HERE rather than above, gating slots alone. While slots was the
+  // catch-all it sat above everything and would now wrongly gate a clock wall on
+  // a PCO connection nothing on it needs.
+  //
+  // Which slots — and whether there are none, making the screen empty — depends
+  // on the unsaved preview draft, which only the component holds, so that last
+  // step stays there.
+  if (kind === "slots") {
+    if (!state.pcoConfigured) {
+      return { k: "not-configured", displayName, locked: outputLocked };
+    }
+    return view();
+  }
+
+  // Every kind is now accounted for, so adding a ViewKind without an arm above
+  // fails the BUILD here. Slots used to be the implicit fallback that caught an
+  // unhandled kind, which meant an eighth kind added by somebody who missed this
+  // file would have put a department's mic-slot grid on an office wall, silently,
+  // and the first report of it would have come from whoever stood in front of it.
+  const _never: never = kind;
+  void _never;
+  return { k: "unknown-kind", kind: String(kind) };
+}

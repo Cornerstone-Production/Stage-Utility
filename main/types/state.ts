@@ -77,7 +77,7 @@ export interface StageState {
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
   publicUrl: string | null;
   /** Icon tint per display id or tool path (e.g. "display-1", "/baptism"), as
-   *  "#rrggbb". One map covers the Displays cards, the Connect tool cards and the
+   *  "#rrggbb". One map covers the screen cards, the Connect tool cards and the
    *  picker tiles, so a color set anywhere shows everywhere that item appears. */
   iconColors?: Record<string, string>;
   /** Icon GLYPH per display id or tool path, as a name from the curated set in

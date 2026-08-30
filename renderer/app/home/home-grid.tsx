@@ -177,6 +177,7 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     reaper: d.reaper,
     pvp: d.pvp,
     pvpSkewMs: d.pvpSkewMs,
+    scores: d.scores,
     resi: d.resi,
     youtube: d.youtube,
     osc: d.osc,

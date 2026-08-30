@@ -25,6 +25,9 @@ const BARE = [
   "current-slide-text", "next-slide-text", "current-slide-notes", "transcript-strip",
   // Draws its own grid of tiles; a card around a grid of cards is noise.
   "slots-grid",
+  // The score strip paints its own opaque ground edge to edge, so a card behind
+  // it is a hairline and a radius the strip covers up.
+  "scores",
   // Home's cards. They used to draw their own frame — hence bare — and now draw
   // none at all, because Home's GRID draws one tile frame for everything on it.
   // A card here would be a second box inside that tile, and its padding would
@@ -32,6 +35,7 @@ const BARE = [
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl", "home-screens",
   "home-streaming", "home-streaming-resi", "home-streaming-youtube", "home-pvp",
+  "home-scores",
   // Retired, and left exactly as it shipped.
   "service-order",
 ] as const;
@@ -57,7 +61,7 @@ describe("a widget you just added", () => {
     // and add it here or to BARE — do not bump the number.
 
     const all = Object.keys(LAYOUT_OBJECTS);
-    assert.equal(all.length, 57);
+    assert.equal(all.length, 59);
     assert.equal(all.filter(hasCard).length, 31);
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });

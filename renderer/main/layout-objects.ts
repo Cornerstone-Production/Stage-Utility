@@ -138,6 +138,7 @@ export const HOST_FRAMED_TYPES = new Set<LayoutObjectType>([
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl",
   "home-screens", "home-streaming", "home-streaming-resi", "home-streaming-youtube",
   "home-pvp",
+  "home-scores",
 ]);
 
 type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
@@ -786,6 +787,44 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: () => PILL({ fontWeight: 700, uppercase: true }),
   },
 
+  // Live scores. Its own composition -- team colours, the score, and the centre
+  // each sport needs -- so it is NOT a PILL and NOT in IDIOM_TYPES: there is no
+  // caption/value/sub to squeeze it into.
+  scores: {
+    label: "Live scores",
+    blurb: "Live score for a team you follow",
+    group: "Status",
+    config: () => ({ type: "scores", game: "auto", detail: true }),
+    // BARE, like slots-grid, and for the same reason it gives: the strip paints
+    // its own neutral ground edge to edge. A card around it would be a hairline
+    // and a radius nobody could see -- the strip's own opaque ground covers both
+    // the card's corners and its fill. This DEVIATES from the plan's table, which
+    // had scores carded; the plan was written before the strip existed.
+    style: () => TEXT(),
+    homeSize: "m",
+    integration: { id: "scores", label: "Live scores" },
+  },
+
+  // The same fact on Home, in Home's own voice. A separate type rather than the
+  // wall object with a flag, exactly as the recording and streaming pairs are:
+  // the two are different compositions, and a card that wore the wall's got a
+  // panel of brand colour beside a readiness list.
+  "home-scores": {
+    label: "Scores",
+    blurb: "Followed teams' scores, on your own page",
+    group: "Status",
+    config: () => ({ type: "home-scores" }),
+    // Bare on Home, carded on a wall -- see HOST_FRAMED_TYPES.
+    style: () => TEXT(),
+    homeSize: "m",
+    // "always", by NOT saying otherwise. Sunday afternoon NFL overlaps the second
+    // service in most US churches, so "idle" as a default would mean the feature
+    // never fires on the day it exists for. The operator's own page is not
+    // stage-facing and they chose to add the card; `when` is on the config for
+    // anyone who wants it gone mid-service.
+    integration: { id: "scores", label: "Live scores" },
+  },
+
   // Video layer — native client only; the web build ignores it.
   "ndi-video": {
     label: "NDI video",
@@ -821,6 +860,7 @@ export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = [
   "custom",
   "script",
   "spl-rundown",
+  "calendar",
 ];
 
 export function isEmbeddableViewKind(kind: ViewKind): boolean {

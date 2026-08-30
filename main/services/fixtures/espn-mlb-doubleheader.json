@@ -1,0 +1,2231 @@
+{
+  "events": [
+    {
+      "id": "401874913",
+      "date": "2026-08-29T17:05Z",
+      "shortName": "BOS @ NYY",
+      "name": "Boston Red Sox at New York Yankees",
+      "status": {
+        "displayClock": "0:00",
+        "period": 9,
+        "type": {
+          "state": "post",
+          "name": "STATUS_FINAL",
+          "detail": "Final",
+          "shortDetail": "Final"
+        }
+      },
+      "competitions": [
+        {
+          "venue": {
+            "fullName": "Yankee Stadium"
+          },
+          "competitors": [
+            {
+              "id": "10",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "76-59"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "35-31"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "41-28"
+                }
+              ],
+              "team": {
+                "id": "10",
+                "abbreviation": "NYY",
+                "shortDisplayName": "Yankees",
+                "name": "Yankees",
+                "displayName": "New York Yankees",
+                "color": "132448",
+                "alternateColor": "c4ced4",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/nyy.png"
+              }
+            },
+            {
+              "id": "2",
+              "homeAway": "away",
+              "score": "6",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "74-61"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "34-32"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "40-29"
+                }
+              ],
+              "team": {
+                "id": "2",
+                "abbreviation": "BOS",
+                "shortDisplayName": "Red Sox",
+                "name": "Red Sox",
+                "displayName": "Boston Red Sox",
+                "color": "0d2b56",
+                "alternateColor": "bd3039",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/bos.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816721",
+      "date": "2026-08-29T17:10Z",
+      "shortName": "LAD @ DET",
+      "name": "Los Angeles Dodgers at Detroit Tigers",
+      "status": {
+        "displayClock": "0:00",
+        "period": 9,
+        "type": {
+          "state": "post",
+          "name": "STATUS_FINAL",
+          "detail": "Final",
+          "shortDetail": "Final"
+        }
+      },
+      "competitions": [
+        {
+          "venue": {
+            "fullName": "Comerica Park"
+          },
+          "competitors": [
+            {
+              "id": "6",
+              "homeAway": "home",
+              "score": "2",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "63-72"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "34-34"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "29-38"
+                }
+              ],
+              "team": {
+                "id": "6",
+                "abbreviation": "DET",
+                "shortDisplayName": "Tigers",
+                "name": "Tigers",
+                "displayName": "Detroit Tigers",
+                "color": "0a2240",
+                "alternateColor": "ff4713",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/det.png"
+              }
+            },
+            {
+              "id": "19",
+              "homeAway": "away",
+              "score": "1",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "81-55"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "40-26"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "41-29"
+                }
+              ],
+              "team": {
+                "id": "19",
+                "abbreviation": "LAD",
+                "shortDisplayName": "Dodgers",
+                "name": "Dodgers",
+                "displayName": "Los Angeles Dodgers",
+                "color": "005a9c",
+                "alternateColor": "ffffff",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/lad.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816725",
+      "date": "2026-08-29T18:10Z",
+      "shortName": "CHW @ MIN",
+      "name": "Chicago White Sox at Minnesota Twins",
+      "status": {
+        "displayClock": "0:00",
+        "period": 8,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "Bottom 8th",
+          "shortDetail": "Bot 8th"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 0,
+            "strikes": 0,
+            "outs": 1,
+            "pitcher": {
+              "playerId": 33856,
+              "period": 8,
+              "athlete": {
+                "id": "33856",
+                "fullName": "Sean Newcomb",
+                "displayName": "Sean Newcomb",
+                "shortName": "S. Newcomb",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/33856"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/33856.png",
+                "jersey": "15",
+                "position": "RP",
+                "team": {
+                  "id": "4"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816725/competitions/401816725/competitors/4/roster/33856/projections?lang=en&region=us"
+              },
+              "summary": "2.1 IP, 0 ER, 2 H, 3 K, 0 BB"
+            },
+            "batter": {
+              "playerId": 41311,
+              "period": 8,
+              "athlete": {
+                "id": "41311",
+                "fullName": "Kody Clemens",
+                "displayName": "Kody Clemens",
+                "shortName": "K. Clemens",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/41311"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/41311.png",
+                "jersey": "2",
+                "position": "1B",
+                "team": {
+                  "id": "9"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816725/competitions/401816725/competitors/9/roster/41311/projections?lang=en&region=us"
+              },
+              "summary": "0-2, BB, K"
+            },
+            "onFirst": false,
+            "onSecond": false,
+            "onThird": false
+          },
+          "venue": {
+            "fullName": "Target Field"
+          },
+          "competitors": [
+            {
+              "id": "9",
+              "homeAway": "home",
+              "score": "2",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "64-71"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "35-32"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "29-39"
+                }
+              ],
+              "team": {
+                "id": "9",
+                "abbreviation": "MIN",
+                "shortDisplayName": "Twins",
+                "name": "Twins",
+                "displayName": "Minnesota Twins",
+                "color": "031f40",
+                "alternateColor": "e20e32",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/min.png"
+              }
+            },
+            {
+              "id": "4",
+              "homeAway": "away",
+              "score": "3",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "71-63"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "41-27"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "30-36"
+                }
+              ],
+              "team": {
+                "id": "4",
+                "abbreviation": "CHW",
+                "shortDisplayName": "White Sox",
+                "name": "White Sox",
+                "displayName": "Chicago White Sox",
+                "color": "000000",
+                "alternateColor": "c4ced4",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/chw.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816727",
+      "date": "2026-08-29T18:15Z",
+      "shortName": "PIT @ STL",
+      "name": "Pittsburgh Pirates at St. Louis Cardinals",
+      "status": {
+        "displayClock": "0:00",
+        "period": 7,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "Bottom 7th",
+          "shortDetail": "Bot 7th"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 2,
+            "strikes": 2,
+            "outs": 0,
+            "pitcher": {
+              "playerId": 39804,
+              "period": 7,
+              "athlete": {
+                "id": "39804",
+                "fullName": "Gregory Soto",
+                "displayName": "Gregory Soto",
+                "shortName": "G. Soto",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/39804"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/39804.png",
+                "jersey": "31",
+                "position": "RP",
+                "team": {
+                  "id": "23"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816727/competitions/401816727/competitors/23/roster/39804/projections?lang=en&region=us"
+              },
+              "summary": "0.0 IP, 0 ER, 0 H, 0 BB"
+            },
+            "batter": {
+              "playerId": 4749675,
+              "period": 7,
+              "athlete": {
+                "id": "4749675",
+                "fullName": "Jimmy Crooks",
+                "displayName": "Jimmy Crooks",
+                "shortName": "J. Crooks",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/4749675"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/4749675.png",
+                "jersey": "8",
+                "position": "C",
+                "team": {
+                  "id": "24"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816727/competitions/401816727/competitors/24/roster/4749675/projections?lang=en&region=us"
+              },
+              "summary": "0-1"
+            },
+            "onFirst": false,
+            "onSecond": false,
+            "onThird": false
+          },
+          "venue": {
+            "fullName": "Busch Stadium"
+          },
+          "competitors": [
+            {
+              "id": "24",
+              "homeAway": "home",
+              "score": "2",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "68-68"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "34-36"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "34-32"
+                }
+              ],
+              "team": {
+                "id": "24",
+                "abbreviation": "STL",
+                "shortDisplayName": "Cardinals",
+                "name": "Cardinals",
+                "displayName": "St. Louis Cardinals",
+                "color": "be0a14",
+                "alternateColor": "001541",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/stl.png"
+              }
+            },
+            {
+              "id": "23",
+              "homeAway": "away",
+              "score": "5",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "65-71"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "34-32"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "31-39"
+                }
+              ],
+              "team": {
+                "id": "23",
+                "abbreviation": "PIT",
+                "shortDisplayName": "Pirates",
+                "name": "Pirates",
+                "displayName": "Pittsburgh Pirates",
+                "color": "000000",
+                "alternateColor": "fdb827",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/pit.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816726",
+      "date": "2026-08-29T18:20Z",
+      "shortName": "CIN @ CHC",
+      "name": "Cincinnati Reds at Chicago Cubs",
+      "status": {
+        "displayClock": "0:00",
+        "period": 7,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "Top 7th",
+          "shortDetail": "Top 7th"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 2,
+            "strikes": 2,
+            "outs": 2,
+            "onFirst": true,
+            "onThird": true,
+            "pitcher": {
+              "playerId": 41220,
+              "period": 7,
+              "athlete": {
+                "id": "41220",
+                "fullName": "Ryan Rolison",
+                "displayName": "Ryan Rolison",
+                "shortName": "R. Rolison",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/41220"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/41220.png",
+                "jersey": "33",
+                "position": "RP",
+                "team": {
+                  "id": "16"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816726/competitions/401816726/competitors/16/roster/41220/projections?lang=en&region=us"
+              },
+              "summary": "0.1 IP, 0 ER, H, BB"
+            },
+            "batter": {
+              "playerId": 5080771,
+              "period": 7,
+              "athlete": {
+                "id": "5080771",
+                "fullName": "Sal Stewart",
+                "displayName": "Sal Stewart",
+                "shortName": "S. Stewart",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/5080771"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/5080771.png",
+                "jersey": "27",
+                "position": "1B",
+                "team": {
+                  "id": "17"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816726/competitions/401816726/competitors/17/roster/5080771/projections?lang=en&region=us"
+              },
+              "summary": "2-4, HR, 2 RBI, R, K"
+            },
+            "onSecond": false
+          },
+          "venue": {
+            "fullName": "Wrigley Field"
+          },
+          "competitors": [
+            {
+              "id": "16",
+              "homeAway": "home",
+              "score": "10",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "76-59"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "38-28"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "38-31"
+                }
+              ],
+              "team": {
+                "id": "16",
+                "abbreviation": "CHC",
+                "shortDisplayName": "Cubs",
+                "name": "Cubs",
+                "displayName": "Chicago Cubs",
+                "color": "0e3386",
+                "alternateColor": "cc3433",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/chc.png"
+              }
+            },
+            {
+              "id": "17",
+              "homeAway": "away",
+              "score": "5",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "64-71"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "32-36"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "32-35"
+                }
+              ],
+              "team": {
+                "id": "17",
+                "abbreviation": "CIN",
+                "shortDisplayName": "Reds",
+                "name": "Reds",
+                "displayName": "Cincinnati Reds",
+                "color": "c6011f",
+                "alternateColor": "ffffff",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/cin.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816724",
+      "date": "2026-08-29T19:07Z",
+      "shortName": "SEA @ TOR",
+      "name": "Seattle Mariners at Toronto Blue Jays",
+      "status": {
+        "displayClock": "0:00",
+        "period": 3,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "Bottom 3rd",
+          "shortDetail": "Bot 3rd"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 1,
+            "strikes": 2,
+            "outs": 0,
+            "pitcher": {
+              "playerId": 5198748,
+              "period": 3,
+              "athlete": {
+                "id": "5198748",
+                "fullName": "Kade Anderson",
+                "displayName": "Kade Anderson",
+                "shortName": "K. Anderson",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/5198748"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/5198748.png",
+                "jersey": "13",
+                "position": "SP",
+                "team": {
+                  "id": "12"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816724/competitions/401816724/competitors/12/roster/5198748/projections?lang=en&region=us"
+              },
+              "summary": "2.0 IP, 0 ER, 0 H, K, BB"
+            },
+            "batter": {
+              "playerId": 34964,
+              "period": 3,
+              "athlete": {
+                "id": "34964",
+                "fullName": "Daz Cameron",
+                "displayName": "Daz Cameron",
+                "shortName": "D. Cameron",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/34964"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/34964.png",
+                "jersey": "23",
+                "position": "RF",
+                "team": {
+                  "id": "14"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816724/competitions/401816724/competitors/14/roster/34964/projections?lang=en&region=us"
+              },
+              "summary": "0-0"
+            },
+            "onFirst": false,
+            "onSecond": false,
+            "onThird": false
+          },
+          "venue": {
+            "fullName": "Rogers Centre"
+          },
+          "competitors": [
+            {
+              "id": "14",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "66-70"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "35-35"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "31-35"
+                }
+              ],
+              "team": {
+                "id": "14",
+                "abbreviation": "TOR",
+                "shortDisplayName": "Blue Jays",
+                "name": "Blue Jays",
+                "displayName": "Toronto Blue Jays",
+                "color": "134a8e",
+                "alternateColor": "6cace5",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/tor.png"
+              }
+            },
+            {
+              "id": "12",
+              "homeAway": "away",
+              "score": "1",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "64-71"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "37-31"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "27-40"
+                }
+              ],
+              "team": {
+                "id": "12",
+                "abbreviation": "SEA",
+                "shortDisplayName": "Mariners",
+                "name": "Mariners",
+                "displayName": "Seattle Mariners",
+                "color": "005c5c",
+                "alternateColor": "0c2c56",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/sea.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816722",
+      "date": "2026-08-29T20:05Z",
+      "shortName": "MIA @ WSH",
+      "name": "Miami Marlins at Washington Nationals",
+      "status": {
+        "displayClock": "0:00",
+        "period": 2,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "Top 2nd",
+          "shortDetail": "Top 2nd"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 1,
+            "strikes": 1,
+            "outs": 0,
+            "pitcher": {
+              "playerId": 4308037,
+              "period": 2,
+              "athlete": {
+                "id": "4308037",
+                "fullName": "Cade Cavalli",
+                "displayName": "Cade Cavalli",
+                "shortName": "C. Cavalli",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/4308037"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/4308037.png",
+                "jersey": "24",
+                "position": "SP",
+                "team": {
+                  "id": "20"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816722/competitions/401816722/competitors/20/roster/4308037/projections?lang=en&region=us"
+              },
+              "summary": "1.0 IP, 0 ER, 0 H, 3 K, 0 BB"
+            },
+            "batter": {
+              "playerId": 41295,
+              "period": 2,
+              "athlete": {
+                "id": "41295",
+                "fullName": "Griffin Conine",
+                "displayName": "Griffin Conine",
+                "shortName": "G. Conine",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/41295"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/41295.png",
+                "jersey": "18",
+                "position": "RF",
+                "team": {
+                  "id": "28"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816722/competitions/401816722/competitors/28/roster/41295/projections?lang=en&region=us"
+              },
+              "summary": "0-0"
+            },
+            "onFirst": false,
+            "onSecond": false,
+            "onThird": false
+          },
+          "venue": {
+            "fullName": "Nationals Park"
+          },
+          "competitors": [
+            {
+              "id": "20",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "64-73"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "30-38"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "34-35"
+                }
+              ],
+              "team": {
+                "id": "20",
+                "abbreviation": "WSH",
+                "shortDisplayName": "Nationals",
+                "name": "Nationals",
+                "displayName": "Washington Nationals",
+                "color": "ab0003",
+                "alternateColor": "11225b",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/wsh.png"
+              }
+            },
+            {
+              "id": "28",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "68-67"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "42-27"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "26-40"
+                }
+              ],
+              "team": {
+                "id": "28",
+                "abbreviation": "MIA",
+                "shortDisplayName": "Marlins",
+                "name": "Marlins",
+                "displayName": "Miami Marlins",
+                "color": "00a3e0",
+                "alternateColor": "000000",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/mia.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816744",
+      "date": "2026-08-29T20:05Z",
+      "shortName": "ARI @ SF",
+      "name": "Arizona Diamondbacks at San Francisco Giants",
+      "status": {
+        "displayClock": "0:00",
+        "period": 2,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "Top 2nd",
+          "shortDetail": "Top 2nd"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 1,
+            "strikes": 1,
+            "outs": 1,
+            "onFirst": true,
+            "pitcher": {
+              "playerId": 5339226,
+              "period": 2,
+              "athlete": {
+                "id": "5339226",
+                "fullName": "Matt Wilkinson",
+                "displayName": "Matt Wilkinson",
+                "shortName": "M. Wilkinson",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/5339226"
+                  }
+                ],
+                "jersey": "71",
+                "position": "SP",
+                "team": {
+                  "id": "26"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816744/competitions/401816744/competitors/26/roster/5339226/projections?lang=en&region=us"
+              },
+              "summary": "1.1 IP, 0 ER, 2 H, K, 0 BB"
+            },
+            "batter": {
+              "playerId": 5010500,
+              "period": 2,
+              "athlete": {
+                "id": "5010500",
+                "fullName": "Jose Fernandez",
+                "displayName": "Jose Fernandez",
+                "shortName": "J. Fernandez",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/5010500"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/5010500.png",
+                "jersey": "11",
+                "position": "DH",
+                "team": {
+                  "id": "29"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816744/competitions/401816744/competitors/29/roster/5010500/projections?lang=en&region=us"
+              },
+              "summary": "0-0"
+            },
+            "onSecond": false,
+            "onThird": false
+          },
+          "venue": {
+            "fullName": "Oracle Park"
+          },
+          "competitors": [
+            {
+              "id": "26",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "55-80"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "32-35"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "23-45"
+                }
+              ],
+              "team": {
+                "id": "26",
+                "abbreviation": "SF",
+                "shortDisplayName": "Giants",
+                "name": "Giants",
+                "displayName": "San Francisco Giants",
+                "color": "000000",
+                "alternateColor": "fd5a1e",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/sf.png"
+              }
+            },
+            {
+              "id": "29",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "72-64"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "40-29"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "32-35"
+                }
+              ],
+              "team": {
+                "id": "29",
+                "abbreviation": "ARI",
+                "shortDisplayName": "Diamondbacks",
+                "name": "Diamondbacks",
+                "displayName": "Arizona Diamondbacks",
+                "color": "aa182c",
+                "alternateColor": "000000",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/ari.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816718",
+      "date": "2026-08-29T20:10Z",
+      "shortName": "COL @ ATL",
+      "name": "Colorado Rockies at Atlanta Braves",
+      "status": {
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "Top 1st",
+          "shortDetail": "Top 1st"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 0,
+            "strikes": 0,
+            "outs": 0,
+            "pitcher": {
+              "playerId": 31098,
+              "period": 1,
+              "athlete": {
+                "id": "31098",
+                "fullName": "Martin Perez",
+                "displayName": "Martin Perez",
+                "shortName": "M. Perez",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/31098"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/31098.png",
+                "jersey": "33",
+                "position": "SP",
+                "team": {
+                  "id": "15"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816718/competitions/401816718/competitors/15/roster/31098/projections?lang=en&region=us"
+              },
+              "summary": "0.0 IP, 0 ER, 0 H, 0 BB"
+            },
+            "batter": {
+              "playerId": 41197,
+              "period": 1,
+              "athlete": {
+                "id": "41197",
+                "fullName": "Jake McCarthy",
+                "displayName": "Jake McCarthy",
+                "shortName": "J. McCarthy",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/41197"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/41197.png",
+                "jersey": "31",
+                "position": "LF",
+                "team": {
+                  "id": "27"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816718/competitions/401816718/competitors/27/roster/41197/projections?lang=en&region=us"
+              },
+              "summary": "0-0"
+            },
+            "onFirst": false,
+            "onSecond": false,
+            "onThird": false
+          },
+          "venue": {
+            "fullName": "Truist Park"
+          },
+          "competitors": [
+            {
+              "id": "15",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "80-55"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "46-23"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "34-32"
+                }
+              ],
+              "team": {
+                "id": "15",
+                "abbreviation": "ATL",
+                "shortDisplayName": "Braves",
+                "name": "Braves",
+                "displayName": "Atlanta Braves",
+                "color": "0c2340",
+                "alternateColor": "ba0c2f",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/atl.png"
+              }
+            },
+            {
+              "id": "27",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "52-83"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "27-38"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "25-45"
+                }
+              ],
+              "team": {
+                "id": "27",
+                "abbreviation": "COL",
+                "shortDisplayName": "Rockies",
+                "name": "Rockies",
+                "displayName": "Colorado Rockies",
+                "color": "33006f",
+                "alternateColor": "000000",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/col.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816719",
+      "date": "2026-08-29T20:10Z",
+      "shortName": "HOU @ NYM",
+      "name": "Houston Astros at New York Mets",
+      "status": {
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "Bottom 1st",
+          "shortDetail": "Bot 1st"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 1,
+            "strikes": 0,
+            "outs": 2,
+            "onFirst": true,
+            "pitcher": {
+              "playerId": 41776,
+              "period": 1,
+              "athlete": {
+                "id": "41776",
+                "fullName": "Bennett Sousa",
+                "displayName": "Bennett Sousa",
+                "shortName": "B. Sousa",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/41776"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/41776.png",
+                "jersey": "62",
+                "position": "RP",
+                "team": {
+                  "id": "18"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816719/competitions/401816719/competitors/18/roster/41776/projections?lang=en&region=us"
+              },
+              "summary": "0.2 IP, 0 ER, 0 H, BB"
+            },
+            "batter": {
+              "playerId": 4925604,
+              "period": 1,
+              "athlete": {
+                "id": "4925604",
+                "fullName": "Carson Benge",
+                "displayName": "Carson Benge",
+                "shortName": "C. Benge",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/4925604"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/4925604.png",
+                "jersey": "3",
+                "position": "RF",
+                "team": {
+                  "id": "21"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816719/competitions/401816719/competitors/21/roster/4925604/projections?lang=en&region=us"
+              },
+              "summary": "0-0"
+            },
+            "onSecond": false,
+            "onThird": false
+          },
+          "venue": {
+            "fullName": "Citi Field"
+          },
+          "competitors": [
+            {
+              "id": "21",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "60-75"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "31-38"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "29-37"
+                }
+              ],
+              "team": {
+                "id": "21",
+                "abbreviation": "NYM",
+                "shortDisplayName": "Mets",
+                "name": "Mets",
+                "displayName": "New York Mets",
+                "color": "002d72",
+                "alternateColor": "ff5910",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/nym.png"
+              }
+            },
+            {
+              "id": "18",
+              "homeAway": "away",
+              "score": "1",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "68-67"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "33-35"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "35-32"
+                }
+              ],
+              "team": {
+                "id": "18",
+                "abbreviation": "HOU",
+                "shortDisplayName": "Astros",
+                "name": "Astros",
+                "displayName": "Houston Astros",
+                "color": "002d62",
+                "alternateColor": "eb6e1f",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/hou.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816720",
+      "date": "2026-08-29T20:10Z",
+      "shortName": "KC @ CLE",
+      "name": "Kansas City Royals at Cleveland Guardians",
+      "status": {
+        "displayClock": "0:00",
+        "period": 2,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "Top 2nd",
+          "shortDetail": "Top 2nd"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 0,
+            "strikes": 0,
+            "outs": 0,
+            "onSecond": true,
+            "pitcher": {
+              "playerId": 33773,
+              "period": 2,
+              "athlete": {
+                "id": "33773",
+                "fullName": "Foster Griffin",
+                "displayName": "Foster Griffin",
+                "shortName": "F. Griffin",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/33773"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/33773.png",
+                "jersey": "22",
+                "position": "SP",
+                "team": {
+                  "id": "5"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816720/competitions/401816720/competitors/5/roster/33773/projections?lang=en&region=us"
+              },
+              "summary": "1.0 IP, 0 ER, H, K, 0 BB"
+            },
+            "batter": {
+              "playerId": 4314013,
+              "period": 2,
+              "athlete": {
+                "id": "4314013",
+                "fullName": "Nick Loftin",
+                "displayName": "Nick Loftin",
+                "shortName": "N. Loftin",
+                "links": [
+                  {
+                    "rel": [
+                      "playercard",
+                      "desktop",
+                      "athlete"
+                    ],
+                    "href": "https://www.espn.com/mlb/player/_/id/4314013"
+                  }
+                ],
+                "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/4314013.png",
+                "jersey": "12",
+                "position": "3B",
+                "team": {
+                  "id": "7"
+                }
+              },
+              "projections": {
+                "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816720/competitions/401816720/competitors/7/roster/4314013/projections?lang=en&region=us"
+              },
+              "summary": "0-0"
+            },
+            "onFirst": false,
+            "onThird": false
+          },
+          "venue": {
+            "fullName": "Progressive Field"
+          },
+          "competitors": [
+            {
+              "id": "5",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "68-67"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "31-35"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "37-32"
+                }
+              ],
+              "team": {
+                "id": "5",
+                "abbreviation": "CLE",
+                "shortDisplayName": "Guardians",
+                "name": "Guardians",
+                "displayName": "Cleveland Guardians",
+                "color": "002b5c",
+                "alternateColor": "e31937",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/cle.png"
+              }
+            },
+            {
+              "id": "7",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "61-75"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "36-30"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "25-45"
+                }
+              ],
+              "team": {
+                "id": "7",
+                "abbreviation": "KC",
+                "shortDisplayName": "Royals",
+                "name": "Royals",
+                "displayName": "Kansas City Royals",
+                "color": "004687",
+                "alternateColor": "7ab2dd",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/kc.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816723",
+      "date": "2026-08-29T20:10Z",
+      "shortName": "SD @ TB",
+      "name": "San Diego Padres at Tampa Bay Rays",
+      "status": {
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "state": "in",
+          "name": "STATUS_IN_PROGRESS",
+          "detail": "End 1st",
+          "shortDetail": "End 1st"
+        }
+      },
+      "competitions": [
+        {
+          "situation": {
+            "balls": 0,
+            "strikes": 0,
+            "outs": 0,
+            "dueUp": [
+              {
+                "playerId": 35591,
+                "period": 1,
+                "athlete": {
+                  "id": "35591",
+                  "fullName": "Ty France",
+                  "displayName": "Ty France",
+                  "shortName": "T. France",
+                  "links": [
+                    {
+                      "rel": [
+                        "playercard",
+                        "desktop",
+                        "athlete"
+                      ],
+                      "href": "https://www.espn.com/mlb/player/_/id/35591"
+                    }
+                  ],
+                  "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/35591.png",
+                  "jersey": "25",
+                  "position": "1B",
+                  "team": {
+                    "id": "25"
+                  }
+                },
+                "projections": {
+                  "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816723/competitions/401816723/competitors/25/roster/35591/projections?lang=en&region=us"
+                },
+                "batOrder": 4,
+                "summary": "0-0"
+              },
+              {
+                "playerId": 4872691,
+                "period": 1,
+                "athlete": {
+                  "id": "4872691",
+                  "fullName": "Jackson Merrill",
+                  "displayName": "Jackson Merrill",
+                  "shortName": "J. Merrill",
+                  "links": [
+                    {
+                      "rel": [
+                        "playercard",
+                        "desktop",
+                        "athlete"
+                      ],
+                      "href": "https://www.espn.com/mlb/player/_/id/4872691"
+                    }
+                  ],
+                  "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/4872691.png",
+                  "jersey": "3",
+                  "position": "CF",
+                  "team": {
+                    "id": "25"
+                  }
+                },
+                "projections": {
+                  "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816723/competitions/401816723/competitors/25/roster/4872691/projections?lang=en&region=us"
+                },
+                "batOrder": 5,
+                "summary": "0-0"
+              },
+              {
+                "playerId": 40521,
+                "period": 1,
+                "athlete": {
+                  "id": "40521",
+                  "fullName": "Luis Campusano",
+                  "displayName": "Luis Campusano",
+                  "shortName": "L. Campusano",
+                  "links": [
+                    {
+                      "rel": [
+                        "playercard",
+                        "desktop",
+                        "athlete"
+                      ],
+                      "href": "https://www.espn.com/mlb/player/_/id/40521"
+                    }
+                  ],
+                  "headshot": "https://a.espncdn.com/i/headshots/mlb/players/full/40521.png",
+                  "jersey": "12",
+                  "position": "C",
+                  "team": {
+                    "id": "25"
+                  }
+                },
+                "projections": {
+                  "$ref": "http://sports.core.api.espn.pvt/v2/sports/baseball/leagues/mlb/events/401816723/competitions/401816723/competitors/25/roster/40521/projections?lang=en&region=us"
+                },
+                "batOrder": 6,
+                "summary": "0-0"
+              }
+            ],
+            "onFirst": false,
+            "onSecond": false,
+            "onThird": false
+          },
+          "venue": {
+            "fullName": "Tropicana Field"
+          },
+          "competitors": [
+            {
+              "id": "30",
+              "homeAway": "home",
+              "score": "1",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "80-54"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "44-23"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "36-31"
+                }
+              ],
+              "team": {
+                "id": "30",
+                "abbreviation": "TB",
+                "shortDisplayName": "Rays",
+                "name": "Rays",
+                "displayName": "Tampa Bay Rays",
+                "color": "092c5c",
+                "alternateColor": "8fbce6",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/tb.png"
+              }
+            },
+            {
+              "id": "25",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "72-63"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "41-28"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "31-35"
+                }
+              ],
+              "team": {
+                "id": "25",
+                "abbreviation": "SD",
+                "shortDisplayName": "Padres",
+                "name": "Padres",
+                "displayName": "San Diego Padres",
+                "color": "2f241d",
+                "alternateColor": "ffc425",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/sd.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816717",
+      "date": "2026-08-29T23:15Z",
+      "shortName": "BOS @ NYY",
+      "name": "Boston Red Sox at New York Yankees",
+      "status": {
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "state": "pre",
+          "name": "STATUS_SCHEDULED",
+          "detail": "Scheduled",
+          "shortDetail": "8/29 - 7:15 PM EDT"
+        }
+      },
+      "competitions": [
+        {
+          "venue": {
+            "fullName": "Yankee Stadium"
+          },
+          "competitors": [
+            {
+              "id": "10",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "76-59"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "35-31"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "41-28"
+                }
+              ],
+              "team": {
+                "id": "10",
+                "abbreviation": "NYY",
+                "shortDisplayName": "Yankees",
+                "name": "Yankees",
+                "displayName": "New York Yankees",
+                "color": "132448",
+                "alternateColor": "c4ced4",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/nyy.png"
+              }
+            },
+            {
+              "id": "2",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "74-61"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "34-32"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "40-29"
+                }
+              ],
+              "team": {
+                "id": "2",
+                "abbreviation": "BOS",
+                "shortDisplayName": "Red Sox",
+                "name": "Red Sox",
+                "displayName": "Boston Red Sox",
+                "color": "0d2b56",
+                "alternateColor": "bd3039",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/bos.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816728",
+      "date": "2026-08-29T23:15Z",
+      "shortName": "TEX @ MIL",
+      "name": "Texas Rangers at Milwaukee Brewers",
+      "status": {
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "state": "pre",
+          "name": "STATUS_SCHEDULED",
+          "detail": "Scheduled",
+          "shortDetail": "8/29 - 7:15 PM EDT"
+        }
+      },
+      "competitions": [
+        {
+          "venue": {
+            "fullName": "American Family Field"
+          },
+          "competitors": [
+            {
+              "id": "8",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "84-51"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "46-24"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "38-27"
+                }
+              ],
+              "team": {
+                "id": "8",
+                "abbreviation": "MIL",
+                "shortDisplayName": "Brewers",
+                "name": "Brewers",
+                "displayName": "Milwaukee Brewers",
+                "color": "13294b",
+                "alternateColor": "ffc72c",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/mil.png"
+              }
+            },
+            {
+              "id": "13",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "66-69"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "36-29"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "30-40"
+                }
+              ],
+              "team": {
+                "id": "13",
+                "abbreviation": "TEX",
+                "shortDisplayName": "Rangers",
+                "name": "Rangers",
+                "displayName": "Texas Rangers",
+                "color": "003278",
+                "alternateColor": "c0111f",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/tex.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816729",
+      "date": "2026-08-30T02:05Z",
+      "shortName": "ARI @ SF",
+      "name": "Arizona Diamondbacks at San Francisco Giants",
+      "status": {
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "state": "pre",
+          "name": "STATUS_SCHEDULED",
+          "detail": "Scheduled",
+          "shortDetail": "8/29 - 10:05 PM EDT"
+        }
+      },
+      "competitions": [
+        {
+          "venue": {
+            "fullName": "Oracle Park"
+          },
+          "competitors": [
+            {
+              "id": "26",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "55-80"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "32-35"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "23-45"
+                }
+              ],
+              "team": {
+                "id": "26",
+                "abbreviation": "SF",
+                "shortDisplayName": "Giants",
+                "name": "Giants",
+                "displayName": "San Francisco Giants",
+                "color": "000000",
+                "alternateColor": "fd5a1e",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/sf.png"
+              }
+            },
+            {
+              "id": "29",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "72-64"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "40-29"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "32-35"
+                }
+              ],
+              "team": {
+                "id": "29",
+                "abbreviation": "ARI",
+                "shortDisplayName": "Diamondbacks",
+                "name": "Diamondbacks",
+                "displayName": "Arizona Diamondbacks",
+                "color": "aa182c",
+                "alternateColor": "000000",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/ari.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816730",
+      "date": "2026-08-30T02:05Z",
+      "shortName": "BAL @ ATH",
+      "name": "Baltimore Orioles at Athletics Athletics",
+      "status": {
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "state": "pre",
+          "name": "STATUS_SCHEDULED",
+          "detail": "Scheduled",
+          "shortDetail": "8/29 - 10:05 PM EDT"
+        }
+      },
+      "competitions": [
+        {
+          "venue": {
+            "fullName": "Sutter Health Park"
+          },
+          "competitors": [
+            {
+              "id": "11",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "53-82"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "25-42"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "28-40"
+                }
+              ],
+              "team": {
+                "id": "11",
+                "abbreviation": "ATH",
+                "shortDisplayName": "Athletics",
+                "name": "Athletics",
+                "displayName": "Athletics",
+                "color": "003831",
+                "alternateColor": "efb21e",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/ath.png"
+              }
+            },
+            {
+              "id": "1",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "66-69"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "34-34"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "32-35"
+                }
+              ],
+              "team": {
+                "id": "1",
+                "abbreviation": "BAL",
+                "shortDisplayName": "Orioles",
+                "name": "Orioles",
+                "displayName": "Baltimore Orioles",
+                "color": "df4601",
+                "alternateColor": "000000",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/bal.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401816731",
+      "date": "2026-08-30T02:07Z",
+      "shortName": "PHI @ LAA",
+      "name": "Philadelphia Phillies at Los Angeles Angels",
+      "status": {
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "state": "pre",
+          "name": "STATUS_SCHEDULED",
+          "detail": "Scheduled",
+          "shortDetail": "8/29 - 10:07 PM EDT"
+        }
+      },
+      "competitions": [
+        {
+          "venue": {
+            "fullName": "Angel Stadium"
+          },
+          "competitors": [
+            {
+              "id": "3",
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "52-83"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "29-40"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "23-43"
+                }
+              ],
+              "team": {
+                "id": "3",
+                "abbreviation": "LAA",
+                "shortDisplayName": "Angels",
+                "name": "Angels",
+                "displayName": "Los Angeles Angels",
+                "color": "ba0021",
+                "alternateColor": "c4ced4",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/laa.png"
+              }
+            },
+            {
+              "id": "22",
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "type": "total",
+                  "summary": "75-60"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "38-30"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "37-30"
+                }
+              ],
+              "team": {
+                "id": "22",
+                "abbreviation": "PHI",
+                "shortDisplayName": "Phillies",
+                "name": "Phillies",
+                "displayName": "Philadelphia Phillies",
+                "color": "e81828",
+                "alternateColor": "003278",
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/phi.png"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

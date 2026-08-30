@@ -49,6 +49,9 @@ import { useSplState } from "../../main/use-spl-state";
 import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl } from "../recording-status";
 import { useResiState, useYouTubeState } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
+import { useScoresState } from "../../main/use-scores-state";
+import { inkFor } from "../../main/score-ink";
+import { liveIndex } from "../score-activity";
 
 /**
  * The same set as a VALUE, so a renderer can ask before it starts matching.
@@ -71,6 +74,7 @@ const HOME_CARD_TYPES: Record<HomeCardType, true> = {
   "home-streaming-resi": true,
   "home-streaming-youtube": true,
   "home-spl": true,
+  "home-scores": true,
   "home-screens": true,
   "home-pvp": true,
 };
@@ -641,6 +645,103 @@ export function PvpCard({ now }: { now: number }) {
 }
 
 /**
+ * Followed scores, in Home's voice.
+ *
+ * NOT the wall strip, and this is the one deliberate departure from the plan's
+ * text: it said "each as a compact ScoreStrip", and the mockup this plan
+ * implements says the opposite, with a reason -- "no colour block here on
+ * purpose: a Home tile sits beside quiet cards, and a red panel would out-shout
+ * the readiness list next to it. The colour survives as the chip." A tile of
+ * brand colour between Readiness and Next service is exactly that panel.
+ *
+ * What is NOT duplicated is the part that could be wrong: the ink over a team's
+ * colour still comes from score-ink, so a chip and a wall widget cannot disagree
+ * about whether the Packers take white text.
+ *
+ * The trailing team is dimmed rather than the leader emphasised. Everything on
+ * this page is already at full strength, so making one row louder would make the
+ * card louder than its neighbours; making the loser quieter says the same thing
+ * and leaves the card where it sits.
+ */
+export function ScoresCard() {
+  const scores = useScoresState();
+  const games = scores?.games ?? [];
+  // The one whose status heads the card: whatever is live and scored last, else
+  // the next one on. The same rule the capsule follows, from the same function.
+  const featured = games[Math.max(0, liveIndex(games, scores?.lastEvents ?? []))] ?? null;
+
+  if (games.length === 0) {
+    // Three different facts, kept apart. "No games today" for a failed request
+    // is a factual lie about the operator's own schedule.
+    const why = scores?.error
+      ? "Scores unavailable"
+      : scores?.connected
+        ? "No games today"
+        : "No teams followed";
+    return <Stat label="Scores" value={why} />;
+  }
+
+  return (
+    <section className="home-scores flex h-full w-full flex-col px-4 py-3">
+      <div className="flex items-baseline gap-2">
+        <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+          Scores
+        </h2>
+        {featured && (
+          <span
+            className={cn(
+              "ml-auto font-mono text-caption2 text-fg-subtle",
+              featured.state === "in" && !featured.delayed && "home-scores-live",
+            )}
+          >
+            {featured.shortDetail}
+          </span>
+        )}
+      </div>
+
+      <div className="home-scores-list mt-1.5">
+        {games.slice(0, 3).map((g) => (
+          <div key={g.eventId} className="home-scores-game">
+            <ScoresRow team={g.away} trailing={behind(g.away, g.home)} />
+            <ScoresRow team={g.home} trailing={behind(g.home, g.away)} />
+          </div>
+        ))}
+      </div>
+
+      {featured?.venue && (
+        <p className="home-scores-foot mt-auto pt-1.5 text-caption2 text-fg-subtle">
+          {featured.venue}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Behind, not merely "not ahead": a tied game dims neither side. */
+function behind(a: ScoreTeamDTO, b: ScoreTeamDTO): boolean {
+  return a.score != null && b.score != null && a.score < b.score;
+}
+
+function ScoresRow({ team, trailing }: { team: ScoreTeamDTO; trailing: boolean }) {
+  const ink = inkFor(team.color);
+  return (
+    <div className={cn("home-scores-row", trailing && "is-trailing")}>
+      <span
+        className="home-scores-chip"
+        // The chip is the ONLY place a team colour appears on this page, and its
+        // ink is chosen by contrast rather than fixed -- roughly a third of the
+        // league is unreadable in white.
+        style={{ background: team.color ?? "var(--color-fill)", color: ink }}
+      >
+        {team.abbreviation}
+      </span>
+      <span className="home-scores-name">{team.name}</span>
+      <span className="home-scores-value">{team.score ?? "\u2014"}</span>
+    </div>
+  );
+}
+
+/**
  * How many screens have a browser attached, of how many exist.
  *
  * Takes the screens and the presence set rather than two numbers, so the
@@ -712,6 +813,8 @@ export function HomeCard({
       return <RecordingCard recorder="REAPER" />;
     case "home-streaming":
       return <StreamingCard now={now} />;
+    case "home-scores":
+      return <ScoresCard />;
     case "home-streaming-resi":
       return <StreamingCard platform="Resi" now={now} />;
     case "home-streaming-youtube":

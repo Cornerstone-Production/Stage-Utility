@@ -16,3 +16,4 @@ export * from "./baptism.js";
 export * from "./pco.js";
 export * from "./state.js";
 export * from "./patch.js";
+export * from "./scores.js";

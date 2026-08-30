@@ -21,11 +21,23 @@ import { fileURLToPath } from "node:url";
 
 import { EMBEDDABLE_VIEW_KINDS, isEmbeddableViewKind } from "./layout-objects.js";
 import { embedRefusal } from "./embed-chain.js";
-import type { ViewKind } from "../../main/types/stage.js";
+import { everyViewKind } from "../../main/types/stage.js";
 
 /** Every kind a View can be — so "exactly these are embeddable" is checked
  *  against the real set rather than a list that can quietly fall behind. */
-const ALL_VIEW_KINDS: ViewKind[] = ["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown"];
+// everyViewKind, not a `ViewKind[]` annotation: an annotation refuses a kind
+// that does not exist and says nothing about one left out, and a list that has
+// fallen behind makes every assertion below quietly narrower.
+const ALL_VIEW_KINDS = everyViewKind([
+  "slots",
+  "dashboard",
+  "stage",
+  "transcription",
+  "custom",
+  "script",
+  "spl-rundown",
+  "calendar",
+]);
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const read = (f: string) => fs.readFileSync(path.join(HERE, f), "utf8");
@@ -151,7 +163,7 @@ describe("embedding cannot recurse", () => {
     // added and forgotten here is a compile error there.
     assert.deepEqual(
       [...EMBEDDABLE_VIEW_KINDS],
-      ["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown"],
+      ["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown", "calendar"],
     );
     assert.deepEqual([...EMBEDDABLE_VIEW_KINDS].sort(), [...ALL_VIEW_KINDS].sort());
   });

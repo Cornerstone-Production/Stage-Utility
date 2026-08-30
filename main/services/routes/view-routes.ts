@@ -25,6 +25,29 @@ import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
 import { LayoutConflictError, stageController } from "../stage-controller.js";
+import type { CalendarSelection } from "../../types/calendar.js";
+import { calendarBroadcaster } from "../calendar-broadcaster.js";
+
+/**
+ * An untrusted body value that is a list of `{ id, name }` strings.
+ *
+ * A type PREDICATE, so the narrowing it performs is the thing handed on. The
+ * first draft returned a bare boolean and needed a second function to rebuild
+ * the list past a cast — two passes over the same value where one does, and the
+ * cast was the part that asserted rather than proved.
+ */
+function isSelectionList(v: unknown): v is CalendarSelection[] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (e) =>
+        typeof e === "object" &&
+        e !== null &&
+        typeof (e as { id?: unknown }).id === "string" &&
+        typeof (e as { name?: unknown }).name === "string",
+    )
+  );
+}
 
 /**
  * `stage-utility-view-left-mic-display-2026-08-17.json`.
@@ -264,13 +287,24 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
       const hasScriptViewLayout = "scriptViewLayoutId" in body
         && (body.scriptViewLayoutId === null || typeof body.scriptViewLayoutId === "string");
+      // Both calendar lists move together — a picker change sends the pair, so a
+      // request carrying one and not the other is a client that has lost half its
+      // state, not a partial update to honour.
+      const calendarFilters =
+        isSelectionList(body.calendarSources) && isSelectionList(body.calendarTags)
+          ? { sources: body.calendarSources, tags: body.calendarTags }
+          : null;
+      if (("calendarSources" in body || "calendarTags" in body) && !calendarFilters) {
+        error(res, "body.calendarSources and body.calendarTags must BOTH be arrays of { id, name } strings");
+        return;
+      }
       // Narrowed to a literal rather than cast: `as` asserts a type without
       // proving it, so the value handed on is still the caller's string as far
       // as anything reading the code — or analysing it — can tell.
       const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
       const hasSurface = surface !== null;
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), or body.scriptViewLayoutId (string|null) required");
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface && !calendarFilters) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.scriptViewLayoutId (string|null), or body.calendarSources + body.calendarTags (arrays) required");
         return;
       }
       let state = stageController.getState();
@@ -305,6 +339,14 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
       if (hasScriptViewLayout) state = await stageController.setViewScriptViewLayout(id, body.scriptViewLayoutId as string | null);
+      if (calendarFilters) {
+        state = await stageController.setViewCalendarFilters(id, calendarFilters.sources, calendarFilters.tags);
+        // Forced past the subscriber gate and NOT awaited. The operator who just
+        // changed a filter is looking at the screen, so the grid must reapply now
+        // rather than up to three minutes later — but a PCO read must not hold
+        // the settings save open, and the save has already succeeded either way.
+        calendarBroadcaster.refreshInBackground("filter change", true);
+      }
       json(res, state);
       return;
     }

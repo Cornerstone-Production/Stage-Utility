@@ -27,6 +27,7 @@ import {
   RadioTowerIcon,
   MoveHorizontalIcon,
   SquareIcon,
+  TrophyIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -37,7 +38,8 @@ export type BarItemId =
   | "current-item"
   | "integration-health"
   | "recording"
-  | "streaming";
+  | "streaming"
+  | "scores";
 
 /**
  * A flexible space, as a position in the saved order.
@@ -140,6 +142,12 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
     label: "Recording",
     icon: CircleDotIcon,
     hint: "Whether OBS or REAPER is rolling — and whether one is connected but stopped.",
+  },
+  scores: {
+    id: "scores",
+    label: "Live scores",
+    icon: TrophyIcon,
+    hint: "A followed team's score. Click it for the full card.",
   },
 };
 

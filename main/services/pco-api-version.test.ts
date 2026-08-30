@@ -91,6 +91,31 @@ describe("X-PCO-API-Version", () => {
     assert.equal(seen[0].headers["X-PCO-API-Version"], EXPECTED_VERSION);
   });
 
+  test("a call to ANOTHER PCO product sends the version IT asked for", async () => {
+    // Not the Services pin. PCO versions each product on its own date line, so
+    // the Calendar client states its own — and the header it states has to
+    // survive the whole way to the wire.
+    //
+    // Written because it nearly did not. Merging the multiview work onto this
+    // branch replaced the one fetch site with the shared `pcoFetch`, which built
+    // the headers from PCO_API_VERSION alone; `apiVersion` was still threaded
+    // from requestProduct down to requestInner and then quietly discarded. It
+    // compiled, every other test here stayed green, and the Calendar client
+    // would have been served whatever the app's console default happens to be.
+    // Drop the `apiVersion` argument from the pcoFetch call in requestInner and
+    // this test goes red -- verified in that session.
+    stubFetch({ data: [] });
+    await pcoService.requestProduct(
+      "https://api.planningcenteronline.com/calendar/v2/calendars",
+      "app-id",
+      "secret",
+      "2021-06-01",
+    );
+
+    assert.equal(seen.length, 1, "expected exactly one request");
+    assert.equal(seen[0].headers["X-PCO-API-Version"], "2021-06-01");
+  });
+
   test("the pin is an exact date, never a floating 'latest'", async () => {
     stubFetch({ data: [], included: [] });
     await pcoService.listServiceTypes("app-id", "secret");

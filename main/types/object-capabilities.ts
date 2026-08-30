@@ -75,6 +75,12 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   // agree in both directions, so declaring one without the other fails.
   "pvp-layers": ["readout"],
   "home-pvp": ["readout"],
+  // Readout only. No drilldown: a DRILLDOWN capability without a matching route
+  // is asserted against in both directions, and there is no scores page to send
+  // an operator to -- the panel that shows more is the context-bar activity, and
+  // it opens from the bar, not from a wall tile.
+  scores: ["readout"],
+  "home-scores": ["readout"],
   "record-status": ["readout"],
   // Readout only, deliberately. Expanding a tile to see a screen full size is a
   // later phase of the producer multiview and is an overlay, not a route — so

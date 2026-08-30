@@ -124,6 +124,65 @@ gets its own ticks, so the next service starts with a clean list. Settings → P
 Teams, not positions: `PlanNote` has no position relationship, so a note can be
 narrowed to Production but not to a single position within it.
 
+## Calendar
+
+A second PCO product, read by a second client (`pco-calendar-service.ts`) against
+`https://api.planningcenteronline.com/calendar/v2`, sharing the Services client's
+credentials, concurrency gate and retry budget. It pins
+`X-PCO-API-Version: 2018-11-01`; Calendar is versioned by date and an app sending
+no header gets whatever default is configured in PCO's developer console, which
+is not part of this repository.
+
+One request draws a month. `event_instances` is asked for the events
+**overlapping** the visible six-week grid — `starts_at <= gridEnd` **and**
+`ends_at >= gridStart` — not for the events starting inside it. A start-only
+range drops a multi-day event that was already running on the first square.
+
+**Filtering is by calendar and by tag, server-side.** Both are chosen per view
+(Screens → the view → **What this calendar shows**) and both are optional;
+choosing nothing draws everything. Tags are the useful filter: a room or vehicle
+booked for an event appears on the main calendar too, so narrowing by calendar
+alone thins very little. PCO matches several tags from one tag group as "any of
+these" and tags from different groups as "all of these", so the picker names each
+tag's group.
+
+Colours come from the **tag**, not the calendar. A Calendar's own `color` is an
+enum of names with no value behind it; a Tag's is a real hex string. A tag colour
+with too little contrast against the display's backdrop is lightened until it is
+visible — the palette is the organisation's, and nothing else about it is
+changed.
+
+**There is no booking-versus-event distinction, because PCO does not model one.**
+A resource reserved for an event is an event instance like any other and inherits
+the tag of whoever reserved it, so no rule separates a meeting from the van
+booked to get there. Filter by tag instead.
+
+Times are bucketed into days on the **server**, in the app time zone. All-day
+events arrive as local midnight expressed in UTC, and a browser — or a UTC-clocked
+host — bucketing them by UTC date puts them on the wrong square.
+
+The current month is **pushed**, not polled. The server re-reads Planning Center
+on a three-minute timer — once for the whole building — and broadcasts on the
+`calendar:grid` SSE channel only when the grid is not what it was, which for a
+calendar is a couple of times a week. It skips the read entirely when no screen
+is showing a calendar. The channel is hydrated on connect, so a display opened
+mid-month is not blank until something happens to change.
+
+**Month navigation** is a separate path. Chevrons in the header page back and
+forward up to 36 months, and any month other than the current one is a one-shot
+`?month=YYYY-MM` read that nothing subscribes to — a past month is not going to
+change while it is being looked at. Returning to the current month drops back to
+the live channel.
+
+Paging is per screen and is not stored on the View: a View can be routed to
+several screens at once, so a stored offset would page every wall in the building
+because one operator looked at December. A **wall display has no chevrons at all**
+— controls are live only where the operator made the surface operable — and a
+console paged away resets to the current month after ten minutes and on reload.
+
+Caching is separate from the Services client's: event instances for 3 minutes,
+calendars and tags for 15.
+
 ## Controlling Live
 
 `controlLive()` posts PCO's own `go_to_next_item` / `go_to_previous_item`. There is

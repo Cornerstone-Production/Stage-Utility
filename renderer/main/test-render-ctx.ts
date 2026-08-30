@@ -78,6 +78,7 @@ export function makeRenderCtx(overrides: Partial<LayoutRenderCtx> = {}): LayoutR
     resi: null,
     youtube: null,
     osc: null,
+    scores: null,
     peopleCount: null,
     serviceLow: null,
     serviceAttendance: null,

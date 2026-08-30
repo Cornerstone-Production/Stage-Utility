@@ -64,6 +64,17 @@ declare global {
   type PvpLayerDTO = Stage.PvpLayerDTO;
   type PvpStatusDTO = Stage.PvpStatusDTO;
   type ReaperStatusDTO = Stage.ReaperStatusDTO;
+  // ── Live scores (main/types/scores.ts) ──
+  type LeagueId = Stage.LeagueId;
+  type ScoreEvent = Stage.ScoreEvent;
+  type ScoreFavourite = Stage.ScoreFavourite;
+  type ScoreGameDTO = Stage.ScoreGameDTO;
+  type ScoreSituation = Stage.ScoreSituation;
+  type ScoreState = Stage.ScoreState;
+  type ScoreTeamDTO = Stage.ScoreTeamDTO;
+  type ScoresConfig = Stage.ScoresConfig;
+  type ScoresStatusDTO = Stage.ScoresStatusDTO;
+  type SportKind = Stage.SportKind;
   type StreamStatusDTO = Stage.StreamStatusDTO;
   type ReconnectSchedule = Stage.ReconnectSchedule;
   type ResolvedOutput = Stage.ResolvedOutput;

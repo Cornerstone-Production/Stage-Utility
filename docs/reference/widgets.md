@@ -67,6 +67,23 @@ somebody walked over to it.
 [ScriptView and Baptisms](../features/scriptview-and-baptisms.md). It is kept so
 existing screens do not break.
 
+**Embedded view** offers every view kind and draws every one of them, **Calendar**
+included. Dashboard, Stage and SPL Rundown are configured per display rather than
+per view, so an Embedded view pointed at one says so and Embedded screen is the
+way to bring it into a tile — see
+[Multiviews](layout-editor.md#multiviews).
+
+A **Calendar** view draws the current month as six weeks, marks today, and
+highlights the one timed event running right now. A day that will not fit shows
+the first few events and then a `+N more` count. On a console — anywhere controls
+are live — the header carries chevrons to page up to three years either way, and
+a Today button back. A wall display has no chevrons and always shows the current
+month; a console that was paged away returns to it after ten minutes. Which calendars and tags it
+draws are set on the view, not globally, so two screens can show two departments
+— see [Planning Center Calendar](../integrations/planning-center.md#calendar).
+There is no booking-versus-event setting, because Planning Center does not model
+the difference.
+
 ## Status
 
 | Widget | What it shows | Source |
@@ -77,9 +94,26 @@ existing screens do not break.
 | **Screens online** | How many displays are connected, of how many | Live display presence |
 | **Recording** *(Home)* | Is anything rolling — every recorder at once | OBS + REAPER |
 | **Streaming** *(Home)* | Live or off air, across every platform | Resi + YouTube + OBS |
+| **Live scores** | Live score for a team you follow | ESPN public scoreboard |
+| **Scores** *(Home)* | Followed teams' scores, on your own page | ESPN public scoreboard |
 
 **Streaming status** can be pinned to one platform, or left on **any**, where it
 answers for whichever is live.
+
+**Live scores** shows one game: a team you follow, or **any followed team**, which
+picks whichever of them is playing and prefers the one that scored most recently.
+Nobody is standing at a wall display to choose, so that is the default. **Show
+sport detail** draws the bases and count, the down and distance, or the game
+clock; turning it off leaves the score and the status line. The teams themselves
+are chosen in Settings, Integrations, Live scores — see
+[Live scores](../integrations/scores.md).
+
+The Home card is a quieter reading of the same thing: a chip in the team's colour,
+the name, the score, and the trailing side dimmed. It shows one matchup on a
+Medium tile and up to three as you make the tile taller. It stays on the page
+during a service by default — Sunday afternoon football overlaps the second
+service in most churches, which is the day the card exists for — and its own
+settings can hide it while a plan item is live.
 
 ### The four "is it happening" widgets behave alike
 
