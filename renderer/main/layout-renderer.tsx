@@ -2894,13 +2894,17 @@ export function LayoutRenderer({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full kiosk-surface">
-        <Loader2Icon className="size-8 text-gray-7 animate-spin" />
+        {/* fg-subtle, not a --gray-N palette step. .kiosk-surface re-declares the
+            --color-fg-* family and nothing else, so a palette token on a kiosk
+            ground still follows the APP's theme: --gray-7 in dark mode is #484848,
+            which is 2.16:1 on the kiosk's #0a0a0a against fg-subtle's 4.24:1. */}
+        <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
       </div>
     );
   }
   if (error || !state) {
     return (
-      <div className="flex items-center justify-center h-full kiosk-surface text-gray-7">
+      <div className="flex items-center justify-center h-full kiosk-surface text-fg-subtle">
         Could not load layout
       </div>
     );
