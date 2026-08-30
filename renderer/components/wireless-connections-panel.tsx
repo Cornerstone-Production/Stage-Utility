@@ -316,8 +316,12 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Header: collapse toggle + name input + provider select + enable + remove */}
-      <div className="flex items-center gap-2">
+      {/* Header: collapse toggle + name input + provider select + enable + remove.
+          Six controls totalling ~560px, so it wraps under sm rather than
+          overflowing: measured at 390px it was 12px too wide for the dialog body
+          and scrolled it sideways. The spacer below is hidden once wrapped, or
+          it takes a whole line to itself. */}
+      <div className="flex items-center gap-2 max-sm:flex-wrap">
         <Button
           variant="transparent"
           size="small"
@@ -353,7 +357,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
           </SelectContent>
         </Select>
 
-        <div className="flex-1 min-w-0" />
+        <div className="flex-1 min-w-0 max-sm:hidden" />
 
         <ConnectionBadge connection={conn.connection} message={conn.message} />
         <Switch

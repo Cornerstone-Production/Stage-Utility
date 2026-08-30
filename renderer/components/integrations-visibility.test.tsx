@@ -95,14 +95,27 @@ describe("every integration is visible, with nothing collapsed", () => {
   });
 
   test("a dormant card is quiet but never dim, and says so in words", async () => {
-    const c = await panel();
+    const c = await panel({ resi: { enabled: true } });
     const obs = tiles(c).find((el) => el.getAttribute("data-integration-card") === "obs")!;
-    const cls = obs.className;
+    const resi = tiles(c).find((el) => el.getAttribute("data-integration-card") === "resi")!;
     // Transparent ground, dashed border, no shadow — the signal is the treatment.
-    assert.match(cls, /\bbg-transparent\b/);
-    assert.match(cls, /\bborder-dashed\b/);
-    assert.match(cls, /\bshadow-none\b/);
+    assert.match(obs.className, /\bbg-transparent\b/);
+    assert.match(obs.className, /\bborder-dashed\b/);
     assert.match(obs.textContent ?? "", /Not set up/);
+
+    // The two treatments are ALTERNATIVES, never a base plus overrides.
+    // `.su-card` lives in @layer utilities after Tailwind's own utilities, so at
+    // equal specificity it wins on source order: `su-card bg-transparent
+    // border-dashed shadow-none` painted a solid white card with a solid border
+    // and a shadow while the class list claimed otherwise. jsdom runs no cascade
+    // and cannot see that, so what is asserted here is the thing that broke —
+    // that a dormant card does not carry su-card at all.
+    assert.doesNotMatch(
+      obs.className,
+      /\bsu-card\b/,
+      "a dormant card also carries su-card, whose solid ground, solid border and shadow win on source order",
+    );
+    assert.match(resi.className, /\bsu-card\b/, "a card in use lost its surface");
     // And never carried by unreadable text: fg-faint is 1.76:1 in light and
     // fg-subtle 2.45:1, both well under AA. Neither may appear on this page.
     assert.doesNotMatch(c.container.innerHTML, /text-fg-faint/);

@@ -276,7 +276,7 @@ function IntegrationTile({
       aria-haspopup="dialog"
       aria-label={`${descriptor.label} settings`}
       className={cn(
-        "su-card flex flex-col gap-1.5 px-3 py-2.5 min-h-24 min-w-0 text-left cursor-pointer",
+        "flex flex-col gap-1.5 rounded-[0.875rem] px-3 py-2.5 min-w-0 text-left cursor-pointer",
         "hover:border-line-strong transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
         // Quieter, never dimmer. A dormant card is one an operator CLICKS — on a
@@ -284,9 +284,18 @@ function IntegrationTile({
         // is carried by faint text. The name drops from --su-fg (16.28:1 light)
         // to --su-fg-muted (5.63:1 light, 6.91:1 dark, both past AA), and the
         // rest of the signal is the ground, the dashed border, the missing
-        // shadow and the words "Not set up" in the badge. Neither --su-fg-faint
-        // (1.76:1) nor --su-fg-subtle (2.45:1) appears on any text on this page.
-        dormant && "bg-transparent border-dashed shadow-none min-h-[4.5rem]",
+        // shadow and the words "Not set up". Neither --su-fg-faint (1.76:1) nor
+        // --su-fg-subtle (2.45:1) appears on any text on this page.
+        //
+        // The two treatments are alternatives rather than a base plus overrides:
+        // `.su-card` is declared inside @layer utilities and AFTER Tailwind's own
+        // utilities in the same layer, so at equal specificity it wins on source
+        // order — `su-card bg-transparent border-dashed shadow-none` painted a
+        // solid white card with a solid border and a shadow, and the class list
+        // said otherwise. Caught in a browser; a className assertion had passed.
+        dormant
+          ? "min-h-[4.5rem] border border-dashed border-line bg-transparent"
+          : "su-card min-h-24",
       )}
     >
       <div className="flex items-start gap-2">
@@ -722,16 +731,31 @@ const GRID =
 
 interface IntegrationsPanelProps {
   className?: string;
+  /** Which integration's settings are open, as an id or a flash id. Omit to let
+   *  the panel hold it itself; the route passes it so the open dialog is URL
+   *  state and the browser's Back button closes it. Same uncontrolled-unless-
+   *  told shape the app's own `Dialog` uses. */
+  open?: string | null;
+  onOpenChange?: (next: string | null) => void;
 }
 
-export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
+export function IntegrationsPanel({ className, open: openProp, onOpenChange }: IntegrationsPanelProps) {
   // The dialog to show, held as EITHER an integration id (a card was clicked) or
   // a flash id (something asked us to reveal one). Resolved below, at render
   // time rather than in an effect, because the common reveal arrives from
   // another page: the request lands before the descriptors it has to be matched
   // against, and a resolution parked in an effect is a cascading render for
   // something the render can just work out.
-  const [wanted, setWanted] = useState<string | null>(null);
+  const [ownWanted, setOwnWanted] = useState<string | null>(null);
+  const controlled = openProp !== undefined;
+  const wanted = controlled ? openProp : ownWanted;
+  const setWanted = useCallback(
+    (next: string | null) => {
+      if (controlled) onOpenChange?.(next);
+      else setOwnWanted(next);
+    },
+    [controlled, onOpenChange],
+  );
   // A reveal names one integration: the context bar's "N disconnected", or
   // Getting Started's "Connect Planning Center". Open its settings — the
   // operator clicked it to DO something. Nothing needs expanding first; every
