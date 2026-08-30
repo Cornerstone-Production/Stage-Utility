@@ -800,6 +800,23 @@ class IntegrationManager {
     const newSecrets: Record<string, string> = {};
 
     for (const [key, value] of Object.entries(config)) {
+      // The key comes off an HTTP body, and `nonSecretConfig[key] = value` is a
+      // property write with a caller-chosen name. `JSON.parse` keeps "__proto__"
+      // as an own enumerable key, `Object.entries` yields it, and plain
+      // assignment then sets the object's PROTOTYPE rather than a field on it.
+      //
+      // Nothing reaches storage today -- the object is spread, and spread copies
+      // own properties only -- but "the exploit stops one layer downstream" is
+      // not a property to leave resting on an object literal that later grows a
+      // second consumer. CodeQL flags it as js/remote-property-injection, high.
+      //
+      // Skipped rather than rejected: an integration has a fixed set of fields
+      // and none of them is called this, so a body carrying one is either junk
+      // or an attempt, and neither deserves a 500.
+      if (key === "__proto__" || key === "constructor" || key === "prototype") {
+        console.warn(`[integration-manager] ignoring reserved config key on ${id}: ${key}`);
+        continue;
+      }
       if (secretKeys.includes(key)) {
         // Only update the secret if the caller provided a real value (not the mask).
         if (value !== "••••" && value !== "") {
