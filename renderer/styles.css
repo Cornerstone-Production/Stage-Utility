@@ -381,16 +381,15 @@
       animation-duration: 1.4s !important;
       animation-iteration-count: infinite !important;
     }
-    /* The readout's progress rule is the other exception, and a deliberate one.
-       It is not decoration: it is a READING, and the number behind it advances
-       once a second, so collapsing the interpolation does not remove motion —
-       it replaces a smooth hairline with one that jumps a step every second,
-       which is more motion to notice, not less. So it keeps the duration the
-       component chose, which is already 0 whenever the value is not simply
-       advancing: a clip change, a scrub and a paused clip all snap here too. */
-    .su-meter-fill {
-      transition-duration: var(--su-meter-ms, 0ms) !important;
-    }
+    /* The readout's progress rule takes NO exception, deliberately. A case can
+       be made that collapsing it swaps a smooth hairline for one that steps
+       once a second — but "reduce motion" is the viewer's machine asking for
+       less motion, and deciding on their behalf that ours is the good kind is
+       what makes the setting worthless. Collapsed, the rule behaves exactly as
+       it did before the smoothing landed, so nobody is worse off than today.
+       The two exceptions that remain are not motion for its own sake: the
+       spinner MEANS "still working", and .su-flash replaces its animation with
+       a static ring rather than keeping one. */
     .su-flash {
       animation: none;
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent);
