@@ -301,6 +301,13 @@ const PVP_DESCRIPTOR: IntegrationDescriptor = {
       key: "port",
       label: "Network API Port",
       type: "number",
+      // What a real PVP install shows under Preferences → Network → Network API.
+      // A prefill, not an assumption: initialConfig only uses it when nothing is
+      // saved, so an install whose port differs keeps its own. The help stays,
+      // because a default that silently disagreed with it would be worse than
+      // none — the number below is the Network API port, not the documentation
+      // port PVP also advertises.
+      default: 50742,
       help: "From Preferences → Network → Network API. Not the documentation port.",
     },
     {
@@ -546,6 +553,79 @@ export function enabledFor(
 /** The registered descriptors, for a guard that needs the real ones. */
 export const INTEGRATION_DESCRIPTORS: readonly IntegrationDescriptor[] = DESCRIPTORS;
 
+/** How many things the operator has set up outside `state.config`, for the
+ *  integrations whose setup does not live there. Gathered by the manager (which
+ *  has the stores) and passed in, so the decision itself stays pure. */
+export interface OutOfBandSetup {
+  wirelessConnections: number;
+  oscTargets: number;
+  rossTalkTargets: number;
+  followedTeams: number;
+}
+
+/**
+ * Integrations that keep their setup somewhere OTHER than `state.config`, and
+ * what "set up" means for each.
+ *
+ * These declare `configSchema: []`, so `state.config` is `{}` — and
+ * `Object.values({}).some(…)`, the fallback every other integration uses, is
+ * false forever. Without an entry here an integration is therefore NEVER
+ * configured: its card reopens itself on every visit to the page and it never
+ * leaves "Not set up". Live scores shipped exactly that way.
+ *
+ * Each answer is the operator's own list, which is also what the applier already
+ * treats as "ready to start" — an OSC row with no targets and a scores row with
+ * no teams are equally not set up, and saying so keeps the card open on the
+ * panel that would let them finish. `empty-schema-configured.test.ts` fails if a
+ * schema-less integration is added without an entry.
+ */
+const OUT_OF_BAND_CONFIGURED: Record<
+  string,
+  (setup: OutOfBandSetup) => boolean
+> = {
+  wireless: (s) => s.wirelessConnections > 0,
+  osc: (s) => s.oscTargets > 0,
+  rosstalk: (s) => s.rossTalkTargets > 0,
+  scores: (s) => s.followedTeams > 0,
+};
+
+/** Ids that answer "configured" from their own list rather than from config. */
+export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = Object.keys(OUT_OF_BAND_CONFIGURED);
+
+/**
+ * Has the operator set this integration up? Independent of the live connection,
+ * so the UI can tell "not set up" apart from "set up but currently down".
+ *
+ * Exported for the guard, which is the only way to state this without booting
+ * the whole manager.
+ */
+export function configuredFor(
+  state: Pick<IntegrationState, "id" | "config">,
+  setup: OutOfBandSetup,
+  inbound: boolean,
+): boolean {
+  if (inbound) return true; // the other end dials us — nothing to set up
+  const outOfBand = OUT_OF_BAND_CONFIGURED[state.id];
+  if (outOfBand) return outOfBand(setup);
+  // YouTube asks for one of two sets of fields depending on how it is set to
+  // check, so "any value present" would call it configured the moment the mode
+  // select alone was saved — and the page would stop listing the one thing
+  // still needed. The masked secrets read as present here, which is right:
+  // a mask means a secret is stored.
+  if (state.id === "youtube") {
+    const c = state.config;
+    return configComplete({
+      mode: c.mode === "oauth" ? "oauth" : "key",
+      apiKey: String(c.apiKey ?? ""),
+      channel: String(c.channel ?? ""),
+      clientId: String(c.clientId ?? ""),
+      clientSecret: String(c.clientSecret ?? ""),
+      refreshToken: String(c.refreshToken ?? ""),
+    });
+  }
+  return Object.values(state.config).some((v) => v !== "" && v != null);
+}
+
 // Keys that are secrets for each integration id.
 const SECRET_KEYS: Record<string, string[]> = {
   "planning-center": ["secret"],
@@ -643,8 +723,25 @@ class IntegrationManager {
     // disconnected), then start it if enabled + configured.
     addBroadcastListener((channel, payload) => {
       if (channel === "people:count") tslService.onPeopleCount(payload as PeopleCountDTO);
-      // Keep the master RossTalk row in step with its targets (and simulate mode).
-      if (channel === "rosstalk:targets-changed") this.refreshRossTalkSummary();
+      // Keep each master row in step with the list that IS its setup. Both halves
+      // matter: the summary is the badge ("2 of 3 target(s)"), which only init
+      // and the master toggle used to refresh, and the broadcast is what carries
+      // `configured` — which now follows the list length, so adding the first
+      // receiver or target has to reach the page that is showing "Not set up".
+      // Unconditional rather than change-gated: adding a target that is switched
+      // off moves `configured` without moving the badge at all.
+      if (channel === "wireless:connections-changed") {
+        this.refreshWirelessSummary();
+        this.broadcastStates();
+      }
+      if (channel === "osc:targets-changed") {
+        this.refreshOscSummary();
+        this.broadcastStates();
+      }
+      if (channel === "rosstalk:targets-changed") {
+        this.refreshRossTalkSummary();
+        this.broadcastStates();
+      }
     });
     await this.applyRossTsl();
 
@@ -665,38 +762,26 @@ class IntegrationManager {
   }
 
   getStates(): IntegrationState[] {
+    // Read the out-of-band lists ONCE, not per integration: each read copies its
+    // whole list, and this runs on every broadcast.
+    const setup = this.outOfBandSetup();
     return Array.from(this.states.values()).map((s) => ({
       ...s,
-      configured: this.isConfigured(s),
+      configured: configuredFor(s, setup, inboundIds.has(s.id)),
       ...(inboundIds.has(s.id) ? { inbound: true as const } : null),
     }));
   }
 
-  /** Whether the operator has set an integration up — independent of the live
-   *  connection, so the UI can tell "not configured" apart from "configured but
-   *  currently disconnected". Cred-based integrations are configured once any
-   *  config/secret value is saved; wireless/OSC (no config schema, set up via
-   *  their own connection/target lists) use the master enable toggle. */
-  private isConfigured(state: IntegrationState): boolean {
-    if (inboundIds.has(state.id)) return true; // the other end dials us — nothing to set up
-    if (state.id === "wireless" || state.id === "osc") return state.enabled;
-    // YouTube asks for one of two sets of fields depending on how it is set to
-    // check, so "any value present" would call it configured the moment the mode
-    // select alone was saved — and the page would stop listing the one thing
-    // still needed. The masked secrets read as present here, which is right:
-    // a mask means a secret is stored.
-    if (state.id === "youtube") {
-      const c = state.config;
-      return configComplete({
-        mode: c.mode === "oauth" ? "oauth" : "key",
-        apiKey: String(c.apiKey ?? ""),
-        channel: String(c.channel ?? ""),
-        clientId: String(c.clientId ?? ""),
-        clientSecret: String(c.clientSecret ?? ""),
-        refreshToken: String(c.refreshToken ?? ""),
-      });
-    }
-    return Object.values(state.config).some((v) => v !== "" && v != null);
+  /** The sizes of the operator's own lists, for the integrations whose setup does
+   *  not live in `state.config`. All four are in-memory caches loaded at init, so
+   *  no I/O happens here. */
+  private outOfBandSetup(): OutOfBandSetup {
+    return {
+      wirelessConnections: wirelessManager.listConnections().length,
+      oscTargets: oscManager.listTargets().length,
+      rossTalkTargets: rosstalkManager.listTargets().length,
+      followedTeams: scoresStore.get().favourites.length,
+    };
   }
 
   /** Live count of connected Companion-module clients (pushed from remote-server
@@ -1276,9 +1361,11 @@ class IntegrationManager {
     return this.hostPort("reaper", 8080);
   }
 
-  /** PVP's Network API port is whatever its Preferences pane shows; the research
-   *  never recorded a default, and inventing one would let "configured" point at
-   *  a port nothing is listening on. So the port is required, not defaulted. */
+  /** PVP's Network API port is whatever its Preferences pane shows. The setup
+   *  form PREFILLS 50742 (the descriptor's `default`), which is what a real
+   *  install shows — but a prefill is a suggestion the operator saves, and this
+   *  is the dialling path. Assuming a port here would let "configured" point at
+   *  one nothing is listening on, so a stored value is still required. */
   private getPvpTarget() {
     const { host, port } = this.hostPort("pvp", null);
     return { host, port, https: this.states.get("pvp")?.config.https === "on" };
@@ -1321,6 +1408,11 @@ class IntegrationManager {
    */
   async refreshScores(): Promise<void> {
     await this.applyScores();
+    // The followed-teams list IS scores' setup, so `configured` just changed and
+    // the panel is holding a cached copy. applyService only broadcasts when the
+    // service's own connection listener fires, which it does not when scores is
+    // switched off — the case where the card is sitting in "Not set up".
+    this.broadcastStates();
   }
 
   /**

@@ -4,7 +4,9 @@ import { Tooltip } from "./ui/tooltip";
 import { useStageState } from "../main/use-stage-state";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { usePropInstances } from "../main/use-dashboard-state";
-import { useState, useEffect, useCallback, type ChangeEvent, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ChangeEvent, type ReactNode } from "react";
+import { integrationDrafts } from "./integration-drafts";
+import { SLIDE_MS, prefersReducedMotion, useSlideOnMove } from "../lib/use-slide-on-move";
 import { useRevealNonce } from "../app/flash";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WirelessConnectionsPanel } from "./wireless-connections-panel";
@@ -199,10 +201,16 @@ function initialConfig(
   return out;
 }
 
-function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: IntegrationCardProps) {
-  // Local config mirrors state.config but tracks in-progress edits
-  const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(() =>
-    initialConfig(descriptor, state),
+export function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: IntegrationCardProps) {
+  // Local config mirrors state.config but tracks in-progress edits.
+  //
+  // Seeded from the draft store, not only from `state`, because this card is
+  // remounted for reasons that have nothing to do with the operator: enabling an
+  // integration moves it into a different group and therefore a different place
+  // in the React tree, and collapsing it unmounts the body outright. Held in
+  // plain `useState` alone, everything typed since the last save went with it.
+  const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(
+    () => integrationDrafts.get(descriptor.id) ?? initialConfig(descriptor, state),
   );
 
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
@@ -214,6 +222,44 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
   const pristine = initialConfig(descriptor, state);
   const dirty = JSON.stringify(localConfig) !== JSON.stringify(pristine);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Park the draft above the card, and take it away again the moment the form
+  // matches what is saved — so "there is a draft" stays a true statement, and a
+  // clean card is seeded from the real state on its next mount.
+  useEffect(() => {
+    if (dirty) integrationDrafts.set(descriptor.id, localConfig);
+    else integrationDrafts.clear(descriptor.id);
+  }, [descriptor.id, dirty, localConfig]);
+
+  // Put the operator back in the field they were typing in. Moving between
+  // groups is a remount, and a remount blurs whatever had focus — so after
+  // flicking the enable switch they were left scrolled to a different part of
+  // the page with no caret anywhere. One-shot, taken from the store, so nothing
+  // steals focus on an ordinary re-render.
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const key = integrationDrafts.takeFocus(descriptor.id);
+    if (!key) return;
+    const el = bodyRef.current?.querySelector<HTMLInputElement>(
+      `[data-config-field="${key}"] input`,
+    );
+    if (!el) return;
+    // preventScroll, because the card is sitting on the FLIP's inverse transform
+    // at this instant: it LOOKS like it has not moved, so the browser sees a
+    // field already on screen and scrolls nowhere — and then the card slides to
+    // its real position at the top of the page, taking the caret with it and
+    // leaving the operator staring at a part of the list they were not in.
+    el.focus({ preventScroll: true });
+    // Caret where they left it, at the end of what they typed. Guarded because
+    // setSelectionRange throws InvalidStateError on a native number input.
+    if (el.type !== "number") el.setSelectionRange(el.value.length, el.value.length);
+    // Then follow the card, once it has landed. jsdom has no scrollIntoView.
+    const landed = window.setTimeout(
+      () => el.scrollIntoView?.({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }),
+      SLIDE_MS,
+    );
+    return () => window.clearTimeout(landed);
+  }, [descriptor.id]);
 
   function setField(key: string, value: unknown) {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
@@ -310,6 +356,17 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
     <div
       className="flex flex-col gap-3"
       data-flash-id={integrationFlashId(descriptor.id)}
+      ref={bodyRef}
+      // One listener for the whole form rather than a prop on each control:
+      // NumberInput takes a closed set of props and forwards no handler of its
+      // own, and React's onFocus bubbles, so the field wrapper's marker is what
+      // identifies which control the operator is in.
+      onFocus={(e) => {
+        const key = (e.target as HTMLElement)
+          .closest("[data-config-field]")
+          ?.getAttribute("data-config-field");
+        if (key) integrationDrafts.noteFocus(descriptor.id, key);
+      }}
     >
       {/* Schema-driven form */}
       <FieldSet flat>
@@ -324,7 +381,7 @@ function IntegrationCard({ descriptor, state, onStateChange, lastRefreshedAt }: 
             }
 
             return (
-              <Field key={field.key} orientation="horizontal">
+              <Field key={field.key} data-config-field={field.key} orientation="horizontal">
                 <FieldContent>
                   <FieldLabel className="flex items-center gap-1.5">
                     {field.label}
@@ -1003,6 +1060,23 @@ const PAIRS: { title: string; ids: [string, string] }[] = [
   { title: "Ross", ids: ["rosstalk", "ross-tsl"] },
 ];
 
+/**
+ * An integration is "in use" if it is enabled or has been configured. Everything
+ * else is noise on this page — a site running three integrations should not scroll
+ * past eleven. Nothing is hidden permanently and there is no preference to store:
+ * the state already says which are in use, so the list reorganizes itself as soon
+ * as one is set up. An ERRORING integration always stays in the main list, since an
+ * error is exactly what you want to see.
+ *
+ * At module scope because it is also what the slide animation watches: a card
+ * changes group exactly when this answer changes, and a signature built from
+ * anything else would either miss a move or animate on a re-render that was not
+ * one.
+ */
+function isInUse(state: IntegrationState): boolean {
+  return state.enabled || state.configured !== false || state.connection === "error";
+}
+
 /** One integration as a collapsible card: header (name · status · enable) that
  *  expands to the config body. Configured integrations start collapsed; ones that
  *  still need setup start open, so the page opens on what needs attention. */
@@ -1011,15 +1085,20 @@ function IntegrationRow({
   state,
   onStateChange,
   body,
+  onBeforeMove,
 }: {
   descriptor: IntegrationDescriptor;
   state: IntegrationState;
   onStateChange: (s: IntegrationState) => void;
   body: ReactNode;
+  /** Called as the switch is flicked, before the state comes back — the moment
+   *  to record where every card is, since this is what moves one. */
+  onBeforeMove?: () => void;
 }) {
   const [toggling, setToggling] = useState(false);
   async function toggleEnabled(enabled: boolean) {
     setToggling(true);
+    onBeforeMove?.();
     try {
       const next = await ipc<IntegrationState>("integrations:setEnabled", { id: descriptor.id, enabled });
       onStateChange(next);
@@ -1030,7 +1109,10 @@ function IntegrationRow({
     }
   }
   return (
-    <div className="su-card px-3 py-2">
+    // The id, not the position, is what the slide animation follows: enabling an
+    // integration moves this card into a different group, which is a remount at
+    // a different place in the tree.
+    <div className="su-card px-3 py-2" data-slide-id={descriptor.id}>
       <IntegrationEntry
         descriptor={descriptor}
         state={state}
@@ -1098,15 +1180,18 @@ function IntegrationPairRow({
   title,
   entries,
   onStateChange,
+  onBeforeMove,
 }: {
   title: string;
   entries: { descriptor: IntegrationDescriptor; state: IntegrationState; body: ReactNode }[];
   onStateChange: (id: string, s: IntegrationState) => void;
+  onBeforeMove?: () => void;
 }) {
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   async function toggle(id: string, label: string, enabled: boolean) {
     setTogglingId(id);
+    onBeforeMove?.();
     try {
       const next = await ipc<IntegrationState>("integrations:setEnabled", { id, enabled });
       onStateChange(id, next);
@@ -1118,7 +1203,7 @@ function IntegrationPairRow({
   }
 
   return (
-    <div className="su-card flex flex-col gap-1 px-3 py-2">
+    <div className="su-card flex flex-col gap-1 px-3 py-2" data-slide-id={`pair:${title}`}>
       <span className="text-caption2 font-semibold uppercase tracking-wider text-gray-9">{title}</span>
       {entries.map(({ descriptor, state, body }, i) => (
         <div key={descriptor.id} className={i > 0 ? "border-t border-line pt-1" : undefined}>
@@ -1154,6 +1239,12 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   // Same hook the rows use — this was the only copy of the pattern until the
   // rows needed it too.
   const revealNonce = useRevealNonce((flashId) => Object.values(FLASH_IDS).includes(flashId));
+
+  // A draft lives exactly as long as this page is open. It has to outlive a
+  // CARD — enabling an integration remounts one somewhere else — but leaving the
+  // page is the operator walking away from the edit, and an unsaved value that
+  // reappeared on a later visit would be a surprise they never asked for.
+  useEffect(() => () => integrationDrafts.clearAll(), []);
 
   const queryClient = useQueryClient();
   const { state: stageState } = useStageState();
@@ -1196,6 +1287,22 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
       );
     },
     [queryClient],
+  );
+
+  // Slide a card that changes group instead of teleporting it. Declared here,
+  // above every early return, because hooks must run in the same order on every
+  // render — so the signature is built from the raw states rather than from the
+  // grouped lists below. It changes when, and only when, a descriptor crosses
+  // between "Not set up" and a category group. The same FLIP Home's grid uses;
+  // it honours prefers-reduced-motion itself, which the global CSS override
+  // cannot do for an inline transform.
+  const moveSignature = (data?.states ?? [])
+    .map((s) => `${s.id}:${isInUse(s) ? 1 : 0}`)
+    .join("|");
+  const { setHost: setSlideHost, capture: captureCardPositions } = useSlideOnMove(
+    moveSignature,
+    true,
+    "data-slide-id",
   );
 
   if (isLoading) {
@@ -1255,17 +1362,9 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   const connectedCount = descriptors.filter((d) => stateMap.get(d.id)?.connection === "connected").length;
   const needsSetup = descriptors.filter((d) => stateMap.get(d.id)?.configured === false).length;
   const categorized = new Set(CATEGORY_ORDER.flatMap((c) => c.ids));
-  /**
-   * An integration is "in use" if it is enabled or has been configured. Everything
-   * else is noise on this page — a site running three integrations should not scroll
-   * past eleven. Nothing is hidden permanently and there is no preference to store:
-   * the state already says which are in use, so the list reorganizes itself as soon
-   * as one is set up. An ERRORING integration always stays in the main list, since an
-   * error is exactly what you want to see.
-   */
   const inUse = (d: IntegrationDescriptor) => {
     const st = stateMap.get(d.id);
-    return !!st && (st.enabled || st.configured !== false || st.connection === "error");
+    return !!st && isInUse(st);
   };
   const dormant = descriptors.filter((d) => !inUse(d));
   const dormantIds = new Set(dormant.map((d) => d.id));
@@ -1281,7 +1380,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
   ].filter((g) => g.items.length > 0);
 
   return (
-    <div className={cn("flex flex-col gap-5", className)}>
+    <div className={cn("flex flex-col gap-5", className)} ref={setSlideHost}>
       <p className="text-caption1 text-fg-subtle">
         <span className="font-medium text-accent">{connectedCount} connected</span>
         {needsSetup > 0 ? ` · ${needsSetup} to set up` : ""}
@@ -1320,6 +1419,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                   title={pair.title}
                   entries={entries}
                   onStateChange={(_id, s) => handleStateChange(s)}
+                  onBeforeMove={captureCardPositions}
                 />
               );
             }
@@ -1331,6 +1431,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                 state={state}
                 onStateChange={handleStateChange}
                 body={bodyFor(descriptor, state)}
+                onBeforeMove={captureCardPositions}
               />
             );
           })}
@@ -1355,6 +1456,7 @@ export function IntegrationsPanel({ className }: IntegrationsPanelProps) {
                   state={state}
                   onStateChange={handleStateChange}
                   body={bodyFor(descriptor, state)}
+                  onBeforeMove={captureCardPositions}
                 />
               );
             })}
