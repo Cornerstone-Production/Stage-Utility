@@ -19,6 +19,7 @@ import {
   UsersIcon, TrendingUpIcon, LayoutPanelTopIcon, DropletIcon, VideoIcon,
   DiscIcon, CircleDotIcon, PlugIcon, SendIcon, TvIcon, ZapIcon,
   SkipForwardIcon, StickyNoteIcon, CheckSquareIcon, FrameIcon, CastIcon,
+  MonitorPlayIcon,
   type LucideIcon,
   RadioTowerIcon,
 } from "lucide-react";
@@ -69,6 +70,7 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   notes: StickyNoteIcon,
   checklist: CheckSquareIcon,
   "view-embed": FrameIcon,
+  "screen-embed": MonitorPlayIcon,
   "ndi-video": CastIcon,
   "home-readiness": CheckSquareIcon,
   "home-next-service": ListIcon,

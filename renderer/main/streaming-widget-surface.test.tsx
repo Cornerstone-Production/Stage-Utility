@@ -31,6 +31,7 @@ class NoStream {
 const { render, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { ObjectContent } = await import("./layout-renderer.js");
+const { makeRenderCtx } = await import("./test-render-ctx.js");
 
 after(() => {
   cleanup();
@@ -43,17 +44,7 @@ after(() => {
 // composition is what this is about.
 
 function ctx(home: boolean) {
-  return {
-    home,
-    now: Date.parse("2026-08-22T18:00:00.000Z"),
-    skewMs: 0,
-    H: 1080,
-    interactive: false,
-    resi: null,
-    youtube: null,
-    obs: null,
-    state: { outputs: [] },
-  } as never;
+  return makeRenderCtx({ home, now: Date.parse("2026-08-22T18:00:00.000Z") });
 }
 
 const OBJ = {

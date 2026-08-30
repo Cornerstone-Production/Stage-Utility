@@ -115,6 +115,7 @@ export function ConsoleRoute() {
         {view.layout ? (
           <LayoutRenderer
             layout={view.layout}
+            viewId={view.id}
             ndiSource={view.ndiSource ?? null}
             interactive={capabilityLive("shell", "control")}
             surface="console"

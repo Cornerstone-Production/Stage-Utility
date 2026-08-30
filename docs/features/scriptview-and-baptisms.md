@@ -45,8 +45,13 @@ on screen: row height is driven mostly by how many columns are shown, because
 notes wrap inside narrow ones. Choosing a **Columns** preset on the Script view
 gains far more rows than shrinking the type does.
 
-Custom views cannot be embedded. That is what stops an embed containing an embed;
-use a container to compose objects within one layout.
+An **Embedded view** object can point at any view, including one holding a custom
+layout of its own — nested up to three deep, and a view cannot embed itself; a
+tile that would loop draws a notice instead. See
+[Multiviews](../reference/layout-editor.md#multiviews) for building a wall of
+such tiles. Within one layout, a **container** is still how you group objects so
+they move and resize together — it has nothing to do with embedding another
+view.
 
 ## Layouts
 

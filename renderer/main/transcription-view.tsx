@@ -7,16 +7,21 @@ import { TranscriptFeed } from "./transcript-feed";
 import { Loader2Icon } from "lucide-react";
 
 interface TranscriptionViewProps {
-  displayId: string;
+  /** Only ever the source of the display NAME here, so an embed with no
+   *  screen behind it passes null rather than inventing an id. */
+  displayId: string | null;
 }
 
+/** Sizes to h-full, never the viewport: this renders both on a display and
+ *  inside an embed tile. The screen height and the safe-area insets belong to
+ *  the kiosk route — see stage-view.tsx. */
 export function TranscriptionView({ displayId }: TranscriptionViewProps) {
   const { state, isLoading } = useStageState();
   const lines = useTranscript();
 
   if (isLoading || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
+      <div className="flex flex-col items-center justify-center h-full kiosk-surface gap-3">
         <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
         <p className="text-headline text-fg-subtle">Loading…</p>
       </div>
@@ -27,7 +32,7 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
   const displayName = display?.name ?? null;
 
   return (
-    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface text-fg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overscroll-none kiosk-surface text-fg">
       {/* Brand top bar */}
       <div
         className="relative flex items-center h-10 shrink-0"

@@ -1,6 +1,6 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
-import { HomeCard, isHomeCard, onlineFromState } from "../app/home/cards";
+import { HomeCard, isHomeCard } from "../app/home/cards";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
@@ -15,6 +15,7 @@ import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
+import { useDisplayPresence } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
 import { streamers, streamIndicator } from "../app/recording-status";
@@ -32,8 +33,10 @@ import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
-import { EMBED_FONT_FRACTION, isEmbeddableViewKind } from "./layout-objects";
-import { ScriptView } from "./script-view";
+import { EmbeddedView, EmbedFontBox, EmbedNotice } from "./embedded-view";
+import { useEmbedBoxHeight } from "./embed-box";
+import { childChain, embedRefusal } from "./embed-chain";
+import { useExpand } from "./expand-overlay";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
@@ -102,6 +105,27 @@ export interface LayoutRenderCtx {
    * OBS status and REAPER status are.
    */
   home: boolean;
+
+  /**
+   * The views being drawn ABOVE this one, outermost first. Empty at the top.
+   *
+   * Required rather than optional, exactly like `home` above it and for the same
+   * reason: every surface that builds a context has to say which it is. An
+   * optional field defaulting to [] would let a surface forget, and a forgotten
+   * chain reads as "nothing above me" — which is the one answer that makes a
+   * cycle undetectable.
+   */
+  embedChain: readonly string[];
+
+  /**
+   * Screens with a browser actually attached, from the `displays:presence`
+   * heartbeat — not screens that merely have a view routed.
+   *
+   * Required, like `embedChain` and `home`, so a surface cannot quietly report
+   * an empty set. Empty is a legitimate answer (nothing is on); "I forgot to
+   * pass it" must not be indistinguishable from it.
+   */
+  onlineOutputIds: readonly string[];
 }
 
 function pad(n: number): string {
@@ -705,8 +729,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           pcoLive={ctx.pcoLive}
           now={ctx.now}
           skewMs={ctx.skewMs}
-          // From the state snapshot, not a presence hook — see onlineFromState.
-          onlineOutputIds={onlineFromState(ctx.state)}
+          onlineOutputIds={ctx.onlineOutputIds}
           secondsToStart={homeSecondsToStart(ctx)}
         />
       </div>
@@ -804,6 +827,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
     case "view-embed":
       return <ViewEmbedObject o={o} config={c} ctx={ctx} />;
+    case "screen-embed":
+      return <ScreenEmbedObject o={o} config={c} ctx={ctx} />;
     case "current-slide-notes": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       return span(pro?.currentNotes ?? "");
@@ -2160,14 +2185,9 @@ function PlanAttachment({
  * loop — while ignoring the object's style and scaling a full-screen design down
  * instead of reflowing into the box.
  *
- * CUSTOM Views are deliberately not embeddable, and that is the entire recursion
- * guard: a custom View is the only kind that holds a layout, so refusing it means
- * an embed can never reach another embed. No depth counter, nothing to get wrong
- * later. Containers already cover composing objects within one layout.
- *
- * Kinds are added as they stop assuming they own the screen — every View renderer
- * currently hardcodes a viewport height, which is right on a display and wrong in
- * a box. `script` is converted; the rest say so rather than rendering broken.
+ * WHICH kinds draw, and what stops the recursion, are no longer this object's
+ * business. EmbeddedView answers both, and the `screen-embed` object asks it the
+ * same question — so a kind that draws in one tile draws in every tile.
  */
 function ViewEmbedObject({
   o,
@@ -2180,42 +2200,188 @@ function ViewEmbedObject({
 }) {
   const view = config.viewId ? ctx.state.views?.find((v) => v.id === config.viewId) ?? null : null;
 
-  const notice = (text: string) => (
-    <div className="flex items-center justify-center h-full text-fg-subtle text-caption1 text-center px-3">{text}</div>
-  );
+  // The embedded view's canvas is the BOX, not the screen. A custom view is
+  // drawn by the same RenderObject a display uses, and everything that sizes
+  // itself there — fonts, spacing — is a fraction of ctx.H. Left as the parent's
+  // H, a quarter-height tile drew its child four times too large: correct-looking
+  // markup, unreadable output. See useEmbedBoxHeight for why it is measured.
+  const { ref: boxRef, height: boxH } = useEmbedBoxHeight(view?.id ?? null);
+
+  // Before the early returns: a hook cannot be called conditionally. And gated
+  // on `view`, not just on `interactive` — the SAME reason screen-embed passes
+  // its `expandable` in rather than wrapping the hook's output. Gated only on
+  // the way out, deleting a view while its tile was expanded left an invisible
+  // "expanded": the panel gone, no control to reopen it, a document keydown
+  // listener still attached, and the panel springing back by itself if the view
+  // came back. Two call sites, one shape, gated the same way at both.
+  const { tileRef, control, overlay } = useExpand(ctx.interactive && !!view);
+
+  const notice = (text: string) => <EmbedNotice text={text} />;
 
   if (!config.viewId) return notice("Pick a view to embed");
   if (!view) return notice("That view no longer exists");
 
-  if (isEmbeddableViewKind(view.kind)) {
-    // w-full h-full, not the object's alignment: boxStyle turns every object into
-    // a flex column aligned by textAlign, which shrink-wraps a child that has no
-    // width of its own — a left-aligned box rendered the rundown at about half
-    // the width it was given. An embed always fills its box; alignment is a text
-    // idea and does not apply.
-    // The font size is set HERE, on the wrapper, and inherited by the whole
-    // rundown. Every other object applies it per text node through textStyle,
-    // which an embedded component never passes through — so without this the
-    // table fell back to the browser default 16px however large the object was,
-    // with no control that did anything.
-    return (
-      <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}>
-        {/* textSizeClass="" drops the page's viewport-relative clamp so the rows
-            inherit the object's own font-size, which boxStyle sets from the
-            object's style. Without it the table capped at ~17px however large the
-            object was — unreadable on a 4K stage panel, with the font-size field
-            hidden as well, so there was no way to fix it. */}
-        <ScriptView
-          scriptViewLayoutId={view.scriptViewLayoutId ?? null}
-          showHeader={config.showHeader ?? false}
-          textSizeClass=""
-          autoScroll={config.autoScroll ?? true}
-        />
-      </div>
-    );
-  }
+  // ONE body, drawn at whichever pair of heights is asking. Two copies of this
+  // JSX would have been two answers to "what does this embed show", and the
+  // expanded one is the copy nobody looks at while editing.
+  //
+  // The two are DIFFERENT numbers on the tile and the same number expanded, so
+  // they stay separate parameters: see the note below for why the object's own
+  // font size is the parent canvas here, and EmbedFontBox for why an expanded
+  // copy has no parent canvas to be a fraction of.
+  const body = (canvasH: number, childH: number) => (
+    <EmbedFontBox o={o} canvasH={canvasH}>
+      <EmbeddedView
+        view={view}
+        ctx={{ ...ctx, H: childH }}
+        showHeader={config.showHeader ?? false}
+        autoScroll={config.autoScroll ?? true}
+      />
+    </EmbedFontBox>
+  );
 
-  return notice(`"${view.name}" is a ${view.kind} view — not embeddable yet`);
+  // w-full h-full, not the object's alignment: boxStyle turns every object into
+  // a flex column aligned by textAlign, which shrink-wraps a child that has no
+  // width of its own — a left-aligned box rendered the rundown at about half the
+  // width it was given. An embed always fills its box; alignment is a text idea
+  // and does not apply.
+  //
+  // The font size is set HERE, on the wrapper, and inherited by the whole
+  // embedded view. Every other object applies it per text node through textStyle,
+  // which an embedded component never passes through — so without this the
+  // rundown fell back to the browser default 16px however large the object was,
+  // with no control that did anything.
+  // The wrapper's own font size stays a fraction of ctx.H: it is the OBJECT's
+  // style, sized against the canvas exactly as every other object's font size
+  // is, and it is the operator's control over the embed. Only the child view's
+  // canvas is the box.
+  //
+  // `relative`, so the expand control can sit in the corner without being an
+  // ancestor of anything the view draws. It is absolutely positioned and adds no
+  // height, so the box measurement below is untouched.
+  return (
+    <div ref={tileRef} className="relative w-full h-full">
+      <div ref={boxRef} className="w-full h-full">{body(ctx.H, boxH || ctx.H)}</div>
+      {/* Each object gates on the states IT resolves — a missing view here, an
+          unrouted or blacked-out screen there. The notices EmbeddedView emits
+          for itself (a per-display kind, a recursion refusal, an empty view) are
+          gated by neither, deliberately: the alternative is a second copy of its
+          kind switch, which is the duplication this file keeps paying for.
+          Expanding one of those enlarges the same sentence, which is harmless;
+          a screen tile's states are gated because they change mid-service. */}
+      {control(view.name)}
+      {overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H), view.name)}
+    </div>
+  );
+}
+
+/**
+ * What another screen is showing, right now.
+ *
+ * Resolves output -> its routed view -> EmbeddedView, so it follows a routing
+ * change without anyone touching this layout. That is the whole difference from
+ * view-embed, and it is why this is the object a producer wall is built from.
+ * It is also the only way the per-display kinds — dashboard, stage, SPL rundown
+ * — can be embedded at all, because each is configured against a display id and
+ * a view-embed has none to give.
+ *
+ * Each not-showing state is NAMED. A tile that draws an empty box for "unrouted"
+ * and an empty box for "deleted" and an empty box for "blacked out" is three
+ * different problems wearing one face, at the moment somebody is trying to work
+ * out what is wrong with a screen.
+ */
+function ScreenEmbedObject({
+  o,
+  config,
+  ctx,
+}: {
+  o: LayoutObject;
+  config: Extract<LayoutObjectConfig, { type: "screen-embed" }>;
+  ctx: LayoutRenderCtx;
+}) {
+  // From `outputs`, which is what the server derives resolvedByOutput from — the
+  // routing, the blackout flag and the screen's NAME all come off the one record
+  // rather than being joined back together from two.
+  const output = config.outputId ? ctx.state.outputs?.find((x) => x.id === config.outputId) ?? null : null;
+  const view = output?.viewId ? ctx.state.views?.find((v) => v.id === output.viewId) ?? null : null;
+  const showing = Boolean(view) && !output?.blackout;
+  // Deliberately not folded into `showing`: a screen can be connected and
+  // blacked out, or routed and unplugged, and the tile has to be able to say so.
+  const connected = output !== null && ctx.onlineOutputIds.includes(output.id);
+
+  // Measured on the BODY, not the tile: the label bar takes real height, and a
+  // child sized against the whole tile overflows by exactly that much.
+  const { ref: boxRef, height: boxH } = useEmbedBoxHeight(view?.id ?? null);
+  const notice = (text: string) => <EmbedNotice text={text} />;
+
+  // Guard clauses, in the order the screen itself resolves. Blackout comes BEFORE
+  // the routing check because a blacked-out screen shows black whatever it is
+  // routed to — read as an order, not counted out of nested ternary indentation.
+  const content = (childH: number) => {
+    if (!config.outputId) return notice("Pick a screen to show");
+    if (!output) return notice("That screen no longer exists");
+    if (output.blackout) return notice("Blackout");
+    if (!view) return notice(`"${output.name}" is not showing anything`);
+    return <EmbeddedView view={view} ctx={{ ...ctx, H: childH }} displayId={output.id} />;
+  };
+
+  // The font box wraps the body rather than the whole tile: the overlay is a
+  // portal to document.body and inherits nothing from this tile's wrapper,
+  // however the React tree reads. Same two heights view-embed takes.
+  const body = (canvasH: number, childH: number) => (
+    <EmbedFontBox o={o} canvasH={canvasH}>{content(childH)}</EmbedFontBox>
+  );
+
+  // Only when there is something to enlarge. A blacked-out, unrouted or deleted
+  // screen's whole content is one sentence, and full-screening a sentence is a
+  // control that does nothing. `showing` already implies `output`; the ternary
+  // is what tells the type checker so.
+  //
+  // The gate goes INTO the hook rather than around its output. Gated only on the
+  // way out, an operator who expanded a tile and then blacked that screen out
+  // kept an invisible "expanded": no control to reopen it, a document key
+  // listener still attached, and the panel springing back to full screen by
+  // itself the moment the blackout cleared.
+  const expandable = showing ? output : null;
+  const { tileRef, control, overlay } = useExpand(ctx.interactive && expandable !== null);
+
+  return (
+    <div
+      ref={tileRef}
+      // `relative`, so the expand control sits in the corner as a SIBLING of the
+      // body rather than an ancestor of it. Absolutely positioned, so it adds no
+      // height and the body measurement is untouched.
+      className="relative flex h-full w-full flex-col overflow-hidden"
+    >
+      {config.showLabel !== false && output && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-1">
+          {config.showStatus !== false && (
+            // A browser is attached — the heartbeat, not the routing.
+            //
+            // This dot used to mean "routed and not blacked out", on the
+            // reasoning that nothing in the app knew whether a screen was
+            // actually up. display-presence.ts always did, and so the dot spent
+            // its life reassuring a producer about screens that were switched
+            // off. Routed and connected are independent facts and the tile keeps
+            // them apart: the BODY names what the screen is or is not showing
+            // ("Blackout", "…is not showing anything"), and the dot answers the
+            // one question the body cannot — is anybody there.
+            <span
+              className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-live-9" : "bg-fg-faint"}`}
+              aria-label={connected ? "Connected" : "Not connected"}
+            />
+          )}
+          <span className="truncate text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+            {output.name}
+          </span>
+        </div>
+      )}
+      <div ref={boxRef} className="min-h-0 flex-1">{body(ctx.H, boxH || ctx.H)}</div>
+      {expandable && control(expandable.name)}
+      {expandable &&
+        overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H), expandable.name)}
+    </div>
+  );
 }
 
 /** The PCO service order as a scrolling list — highlights the live item and shows
@@ -2375,14 +2541,93 @@ function ServiceOrderObject({
   );
 }
 
-/** Collect the set of object `config.type`s present in a layout (recursing into
- *  container children) so live-data hooks can be gated to only the channels the
- *  layout actually renders. */
-function collectLayoutTypes(objects: LayoutObject[] | undefined, into: Set<string>): void {
+/** Collect the set of object `config.type`s present in a layout so live-data
+ *  hooks can be gated to only the channels the layout actually renders.
+ *
+ *  Recurses into container children AND through both embed objects into the
+ *  layouts they draw, because a widget in a tile is every bit as on-screen as
+ *  one on the canvas. Without the descent, an OBS badge inside a producer
+ *  multiview asked for a channel nobody subscribed to and sat dead for ever.
+ *
+ *  The cheap alternative — naming `view-embed`/`screen-embed` in every gate —
+ *  makes any layout containing one tile subscribe to everything, which is the
+ *  efficiency these gates exist to buy.
+ *
+ *  @param views   every View, so an embed's target can be resolved. Passed in
+ *    rather than read from a module-level store: this is a pure function, and
+ *    the caller (useLayoutData) already holds the state.
+ *  @param outputs every Output, so a screen-embed can be resolved the way the
+ *    tile itself resolves it — output -> its routed view.
+ *  @param chain   the views already being drawn above this layout, outermost
+ *    first — the SAME chain the renderer carries in `ctx.embedChain`.
+ */
+function collectLayoutTypes(
+  objects: LayoutObject[] | undefined,
+  into: Set<string>,
+  views: readonly View[],
+  outputs: readonly Output[],
+  chain: readonly string[],
+): void {
+  /** One level in, guarded by embed-chain — the renderer's own limiter, not a
+   *  second one. A view that would be REFUSED on screen draws nothing, so it
+   *  needs no channels; and cycles terminate here for the same reason they
+   *  terminate there. Two limiters that disagree would be worse than one: the
+   *  gate would either starve a tile that draws or subscribe for one that does
+   *  not. */
+  const descend = (viewId: string | null | undefined) => {
+    if (!viewId || embedRefusal(viewId, chain)) return;
+    const view = views.find((v) => v.id === viewId);
+    // Only a CUSTOM view draws objects. Every other kind is a whole component
+    // with its own hooks, and a view that used to be custom can still be
+    // carrying the layout it had then — collecting that would gate channels on
+    // objects nobody can see.
+    const layout = view?.kind === "custom" ? view.layout : undefined;
+    if (!layout) return;
+    collectLayoutTypes(layout.objects, into, views, outputs, childChain(viewId, chain));
+  };
+
   for (const o of objects ?? []) {
-    if (o.config?.type) into.add(o.config.type);
-    if (o.children?.length) collectLayoutTypes(o.children, into);
+    const config = o.config;
+    if (config?.type) into.add(config.type);
+    if (o.children?.length) collectLayoutTypes(o.children, into, views, outputs, chain);
+    if (config?.type === "view-embed") descend(config.viewId);
+    // Resolved through the OUTPUT, exactly as the tile does, so a routing change
+    // moves the gates with it rather than leaving the new view's widgets dark.
+    else if (config?.type === "screen-embed") descend(outputs.find((x) => x.id === config.outputId)?.viewId);
   }
+}
+
+/**
+ * Which object types a layout actually puts on screen, embedded views included.
+ *
+ * Deliberately WIDER than the render, in two places, and neither is a bug to be
+ * tidied up later:
+ *
+ *   HIDDEN objects count. Every renderer filters `o.hidden` on the way out; this
+ *   does not, so a hidden meter still holds its channel open. Unhiding is one
+ *   click, mid-service, and a widget that appears and then sits blank until a
+ *   subscription catches up is worse than a channel nobody is reading.
+ *
+ *   A BLACKED-OUT screen tile counts. It draws the word "Blackout" and nothing
+ *   else, but blackout is a momentary command from Companion and un-blacking has
+ *   to restore the picture instantly, not start subscribing.
+ *
+ * Exported for the guard suite: the gates below are a set membership test, so
+ * this set IS the behaviour worth testing, and testing it needs no React.
+ *
+ * @param viewId the View this layout belongs to — it seeds the embed chain, the
+ *   same way LayoutRenderer seeds `ctx.embedChain`. Absent (Home, the editor)
+ *   means nothing is above this layout.
+ */
+export function layoutChannelTypes(
+  layout: LayoutDTO,
+  views: readonly View[],
+  outputs: readonly Output[],
+  viewId?: string | null,
+): Set<string> {
+  const into = new Set<string>();
+  collectLayoutTypes(layout.objects, into, views, outputs, viewId ? [viewId] : []);
+  return into;
 }
 
 /** Live data + tickers shared by the kiosk renderer and the settings editor.
@@ -2390,17 +2635,29 @@ function collectLayoutTypes(objects: LayoutObject[] | undefined, into: Set<strin
  *  hooks are gated to the object types the layout contains — so a clock-only
  *  display doesn't subscribe to (or re-render on) SPL/transcript/wireless/etc.
  *  Called with no arg (editor) → every hook is enabled so previews always show data. */
-export function useLayoutData(layout?: LayoutDTO) {
+export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
+  // The state comes FIRST, before the gates that used to be computed above it:
+  // an embedded view's objects live in `state.views`, and a gate that cannot see
+  // them leaves every widget inside a tile without a channel.
+  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
+  const views = state?.views;
+  const outputs = state?.outputs;
+  // `views`/`outputs` are fresh array identities on every state broadcast, so
+  // this walk runs per broadcast rather than per layout change. Left that way
+  // deliberately, and measured: a deliberately heavy shape — thirty views of
+  // forty objects, four embeds per level fanning out to the depth cap — walks in
+  // 0.054 ms, and broadcasts are change-driven rather than a poll. Narrowing the
+  // dependency would mean deriving a signature from the same fields the walk
+  // reads, which is the same walk wearing a hat. The result feeds only the
+  // `want()` booleans, so an identical set re-derived changes nothing downstream
+  // and no subscription is torn down.
   const types = useMemo(() => {
     if (!layout) return null; // editor / unknown → enable everything
-    const s = new Set<string>();
-    collectLayoutTypes(layout.objects, s);
-    return s;
-  }, [layout]);
+    return layoutChannelTypes(layout, views ?? [], outputs ?? [], viewId);
+  }, [layout, views, outputs, viewId]);
   const want = (kinds: string[]) => types === null || kinds.some((k) => types.has(k));
   const peopleWanted = want(["people-counter", "people-graph", "people-panel"]);
 
-  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript(want(["transcript-strip"]));
   const spl = useSplState(want(["spl-meter"]));
   const obs = useObsState(want(["obs-status"]));
@@ -2416,6 +2673,16 @@ export function useLayoutData(layout?: LayoutDTO) {
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
   const servicePeaks = useLiveServicePeaks(peopleWanted);
   const wireless = useWirelessTelemetry(want(["wireless-summary", "wireless-channel"]));
+  // The screen tile's status dot, Home's screens count and Home's readiness list
+  // are the only things that draw presence — so a wall of clocks subscribes to
+  // nothing, which was the whole objection to wiring this up at all.
+  //
+  // "view-embed" was in this list too, as a stand-in for the descent that did
+  // not exist: a screen tile nested inside an embedded view was invisible to the
+  // gate and its dot never lit. collectLayoutTypes now walks into embedded
+  // layouts, so that tile reports "screen-embed" on its own and the stand-in is
+  // gone — a view-embed of a clock no longer opens the presence channel.
+  const onlineOutputIds = useDisplayPresence(want(["screen-embed", "home-screens", "home-readiness"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
@@ -2432,7 +2699,7 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs };
 }
 
 /**
@@ -2444,6 +2711,7 @@ export function LayoutRenderer({
   ndiSource,
   interactive = false,
   surface,
+  viewId,
 }: {
   layout: LayoutDTO;
   ndiSource: string | null;
@@ -2451,8 +2719,21 @@ export function LayoutRenderer({
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
+  /**
+   * Which View this layout belongs to — it SEEDS the embed chain.
+   *
+   * Required rather than optional, exactly like `embedChain` above and for the
+   * same reason: an optional field defaulting a caller to `embedChain: []`
+   * lets a surface forget it, and a forgotten seed is indistinguishable from
+   * "nothing above me" — the one answer that makes a tile pointing back at the
+   * view it lives on undetectable as a cycle. It then draws a second copy of
+   * the whole layout inside itself and only the depth cap stops it. Verified
+   * in a browser, which is the only place it shows — every unit test builds
+   * the chain by hand and so agrees with whatever the component does.
+   */
+  viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -2521,7 +2802,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
