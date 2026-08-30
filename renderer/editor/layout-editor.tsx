@@ -736,7 +736,16 @@ export function EditorCanvas({
       {boxW > 0 && boxH > 0 && (
         <div
           ref={boxRef}
-          className="relative overflow-hidden rounded-xl"
+          // kiosk-surface, the same class LayoutRenderer puts on the live
+          // container. NOT decoration: the class is what re-declares --color-fg
+          // and friends to the kiosk's white foregrounds, and a canvas that
+          // painted `var(--kiosk-bg)` without it left every widget resolving the
+          // APP's tokens. In light mode that is #161b22 text on #0a0a0a —
+          // measured in a browser at 1.05–1.14:1 on thirty of the forty-eight
+          // object types that draw text, which is invisible. Setting --su-* here
+          // would not work; see the rule in styles.css for why the class has to
+          // carry the Tailwind variables itself.
+          className="relative overflow-hidden rounded-xl kiosk-surface"
           style={{
             width: boxW,
             height: boxH,
