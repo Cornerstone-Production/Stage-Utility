@@ -31,6 +31,7 @@ import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
+import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { scoresService } from "./scores-service.js";
 import { oscManager } from "./osc-manager.js";
@@ -875,6 +876,7 @@ export class RemoteServer {
       sseWrite(res, "baptism:state", baptismTimerService.getState());
       sseWrite(res, "obs:status", obsService.getLatest());
       sseWrite(res, "reaper:status", reaperService.getLatest());
+      sseWrite(res, "pvp:status", pvpService.getLatest());
       // Scores hydrate for the same reason: a display opened at half time shows
       // the score it is already at rather than waiting for the next one.
       sseWrite(res, "scores:status", scoresService.getLatest());

@@ -1,5 +1,7 @@
 // Types for the automation engine — "when X happens in Stage, do Y to a device".
 
+import type { PvpLayerDTO } from "./pvp.js";
+
 /** A typed parameter on a trigger, condition or action — renders a form field. */
 export interface ParamDef {
   key: string;
@@ -57,6 +59,11 @@ export interface ConditionCtx {
   youtubeStreaming: boolean;
   /** Current baptism-timer phase, or null when the timer has never run. */
   baptismPhase: string | null;
+  /** ProVideoPlayer's layers as of the last poll, or null when the integration
+   *  is off or has never connected. Null and empty are DIFFERENT: null is "we do
+   *  not know", and every PVP condition declines to hold on it — an unreachable
+   *  machine must not make "the workspace has nothing on screen" true. */
+  pvpLayers: PvpLayerDTO[] | null;
 }
 
 export interface ActionResult {

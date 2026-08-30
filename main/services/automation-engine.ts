@@ -25,6 +25,7 @@ import { sensourceService } from "./sensource-service.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
+import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
@@ -238,12 +239,20 @@ class AutomationEngine {
     const state = stageController.getState();
     const integrations: Record<string, string> = {};
     for (const s of integrationManager.getStates()) integrations[s.id] = s.connection;
+    // Read ONCE. Two getLatest() calls could straddle a poll and hand the
+    // conditions a `connected` from one snapshot and layers from the next.
+    const pvp = pvpService.getLatest();
     return {
       pcoLive: live ? { mode: live.mode, serviceTimeId: live.serviceTimeId ?? null } : null,
       serviceTypeId: state.serviceTypeId ?? null,
       integrations,
       obsRecording: obsService.getLatest().recording === true,
       reaperRecording: reaperService.getLatest().recording === true,
+      // null, not [], when PVP has never connected. An empty workspace and an
+      // integration that is switched off look identical as a list, and "the
+      // workspace has nothing on screen" must not hold for a machine we have
+      // never spoken to.
+      pvpLayers: pvp.connected ? pvp.layers : null,
       resiStreaming: resiService.getLatest().live === true,
       youtubeStreaming: youtubeService.getLatest().live === true,
       baptismPhase: baptismTimerService.getState()?.phase ?? null,
@@ -289,3 +298,8 @@ sensourceService.addDemandSource(() => automationEngine.wantsChannel("people:cou
 // after the stream started. A rule reading the channel is a watcher.
 resiService.addDemandSource(() => automationEngine.wantsChannel("resi:status"));
 youtubeService.addDemandSource(() => automationEngine.wantsChannel("youtube:status"));
+// PVP is the one where this matters most: its whole point is driving content
+// from a rule, and a booth appliance with no browser open is exactly where that
+// is wanted. Without this registration its inDemand gate is decorative, and
+// every PVP rule would see the five-second idle cadence at best.
+pvpService.addDemandSource(() => automationEngine.wantsChannel("pvp:status"));

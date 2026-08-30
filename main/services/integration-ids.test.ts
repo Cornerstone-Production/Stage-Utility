@@ -1,7 +1,7 @@
 // Every integration is either connection-managed or deliberately not.
 //
 // integration-manager used to carry TWO identical ladders -- one in setConfig,
-// one in setEnabled -- each listing the same nine integrations. Adding Resi and
+// one in setEnabled -- each listing the same integrations. Adding Resi and
 // YouTube meant remembering both. An integration added to only one would save
 // its config and never reconnect, or reconnect on a toggle and not on a save,
 // and neither failure says which half was missed.

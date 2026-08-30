@@ -105,6 +105,7 @@ screens with a browser attached, which each display page reports by heartbeat
 | GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record |
 | GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record |
 | GET | `/api/obs/status` | OBS streaming / recording / scene state |
+| GET | `/api/pvp/status` | ProVideoPlayer layer state — what is on each layer, and how far in |
 | GET | `/api/resi/status` \| `/api/youtube/status` | Whether that platform is live, and since when |
 | GET | `/api/scores/status` | Followed teams' live scores + the last scoring change |
 | GET \| POST | `/api/scores/favourites` | Read / replace the followed teams |
