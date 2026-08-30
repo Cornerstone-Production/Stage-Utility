@@ -61,6 +61,8 @@ declare global {
   type ProPresenterStatusDTO = Stage.ProPresenterStatusDTO;
   type ProSection = Stage.ProSection;
   type ProTimer = Stage.ProTimer;
+  type PvpLayerDTO = Stage.PvpLayerDTO;
+  type PvpStatusDTO = Stage.PvpStatusDTO;
   type ReaperStatusDTO = Stage.ReaperStatusDTO;
   type StreamStatusDTO = Stage.StreamStatusDTO;
   type ReconnectSchedule = Stage.ReconnectSchedule;

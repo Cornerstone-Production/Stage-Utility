@@ -68,7 +68,7 @@ So `PvpService` **overrides `emitIfChanged`** with a signature compare, the way 
 
 ## Decision 2 — every action verifies, because a 200 proves nothing
 
-From authorised live POST testing (research §4.1): **every POST returns HTTP 200 with an entirely empty body**, and four of the five documented trigger addressing forms returned 200 having demonstrably changed nothing — before/after `transportState` reads were byte-identical, `timeRemaining` included, within the same second.
+From authorised live POST testing (research §4.1): **every POST returns HTTP 200 with an entirely empty body**. No echo of the applied value, no confirmation, nothing to read. That half of the finding is unchanged by the §4.2 correction and is the whole reason this design exists — a 200 tells you the request arrived and nothing else.
 
 An action that reports success while doing nothing is the worst failure this repo has a rule about. CLAUDE.md: *"A new `catch` either rethrows or returns the failure to its caller"*, and *"an archive import reported success having written nothing"*. Treating a 200 as proof is that failure in a new costume — a rule would appear to run, log `fired`, and never touch a screen.
 
@@ -81,14 +81,17 @@ Two details that matter:
 
 ---
 
-## Decision 3 — what Task 0 settles, and what happens if the answer is "none"
+## Decision 3 — triggering cues, now that Task 0 is settled
 
-**Nothing in this plan designs around a specific trigger addressing form until Task 0 has proved one.** Four forms are proven no-ops; the fifth (`POST /trigger/cue/{n}`) changed media once, but the pre-service playlist auto-advances every 20 seconds, so the change cannot be attributed to it. Suggestive, not proven.
+**Task 0 has been run by the operator and every one of the five addressing forms fires.** Research §4.2 records the measurement, and it supersedes the rest of this plan wherever the two disagree — this section, Task 0 and the Self-Review were all written while four forms were wrongly believed to be no-ops, and have been rewritten here to match the evidence.
 
-Task 0 settles it against a workspace with **auto-advance disabled**, and ships no product code.
+The original result was a measurement error twice over: the before/after `transportState` reads were taken within the same second, and PVP applies a change a beat after the 200; and the retest asked "did the media change at all", which is unanswerable while a pre-service playlist auto-advances every 20 seconds. Re-measured by asking **"did the media become the media of the cue I asked for"**, cues 4, 9, 2 and 11 each landed on exactly the cue requested.
 
-- **If a form works** → Task 6 Step 8 ships `pvp.trigger-cue` using that form, verified by reading the target layer's cue name back.
-- **If none works** → **Task 6 Step 8 is deleted and nothing else in this plan changes.** The layout object, the Home card, every trigger, every condition and the seven non-trigger actions — clear layer, clear workspace, hide, unhide, mute, unmute, set opacity — all stand on their own. Five of those seven were verified working live; the two that were not are flagged where they are built. The integration is a complete, useful feature without the ability to fire a cue, and must be built as one rather than as a stub waiting on an answer.
+So `pvp.trigger-cue` ships, addressed as `/trigger/playlist/{playlist}/cue/{cue}` by name.
+
+**One genuine no-op remains and it is the only open question.** `/trigger/layer/{l}/playlist/{p}/cue/{c}` fires, but the one attempt to send a cue to a specific *empty* layer did not put content on that layer. Whether the layer argument is ignored or that layer refused the media is unknown. So the layer-addressed form ships as its own action, `pvp.trigger-cue-on-layer`, whose verify predicate asks about **that layer specifically** — if PVP ignores the argument, the action reports a failure rather than a success, which is exactly what the verify-then-report design is for. The docs say so plainly instead of implying the argument works.
+
+**What did NOT change, and is the half that shaped every other decision in this plan:** a POST returns HTTP 200 with an empty body whether or not anything happened. Every action still verifies by reading state back. Decision 2 needs no revision.
 
 ---
 
@@ -169,140 +172,59 @@ Split this way because `pvp-parse.ts` is where the three findings live — resid
 
 ---
 
-## Task 0: Pre-flight — settle which trigger form works
+## Task 0: Pre-flight — SETTLED, do not re-run
 
-**No product code ships from this task.** It answers the largest open risk in the integration before anything is designed around it.
+**The operator ran this and the answer is in research §4.2. Nothing here is
+outstanding.** This section is kept rather than deleted because the rest of the
+plan refers to it, and because the way the first measurement went wrong is worth
+carrying forward.
 
-**Files:**
-- Create (temporary, deleted in Step 5): `scratch/pvp-trigger-probe.mjs`
+**Result: all five trigger addressing forms fire, and each lands on the cue asked
+for.** Controlled against the obvious alternative — that any trigger merely
+resets to the top of the playlist — by requesting cues 4, 9, 2 and 11 in turn and
+getting exactly those.
 
-- [ ] **Step 1: Put the workspace in a state where a change can be attributed**
+| Form | Result |
+|---|---|
+| `/trigger/cue/{n}` (current playlist) | fires |
+| `/trigger/playlist/{name}/cue/{n}` | fires |
+| `/trigger/playlist/{uuid}/cue/{n}` | fires |
+| `/trigger/playlist/{index}/cue/{n}` | fires |
+| `/trigger/layer/{l}/playlist/{p}/cue/{c}` | fires |
 
-In ProVideoPlayer, open a playlist and **turn auto-advance off** on the layer under test. The research's fifth form was confounded precisely because a pre-service playlist advanced every 20 seconds on its own; with auto-advance off, any change to `playingMedia` between two reads seconds apart was caused by the POST or by nothing.
+**How the first pass got it wrong**, because the same two mistakes are available
+to anyone re-measuring anything against PVP:
 
-Note the target playlist name, its uuid, its index, a cue uuid, that cue's index, and the target layer's uuid and index. Keep every one of them out of any file that will be committed — they are passed in as environment variables below.
+1. **PVP has apply latency.** The change lands a beat after the 200. Reading
+   `transportState` immediately before and immediately after the POST, inside the
+   same second, sees nothing and reads that as proof of nothing. Re-read with
+   retries; never once, immediately.
+2. **"Did it change" is the wrong question** while a playlist auto-advances every
+   20 seconds — a change may be the trigger or may be the loop. The answerable
+   question is **"did it become the thing I asked for"**.
 
-- [ ] **Step 2: Write the probe**
+**The one genuine no-op, and the only thing still open:** sending a cue to a
+specific *empty* layer via `/trigger/layer/{l}/playlist/{p}/cue/{c}` did not put
+content on that layer. Unknown whether the layer argument is ignored or the layer
+refused that media. Task 6 exposes the form as its own action and lets the
+verifier catch it; nothing in this plan relies on the layer argument redirecting
+a cue.
 
-```js
-// scratch/pvp-trigger-probe.mjs — throwaway. Deleted in Step 5; never committed.
-//
-// Answers one question: does ANY of PVP's five documented trigger addressing
-// forms actually fire a cue? Four are proven no-ops and the fifth is confounded
-// by playlist auto-advance, so this runs against a workspace with auto-advance
-// OFF, where a change between two reads was caused by the POST or by nothing.
+**Unchanged, and the half that shaped the design:** a POST returns HTTP 200 with
+an empty body whether or not anything happened. Every action must still verify by
+reading state back and return a real failure when the read does not confirm the
+write.
 
-const BASE = `http://${process.env.PVP_HOST}:${process.env.PVP_PORT}/api/0`;
-const AUTH = process.env.PVP_TOKEN ? { Authorization: `Bearer ${process.env.PVP_TOKEN}` } : {};
+**Not settled, and not settled by this branch either** — the two smaller unknowns
+the original Task 0 also proposed to answer:
 
-// From Step 1. Workspace-specific, passed in, never written down here.
-const PLAYLIST_NAME = process.env.PVP_PLAYLIST_NAME;
-const PLAYLIST_UUID = process.env.PVP_PLAYLIST_UUID;
-const PLAYLIST_INDEX = process.env.PVP_PLAYLIST_INDEX;
-const CUE_UUID = process.env.PVP_CUE_UUID;
-const CUE_INDEX = process.env.PVP_CUE_INDEX;
-const LAYER_INDEX = process.env.PVP_LAYER_INDEX;
-
-async function snapshot() {
-  const res = await fetch(`${BASE}/transportState/workspace`, { headers: AUTH });
-  if (!res.ok) throw new Error(`GET transportState -> HTTP ${res.status}`);
-  const body = await res.json();
-  // uuid -> media uuid + cue name. The two things a successful trigger moves.
-  const out = new Map();
-  for (const entry of body.data ?? []) {
-    const t = entry.transportState ?? {};
-    out.set(t.layer?.uuid ?? "?", {
-      layer: t.layer?.name ?? "?",
-      // undefined means the key was ABSENT, which is not the same as null.
-      media: "playingMedia" in t ? (t.playingMedia?.uuid ?? null) : undefined,
-      cue: t.playingItem?.name ?? null,
-    });
-  }
-  return out;
-}
-
-function diff(before, after) {
-  const moved = [];
-  for (const [uuid, a] of after) {
-    const b = before.get(uuid);
-    if (!b) continue;
-    if (b.media !== a.media || b.cue !== a.cue) {
-      moved.push(`${a.layer}: media ${String(b.media)} -> ${String(a.media)}, cue ${String(b.cue)} -> ${String(a.cue)}`);
-    }
-  }
-  return moved;
-}
-
-const FORMS = [
-  ["trigger/cue/{index}", `/trigger/cue/${CUE_INDEX}`],
-  ["trigger/playlist/{name}/cue/{index}", `/trigger/playlist/${encodeURIComponent(PLAYLIST_NAME)}/cue/${CUE_INDEX}`],
-  ["trigger/playlist/{uuid}/cue/{uuid}", `/trigger/playlist/${PLAYLIST_UUID}/cue/${CUE_UUID}`],
-  ["trigger/playlist/{index}/cue/{index}", `/trigger/playlist/${PLAYLIST_INDEX}/cue/${CUE_INDEX}`],
-  ["trigger/layer/{i}/playlist/{name}/cue/{i}", `/trigger/layer/${LAYER_INDEX}/playlist/${encodeURIComponent(PLAYLIST_NAME)}/cue/${CUE_INDEX}`],
-];
-
-const settle = (ms) => new Promise((r) => setTimeout(r, ms));
-
-for (const [label, path] of FORMS) {
-  const before = await snapshot();
-  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: AUTH });
-  const text = await res.text();
-  // Re-read repeatedly rather than sleeping once: nothing has measured how long
-  // PVP takes to apply a POST, and a single guessed sleep would make "no effect"
-  // and "read too early" look identical.
-  let moved = [];
-  let sawAt = null;
-  for (let i = 0; i < 8 && moved.length === 0; i++) {
-    await settle(150);
-    moved = diff(before, await snapshot());
-    if (moved.length) sawAt = (i + 1) * 150;
-  }
-  console.log(`\n${label}`);
-  console.log(`  HTTP ${res.status}, body ${text.length} bytes`);
-  console.log(moved.length ? `  EFFECT after ~${sawAt}ms:\n    ${moved.join("\n    ")}` : "  NO EFFECT after 1200ms");
-  // Long enough that a slow apply from one form cannot be read as the next
-  // form's effect.
-  await settle(3000);
-}
-```
-
-- [ ] **Step 3: Run it and record the answer**
-
-```bash
-PVP_HOST=… PVP_PORT=… PVP_PLAYLIST_NAME=… PVP_PLAYLIST_UUID=… \
-PVP_PLAYLIST_INDEX=… PVP_CUE_UUID=… PVP_CUE_INDEX=… PVP_LAYER_INDEX=… \
-node scratch/pvp-trigger-probe.mjs
-```
-
-Record, in the Task 6 commit message and in `docs/integrations/provideoplayer.md`:
-
-- which forms reported EFFECT and which reported NO EFFECT
-- the observed apply latency for any that worked
-- that auto-advance was confirmed off — say it explicitly, because the whole result is worthless otherwise
-
-- [ ] **Step 4: Run it a second time**
-
-A single observation of a cue firing is exactly the evidence the research already had and correctly refused to call proof. Run the whole probe again and require the same form to show EFFECT both times before Task 6 Step 8 ships. A form that works once and not twice is recorded as **not proven** and treated as "none".
-
-- [ ] **Step 5: Delete the probe**
-
-```bash
-rm -rf scratch/
-git status --porcelain
-```
-
-`git status` must show nothing under `scratch/`. The probe is run with a real workspace's playlist and layer identifiers; it is never committed, and nothing in the shipped diff references it.
-
-- [ ] **Step 6: Settle two of the research's smaller unknowns in the same window**
-
-Same authorised session, because the cost of asking is one request each and the cost of not asking is a renderer branch nobody has ever seen run.
-
-1. **`/clear/layer/{id}` against a layer holding content.** Only the empty case was tested. Fire it at a layer with media and confirm `playingMedia` becomes absent. Also record whether `playingItem` clears with it — the research lists that as unknown, and Task 3's renderer behaviour is chosen so either answer is safe.
-2. **`isHidden`, `isMuted` and `opacity < 1`.** Every observed layer was visible, unmuted and fully opaque. `POST /hide/layer/{id}`, `POST /mute/layer/{id}` and `POST /opacity/layer/{id} {"value":0.5}` are all verified working, so set each in turn, read `transportState` back, and confirm the field lands where `parseWorkspace` expects it. Restore every one.
-
-Both answers go into the Task 1 commit message. If `/clear/layer` on a full layer does **not** work, Task 6 Step 3's verify predicate is still correct — it will report the failure, which is the whole point of the design.
-
----
+- `/clear/layer/{id}` against a layer holding content. Only the empty case was
+  ever tested. The action ships anyway, because it verifies: if the clear does
+  nothing, the rule reports a failure rather than a success.
+- `isHidden`, `isMuted` and `opacity < 1` read back off a real workspace. Every
+  observed layer was visible, unmuted and fully opaque. These are synthesised into
+  the fixture (layer 4) so the renderer branch is exercised by something, and the
+  docs say the live path is unobserved.
 
 ## Task 1: The types and the pure fold
 
@@ -882,7 +804,7 @@ git add main/types/pvp.ts main/types/stage.ts renderer/types.d.ts \
 git commit -m "feat(pvp): read a ProVideoPlayer workspace without believing what it says"
 ```
 
-The commit body records the four guard mutations from Step 7, and the two answers from Task 0 Step 6 (clear-with-content, and hidden/muted/opacity confirmed as parsed).
+The commit body records the four guard mutations from Step 7, and states plainly that `/clear/layer` against a layer holding content and the hidden/muted/faded read-back are both still unobserved on a real workspace — synthesised into the fixture so the branches are exercised, and flagged in the docs.
 
 ---
 
@@ -1106,10 +1028,15 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
    * Post a command, then PROVE it happened.
    *
    * PVP answers every POST with HTTP 200 and an empty body whether or not
-   * anything happened: four of the five documented trigger addressing forms
-   * returned 200 having demonstrably changed nothing. So a 200 is not evidence,
-   * and an action that reported success on one would be a rule that appears to
-   * run, logs a success, and never touches a screen.
+   * anything happened — no echo of the applied value, nothing to read. So a 200
+   * is not evidence, and an action that reported success on one would be a rule
+   * that appears to run, logs a success, and never touches a screen.
+   *
+   * It also applies a change a BEAT after the 200, which is why the confirming
+   * read is retried rather than taken once: a single immediate read makes "no
+   * effect" and "read too early" look identical, and that is exactly how the
+   * research's first pass concluded four trigger forms were no-ops when all five
+   * fire.
    *
    * Never throws. Every outcome — including "the write may have landed but we
    * could not confirm it" — comes back as a result the caller reports to the
@@ -2804,7 +2731,7 @@ The commit body names the five guard mutations from Steps 5 and 9, states plainl
 - Consumes: Task 2's `pvpService.command(path, body, verify)` and `pvpService.readLayers()`; Task 1's `PvpLayerDTO`.
 - Produces: `PVP_ACTIONS` — a `Record<string, ActionDef>` spread into `AUTOMATION_ACTIONS`; and `pvpDeps`, the test seam.
 
-The registry goes from six action kinds to fourteen (or thirteen, if Task 0 said none), which is the doubling the research predicted and makes PVP **the first integration in this app that drives content rather than only reporting it**.
+The registry goes from six action kinds to fifteen, which is the doubling the research predicted and makes PVP **the first integration in this app that drives content rather than only reporting it**.
 
 Two things come free and are worth knowing before writing any of it:
 
@@ -2813,7 +2740,7 @@ Two things come free and are worth knowing before writing any of it:
 
 ### The verify-then-report pattern, stated once
 
-Every action below is one call to `pvpService.command(path, body, verify)`. Nothing posts without a predicate, and nothing returns `ok` on a 200 alone. The reason, restated at the point of use because this is where it would get dropped: **PVP answers every POST with 200 and an empty body whether or not anything happened**, and four of the five documented trigger forms did exactly that.
+Every action below is one call to `pvpService.command(path, body, verify)`. Nothing posts without a predicate, and nothing returns `ok` on a 200 alone. The reason, restated at the point of use because this is where it would get dropped: **PVP answers every POST with 200 and an empty body whether or not anything happened**, and applies the change a beat later, so neither the response nor an immediate re-read is evidence.
 
 `command()` returns `{ ok, detail }`, `ActionDef.run` returns `ActionResult { ok, detail }`, and the two are the same shape — so an action is a params check, a simulate check, and a `command`. There is no `try`/`catch` in any action below, because `command()` already converts a transport failure into a returned result and CLAUDE.md's rule is that a `catch` either rethrows or returns the failure. A second `catch` around a method that cannot throw would be a `catch` that only logs.
 
@@ -2823,12 +2750,12 @@ Every action below is one call to `pvpService.command(path, body, verify)`. Noth
 // pvp-actions.ts — the automation actions that drive ProVideoPlayer.
 //
 // EVERY ONE OF THESE VERIFIES. PVP answers a POST with HTTP 200 and an empty
-// body whether or not anything happened — four of the five documented trigger
-// addressing forms returned 200 having demonstrably changed nothing, confirmed by
-// byte-identical before/after reads of transportState. So a 200 is not evidence,
-// and an action that reported success on one would be a rule that appears to run,
-// logs "fired", and never touches a screen. That is the swallowed failure this
-// repo has a rule about, wearing a different costume.
+// body whether or not anything happened — no echo of the applied value, no
+// confirmation, nothing to read — and it applies the change a BEAT after the 200.
+// So neither the response nor an immediate re-read is evidence, and an action that
+// reported success on a 200 would be a rule that appears to run, logs "fired", and
+// never touches a screen. That is the swallowed failure this repo has a rule
+// about, wearing a different costume.
 //
 // The shape, without exception: resolve the layer, honour simulate, then ONE call
 // to pvpService.command(path, body, { what, holds }). `holds` is asked of a fresh
@@ -3207,56 +3134,126 @@ A separate module rather than eight more literals in a file that is currently 19
 
 Confirm the file-level comment at `automation-actions.ts:1-6` is still true after the spread. It says *"No provider throws: a failure is a returned result"* — which is exactly what Step 4's last test pins for these eight.
 
-- [ ] **Step 8: The trigger action — CONDITIONAL on Task 0**
+- [ ] **Step 8: The two trigger actions**
 
-**Skip this step entirely if Task 0 did not prove a form twice.** Delete it from the plan, note the result in `docs/integrations/provideoplayer.md`, and ship the other seven. Nothing else in the plan depends on it: no type, no test, no surface.
+Task 0 is settled (research §4.2): all five addressing forms fire. Two actions ship, and they are deliberately not one.
 
-If a form was proven, add one action using **that form and only that form**:
+**`pvp.trigger-cue`** takes a playlist and a cue, both by name, and posts `/trigger/playlist/{playlist}/cue/{cue}`. It cannot say which layer the cue will land on — PVP decides that from the cue — so its verify predicate asks whether **any** layer's last cue is now the one requested.
+
+**`pvp.trigger-cue-on-layer`** additionally takes a layer and posts `/trigger/layer/{layer}/playlist/{playlist}/cue/{cue}`. This is the one form with an open question against it: it fires, but the single attempt to send a cue to a specific *empty* layer did not put content there, and it is unknown whether the argument is ignored or that layer refused the media. Its verify predicate therefore asks about **that layer specifically**, so if PVP ignores the argument the action reports a failure. That is the design working, not a bug — and the docs say so rather than implying the argument is reliable.
+
+Both take names rather than uuids, for the reason stated in Task 5. **PVP reads an all-digits path parameter as an INDEX, never a name**, so a playlist or cue literally named "2024" cannot be addressed by name at all; the help text says so.
 
 ```ts
+const PLAYLIST_PARAM = {
+  key: "playlist",
+  label: "Playlist",
+  type: "string" as const,
+  help: "The playlist's name in ProVideoPlayer. A playlist whose name is only digits cannot be used — PVP reads an all-digits value as a position, never a name.",
+};
+const CUE_PARAM = {
+  key: "cue",
+  label: "Cue",
+  type: "string" as const,
+  help: "The cue's name in ProVideoPlayer, exactly as it appears there. A cue whose name is only digits cannot be used — PVP reads an all-digits value as a position, never a name.",
+};
+
+/** A path segment PVP will read as a NAME. PVP reads an all-digits parameter as
+ *  an index, so "2024" would address the 2024th entry rather than the playlist
+ *  called 2024 — refused here rather than sent somewhere unintended. */
+function nameSegment(raw: unknown, what: string): { value: string } | { error: string } {
+  const v = String(raw ?? "").trim();
+  if (!v) return { error: `no ${what} name configured` };
+  if (/^\d+$/.test(v)) {
+    return { error: `ProVideoPlayer reads an all-digits ${what} name as a position, so "${v}" cannot be addressed by name` };
+  }
+  return { value: encodeURIComponent(v) };
+}
+
+/** After a successful trigger, playingItem holds the cue we asked for. It is
+ *  residual everywhere else in this integration and an asset exactly here. */
+const cueLanded = (l: PvpLayerDTO | undefined, cue: string): boolean =>
+  !!l && (l.lastCueName ?? "").trim().toLowerCase() === cue.trim().toLowerCase();
+
   "pvp.trigger-cue": {
     id: "pvp.trigger-cue",
     label: "Fire a ProVideoPlayer cue",
-    // Every word of this help is load-bearing. Four of PVP's five documented
-    // addressing forms answer 200 and do nothing; only the form recorded in the
-    // pre-flight is used here, and even that was established against a workspace
-    // with auto-advance OFF.
-    help: "Fires a cue by name on a layer. ProVideoPlayer accepts several ways of naming a cue and most of them do nothing while still answering OK, so this uses the one form proven to work and confirms it by reading PVP's state back. If the cue does not appear on the layer, the rule reports a failure.",
-    params: [
-      LAYER_PARAM,
-      { key: "cue", label: "Cue", type: "string", help: "The cue's name in ProVideoPlayer, exactly as it appears there." },
-    ],
+    help: "Fires a cue from a playlist. ProVideoPlayer decides which layer it lands on. Confirmed by reading PVP's state back — if no layer picks the cue up, the rule reports a failure rather than a success.",
+    params: [PLAYLIST_PARAM, CUE_PARAM],
     run: async (params, ctx) => {
-      const cue = String(params.cue ?? "").trim();
-      if (!cue) return fail("no cue name configured");
+      const playlist = nameSegment(params.playlist, "playlist");
+      if ("error" in playlist) return fail(playlist.error);
+      const cue = nameSegment(params.cue, "cue");
+      if ("error" in cue) return fail(cue.error);
+      const cueName = String(params.cue).trim();
+      if (ctx.simulate) return ok(`would fire cue "${cueName}"`);
+      return await pvpDeps.command(`/trigger/playlist/${playlist.value}/cue/${cue.value}`, undefined, {
+        what: `cue "${cueName}" fired`,
+        // ANY layer, because this form does not say which one it will land on —
+        // PVP decides that from the cue. Asking about a specific layer here would
+        // report a working trigger as failed.
+        holds: (layers) => layers.some((l) => cueLanded(l, cueName)),
+      });
+    },
+  },
+
+  "pvp.trigger-cue-on-layer": {
+    id: "pvp.trigger-cue-on-layer",
+    label: "Fire a ProVideoPlayer cue on a specific layer",
+    // The one form with an open question against it. It fires, but the single
+    // attempt to send a cue to a specific EMPTY layer did not put content there,
+    // and it is unknown whether PVP ignores the layer argument or that layer
+    // refused the media. The verify asks about THAT layer, so if the argument is
+    // ignored this reports a failure — which is the design working.
+    help: "Fires a cue from a playlist onto a named layer. ProVideoPlayer does not always honour the layer, so this confirms the cue actually landed on it and reports a failure if it did not. Use \"Fire a ProVideoPlayer cue\" when you do not need to choose the layer.",
+    params: [LAYER_PARAM, PLAYLIST_PARAM, CUE_PARAM],
+    run: async (params, ctx) => {
+      const playlist = nameSegment(params.playlist, "playlist");
+      if ("error" in playlist) return fail(playlist.error);
+      const cue = nameSegment(params.cue, "cue");
+      if ("error" in cue) return fail(cue.error);
       const r = await resolveLayer(params);
       if ("error" in r) return fail(r.error);
-      if (ctx.simulate) return ok(`would fire cue "${cue}" on layer ${r.layer.name}`);
-      // PATH_FROM_TASK_0 — substitute the exact form the pre-flight proved, twice.
-      return await pvpDeps.command(PATH_FROM_TASK_0(r.layer, cue), undefined, {
-        what: `cue "${cue}" fired on layer ${r.layer.name}`,
-        // playingItem is RESIDUAL — it holds the last cue that touched the layer.
-        // That is a liability everywhere else in this integration and an asset
-        // here: after a successful trigger it is the cue we asked for. Verified
-        // against the layer's uuid, so a rename between write and read cannot
-        // make a failed trigger look successful.
-        holds: (layers) => {
-          const l = byUuid(layers, r.layer.uuid);
-          return !!l && (l.lastCueName ?? "").trim().toLowerCase() === cue.toLowerCase();
+      const cueName = String(params.cue).trim();
+      if (ctx.simulate) return ok(`would fire cue "${cueName}" on layer ${r.layer.name}`);
+      // The layer by UUID, not the name the operator typed: a rename between the
+      // write and the read cannot then make a failed trigger look successful.
+      return await pvpDeps.command(
+        `/trigger/layer/${r.layer.uuid}/playlist/${playlist.value}/cue/${cue.value}`,
+        undefined,
+        {
+          what: `cue "${cueName}" fired on layer ${r.layer.name}`,
+          holds: (layers) => cueLanded(byUuid(layers, r.layer.uuid), cueName),
         },
-      });
+      );
     },
   },
 ```
 
-and one test, in the same file:
+and the tests, in the same file:
 
 ```ts
-  test("firing a cue that did not appear on the layer FAILS", async () => {
+  test("firing a cue succeeds when SOME layer picks it up", async () => {
     after = [layer({ lastCueName: "SOMETHING ELSE" })];
-    assert.equal((await run("pvp.trigger-cue", { layer: "Graphics", cue: "MAIN GRAPHIC" })).ok, false);
+    assert.equal((await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, false);
     after = [layer({ lastCueName: "MAIN GRAPHIC" })];
-    assert.equal((await run("pvp.trigger-cue", { layer: "Graphics", cue: "MAIN GRAPHIC" })).ok, true);
+    assert.equal((await run("pvp.trigger-cue", { playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, true);
+  });
+
+  test("firing a cue ON A LAYER fails when it landed somewhere else", async () => {
+    // The open question, pinned. If PVP ignores the layer argument the cue turns
+    // up on another layer and this MUST report a failure.
+    after = [layer({ lastCueName: "SOMETHING ELSE" }), layer({ uuid: "l2", name: "Other", lastCueName: "MAIN GRAPHIC" })];
+    assert.equal((await run("pvp.trigger-cue-on-layer", { layer: "Graphics", playlist: "PreService", cue: "MAIN GRAPHIC" })).ok, false);
+  });
+
+  test("an all-digits playlist or cue name is REFUSED, not sent as a position", async () => {
+    for (const params of [{ playlist: "2024", cue: "MAIN GRAPHIC" }, { playlist: "PreService", cue: "12" }]) {
+      const res = await run("pvp.trigger-cue", params);
+      assert.equal(res.ok, false, JSON.stringify(params));
+      assert.match(res.detail, /position/);
+    }
+    assert.deepEqual(posted, []);
   });
 ```
 
@@ -3281,7 +3278,7 @@ npx tsc --noEmit && npm test 2>&1 | tail -5
 git commit -m "feat(automation): drive ProVideoPlayer, and prove every command landed"
 ```
 
-The commit body records: the four guard mutations from Step 6 (naming that the first was run against the real `command`, not the double), the Task 0 result in one line, and whether `pvp.trigger-cue` shipped.
+The commit body records: the four guard mutations from Step 6 (naming that the first was run against the real `command`, not the double), and that both trigger actions shipped on the settled Task 0 result.
 
 ---
 
@@ -3312,8 +3309,8 @@ And, in a short **What is verified, and what is not** section, the state of play
 
 - Which POSTs are confirmed working against a live instance (hide, unhide, mute, unmute, opacity, clear-layer).
 - That **every action confirms itself by reading PVP's state back**, because PVP answers 200 to a request it ignored — and that a rule which appears not to have run will say so in the Activity log rather than logging a success.
-- The Task 0 result on cue triggering, in one sentence, whichever way it went.
-- If `pvp.trigger-cue` shipped: that its confirmation is strong on a layer that does not auto-advance and only suggestive on one that does.
+- That all five cue addressing forms fire, and that the single open question is whether the layer-addressed form's layer argument redirects a cue.
+- That the trigger confirmation is strong on a layer that does not auto-advance and only suggestive on one that does.
 
 - [ ] **Step 2: The index row**
 
@@ -3343,7 +3340,7 @@ The generated `ProVideoPlayer connects / disconnects` pair is already covered by
 
 **Conditions** — the prose paragraph gains the five: *a ProVideoPlayer layer has content*, *is playing a video*, *is hidden*, *is muted*, and *ProVideoPlayer has something on screen*.
 
-**Actions** — seven or eight rows, and the table gains a sentence above it that the rest of the actions do not need:
+**Actions** — nine rows, and the table gains a sentence above it that the rest of the actions do not need:
 
 > ProVideoPlayer answers every command with "OK" whether or not it acted on it, so every ProVideoPlayer action below reads PVP's state back to confirm what it did. A command that was accepted and ignored is recorded as a **failure**, not a success — which is the opposite of what the log would otherwise show.
 
@@ -3379,12 +3376,11 @@ git commit -m "docs: ProVideoPlayer"
 - [ ] `npm run lint` clean
 - [ ] Every exact-count assertion in the Global Constraints table moved to the value the suite reports, not the value this plan predicted. Read the numbers; do not assume the table.
 - [ ] Three review passes: correctness, simplification, whole-PR. Fix what they find before opening; if you disagree with a finding, say why — do not silently skip it.
-- [ ] **Every guard in this branch proven red in-session against the bug it guards, and each proof named in its commit.** There are seventeen: four in Task 1, two in Task 2, four in Task 3, five in Task 5, four in Task 6. Two of them are worth re-reading before you claim them: the `emitIfChanged` override (Task 2 Step 3) and the un-verified POST (Task 6 Step 6), which must be run against the real `pvpService.command` and not the test double.
+- [ ] **Every guard in this branch proven red in-session against the bug it guards, and each proof named in its commit.** Count them against the branch rather than trusting this line. Two of them are worth re-reading before you claim them: the `emitIfChanged` override (Task 2 Step 3) and the un-verified POST (Task 6 Step 6), which must be run against the real `pvpService.command` and not the test double.
 - [ ] The efficiency decision **observed**, not asserted: with a video playing, count `pvp:status` frames on `/api/events` for 30 seconds. Two, not thirty. Record the number in the PR body.
 - [ ] The failure path driven: an action against a layer that does not exist reports `failed` in the Activity log, with the real layer names in the detail.
 - [ ] No secret anywhere in the diff: `git diff origin/beta... | grep -inE "bearer [a-z0-9]|token.*=.*['\"][a-z0-9]{8}"` returns nothing, and no LAN address: `git diff origin/beta... | grep -nE "192\.168\.|10\.[0-9]+\.|172\.(1[6-9]|2[0-9]|3[01])\."` returns nothing except the placeholder `192.168.1.50` in the descriptor, which matches the OBS and REAPER descriptors already there.
 - [ ] No church name, no real service-type id, and no real layer or media name in **code, tests or fixtures**: `git diff origin/beta... -- main/ renderer/ | grep -inE "cornerstone|series graphic|youthkickoff"` returns nothing. Scoped to code on purpose: the research doc under `docs/superpowers/research/` records real observed names as evidence, which is its job, and it is already free of the host address and the token.
-- [ ] `scratch/` is gone: `git log --stat origin/beta.. | grep scratch` returns nothing.
 - [ ] `grep -rn "pvp" main/services/*.ts renderer/**/*.ts* | grep -i "todo\|fixme"` returns nothing
 - [ ] No emojis anywhere in the diff: `git diff origin/beta... | grep -P "[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]"` returns nothing
 - [ ] No Claude attribution in any commit message or in the PR body
@@ -3393,7 +3389,7 @@ git commit -m "docs: ProVideoPlayer"
 
 ## Self-Review
 
-**Spec coverage.** Every element of the operator's ask maps to a task. The **custom layout object** is Task 3, with the filter mode the research argued for (`with-content` as the default, turning eleven rows into two). The **Home tab object** is Task 4, sharing Task 3's row component rather than reimplementing it. The **full suite of automations** is Tasks 5 and 6: seven triggers plus the generated connect/disconnect pair, five conditions plus the generated `is-connected`, and seven or eight actions — taking the action registry from six kinds to thirteen or fourteen and making PVP the first integration here that drives content rather than only reporting it. The registration chain the brief enumerated is Task 2, item by item, plus two the brief did not list and the code requires: `renderer/components/integrations-panel.tsx`'s `CATEGORY_ORDER`, without which the integration is registered, polling and invisible; and `automation-engine.ts`'s `addDemandSource`, without which the `inDemand` gate is decorative.
+**Spec coverage.** Every element of the operator's ask maps to a task. The **custom layout object** is Task 3, with the filter mode the research argued for (`with-content` as the default, turning eleven rows into two). The **Home tab object** is Task 4, sharing Task 3's row component rather than reimplementing it. The **full suite of automations** is Tasks 5 and 6: seven triggers plus the generated connect/disconnect pair, five conditions plus the generated `is-connected`, and nine actions — taking the action registry from six kinds to fifteen and making PVP the first integration here that drives content rather than only reporting it. The registration chain the brief enumerated is Task 2, item by item, plus two the brief did not list and the code requires: `renderer/components/integrations-panel.tsx`'s `CATEGORY_ORDER`, without which the integration is registered, polling and invisible; and `automation-engine.ts`'s `addDemandSource`, without which the `inDemand` gate is decorative.
 
 **The efficiency decision.** Stated at the top as Decision 1: `timeElapsed` and `timeRemaining` are excluded from the compared payload, the DTO carries an anchor, and the client interpolates — following `live-poller.ts:42`, which excludes `serverNow` for exactly this reason, and `pco-timer.ts`, which is the pure interpolator this plan's `pvp-progress.ts` mirrors. The alternative (accept the frame rate, as REAPER does) is named and the reason it does not transfer is given: one recorder's six scalars is not eleven layers on nine tiles. Two things the brief did not ask for but the code forced: `emitIfChanged`'s shallow `!==` **cannot be used at all** on an array-bearing DTO, so it is overridden; and a media-uuid diff alone cannot see a single clip looping, so a drift re-anchor is part of the decision rather than an optimisation on top of it.
 
@@ -3410,23 +3406,23 @@ git commit -m "docs: ProVideoPlayer"
 
 **Where the research's unverified list forced a choice.** Nine, each resolved rather than left open:
 
-1. *Whether any trigger form works.* → Task 0, run twice, with auto-advance off. The plan is written so "none" costs exactly one step and nothing else.
+1. *Whether any trigger form works.* → **Settled: all five fire** (research §4.2). The earlier "four are no-ops" reading was a measurement error — reads taken inside the same second as the POST, against a playlist that auto-advances. `pvp.trigger-cue` ships. What is still open is narrower: whether the LAYER ARGUMENT of the layer-addressed form redirects a cue. That form ships as its own action whose verify asks about that layer specifically, so an ignored argument reports a failure.
 2. *PVP's apply latency after a POST.* → Never measured, so no fixed sleep. The verifier re-reads four times at 150 ms and takes the first confirming read.
-3. *`/clear/layer` against a layer holding content.* → Verified in Task 0 Step 6. The action would have been correct either way, because it verifies.
-4. *`isHidden`, `isMuted`, `opacity < 1`.* → Never seen live, so they are **synthesised into the fixture** (layer 4) and set once for real in Task 0 Step 6. The renderer branch that draws those badges is exercised by something.
+3. *`/clear/layer` against a layer holding content.* → Still unobserved; only the empty case was ever tested. Ships anyway, because it verifies: a clear that does nothing reports a failure, not a success. Said in the docs rather than implied.
+4. *`isHidden`, `isMuted`, `opacity < 1`.* → Never seen live on a real workspace, so they are **synthesised into the fixture** (layer 4). The renderer branch that draws those badges is exercised by something, and the docs say the live read-back is unobserved. The POSTs that set them were verified live by the research; only the parse of the resulting state is untested against a real instance.
 5. *Authentication.* → `Require Authentication` was off, so the `Bearer` path is unobserved. Built anyway, because the alternative is an integration that cannot be used on a secured instance; a 401/403 gets its own message rather than a generic HTTP error. Recorded as building without verification.
 6. *HTTPS and self-signed certificates.* → **Not solved, and deliberately not worked around.** The checkbox is offered so a trusted certificate works, and a TLS failure produces an explicit message naming the likely cause. No "disable certificate verification" toggle: that is a security hole in a public repo, added for a path nobody has run.
 7. *Workspace-wide POSTs.* → `clear/workspace` ships verified; the other two do not ship. See above.
 8. *Behaviour when no workspace is open.* → Unknown whether PVP returns an empty `data[]` or an error. `parseWorkspace` returns `[]` for both, and the object's empty state distinguishes offline from idle, so both answers render correctly without knowing which one happens.
 9. *Deep playlist nesting, `isScrubbing`, negative or fractional `playbackRate`, multi-machine.* → None is read. Nesting matters only to a playlist browser this plan does not build; `isScrubbing` has no consumer; `playbackRate` is used as a multiplier and as `> 0`, both of which are correct for any value including a negative one; slave-machine state is not surfaced because nothing is known about whether it is even reported.
 
-**Placeholder scan.** No "TBD", no "add appropriate error handling", no "similar to Task N". Every code step carries the code. Three places say "find that line" and each names the file and a neighbouring symbol because the line number will have drifted: the `stores.ts`-style registration in `automation-engine.ts`'s demand block, the `CATEGORY_ORDER` entry in `integrations-panel.tsx`, and the `ADDED_SINCE` insertion point. One symbol is deliberately a placeholder — `PATH_FROM_TASK_0` in Task 6 Step 8 — and it is the one thing in the plan that cannot be written down before Task 0 runs, which is why Task 0 exists.
+**Placeholder scan.** No "TBD", no "add appropriate error handling", no "similar to Task N". Every code step carries the code. Three places say "find that line" and each names the file and a neighbouring symbol because the line number will have drifted: the `stores.ts`-style registration in `automation-engine.ts`'s demand block, the `CATEGORY_ORDER` entry in `integrations-panel.tsx`, and the `ADDED_SINCE` insertion point. The one placeholder this plan originally carried — `PATH_FROM_TASK_0` in Task 6 Step 8 — has been resolved: Task 0 is settled and the two trigger actions carry their real paths.
 
 **Type consistency.** `PvpLayerDTO` flows unchanged from `parseWorkspace` through `PvpStatusDTO` to both surfaces, both automation registries and every verify predicate. `computePvpProgress` takes `sampledAt: string | null` because that is `PvpStatusDTO.sampledAt`'s type. `anchorDriftSec` takes `number | null` on both elapsed arguments because that is `anchorElapsedSec`'s type. `visibleLayers` takes the same `Config` the object body does, so the Home card in Task 4 calls it with a synthetic `{ type: "pvp-layers", show: "with-content" }` that type-checks. `pvpDeps.command`'s signature matches `pvpService.command` exactly, which is what makes the Task 6 Step 6 mutation — pointing the seam at the real method — possible.
 
 **Three risks this plan does not remove.**
 
-*The trigger question may answer "none".* Then PVP can be read and its layers manipulated, but a cue cannot be fired from a rule, and the largest-sounding half of "drive content" is not available. Task 0 finds that out in an hour rather than at the end of Task 6, and the plan degrades to seven actions with no rework. Worth Henry knowing before the first commit.
+*The layer argument of the layer-addressed trigger may be ignored.* All five addressing forms fire, but the one attempt to send a cue to a specific empty layer did not put content there, and nobody knows whether PVP ignored the argument or that layer refused the media. `pvp.trigger-cue-on-layer` ships with a verify that asks about that layer specifically, so the failure is visible rather than silent — but an operator who wants a cue on a chosen layer may find that this action reports `failed` every time on their workspace, and the honest answer is then to use `pvp.trigger-cue` and let PVP place it. Recorded in the docs as an open question, not as a working feature.
 
 *A layer rename silently stops a rule.* Accepted, documented, and identical to the trade `pco.live.advance` already makes. There is no id in this system that both survives a workspace rebuild and is typable into a form.
 
