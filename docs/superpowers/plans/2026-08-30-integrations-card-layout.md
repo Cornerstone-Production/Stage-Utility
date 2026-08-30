@@ -2,7 +2,9 @@
 
 **Goal:** the Integrations page stops reading as sixteen stacked full-width rows.
 Each integration becomes a small card that answers "what is this, and is it
-working"; its settings open in a dialog.
+working"; its settings open in a dialog. **All sixteen are on the page at all
+times** — the ones that are not set up sort to the bottom and are greyed, not
+hidden behind a disclosure.
 
 **Mockup:** https://claude.ai/code/artifact/63c4a1fe-1158-4333-b65a-feaf9a4a492c
 
@@ -24,8 +26,27 @@ sixteen integrations rendered, "Not set up" expanded:
 | Collapsed row | 51px | 51px |
 | Expanded row | 161-409px | 193-558px |
 
-The same page in the mockup's card grid measures **1292px** at 1400x920 — a
-3.5x reduction — because no card holds a form any more.
+The same content in the mockup, with **all sixteen cards visible**, measures
+**686px** at 1440x900 and **1831px** at 390x844:
+
+| | 1440x900 | 390x844 |
+|---|---|---|
+| Today, "Not set up" expanded | 4519px (5.0 screens) | 5267px (6.2 screens) |
+| Card grid, all 16 always visible | **686px (0.76 screens)** | **1831px (2.17 screens)** |
+
+A **6.6x** reduction on a console and **2.9x** on a phone, while showing strictly
+more than the current page does at rest. It fits on one screen at 1440x900 with
+nothing collapsed, because no card holds a form any more.
+
+**Does the not-set-up group fall below the fold?** On a console, no — its heading
+sits 363px down, well inside the first screen. On a phone, yes: 889px down, about
+**1.05 screens**. That is the right trade and it is still a large improvement —
+today the same group sits below roughly four screens of expanded rows. It also
+matches the priority: an operator on a phone is far more often checking whether
+something is connected than setting a new integration up, and the things they
+came for are the ones above the fold. Worth revisiting only if a fresh install on
+a phone turns out to be a common path, which it is not — first-run setup happens
+on the console.
 
 ### Every form control is narrow
 
@@ -152,30 +173,45 @@ so that a tile unmount takes the dialog with it. Task 5 makes that structurally
 impossible (the dialog is a sibling of the grid, keyed by id) and Task 10 guards
 it with a test that fails if the dialog is moved back inside the tile.
 
-### 3. `useRevealNonce` is simplified, not deleted
+### 3. `useRevealNonce` is deleted outright
 
 Today a reveal has to punch through **two** collapsed layers — the "Not set up"
 group, then the card's own `Collapsible` — because `data-flash-id` sits on the
 config form *inside* the collapsed body (`integrations-panel.tsx:358`). Hence two
-separate `useRevealNonce` call sites (`:1148` per card, `:1243` for the group).
+`useRevealNonce` call sites (`:1148` per card, `:1243` for the group).
 
-After this change:
+**Nothing on the page is collapsed any more, so the hook has no job left.**
+Checked rather than assumed: `useRevealNonce` has exactly two callers, both in
+`integrations-panel.tsx`, and its own doc comment says it was "Extracted from
+IntegrationsPanel, which had the only copy". Both go, and so does the hook —
+`renderer/app/flash.ts:131-150`.
 
-- `data-flash-id` moves onto the **card tile**, which is always in the DOM when
-  its group is open. So the highlight has something to land on without any
-  remount trick.
-- The **per-card** `useRevealNonce` goes away — there is no `Collapsible` per
-  card any more.
-- The **panel-level** one stays, in simplified form: it still has to open the
-  "Not set up" section when the target is inside it. It is the only collapsible
-  left.
-- A reveal additionally **opens that integration's dialog**, which is what the
-  operator wanted in the first place.
+What replaces it is smaller. The reveal machinery that actually highlights —
+`flashTarget`, `pendingFlashTarget`, `REVEAL_EVENT`, the retry loop that finds
+`[data-flash-id]` and applies `.su-flash` — **stays untouched**. Only the *nonce*
+goes, because a nonce exists to re-key a collapsed thing open, and there is
+nothing collapsed. In its place, one hook in the same file hands the id to a
+callback instead of returning a counter:
 
-Three call sites aim at the literal `"pco-credentials"` — `settings/getting-started.tsx:39-46`,
-`app/home/readiness.ts:68-76`, and the popover's derived path via
-`integrationFlashId`. Only the last is type-linked to `FLASH_IDS`. Task 9 adds a
-test that pins all three.
+```ts
+/** Run `onReveal` when a flash target this surface can act on is requested.
+ *
+ * Replaces useRevealNonce, which returned a counter for re-keying a collapsed
+ * section open with `defaultOpen`. Nothing on the Integrations page collapses
+ * any more, so the counter had no use; what the caller actually wants is the id,
+ * so it can open that integration's dialog. Same event, same pending-target
+ * seeding, same subscribe-once-with-a-ref shape. */
+export function useRevealTarget(onReveal: (flashId: string) => void): void
+```
+
+Removing the collapsed section makes `flashTarget` **more** reliable, not less:
+its retry loop exists partly to wait out "a section mid-reveal", and every card
+is now mounted on the first frame.
+
+Three call sites aim at the literal `"pco-credentials"` — `settings/getting-started.tsx:45`,
+`app/home/readiness.ts:75`, and the derived path via `integrationFlashId`
+(`integrations-panel.tsx:1025`). Only the last is type-linked to `FLASH_IDS`.
+Task 9 adds a test that pins all three.
 
 ### 4. Deep-linking: a search param, and Back closes the dialog
 
@@ -225,6 +261,133 @@ Dismissal, all three routes, one handler:
 | `Escape` | closes | raises `UnsavedChangesDialog` |
 | Close button / X | closes | raises `UnsavedChangesDialog` |
 | Click outside | closes | raises `UnsavedChangesDialog` |
+
+### 7. The greyed treatment, measured
+
+A dormant card is one an operator **clicks to set something up**. On a fresh
+install every card on the page is one of these. Dimmed has to read as secondary,
+never as unavailable, and "looks about right" is not evidence — the app has just
+shipped a fix for a widget that measured **1.05:1** because a token resolved to
+the wrong theme.
+
+Every value below is computed from what the browser actually paints, alpha
+tokens composited over their real backdrop, in the published mockup:
+
+| Role | Token | Light on `#f7f8fa` | Dark on `#0e0e0e` |
+|---|---|---|---|
+| Dormant card name | `--su-fg-muted` | **5.63** | **6.91** |
+| Dormant summary line | `--su-fg-muted` | **5.63** | **6.91** |
+| Dormant "Not set up" badge | `--su-fg-muted` | **5.63** | **6.91** |
+| "Not set up" heading | `--su-fg-muted` | **5.63** | **6.91** |
+| Configured card name | `--su-fg` | 16.28 | 16.52 |
+| Configured summary line | `--su-fg-muted` | 5.63 | 6.91 |
+| Summary strip | `--su-fg-muted` | 5.63 | 6.91 |
+| "Connected" badge | `--su-ok` | 3.34 | 10.29 |
+| Error badge | `--su-danger` | 4.11 | 5.79 |
+
+**Every text role on a dormant card passes AA for normal text (4.5:1) in both
+themes.** The dark ground is `rgb(14,14,14)` — strictly R=G=B, asserted in the
+mockup rather than eyeballed.
+
+Two rows in that table are the app's existing semantic colours and are *not*
+fixed here: the "Connected" badge is `--su-ok` at **3.34** in light and the error
+badge is `--su-danger` at **4.11**. Both clear the 3.0 bar for a UI component but
+miss 4.5 for normal text, in light only. They are unchanged from today, they are
+never the only signal (each sits beside a coloured dot, and the card's whole
+treatment carries the state), and re-toning the app's ok/danger ramp is well
+outside this change. Noted so the table is not read as a clean bill of health.
+
+The dormant card is therefore **not distinguished by dimmer text at all**. Its
+name drops from `--su-fg` to `--su-fg-muted` (16.28 -> 5.63, still comfortably
+readable) and everything else is carried by non-text signals:
+
+- transparent ground instead of `--su-surface`,
+- a **dashed** border instead of solid — an outline still to be filled in,
+- no shadow,
+- a shorter card, and
+- the words "Not set up" in its badge.
+
+**Three tokens are unusable for text and are avoided throughout:**
+`--su-fg-faint` (**1.76** light / 2.85 dark), `--su-fg-subtle` (**2.45** / 3.24)
+and `--su-gray-9` (**3.12** / 3.79). The first draft of this design used
+`--su-fg-faint` for the dormant summary line and the "Not set up" badge — 1.76:1,
+the same class of defect as the 1.05:1 widget. `--su-gray-9` is kept only for the
+7px status dot, a graphical object needing 3.0.
+
+> **Repo-wide finding, not fixed here.** `--su-fg-subtle` (2.45:1 light) and
+> `--su-gray-9` (3.12:1 light) are used as body-text colours across the existing
+> app, including today's Integrations summary strip and every group heading.
+> Those are real AA failures independent of this work. This plan does not change
+> the tokens or touch other surfaces; it only declines to use them for text on
+> the page it is rebuilding. Worth its own pass.
+
+Placeholder text stays on `--su-fg-subtle`, matching the app's existing
+convention: it is a format hint, not content, and it is never the only place a
+value appears.
+
+**No special case for a fresh install.** With nothing configured, all sixteen
+cards are dormant and the whole page is in the quiet treatment. That was
+considered and rejected as a problem: the page is telling the truth, the heading
+explains it, and every card clears 5.63:1. Rendering them at full strength until
+the first save would mean fifteen cards visibly changing appearance the moment
+the operator saves the first one, which is worse than a uniformly quiet page.
+
+### 8. What separates the two halves
+
+A **plain, non-collapsible heading** reading "Not set up", in the same style as
+every other group heading on the page, over a 1px rule and extra top margin.
+
+It has to read as "another group" rather than "a broken area", and three things
+carry that:
+
+- **The same heading grammar as the rest of the page** — uppercase, 11px,
+  letter-spaced, `--su-fg-muted`. Not red, not warning-coloured, not an icon.
+- **The word.** "Not set up" is the state, and each card in the group repeats it
+  in its own badge.
+- **Error is a different treatment entirely, and never appears here.** An
+  erroring integration is red-badged and carries its message — and `isInUse()`
+  already keeps anything in an error state *out* of this group and up with the
+  live ones. That is existing behaviour and it is what makes the two states
+  impossible to confuse.
+
+No count in the heading. The cards are on screen; a number would restate them.
+
+### 9. Category headings go, category *order* stays
+
+Not asked for, but the change forces the question and the mockup made it obvious:
+with eight categories over sixteen integrations, most categories hold **one**
+card. Rendering eight headings each above a single card wastes three quarters of
+the grid width and re-creates the tall thin column the redesign is removing.
+
+So: **one grid for the in-use half, ordered by `CATEGORY_ORDER`**, and one for
+the not-set-up half, same order. Planning Center and ProdCom still sit next to
+each other; there is just no heading between each pair.
+
+The honest framing is that the category split existed to break up a long vertical
+list of full-width rows. A four-column grid of seven cards is scannable without
+it. **This one is a judgement call rather than a request — flagged in the parity
+inventory as a removal, and easy to put back** (it is one `map` over
+`CATEGORY_ORDER` instead of one `sort`) if the categories turn out to be load
+bearing for a bigger install.
+
+### 10. Summary strip and empty state, both rewritten
+
+The old strip read `N connected · M to set up`, and the old empty state
+`Nothing set up yet — pick one below to get started.` Both were written for a
+page whose not-set-up cards were behind a click.
+
+- **"M to set up" is cut.** The cards it counted are now on screen, under a
+  heading that names the state, each with its own "Not set up" badge. It restated
+  what the reader can already see.
+- **The connected count stays, and gains a denominator:** `4 of 16 connected`.
+  How many of the sixteen are actually up is the one fact no single card can
+  tell you, and counting sixteen badges by eye is real work.
+- **The empty state replaces the strip rather than sitting above it** — `0 of 16
+  connected` is a useless thing to lead a fresh install with. When nothing is in
+  use: `Nothing is set up yet — open any card to connect it.` "Below" is gone
+  (the cards are alongside, and on a phone the first one is directly beneath),
+  and "open any card" names the new interaction, which is not obvious from a card
+  that no longer looks like a form.
 
 ### Is the dialog wrong for any of the sixteen?
 
@@ -381,6 +544,10 @@ function IntegrationTile({ descriptor, state, onOpen, onToggle, toggling }: {...
       className={cn(
         "su-card flex flex-col gap-1.5 px-3 py-2.5 min-h-24 text-left cursor-pointer",
         "hover:border-line-strong transition-colors",
+        // Quieter, never dimmer: the name drops to --su-fg-muted (5.63:1 light,
+        // 6.91:1 dark) and everything else is carried by the ground, the dashed
+        // border and the badge. Nothing here uses fg-faint (1.76:1) or
+        // fg-subtle (2.45:1) for text.
         dormant && "bg-transparent border-dashed shadow-none min-h-[4.5rem]",
       )}
     >
@@ -545,19 +712,19 @@ for a dormant integration, enable it, save, close — assert
 `document.activeElement` is the card, which has by then moved groups. Prove it by
 holding the node instead of the id and watching it fail.
 
-### Task 9 — Reveal opens the dialog
+### Task 9 — Reveal opens the dialog, and `useRevealNonce` is deleted
 
-`integrationFlashId` and `FLASH_IDS` are unchanged. The panel's `useRevealNonce`
-now also sets `openId`.
+`integrationFlashId` and `FLASH_IDS` are unchanged. Replace `useRevealNonce`
+(`renderer/app/flash.ts:131-150`) with `useRevealTarget`, which hands over the id
+instead of a counter. Both of its callers are in this file and both go.
 
 ```tsx
 // A reveal names one integration. Open its dialog and highlight its card: the
-// operator clicked "2 disconnected" to DO something about it.
+// operator clicked "1 disconnected" to DO something about it. Nothing needs
+// expanding first -- every card is mounted, always.
 useRevealTarget((flashId) => {
   const hit = descriptors.find((d) => integrationFlashId(d.id) === flashId);
-  if (!hit) return;
-  if (!isInUse(stateMap.get(hit.id)!)) setDormantOpen(true);
-  setOpenId(hit.id);
+  if (hit) setOpenId(hit.id);
 });
 ```
 
@@ -566,10 +733,12 @@ useRevealTarget((flashId) => {
 - `flashTarget(integrationFlashId("obs"))` opens the OBS dialog,
 - `flashTarget("pco-credentials")` opens the Planning Center dialog — the literal,
   because three call sites hardcode it,
-- a reveal aimed at a dormant integration expands "Not set up" as well.
+- a reveal aimed at a **not-set-up** integration opens its dialog and flashes its
+  card with no expansion step, since there is nothing to expand,
+- an unknown flash id opens nothing and does not throw.
 
-Plus a scan that pins the three call sites, matching on the assignment rather
-than the bare string so a comment cannot satisfy it:
+Plus a scan pinning the three call sites, matching on the assignment rather than
+the bare string so a comment cannot satisfy it:
 
 ```ts
 // getting-started.tsx and readiness.ts both hardcode "pco-credentials" rather
@@ -579,6 +748,69 @@ assert.equal(GETTING_STARTED_STEPS.find((s) => s.label === "Connect Planning Cen
 assert.equal(readinessChecks(stateFixture).find((c) => c.id === "pco")?.flash, "pco-credentials");
 assert.equal(integrationFlashId("planning-center"), "pco-credentials");
 ```
+
+And a guard that the hook is really gone, since a dead export invites a new
+caller:
+
+```ts
+// useRevealNonce existed only to re-key a collapsed section open. Nothing on
+// this page collapses now. Asserting on the module's exports rather than on
+// source text, so a commented-out declaration cannot satisfy it.
+assert.equal("useRevealNonce" in flashModule, false);
+```
+
+Prove it: re-export `useRevealNonce` and watch that go red.
+
+### Task 9b — All sixteen visible, greyed, no disclosure
+
+Remove the `Collapsible` wrapper around the dormant list and the `dormantOpen`
+state with it. Two grids, one `sort`, no category headings:
+
+```tsx
+// Ordered by CATEGORY_ORDER but not split by it -- eight headings over sixteen
+// integrations means most hold one card, which leaves three quarters of the grid
+// empty and rebuilds the tall thin column this redesign removes. Order is kept,
+// so Planning Center and ProdCom still sit together.
+const rank = (id: string) => { const i = ORDER.indexOf(id); return i === -1 ? ORDER.length : i; };
+const byOrder = (a: IntegrationDescriptor, b: IntegrationDescriptor) => rank(a.id) - rank(b.id);
+const live = descriptors.filter((d) => inUse(d)).sort(byOrder);
+const dormant = descriptors.filter((d) => !inUse(d)).sort(byOrder);
+```
+
+```tsx
+{dormant.length > 0 && (
+  // A heading, not a disclosure. Same grammar as any other group heading, over a
+  // rule -- so this reads as "another group, not set up", never as an error area.
+  // No count: the cards are on screen.
+  <section className="border-t border-line pt-[18px] mt-2.5">
+    <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted mb-2 block">
+      Not set up
+    </span>
+    <div className={GRID}>{dormant.map(renderTile)}</div>
+  </section>
+)}
+```
+
+`GRID` is `grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(15.75rem,1fr))]` with
+`[&>*]:min-w-0`.
+
+> **The `min-w-0` is load bearing, and its absence is a real bug I hit.** Under
+> `sm` the grid becomes a single column, and a bare `1fr` track takes its
+> automatic minimum from `min-content` — a `whitespace-nowrap` description made
+> the track **752px wide inside a 390px viewport**, and the whole page scrolled
+> sideways. Use `minmax(0,1fr)` for the phone track and `min-w-0` on the items.
+
+**Test** `renderer/components/integrations-visibility.test.tsx`:
+
+- all 16 tiles are in the document on first render, with **no** disclosure button
+  anywhere in the panel — assert an exact count of 16, not a floor,
+- every dormant descriptor sorts after every in-use one,
+- the "Not set up" heading is a plain element, not a `button`, and has no
+  `aria-expanded`,
+- with every integration dormant, the heading still renders and the summary shows
+  the empty-state sentence rather than "0 of 16 connected".
+
+Prove it: restore the `Collapsible` and watch the count assertion go red.
 
 ### Task 10 — The dialog is not owned by a tile
 
@@ -643,7 +875,7 @@ Nothing is dropped without a stated reason.
 | 5 | Context bar "N disconnected" reveals one integration | **Preserved and improved** — Task 9. Flash lands on the tile and the dialog opens |
 | 6 | Getting Started points at the PCO card | **Preserved** — Task 9; `"pco-credentials"` unchanged, all three call sites pinned by test |
 | 7 | Per-card `useRevealNonce` + `defaultOpen` remount | **Removed, with reason** — it existed because the target was inside a collapsed body. The tile is always in the DOM |
-| 8 | Panel-level `useRevealNonce` for "Not set up" | **Preserved** — the section is still collapsible |
+| 8 | Panel-level `useRevealNonce` for "Not set up" | **Removed, with reason** — Task 9. Nothing collapses, so a nonce that re-keys a section open has no job. The hook itself is deleted (both callers were here); `flashTarget` and the highlight are untouched and get *more* reliable |
 | 9 | An `inbound` integration gets no switch | **Preserved** — Task 4 (card) and Task 5 (dialog header); tested both places |
 | 10 | `ConnectionBadge` states and colours | **Preserved** — moved verbatim in Task 1, used on the tile and in the dialog header |
 | 11 | Error message truncates with full text on hover | **Preserved** — same component; the tile is narrower, so `min-w-0 truncate` matters more, and the `Tooltip` still carries the full text |
@@ -656,14 +888,22 @@ Nothing is dropped without a stated reason.
 | 18 | Password masking and omit-on-save | **Preserved** — untouched |
 | 19 | All 8 bespoke panels | **Preserved** — same components, rendered in the dialog body; 3 move to their own files |
 | 20 | `CaptionColorsPanel` under ProdCom | **Preserved** — still additive after the schema form |
-| 21 | Category grouping + "Other" bucket | **Preserved** — groups become grid sections |
-| 22 | "Not set up (N)" collapsed at the bottom | **Preserved** — the operator's stated ask; already built, kept as-is |
-| 23 | Dormant greyed-out treatment | **New** — the operator asked for it; dashed border, no shadow, muted label |
-| 24 | Summary strip "N connected / M to set up" | **Preserved** — unchanged |
+| 21 | Category headings + "Other" bucket | **Removed, judgement call** — Decision 9. Most categories hold one card, so eight headings wasted three quarters of the grid. The *order* is kept, so related integrations stay adjacent. Flagged for the maintainer; one `map` to put back |
+| 22 | "Not set up (N)" collapsed disclosure | **Removed, at the operator's request** — "I don't want the not set up integrations under a drop down anymore, they can be on the same page but just grayed out." Replaced by a plain heading over the same cards, always visible. Not removed because it was wrong |
+| 22b | Dormant integrations sort to the bottom | **Preserved** — same `isInUse()` predicate, unchanged; only the container changed |
+| 22c | An erroring integration stays out of the dormant group | **Preserved** — `isInUse()` already includes `connection === "error"`. This is what keeps "not set up" and "broken" from reading alike now that both halves are on screen |
+| 23 | Dormant greyed-out treatment | **New** — the operator asked for it. Transparent ground, dashed border, no shadow, muted name, "Not set up" badge. Measured: every text role 5.63:1 light / 6.91:1 dark |
+| 24 | Summary strip "N connected / M to set up" | **Changed, with reason** — Decision 10. "M to set up" restated visible cards and is cut; the count gains a denominator (`4 of 16 connected`) |
+| 24b | Empty state "Nothing set up yet — pick one below" | **Rewritten** — Decision 10. "below" was written for cards behind a disclosure; it now replaces the count rather than sitting above `0 of 16` |
 | 25 | `PAIRS` (Ross shown as one card) | **Removed, with reason** — Task 12; adjacency in the grid replaces it |
 | 26 | Live SSE state updates | **Preserved** — untouched; the open dialog re-renders from the same query data |
 | 27 | Loading skeleton and error state | **Preserved** — untouched |
 | 28 | `IpListField` | **Preserved** — deduped to one copy (Task 1) |
+
+One more that the change creates rather than preserves: **the page no longer has
+any collapsed region at all**, which means `flashTarget`'s retry loop always
+finds its target on the first frame. That is a reliability gain, not a parity
+item, but it is why removing the disclosure costs nothing on the reveal path.
 
 Not in scope, noted rather than changed: `.score-*`, `score-activity.tsx`,
 `.context-strip`, the bar configurator, the app-shell scroll, the editor canvas.
@@ -675,10 +915,17 @@ The shell owns the page scroller and the horizontal gutter
 ## Verify before claiming
 
 - `npm run type-check`, `npm run lint`, `npm test` green.
-- Drive the real server: card grid renders 16 tiles; open a small one (REAPER)
-  and a repeater one (Wireless); type, Escape, check the confirm; Discard, then
-  Save & close; flip a dormant switch and watch it move; click "N disconnected"
-  in the context bar and land on the right open dialog; repeat at 390px.
+- Drive the real server: **all 16 tiles render with nothing collapsed**; open a
+  small one (REAPER) and a repeater one (Wireless); type, Escape, check the
+  confirm; Discard, then Save & close; flip a dormant switch and watch it move
+  up; click "N disconnected" in the context bar and land on the right open
+  dialog; repeat at 390px.
+- Measure, do not eyeball: `document.scrollingElement.scrollWidth` must equal
+  `clientWidth` at 390px and 320px, and read the computed `color` of a dormant
+  card's name, summary line and badge against the painted background in **both**
+  themes. Every one must clear 4.5:1. The tokens that fail — `--su-fg-faint`
+  (1.76), `--su-fg-subtle` (2.45), `--su-gray-9` (3.12) — must not appear on any
+  text on this page.
 - Each guard proved by watching it fail, said so in its commit.
 
 ## Docs
