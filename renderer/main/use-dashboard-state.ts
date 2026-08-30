@@ -8,6 +8,16 @@ interface UseDashboardStateResult {
   isLoading: boolean;
   error: string | null;
   pcoLive: PcoLiveDTO | null;
+  /**
+   * Has the pco:live channel answered yet?
+   *
+   * `pcoLive === null` cannot carry this. Null is also the settled answer when
+   * Planning Center is not configured, and it is literally what the server
+   * hydrates with, so by value alone "no service" and "no answer yet" are the
+   * same thing. A consumer that has to act on the difference — Home, which
+   * hides cards by mood — needs to be told.
+   */
+  pcoLiveKnown: boolean;
   propresenter: ProPresenterStatusDTO | null;
 }
 
@@ -19,6 +29,7 @@ interface UseDashboardStateResult {
 export function useDashboardState(): UseDashboardStateResult {
   const { state, isLoading, error } = useStageState();
   const [pcoLive, setPcoLive] = useState<PcoLiveDTO | null>(null);
+  const [pcoLiveKnown, setPcoLiveKnown] = useState(false);
 
   // ProPresenter is a StatusIntegration, so its hydrate and its pushes are
   // version-stamped and ordered by useStatusChannel — see the note there.
@@ -27,17 +38,32 @@ export function useDashboardState(): UseDashboardStateResult {
 
   // pco:live is NOT one: it comes from the live controller, not an integration,
   // and carries no rev. It keeps the plain hydrate-then-subscribe shape.
+  //
+  // Either half answers the "is it known yet?" question, and so does the read
+  // FAILING: an unreachable server is the answer "we are not going to know",
+  // and a consumer waiting for a certainty that cannot arrive is a page that
+  // never finishes loading. apiFetch caps the read at 15s, so this settles one
+  // way or the other whatever the server does. (The failure itself is still not
+  // reported here — it never was; a PCO that is down is surfaced on the
+  // Integrations page, which is where an operator can act on it.)
   useEffect(() => {
     let cancelled = false;
     invoke<PcoLiveDTO | null>("pco:getLive")
-      .then((l) => { if (!cancelled && l) setPcoLive(l); })
-      .catch(() => { /* ignore */ });
+      .then((l) => {
+        if (cancelled) return;
+        if (l) setPcoLive(l);
+        setPcoLiveKnown(true);
+      })
+      .catch(() => { if (!cancelled) setPcoLiveKnown(true); });
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => onNotification("pco:live", (p) => setPcoLive(p as PcoLiveDTO)), []);
+  useEffect(() => onNotification("pco:live", (p) => {
+    setPcoLive(p as PcoLiveDTO);
+    setPcoLiveKnown(true);
+  }), []);
 
-  return { state, isLoading, error, pcoLive, propresenter };
+  return { state, isLoading, error, pcoLive, pcoLiveKnown, propresenter };
 }
 
 /**
