@@ -587,7 +587,11 @@ export function CalendarView({
     invoke<CalendarGrid>("calendar:getGrid", { viewId }).then(
       (g) => {
         if (cancelled) return;
-        setLiveFailed(false);
+        // !g, not false. apiFetch resolves with whatever the body parsed to, so
+        // a 200 carrying null lands here with g === null — clearing the flag and
+        // leaving liveGrid null renders "Loading the calendar…" for ever with
+        // nothing loading. The paged read below already treats the two the same.
+        setLiveFailed(!g);
         if (g) setLiveGrid(g);
       },
       () => {

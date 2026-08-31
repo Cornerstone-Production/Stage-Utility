@@ -36,10 +36,17 @@ let sent: { url: string; method: string }[] = [];
 /** Set to fail any request whose URL carries a `month=` — a paged month 502ing
  *  while the live channel is perfectly healthy, which is the real case. */
 let failPagedMonths = false;
+/** A 200 carrying a null body. Not a hypothetical: apiFetch resolves with
+ *  whatever the body parsed to, so this is what the calendar sees whenever the
+ *  route answers OK with nothing in it. */
+let liveGridIsNull = false;
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init?: RequestInit) => {
   sent.push({ url, method: init?.method ?? "GET" });
   if (failPagedMonths && url.includes("month=")) {
     return { ok: false, status: 502, json: async () => ({ error: "down" }), text: async () => '{"error":"down"}' };
+  }
+  if (liveGridIsNull && url.includes("/api/pco/calendar") && !url.includes("month=")) {
+    return { ok: true, status: 200, json: async () => null, text: async () => "null" };
   }
   // A real grid for the calendar route: CalendarView renders a notice rather
   // than a header until it has one, and the chevrons live in the header.
@@ -120,6 +127,7 @@ beforeEach(() => {
   cleanup();
   sent = [];
   failPagedMonths = false;
+  liveGridIsNull = false;
 });
 afterEach(async () => {
   cleanup();
@@ -609,6 +617,28 @@ describe("paging is per screen, and the current month stays live", () => {
       "a pushed frame turned the paged failure into a spinner that never resolves",
     );
     assert.ok(screen.queryByText(/could not read that month/i), "the paged failure was cleared by unrelated news");
+  });
+
+  it("does not spin for ever on a 200 that carries no grid", async () => {
+    // The bug: `setLiveFailed(false); if (g) setLiveGrid(g);`. apiFetch resolves
+    // with res.json(), so an OK response with a null body lands in the SUCCESS
+    // arm with g === null — the failure flag cleared, no grid stored, and
+    // "Loading the calendar…" on the wall for ever with nothing loading and
+    // nothing that ever would. The paged read a few lines below always treated
+    // the two the same.
+    liveGridIsNull = true;
+    // A view id of its own, not v-1: renderer/lib/api.ts replays the last frame
+    // of a hydrated channel to every late subscriber, so a v-1 mount here would
+    // be handed the grid an earlier test in this suite pushed and the read's
+    // answer would never be what is on screen.
+    render(React.createElement(CalendarView, { viewId: "v-empty", pcoConfigured: true, interactive: true }));
+    await pastDebounce();
+
+    assert.ok(
+      screen.queryByText(/loading the calendar/i) === null,
+      "an empty 200 left the permanent spinner up",
+    );
+    assert.ok(screen.getByText(/could not read the calendar/i));
   });
 
   it("asks for the current month with NO month parameter, so it is the live one", async () => {
