@@ -2,8 +2,10 @@ import { createElement } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Tooltip } from "./ui/tooltip";
 import { invoke } from "../lib/api";
+import { errorMessage } from "@main/services/errors";
 import { ColorField } from "./ui/color-field";
 import { useEditableIcon } from "./editable-icon";
+import { toast } from "./ui";
 import { cn } from "../lib/cn";
 
 /** The theme accent, used when an item has no color of its own. Kept as a CSS
@@ -33,14 +35,24 @@ const DEFAULT_TINT = "var(--su-accent)";
  */
 export function IconTint({
   itemKey,
+  legacyKey,
   icon: Icon,
   color,
   label,
   className,
   iconClassName,
 }: {
-  /** Display id or tool path — the key this color is stored under. */
+  /** Display id, tool path or view id — the key this color is stored under. */
   itemKey: string;
+  /**
+   * A key this item was stored under before `itemKey`, if it moved.
+   *
+   * The GLYPH falls back to it here; the COLOUR falls back at the call site,
+   * because the caller already resolves the colour out of the state it holds.
+   * Both are migrated on the next write, which is the only moment a stored
+   * choice may be moved — reading must not save.
+   */
+  legacyKey?: string;
   icon: LucideIcon;
   /** Current color, or null/undefined for the theme default. */
   color?: string | null;
@@ -50,7 +62,7 @@ export function IconTint({
   iconClassName?: string;
 }) {
   const tint = color || DEFAULT_TINT;
-  const { glyph, iconEditing } = useEditableIcon(itemKey, Icon);
+  const { glyph, iconEditing } = useEditableIcon(itemKey, Icon, legacyKey);
   return (
     <Tooltip label={`Change the ${label} icon`}>
       <span
@@ -79,7 +91,20 @@ export function IconTint({
           // The stored value may be absent — the icon is then on the theme's own
           // colour, which is a token with no numbers to put on a slider.
           value={color || "#3b82f6"}
-          onChange={(v: string) => void invoke("icons:setColor", { key: itemKey, color: v })}
+          // The legacy entry is cleared only AFTER the new one has landed, so a
+          // failure loses nothing: at worst the colour stays where it was and is
+          // still found by the fallback above.
+          onChange={(v: string) => {
+            void invoke("icons:setColor", { key: itemKey, color: v })
+              .then(() => {
+                if (!legacyKey || legacyKey === itemKey) return;
+                return invoke("icons:setColor", { key: legacyKey, color: "" });
+              })
+              .catch((e: unknown) => {
+                console.error("[icon-tint:setColor]", itemKey, v, e);
+                toast.error(`Could not change the icon colour: ${errorMessage(e)}`);
+              });
+          }}
           className="absolute inset-0 [&>button]:size-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
           icon={iconEditing}
         />

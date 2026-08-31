@@ -93,9 +93,29 @@ function hydrate(): void {
     })
     .catch((err: unknown) => {
       hydrating = false;
-      // Reported, not swallowed: the failure is handed to every consumer as
-      // `error`, and a consumer mounting later retries (see `subscribe`), so a
-      // server that was down at page load does not blank the wall for ever.
+      // Same rule as the success arm, and for a worse reason. api.ts replays the
+      // hello-burst frame of every hydrated channel to a late subscriber, so on a
+      // normal page load a GOOD `stage:state-changed` lands while this read is
+      // still in flight. If the read then rejects — apiFetch's 15s cap on a
+      // loaded Pi, a transient 5xx, a wifi blip — stamping `error` over live
+      // state blanks the surface: resolveScreen() checks `error` BEFORE `state`,
+      // so every routed screen draws "Could not load stage state" while holding
+      // the truth. And nothing clears it: the retry in `subscribe` is gated on
+      // there being no state, and the channel is change-driven, so in a quiet
+      // building the next frame is hours away. The broadcast is newer than what
+      // this read was carrying either way — keep it, and just retire `isLoading`.
+      //
+      // Still reported, never swallowed — the two outcomes just log differently,
+      // because they are different mornings: one is a wall that is fine and a
+      // read that is not, the other is a wall with nothing on it.
+      if (broadcastSinceHydrateStarted) {
+        console.warn("[useStageState] hydrate failed; keeping the newer broadcast", err);
+        if (snapshot.isLoading) publish({ ...snapshot, isLoading: false });
+        return;
+      }
+      // Handed to every consumer as `error`, and a consumer mounting later
+      // retries (see `subscribe`), so a server that was down at page load does
+      // not blank the wall for ever.
       console.error("[useStageState] hydrate error", err);
       publish({ state: snapshot.state, isLoading: false, error: String(err) });
     });

@@ -34,9 +34,13 @@ const VIEWS = [view("console-a", "console"), view("wall-b", "display")];
 const CHOSEN_GLYPH = "Star";
 const CHOSEN_COLOUR = "rgb(229, 72, 77)";
 
+/** A glyph set BEFORE the card's key moved, still sitting under the old key. */
+const LEGACY_KEY = "display-invented-legacy";
+const LEGACY_GLYPH = "Anchor";
+
 // After installDom(), never before: a static import evaluates first and React
 // would come up with no document.
-const { iconKeyFor } = await import("./outputs-section.js");
+const { iconKeyFor, resolveIconEntry } = await import("./outputs-section.js");
 
 const CARD_KEY = iconKeyFor({ id: "display-1", viewId: "console-a" }, VIEWS);
 
@@ -49,7 +53,7 @@ const CARD_KEY = iconKeyFor({ id: "display-1", viewId: "console-a" }, VIEWS);
     hourCycle: "12h",
     slotsByView: {},
     slotsByLayoutObject: {},
-    iconGlyphs: { [CARD_KEY]: CHOSEN_GLYPH },
+    iconGlyphs: { [CARD_KEY]: CHOSEN_GLYPH, [LEGACY_KEY]: LEGACY_GLYPH },
     iconColors: { [CARD_KEY]: CHOSEN_COLOUR },
   };
   return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
@@ -68,8 +72,10 @@ class FakeEventSource {
 const { render, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { ConsoleRailIcon } = await import("../../components/console-rail-icon.js");
+const { IconTint } = await import("../../components/icon-tint.js");
+const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 const { resolveIcon } = await import("../../components/icon-set.js");
-const { SlidersHorizontalIcon } = await import("lucide-react");
+const { SlidersHorizontalIcon, MonitorIcon } = await import("lucide-react");
 
 const settle = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 
@@ -107,6 +113,54 @@ describe("where a screen's icon is stored", () => {
   test("a screen pointed at a view this build cannot find keeps its own key", () => {
     // Rather than throwing, or keying by an id nothing resolves.
     assert.equal(iconKeyFor({ id: "display-1", viewId: "gone" }, VIEWS), "display-1");
+  });
+});
+
+describe("a tint set before the key moved", () => {
+  // The key MOVED with no fallback and no migration. Every console-surface card
+  // in the building lost the tint its operator had chosen: the icon went back to
+  // the theme accent and the stored entry was read by nothing.
+  const OUTPUT = { id: "display-1", viewId: "console-a" };
+  const OLD_COLOUR = "#7a1f3d";
+
+  test("is still found under the key it was stored under", () => {
+    const entry = resolveIconEntry(OUTPUT, VIEWS, { "display-1": OLD_COLOUR });
+    assert.equal(
+      entry.value,
+      OLD_COLOUR,
+      "the tint stored before the re-key is gone — the icon is back on the theme accent",
+    );
+  });
+
+  test("and the old key travels with it, so the next write can move it", () => {
+    const entry = resolveIconEntry(OUTPUT, VIEWS, { "display-1": OLD_COLOUR });
+    assert.equal(entry.key, "console-a");
+    assert.equal(entry.legacyKey, "display-1");
+  });
+
+  test("but the NEW key wins where both exist", () => {
+    // Once migrated — or once the sidebar tab had already been set — the current
+    // key is the answer. A fallback that outranked it would undo the re-key.
+    const entry = resolveIconEntry(OUTPUT, VIEWS, {
+      "display-1": OLD_COLOUR,
+      "console-a": CHOSEN_COLOUR,
+    });
+    assert.equal(entry.value, CHOSEN_COLOUR);
+  });
+
+  test("a screen whose key never moved offers no legacy key to clear", () => {
+    // Clearing there would erase the entry the same write just made.
+    const entry = resolveIconEntry({ id: "display-1", viewId: "wall-b" }, VIEWS, {
+      "display-1": OLD_COLOUR,
+    });
+    assert.equal(entry.key, "display-1");
+    assert.equal(entry.legacyKey, undefined);
+    assert.equal(entry.value, OLD_COLOUR);
+  });
+
+  test("and nothing stored anywhere is still nothing", () => {
+    assert.equal(resolveIconEntry(OUTPUT, VIEWS, {}).value, undefined);
+    assert.equal(resolveIconEntry(OUTPUT, VIEWS, undefined).value, undefined);
   });
 });
 
@@ -163,5 +217,47 @@ describe("the console tab reads that same key", () => {
     const svg = container.querySelector("svg");
     assert.ok(svg);
     assert.equal(svg.style.color, "", "an inactive row wore the operator's colour");
+  });
+});
+
+describe("a glyph set before the key moved", () => {
+  // The colour half of this is asserted on resolveIconEntry above; both go
+  // through iconEntryAt, and this is the glyph half drawn by the real card
+  // component rather than reasoned about.
+  //
+  // The glyph is compared as PATH DATA, because jsdom models no layout and there
+  // is nothing visual to check — what is checkable is which icon was rendered.
+  test("the card draws it, rather than falling back to its built-in icon", async () => {
+    const legacy = resolveIcon(LEGACY_GLYPH);
+    assert.ok(legacy, `${LEGACY_GLYPH} is not in the icon set`);
+    assert.notEqual(
+      glyphFor(legacy),
+      glyphFor(MonitorIcon),
+      "the legacy glyph is indistinguishable from the card's built-in one, so this proves nothing",
+    );
+
+    // Wrapped as the operator app wraps it (renderer/app/index.tsx) — IconTint's
+    // tooltip refuses to render without the provider.
+    const container = render(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(IconTint, {
+          // Nothing is stored under this key — the operator set the icon before
+          // the card was re-keyed, so it is all sitting under the old one.
+          itemKey: "console-invented-unset",
+          legacyKey: LEGACY_KEY,
+          icon: MonitorIcon,
+          label: "Invented Screen",
+        }),
+      ),
+    ).container;
+    await settle();
+
+    assert.equal(
+      glyphOf(container),
+      glyphFor(legacy),
+      "the card drew its built-in icon — the glyph stored before the re-key is read by nothing",
+    );
   });
 });

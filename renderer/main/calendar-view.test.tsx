@@ -41,8 +41,18 @@ let failPagedMonths = false;
  *  whatever the body parsed to, so this is what the calendar sees whenever the
  *  route answers OK with nothing in it. */
 let liveGridIsNull = false;
+/** Hold the LIVE grid request open, so a push can be made to land before it. Set
+ *  by the ordering test and answered by hand through `answerLiveGrid`. */
+let holdLiveGrid = false;
+let answerLiveGrid: ((body: unknown) => void) | null = null;
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init?: RequestInit) => {
   sent.push({ url, method: init?.method ?? "GET" });
+  if (holdLiveGrid && url.includes("/api/pco/calendar") && !url.includes("month=")) {
+    return new Promise((res) => {
+      answerLiveGrid = (body: unknown) =>
+        res({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+    });
+  }
   if (failPagedMonths && url.includes("month=")) {
     return { ok: false, status: 502, json: async () => ({ error: "down" }), text: async () => '{"error":"down"}' };
   }
@@ -128,6 +138,8 @@ beforeEach(() => {
   sent = [];
   failPagedMonths = false;
   liveGridIsNull = false;
+  holdLiveGrid = false;
+  answerLiveGrid = null;
 });
 afterEach(async () => {
   cleanup();
@@ -674,6 +686,53 @@ describe("paging is per screen, and the current month stays live", () => {
       "a pushed frame turned the paged failure into a spinner that never resolves",
     );
     assert.ok(screen.queryByText(/could not read that month/i), "the paged failure was cleared by unrelated news");
+  });
+
+  it("does not let an older read undo the grid a push already delivered", async () => {
+    // The wall-shows-the-wrong-department bug. The read and the subscription used
+    // to be two effects, the read declared first, with nothing ordering them: a
+    // display mounts and its GET is served at T0; at T0+e the operator changes the
+    // view's filters and view-routes forces a refresh, which pushes the NEW grid;
+    // the client applies the push and then the older response resolves and puts
+    // the pre-change month back. calendar-broadcaster only sends on a signature
+    // change and its signature already matches, so the three-minute timer never
+    // re-sends and the wall stays wrong until somebody reloads it.
+    //
+    // A rev cannot settle this — calendar-broadcaster.ts's header says nothing in
+    // the payload is a per-fetch value — so what is asserted is the ORDERING: a
+    // live frame beats a read that was already in flight.
+    //
+    // Its own view id, because api.ts replays the last frame of a hydrated channel
+    // to a late subscriber and a v-1 mount would be handed what an earlier case
+    // here pushed.
+    holdLiveGrid = true;
+    render(React.createElement(CalendarView, { viewId: "v-race", pcoConfigured: true, interactive: true }));
+    await mounted(); // subscribed; the read is still in flight
+
+    // The operator's new filters, pushed while that read is open.
+    act(() => {
+      pushFrame({
+        "v-race": grid({ "2026-08-12": [event("pushed", "2026-08-12T15:00:00Z", "2026-08-12T16:00:00Z")] }),
+      });
+    });
+    await mounted();
+    assert.ok(screen.queryByText("Event pushed"), "the pushed grid never reached the screen");
+
+    // Now the older response lands, carrying the department the operator just
+    // filtered away.
+    await act(async () => {
+      answerLiveGrid!(
+        grid({ "2026-08-12": [event("stale", "2026-08-12T15:00:00Z", "2026-08-12T16:00:00Z")] }),
+      );
+      await mounted();
+    });
+
+    assert.ok(
+      screen.queryByText("Event pushed"),
+      "an older read replaced the grid a push had already delivered — the broadcaster " +
+        "will not re-send, so the wall stays on the wrong month until it is reloaded",
+    );
+    assert.equal(screen.queryByText("Event stale"), null, "the stale month is on screen");
   });
 
   it("does not spin for ever on a 200 that carries no grid", async () => {

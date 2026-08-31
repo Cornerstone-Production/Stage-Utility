@@ -82,6 +82,7 @@ const requests: string[] = [];
 const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { useStageState, __resetForTests } = await import("./use-stage-state.js");
+const { __resetReplayCacheForTests } = await import("../lib/api.js");
 
 /**
  * Let everything in flight settle BEFORE anything is asserted or torn down.
@@ -132,6 +133,11 @@ beforeEach(() => {
   // The cache is module-level by design, so without this a case would inherit
   // the previous one's state and pass or fail on test ORDER.
   __resetForTests();
+  // api.ts replays the last frame of a hydrated channel to a late subscriber, and
+  // that cache outlives __resetForTests. Without this, a case that emits a
+  // broadcast hands the NEXT case's mount a state frame it never asked for, and
+  // "the server was down at page load" quietly stops being testable.
+  __resetReplayCacheForTests();
   listeners.clear();
   requests.length = 0;
 });
@@ -278,5 +284,55 @@ describe("a failed hydrate", () => {
     (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
     const seen = screen.getByTestId("err").textContent ?? "";
     assert.ok(seen.includes("no server"), `error never reached the consumer (${seen})`);
+  });
+
+  test("does NOT blank a broadcast that beat it", async () => {
+    // The wall-blanking case. api.ts replays the hello-burst frame of a hydrated
+    // channel to a late subscriber, so the broadcast arriving BEFORE the read
+    // resolves is the normal page load, not the rare one. The read then rejects
+    // (a 15s cap on a loaded Pi, a 5xx, a wifi blip) and the catch used to stamp
+    // `error` over state that is already correct — and resolveScreen() checks
+    // `error` before `state`, so every routed screen drew "Could not load stage
+    // state" while holding the truth, with nothing to clear it.
+    //
+    // Driven by holding the hydrate open rather than by timing, so the ordering
+    // under test is the one asserted rather than whatever the event loop chose.
+    const realFetch = (globalThis as unknown as { fetch: unknown }).fetch;
+    let failHydrate!: (err: unknown) => void;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
+      if (String(input).includes("/api/state")) {
+        return new Promise((_resolve, reject) => {
+          failHydrate = reject;
+        });
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+    };
+    function Watcher(): React.ReactElement {
+      const { state, error, isLoading } = useStageState();
+      return React.createElement(
+        "div",
+        { "data-testid": "watch" },
+        error ? `error:${error}` : state ? state.appName : isLoading ? "loading" : "",
+      );
+    }
+    render(React.createElement(Watcher));
+    await settle(); // subscribed, hydrate still in flight
+
+    act(() => {
+      emitStateChanged({ ...BASE, appName: "Live" });
+    });
+    assert.equal(screen.getByTestId("watch").textContent, "Live", "the broadcast never landed");
+
+    await act(async () => {
+      failHydrate(new Error("wifi blip"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
+
+    assert.equal(
+      screen.getByTestId("watch").textContent,
+      "Live",
+      "a failed hydrate blanked live state — every routed screen now draws 'Could not load stage state'",
+    );
   });
 });

@@ -650,19 +650,58 @@ export function CalendarView({
   // month even if a stray offset ever got set.
   const shown = interactive ? offset : 0;
 
+  /**
+   * ONE effect, subscribe FIRST, and a live frame beats the read.
+   *
+   * This was two effects — the read declared above the subscription, both writing
+   * `liveGrid`, with nothing ordering them. A wall mounts and its GET is served
+   * at T0; at T0+e the operator changes the view's filters and view-routes forces
+   * a refresh, which pushes the NEW grid; the client applies the push and then the
+   * older response resolves and puts the pre-change month back. The broadcaster
+   * only sends on a signature change and its signature already matches, so the
+   * three-minute timer never re-sends and the wall shows the wrong department's
+   * month until somebody reloads it.
+   *
+   * useStatusChannel owns this rule everywhere else and is not usable here: its
+   * push payload IS its value, and this channel carries a map keyed by view id
+   * (two calendar views can filter to two different departments, so a frame that
+   * did not name the view could not say which grid it carried). It also has no
+   * place for the failure flag below. The rule is the same one, though, and the
+   * reason a rev cannot do the work is written at the top of
+   * calendar-broadcaster.ts: nothing in that payload is a per-fetch value.
+   *
+   * `pushedLive` rather than "any frame at all", for the reason use-status-channel
+   * spells out: api.ts replays the cached snapshot to a late subscriber, and the
+   * server stops feeding that cache for a channel nobody is subscribed to — so a
+   * view mounted, unmounted and mounted again is handed a snapshot that can be
+   * hours old. Correcting exactly that is what the read is for.
+   */
   useEffect(() => {
-    // Same gate as the push effect below, and for the reason the two must agree:
-    // without an id the push has nothing to key on, so a hydrate here would
-    // fetch the unfiltered grid once and then sit frozen at mount for the page's
-    // life with nothing on screen saying so. What the surface says about it is
-    // DERIVED where `failed` is passed down, not set from here — a synchronous
-    // setState in an effect cascades a render, which is the same objection this
-    // file's `paged` tag was written against.
+    // The id gate the push and the paged read below share, and for the reason the
+    // three must agree: without an id the push has nothing to key on, so a hydrate
+    // here would fetch the unfiltered grid once and then sit frozen at mount for
+    // the page's life with nothing on screen saying so. What the surface says
+    // about it is DERIVED where `failed` is passed down, not set from here — a
+    // synchronous setState in an effect cascades a render, which is the same
+    // objection this file's `paged` tag was written against.
     if (!viewId) return;
     let cancelled = false;
+    let pushedLive = false;
+
+    const off = onNotification("calendar:grid", (p, replayed) => {
+      const next = (p as Record<string, CalendarGrid> | null)?.[viewId];
+      if (!next) return;
+      if (!replayed) pushedLive = true;
+      setLiveGrid(next);
+      // A frame arriving IS the server reaching Planning Center, so it clears the
+      // stale marker on the LIVE month. It says nothing about a paged month the
+      // operator asked for and did not get, and must not clear that.
+      setLiveFailed(false);
+    });
+
     invoke<CalendarGrid>("calendar:getGrid", { viewId }).then(
       (g) => {
-        if (cancelled) return;
+        if (cancelled || pushedLive) return;
         // !g, not false. apiFetch resolves with whatever the body parsed to, so
         // a 200 carrying null lands here with g === null — clearing the flag and
         // leaving liveGrid null renders "Loading the calendar…" for ever with
@@ -673,29 +712,17 @@ export function CalendarView({
       () => {
         // REPORTED, not swallowed: a calendar that quietly empties itself is the
         // absence nobody reports. CalendarMonth keeps the last good month on
-        // screen under the notice rather than blanking it.
-        if (!cancelled) setLiveFailed(true);
+        // screen under the notice rather than blanking it. Not raised over a live
+        // frame, though: a grid the server just pushed is not a failed read to an
+        // operator looking at it, and the notice would never clear.
+        if (!cancelled && !pushedLive) setLiveFailed(true);
       },
     );
+
     return () => {
       cancelled = true;
+      off();
     };
-  }, [viewId]);
-
-  // The push. The payload is a map keyed by view id, because two calendar views
-  // can filter to two different departments — a frame that did not name the view
-  // could not say which grid it carried.
-  useEffect(() => {
-    if (!viewId) return;
-    return onNotification("calendar:grid", (p) => {
-      const next = (p as Record<string, CalendarGrid> | null)?.[viewId];
-      if (!next) return;
-      setLiveGrid(next);
-      // A frame arriving IS the server reaching Planning Center, so it clears the
-      // stale marker on the LIVE month. It says nothing about a paged month the
-      // operator asked for and did not get, and must not clear that.
-      setLiveFailed(false);
-    });
   }, [viewId]);
 
   /**

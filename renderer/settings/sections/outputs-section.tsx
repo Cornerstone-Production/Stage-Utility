@@ -23,6 +23,7 @@ import {
   confirm, Dialog} from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
+import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
@@ -52,6 +53,9 @@ interface OutputRowProps {
   /** Where this card's icon is stored — the view id for a control surface, so it
    *  is the same entry the sidebar tab uses; the output id otherwise. */
   iconKey: string;
+  /** Where it was stored before that key moved, if it did. Undefined when the two
+   *  are the same key. Read as a fallback, migrated on the next write. */
+  legacyIconKey?: string;
   /** Save the friendly URL slug ("" clears it). Rejects with a reason the card shows. */
   onSetSlug: (slug: string) => Promise<void>;
   onSetView: (viewId: string | null) => void;
@@ -87,7 +91,30 @@ export function iconKeyFor(output: { id: string; viewId?: string | null }, views
   return view && viewSurface(view) === "console" ? view.id : output.id;
 }
 
-export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+/**
+ * Where this screen's icon is stored, where it USED to be, and the entry in hand.
+ *
+ * The key above MOVED for a console-surface screen — from the output id to the
+ * view id — and moved with no fallback and no migration, so an operator's tint
+ * reverted to the theme accent and the entry they had set was read by nothing.
+ * The old key is still read, and the next write moves the value onto the new one
+ * (see `IconTint`); reading may not save.
+ *
+ * A function rather than an expression in the card's props because it is asserted
+ * on: the version that lived inline could only be checked by rendering the whole
+ * section, so it was not checked at all.
+ */
+export function resolveIconEntry(
+  output: { id: string; viewId?: string | null },
+  views: View[],
+  entries: Record<string, string> | undefined,
+): { key: string; legacyKey?: string; value?: string } {
+  const key = iconKeyFor(output, views);
+  const legacyKey = key === output.id ? undefined : output.id;
+  return { key, legacyKey, value: iconEntryAt(entries, key, legacyKey) };
+}
+
+export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   // Both bar items below are about a strip that only some kinds draw. Offering
@@ -189,7 +216,7 @@ export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor
               if the tab had ever been set. One key, no precedence to reason
               about. A screen showing a wall-screen view keeps its own key: it is
               a screen, not a thing the sidebar lists. */}
-          <IconTint itemKey={iconKey} icon={MonitorIcon} color={iconColor} label={output.name} />
+          <IconTint itemKey={iconKey} legacyKey={legacyIconKey} icon={MonitorIcon} color={iconColor} label={output.name} />
         </span>
         <Input
           value={editName}
@@ -682,7 +709,7 @@ export function OutputsSection({
               // Once per row, not twice: it scans every view to answer, and the
               // colour and the glyph are the same question asked about the same
               // screen — they cannot be allowed to answer differently either.
-              const iconKey = iconKeyFor(output, stageState.views);
+              const icon = resolveIconEntry(output, stageState.views, stageState.iconColors);
               return (
               <OutputRow
                 key={output.id}
@@ -691,8 +718,9 @@ export function OutputsSection({
                 baseUrl={baseUrl}
                 online={connected.has(output.id)}
                 canRemove={outputs.length > 1}
-                iconColor={stageState.iconColors?.[iconKey]}
-                iconKey={iconKey}
+                iconColor={icon.value}
+                iconKey={icon.key}
+                legacyIconKey={icon.legacyKey}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
                 onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
