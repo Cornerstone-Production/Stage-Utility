@@ -221,7 +221,13 @@ function ColorPanel({
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
     };
-  }, [anchor]);
+    // pickingIcon, because the BODY is what `h` measures: "Change icon" swaps
+    // the colour body for the grid, and the grid is a different height. A panel
+    // flipped above its swatch keeps `a.top - h - 8` computed for the taller
+    // body and floats clear of the swatch it belongs to; in the other direction
+    // the taller body runs off the bottom of the viewport. It is fixed, in a
+    // portal, so nothing scrolls it back.
+  }, [anchor, pickingIcon]);
 
   return createPortal(
     <div
