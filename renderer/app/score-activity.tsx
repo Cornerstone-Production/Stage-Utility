@@ -30,11 +30,12 @@ import { leagueById } from "@main/types/scores";
 import { formatClock } from "../lib/clock-format";
 import { cn } from "../lib/cn";
 import { scoreActivity, useScoreActivity } from "./score-activity-store";
-// ONE definition of "does this viewer want motion", in lib. There were two —
-// this file had its own copy without the `typeof window` guards — and a third
-// was about to be added for the drawer drag. The reason it is asked in JS at
-// all is unchanged: the global CSS override collapses `transition-duration`
-// and cannot reach a `transform` or a class set from JS.
+// ONE definition of "does this viewer want motion", in lib. There were FOUR —
+// here, view-transition.ts, expand-overlay.tsx and the lib copy — and a fifth
+// was about to be added for the drawer drag. Only the lib one carried the
+// `typeof window` guards. The reason it is asked in JS at all is unchanged: the
+// global CSS override collapses `transition-duration` and cannot reach a
+// `transform` or a class set from JS.
 import { prefersReducedMotion } from "../lib/use-slide-on-move";
 
 /** The gap between two cards in the stack, in px. Mirrored in no stylesheet:

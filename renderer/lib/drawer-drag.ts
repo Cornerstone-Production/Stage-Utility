@@ -48,7 +48,7 @@ export const CLOSE_FRACTION = 0.5;
 export const VELOCITY_WINDOW_MS = 80;
 
 /** Travel before a gesture becomes a drag rather than a tap or a scroll. */
-export const DRAG_SLOP_PX = 8;
+const DRAG_SLOP_PX = 8;
 
 export interface DragSample {
   /** Pointer x, in client px. */
@@ -68,19 +68,15 @@ export interface DragSample {
  *
  * @param now  the timestamp of the LIFT, on the same clock as the samples.
  */
-export function recentVelocity(
-  samples: readonly DragSample[],
-  now: number,
-  maxAgeMs: number = VELOCITY_WINDOW_MS,
-): number | null {
+export function recentVelocity(samples: readonly DragSample[], now: number): number | null {
   if (samples.length < 2) return null;
   const last = samples[samples.length - 1];
   // The finger had already stopped. See VELOCITY_WINDOW_MS.
-  if (now - last.t > maxAgeMs) return null;
+  if (now - last.t > VELOCITY_WINDOW_MS) return null;
   // The oldest sample still inside the window.
   let first = last;
   for (let i = samples.length - 2; i >= 0; i--) {
-    if (last.t - samples[i].t > maxAgeMs) break;
+    if (last.t - samples[i].t > VELOCITY_WINDOW_MS) break;
     first = samples[i];
   }
   const dt = last.t - first.t;
@@ -150,15 +146,20 @@ export function dragOffset(
  * the instant the settle started, which is the whole thing being avoided.
  */
 export function currentTranslateX(transform: string): number {
+  // Hand-parsed rather than `new DOMMatrixReadOnly(transform).m41` so this stays
+  // a pure function: the guards below run under node:test with no DOM, and
+  // DOMMatrix is not there to construct.
   const s = transform.trim();
   if (!s || s === "none") return 0;
   const open = s.indexOf("(");
   if (open < 0 || !s.endsWith(")")) return 0;
   const fn = s.slice(0, open);
   const parts = s.slice(open + 1, -1).split(",").map((p) => Number.parseFloat(p));
-  // matrix(a,b,c,d,tx,ty) → index 4. matrix3d has tx at index 12.
-  const i = fn === "matrix3d" ? 12 : fn === "matrix" ? 4 : -1;
-  if (i < 0 || parts.length <= i) return 0;
+  // matrix(a,b,c,d,tx,ty) keeps tx at index 4; matrix3d — what a
+  // compositor-promoted layer reports — keeps it at 12.
+  const TX_INDEX: Record<string, number> = { matrix: 4, matrix3d: 12 };
+  const i = TX_INDEX[fn];
+  if (i === undefined || parts.length <= i) return 0;
   const tx = parts[i];
   return Number.isFinite(tx) ? tx : 0;
 }
@@ -171,6 +172,13 @@ function transitionMs(el: HTMLElement): number {
   const n = Number.parseFloat(d);
   if (!Number.isFinite(n)) return 0;
   return d.endsWith("ms") ? n : n * 1000;
+}
+
+/** Hand one property to the motion tokens for the length of a settle. */
+function armTransition(el: HTMLElement, property: "transform" | "opacity"): void {
+  el.style.transitionProperty = property;
+  el.style.transitionDuration = "var(--motion-settled)";
+  el.style.transitionTimingFunction = "var(--motion-ease-out)";
 }
 
 interface Gesture {
@@ -187,6 +195,10 @@ interface Gesture {
   abandoned: boolean;
   offset: number;
   samples: DragSample[];
+  /** The settle this grab INTERRUPTED, if any. A tap that lands on a drawer
+   *  mid-flight must let that settle finish rather than dumping the drawer back
+   *  where it started — the operator already completed that close. */
+  interrupted: "closed" | "open" | null;
 }
 
 export interface DrawerDragHandlers {
@@ -214,9 +226,8 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
   const gesture = React.useRef<Gesture | null>(null);
   const frame = React.useRef(0);
   const settleTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Latest settle wins. A settle started before a new grab must not fire its
-  // completion into the middle of that grab.
-  const settleId = React.useRef(0);
+  /** Where the settle in flight was heading, or null when nothing is settling. */
+  const inFlight = React.useRef<"closed" | "open" | null>(null);
 
   const paint = React.useCallback(() => {
     frame.current = 0;
@@ -264,8 +275,10 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
     }
   }, []);
 
+  /** Abandon any settle in flight. Called both by a new grab and by settle()
+   *  itself, so `pointerup` and `pointercancel` arriving for the same pointer
+   *  clear the first timer rather than orphaning its handle. */
   const cancelSettle = React.useCallback(() => {
-    settleId.current += 1;
     if (settleTimer.current !== null) {
       clearTimeout(settleTimer.current);
       settleTimer.current = null;
@@ -281,13 +294,17 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
     const el = drawer.current;
     const ov = overlay.current;
     if (!el) return;
+    cancelSettle();
     const to = target === "closed" ? width : 0;
     // A compositor layer costs memory for a gesture that happens a few times a
     // service. It exists for the drag and no longer.
     el.style.willChange = "";
 
+    inFlight.current = target;
+
     const finish = () => {
       settleTimer.current = null;
+      inFlight.current = null;
       gesture.current = null;
       if (target === "closed") {
         // Leave the transform where it is: the element unmounts from here, and
@@ -300,37 +317,29 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
 
     if (prefersReducedMotion()) {
       // The DRAG still tracked the finger — direct manipulation is not the
-      // unrequested motion the setting is about. Only the settle is instant.
-      el.style.transitionProperty = "none";
-      el.style.transform = `translate3d(${-to}px, 0, 0)`;
-      if (ov) {
-        ov.style.transitionProperty = "none";
-        ov.style.opacity = target === "closed" ? "0" : "1";
-      }
+      // unrequested motion the setting is about. Only the settle is instant,
+      // which is what "hold this position, with nothing transitioning" already
+      // means: freeze() at the destination rather than a second copy of it.
+      freeze(el, ov, -to, width);
       finish();
       return;
     }
 
     // The tokens by name, not a literal: --motion-settled is what everything
     // else that travels uses.
-    for (const node of [el, ov]) {
-      if (!node) continue;
-      node.style.transitionProperty = node === el ? "transform" : "opacity";
-      node.style.transitionDuration = "var(--motion-settled)";
-      node.style.transitionTimingFunction = "var(--motion-ease-out)";
-    }
+    armTransition(el, "transform");
     el.style.transform = `translate3d(${-to}px, 0, 0)`;
-    if (ov) ov.style.opacity = target === "closed" ? "0" : "1";
+    if (ov) {
+      armTransition(ov, "opacity");
+      ov.style.opacity = String(scrimOpacity(to, width));
+    }
 
-    const id = ++settleId.current;
     // A timer rather than `transitionend`: that event does not fire when the
     // resolved duration is 0, and it fires per-property on an element that may
     // grow another transition later. The read-back duration already includes
     // whatever the reduced-motion override did to it.
-    settleTimer.current = setTimeout(() => {
-      if (settleId.current === id) finish();
-    }, transitionMs(el) + 40);
-  }, [thaw, onClose]);
+    settleTimer.current = setTimeout(finish, transitionMs(el) + 40);
+  }, [thaw, onClose, cancelSettle, freeze]);
 
   React.useEffect(() => () => {
     if (frame.current) cancelAnimationFrame(frame.current);
@@ -342,6 +351,13 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
     if (!el) return;
     // Left button only for a mouse; touch and pen report button 0 too.
     if (e.button !== 0) return;
+    // ONE pointer owns the gesture. A second finger — a palm graze mid-drag, or
+    // a two-finger scroll of the sidebar — would otherwise overwrite the first
+    // one's state wholesale, orphaning its moves (they now fail the pointerId
+    // check) and, if the second lifts without dragging, thawing the drawer back
+    // open from under a finger that is still holding it.
+    if (!e.isPrimary || gesture.current) return;
+    const interrupted = inFlight.current;
     cancelSettle();
     // ADOPT THE LIVE TRANSFORM. Not a stored open/closed flag — a drawer that is
     // settling is at some fraction of its travel, and that fraction is where
@@ -359,6 +375,7 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
       abandoned: false,
       offset: -live,
       samples: [{ x: e.clientX, t: e.timeStamp }],
+      interrupted,
     };
   }, [cancelSettle, freeze]);
 
@@ -366,6 +383,14 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
     const g = gesture.current;
     const el = drawer.current;
     if (!g || !el || g.abandoned || e.pointerId !== g.pointerId) return;
+    // Nothing is pressed, so this is a hover, not a drag. A mouse reuses
+    // pointerId 1 for every gesture, so without this a gesture left over from a
+    // drawer that unmounted mid-drag would resume against a fresh element and
+    // follow the pointer with no button down.
+    if (e.buttons === 0) {
+      gesture.current = null;
+      return;
+    }
     const dx = e.clientX - g.startX;
     const dy = e.clientY - g.startY;
 
@@ -389,10 +414,17 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
       // drawer itself.
       try {
         el.setPointerCapture(g.pointerId);
-      } catch {
-        // Not fatal: without capture the drag still tracks while the pointer is
-        // over the drawer, and pointercancel settles it if it leaves. Rethrowing
-        // would abort a gesture over a browser quirk.
+      } catch (err) {
+        // Deliberately not rethrown: without capture the drag still tracks while
+        // the pointer is over the drawer, and pointercancel settles it if it
+        // leaves, so aborting the whole gesture would be the worse outcome. But
+        // it is REPORTED, because the failure this actually catches is
+        // NotFoundError — the pointer is no longer active — and a drawer that
+        // "sometimes lets go" is otherwise silent.
+        console.warn(
+          `[drawer-drag] pointer capture refused for pointer ${g.pointerId}; the drag will drop if the pointer leaves the drawer`,
+          err,
+        );
       }
       el.style.willChange = "transform";
     }
@@ -415,9 +447,16 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
       frame.current = 0;
     }
     if (!g.engaged || g.abandoned) {
-      // A tap, or a scroll. Nothing moved; hand the styles back.
+      // A tap, or a scroll. Nothing moved.
+      //
+      // If it landed on a drawer that was still travelling, put that settle back
+      // rather than thawing: thawing clears the transform, which slams a drawer
+      // the operator had ALREADY closed back to fully open and never calls
+      // onClose, leaving it open for good.
+      const resume = g.interrupted;
       gesture.current = null;
-      thaw();
+      if (resume) settle(resume, g.width);
+      else thaw();
       return;
     }
     // The lift position is deliberately NOT appended as a sample: it would make
@@ -431,6 +470,19 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
   const onPointerCancel = React.useCallback((e: React.PointerEvent) => endGesture(e, true), [endGesture]);
 
   const drawerRef = React.useCallback((el: HTMLElement | null) => {
+    // A drawer can leave mid-gesture — Escape, or a route change — and its
+    // pointerup then never reaches a handler bound to it. Anything left in
+    // `gesture` would be adopted by the NEXT drawer, because a mouse reuses
+    // pointerId 1: the drawer would jump to an offset computed from a startX
+    // recorded before it was ever mounted.
+    if (!el) {
+      gesture.current = null;
+      inFlight.current = null;
+      if (frame.current) {
+        cancelAnimationFrame(frame.current);
+        frame.current = 0;
+      }
+    }
     drawer.current = el;
   }, []);
   const overlayRef = React.useCallback((el: HTMLElement | null) => {

@@ -49,7 +49,9 @@ interface SplitViewProps {
  * nothing there. Claiming the edge also spends the browser's back gesture, which
  * is the operator's most reliable exit from a console with no chrome.
  *
- * Do not reintroduce it. See docs/superpowers/research/2026-08-30-console-chrome-free.md.
+ * Do not reintroduce it. The reasoning above is the whole of it; the measured
+ * write-up is docs/superpowers/research/2026-08-30-console-chrome-free.md,
+ * which arrives with PR #385 and is not in this branch's tree yet.
  *
  * The sidebar subtree is wrapped in a SidebarChromeProvider so its items render
  * icon-only + tooltip when railed and close the drawer on selection (mobile).
@@ -104,33 +106,25 @@ export function SplitView({
 
         <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
 
-        {/* THE ONLY WAY OUT, so it never fades and never dims.
-            Of every route off a chrome-free console this is the only one that
-            exists in every container: the browser's toolbar and address bar are
-            absent in an installed home-screen app, and "back" needs history a
-            bookmarked console does not have.
+        {/* THE ONLY WAY OUT, so it never fades and never dims. It is the one
+            route off a chrome-free console that exists in every container the
+            app is opened in — a browser toolbar and address bar are absent in an
+            installed home-screen app, and Back needs history a bookmarked
+            console does not have.
 
-            Two things it deliberately is not. It does not fade after inactivity
-            and return on tap — on a live console the first press would land on
-            the reveal instead of the fader underneath it. And it does not dim to
-            stay pressable, which would make the one guaranteed exit the least
-            visible thing on a screen an operator reaches for under pressure.
+            Bottom-left: the top of an 844px phone is the hardest place to reach
+            one-handed and is the band this is giving back, and the drawer comes
+            from the left so the control agrees with it. Inset above
+            env(safe-area-inset-bottom).
 
-            BOTTOM-LEFT. Bottom, because the top of an 844px phone is the hardest
-            place to reach one-handed and is exactly the band this is giving back.
-            Left, because the drawer comes from the left, so the control and the
-            panel it opens agree about direction. Inset above the safe area so
-            Safari's bottom bar and the home indicator do not sit under it.
+            It overlaps whatever is under it and takes the tap — a console IS
+            buttons, so any fixed position covers something on some layout. It is
+            exactly its own 44px with no reserved lane, and carries its own
+            opaque ground so it stays legible on a near-black canvas.
 
-            IT OVERLAPS WHATEVER IS UNDER IT, and takes the tap. A console IS
-            buttons, so any fixed position covers something on some layout and the
-            app cannot know which. Two things keep that honest rather than
-            hiding it: it is exactly its own 44px footprint, with no reserved lane
-            and no larger hit region — a 44px band across the bottom would give
-            back half of what this change won — and it carries its own opaque
-            ground so it is legible over a near-black canvas, which is what the
-            operator needs to see it and move their object out from under it.
-            44x44 is 0.6% of a 390x844 screen; the chrome it replaces is 10.5%. */}
+            The reasoning behind each of those, and what an operator does when it
+            lands on a control they use, is in
+            docs/features/operator-app.md#running-a-console-without-the-apps-chrome. */}
         {chromeless && (
           <Button
             variant="transparent"

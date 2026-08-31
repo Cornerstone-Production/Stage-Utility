@@ -38,6 +38,7 @@ import { createPortal } from "react-dom";
 import { Maximize2Icon, XIcon } from "lucide-react";
 
 import { useEmbedBoxHeight } from "./embed-box";
+import { prefersReducedMotion } from "../lib/use-slide-on-move";
 
 const OPEN_MS = 260;
 
@@ -168,8 +169,7 @@ export function useExpand(enabled: boolean) {
 
     // Reduced motion still opens and still closes; it just arrives rather than
     // travels.
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    if (reduced) return;
+    if (prefersReducedMotion()) return;
 
     const to = panel.getBoundingClientRect();
     // A zero-sized panel means the layout has not happened yet (jsdom, a

@@ -46,9 +46,18 @@ export function Shell() {
   // Read from the LIVE state, the same source the rail reads, so turning it on
   // takes effect on the console you are standing at rather than on the next
   // reload.
+  //
+  // UNKNOWN IS NOT "SHOW THE BARS". `liveState` is null from first paint until
+  // the hydrate lands — a real interval on a Pi — and answering `false` there
+  // drew both bands and then tore them off again on every cold load of a
+  // chrome-free console, re-laying-out the console under them. So on a console
+  // route the bands wait until the answer is actually known. Nothing is lost by
+  // waiting: ConsoleRoute itself renders null without `stageState`, so the
+  // content area is empty for exactly that window either way.
+  const views = liveState?.views;
   const chromeless = useMemo(
-    () => consoleHidesChrome(pathname, liveState?.views),
-    [pathname, liveState?.views],
+    () => (views ? consoleHidesChrome(pathname, views) : pathname.startsWith("/consoles/")),
+    [pathname, views],
   );
   const { collapsed, toggle } = useSidebarCollapsed();
   const resetKey = useRouteResetKey();
