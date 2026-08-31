@@ -95,13 +95,13 @@ export function ConsoleRoute() {
     // a page of the app. The negative margins cancel that gutter so the console
     // simply IS the content area.
     //
-    // `sm:-mt-4` cancels the TOP of that gutter, which the horizontal pair had
-    // been leaving behind. The shell's `sm:pt-4` is there to give a page air
-    // under the strip; a console has no page to give air to, so the 16px landed
-    // as a band of empty white between the strip and the stage-black, thicker
-    // below the strip's text than above it and reading as part of the bar.
+    // The TOP of that gutter is not cancelled here. It was, with `sm:-mt-4`, and
+    // that was wrong: a negative margin moves the box without giving it the
+    // height back, so `h-full` still measured the padded area and the console
+    // ended 16px short — the white band simply moved from above the console to
+    // below it. The shell does not apply the padding to a console at all now.
     <div
-      className="relative flex h-full min-h-0 flex-col -mx-5 max-sm:-mx-3 sm:-mt-4"
+      className="relative flex h-full min-h-0 flex-col -mx-5 max-sm:-mx-3"
       // Proximity, not a hover region. A region big enough to aim at is also a
       // region that swallows every click inside it, and the top-right corner of
       // a console is a perfectly reasonable place to put a control. This watches

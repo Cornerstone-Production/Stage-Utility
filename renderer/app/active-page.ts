@@ -81,6 +81,21 @@ export function consolePages(views: readonly View[] | undefined): PageIdentity[]
 }
 
 /**
+ * Is this pathname a console?
+ *
+ * EXACT match on `/consoles/<id>`, like {@link consoleHidesChrome}, and through
+ * the same list — so it can only be true for a View that really is a console.
+ *
+ * The shell asks because a console is the one page with nothing to give air to.
+ * Every other page gets `sm:pt-4` under the strip; a console fills its area
+ * edge to edge, and that 16px landed as a band of empty white between the strip
+ * and the stage-black.
+ */
+export function isConsolePath(pathname: string, views: readonly View[] | undefined): boolean {
+  return consoleViewList(views).some((v) => pathname === consolePath(v.id));
+}
+
+/**
  * Does the console at this pathname want the shell's chrome hidden?
  *
  * EXACT match on `/consoles/<id>`, never a prefix. A prefix would carry the
