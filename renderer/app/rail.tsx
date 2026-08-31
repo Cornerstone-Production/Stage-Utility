@@ -82,7 +82,14 @@ export function Rail({
   // A rail entry per console View, from the same helper the shell titles a
   // console with. The rail row and the page title cannot disagree about a
   // console's name if only one place decides what it is called.
-  const consoleViews = consoleViewList(state?.views);
+  // Each console's page, built ONCE and used for both jobs below: the candidate
+  // list the matcher runs over, and the row itself. It used to be built twice
+  // per console per render, and the second copy's path was then re-spelled by
+  // hand a third time to decide whether the row was selected.
+  const consoleEntries = consoleViewList(state?.views).map((view) => ({
+    view,
+    page: consolePageFor(view),
+  }));
 
   // Which page is current. resolvePage is the app's ONE matcher; the rail used
   // to carry its own copy of the longest-prefix rule, over a candidate list that
@@ -91,17 +98,17 @@ export function Rail({
   // Resolved before the destinations are built, because a console's icon has to
   // know whether it is the current page — it wears the operator's colour only
   // while selected.
-  const activePath = resolvePage(pathname, consoleViews.map(consolePageFor))?.page.path ?? null;
+  const activePath = resolvePage(pathname, consoleEntries.map((c) => c.page))?.page.path ?? null;
 
-  const consoles: Destination[] = consoleViews.map((v) => ({
+  const consoles: Destination[] = consoleEntries.map(({ view, page }) => ({
     // path, label and description all come from consolePageFor, so the rail row
     // and the page header cannot name the same console two different things.
-    ...consolePageFor(v),
+    ...page,
     // A PLAIN GLYPH. Nothing interactive goes in here: the row itself is a
     // <button>, and putting one inside it is invalid markup whose outer button
     // swallows the click — the page navigated every time an icon was touched.
     // Right-clicking the glyph opens the set, from a portal.
-    icon: <ConsoleRailIcon viewId={v.id} label={v.name} active={activePath === `/consoles/${v.id}`} />,
+    icon: <ConsoleRailIcon viewId={view.id} label={view.name} active={activePath === page.path} />,
     Component: () => null, // routing is by path; the route table owns the component
   }));
 
