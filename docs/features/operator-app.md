@@ -44,6 +44,15 @@ page that takes it works on one platform, does nothing on another, and costs you
 the most reliable way out of a page. The hamburger works everywhere, in a tab and
 in an app added to the home screen alike.
 
+**Drag the open drawer off to the left to close it.** It follows your finger the
+whole way, and the page behind it lightens as it goes, so you can see how far you
+are before you let go. A quick flick closes it however short; a slow drag lets go
+past halfway to close and springs back before that. Catching one that is already
+on its way out picks it up where it is rather than snapping it back. Dragging up
+or down scrolls the drawer as normal, and tapping a page in it just opens that
+page. With reduced motion turned on the drag still follows your finger — it is
+the settle at the end that stops animating.
+
 A page you open arrives at the top, whatever you were reading before it. Picking
 the page you are already on does the same, and resets it to its top view. Back
 and Forward are the exception: they return you to where you were on that page,

@@ -30,6 +30,12 @@ import { leagueById } from "@main/types/scores";
 import { formatClock } from "../lib/clock-format";
 import { cn } from "../lib/cn";
 import { scoreActivity, useScoreActivity } from "./score-activity-store";
+// ONE definition of "does this viewer want motion", in lib. There were two —
+// this file had its own copy without the `typeof window` guards — and a third
+// was about to be added for the drawer drag. The reason it is asked in JS at
+// all is unchanged: the global CSS override collapses `transition-duration`
+// and cannot reach a `transform` or a class set from JS.
+import { prefersReducedMotion } from "../lib/use-slide-on-move";
 
 /** The gap between two cards in the stack, in px. Mirrored in no stylesheet:
  *  the stack is positioned entirely from JS, so this is the only copy. */
@@ -38,18 +44,6 @@ const STACK_GAP = 8;
 /** How long the shell takes to arrive. Matches `.score-host.is-open .score-shell`
  *  in styles.css — nothing inside the shell may transition before this elapses. */
 const SHELL_MS = 620;
-
-/**
- * Involuntary motion is the category this setting exists for most strongly, and
- * a score arriving is the definition of it — the viewer did not ask for it.
- *
- * Checked in JS, not left to the global CSS override at styles.css:371: that
- * override collapses `transition-duration`, and it cannot reach a `transform` or
- * a class this file sets from JS.
- */
-export function prefersReducedMotion(): boolean {
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-}
 
 /**
  * Which side of THIS game a score landed on, or null.

@@ -7,6 +7,7 @@ import { DialogOverlay } from "./dialog";
 import { Button } from "./button";
 import { SidebarChromeProvider } from "./sidebar";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useDrawerDrag } from "@renderer/lib/drawer-drag";
 
 interface SplitViewProps {
   sidebar: React.ReactNode;
@@ -28,14 +29,12 @@ interface SplitViewProps {
   className?: string;
 }
 
-const SWIPE_MIN = 48; // px of horizontal travel to count as a swipe
-
 /**
  * Responsive two-panel shell with three states:
  *  - desktop expanded  → inline sidebar at `expandedWidth`
  *  - desktop collapsed → inline icon rail at `railWidth` (parent toggles `collapsed`)
  *  - mobile            → sidebar hidden; the hamburger opens it as a slide-over
- *                        drawer; swipe left to close
+ *                        drawer, which you can drag off to the left to close
  *
  * THE HAMBURGER IS THE ONLY WAY IN. There was also a 16px left-edge strip that
  * opened the drawer, and it is gone. It sat inside iOS Safari's back-gesture
@@ -75,22 +74,12 @@ export function SplitView({
   const closeDrawer = React.useCallback(() => setDrawerOpen(false), []);
   const chrome = { collapsed: railed, isMobile, closeDrawer };
 
-  // Touch swipe: swipe left on the open drawer closes it. There is no
-  // open-swipe — see the note above the component.
-  const touchStart = React.useRef<{ x: number; y: number } | null>(null);
-  const onTouchStart = (e: React.TouchEvent) => {
-    const t = e.touches[0];
-    touchStart.current = { x: t.clientX, y: t.clientY };
-  };
-  const onTouchEndClose = (e: React.TouchEvent) => {
-    const start = touchStart.current;
-    touchStart.current = null;
-    if (!start) return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - start.x;
-    const dy = t.clientY - start.y;
-    if (dx < -SWIPE_MIN && Math.abs(dx) > Math.abs(dy) * 1.5) closeDrawer();
-  };
+  // Drag the drawer off to the left to close it, with the drawer under the
+  // finger the whole way. There is no open-swipe — see the note above.
+  // Destructured, not held as an object: the lint rule reads a member access on
+  // a hook result that carries refs as a ref read during render.
+  const { drawerRef, overlayRef, onPointerDown, onPointerMove, onPointerUp, onPointerCancel } =
+    useDrawerDrag(closeDrawer);
 
   if (isMobile) {
     return (
@@ -111,11 +100,20 @@ export function SplitView({
 
         <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
           <DialogPrimitive.Portal>
-            <DialogOverlay />
+            <DialogOverlay ref={overlayRef} />
             <DialogPrimitive.Content
               aria-describedby={undefined}
-              onTouchStart={onTouchStart}
-              onTouchEnd={onTouchEndClose}
+              ref={drawerRef}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerCancel}
+              // pan-y hands the browser the vertical axis — the sidebar inside
+              // scrolls, and that scroll stays native — and leaves us the
+              // horizontal one, declaratively. It is also the reason nothing
+              // here needs a non-passive listener to call preventDefault, which
+              // a React synthetic touch handler could not do anyway.
+              style={{ touchAction: "pan-y" }}
               // bg-rail, not bg-surface: on mobile this drawer IS the rail, so
               // anything showing through it — an overscroll bounce, a rounding
               // gap — should be the rail's colour rather than the content's.
