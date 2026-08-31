@@ -133,9 +133,12 @@ describe("every status channel publishes a version", () => {
   // answers a hydrate route and the SSE hello burst from getLatest(), and each
   // has a renderer hook that compares that answer against a push.
   //
-  // An EXACT list, not a floor: an eighth StatusIntegration arriving without a
-  // hook and without a line here is the drift this repo keeps paying for.
-  test("all seven integrations stamp their hydrate read", async () => {
+  // An EXACT list, not a floor: another StatusIntegration arriving without a
+  // hook and without a line here is the drift this repo keeps paying for. The
+  // COUNT deliberately does not appear in the title either — it said "seven"
+  // while the list below held nine, which is the same drift wearing a different
+  // hat.
+  test("every StatusIntegration stamps its hydrate read", async () => {
     const services = await Promise.all([
       import("./obs-service.js").then((m) => ["obs:status", m.obsService] as const),
       import("./reaper-service.js").then((m) => ["reaper:status", m.reaperService] as const),

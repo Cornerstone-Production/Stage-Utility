@@ -9,6 +9,14 @@ the plan, view, output and slot routes return the updated `StageState`, while th
 rest return the collection they touched (`{targets}`, `{rules}`, `{presets}`) or
 an outcome (`{ok, …}`). Creating something answers `201`.
 
+Failures answer `{error}` with the status that says whose problem it is: `400`
+for a body or query the caller got wrong, `409` for something the server cannot
+do right now (editing a service that is recording), `413` for an over-limit
+body, and `502` for a read that only failed because Planning Center could not be
+reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
+`/api/team-positions` and the two `/api/scriptview` reads. A `500` means this app
+broke, and only that.
+
 ## What is protected, and what is not
 
 The app is a LAN appliance with no user accounts, and **every route below is
@@ -276,6 +284,11 @@ recorder is running. Pass `{override: true}` to go anyway.
 `/api/baptism-auto-start`, `/api/ndi-enabled`, `/api/onboarding-dismissed`,
 `/api/saved-colors`, `/api/icon-color`, `/api/icon-glyph`,
 `/api/caption-colors`.
+
+`/api/checklist-sources` takes `{categories}` and `{teams}` — plan-note category
+and team names, not ids. Either may be omitted and is then left as it stands; a
+present one must be a `string[]`, and `[]` clears that list. A body naming
+neither is a 400.
 
 **Branding & events**
 | Method | Path | Purpose |

@@ -40,6 +40,21 @@ export interface TriggerDef {
 export interface ConditionDef {
   id: string;
   label: string;
+  /**
+   * The broadcast channel whose snapshot this reads, or null when it reads
+   * nothing a producer can throttle (the clock, the current service type).
+   *
+   * Conditions are PULLED at the moment a rule fires, so they never appear on
+   * the bus and the trigger-channel demand loop cannot see them — a rule that
+   * triggers on PCO and merely ASKS about a ProVideoPlayer layer would read a
+   * snapshot at the idle cadence. automation-engine.ts registers demand by
+   * iterating this registry, so the answer lives on the definition.
+   *
+   * Required, and nullable rather than optional, so a new condition cannot be
+   * written without deciding: a hand-maintained table beside the registry lost
+   * five entries with the whole suite green.
+   */
+  channel: string | null;
   params: ParamDef[];
   /** PURE. Does this qualifier hold right now? */
   holds(ctx: ConditionCtx, params: Record<string, unknown>, now: number): boolean;

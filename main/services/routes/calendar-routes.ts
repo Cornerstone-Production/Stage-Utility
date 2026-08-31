@@ -38,7 +38,7 @@ export async function calendarRoutes(c: RouteCtx): Promise<void> {
       // would blame the caller for the upstream being down. Rethrowing instead
       // would leave the response unsent, which the dispatcher reads as unhandled
       // — see the ONE RULE in context.ts.
-      json(res, { error: errorMessage(err) }, 502);
+      error(res, errorMessage(err), 502);
     }
     return;
   }
@@ -49,7 +49,7 @@ export async function calendarRoutes(c: RouteCtx): Promise<void> {
     try {
       json(res, await stageController.listCalendarSources());
     } catch (err) {
-      json(res, { error: errorMessage(err) }, 502);
+      error(res, errorMessage(err), 502);
     }
     return;
   }

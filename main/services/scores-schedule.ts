@@ -1,4 +1,11 @@
-// scores-schedule.ts — when to ask ESPN again, and when to stop asking.
+// scores-schedule.ts — how long to wait before asking ESPN again.
+//
+// The poller wakes and fetches every time; the only lever is the delay. This
+// used to also return a `poll: boolean` meaning "skip the fetch on this
+// wake-up", which nothing ever read — connect() fetched unconditionally, so a
+// followed team whose games had all finished still hit ESPN every 30 minutes
+// while eight assertions said it had stopped. The tiering is entirely in
+// delayMs, and saying so here is the point of the change.
 //
 // Pure, and takes `now` rather than reading a clock, so every tier is testable.
 //
@@ -23,8 +30,6 @@ const RAMP_WINDOW_MS = 3_600_000;
 const DORMANT_MS = 1_800_000;
 
 export interface PollDecision {
-  /** Whether to fetch on this wake-up at all. */
-  poll: boolean;
   /** How long until the next wake-up. Always finite and positive. */
   delayMs: number;
 }
@@ -42,7 +47,7 @@ export function nextPoll(
   inDemand: boolean,
 ): PollDecision {
   if (games.some((g) => g.state === "in")) {
-    return { poll: true, delayMs: inDemand ? ACTIVE_MS : UNWATCHED_MS };
+    return { delayMs: inDemand ? ACTIVE_MS : UNWATCHED_MS };
   }
 
   const starts = games
@@ -52,14 +57,14 @@ export function nextPoll(
     .sort((a, b) => a - b);
 
   const next = starts[0];
-  if (next === undefined) return { poll: false, delayMs: DORMANT_MS };
+  if (next === undefined) return { delayMs: DORMANT_MS };
 
   const until = next - now;
-  if (until <= RAMP_WINDOW_MS) return { poll: true, delayMs: RAMP_MS };
+  if (until <= RAMP_WINDOW_MS) return { delayMs: RAMP_MS };
 
   // Never sleep past the moment the ramp window opens — the same clamp
   // service-window.ts uses so a long dormant delay cannot swallow the next
   // window's start. The floor is what keeps a delay from reaching zero and
   // spinning the poll against an endpoint that blocks by IP.
-  return { poll: false, delayMs: Math.max(60_000, Math.min(DORMANT_MS, until - RAMP_WINDOW_MS)) };
+  return { delayMs: Math.max(60_000, Math.min(DORMANT_MS, until - RAMP_WINDOW_MS)) };
 }
