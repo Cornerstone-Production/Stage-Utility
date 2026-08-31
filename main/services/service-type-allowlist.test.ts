@@ -172,7 +172,13 @@ describe("no organisation's ids are baked into the source", () => {
       found.filter((f) => f.endsWith(".json")).sort(),
       [
         "main/services/fixtures/espn-football-in-play.json",
+        // Both arrived with the midnight-carry and poll-tier fixes. Checked when
+        // they were added to this list: every id in them is invented (700001,
+        // 9101 and friends), the only long numbers are dates, and no real
+        // organisation name appears.
+        "main/services/fixtures/espn-late-slate.json",
         "main/services/fixtures/espn-mlb-doubleheader.json",
+        "main/services/fixtures/espn-next-slate.json",
         "main/services/fixtures/espn-nfl-scoreboard.json",
         "main/services/fixtures/pvp-playlists.json",
         "main/services/fixtures/pvp-workspace.json",
