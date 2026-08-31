@@ -216,25 +216,37 @@ export async function readPcoPages<T extends PcoNode = PcoNode>(
 export function pcoUrlFrom(candidate: unknown, base: string): string | null {
   if (!sameOrigin(candidate, base)) return null;
   try {
-    const parsed = new URL(candidate);
-    // Built by ASSIGNMENT, never by `new URL(path, origin)`.
-    //
-    // The two-argument constructor RE-PARSES its first argument, and a pathname
-    // beginning with `//` is read as a protocol-relative AUTHORITY, not a path.
-    // So a candidate of
-    //     https://api.planningcenteronline.com//attacker.example/steal
-    // passes sameOrigin (its origin really is PCO's), yields a pathname of
-    // `//attacker.example/steal`, and rebuilds as https://attacker.example/steal
-    // -- off-origin, with pcoFetch about to attach the app id and secret to it.
-    //
-    // The setters write one component each and cannot touch the origin.
-    const rebuilt = new URL(base);
-    rebuilt.pathname = parsed.pathname;
-    rebuilt.search = parsed.search;
-    return rebuilt.toString();
+    return rebuildOn(base, new URL(candidate));
   } catch {
     return null;
   }
+}
+
+/**
+ * `base`'s origin, `parsed`'s path and query. The one rebuild, for both callers.
+ *
+ * Built by ASSIGNMENT, never by `new URL(path, origin)`.
+ *
+ * The two-argument constructor RE-PARSES its first argument, and a pathname
+ * beginning with `//` is read as a protocol-relative AUTHORITY, not a path. So a
+ * candidate of
+ *     https://api.planningcenteronline.com//attacker.example/steal
+ * passes sameOrigin (its origin really is PCO's), yields a pathname of
+ * `//attacker.example/steal`, and rebuilds as https://attacker.example/steal --
+ * off-origin, with pcoFetch about to attach the app id and secret to it.
+ * `\\attacker.example` reaches the same place, because WHATWG folds a backslash
+ * to a slash for a special scheme.
+ *
+ * The setters write one component each and cannot touch the origin. This is the
+ * whole of the fix for that bug, and it is written once: pcoUrlFrom and
+ * pinnedToPco each had a copy, differing only in whether a bad candidate is
+ * rejected or forced, which is not the part that is easy to get wrong.
+ */
+function rebuildOn(base: string, parsed: URL): string {
+  const rebuilt = new URL(base);
+  rebuilt.pathname = parsed.pathname;
+  rebuilt.search = parsed.search;
+  return rebuilt.toString();
 }
 /**
  * The one URL that reaches `fetch`, forced onto PCO's own origin.
@@ -251,16 +263,16 @@ export function pcoUrlFrom(candidate: unknown, base: string): string | null {
  * id and secret on it is not a failure to swallow.
  */
 export function pinnedToPco(url: string): string {
-  const base = new URL(PCO_BASE);
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
     throw new Error(`pcoFetch was handed a URL it cannot parse: ${scrub(url)}`);
   }
-  base.pathname = parsed.pathname;
-  base.search = parsed.search;
-  return base.toString();
+  // The same rebuild pcoUrlFrom uses. The two differ only in what they do with a
+  // candidate that is not PCO's — reject, or force — never in how the URL is put
+  // back together, which is where the protocol-relative bug lived.
+  return rebuildOn(PCO_BASE, parsed);
 }
 
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with

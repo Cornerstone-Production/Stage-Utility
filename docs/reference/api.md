@@ -311,7 +311,8 @@ something to change:
 
 `prodcom:transcript` · `slots:devices` · `integrations:state-changed` ·
 `wireless:connections-changed` · `osc:targets-changed` ·
-`rosstalk:targets-changed` · `rosstalk:simulated` · `automation:rules` ·
+`rosstalk:targets-changed` · `scores:favourites-changed` ·
+`rosstalk:simulated` · `automation:rules` ·
 `automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` ·
 `display:refresh` · `settings:allowedServiceTypeIds-changed`
 

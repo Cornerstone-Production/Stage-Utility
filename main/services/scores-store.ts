@@ -8,6 +8,7 @@
 // GLOBAL, not per-device, like bar-config: two operators on two machines should
 // be following the same teams.
 
+import { broadcast } from "./broadcaster.js";
 import { DataStore } from "./data-store.js";
 import type { ScoreFavourite, ScoresConfig } from "../types/scores.js";
 
@@ -26,6 +27,13 @@ export const scoresStore = {
   },
   async setFavourites(favourites: ScoreFavourite[]): Promise<ScoresConfig> {
     cache = await store.update((c) => ({ ...c, favourites }));
+    // ANNOUNCED, like the other three lists that are an integration's setup
+    // (wireless connections, OSC targets, RossTalk targets). This list was the
+    // odd one out: the poller was restarted by an explicit call from the one
+    // route that writes it, so a second writer that forgot it would leave scores
+    // stopped with the panel reporting teams followed. integration-manager
+    // answers this channel; see setupListRefreshers there.
+    broadcast("scores:favourites-changed", cache);
     return cache;
   },
 };

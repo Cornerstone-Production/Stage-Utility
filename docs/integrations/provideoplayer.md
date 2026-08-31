@@ -84,6 +84,9 @@ is wrong until the next poll. It is drawn quietly, never without a current cue t
 anchor it, never past the end of a playlist, and it can be switched off. The
 playlist tree is read at most once every five minutes — and again within thirty
 seconds if a layer plays a cue Stage has not seen — so it costs nothing per poll.
+That read runs beside the layer poll rather than in front of it, so a playlist
+endpoint that hangs cannot hold up the layer view; the cost is that a newly read
+tree first shows on the following poll, a second later.
 
 **HTTPS is not supported against a self-signed certificate.** PVP's own
 documentation uses `curl -k` throughout, which implies one, and this app will not

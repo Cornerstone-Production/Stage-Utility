@@ -78,7 +78,13 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
     // still, which dropped its duration, which made its progress bar and its
     // countdown VANISH mid-service rather than freezing where they were.
     const timed = hasMedia && remaining > 0;
-    const state: PvpLayerState = !hasMedia ? "empty" : playbackRate > 0 || timed ? "video" : "still";
+    // Written out, not as a nested ternary: this is the three-state decision the
+    // twelve lines of comment above explain, and it is worth being able to read
+    // one arm at a time.
+    let state: PvpLayerState;
+    if (!hasMedia) state = "empty";
+    else if (playbackRate > 0 || timed) state = "video";
+    else state = "still";
 
     out.push({
       uuid,

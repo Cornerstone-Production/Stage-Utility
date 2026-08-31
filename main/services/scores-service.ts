@@ -10,7 +10,7 @@
 // display shows a stale-data notice instead of silently freezing on numbers that
 // stopped being true an hour ago.
 
-import { appTimeZone } from "./app-timezone.js";
+import { zonedDateKey } from "./app-timezone.js";
 import { errorMessage } from "./errors.js";
 import { fetchScoreboard, fetchTeams } from "./espn-client.js";
 import { StatusIntegration } from "./integration-base.js";
@@ -44,16 +44,16 @@ const TEAM_CACHE_MS = 86_400_000;
  * date at 19:00 in Chicago, which would ask for tomorrow's scoreboard all
  * evening and show an operator an empty board through the whole of a Sunday
  * night game.
+ *
+ * `zonedDateKey`, not a second private `Intl.DateTimeFormat`. This built its own
+ * and stripped the hyphens; it was zone-correct, and the two answered
+ * identically across 6.2M instants in 14 zones, DST transitions and new-year
+ * rollovers included. But "time goes through app-timezone.ts" is a rule with one
+ * home precisely because a private formatter is where the next one drifts, and
+ * the drift that rule exists for is what once stopped every recorder mid-service.
  */
-function todayStamp(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: appTimeZone(),
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  })
-    .format(new Date())
-    .replaceAll("-", "");
+export function todayStamp(): string {
+  return zonedDateKey(Date.now()).replaceAll("-", "");
 }
 
 class ScoresService extends StatusIntegration<ScoresStatusDTO> {

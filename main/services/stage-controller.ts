@@ -898,15 +898,14 @@ export class StageController {
    */
   async setChecklistSources(categories: string[], teams: string[]): Promise<StageState> {
     const clean = (xs: string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
-    await settingsStore.patch({
-      checklistNoteCategories: clean(categories),
-      checklistNoteTeams: clean(teams),
-    });
-    this.state = {
-      ...this.state,
-      checklistNoteCategories: clean(categories),
-      checklistNoteTeams: clean(teams),
-    };
+    // Computed ONCE each, then written to both. Calling clean() four times made
+    // what is saved and what is broadcast two independent computations of the
+    // same thing — which is only harmless while they agree, and the whole point
+    // of a normalising step is that somebody will change it.
+    const checklistNoteCategories = clean(categories);
+    const checklistNoteTeams = clean(teams);
+    await settingsStore.patch({ checklistNoteCategories, checklistNoteTeams });
+    this.state = { ...this.state, checklistNoteCategories, checklistNoteTeams };
     this.broadcast();
     return this.state;
   }
