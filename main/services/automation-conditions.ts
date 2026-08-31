@@ -109,7 +109,10 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "pvp.layer-is-playing": pvpLayerCondition(
     "pvp.layer-is-playing",
     "A ProVideoPlayer layer is playing a video",
-    // playbackRate, not isPlaying: a still image reports isPlaying true.
+    // `state`, which parseWorkspace derives from playbackRate and timeRemaining
+    // — NOT PVP's own isPlaying, which a still image reports true. So "video"
+    // covers a paused clip as well as a rolling one: both are a video on that
+    // layer, which is the question this condition asks.
     (l) => l.state === "video",
   ),
   "pvp.layer-is-hidden": pvpLayerCondition(

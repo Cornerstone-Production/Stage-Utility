@@ -175,7 +175,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.setTimezone(tz));
       } catch (err) {
-        json(res, { error: errorMessage(err) }, 400);
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -185,7 +185,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.setHourCycle(body.hourCycle as "12h" | "24h"));
       } catch (err) {
-        json(res, { error: errorMessage(err) }, 400);
+        error(res, errorMessage(err));
       }
       return;
     }

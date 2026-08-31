@@ -101,7 +101,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
         // 502, not an empty list. An empty dropdown and a failed request look
         // identical to the operator, and the panel is required to say which
         // league could not be loaded.
-        json(res, { error: errorMessage(err) }, 502);
+        error(res, errorMessage(err), 502);
       }
       return;
     }
@@ -127,7 +127,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await integrationManager.getSensourceLocations());
       } catch (err) {
-        json(res, { error: errorMessage(err) }, 502);
+        error(res, errorMessage(err), 502);
       }
       return;
     }
@@ -135,7 +135,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await integrationManager.getSensourceZones());
       } catch (err) {
-        json(res, { error: errorMessage(err) }, 502);
+        error(res, errorMessage(err), 502);
       }
       return;
     }
