@@ -966,21 +966,16 @@ class IntegrationManager {
 
     // Persist non-secret config.
     //
-    // patch, not load-mutate-save. Saving the whole object writes back every
-    // field as it was read, so anything written in between is undone -- and one
-    // of those fields is idFloors, the high-water mark that stops a deleted view
-    // or display id being handed out again. Creating a view while this saved
-    // would have rolled the floor back to before it existed.
-    const settings = await settingsStore.load();
-    // Built once and used for BOTH the write and the mask below. The masked
-    // config used to be read back off the object this mutated in place, so
-    // dropping the mutation without this would leave the state holding the
-    // PREVIOUS config -- which is credentials saved and the integration never
-    // started.
-    const merged = { ...(settings.integrationConfigs?.[id] ?? {}), ...nonSecretConfig };
-    await settingsStore.patch({
-      integrationConfigs: { ...settings.integrationConfigs, [id]: merged },
-    });
+    // patchIntegrationConfig, not load-then-patch. `patch` is atomic for the
+    // values handed to it, and this hands it a whole `integrationConfigs` map
+    // built from a load() taken OUTSIDE the write queue — so two integrations
+    // saved at once both read the map before either write lands, and the second
+    // writes one that never heard of the first. Merging inside store.update is
+    // what makes the read and the write indivisible.
+    //
+    // It returns the merged config because the mask below needs it. Reading it
+    // back off a second load() is the other half of the same race.
+    const merged = await settingsStore.patchIntegrationConfig(id, nonSecretConfig);
 
     // Persist secrets (merge with existing so unchanged ones survive).
     if (Object.keys(newSecrets).length > 0) {
@@ -1036,13 +1031,10 @@ class IntegrationManager {
 
     this.states.set(id, { ...state, enabled });
 
-    // patch, for the reason spelled out in the config save above: a whole-object
-    // save undoes anything written between the read and the write, id floors
-    // included.
-    const settings = await settingsStore.load();
-    await settingsStore.patch({
-      integrationEnabled: { ...settings.integrationEnabled, [id]: enabled },
-    });
+    // Merged inside the write queue, for the reason spelled out in the config
+    // save above: a nested spread built from a load() outside the queue is a
+    // read-modify-write, and two integrations toggled at once lose one of them.
+    await settingsStore.patchIntegrationEnabled(id, enabled);
 
     if (id === "wireless") {
       // Master toggle: re-apply connections without reloading from disk.

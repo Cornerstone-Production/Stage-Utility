@@ -169,6 +169,26 @@ describe("ordering within a day", () => {
     const day = grid.days.find((d) => d.date === "2026-08-14");
     assert.deepEqual(day?.events.map((e) => e.id), ["allday", "early", "late"]);
   });
+
+  it("breaks a TIE on id, so two events starting together do not reshuffle", () => {
+    // Three distinct times leave the id tiebreak free: `return byStart;` passed
+    // the whole file. Two services in different rooms at 9am is the ordinary
+    // case, and a square whose two rows swap between renders reads as the
+    // calendar changing under the operator.
+    //
+    // Fed in REVERSE id order, so the answer cannot come from the input order.
+    const at9 = "2026-08-14T14:00:00Z";
+    const grid = buildGrid(
+      [
+        event("b-second-service", at9, "2026-08-14T15:00:00Z"),
+        event("a-first-service", at9, "2026-08-14T15:00:00Z"),
+      ],
+      "2026-08-10T12:00:00Z",
+      ZONE,
+    );
+    const day = grid.days.find((d) => d.date === "2026-08-14");
+    assert.deepEqual(day?.events.map((e) => e.id), ["a-first-service", "b-second-service"]);
+  });
 });
 
 describe("gridWindow", () => {

@@ -207,6 +207,50 @@ describe("parseScoreboard", () => {
     assert.deepEqual(parseScoreboard("mlb", doctored, new Set([NYY])), []);
   });
 
+  test("hands the slate back SORTED, whatever order ESPN sent it in", () => {
+    // `return sortGames(out)` was free: the fixture already arrives ascending,
+    // so `return out` passed the whole file. ESPN promises no order between
+    // polls, and a stack of cards that reshuffles is unreadable.
+    const forwards = parseScoreboard("mlb", MLB, allTeamIds(MLB)).map((g) => g.eventId);
+    const reversed = structuredClone(MLB);
+    reversed.events.reverse();
+    assert.deepEqual(
+      parseScoreboard("mlb", reversed, allTeamIds(MLB)).map((g) => g.eventId),
+      forwards,
+      "a reversed payload came back in a different order",
+    );
+  });
+
+  test("an EMPTY favourites set follows nothing, not everything", () => {
+    // "Follow everything" is not a state this feature has. Adding
+    // `followed.size > 0 &&` to the guard — a very natural-looking fix —
+    // silently turns an empty list into every game in the league, and the
+    // poller then renders fifteen games nobody asked for.
+    assert.deepEqual(parseScoreboard("mlb", MLB, new Set()), []);
+  });
+
+  test("a scheduled game is 'pre', and so is one whose status makes no sense", () => {
+    // parseState's default was unpinned: `v === "post" ? "post" : "in"` left the
+    // file green, which renders every scheduled game as LIVE.
+    const scheduled = parseScoreboard("mlb", MLB, allTeamIds(MLB)).filter((g) => g.state === "pre");
+    assert.equal(scheduled.length, 5, "the fixture must contain scheduled games");
+
+    const doctored = structuredClone(MLB);
+    const ev = doctored.events[0];
+    const id = ev.competitions[0].competitors[0].id;
+    for (const state of ["pre", "nonsense", undefined]) {
+      if (state === undefined) delete ev.status.type.state;
+      else ev.status.type = { ...ev.status.type, state };
+      const g = parseScoreboard("mlb", doctored, new Set([id]))[0];
+      assert.equal(g.state, "pre", `state ${JSON.stringify(state)} did not read as "pre"`);
+    }
+    // And the two states that ARE real still come through.
+    ev.status.type = { ...ev.status.type, state: "in" };
+    assert.equal(parseScoreboard("mlb", doctored, new Set([id]))[0].state, "in");
+    ev.status.type = { ...ev.status.type, state: "post" };
+    assert.equal(parseScoreboard("mlb", doctored, new Set([id]))[0].state, "post");
+  });
+
   test("a delayed game reports delayed, even though its state is in", () => {
     const doctored = structuredClone(MLB);
     const ev = doctored.events[0];
@@ -296,15 +340,30 @@ describe("diffScores", () => {
 });
 
 describe("sortGames", () => {
-  test("is stable by start time then eventId, so cards never reshuffle", () => {
-    // ESPN does not guarantee events[] order between polls.
+  test("is ASCENDING by start time, not merely deterministic", () => {
+    // This used to sort a reversed copy and compare it to a sorted original,
+    // which proves the comparator is a function of its inputs and nothing else:
+    // sorting DESCENDING, or ignoring startsAt entirely, both passed it. What a
+    // person expects is the next game first, so that is what is asserted.
     const games = parseScoreboard("mlb", MLB, allTeamIds(MLB));
-    const a = sortGames([...games].reverse());
-    const b = sortGames([...games]);
-    assert.deepEqual(
-      a.map((g) => g.eventId),
-      b.map((g) => g.eventId),
-    );
+    const starts = sortGames([...games].reverse()).map((g) => g.startsAt);
+    assert.deepEqual(starts, [...starts].sort(), "the stack is not in start-time order");
+    // A sorted list of one, or of identical values, would satisfy that alone.
+    assert.ok(starts.length > 1 && starts[0] !== starts[starts.length - 1], "the fixture spans one instant");
+  });
+
+  test("eventId breaks a tie, so a doubleheader never reshuffles", () => {
+    // Four fixture games share 2026-08-29T20:10Z. Without the tiebreak their
+    // relative order is whatever the input order happened to be, and a stack of
+    // cards that reshuffles under the operator between polls is unreadable.
+    const games = parseScoreboard("mlb", MLB, allTeamIds(MLB));
+    const tied = "2026-08-29T20:10Z";
+    const idsAt = (list: readonly ScoreGameDTO[]) =>
+      sortGames(list).filter((g) => g.startsAt === tied).map((g) => g.eventId);
+    const expected = ["401816718", "401816719", "401816720", "401816723"];
+    assert.deepEqual(idsAt(games), expected);
+    // Fed in the opposite order, the answer is the same one.
+    assert.deepEqual(idsAt([...games].reverse()), expected);
   });
 });
 

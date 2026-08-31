@@ -219,6 +219,36 @@ export abstract class StatusIntegration<T extends { connected: boolean; rev?: nu
   }
 
   /**
+   * Is `next` worth a frame?
+   *
+   * THE ONLY THING A SUBCLASS OVERRIDES. The tail below — emit, or else keep
+   * `last` current silently — was copied verbatim into three of them, and the
+   * `else this.last = next` half is easy to read as dead code and drop: it is
+   * what lets a display connecting between changes hydrate with the truth
+   * instead of a stale snapshot, and nothing about the line says so where it is
+   * written out for the fourth time. A pure predicate has nowhere to put that
+   * mistake.
+   *
+   * Shallow, over every key of the DTO. Resi and YouTube each carried a
+   * hand-written copy comparing the same four fields by name, which is a list to
+   * forget to extend the next time a field is added to the DTO. It is also the
+   * wrong answer for any DTO holding an array — a fresh array is never `===` its
+   * predecessor — which is why PVP and scores override it.
+   *
+   * Three integrations override this today: REAPER ticks every poll while
+   * recording on purpose so a timecode display advances; PVP compares a
+   * signature that deliberately omits every time-varying field; scores compares
+   * the games rather than the fetch timestamp.
+   */
+  protected changed(prev: T, next: T): boolean {
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]) as Set<keyof T>;
+    for (const k of keys) {
+      if (prev[k] !== next[k]) return true;
+    }
+    return false;
+  }
+
+  /**
    * Broadcast only when something actually changed; otherwise keep `last` fresh
    * silently.
    *
@@ -227,21 +257,10 @@ export abstract class StatusIntegration<T extends { connected: boolean; rev?: nu
    * current is what lets a display that connects between changes hydrate with
    * the truth instead of a stale snapshot.
    *
-   * Shallow, over every key of the DTO. Resi and YouTube each carried a
-   * hand-written copy comparing the same four fields by name, which is a list to
-   * forget to extend the next time a field is added to the DTO.
-   *
-   * REAPER overrides this: while recording it ticks every poll on purpose, so a
-   * timecode display advances.
+   * Not overridden anywhere: subclasses override `changed`.
    */
   protected emitIfChanged(next: T): void {
-    const prev = this.last;
-    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]) as Set<keyof T>;
-    let changed = false;
-    for (const k of keys) {
-      if (prev[k] !== next[k]) { changed = true; break; }
-    }
-    if (changed) this.emit(next);
+    if (this.changed(this.last, next)) this.emit(next);
     else this.last = next;
   }
 

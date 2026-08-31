@@ -172,9 +172,8 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
    * poll to advance a timecode. A game clock would tempt the same thing; the
    * client counts down locally instead.
    */
-  protected override emitIfChanged(next: ScoresStatusDTO): void {
-    if (scoresChanged(this.last, next)) this.emit(next);
-    else this.last = next;
+  protected override changed(prev: ScoresStatusDTO, next: ScoresStatusDTO): boolean {
+    return scoresChanged(prev, next);
   }
 
   private fail(message: string): void {
