@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { CableIcon, ChevronRightIcon, TriangleAlertIcon } from "lucide-react";
 
-import { invoke, onNotification } from "../lib/api";
+import { invoke } from "../lib/api";
 import { useStageState } from "./use-stage-state";
+import { useStatusChannel } from "./use-status-channel";
 import { resolvePatch, endpointKey } from "../lib/patch-resolve";
 
 type ChainNode = { text: string; kind: "source" | "hop" | "rack" | "console" };
@@ -46,17 +47,21 @@ function PatchChain({ nodes }: { nodes: ChainNode[] }) {
  */
 export function PatchView() {
   const { state } = useStageState();
-  const [file, setFile] = useState<PatchFile | null>(null);
   const [sheetId, setSheetId] = useState<string>("");
   const [tab, setTab] = useState<"in" | "out">("in");
   const [changesOnly, setChangesOnly] = useState(false);
   const [q, setQ] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    invoke<PatchFile>("patch:get").then(setFile).catch(() => setFile(null));
-    return onNotification("patch:updated", (p) => setFile(p as PatchFile));
-  }, []);
+  // Read once, then live on "patch:updated". The ordering between the two is
+  // useStatusChannel's job — see the note there: the read used to be dispatched
+  // first and could land after a push, putting the pre-edit sheet back on a wall
+  // display until somebody saved the patch again. clearOnReadFailure keeps the
+  // old behaviour of showing nothing when the read fails.
+  const readPatch = useCallback(() => invoke<PatchFile>("patch:get"), []);
+  const file = useStatusChannel<PatchFile>(readPatch, "patch:updated", true, {
+    clearOnReadFailure: true,
+  });
   useEffect(() => {
     document.title = `${state?.appName ?? "Stage Utility"} — Patch`;
   }, [state?.appName]);

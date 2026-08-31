@@ -17,10 +17,12 @@ import { onNotification } from "../lib/api";
  * ── Why not "ignore the read once a push has arrived" ──────────────────────
  * Because a push always arrives. `renderer/lib/api.ts` caches the last frame of
  * each hydrated channel and replays it to every late subscriber in a microtask,
- * so any component mounting into an already-open stream is handed the
- * CONNECT-TIME value immediately — which is exactly the stale value the read
- * exists to correct. That flag trades a rare race for a guaranteed regression on
- * every mount after the first.
+ * so any component mounting into an already-open stream is handed a CACHED value
+ * immediately — and the server filters a channel out for a client with nothing
+ * subscribed to it, so once the last subscriber goes away that cache stops being
+ * updated and can be hours old. Correcting exactly that is what the read is for.
+ * A bare "a push has arrived" flag trades a rare race for a guaranteed regression
+ * on every mount after the first.
  *
  * ── What it does instead ───────────────────────────────────────────────────
  * The server stamps a monotonic `rev` on both halves, bumped only when a frame
@@ -36,8 +38,21 @@ import { onNotification } from "../lib/api";
  *     snapshot current between throttled broadcasts, so at the same rev the read
  *     can legitimately be the fresher of the two
  *
- * A payload with no `rev` (an older server) skips the comparison entirely and
- * behaves exactly as this code did before.
+ * ── Channels that cannot carry a rev ─────────────────────────────────
+ * Not every change-driven channel is a StatusIntegration. OSC feedback, the
+ * baptism timer, wireless telemetry, the transcript buffer and the integration
+ * list are pushed by other machinery and stamp nothing, and the same race is the
+ * same bug there — an OSC button showing the wrong lamp until somebody touches
+ * the desk again.
+ *
+ * With no revs to compare, the only fact left is WHICH FRAME IS A REPLAY.
+ * `onNotification` says so, and the answer is exactly what a rev would tell us:
+ * a LIVE frame is something the server sent after this read went out, so it
+ * wins; a REPLAYED frame is the cached snapshot the read exists to correct, so
+ * it does not. That is the identity used above, without the counter.
+ *
+ * A replayed frame still APPLIES — first paint from a cache beats an empty
+ * widget, and it is the reason the cache exists. It just does not veto the read.
  *
  * @param read  issues the one-shot hydrate. A thunk rather than a channel name,
  *              so the invoke call and its quoted channel stay written out at the
@@ -55,7 +70,21 @@ import { onNotification } from "../lib/api";
  *   the strength of a read that just failed. Empty is the honest reading of "we
  *   do not know" there, and it fails toward "go and look at the screen".
  */
-export function useStatusChannel<T extends { rev?: number }>(
+/**
+ * The frame's `rev`, or null when it carries none.
+ *
+ * Read off the value rather than declared in the type parameter: the constraint
+ * that said so was `{ rev?: number }`, which is a WEAK TYPE — every property
+ * optional — so TypeScript rejects any payload with no property in common with
+ * it, which is every rev-less channel and every array-shaped one. The rule is a
+ * fact about the payload at run time, so it is checked at run time.
+ */
+function revOf(frame: unknown): number | null {
+  const rev = (frame as { rev?: unknown } | null)?.rev;
+  return typeof rev === "number" ? rev : null;
+}
+
+export function useStatusChannel<T extends object>(
   read: () => Promise<T | null | undefined>,
   pushChannel: string,
   enabled = true,
@@ -69,20 +98,25 @@ export function useStatusChannel<T extends { rev?: number }>(
 
   // Highest rev applied from a push during THIS hydration window.
   const pushedRev = useRef<number | null>(null);
+  // Whether a LIVE frame (not a replayed cache snapshot) landed in this window.
+  // The rev-less stand-in for `pushedRev` — see the header.
+  const pushedLive = useRef(false);
 
   useEffect(() => {
     if (!enabled) return;
     // A fresh window: a rev left over from a previous `enabled` cycle, or from a
     // server that has since restarted its counter, must not block this read.
     pushedRev.current = null;
+    pushedLive.current = false;
     let cancelled = false;
 
     // Subscribe FIRST, so a push that lands while the read is in flight is seen
     // rather than silently lost between the two.
-    const off = onNotification(pushChannel, (p) => {
+    const off = onNotification(pushChannel, (p, replayed) => {
       const frame = p as T;
-      const rev = frame?.rev;
-      if (typeof rev === "number") pushedRev.current = Math.max(pushedRev.current ?? rev, rev);
+      const rev = revOf(frame);
+      if (rev !== null) pushedRev.current = Math.max(pushedRev.current ?? rev, rev);
+      if (!replayed) pushedLive.current = true;
       setValue(frame);
     });
 
@@ -90,7 +124,15 @@ export function useStatusChannel<T extends { rev?: number }>(
       .then((s) => {
         if (cancelled || !s) return;
         const seen = pushedRev.current;
-        if (seen !== null && typeof s.rev === "number" && s.rev < seen) return;
+        const mine = revOf(s);
+        // Revs on both sides: the counter decides, and only STRICTLY older loses.
+        if (seen !== null && mine !== null) {
+          if (mine < seen) return;
+        } else if (pushedLive.current) {
+          // No revs to compare. A live frame went out after this read did, so it
+          // is the newer of the two; a replay would not have set this.
+          return;
+        }
         setValue(s);
       })
       .catch((err: unknown) => {

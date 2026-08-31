@@ -959,7 +959,7 @@ const WORKER_PING_MS = 15_000;
 const WORKER_PONG_TIMEOUT_MS = 5_000;
 let workerPingTimer: ReturnType<typeof setInterval> | null = null;
 let workerPongTimer: ReturnType<typeof setTimeout> | null = null;
-const workerHandlers = new Map<string, Set<(payload: unknown) => void>>();
+const workerHandlers = new Map<string, Set<(payload: unknown, replayed: boolean) => void>>();
 let sseWorker: SharedWorker | null = null;
 
 function ensureWorker(): boolean {
@@ -976,10 +976,13 @@ function ensureWorker(): boolean {
         if (msg.streamOpen === false) abandonWorker("its event stream is closed");
         return;
       }
-      const { channel, data } = msg as { channel: string; data: unknown };
+      // `replay` is the worker's word for "this is the cached snapshot, not
+      // something the server just sent" — the same distinction the direct path
+      // draws, so a subscriber cannot tell which transport it is on.
+      const { channel, data, replay } = msg as { channel: string; data: unknown; replay?: boolean };
       const set = workerHandlers.get(channel);
       if (set) for (const cb of set) {
-        try { cb(data); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
+        try { cb(data, replay === true); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
       }
     };
     sseWorker.port.start();
@@ -1033,7 +1036,9 @@ function abandonWorker(why: string): void {
     for (const cb of callbacks) {
       const handler = (e: MessageEvent) => {
         try {
-          cb(JSON.parse(e.data));
+          // A frame off the wire, never a replay — this is the direct
+          // EventSource path standing in for the abandoned worker.
+          cb(JSON.parse(e.data), false);
         } catch (err) {
           console.error(`[api] SSE handler error for "${channel}":`, err);
         }
@@ -1216,10 +1221,26 @@ if (typeof document !== "undefined") {
 /**
  * Subscribe to a server-sent event channel.
  * Returns an unsubscribe function.
+ *
+ * The handler's second argument says whether the frame is a REPLAY of the cached
+ * snapshot rather than something the server just sent. The two are not
+ * interchangeable, and a subscriber that has also issued a one-shot read has to
+ * be able to tell them apart:
+ *
+ *   - a LIVE frame is newer than any read already in flight, so it wins;
+ *   - a REPLAYED frame is at best connect-time and can be far older. The server
+ *     filters a channel out for a client with nothing subscribed to it, so the
+ *     moment the last subscriber for a channel goes away the cache stops being
+ *     updated — a component that mounts, unmounts and mounts again is handed a
+ *     snapshot from whenever the previous one was listening. Correcting exactly
+ *     that is what the read is for, so it must not be dropped in its favour.
+ *
+ * Ignoring the argument is fine and is what most subscribers do — it changes
+ * nothing about which frames arrive or in what order.
  */
 export function onNotification(
   channel: string,
-  cb: (payload: unknown) => void,
+  cb: (payload: unknown, replayed: boolean) => void,
 ): () => void {
   // Shared-worker path: register the callback and let the worker deliver parsed
   // payloads. Falls through to the direct path if the worker can't be created.
@@ -1242,7 +1263,7 @@ export function onNotification(
     try {
       const payload = JSON.parse(e.data);
       if (hydratedSet.has(channel)) lastPayload.set(channel, payload);
-      cb(payload);
+      cb(payload, false);
     } catch (err) {
       console.error(`[api] SSE parse error for "${channel}":`, err);
     }
@@ -1255,7 +1276,7 @@ export function onNotification(
   // so a caller cannot receive it synchronously during its own render.
   if (hydratedSet.has(channel) && lastPayload.has(channel)) {
     const cached = lastPayload.get(channel);
-    queueMicrotask(() => cb(cached));
+    queueMicrotask(() => cb(cached, true));
   }
 
   const es = ensureEventSource();

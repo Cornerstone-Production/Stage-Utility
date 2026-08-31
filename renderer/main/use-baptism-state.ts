@@ -1,31 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 
-import { invoke, onNotification } from "../lib/api";
+import { invoke } from "../lib/api";
+import { useStatusChannel } from "./use-status-channel";
 
 /**
  * Live baptism-timer state, pushed on the "baptism:state" channel. Hydrates once
  * on mount then stays live. Shared by the operator panel and the display object.
+ *
+ * Ordering between the hydrate and the first push is useStatusChannel's job — see
+ * the note there. A running timer whose read landed after the start frame reads
+ * as stopped on the wall until the next button press.
  */
 export function useBaptismState(): BaptismState | null {
-  const [state, setState] = useState<BaptismState | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    invoke<BaptismState>("baptism:get")
-      .then((s) => {
-        if (!cancelled && s) setState(s);
-      })
-      .catch(() => {
-        /* ignore */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => onNotification("baptism:state", (p) => setState(p as BaptismState)), []);
-
-  return state;
+  const read = useCallback(() => invoke<BaptismState>("baptism:get"), []);
+  return useStatusChannel<BaptismState>(read, "baptism:state");
 }
 
 /** Totals + averages over the completed people in a session. */

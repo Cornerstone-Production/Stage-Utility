@@ -104,8 +104,18 @@ a client recovers when the server restarts and the counter returns to 0.
 
 `rev` is additive: a consumer that has never heard of it — the Bitfocus Companion
 module reads several of these channels from its own repository — simply does not
-read it, and nothing else about these payloads changed. A payload arriving without
-a `rev` skips the comparison entirely.
+read it, and nothing else about these payloads changed.
+
+Change-driven channels that are not status integrations carry no `rev` and cannot
+be given one: the OSC feedback map, the baptism timer, wireless telemetry, the
+ProdCom transcript buffer, the integration list, the patch file and the calendar
+grid are all pushed by other machinery, and the calendar's payload is by design
+free of per-fetch values. The same race is the same bug there, so `useStatusChannel`
+falls back to the one fact left — whether the frame is LIVE or a REPLAY of the
+snapshot `api.ts` caches for late subscribers. A live frame is something the server
+sent after the read went out, so it wins; a replayed frame can be hours old
+(the server stops feeding that cache for a channel nobody is subscribed to), so it
+is applied for the first paint but never vetoes the read.
 
 ## Automation
 

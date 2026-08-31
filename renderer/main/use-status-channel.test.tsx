@@ -57,13 +57,21 @@ class FakeEventSource {
 const { render, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { useStatusChannel } = await import("./use-status-channel.js");
+const { __resetReplayCacheForTests } = await import("../lib/api.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => {
   await settle();
   teardown();
 });
-beforeEach(() => cleanup());
+beforeEach(() => {
+  cleanup();
+  // api.ts's replay cache is module-level and outlives a case, so without this a
+  // frame pushed by one test is replayed into the next test's first subscriber
+  // and the cases pass or fail on ORDER. The two that want a populated cache
+  // fill it themselves, inside the case.
+  __resetReplayCacheForTests();
+});
 afterEach(async () => {
   cleanup();
   await settle();
@@ -185,20 +193,61 @@ describe("useStatusChannel publish ordering", () => {
     off();
   });
 
-  test("a payload with no rev behaves exactly as before the fix", async () => {
-    // An older server sends no version. The comparison is skipped rather than
-    // guessed at, so the hook degrades to its previous last-writer-wins shape
-    // instead of silently dropping every read.
+  test("with no rev at all, a LIVE push still beats the older read", async () => {
+    // Not every change-driven channel is a StatusIntegration, so not every one can
+    // stamp a rev: OSC feedback, the baptism timer, wireless telemetry, the
+    // transcript buffer, the integration list and the calendar grid carry none,
+    // and the race is the same bug there — an OSC button showing the wrong lamp
+    // until somebody touches the desk again.
+    //
+    // With nothing to compare, the fact that decides it is that the frame is LIVE:
+    // the server sent it after this read went out, so it is the newer of the two.
     const read = deferred<Dto | null>();
-    const seen = mount(() => read.promise, "people:count");
+    const seen = mount(() => read.promise, "osc:feedback");
     await settle();
 
-    FakeEventSource.last!.push("people:count", { connected: true, recording: true });
+    FakeEventSource.last!.push("osc:feedback", { connected: true, recording: true });
     await settle();
+    assert.equal(seen.value?.recording, true, "the push should have been applied");
 
     read.resolve({ connected: true, recording: false });
     await settle();
 
-    assert.equal(seen.value?.recording, false, "with no rev, the read applies as it always did");
+    assert.equal(
+      seen.value?.recording,
+      true,
+      "a rev-less channel let the older read overwrite the live push — this channel " +
+        "broadcasts only on change, so nothing would ever correct it",
+    );
+  });
+
+  test("with no rev, a REPLAYED push does not veto the read", async () => {
+    // The other half, and the reason this is not simply "any push wins". api.ts
+    // replays its cached snapshot to a late subscriber, and the server stops
+    // feeding that cache for a channel nobody is subscribed to — so a component
+    // that mounts, unmounts and mounts again is handed a frame that can be hours
+    // old. Correcting exactly that is what the read is for.
+    const { onNotification } = await import("../lib/api.js");
+
+    // A first subscriber, so the frame lands in api.ts's replay cache, then goes
+    // away — which is when the server stops updating what is cached.
+    const off = onNotification("baptism:state", () => {});
+    FakeEventSource.last!.push("baptism:state", { connected: true, recording: false });
+    await settle();
+    off();
+
+    const read = deferred<Dto | null>();
+    const seen = mount(() => read.promise, "baptism:state");
+    await settle();
+    assert.equal(seen.value?.recording, false, "the replayed frame arrives first");
+
+    read.resolve({ connected: true, recording: true });
+    await settle();
+
+    assert.equal(
+      seen.value?.recording,
+      true,
+      "the read is what corrects a stale replay — a replayed frame must not veto it",
+    );
   });
 });
