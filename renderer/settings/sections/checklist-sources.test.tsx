@@ -212,6 +212,52 @@ describe("a category Planning Center no longer offers", () => {
   });
 });
 
+describe("the two pickers do not sound alike", () => {
+  // THE BUG. Both MultiSelects carry placeholder="None" and nothing else. Their
+  // captions are FieldLabel <span>s, which associate with no control, so the
+  // trigger's only text was that placeholder: two adjacent buttons announcing
+  // "None, button" and "None, button", naming neither and telling them apart
+  // not at all.
+  //
+  // The names are read through getByRole's `name` option, which computes the
+  // ACCESSIBLE NAME the way a browser does rather than reading DOM text — so
+  // this is the string a reader would actually say. jsdom settles nothing about
+  // how the sr-only span is painted; that it is clipped and not removed is a
+  // stylesheet claim, and the clip is the app's existing utility.
+  it("THE GUARD: each announces its own caption, not just its summary", async () => {
+    render(props({}).node);
+    await settle();
+
+    // The distinguishing half FIRST, because it is the finding: before the fix
+    // this was 2, two adjacent controls with one indistinguishable name.
+    assert.equal(
+      screen.queryAllByRole("button", { name: "None" }).length,
+      0,
+      "two pickers side by side both announce nothing but 'None', so nothing tells them apart",
+    );
+    assert.equal(
+      screen.queryAllByRole("button", { name: "Note categories None" }).length,
+      1,
+      "no control announces itself as the note-category picker",
+    );
+    assert.equal(
+      screen.queryAllByRole("button", { name: "Teams None" }).length,
+      1,
+      "no control announces itself as the teams picker",
+    );
+  });
+
+  it("and the name survives a selection, which is what the summary does not", async () => {
+    render(props({ categories: ["Production Notes"] }).node);
+    await settle();
+    assert.equal(
+      screen.queryAllByRole("button", { name: "Note categories Production Notes" }).length,
+      1,
+      "the caption dropped out once something was chosen",
+    );
+  });
+});
+
 describe("ticking a category reaches the handler", () => {
   it("sends BOTH lists, so the other picker is not wiped", async () => {
     const { node, calls } = props({ teams: ["Audio Team"] });

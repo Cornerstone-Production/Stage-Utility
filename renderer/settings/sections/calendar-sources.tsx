@@ -178,6 +178,7 @@ export function CalendarSources({ view, pcoConfigured }: { view: View; pcoConfig
             </FieldDescription>
           </FieldContent>
           <MultiSelect
+            label="Calendars"
             options={listing(sources?.calendars, calendars)}
             selected={idsOf(calendars)}
             onChange={(next) => save(toSelections(next, sources?.calendars ?? [], calendars), tags)}
@@ -196,6 +197,7 @@ export function CalendarSources({ view, pcoConfigured }: { view: View; pcoConfig
             </FieldDescription>
           </FieldContent>
           <MultiSelect
+            label="Tags"
             options={listing(sources?.tags, tags)}
             selected={idsOf(tags)}
             onChange={(next) => save(calendars, toSelections(next, sources?.tags ?? [], tags))}

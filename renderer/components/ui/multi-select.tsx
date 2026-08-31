@@ -4,6 +4,7 @@ import { Popover as PopoverPrimitive } from "radix-ui";
 // scrolling list box, not an OS popup, so there is nothing native to opt into. The
 // position picker is custom for the same reason (it also needs a search field).
 // Styling therefore follows that picker — a bare tick, not a filled checkbox.
+import { useId } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -16,6 +17,7 @@ export interface MultiSelectOption {
  *  items and opens a popover of checkable rows. Keeps the list hidden until wanted
  *  (unlike an always-expanded toggle grid) and stays open while you check items. */
 export function MultiSelect({
+  label,
   options,
   selected,
   onChange,
@@ -24,6 +26,18 @@ export function MultiSelect({
   className,
   disabled,
 }: {
+  /**
+   * What this picker is FOR. Required, and the type checker is the enforcement:
+   * every visible label in this app is a <span> — FieldLabel is one, and so is
+   * the inline text beside a trigger — so nothing associates a caption with this
+   * control, and the trigger's only text is a SUMMARY that changes with the
+   * selection. Two of these sat side by side reading "None, button" and "None,
+   * button", which names neither and tells them apart not at all.
+   *
+   * Use the control's own visible caption, so speaking what is on screen reaches
+   * the thing on screen.
+   */
+  label: string;
   options: MultiSelectOption[];
   selected: string[];
   onChange: (next: string[]) => void;
@@ -33,9 +47,12 @@ export function MultiSelect({
   className?: string;
   disabled?: boolean;
 }) {
+  // One prefix per instance — these fields come in pairs on the same page, and
+  // two triggers sharing an id would name each other.
+  const ids = useId();
   const selectedSet = new Set(selected);
   const chosen = options.filter((o) => selectedSet.has(o.value));
-  const label =
+  const triggerText =
     summary ??
     (chosen.length === 0
       ? placeholder
@@ -53,6 +70,18 @@ export function MultiSelect({
     <PopoverPrimitive.Root>
       <PopoverPrimitive.Trigger
         disabled={disabled}
+        // THE NAME IS THE CAPTION AND THEN THE SUMMARY, joined by
+        // aria-labelledby rather than written into an aria-label.
+        //
+        // aria-label would REPLACE the name computed from the content, costing
+        // the summary: "Note categories, button", with no word about what is
+        // chosen. Putting the caption in a clipped span and letting the content
+        // name the button keeps both, but the accessible-name algorithm
+        // concatenates sibling content with NO separator — it read back
+        // "Note categoriesNone". aria-labelledby is the one join the spec
+        // defines as space-separated, so this is "Note categories None"
+        // wherever it is computed.
+        aria-labelledby={`${ids}-label ${ids}-value`}
         className={cn(
           "flex h-7 items-center justify-between gap-1 rounded-md border border-line-strong bg-field",
           "px-2.5 py-1 text-footnote text-fg whitespace-nowrap",
@@ -61,13 +90,22 @@ export function MultiSelect({
           className,
         )}
       >
-        <span className={cn("truncate", chosen.length === 0 && "text-gray-a8")}>{label}</span>
+        {/* The caption, clipped rather than removed — display:none would take it
+            out of the accessibility tree too. Same utility the context bar's
+            live badge uses. */}
+        <span id={`${ids}-label`} className="sr-only">{label}</span>
+        <span id={`${ids}-value`} className={cn("truncate", chosen.length === 0 && "text-gray-a8")}>
+          {triggerText}
+        </span>
         <ChevronDownIcon className="size-3.5 text-gray-9 shrink-0" />
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content
           align="start"
           sideOffset={4}
+          // Named too: the list is portalled out of the page, so once focus is
+          // in it there is nothing around it to say which picker it belongs to.
+          aria-label={label}
           className={cn(
             "z-50 w-[var(--radix-popover-trigger-width)] min-w-52 overflow-hidden rounded-md border border-line-strong bg-popover backdrop-blur-xl shadow-md",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
