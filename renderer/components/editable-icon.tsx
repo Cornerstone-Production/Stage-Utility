@@ -1,24 +1,45 @@
 // editable-icon.tsx — an icon the operator can change, wherever it is drawn.
 //
-// Right-click opens the picker. The rule lives here once because two surfaces
-// draw an item's icon — the Screens cards and the console rail — and two copies
-// of "resolve the stored glyph, fall back to the built-in one, open a picker on
-// right-click" would drift the first time either was touched.
+// Two rules live here once, because two surfaces draw an item's icon and two
+// copies of either would drift the first time one was touched: resolve the
+// stored glyph and fall back to the built-in one, and report a save that did
+// not land.
 //
-// A HOOK, not a component: what a caller needs is the resolved glyph and the
-// handful of callbacks that let the COLOUR panel edit it too. The icon and its
-// colour are one popup — a preview in the colour being dragged, and a button
-// that swaps the body for the set — so there is nothing left for a second
-// component to render.
+// A HOOK, not a component, and it owns no GESTURE. What a caller needs is the
+// resolved glyph and the callbacks that let the COLOUR panel edit it — the icon
+// and its colour are one popup, a preview in the colour being dragged and a
+// button that swaps the body for the set. How the popup is REACHED belongs to
+// the surface: a Screens card opens it from the colour swatch (icon-tint.tsx),
+// and the console rail opens it by right-clicking the glyph, which the rail
+// implements itself because its rows are <button> elements and there is nothing
+// else there to right-click.
 //
 // Keyed the same way icon COLOURS are — display id, tool path, or view id — so a
 // glyph chosen in one surface shows in every surface that draws the same thing.
 
 import type { LucideIcon } from "lucide-react";
 import { invoke } from "../lib/api";
+import { errorMessage } from "@main/services/errors";
+import { toast } from "./ui";
 import type { IconEditing } from "./ui/color-field";
 import { resolveIcon } from "./icon-set";
 import { useStageState } from "../main/use-stage-state";
+
+/**
+ * Store a chosen glyph, and say so if it does not land.
+ *
+ * Four call sites over two surfaces, and every one of them closed the picker on
+ * the click: a rejected save changed nothing, said nothing, and left an
+ * unhandled rejection behind. The convention is two files away —
+ * calendar-sources.tsx and checklist-sources.tsx both report theirs.
+ *
+ * @param glyph the icon's stored name, or "" to go back to the built-in one.
+ */
+export function saveIcon(key: string, glyph: string): void {
+  void invoke("icons:setIcon", { key, glyph }).catch((e: unknown) =>
+    toast.error(`Could not change the icon: ${errorMessage(e)}`),
+  );
+}
 
 export interface EditableIconParts {
   /** The icon to draw: the operator's choice, else the caller's own. */
@@ -44,8 +65,8 @@ export function useEditableIcon(
     iconEditing: {
       glyph,
       current: chosen,
-      onPick: (name) => void invoke("icons:setIcon", { key: itemKey, glyph: name }),
-      onClear: () => void invoke("icons:setIcon", { key: itemKey, glyph: "" }),
+      onPick: (name) => saveIcon(itemKey, name),
+      onClear: () => saveIcon(itemKey, ""),
     },
   };
 }
