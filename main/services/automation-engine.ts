@@ -15,7 +15,7 @@ import { scrub } from "./scrub.js";
 import type { AutomationSettings, ConditionCtx, Rule } from "../types/automation.js";
 import { addBroadcastListener, addChannelDemandSource, broadcast } from "./broadcaster.js";
 import { AUTOMATION_ACTIONS } from "./automation-actions.js";
-import { allConditionsHold } from "./automation-conditions.js";
+import { AUTOMATION_CONDITIONS, allConditionsHold } from "./automation-conditions.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { automationLog } from "./automation-log.js";
 import { automationStore } from "./automation-store.js";
@@ -331,30 +331,23 @@ for (const channel of new Set(Object.values(AUTOMATION_TRIGGERS).map((t) => t.ch
 /**
  * Conditions, which arrive by pull rather than on the bus.
  *
- * conditionCtx() reads each of these from its service's latest snapshot at the
- * moment a rule fires, so the trigger loop above cannot see the demand. The three
- * whose channel already appears as a trigger channel are covered by that loop;
- * REAPER's is not, and is the reason this table exists at all.
+ * conditionCtx() reads each one from its service's latest snapshot at the moment
+ * a rule fires, so the trigger loop above cannot see the demand. A condition
+ * needs its own registration even when its channel is ALSO a trigger channel:
+ * the loop above covers the channels a rule TRIGGERS on, and a rule can
+ * perfectly well trigger on PCO and merely ASK about a PVP layer. That rule
+ * would read a snapshot at the idle cadence — which for PVP, whose whole point
+ * is driving content from a rule on a booth appliance with no browser open, is
+ * the case that matters most.
+ *
+ * Derived from the registry, exactly as the trigger loop is. This was a
+ * hand-maintained table beside AUTOMATION_CONDITIONS, and deleting five of its
+ * ten entries left the whole suite green — nothing anywhere tied a condition to
+ * its channel. `ConditionDef.channel` is now required and nullable, so a new
+ * condition cannot be written without answering the question.
  */
-const CONDITION_CHANNELS: Record<string, string> = {
-  "obs.is-recording": "obs:status",
-  "reaper.is-recording": "reaper:status",
-  "resi.is-streaming": "resi:status",
-  "youtube.is-streaming": "youtube:status",
-  // ProVideoPlayer and baptisms, added when their features merged. A condition
-  // needs a line here even when its channel is ALSO a trigger channel: the loop
-  // above registers demand for the channels a rule TRIGGERS on, and a rule can
-  // perfectly well trigger on PCO and merely ASK about a PVP layer. That rule
-  // would read a snapshot at the idle cadence -- which for PVP, whose whole
-  // point is driving content from a rule on a booth appliance with no browser
-  // open, is the case that matters most.
-  "pvp.layer-has-content": "pvp:status",
-  "pvp.layer-is-hidden": "pvp:status",
-  "pvp.layer-is-muted": "pvp:status",
-  "pvp.layer-is-playing": "pvp:status",
-  "pvp.workspace-has-content": "pvp:status",
-  "baptism.phase-is": "baptism:state",
-};
-for (const [conditionId, channel] of Object.entries(CONDITION_CHANNELS)) {
+for (const [conditionId, def] of Object.entries(AUTOMATION_CONDITIONS)) {
+  const { channel } = def;
+  if (channel === null) continue;
   addChannelDemandSource(channel, () => automationEngine.wantsCondition(conditionId));
 }

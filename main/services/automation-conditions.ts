@@ -30,6 +30,9 @@ function isConnectedCondition(id: string, label: string): ConditionDef {
   return {
     id: `${id}.is-connected`,
     label: `${label} is connected`,
+    // Connection state is pushed by the integration manager whether anyone is
+    // watching or not, so there is no throttled poll behind this one.
+    channel: null,
     params: [],
     holds: (ctx) => ctx.integrations?.[id] === "connected",
   };
@@ -61,6 +64,8 @@ function pvpLayerCondition(
   return {
     id,
     label,
+    // On the factory, so a fifth layer condition gets its demand for free.
+    channel: "pvp:status",
     params: [
       {
         key: "layer",
@@ -88,6 +93,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "obs.is-recording": {
     id: "obs.is-recording",
     label: "OBS is recording",
+    channel: "obs:status",
     params: [],
     holds: (ctx) => ctx.obsRecording === true,
   },
@@ -120,6 +126,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "pvp.workspace-has-content": {
     id: "pvp.workspace-has-content",
     label: "ProVideoPlayer has something on screen",
+    channel: "pvp:status",
     // Deliberately no layer param — this is the "any layer at all" question, and
     // giving it one would duplicate pvp.layer-has-content with a worse label.
     params: [],
@@ -129,6 +136,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "reaper.is-recording": {
     id: "reaper.is-recording",
     label: "REAPER is recording",
+    channel: "reaper:status",
     params: [],
     holds: (ctx) => ctx.reaperRecording === true,
   },
@@ -136,6 +144,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "resi.is-streaming": {
     id: "resi.is-streaming",
     label: "Resi is streaming",
+    channel: "resi:status",
     params: [],
     holds: (ctx) => ctx.resiStreaming === true,
   },
@@ -143,6 +152,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "youtube.is-streaming": {
     id: "youtube.is-streaming",
     label: "YouTube is streaming",
+    channel: "youtube:status",
     params: [],
     holds: (ctx) => ctx.youtubeStreaming === true,
   },
@@ -150,6 +160,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "baptism.phase-is": {
     id: "baptism.phase-is",
     label: "Baptism phase is",
+    channel: "baptism:state",
     params: [{
       key: "phase", label: "Phase", type: "enum",
       options: [
@@ -166,6 +177,9 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "service.is-live": {
     id: "service.is-live",
     label: "A service is live",
+    // Read from the controller's own state, which the live poller keeps current
+    // for its own reasons -- nothing throttles it on a browser check.
+    channel: null,
     params: [],
     holds: (ctx) => ctx.pcoLive?.mode === "item",
   },
@@ -173,6 +187,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "service.type-is": {
     id: "service.type-is",
     label: "Service type is",
+    channel: null,
     params: [{ key: "serviceTypeId", label: "Service type", type: "enum", optionsFrom: "service-types" }],
     holds: (ctx, params) => {
       const want = String(params.serviceTypeId ?? "");
@@ -183,6 +198,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "time.day-of-week": {
     id: "time.day-of-week",
     label: "Day of week is",
+    channel: null,
     params: [{
       key: "days",
       label: "Days",
@@ -203,6 +219,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   "time.between": {
     id: "time.between",
     label: "Time is between",
+    channel: null,
     params: [
       { key: "from", label: "From", type: "string", help: "HH:MM, 24-hour" },
       { key: "to", label: "To", type: "string", help: "HH:MM, 24-hour" },
