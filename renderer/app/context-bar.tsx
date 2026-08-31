@@ -579,6 +579,15 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
         <ScoreCapsule game={view.game} scored={scored} preview={ctx.preview} />
       );
     }
-
   }
+
+  // EVERY id has a case, and the compiler is what says so. Without this a new
+  // BarItemId with no case compiled, returned undefined, and BarStripRows'
+  // `content === null` did not drop it — leaving an empty .bar-item that still
+  // charges the strip a gap. That is the hole the service-type note above is
+  // about, and the no-reflow guard cannot catch it: assert.notEqual(x, null)
+  // passes on undefined. The same three lines HomeCard's switch already ends on.
+  const _never: never = id;
+  void _never;
+  return null;
 }
