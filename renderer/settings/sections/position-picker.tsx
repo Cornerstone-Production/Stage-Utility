@@ -77,7 +77,7 @@ export function PositionRangeEditor({ positions, teamPositions, onChange }: Posi
             className={cn(
               "flex h-7 w-full min-w-0 items-center justify-between gap-1 rounded-md border border-gray-a6 bg-gray-a2",
               "px-2.5 py-1 text-footnote text-gray-12",
-              "focus:outline-none focus:border-blue-8 focus:ring-1 focus:ring-blue-8",
+              "focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus",
             )}
           >
             <span className={cn("truncate", !summary && "text-gray-a8")}>
@@ -104,7 +104,7 @@ export function PositionRangeEditor({ positions, teamPositions, onChange }: Posi
                 placeholder="Search positions…"
                 className={cn(
                   "h-7 w-full rounded border border-gray-a6 bg-gray-a2 px-2 text-footnote",
-                  "text-gray-12 placeholder:text-gray-a8 focus:outline-none focus:border-blue-8",
+                  "text-gray-12 placeholder:text-gray-a8 focus:outline-none focus:border-focus",
                 )}
               />
             </div>
@@ -189,7 +189,7 @@ export function PositionRangeEditor({ positions, teamPositions, onChange }: Posi
                   aria-label={`Note filter for ${p.name ?? "any position"}`}
                   className={cn(
                     "h-7 w-24 shrink-0 rounded-md border border-gray-a6 bg-gray-a2 px-2 text-footnote",
-                    "text-gray-12 placeholder:text-gray-a8 focus:outline-none focus:border-blue-8",
+                    "text-gray-12 placeholder:text-gray-a8 focus:outline-none focus:border-focus",
                   )}
                 />
               </div>

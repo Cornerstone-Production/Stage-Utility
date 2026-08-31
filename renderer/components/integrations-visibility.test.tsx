@@ -120,6 +120,20 @@ describe("every integration is visible, with nothing collapsed", () => {
     // fg-subtle 2.45:1, both well under AA. Neither may appear on this page.
     assert.doesNotMatch(c.container.innerHTML, /text-fg-faint/);
     assert.doesNotMatch(c.container.innerHTML, /text-fg-subtle/);
+    // The palette ALIAS too, or the same contrast walks straight back in under
+    // another name: Radix gray-9 is 3.32:1 on the light surface and 3.34–3.58:1
+    // on the dark one — the same failure the two lines above ban, spelled
+    // differently. Measured against #ffffff, #151515 and #1c1c1c.
+    //
+    // Compared as a BOOLEAN with a short excerpt, never assert.doesNotMatch on
+    // the html: assert renders whatever it is handed, and serialising this page
+    // takes long enough that node:test reports the file rather than the line.
+    const alias = /class="[^"]*\btext-gray-[89]\b[^"]*"[^>]*>[^<]{0,40}/.exec(c.container.innerHTML);
+    assert.equal(
+      alias === null,
+      true,
+      `sub-AA palette text on the page — ${alias?.[0].slice(0, 120)}`,
+    );
   });
 
   test("with nothing set up, the summary is the sentence and not '0 of 16 connected'", async () => {

@@ -190,11 +190,11 @@ export function TeamPicker({
           className={cn(
             "flex h-7 items-center justify-between gap-1 rounded-md border border-gray-a6 bg-gray-a2",
             "px-2.5 py-1 text-footnote text-gray-12",
-            "focus:outline-none focus:border-blue-8 focus:ring-1 focus:ring-blue-8",
+            "focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus",
           )}
         >
           <span>Add a team</span>
-          <ChevronDownIcon className="size-3.5 shrink-0 text-gray-9" />
+          <ChevronDownIcon className="size-3.5 shrink-0 text-fg-muted" />
         </button>
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
@@ -209,7 +209,7 @@ export function TeamPicker({
           {league === null ? (
             // ── Step one: the sport ──────────────────────────────────────────
             <>
-              <p className="border-b border-gray-a4 px-2.5 py-2 text-caption2 font-medium uppercase tracking-wider text-gray-9">
+              <p className="border-b border-gray-a4 px-2.5 py-2 text-caption2 font-medium uppercase tracking-wider text-fg-muted">
                 Choose a sport
               </p>
               <div className="max-h-72 overflow-y-auto p-1">
@@ -227,12 +227,12 @@ export function TeamPicker({
                     >
                       <span className="truncate">{l.label}</span>
                       {following > 0 && (
-                        <span className="ml-auto shrink-0 text-caption2 text-gray-9">
+                        <span className="ml-auto shrink-0 text-caption2 text-fg-muted">
                           {following} followed
                         </span>
                       )}
                       <ChevronRightIcon
-                        className={cn("size-3.5 shrink-0 text-gray-9", following === 0 && "ml-auto")}
+                        className={cn("size-3.5 shrink-0 text-fg-muted", following === 0 && "ml-auto")}
                       />
                     </button>
                   );
@@ -250,7 +250,10 @@ export function TeamPicker({
                   className={cn(
                     "flex h-7 shrink-0 items-center gap-0.5 rounded pl-1 pr-1.5",
                     "text-caption1 text-gray-11 hover:bg-gray-a3 hover:text-gray-12",
-                    "focus:outline-none focus:ring-1 focus:ring-blue-8",
+                    // focus-VISIBLE, not focus: this button keeps focus after a
+                    // click, so `focus:` left the ring lit while the list below
+                    // it was being used — the same reason MultiSelect's rows do.
+                    "focus:outline-none focus-visible:ring-1 focus-visible:ring-focus",
                   )}
                 >
                   <ChevronLeftIcon className="size-3.5" />
@@ -264,7 +267,7 @@ export function TeamPicker({
                   aria-label="Search teams"
                   className={cn(
                     "h-7 min-w-0 flex-1 rounded border border-gray-a6 bg-gray-a2 px-2 text-footnote",
-                    "text-gray-12 placeholder:text-gray-a8 focus:outline-none focus:border-blue-8",
+                    "text-gray-12 placeholder:text-gray-a8 focus:outline-none focus:border-focus",
                   )}
                 />
               </div>
@@ -282,13 +285,13 @@ export function TeamPicker({
 
               <div className="max-h-72 overflow-y-auto p-1" role="listbox" aria-multiselectable>
                 {loading && (
-                  <div className="flex items-center justify-center gap-2 px-2 py-4 text-caption1 text-gray-9">
+                  <div className="flex items-center justify-center gap-2 px-2 py-4 text-caption1 text-fg-muted">
                     <Loader2Icon className="size-3.5 animate-spin" />
                     <span>Loading teams…</span>
                   </div>
                 )}
                 {!loading && hits.length === 0 && (
-                  <div className="px-2 py-4 text-center text-caption1 text-gray-9">
+                  <div className="px-2 py-4 text-center text-caption1 text-fg-muted">
                     {teams.length === 0 ? "No teams available" : "No teams match"}
                   </div>
                 )}
@@ -312,7 +315,7 @@ export function TeamPicker({
                       />
                       <TeamMark team={t} size={18} />
                       <span className="truncate">{t.displayName}</span>
-                      {chosen && <span className="ml-auto shrink-0 text-caption2 text-gray-9">Following</span>}
+                      {chosen && <span className="ml-auto shrink-0 text-caption2 text-fg-muted">Following</span>}
                     </button>
                   );
                 })}
@@ -379,7 +382,7 @@ export function ScoresTeamsPanel({ className }: { className?: string } = {}) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col">
           <span className="text-body text-gray-12">Followed teams</span>
-          <span className="text-caption1 text-gray-9">
+          <span className="text-caption1 text-fg-muted">
             Their live scores appear in the context bar, on Home, and on any display with a Live
             scores object.
           </span>
@@ -403,7 +406,7 @@ export function ScoresTeamsPanel({ className }: { className?: string } = {}) {
       )}
 
       {favourites.length === 0 ? (
-        <p className="rounded-md border border-dashed border-gray-a5 px-3 py-4 text-center text-caption1 text-gray-9">
+        <p className="rounded-md border border-dashed border-gray-a5 px-3 py-4 text-center text-caption1 text-fg-muted">
           No teams followed yet. Scores stay off until you add one.
         </p>
       ) : (
@@ -415,14 +418,14 @@ export function ScoresTeamsPanel({ className }: { className?: string } = {}) {
             >
               <TeamMark team={f} />
               <span className="truncate text-footnote text-gray-12">{f.displayName}</span>
-              <span className="ml-auto shrink-0 text-caption2 uppercase tracking-wider text-gray-9">
+              <span className="ml-auto shrink-0 text-caption2 uppercase tracking-wider text-fg-muted">
                 {labelForLeague(f.league)}
               </span>
               <button
                 type="button"
                 aria-label={`Stop following ${f.displayName}`}
                 onClick={() => void save(favourites.filter((x) => keyOf(x) !== keyOf(f)))}
-                className="shrink-0 rounded p-1 text-gray-9 hover:bg-gray-a3 hover:text-red-11"
+                className="shrink-0 rounded p-1 text-fg-muted hover:bg-gray-a3 hover:text-red-11"
               >
                 <TrashIcon className="size-3.5" />
               </button>

@@ -239,4 +239,48 @@ describe("TeamPicker", () => {
     ui.unmount();
     await settle();
   });
+
+  /**
+   * Colour comes from the semantic tokens, never straight off the palette ramp.
+   *
+   * Measured against the app's own grounds — light surface #ffffff, dark surface
+   * #151515, dark popover #1c1c1c:
+   *
+   *   text-gray-9   3.32:1 light, 3.34–3.58:1 dark   — under AA for text
+   *   text-fg-muted 5.98:1 light, 6.10–6.54:1 dark   — over it
+   *
+   * The ring is a themeability problem rather than a contrast one: --su-focus
+   * follows the operator's accent, and a Radix `blue-8` ring stays Radix blue on
+   * a themed install while every other control changes with it.
+   *
+   * Asserted as an ABSENCE, which is why a class name is the right thing to read
+   * here: the repo's scar is a class that is PRESENT and overridden by a later
+   * @layer rule, and no cascade can conjure a class that was never written.
+   * integrations-visibility.test.tsx bans text-fg-subtle/text-fg-faint on its
+   * page for the same reason — and this file exists because the same contrast
+   * walked into a dialog under the palette alias instead.
+   */
+  const BANNED = [
+    // Sub-AA as text, in both themes.
+    /\btext-gray-[89]\b/,
+    /\btext-fg-subtle\b/,
+    /\btext-fg-faint\b/,
+    // Not themeable: these keep Radix's blue when the app is not blue.
+    /\bring-blue-\d/,
+    /\bborder-blue-\d/,
+  ];
+
+  test("THE GUARD: no unreadable or unthemeable colour, in either step", async () => {
+    const ui = picker();
+    open(ui);
+    for (const banned of BANNED) {
+      assert.doesNotMatch(document.body.innerHTML, banned, `the sport step carries ${banned}`);
+    }
+    toMlb(ui);
+    for (const banned of BANNED) {
+      assert.doesNotMatch(document.body.innerHTML, banned, `the team step carries ${banned}`);
+    }
+    ui.unmount();
+    await settle();
+  });
 });
