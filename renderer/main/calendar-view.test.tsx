@@ -21,6 +21,7 @@
 // Every id, name and colour below is INVENTED. This is a public repository.
 
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { after, afterEach, beforeEach, describe, it, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
@@ -80,9 +81,8 @@ function pushFrame(payload: unknown): void {
 // would come up with no document.
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { CalendarMonth, CalendarView, readableTagColor, visibleEvents, KIOSK_BACKDROP } = await import(
-  "./calendar-view.js"
-);
+const { CalendarMonth, CalendarView, readableTagColor, visibleEvents, KIOSK_BACKDROP, MIN_CONTRAST } =
+  await import("./calendar-view.js");
 const { contrastRatio } = await import("../components/ui/color-math.js");
 
 const ZONE = "America/Chicago";
@@ -219,6 +219,34 @@ describe("what is happening right now", () => {
     const marked = document.querySelectorAll('[aria-current="true"]');
     assert.equal(marked.length, 1);
     assert.ok(marked[0].textContent?.includes("Event live"));
+
+    // aria-current is not the highlight. The pill SHIPPED as a font-weight
+    // change and nothing else — written against bg-fill-strong, which is not a
+    // token, so Tailwind emitted nothing — and every test here stayed green
+    // because they all asserted aria-current. What a person in the room sees is
+    // the fill and the ring, so those are what is asserted.
+    //
+    // jsdom has no stylesheet and no layout: it cannot say what any of these
+    // classes PAINT. The class list is the most this can check, and it is
+    // checked against the row that is NOT running so a class both rows carry
+    // could not satisfy it.
+    const pill = marked[0].className.split(/\s+/);
+    for (const cls of ["bg-fill-active", "ring-1", "ring-accent", "text-fg"]) {
+      assert.ok(pill.includes(cls), `the running event carries no ${cls}: ${marked[0].className}`);
+    }
+  });
+
+  test("does not give a quiet event the running event's fill", () => {
+    // The other half of the same guard: if these classes were on every row the
+    // assertion above would pass with no highlight on the wall at all.
+    const g = grid({ "2026-08-14": [event("done", "2026-08-14T14:00:00Z", "2026-08-14T15:00:00Z")] });
+    render(React.createElement(CalendarMonth, { pcoConfigured: true, grid: g, nowMs: NOW }));
+    const row = cell("2026-08-14").querySelector("li");
+    assert.ok(row, "the event never rendered");
+    const quiet = row.className.split(/\s+/);
+    for (const cls of ["bg-fill-active", "ring-accent"]) {
+      assert.ok(!quiet.includes(cls), `a quiet event carries ${cls}: ${row.className}`);
+    }
   });
 
   test("highlights only ONE event when several overlap", () => {
@@ -275,7 +303,7 @@ describe("tag colour", () => {
       const fixed = readableTagColor(raw);
       assert.ok(fixed, raw);
       assert.ok(
-        contrastRatio(fixed, KIOSK_BACKDROP) >= 3,
+        contrastRatio(fixed, KIOSK_BACKDROP) >= MIN_CONTRAST,
         `${raw} -> ${fixed} is ${contrastRatio(fixed, KIOSK_BACKDROP).toFixed(2)}:1 against the backdrop`,
       );
     }
@@ -306,6 +334,35 @@ describe("tag colour", () => {
     const swatch = cell("2026-08-14").querySelector("[data-tag-color]") as HTMLElement | null;
     assert.ok(swatch, "the tag colour never reached the DOM");
     assert.equal(swatch.dataset.tagColor, "#1d9a8c");
+    // The data attribute is read by nothing but this test. Deleting the inline
+    // style renders the swatch invisible and leaves the line above green, so the
+    // PAINTED value is what the guard rests on — jsdom does model inline style,
+    // and normalises a hex to rgb().
+    assert.equal(swatch.style.backgroundColor, "rgb(29, 154, 140)");
+  });
+});
+
+describe("the contrast floor is tied to its sources", () => {
+  // Both literals used to live in this file with nothing joining them to the
+  // values they stand for. Change --kiosk-bg, or raise the floor in the
+  // component, and the suite would go on measuring against the old ones and stay
+  // green while the wall got less readable. install-metadata.test.ts already
+  // holds the <meta theme-color> to --kiosk-bg the same way.
+  const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+
+  test("KIOSK_BACKDROP is the --kiosk-bg the stylesheet paints", () => {
+    const declared = [...css.matchAll(/--kiosk-bg:\s*(#[0-9a-f]{6})\s*;/gi)].map((m) => m[1]);
+    assert.deepEqual(declared, [KIOSK_BACKDROP], "the calendar's backdrop drifted from --kiosk-bg");
+  });
+
+  test("the suite measures against the component's own floor", () => {
+    // Imported, not restated: raising MIN_CONTRAST must raise what is asserted.
+    assert.equal(typeof MIN_CONTRAST, "number");
+    for (const raw of ["#000000", "#0b0b0b"]) {
+      const fixed = readableTagColor(raw);
+      assert.ok(fixed);
+      assert.ok(contrastRatio(fixed, KIOSK_BACKDROP) >= MIN_CONTRAST, `${raw} -> ${fixed}`);
+    }
   });
 });
 
@@ -637,6 +694,27 @@ describe("paging is per screen, and the current month stays live", () => {
     assert.ok(
       screen.queryByText(/loading the calendar/i) === null,
       "an empty 200 left the permanent spinner up",
+    );
+    assert.ok(screen.getByText(/could not read the calendar/i));
+  });
+
+  it("says so rather than freezing when it is handed no view to show", async () => {
+    // stage-view passes `activeView?.id ?? null`. The push effect has always
+    // been gated on the id — it has nothing to key the payload by without one —
+    // so a hydrate that ran anyway fetched the UNFILTERED grid once and then sat
+    // frozen at mount for the life of the page, looking perfectly current.
+    sent = [];
+    render(React.createElement(CalendarView, { viewId: null, pcoConfigured: true, interactive: true }));
+    await pastDebounce();
+
+    assert.deepEqual(
+      sent.filter((r) => r.url.includes("/api/pco/calendar")),
+      [],
+      "fetched a grid it could never receive an update for",
+    );
+    assert.ok(
+      screen.queryByText(/loading the calendar/i) === null,
+      "a view-less calendar sat on a spinner that resolves to nothing",
     );
     assert.ok(screen.getByText(/could not read the calendar/i));
   });

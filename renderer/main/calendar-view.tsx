@@ -46,8 +46,10 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
  */
 export const KIOSK_BACKDROP = "#0a0a0a";
 
-/** WCAG's floor for a non-text indicator. A tag swatch is exactly that. */
-const MIN_CONTRAST = 3;
+/** WCAG's floor for a non-text indicator. A tag swatch is exactly that.
+ *  Exported so the contrast suite measures against THIS floor rather than a
+ *  literal of its own that would go on passing if this one were raised. */
+export const MIN_CONTRAST = 3;
 
 /**
  * How many events a square draws before it starts counting instead.
@@ -80,6 +82,27 @@ const MAX_EVENTS_PER_DAY = 4;
  */
 export function readableTagColor(hex: string | null): string | null {
   if (!hex) return null;
+  const hit = TAG_COLOR_CACHE.get(hex);
+  if (hit !== undefined) return hit;
+  const solved = solveTagColor(hex);
+  TAG_COLOR_CACHE.set(hex, solved);
+  return solved;
+}
+
+/**
+ * Memoised, module-level, keyed on the raw hex — because the caller is a render.
+ *
+ * EventRow calls this per event per render, and the grid re-renders on a minute
+ * tick. A month of a busy calendar is up to 168 events, and the lighten loop is
+ * up to 24 parseColor/formatColor round trips for each low-contrast tag: 1440
+ * ticks a day of that, on a Pi driving a wall. The input space is the
+ * organisation's tag palette — a couple of dozen strings for the life of the
+ * page — so a plain Map bounded by that is the whole fix. It is keyed on the
+ * INPUT, so a re-themed tag is simply a different key rather than a stale hit.
+ */
+const TAG_COLOR_CACHE = new Map<string, string | null>();
+
+function solveTagColor(hex: string): string | null {
   let c = parseColor(hex);
   if (!c) return null;
   if (contrastRatio(hex, KIOSK_BACKDROP) >= MIN_CONTRAST) return hex;
@@ -218,7 +241,14 @@ function DaySquare({
       <span
         className={cn(
           "shrink-0 self-start rounded px-1 text-caption2 tabular-nums leading-none",
-          isToday ? "bg-accent text-white font-semibold" : "text-fg-faint",
+          // A TINT plus a ring, not a solid accent with white on it. The accent
+          // is themeable per organisation, so no fixed ink is right for it: the
+          // kiosk default (#6aa6df) put white at 2.58:1 — under even the 3:1
+          // non-text floor, on the one glyph a wall calendar has to be able to
+          // read. Against the kiosk backdrop the tint puts text-fg at 11.19:1
+          // and the ring at 7.67:1, and both stay derived from whatever accent
+          // the operator picked.
+          isToday ? "bg-accent/25 text-fg font-semibold ring-1 ring-accent" : "text-fg-faint",
         )}
       >
         {Number(day.date.slice(8))}
@@ -277,6 +307,73 @@ function NavButton({
   );
 }
 
+/**
+ * The month header — icon, label, chevrons, and whatever the surface has to say
+ * about the month underneath it.
+ *
+ * ONE copy. The header was written out twice, once over the grid and once over
+ * the "no grid yet" notice, and the two were byte-identical down to the same
+ * 118-character button className. A change to the chevrons, the Today button or
+ * the spacing had to land in both, and the failure sentence was a third copy
+ * again.
+ *
+ * @param label the SERVER's month name, or null before one has arrived — naming
+ *   it here would be the browser's zone answering a question it does not own.
+ */
+function MonthHeader({
+  label,
+  nav,
+  status,
+}: {
+  label: string | null;
+  nav: CalendarNav | null;
+  status?: React.ReactNode;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+      <CalendarDaysIcon className="size-4 text-fg-subtle" aria-hidden="true" />
+      <span className={cn("text-footnote font-title", label ? "text-fg" : "text-fg-subtle")}>{label ?? "\u2014"}</span>
+      {nav && (
+        <span className="flex items-center gap-0.5">
+          <NavButton label="Previous month" onClick={nav.onPrev} disabled={!nav.canPrev}>
+            <ChevronLeftIcon className="size-4" aria-hidden="true" />
+          </NavButton>
+          <NavButton label="Next month" onClick={nav.onNext} disabled={!nav.canNext}>
+            <ChevronRightIcon className="size-4" aria-hidden="true" />
+          </NavButton>
+          {/* Only once paged away. On the current month it would do nothing,
+              and a live control that does nothing reads as broken. */}
+          {nav.offset !== 0 && (
+            <button
+              type="button"
+              onClick={nav.onToday}
+              className="ml-1 rounded px-1.5 py-0.5 text-caption2 text-fg-subtle hover:text-fg hover:bg-fill-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            >
+              Today
+            </button>
+          )}
+        </span>
+      )}
+      {status}
+    </div>
+  );
+}
+
+/**
+ * The sentence for a failed read.
+ *
+ * Three sentences, one decision, and it was written out twice. A PAGED month
+ * that fails is "the thing you just asked for did not arrive"; the live month is
+ * either "what you are looking at has stopped updating" (a grid is still up) or
+ * "there is nothing here and there is not going to be".
+ */
+function failureText(nav: CalendarNav | null, stale: boolean): string {
+  if (nav && nav.offset !== 0) return "Could not read that month from Planning Center";
+  return stale
+    ? "Could not reach Planning Center \u2014 showing the last month read"
+    : "Could not read the calendar from Planning Center";
+}
+
 export function CalendarMonth({
   grid,
   nowMs,
@@ -319,42 +416,16 @@ export function CalendarMonth({
   // blank screen with nothing to press. A wall display has no chevrons anyway,
   // so it gets the bare notice it always did.
   if (!grid) {
+    // stale=false: there is no month underneath this to have gone stale.
     const body = (
-      <Notice spinner={!failed}>
-        {failed
-          ? nav && nav.offset !== 0
-            ? "Could not read that month from Planning Center"
-            : "Could not read the calendar from Planning Center"
-          : "Loading the calendar…"}
-      </Notice>
+      <Notice spinner={!failed}>{failed ? failureText(nav, false) : "Loading the calendar…"}</Notice>
     );
     if (!nav) return body;
     return (
       <div className="flex h-full min-h-0 flex-col kiosk-surface">
-        <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-          <CalendarDaysIcon className="size-4 text-fg-subtle" aria-hidden="true" />
-          {/* No month name: the server names the month, in the app time zone,
-              and it has not answered yet. Naming it here would be the browser's
-              zone answering a question it does not own. */}
-          <span className="text-footnote font-title text-fg-subtle">—</span>
-          <span className="flex items-center gap-0.5">
-            <NavButton label="Previous month" onClick={nav.onPrev} disabled={!nav.canPrev}>
-              <ChevronLeftIcon className="size-4" aria-hidden="true" />
-            </NavButton>
-            <NavButton label="Next month" onClick={nav.onNext} disabled={!nav.canNext}>
-              <ChevronRightIcon className="size-4" aria-hidden="true" />
-            </NavButton>
-            {nav.offset !== 0 && (
-              <button
-                type="button"
-                onClick={nav.onToday}
-                className="ml-1 rounded px-1.5 py-0.5 text-caption2 text-fg-subtle hover:text-fg hover:bg-fill-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-              >
-                Today
-              </button>
-            )}
-          </span>
-        </div>
+        {/* No month name yet: the server names the month, in the app time zone,
+            and it has not answered. */}
+        <MonthHeader label={null} nav={nav} />
         <div className="min-h-0 flex-1">{body}</div>
       </div>
     );
@@ -369,59 +440,36 @@ export function CalendarMonth({
 
   return (
     <div className="flex h-full min-h-0 flex-col kiosk-surface">
-      <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-        <CalendarDaysIcon className="size-4 text-fg-subtle" aria-hidden="true" />
-        {/* The label is the SERVER's, rendered in the app time zone. A month name
-            computed here would be the browser's idea of the month. */}
-        <span className="text-footnote font-title text-fg">{grid.monthLabel}</span>
-        {nav && (
-          <span className="flex items-center gap-0.5">
-            <NavButton label="Previous month" onClick={nav.onPrev} disabled={!nav.canPrev}>
-              <ChevronLeftIcon className="size-4" aria-hidden="true" />
-            </NavButton>
-            <NavButton label="Next month" onClick={nav.onNext} disabled={!nav.canNext}>
-              <ChevronRightIcon className="size-4" aria-hidden="true" />
-            </NavButton>
-            {/* Only once paged away. On the current month it would do nothing,
-                and a live control that does nothing reads as broken. */}
-            {nav.offset !== 0 && (
-              <button
-                type="button"
-                onClick={nav.onToday}
-                className="ml-1 rounded px-1.5 py-0.5 text-caption2 text-fg-subtle hover:text-fg hover:bg-fill-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-              >
-                Today
-              </button>
-            )}
-          </span>
-        )}
-        {/* The failure wins the slot. An operator looking at a month that has
-            stopped updating needs to be told that before anything else, and a
-            "nothing this month" on a stale grid is the lie this says instead. */}
-        {failed ? (
-          <span className="ml-auto text-caption2 text-warn-11">
-            {nav && nav.offset !== 0
-              ? "Could not read that month from Planning Center"
-              : "Could not reach Planning Center — showing the last month read"}
-          </span>
-        ) : grid.unplaceable > 0 ? (
-          // The mapper upstream guarantees an ISO start, so this is a contract
-          // breach rather than a routine case — and the whole point of counting
-          // it was that the caller SAYS so. Counting it and drawing nothing
-          // would be the silent absence this feature is written against.
-          <span className="ml-auto text-caption2 text-warn-11">
-            {`${grid.unplaceable} event${grid.unplaceable === 1 ? "" : "s"} had no usable time and could not be drawn`}
-          </span>
-        ) : (
-          total === 0 && (
-            <span className="ml-auto text-caption2 text-fg-faint">
-              {pcoConfigured
-                ? "Nothing on the calendar this month"
-                : "Planning Center is not connected yet"}
+      {/* The label is the SERVER's, rendered in the app time zone. A month name
+          computed here would be the browser's idea of the month. */}
+      <MonthHeader
+        label={grid.monthLabel}
+        nav={nav}
+        status={
+          /* The failure wins the slot. An operator looking at a month that has
+             stopped updating needs to be told that before anything else, and a
+             "nothing this month" on a stale grid is the lie this says instead. */
+          failed ? (
+            <span className="ml-auto text-caption2 text-warn-11">{failureText(nav, true)}</span>
+          ) : grid.unplaceable > 0 ? (
+            // The mapper upstream guarantees an ISO start, so this is a contract
+            // breach rather than a routine case — and the whole point of counting
+            // it was that the caller SAYS so. Counting it and drawing nothing
+            // would be the silent absence this feature is written against.
+            <span className="ml-auto text-caption2 text-warn-11">
+              {`${grid.unplaceable} event${grid.unplaceable === 1 ? "" : "s"} had no usable time and could not be drawn`}
             </span>
+          ) : (
+            total === 0 && (
+              <span className="ml-auto text-caption2 text-fg-faint">
+                {pcoConfigured
+                  ? "Nothing on the calendar this month"
+                  : "Planning Center is not connected yet"}
+              </span>
+            )
           )
-        )}
-      </div>
+        }
+      />
       <div className="grid shrink-0 grid-cols-7 border-b border-line">
         {WEEKDAYS.map((d) => (
           <span key={d} className="px-1 py-1 text-center text-caption2 uppercase tracking-wide text-fg-faint">
@@ -583,6 +631,15 @@ export function CalendarView({
   const shown = interactive ? offset : 0;
 
   useEffect(() => {
+    // Same gate as the push effect below, and for the reason the two must agree:
+    // without an id the push has nothing to key on, so a hydrate here would
+    // fetch the unfiltered grid once and then sit frozen at mount for the page's
+    // life with nothing on screen saying so. Marked failed instead, so the
+    // surface states it is not going to update rather than looking current.
+    if (!viewId) {
+      setLiveFailed(true);
+      return;
+    }
     let cancelled = false;
     invoke<CalendarGrid>("calendar:getGrid", { viewId }).then(
       (g) => {
