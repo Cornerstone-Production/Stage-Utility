@@ -138,6 +138,10 @@ and reconstructing it would be our prose presented as theirs. It is not shown.
 | POST | `/api/scores/favourites` | Replace the followed teams |
 | GET | `/api/scores/teams?league=<id>` | One league's teams, for the picker |
 
+The `POST` replaces the list outright — it does not merge — so a client sends one
+write at a time. Two in flight are unordered, and whichever arrives last is the
+list that is kept.
+
 State is pushed on the `scores:status` SSE channel, and replayed to a client that
 connects after the last change — a display opened mid-game shows the score it is
 already at rather than sitting blank until somebody scores again.

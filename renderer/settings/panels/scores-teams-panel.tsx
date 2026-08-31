@@ -29,8 +29,12 @@
 // The WHOLE favourite is saved, not just the id — displayName, abbreviation,
 // logo and colour are cached at selection time so the settings row renders
 // before the first poll and no display ever reaches a.espncdn.com itself.
+//
+// EVERY ROW CLICK SAVES, and the whole list goes with it, so the saves are
+// serialized — see createFavouritesWriter. Three teams ticked in a row are three
+// full replacements, and unordered they lose one of the three silently.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -55,6 +59,86 @@ function ipc<T>(channel: string, payload?: Record<string, unknown>): Promise<T> 
 
 /** The identity of a favourite. League AND id: ESPN's ids are unique per league. */
 const keyOf = (f: { league: string; teamId: string }): string => `${f.league}:${f.teamId}`;
+
+/** The one cache entry the panel reads and writes. */
+const FAVOURITES_KEY = ["scores:getFavourites"];
+
+/** Apply an edit to the followed teams as they stand right now. */
+type EditFavourites = (change: (current: ScoreFavourite[]) => ScoreFavourite[]) => void;
+
+/**
+ * The writer behind every toggle: ONE save in flight, and only the newest
+ * answer paints.
+ *
+ * Each row click saves the WHOLE list, so two clicks in quick succession are two
+ * full replacements built from two different snapshots — and ticking three teams
+ * in a row is the intended flow, the list being multi-select. A browser opens
+ * several connections per origin and orders nothing between them, so
+ * `{favourites:[A,B]}` could reach the server after `{favourites:[A]}` was sent
+ * but before it arrived; scoresStore.setFavourites replaces outright, so B was
+ * gone from disk with nothing on screen, in the log or in a toast to say so. The
+ * operator found out the following Sunday, when the wall showed two of the three
+ * teams they had ticked.
+ *
+ * Serialized HERE rather than by splitting the route into per-team add/remove.
+ * A row is a TOGGLE: an add and a remove of the SAME team delivered out of order
+ * is nondeterministic however the server merges them, and the only thing that
+ * knows which the operator meant last is the click that made it. Establishing
+ * the order at the source also settles the second half of the bug for free —
+ * with one request outstanding at a time the responses cannot cross, so the
+ * panel can no longer sit showing a list the disk does not hold.
+ *
+ * `read()` is called at SEND time, not at click time, so a burst of clicks
+ * collapses into one write carrying the latest intent instead of a queue of
+ * stale ones.
+ */
+function createFavouritesWriter(ports: {
+  /** The list as it stands, including an optimistic edit not yet confirmed. */
+  read: () => ScoreFavourite[];
+  /** Show a list. Optimistically before the write, the server's answer after. */
+  paint: (favourites: ScoreFavourite[]) => void;
+  /** Save the whole list. Resolves to what the server says it stored. */
+  write: (favourites: ScoreFavourite[]) => Promise<ScoresConfig>;
+  /** A refused save. Never swallowed — the operator has to hear about it. */
+  onError: (err: unknown) => void;
+}): EditFavourites {
+  let inFlight = false;
+  /** An edit arrived mid-save: send again from the latest list once it settles. */
+  let superseded = false;
+
+  async function run(): Promise<void> {
+    inFlight = true;
+    try {
+      for (;;) {
+        superseded = false;
+        const saved = await ports.write(ports.read());
+        // Only the answer to the LATEST request may paint. An older one
+        // describes a list the operator has already moved past, and painting it
+        // is what let the panel disagree with the store.
+        if (!superseded) {
+          ports.paint(saved.favourites);
+          return;
+        }
+      }
+    } catch (err) {
+      // Not retried and not swallowed: the queued edit was built on a list the
+      // server has just refused, so re-sending it would push a fiction. The
+      // caller puts the stored truth back on screen and says what happened.
+      ports.onError(err);
+    } finally {
+      inFlight = false;
+      superseded = false;
+    }
+  }
+
+  return (change) => {
+    // From the cache, not from render state: two clicks inside one React batch
+    // would both read the same stale array and the second would undo the first.
+    ports.paint(change(ports.read()));
+    if (inFlight) superseded = true;
+    else void run();
+  };
+}
 
 /**
  * Teams matching the query, on display name OR abbreviation.
@@ -334,7 +418,7 @@ export function ScoresTeamsPanel({ className }: { className?: string } = {}) {
   const [league, setLeague] = useState<LeagueId | null>(null);
 
   const favouritesQuery = useQuery({
-    queryKey: ["scores:getFavourites"],
+    queryKey: FAVOURITES_KEY,
     queryFn: () => ipc<ScoresConfig>("scores:getFavourites"),
     retry: 1,
   });
@@ -356,24 +440,35 @@ export function ScoresTeamsPanel({ className }: { className?: string } = {}) {
   const favourites = favouritesQuery.data?.favourites ?? [];
   const selected = new Set(favourites.map(keyOf));
 
-  async function save(next: ScoreFavourite[]): Promise<void> {
-    // Optimistic, then reconciled with what the server says it stored.
-    queryClient.setQueryData(["scores:getFavourites"], { favourites: next });
-    try {
-      const saved = await ipc<ScoresConfig>("scores:setFavourites", { favourites: next });
-      queryClient.setQueryData(["scores:getFavourites"], saved);
-    } catch (err) {
-      // Put the truth back rather than leaving the row showing a team that was
-      // never saved, and say so.
+  // Built once and kept: the serialization is state, and a writer rebuilt each
+  // render would forget that a save is outstanding — which is the bug.
+  // queryClient is stable for the life of the provider.
+  const writerRef = useRef<EditFavourites | null>(null);
+  writerRef.current ??= createFavouritesWriter({
+    read: () => queryClient.getQueryData<ScoresConfig>(FAVOURITES_KEY)?.favourites ?? [],
+    paint: (next) => queryClient.setQueryData<ScoresConfig>(FAVOURITES_KEY, { favourites: next }),
+    write: (next) => ipc<ScoresConfig>("scores:setFavourites", { favourites: next }),
+    onError: (err) => {
+      // Tagged for the browser console, as the other list panels do — a toast is
+      // gone in seconds and this is the failure someone has to reconstruct.
+      console.error("[ScoresTeamsPanel:save]", err);
+      // Put the stored truth back rather than leaving a team on screen that was
+      // never saved, and say so. Nothing is dropped quietly.
       void favouritesQuery.refetch();
       toast.error(`Could not save followed teams: ${errorMessage(err)}`);
-    }
-  }
+    },
+  });
+  const edit = writerRef.current;
 
   function toggle(team: ScoreFavourite): void {
     const key = keyOf(team);
-    void save(
-      selected.has(key) ? favourites.filter((f) => keyOf(f) !== key) : [...favourites, team],
+    // Add or remove is decided from the list at edit time, not from the
+    // render-time `selected`: mid-burst that set is one click behind, and a
+    // stale one turns the operator's add into a remove.
+    edit((current) =>
+      current.some((f) => keyOf(f) === key)
+        ? current.filter((f) => keyOf(f) !== key)
+        : [...current, team],
     );
   }
 
@@ -424,7 +519,7 @@ export function ScoresTeamsPanel({ className }: { className?: string } = {}) {
               <button
                 type="button"
                 aria-label={`Stop following ${f.displayName}`}
-                onClick={() => void save(favourites.filter((x) => keyOf(x) !== keyOf(f)))}
+                onClick={() => edit((current) => current.filter((x) => keyOf(x) !== keyOf(f)))}
                 className="shrink-0 rounded p-1 text-fg-muted hover:bg-gray-a3 hover:text-red-11"
               >
                 <TrashIcon className="size-3.5" />
