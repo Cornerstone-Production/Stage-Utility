@@ -11,6 +11,21 @@
 // wrong square.
 
 /**
+ * How often the server re-reads Planning Center for the current month.
+ *
+ * ONE number, here, because two of them drifted. The broadcaster's timer and the
+ * calendar client's own cache were both written as three minutes, independently
+ * — and a cache entry is stamped when the read COMPLETES, so the tick three
+ * minutes later was always a few hundred milliseconds inside the entry and was
+ * served it. The real interval between reads of Planning Center was six minutes,
+ * while two files and the docs said three.
+ *
+ * So the cache TTL is DERIVED from this (see TTL_EVENTS_MS in
+ * pco-calendar-service.ts) rather than written out again beside it.
+ */
+export const CALENDAR_REFRESH_MS = 3 * 60_000;
+
+/**
  * A tag as it hangs off one event.
  *
  * `color` is a REAL hex string (`#rrggbb`), which is why tags are the colour

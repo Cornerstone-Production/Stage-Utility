@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 import { CALENDAR_API_VERSION, pcoCalendarService } from "./pco-calendar-service.js";
 import { PCO_API_VERSION, pcoService } from "./pco-service.js";
+import { CALENDAR_REFRESH_MS } from "../types/calendar.js";
 
 type Requester = { request: (url: string, appId: string, secret: string) => Promise<unknown> };
 const svc = pcoCalendarService as unknown as Requester;
@@ -538,6 +539,56 @@ describe("the API version pin", () => {
     assert.equal(seen.length, 1);
     assert.equal(seen[0].get("X-PCO-API-Version"), PCO_API_VERSION, "a /services/v2 request lost the pin");
     assert.ok(seen[0].get("Authorization")?.startsWith("Basic "), "the auth header is still built the same way");
+  });
+});
+
+describe("the event-instance cache against the server's own refresh", () => {
+  beforeEach(() => pcoCalendarService.clearCache());
+
+  it("THE GUARD: a refresh at the server's own period is a REAL read", async () => {
+    // The bug: the broadcaster's timer and this cache were both written as three
+    // minutes, and an entry is stamped when its read COMPLETES — so the tick
+    // three minutes later fell inside the entry and was served it. Every other
+    // tick did a real read and the true interval was six minutes, while both
+    // files and the docs said three.
+    //
+    // Driven through the real cache at exactly the broadcaster's period, which
+    // is the instant the timer wakes. The clock is moved rather than waited on.
+    const realNow = Date.now;
+    let fake = realNow();
+    Date.now = () => fake;
+    try {
+      stub([]);
+      await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+      assert.equal(urls.length, 1, "the first read did not reach Planning Center");
+
+      fake += CALENDAR_REFRESH_MS;
+      await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+      assert.equal(
+        urls.length,
+        2,
+        `the refresh at ${CALENDAR_REFRESH_MS / 60_000} minutes was served the cache, so the real interval is ${(2 * CALENDAR_REFRESH_MS) / 60_000} minutes`,
+      );
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it("still absorbs the ad-hoc reads it exists for", async () => {
+    // The other half. A second view with the same filters, or a browser opening
+    // the calendar between refreshes, must not each cost a request.
+    const realNow = Date.now;
+    let fake = realNow();
+    Date.now = () => fake;
+    try {
+      stub([]);
+      await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+      fake += CALENDAR_REFRESH_MS - 61_000;
+      await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+      assert.equal(urls.length, 1, "a read a minute inside the TTL went to Planning Center anyway");
+    } finally {
+      Date.now = realNow;
+    }
   });
 });
 

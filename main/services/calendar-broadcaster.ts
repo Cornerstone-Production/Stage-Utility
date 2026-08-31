@@ -27,19 +27,24 @@ import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import type { CalendarGrid } from "../types/calendar.js";
+import { CALENDAR_REFRESH_MS } from "../types/calendar.js";
 
 /** The SSE channel. Also listed in renderer/lib/sse-channels.ts (hydrated, because
  *  a calendar is state) and in automation-coverage.test.ts's BROADCAST_CHANNELS. */
 export const CALENDAR_CHANNEL = "calendar:grid";
 
 /**
- * How often the server re-reads Planning Center.
+ * How often the server re-reads Planning Center. ONE read for the building,
+ * however many walls are showing it.
  *
- * Matched to the calendar client's own three-minute cache on event instances, so
- * a shorter timer would only be served the same answer. This is ONE read for the
- * building however many walls are showing it.
+ * The period lives in types/calendar.ts because the calendar client's cache TTL
+ * is derived from it. Written out separately in both places, they were both
+ * three minutes — and a cache entry stamped when its read COMPLETES outlives a
+ * tick exactly three minutes later, so every other tick was served the cache and
+ * the real interval was six minutes. The TTL is now a minute shorter than this
+ * by construction.
  */
-const REFRESH_MS = 3 * 60_000;
+const REFRESH_MS = CALENDAR_REFRESH_MS;
 
 /** What one view's read did. A view that failed keeps its last good grid. */
 export interface CalendarRefreshFailure {

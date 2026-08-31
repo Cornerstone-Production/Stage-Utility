@@ -162,7 +162,9 @@ events arrive as local midnight expressed in UTC, and a browser — or a UTC-clo
 host — bucketing them by UTC date puts them on the wrong square.
 
 The current month is **pushed**, not polled. The server re-reads Planning Center
-on a three-minute timer — once for the whole building — and broadcasts on the
+every three minutes — once for the whole building, and a real read each time; the
+client's own cache on event instances is deliberately shorter than the timer, so
+a refresh is never served the answer it is trying to replace — and broadcasts on the
 `calendar:grid` SSE channel only when the grid is not what it was, which for a
 calendar is a couple of times a week. It skips the read entirely when no screen
 is showing a calendar. The channel is hydrated on connect, so a display opened
