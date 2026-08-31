@@ -22,6 +22,7 @@ const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
   "../test-fixtures/integration-descriptors.js"
 );
 const { IntegrationDialog } = await import("./integrations-panel.js");
+const { StrictMode } = await import("react");
 
 const OBS = INTEGRATION_DESCRIPTOR_FIXTURE.find((d) => d.id === "obs")!;
 const PROPRESENTER = INTEGRATION_DESCRIPTOR_FIXTURE.find((d) => d.id === "propresenter")!;
@@ -228,20 +229,25 @@ describe("dismissing a dialog with unsaved changes", () => {
 
 const propSettings = (): HTMLElement => settingsWith(/Additional instances/);
 
-async function openProPresenter(): Promise<Opened> {
+/**
+ * @param strict wrap in StrictMode, which is how the app itself mounts
+ *   (renderer/app/index.tsx). It simulates mount → unmount → mount, so a panel
+ *   that registered its unsaved work in an effect and deregistered it in a
+ *   cleanup has to end up registered anyway.
+ */
+async function openProPresenter(strict = false): Promise<Opened> {
   const closed = { n: 0 };
-  const c = render(
-    withQueryClient(
-      <IntegrationDialog
-        descriptor={PROPRESENTER}
-        state={blankState("propresenter")}
-        onStateChange={() => {}}
-        onClose={() => {
-          closed.n += 1;
-        }}
-      />,
-    ),
+  const dialog = withQueryClient(
+    <IntegrationDialog
+      descriptor={PROPRESENTER}
+      state={blankState("propresenter")}
+      onStateChange={() => {}}
+      onClose={() => {
+        closed.n += 1;
+      }}
+    />,
   );
+  const c = render(strict ? <StrictMode>{dialog}</StrictMode> : dialog);
   await settle();
   return {
     get closes() {
@@ -278,6 +284,20 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
 
     assert.ok(confirmDialog(), "Escape threw the unsaved instance away with no question asked");
     assert.equal(o.closes, 0, "the dialog closed anyway");
+  });
+
+  test("and under StrictMode, which is how the app actually mounts", async () => {
+    // StrictMode runs mount → unmount → mount, so the panel's registration
+    // effect fires, its deregistration cleanup fires, and the effect fires
+    // again. Ending clean there would put the guard back to where it was.
+    const o = await openProPresenter(true);
+    await addInstance("Chapel");
+
+    fireEvent.keyDown(propSettings(), { key: "Escape" });
+    await settle();
+
+    assert.ok(confirmDialog(), "a StrictMode remount deregistered the panel's unsaved work");
+    assert.equal(o.closes, 0);
   });
 
   test("a sub-panel with nothing added still closes on Escape with no question", async () => {
