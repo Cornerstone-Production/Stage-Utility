@@ -220,7 +220,12 @@ export function writeIconEntry(
   const next: Record<string, string> = Object.create(null);
   for (const [k, v] of Object.entries(current ?? {})) {
     if (FORBIDDEN_KEYS.has(k)) {
-      console.warn(`[stage-controller] ${label} — dropped a reserved key from the stored map: ${scrub(k)}`);
+      // Both interpolations scrubbed. `label` is our own literal today, but this
+      // file is request-facing and log-injection.test.ts holds every one of them
+      // to scrub() so nobody has to judge that case by case.
+      console.warn(
+        `[stage-controller] ${scrub(label)} — dropped a reserved key from the stored map: ${scrub(k)}`,
+      );
       continue;
     }
     next[k] = v;
