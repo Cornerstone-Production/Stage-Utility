@@ -94,12 +94,19 @@ One timer, and the cadence depends on what is actually happening:
 |---|---|
 | A followed game is live and something is reading the channel | 25 s |
 | A followed game is live and nothing is | 5 min |
-| A followed game starts within the hour | 2 min |
+| A followed game starts within the hour, or is past its listed start and has not begun | 2 min |
 | Nothing on today | 30 min |
 
 Only leagues with a followed team are asked at all, and one league failing does
 not blank the others. Broadcasts go out on change only, so a poll that found
 nothing new is not an update to every display.
+
+The listed start is when the two-minute tier ends, not when it stops mattering.
+A game is marked as in play at the opening kickoff or the first pitch, which is
+several minutes after the time on the schedule and can be hours after it through
+a rain delay — so the two-minute tier is held past a listed start that has come
+and gone, and the score appears within a couple of minutes of the game actually
+starting rather than up to half an hour later.
 
 **A game does not vanish at midnight.** ESPN files a game under the date it is
 played on where it is played, so a Sunday night game listed 9:40pm stays on

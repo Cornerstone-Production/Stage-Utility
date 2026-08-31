@@ -52,6 +52,45 @@ describe("nextPoll", () => {
     assert.equal(d.delayMs, 120_000);
   });
 
+  test("THE GUARD: a listed start that has already passed keeps the ramp", () => {
+    // The half hour this file used to lose. ESPN flips a game to "in" at the
+    // opening kickoff, typically three to eight minutes after the listed start
+    // and hours after it through a rain delay. In between the game is "pre"
+    // with a start in the past, which the old `t > now` filter dropped: `starts`
+    // came back empty and the poller slept for DORMANT_MS, so the wall sat on
+    // the pre-game card through the first quarter.
+    const started = new Date(NOON - 60_000).toISOString();
+    const d = nextPoll([game({ state: "pre", startsAt: started })], NOON, true);
+    assert.equal(
+      d.delayMs,
+      120_000,
+      `a game listed one minute ago and not yet flipped to "in" scheduled the next poll ${d.delayMs / 60_000} minutes out`,
+    );
+  });
+
+  test("a rain-delayed start hours ago still keeps the ramp", () => {
+    // The same case at the far end. A pre-game rain delay can hold a game at
+    // "pre" for hours past its listed time, and that is precisely when an
+    // operator is watching for it to start.
+    const started = new Date(NOON - 3 * 3_600_000).toISOString();
+    const d = nextPoll([game({ state: "pre", startsAt: started })], NOON, true);
+    assert.equal(d.delayMs, 120_000);
+  });
+
+  test("a passed start does not lose to a later one on the same slate", () => {
+    // Order matters: the earliest start wins, and a game already under way is
+    // earlier than tonight's. Sorting is what makes the two-minute tier reach
+    // the game that needs it.
+    const later = new Date(NOON + 6 * 3_600_000).toISOString();
+    const started = new Date(NOON - 5 * 60_000).toISOString();
+    const d = nextPoll(
+      [game({ state: "pre", startsAt: later }), game({ eventId: "e2", state: "pre", startsAt: started })],
+      NOON,
+      true,
+    );
+    assert.equal(d.delayMs, 120_000);
+  });
+
   test("every followed game finished: drop to the dormant cadence", () => {
     // Not "stop". The poller fetches on every wake-up — the schedule's only
     // lever is how long it waits — and these titles used to say STOP on the
@@ -91,6 +130,7 @@ describe("nextPoll", () => {
       [],
       [game({ state: "post" })],
       [game({ state: "pre", startsAt: new Date(NOON + 3_600_000 + 1).toISOString() })],
+      [game({ state: "pre", startsAt: new Date(NOON - 6 * 3_600_000).toISOString() })],
       [game({ state: "pre", startsAt: "not a date" })],
     ];
     for (const games of cases) {
