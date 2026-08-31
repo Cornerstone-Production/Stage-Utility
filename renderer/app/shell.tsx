@@ -64,6 +64,11 @@ export function Shell() {
   // Mounted HERE, not on a route: these subscriptions must outlive any single
   // page. On a route they would unsubscribe the moment you navigated away, and
   // the app would stop seeing live changes until you happened to come back.
+  // THE QUERY MIRROR, not a second source of truth. `liveState` above is the SSE
+  // module store and is what everything on this page reads; this is the React
+  // Query copy, which only moves when live-wiring pushes SSE into it. It is here
+  // for accentColor and for nothing else — read `views` off it and you get a
+  // list that lags the rail's.
   const { data: stageState } = useStageStateQuery();
   useStageLiveWiring(stageState?.accentColor);
   const { width, dragging, startResize, reset: resetWidth } = useSidebarWidth();
