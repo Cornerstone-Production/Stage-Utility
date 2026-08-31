@@ -1,70 +1,77 @@
-// A config key from an HTTP body must never become a property WRITE the caller
-// chose the name of.
+// A config key from an HTTP body must never become a property WRITE whose name
+// the caller chose.
 //
-// integrationManager.setConfig builds an object with `obj[key] = value`, where
-// `key` is whatever the request body carried. JSON.parse keeps "__proto__" as an
-// own enumerable key and Object.entries yields it, so plain assignment sets the
-// object's prototype instead of a field on it. CodeQL calls this
-// js/remote-property-injection and rates it high.
+// `setConfig` folds the request body with `out[key] = value`, where `key` is
+// whatever arrived. `JSON.parse` keeps "__proto__" as an own enumerable key and
+// `Object.entries` yields it, so a plain assignment sets the object's PROTOTYPE
+// instead of a field on it. CodeQL calls this js/remote-property-injection and
+// rates it high.
 //
-// The blast radius today is small — the object is spread into storage, and
-// spread copies own properties only — which is exactly why this test exists
-// rather than a note saying it is fine. The next consumer of that object does
-// not know it was ever true.
+// WHY THIS FILE WAS REWRITTEN. Its first version defined its own `foldConfig` —
+// a copy of the loop — and asserted against that. Deleting the real guard from
+// integration-manager.ts left it green, which was demonstrated before this
+// rewrite. A test that reimplements the code it guards proves the copy correct
+// and says nothing about the shipped path.
+//
+// `setConfig` itself cannot be driven from a unit test: it needs `init()`,
+// which starts the reconnect timers and never lets the process exit, and it
+// ends by dialling the integration. So the fold was EXTRACTED instead. There is
+// now one copy, `foldConfigEntries`, and this imports the same one `setConfig`
+// calls.
+//
+// Addresses are from the documentation range (RFC 5737). This is a public
+// repository and a fixture is not the place for anyone's LAN.
 
 import assert from "node:assert/strict";
-import { test, describe } from "node:test";
+import { describe, test } from "node:test";
 
-/** The fold as setConfig performs it, over keys a caller supplied. */
-function foldConfig(entries: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(entries)) {
-    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
-    out[key] = value;
-  }
-  return out;
-}
+import { foldConfigEntries } from "./integration-manager.js";
+
+/** A body as it arrives over HTTP. Parsed, never written as a literal: an
+ *  object literal treats `__proto__` as a prototype setter at PARSE time, so a
+ *  literal cannot reproduce the case — the key would never be own. */
+const hostile = () =>
+  JSON.parse(
+    String.raw`{"host":"203.0.113.7","password":"s3cret","__proto__":{"polluted":true},"constructor":{"x":1},"prototype":{"y":2}}`,
+  ) as Record<string, unknown>;
 
 describe("config keys from a request body", () => {
-  test("a __proto__ key cannot change the built object's prototype", () => {
-    // Parsed, not written as a literal: an object literal treats __proto__ as a
-    // prototype setter at parse time, so a literal would not reproduce what
-    // arrives over HTTP. JSON.parse keeps it as an own key, which is the case.
-    const body = JSON.parse(String.raw`{"host":"10.0.0.5","__proto__":{"polluted":true}}`) as Record<
-      string,
-      unknown
-    >;
-    assert.ok(Object.keys(body).includes("__proto__"), "the fixture must carry __proto__ as an own key");
+  test("the fixture really carries the reserved names as own keys", () => {
+    // Without this the file could pass by testing nothing: if the parse ever
+    // stopped producing an own "__proto__", every assertion below would be
+    // trivially true.
+    const body = hostile();
+    for (const k of ["__proto__", "constructor", "prototype"]) {
+      assert.ok(Object.keys(body).includes(k), `fixture lost its own "${k}" key`);
+    }
+  });
 
-    const out = foldConfig(body);
-
-    assert.equal(out.host, "10.0.0.5", "a legitimate field must still be written");
-    assert.equal(
-      (Object.getPrototypeOf(out) as Record<string, unknown>).polluted,
-      undefined,
-      "the caller's __proto__ reached the object's prototype",
-    );
-    assert.equal(
-      (out as Record<string, unknown>).polluted,
-      undefined,
-      "the caller's __proto__ became readable through the object",
+  test("the real field is kept, the secret is split out, the reserved names are dropped", () => {
+    const { config, secrets } = foldConfigEntries(hostile(), ["password"], "test");
+    assert.equal(config.host, "203.0.113.7", "the legitimate field was lost");
+    assert.equal(secrets.password, "s3cret", "the secret was not split out");
+    assert.deepEqual(
+      Object.keys(config).filter((k) => k === "__proto__" || k === "constructor" || k === "prototype"),
+      [],
+      "a reserved key survived into the config that gets persisted",
     );
   });
 
-  test("constructor and prototype are refused too", () => {
-    const body = JSON.parse(String.raw`{"port":"8080","constructor":"x","prototype":"y"}`) as Record<
-      string,
-      unknown
-    >;
-    const out = foldConfig(body);
-    assert.deepEqual(Object.keys(out), ["port"], "a reserved key was written");
+  test("nothing anywhere was polluted", () => {
+    foldConfigEntries(hostile(), [], "test");
+    // The payload's own word. Had the prototype been set, this would read
+    // `true` on every object in the process, including ones made before it.
+    assert.equal(({} as Record<string, unknown>).polluted, undefined);
+    assert.equal((Object.prototype as unknown as Record<string, unknown>).polluted, undefined);
+    assert.equal(Object.getPrototypeOf({}), Object.prototype);
   });
 
-  test("the fold is not simply dropping everything", () => {
-    // The mirror of the guard above: a filter that refused every key would pass
-    // both tests, and would silently stop every integration from being
-    // configured at all.
-    const out = foldConfig({ host: "a", port: 1, https: true, token: "t" });
-    assert.deepEqual(Object.keys(out).sort(), ["host", "https", "port", "token"]);
+  test("and the target has no prototype to poison in the first place", () => {
+    // Defence in depth that does not depend on the skip-list staying complete:
+    // on a null-prototype object an assignment named "__proto__" would create an
+    // ordinary own key rather than reaching any prototype.
+    const { config, secrets } = foldConfigEntries({ a: 1 }, [], "test");
+    assert.equal(Object.getPrototypeOf(config), null, "the config target has a prototype");
+    assert.equal(Object.getPrototypeOf(secrets), null, "the secrets target has a prototype");
   });
 });
