@@ -709,7 +709,13 @@ export function BarConfigurator({
                 NO_SELECT,
               )}
             >
-              {rows.length === 0 && !dragging && (
+              {/* Gaps are not readings, so a strip carrying nothing else is still
+                  an empty bar and says so. Reachable on REOPEN now that an
+                  emptied bar stays empty: the arrangement that gets saved is
+                  ["spacer"], and without this the dialog opened on a blank strip
+                  with nothing to explain it. `[].every()` is true, so this still
+                  covers the strip you have just dragged the last item out of. */}
+              {rows.every((r) => isBarGap(r.id)) && !dragging && (
                 <span className="text-footnote text-fg-subtle">Drag something in.</span>
               )}
               {rows.map((row) => (
