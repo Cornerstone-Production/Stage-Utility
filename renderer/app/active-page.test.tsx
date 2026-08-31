@@ -24,7 +24,7 @@ const { render, cleanup } = await import("@testing-library/react");
 const { router } = await import("./router.js");
 const { MOVED_ROUTES } = await import("./redirects.js");
 const { consolePageFor, consolePages, resolvePage } = await import("./active-page.js");
-const { PageHeader } = await import("./page-header.js");
+const { PageTitle } = await import("./page-title.js");
 const { PageActionsProvider } = await import("./page-actions.js");
 
 after(() => {
@@ -178,37 +178,40 @@ describe("exact versus prefix", () => {
   });
 });
 
-describe("the desktop header draws what the resolver found", () => {
+describe("the strip's page name draws what the resolver found", () => {
   const draw = (pathname: string) =>
     render(
       <PageActionsProvider>
-        <PageHeader active={resolvePage(pathname, CONSOLES)} />
+        <PageTitle active={resolvePage(pathname, CONSOLES)} />
       </PageActionsProvider>,
     );
 
   test("a console's name is the page's h1", () => {
     const { container } = draw(`/consoles/${CONSOLE_ID}`);
     assert.equal(container.querySelector("h1")?.textContent, CONSOLE_NAME);
-    // And no subtitle line: a console wants the height.
-    assert.equal(container.querySelector("p"), null);
+    // And no subtitle to carry: a console wants the height, so it has none.
+    assert.equal(container.querySelector("h1")?.getAttribute("title"), null);
     cleanup();
   });
 
-  test("a destination keeps its title and its subtitle", () => {
+  test("a destination keeps its title, and its description on hover", () => {
     const { container } = draw("/screens");
-    assert.equal(container.querySelector("h1")?.textContent, "Screens");
-    assert.ok((container.querySelector("p")?.textContent ?? "").length > 0);
+    const h1 = container.querySelector("h1");
+    assert.equal(h1?.textContent, "Screens");
+    // The band that printed this is gone; the text is not. It is the heading's
+    // tooltip now — see PageTitle.
+    assert.ok((h1?.getAttribute("title") ?? "").length > 0, "the description was dropped, not moved");
     cleanup();
   });
 
-  test("a child route draws no header at all", () => {
+  test("a child route draws no name at all", () => {
     const { container } = draw(`/screens/${CONSOLE_ID}/edit`);
     // Asserted as a boolean: an HTMLElement in the failure message prints the
     // whole React fiber and buries what went wrong.
     assert.equal(
-      !!container.querySelector("header"),
+      !!container.querySelector("h1"),
       false,
-      "the editor draws its own heading; a second one above it is the bug",
+      "the editor draws its own heading; a second one in the strip above it is the bug",
     );
     cleanup();
   });

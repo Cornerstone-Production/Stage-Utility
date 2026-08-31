@@ -48,14 +48,22 @@ collide with them, are in [Display URLs](../display-urls.md).
 
 ## Every page says its name
 
-The page's name sits in the top bar on a phone and above the content on a
-desktop, where it carries a one-line description of what the page is for. A
-console is named after the view it shows, so the name you gave it in Screens is
-the name on the page and in the sidebar.
+The page's name sits in the top bar on a phone, and at the left of the
+[context bar](context-bar.md) on a desktop. Either way it shares a band with
+something else rather than taking one of its own, so one strip of chrome sits
+above the page instead of two. A console is named after the view it shows, so the
+name you gave it in Screens is the name on the page and in the sidebar.
+
+The page's own controls — Home's **Edit widgets**, for one — sit at the right of
+the same band.
+
+**The one-line description of what a page is for is a tooltip now.** A single
+44px band has no second line to print it on, so hovering the page's name shows
+it. Every page still has one.
 
 Pages you reach from inside another page — the layout editor, a ScriptView
-rundown, the patch editor — draw their own heading instead, and the top bar names
-the section they belong to.
+rundown, the patch editor — draw their own heading instead, so the bar shows no
+name for them; on a phone the top bar names the section they belong to.
 
 ## Home
 
@@ -63,7 +71,7 @@ Home is a grid of widgets you build yourself, out of the same registry every
 other surface draws from — anything you can put on a wall you can put here. See
 [Widgets](../reference/widgets.md) for what each one shows.
 
-**Editing.** The pencil in the page header turns on edit mode. Each tile then
+**Editing.** The pencil at the right of the context bar turns on edit mode. Each tile then
 gains a size picker, a visibility select, a remove button and a drag handle, and
 **Add widget** offers the whole registry. The tick finishes.
 

@@ -1,6 +1,11 @@
-// Rail + context bar + page header + content. The one layout every operator
-// surface renders inside, which is what makes the app feel like one program
-// rather than a set of pages that happen to share a server.
+// Rail + context bar + content. The one layout every operator surface renders
+// inside, which is what makes the app feel like one program rather than a set of
+// pages that happen to share a server.
+//
+// THERE IS NO PAGE HEADER BAND ANY MORE. On a desktop the page's name and its
+// actions render inside the context bar; on a phone the top bar carries them, as
+// it always has. Either way one band of chrome sits above the content instead of
+// two. See page-title.tsx.
 //
 // The responsive layout is SplitView's job, not this file's — inline sidebar on
 // desktop, icon rail when collapsed, and a hamburger-opened drawer on mobile.
@@ -13,7 +18,6 @@ import { SplitView } from "../components/ui/split-view";
 import { PAGE_SCROLLER_ID, useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
 import { PageActionsProvider, PageActionsSlot } from "./page-actions";
-import { PageHeader } from "./page-header";
 import { ContextBar } from "./context-bar";
 import { consolePages, resolvePage } from "./active-page";
 import { useStageState } from "../main/use-stage-state";
@@ -59,7 +63,13 @@ export function Shell() {
         railWidth={RAIL_WIDTH}
         resizing={dragging}
         mobileTitle={active?.page.label}
-        // On a phone the top bar IS the page header — see PageHeader.
+        // On a phone the top bar IS the page header — see page-title.tsx.
+        //
+        // SplitView renders this subtree only below 640px, and PageActionsEnd is
+        // `display: none` there, so exactly one copy of the route's controls is
+        // ever visible — and `display: none` keeps the other out of the
+        // accessibility tree rather than merely off the screen. That is the
+        // arrangement the page header already had; the merge did not change it.
         mobileActions={<PageActionsSlot />}
         sidebar={
           <Rail
@@ -71,18 +81,22 @@ export function Shell() {
         }
       >
         <div className="flex flex-col h-full min-w-0">
-          <ContextBar />
-          <PageHeader active={active} />
+          <ContextBar active={active} />
           {/* Page gutter, applied ONCE here rather than by each route. Routes were
                 padding themselves individually and the ones added recently did not,
                 so the editor and Screens sat flush against the right edge. */}
           {/* The app's ONE scroller, and the only one the router knows by name —
               see PAGE_SCROLLER_ID. Without the id, TanStack identifies it by an
-              `nth-child` path, which changes when PageHeader renders nothing or
-              the scores panel adds a sibling above. */}
+              `nth-child` path, which changes when the scores panel adds a
+              sibling above. */}
+          {/* `sm:pt-4` REPLACES THE HEADER'S OWN TOP PADDING, and only on the
+              surface that had one. The header band supplied the 20px of air
+              between the strip and the page; without it a desktop page starts
+              flush against the bar and reads as part of it. A phone never had a
+              header and gets no padding here, so nothing below 640px moves. */}
           <main
             data-scroll-restoration-id={PAGE_SCROLLER_ID}
-            className="flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3"
+            className="flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3 sm:pt-4"
           >
             {/* Keyed so re-selecting the active rail item remounts the route,
                 returning it to its top view. */}
