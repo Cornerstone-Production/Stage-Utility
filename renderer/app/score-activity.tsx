@@ -25,7 +25,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
-import { ScoreSide, ScoreStrip } from "../main/score-strip";
+import { gameLabel, ScoreSide, ScoreStrip } from "../main/score-strip";
 import { leagueById } from "@main/types/scores";
 import { formatClock } from "../lib/clock-format";
 import { cn } from "../lib/cn";
@@ -243,7 +243,7 @@ function ScoreCard({
       role="button"
       tabIndex={0}
       aria-expanded={focused}
-      aria-label={`${game.away.displayName} ${game.away.score ?? "no score"}, ${game.home.displayName} ${game.home.score ?? "no score"}. ${game.shortDetail}`}
+      aria-label={gameLabel(game)}
       onClick={() => scoreActivity.focus(index)}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
@@ -252,7 +252,10 @@ function ScoreCard({
       }}
     >
       {/* Keyed on this game's own two scores — see scoreKey. */}
-      <ScoreStrip key={scoreKey(game)} game={game} scored={scored} />
+      {/* labelled={false}: the card above already names the game, and a screen
+          reader in browse mode announces a labelled element and then the
+          labelled element inside it — the reading twice over. */}
+      <ScoreStrip key={scoreKey(game)} game={game} scored={scored} labelled={false} />
       {/* Clipped by HEIGHT rather than faded, so a peek strip is a real strip and
           not a ghost of a taller card. */}
       <div className="score-card-body">
@@ -318,7 +321,7 @@ export function ScoreCapsule({
       data-score-capsule=""
       className="score-capsule"
       aria-expanded={open}
-      aria-label={`${game.away.displayName} ${game.away.score ?? "no score"}, ${game.home.displayName} ${game.home.score ?? "no score"}. ${open ? "Hide" : "Show"} details.`}
+      aria-label={gameLabel(game, `${open ? "Hide" : "Show"} details.`)}
       onClick={() => scoreActivity.toggle()}
     >
       {inner}
