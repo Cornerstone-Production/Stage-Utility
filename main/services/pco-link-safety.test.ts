@@ -154,24 +154,6 @@ describe("the URL actually handed to fetch()", () => {
     }
   });
 
-  it("no URL from a response body is followed at all any more", () => {
-    // The contract is stronger than "rebuilt on our origin": pagination carries
-    // an integer, and the Live action URL is constructed, so there is no string
-    // from a PCO body that reaches fetch(). pcoUrlFrom survives only to compare
-    // against, for a log line.
-    const src = fs.readFileSync(path.join(HERE, "pco-service.ts"), "utf8");
-    const assignments = src
-      .split("\n")
-      .filter((l) => !isComment(l))
-      .filter((l) => /\burl\s*=\s*/.test(l) && /\blinks\b|\bnext\b/.test(l));
-    for (const line of assignments) {
-      assert.match(
-        line,
-        /withOffset\(/,
-        `a request URL is still built from a response body: ${line.trim()}`,
-      );
-    }
-  });
 });
 
 /**
@@ -231,6 +213,59 @@ function consoleCalls(lines: string[]): { line: number; text: string }[] {
   return calls;
 }
 
+/**
+ * The TOP-LEVEL arguments of one captured console call, as source text.
+ *
+ * Split on commas that are actually separators: not the ones inside a nested
+ * call, an array, an object, a quoted string or a template's `${…}`. A splitter
+ * that cut on every comma would read `scrub(a, b)` as two arguments and excuse
+ * the second one for not starting with `scrub(`.
+ *
+ * Deliberately a scanner rather than a parser. It is small enough to read, and
+ * the test below feeds it the three shapes it has to get right.
+ */
+function consoleArguments(callText: string): string[] {
+  // The console call's OWN paren, not the first one on the line: these are
+  // routinely written `if (DEBUG_PCO) console.log(...)`, and starting at the
+  // `if (` would report the guard as an argument.
+  const head = /console\.(?:log|warn|error)\s*\(/.exec(callText);
+  if (!head) return [];
+  const open = head.index + head[0].length - 1;
+  const args: string[] = [];
+  let current = "";
+  let depth = 0;
+  // The quote character we are inside, or "" when we are not.
+  let quote = "";
+  for (let i = open + 1; i < callText.length; i++) {
+    const c = callText[i];
+    // Inside a literal, EVERYTHING runs to the closing quote — a comma in there
+    // is never a separator, in a template's `${…}` or anywhere else.
+    if (quote) {
+      current += c;
+      if (c === "\\") current += callText[++i] ?? "";
+      else if (c === quote) quote = "";
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+      current += c;
+      continue;
+    }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      if (c === ")" && depth === 0) break; // the call's own closing paren
+      depth--;
+    } else if (c === "," && depth === 0) {
+      args.push(current);
+      current = "";
+      continue;
+    }
+    current += c;
+  }
+  if (current.trim() !== "") args.push(current);
+  return args.map((a) => a.trim());
+}
+
 describe("scrub coverage in every PCO client", () => {
   for (const file of PCO_CLIENTS) {
     it(`${file}: every console call interpolates only scrubbed values`, () => {
@@ -247,6 +282,31 @@ describe("scrub coverage in every PCO client", () => {
       }
       assert.deepEqual(offenders, [], `${file}: these log sites interpolate unscrubbed values`);
     });
+
+    it(`${file}: every console ARGUMENT is a literal or scrubbed`, () => {
+      // The interpolation scan above only ever looked inside `${...}`, so
+      //
+      //   console.error("[pco] failed:", err)
+      //
+      // passed it without being examined at all — the value never touches a
+      // template, and a newline in it forges a line on the LAN-visible /log page
+      // exactly the same way. Latent rather than live when found; widened here
+      // so it stays that way.
+      //
+      // The rule: each top-level argument is either a string/template literal
+      // (whose interpolations the scan above has already checked) or a scrub()
+      // call. Nothing else reaches console.
+      const offenders: string[] = [];
+      for (const call of consoleCalls(linesOf(file))) {
+        for (const argument of consoleArguments(call.text)) {
+          const a = argument.trim();
+          if (a === "") continue;
+          if (/^[`'"]/.test(a) || a.startsWith("scrub(")) continue;
+          offenders.push(`${call.line}: ${a}`);
+        }
+      }
+      assert.deepEqual(offenders, [], `${file}: these log arguments reach /log unscrubbed`);
+    });
   }
 
   it("and the scan can actually SEE a call that spans several lines", () => {
@@ -260,25 +320,113 @@ describe("scrub coverage in every PCO client", () => {
       assert.match(c.text, /\$\{/, `a multi-line call was captured without its body: ${c.text}`);
     }
   });
+
+  it("and the argument split survives commas that are not separators", () => {
+    // The guard on that guard. A splitter that cut on every comma would read
+    // `scrub(a, b)` as two arguments and `${x ? "a," : "b"}` as three, and would
+    // then flag or excuse the wrong halves.
+    assert.deepEqual(consoleArguments('console.warn("a, b", scrub(c, 2), `${d}, e`)'), [
+      '"a, b"',
+      "scrub(c, 2)",
+      "`${d}, e`",
+    ]);
+    // And it catches the shape this rule exists for.
+    assert.deepEqual(consoleArguments('console.error("[pco] failed:", err)'), ['"[pco] failed:"', "err"]);
+  });
 });
 
-describe("pagination in every PCO client", () => {
-  for (const file of PCO_CLIENTS) {
-    it(`${file}: carries an integer, never a URL from the response body`, () => {
-      // An offset cannot carry a host, a path or a scheme. This is what makes
-      // following a page structurally safe rather than safe-because-checked.
-      // The line filter is the UNION of the two this file used to run, so
-      // widening it can only ever add coverage.
-      const offenders: string[] = [];
-      linesOf(file).forEach((line, i) => {
-        if (isComment(line)) return;
-        if (!/\burl\s*=\s*/.test(line)) return;
-        if (!/\blinks\b|\bnext\b|\boffset\b/.test(line)) return;
-        if (!line.includes("withOffset(")) offenders.push(`${i + 1}: ${line.trim()}`);
-      });
-      assert.deepEqual(offenders, [], `${file}: these build a request URL out of a response body`);
-    });
+/** Every non-test .ts under main/services, walked recursively, as file paths
+ *  relative to this directory. */
+function serviceSources(dir = HERE, prefix = ""): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...serviceSources(path.join(dir, entry.name), rel));
+    else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) out.push(rel);
   }
+  return out;
+}
+
+/**
+ * Every `url = …` that is choosing a NEXT PAGE, as source text, however many
+ * lines it spans.
+ *
+ * Block-capturing for the same reason consoleCalls is: the two scans this
+ * replaces were single-line, and the assignment they were written for is
+ * routinely wrapped. The block runs to the first line containing `;`, capped;
+ * over-inclusion can only ADD text to check, which fails loudly, where ending
+ * early drops one silently.
+ */
+function pageAssignments(lines: string[]): { line: number; text: string }[] {
+  const found: { line: number; text: string }[] = [];
+  lines.forEach((line, i) => {
+    if (isComment(line)) return;
+    if (!/\burl\s*=\s*/.test(line)) return;
+    const block: string[] = [];
+    for (let j = i; j < lines.length && j < i + 6; j++) {
+      block.push(lines[j]);
+      if (lines[j].includes(";")) break;
+    }
+    const text = block.join("\n");
+    // Only the pagination ones. A url built from PCO_BASE and an id is not this.
+    if (!/\blinks\b|\bnext\b|\boffset\b/.test(text)) return;
+    found.push({ line: i + 1, text });
+  });
+  return found;
+}
+
+describe("pagination", () => {
+  it("is written ONCE, and carries an integer rather than a URL from the body", () => {
+    // Two things at once, because they are the same fact.
+    //
+    // EXACTLY ONE. This loop was three verbatim copies — two in pco-service.ts
+    // and a third in pco-calendar-service.ts — and a rule that holds in one of
+    // three places is the failure mode CLAUDE.md names as this repo's most
+    // expensive. A floor would let a fourth copy ride along; an exact count
+    // fails the moment one appears, which is the point at which it is cheap to
+    // remove.
+    //
+    // AN INTEGER. `links.next` arrives in a response BODY and every request it
+    // would feed carries the operator's App ID and secret. An offset cannot
+    // carry a host, a path or a scheme, so following a page is structurally
+    // safe rather than safe-because-checked.
+    //
+    // The whole services tree, not a hand-kept list of clients: a third PCO
+    // client would otherwise arrive with its own copy and its own coverage, the
+    // way the second one did.
+    const found = serviceSources().flatMap((file) =>
+      pageAssignments(fs.readFileSync(path.join(HERE, file), "utf8").split("\n")).map((a) => ({
+        ...a,
+        where: `${file}:${a.line}`,
+      })),
+    );
+    // Files, not line numbers: a line number here would break on any edit above
+    // it, and the fact under test is where the loop lives, not what line.
+    assert.deepEqual(
+      found.map((f) => f.where.replace(/:\d+$/, "")),
+      ["pco-service.ts"],
+      `the paging loop is no longer in exactly one place: ${found.map((f) => f.where).join(", ")}`,
+    );
+    assert.match(
+      found[0].text,
+      /withOffset\(/,
+      `a request URL is built from a response body: ${found[0].text}`,
+    );
+  });
+
+  it("and the scan can actually SEE a wrapped assignment", () => {
+    // The guard on the guard. A line-based version reports nothing for the
+    // wrapped form below, and then passes on anything.
+    const wrapped = [
+      "      url =",
+      "        offset === null || offset <= seenOffset",
+      "          ? null",
+      "          : somethingElse(url, offset);",
+    ];
+    const seen = pageAssignments(wrapped);
+    assert.equal(seen.length, 1, "a wrapped pagination assignment was invisible to the scan");
+    assert.doesNotMatch(seen[0].text, /withOffset\(/, "the block was captured without its body");
+  });
 });
 
 /**
@@ -497,14 +645,15 @@ describe("no response-body URL is followed", () => {
   const src = fs.readFileSync(path.join(HERE, "pco-service.ts"), "utf8");
   const lines = src.split("\n");
 
-  it("and there are exactly the three sites we know about", () => {
-    // One live-action URL plus two pagination follows. A fourth appearing
-    // without a guard fails the test above; a fourth appearing WITH one fails
-    // this, so it has to be looked at either way.
-    // Two pagination loops carrying an offset. The Live action URL is no longer
-    // among them: it is constructed outright.
+  it("and there is exactly the ONE site we know about", () => {
+    // ONE pagination follow, in readPcoPages. It was two here and a third in
+    // pco-calendar-service.ts; all three readers now share the loop. A second
+    // appearing without a guard fails the exact-count scan above; a second
+    // appearing WITH one fails this, so it has to be looked at either way.
+    //
+    // The Live action URL is not among them: it is constructed outright.
     const uses = lines.filter((l) => l.includes("withOffset(") && !l.includes("export function withOffset"));
-    assert.equal(uses.length, 2, `expected 2 pagination sites, found ${uses.length}:\n  ${uses.join("\n  ")}`);
+    assert.equal(uses.length, 1, `expected 1 pagination site, found ${uses.length}:\n  ${uses.join("\n  ")}`);
   });
 
   it("no fetch in this file takes a URL that skipped the guard", () => {

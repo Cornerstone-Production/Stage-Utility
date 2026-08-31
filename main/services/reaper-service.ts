@@ -128,16 +128,14 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
 
   // Overrides the base's shallow compare: while recording, tick EVERY poll so a
   // timecode display advances, which a change-only broadcast would freeze.
-  protected override emitIfChanged(next: ReaperStatusDTO): void {
-    const p = this.last;
+  protected override changed(p: ReaperStatusDTO, next: ReaperStatusDTO): boolean {
     const stateChanged =
       p.connected !== next.connected ||
       p.recording !== next.recording ||
       p.recordPaused !== next.recordPaused ||
       p.playing !== next.playing;
     const tick = next.recording && p.positionString !== next.positionString;
-    if (stateChanged || tick) this.emit(next);
-    else this.last = next;
+    return stateChanged || tick;
   }
 
 }

@@ -12,7 +12,7 @@
 //
 // TWO THINGS HERE ARE DELIBERATE AND EASY TO UNDO BY ACCIDENT:
 //
-//   1. emitIfChanged is OVERRIDDEN. The base compares DTO keys with `!==`, and
+//   1. changed() is OVERRIDDEN. The base compares DTO keys with `!==`, and
 //      `layers` is a fresh array every poll, so the base implementation would
 //      broadcast at the poll rate forever. See shouldEmit below.
 //   2. The cadence gates on inDemand, not hasSubscribers. This channel carries
@@ -355,15 +355,33 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
         this.resetBackoff();
         this.report("connected", `Connected to ProVideoPlayer at ${t.host}:${t.port}`);
       }
-      // Before the emit, so the frame this poll sends already carries its next
-      // cues rather than naming them a poll later.
-      await this.refreshSuccessors(t, layers);
-      if (!this.running) return;
       this.emitFresh(layers, startedAtMs);
       // inDemand, not hasSubscribers: a rule reading this channel is a watcher,
       // and an appliance with no browser attached is exactly where "nobody is
       // looking" is permanent.
       this.scheduleIn(this.inDemand ? POLL_MS : IDLE_POLL_MS);
+
+      // AFTER both, and deliberately NOT awaited.
+      //
+      // This can issue a second request, to /data/playlists, and every request
+      // here carries a 4-second timeout. Awaiting it between the workspace read
+      // and the emit put that timeout in front of BOTH the layer snapshot and
+      // the scheduling of the next poll: one hung playlist endpoint froze the
+      // layer view — the part of this integration that has to be current within
+      // a second — for four seconds at a time, forever, while the transport
+      // state it was showing was arriving perfectly well.
+      //
+      // The cost is that a next-cue line first appears one poll (1s) later than
+      // it used to, on the first read after a tree is loaded. emitFresh
+      // decorates from the cache, so every frame after that carries it.
+      //
+      // The catch is the TOP of this chain — there is no caller to hand a
+      // failure back to — so it says so on the tagged line an operator reads.
+      // refreshSuccessors does not reject today; this is what keeps that from
+      // becoming an unhandled rejection if it ever does.
+      void this.refreshSuccessors(t, layers).catch((err: unknown) => {
+        console.warn(`[pvp] playlist refresh failed (${errorMessage(err)}) — the next-cue line may be stale`);
+      });
     } catch (err) {
       const msg = errorMessage(err);
       if (this.attempt === 0) console.warn(`[pvp] ${t.host}:${t.port} unreachable (${msg}) — backing off quietly`);
@@ -477,15 +495,14 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
    *
    * Deleting this override is the single most expensive mistake available in
    * this file. It is guarded by "the emitIfChanged override decides what reaches
-   * the wire" in pvp-service.test.ts, which drives THIS method and counts frames
-   * arriving at the broadcaster — not the static shouldEmit helper, which an
-   * earlier version of that suite tested instead and which left this line
-   * deletable with the whole suite green. On the live device the difference is
-   * 2 frames per 30s against 20.
+   * the wire" in pvp-service.test.ts, which drives emitIfChanged — and so this
+   * predicate — and counts frames arriving at the broadcaster, not the static
+   * shouldEmit helper, which an earlier version of that suite tested instead and
+   * which left this line deletable with the whole suite green. On the live
+   * device the difference is 2 frames per 30s against 20.
    */
-  protected override emitIfChanged(next: PvpStatusDTO): void {
-    if (PvpService.shouldEmit(this.last, next, this.lastBroadcastAtMs, Date.now())) this.emit(next);
-    else this.last = next;
+  protected override changed(prev: PvpStatusDTO, next: PvpStatusDTO): boolean {
+    return PvpService.shouldEmit(prev, next, this.lastBroadcastAtMs, Date.now());
   }
 
   /** Stamped here rather than in emitIfChanged so goOffline() — which calls

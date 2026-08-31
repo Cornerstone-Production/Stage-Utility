@@ -19,8 +19,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
-import { pcoCalendarService } from "./pco-calendar-service.js";
-import { pcoService } from "./pco-service.js";
+import { CALENDAR_API_VERSION, pcoCalendarService } from "./pco-calendar-service.js";
+import { PCO_API_VERSION, pcoService } from "./pco-service.js";
 
 type Requester = { request: (url: string, appId: string, secret: string) => Promise<unknown> };
 const svc = pcoCalendarService as unknown as Requester;
@@ -250,6 +250,138 @@ describe("the pickers", () => {
   });
 });
 
+// ── Pagination ──────────────────────────────────────────────────────────────
+//
+// The stub above answers the SAME payload however many times it is asked and
+// advertises no `links`, so the paging loop ran exactly once in every test in
+// this file and six separate mutations of it stayed green — the page bound, the
+// strictly-forward rule, the dedupe, the offset carried out of the body, and the
+// warning on truncation all had zero coverage.
+//
+// These drive the real reader with a stub KEYED ON THE OFFSET in the url it is
+// asked for, so the loop actually walks. The loop itself is readPcoPages in
+// pco-service.ts, shared with the two /services/v2 readers that used to carry
+// verbatim copies of it; there is one loop to guard, and this is it.
+describe("pagination", () => {
+  /** The `offset` the client asked for, or 0 when it asked for the first page. */
+  function offsetOf(url: string): number {
+    return Number(new URL(url).searchParams.get("offset") ?? 0);
+  }
+
+  /**
+   * Serve one page per entry in `pages`, keyed on the requested offset.
+   *
+   * `nextOf` builds the `links.next` a page carries; returning undefined ends
+   * the collection. Offsets advance by 100 (PER_PAGE) so the urls look like
+   * PCO's own.
+   */
+  function stubPaged(pages: unknown[][], nextOf: (page: number) => string | undefined): void {
+    urls = [];
+    svc.request = async (url: string) => {
+      urls.push(url);
+      const page = offsetOf(url) / 100;
+      const data = pages[page] ?? [];
+      const next = nextOf(page);
+      return { data, included: [TAG_TEAL, TAG_AMBER], ...(next ? { links: { next } } : {}) };
+    };
+  }
+
+  /** A next-link on PCO's own origin at `offset`. */
+  const pcoNext = (offset: number) =>
+    `https://api.planningcenteronline.com/calendar/v2/event_instances?per_page=100&offset=${offset}`;
+
+  /** Run `body` with console.warn captured. */
+  async function warnings(body: () => Promise<unknown>): Promise<string[]> {
+    const real = console.warn;
+    const seen: string[] = [];
+    console.warn = (...args: unknown[]) => void seen.push(args.map(String).join(" "));
+    try {
+      await body();
+    } finally {
+      console.warn = real;
+    }
+    return seen;
+  }
+
+  beforeEach(() => pcoCalendarService.clearCache());
+
+  it("concatenates every page, following the offset out of links.next", async () => {
+    // Three pages of two. A loop that runs once returns 2; one that ignores the
+    // dedupe on a repeated id returns more than 6.
+    stubPaged(
+      [
+        [instance("e1", {}), instance("e2", {})],
+        [instance("e3", {}), instance("e4", {})],
+        [instance("e5", {}), instance("e6", {})],
+      ],
+      (page) => (page < 2 ? pcoNext((page + 1) * 100) : undefined),
+    );
+    const events = await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+    assert.equal(urls.length, 3, `expected exactly 3 requests, made ${urls.length}`);
+    assert.deepEqual(events.map((e) => e.id), ["e1", "e2", "e3", "e4", "e5", "e6"]);
+  });
+
+  it("drops a row a later page repeats, rather than listing it twice", async () => {
+    stubPaged(
+      [
+        [instance("e1", {}), instance("e2", {})],
+        [instance("e2", {}), instance("e3", {})],
+      ],
+      (page) => (page < 1 ? pcoNext(100) : undefined),
+    );
+    const events = await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+    assert.deepEqual(events.map((e) => e.id), ["e1", "e2", "e3"]);
+  });
+
+  it("STOPS on a next-link that does not move forward, instead of looping for ever", async () => {
+    // PCO does not do this, which is exactly why nothing would catch it if it
+    // started: the offset is not larger than the one already asked for, so the
+    // second page is the last request made.
+    stubPaged(
+      [[instance("e1", {})], [instance("e2", {})], [instance("e3", {})]],
+      (page) => (page === 0 ? pcoNext(100) : pcoNext(100)),
+    );
+    const events = await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+    assert.equal(urls.length, 2, `a non-advancing offset made ${urls.length} requests`);
+    assert.deepEqual(events.map((e) => e.id), ["e1", "e2"]);
+  });
+
+  it("stops at the page bound, and SAYS SO", async () => {
+    // 13 pages on offer, MAX_PAGES is 12. Exiting on the bound is otherwise
+    // indistinguishable from having read everything, so the operator gets a line
+    // in /log rather than a month that is quietly missing its last week.
+    const pages = Array.from({ length: 13 }, (_, i) => [instance(`e${i}`, {})]);
+    stubPaged(pages, (page) => (page < 12 ? pcoNext((page + 1) * 100) : undefined));
+    const seen = await warnings(() => pcoCalendarService.listEventInstances("app", "secret", WINDOW));
+    assert.equal(urls.length, 12, `the page bound let ${urls.length} requests through`);
+    assert.equal(seen.length, 1, `expected one truncation warning, got ${seen.length}`);
+    assert.match(seen[0], /page limit reached/);
+    assert.match(seen[0], /\[pco-calendar\]/);
+  });
+
+  it("carries an OFFSET out of links.next, never the url — even one naming another host", async () => {
+    // The credentials go on every request this makes. `links.next` arrives in a
+    // response BODY, so an integer is the only thing safe to take from it: it
+    // cannot carry a host, a path or a scheme.
+    stubPaged(
+      [[instance("e1", {})], [instance("e2", {})]],
+      (page) => (page === 0 ? "https://evil.example/calendar/v2/event_instances?per_page=100&offset=100" : undefined),
+    );
+    await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+    assert.equal(urls.length, 2);
+    const second = new URL(urls[1]);
+    assert.equal(second.origin, "https://api.planningcenteronline.com", `page two went to ${second.origin}`);
+    assert.equal(second.searchParams.get("offset"), "100", "the offset from links.next was not applied");
+    assert.equal(second.pathname, new URL(urls[0]).pathname, "page two changed path");
+  });
+
+  it("asks for a full page, not one row at a time", async () => {
+    stubPaged([[instance("e1", {})]], () => undefined);
+    await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+    assert.equal(new URL(urls[0]).searchParams.get("per_page"), "100");
+  });
+});
+
 describe("the cache", () => {
   beforeEach(() => pcoCalendarService.clearCache());
 
@@ -276,6 +408,68 @@ describe("the cache", () => {
     stub([instance("e2", {})]);
     const filtered = await pcoCalendarService.listEventInstances("app", "secret", { ...WINDOW, tagIds: ["tag-1"] });
     assert.deepEqual(filtered.map((e) => e.id), ["e2"], "a filtered read was served the unfiltered answer");
+  });
+
+  // The three tests above pinned only hit-versus-miss KEYING, so every number
+  // this cache is built out of was free: TTL_EMPTY_MS could equal
+  // TTL_METADATA_MS, MAX_CACHE_ENTRIES could be 1, and TTL_EVENTS_MS could be 0,
+  // all with the file green. TTL_EMPTY_MS in particular carried a six-line
+  // docstring nothing checked.
+  //
+  // These drive the real cache with the clock moved on, which is the only way to
+  // see a TTL at all.
+  describe("holds an answer for as long as it says it does", () => {
+    /** Run `body` with Date.now advanced by `ms` for its whole duration. */
+    async function at(ms: number, body: () => Promise<unknown>): Promise<void> {
+      const real = Date.now;
+      const base = real();
+      Date.now = () => base + ms;
+      try {
+        await body();
+      } finally {
+        Date.now = real;
+      }
+    }
+
+    it("re-reads an EMPTY calendar list quickly, and a real one slowly", async () => {
+      // An empty answer is far more likely to be a blip than an org with no
+      // calendars, and holding it for the metadata TTL would make one blip look
+      // permanent. TTL_EMPTY_MS is 30s; TTL_METADATA_MS is 15 minutes.
+      stub([]);
+      await pcoCalendarService.listCalendars("app", "secret");
+      await at(45_000, () => pcoCalendarService.listCalendars("app", "secret"));
+      assert.equal(urls.length, 2, "an empty calendar list was held past its 30s TTL");
+
+      pcoCalendarService.clearCache();
+      stub([{ id: "cal-1", type: "Calendar", attributes: { name: "Sample Calendar" } }]);
+      await pcoCalendarService.listCalendars("app", "secret");
+      await at(45_000, () => pcoCalendarService.listCalendars("app", "secret"));
+      assert.equal(urls.length, 1, "a real calendar list was re-fetched 45s later");
+    });
+
+    it("holds a window for minutes, not for one tick", async () => {
+      // TTL_EVENTS_MS is 3 minutes: an operator moves an event and expects to
+      // see it move, but a grid that re-fetched on every render would hammer PCO.
+      stub([instance("e1", {})]);
+      await pcoCalendarService.listEventInstances("app", "secret", WINDOW);
+      await at(60_000, () => pcoCalendarService.listEventInstances("app", "secret", WINDOW));
+      assert.equal(urls.length, 1, "the window was re-fetched a minute later");
+      await at(4 * 60_000, () => pcoCalendarService.listEventInstances("app", "secret", WINDOW));
+      assert.equal(urls.length, 2, "the window was still being served four minutes later");
+    });
+
+    it("keeps more than one window at a time", async () => {
+      // MAX_CACHE_ENTRIES is 200 precisely so a month grid browsed back and
+      // forth keeps its neighbours. At 1, every step forward evicts the month
+      // the operator is about to step back to.
+      const MARCH = WINDOW;
+      const APRIL = { ...WINDOW, fromIso: "2026-04-01T05:00:00Z", toIso: "2026-05-01T04:59:59Z" };
+      stub([instance("e1", {})]);
+      await pcoCalendarService.listEventInstances("app", "secret", MARCH);
+      await pcoCalendarService.listEventInstances("app", "secret", APRIL);
+      await pcoCalendarService.listEventInstances("app", "secret", MARCH);
+      assert.equal(urls.length, 2, "stepping to the next month evicted the one before it");
+    });
   });
 });
 
@@ -315,9 +509,10 @@ describe("the API version pin", () => {
     assert.equal(seen.length, 1);
     assert.equal(
       seen[0].get("X-PCO-API-Version"),
-      "2018-11-01",
+      CALENDAR_API_VERSION,
       "unpinned: the version is then whatever a developer console outside this repo says",
     );
+    assert.match(CALENDAR_API_VERSION, /^\d{4}-\d{2}-\d{2}$/, "PCO versions each product by DATE");
   });
 
   it("pins a /services/v2 request from the Services constant, not from this argument", async () => {
@@ -327,15 +522,21 @@ describe("the API version pin", () => {
     // it already had, and the note said "when fix/pco-freshness lands it pins
     // /services/v2 too, and this expectation inverts with it". It landed.
     //
-    // What is left to check is that the two products are pinned INDEPENDENTLY.
-    // The Services path takes the Services constant, and the calendar's argument
-    // is an override for one product rather than the thing that decides this
-    // header. That the override actually reaches the wire is the other half, and
-    // lives in pco-api-version.test.ts where a version unlike either constant can
-    // be asked for and looked for.
+    // What is left to check is that each product's request carries ITS OWN
+    // constant. The Services path takes the Services constant, and the
+    // calendar's argument is an override for one product rather than the thing
+    // that decides this header. That the override actually reaches the wire is
+    // the other half, and lives in pco-api-version.test.ts, where a version
+    // unlike either constant can be asked for and looked for.
+    //
+    // Against the IMPORTED constant, not against the literal. This block used to
+    // claim it pinned the two products INDEPENDENTLY while comparing both to the
+    // same hardcoded "2018-11-01" — which is what both constants happen to say
+    // today, so the claim was untrue and moving either constant left this
+    // assertion passing on a date the app no longer sends.
     const seen = await captureHeaders(() => pcoService.listServiceTypes("app", "secret"));
     assert.equal(seen.length, 1);
-    assert.equal(seen[0].get("X-PCO-API-Version"), "2018-11-01", "a /services/v2 request lost the pin");
+    assert.equal(seen[0].get("X-PCO-API-Version"), PCO_API_VERSION, "a /services/v2 request lost the pin");
     assert.ok(seen[0].get("Authorization")?.startsWith("Basic "), "the auth header is still built the same way");
   });
 });

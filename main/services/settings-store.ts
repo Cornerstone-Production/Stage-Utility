@@ -245,6 +245,42 @@ export const settingsStore = {
   },
 
   /**
+   * Merge one integration's non-secret config INSIDE the write queue.
+   *
+   * `patch` is atomic only for the values it is handed. Building the nested
+   * object from a `load()` taken outside the queue puts the read-modify-write
+   * back where it was: two integrations saved at once both read
+   * `integrationConfigs` before either write lands, and the second one writes a
+   * map that never heard of the first — credentials accepted, saved, and gone.
+   * The same shape as the whole-object `save` that was removed from this store
+   * for the same reason, one level down the object.
+   *
+   * @returns the merged config for THAT integration, which the caller needs to
+   *   build its masked state. Reading it back off a separate load() is the other
+   *   half of the same race.
+   */
+  async patchIntegrationConfig(
+    id: string,
+    config: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    let merged: Record<string, unknown> = {};
+    syncTimeZone(await store.update((current) => {
+      merged = { ...(current.integrationConfigs?.[id] ?? {}), ...config };
+      return { ...current, integrationConfigs: { ...current.integrationConfigs, [id]: merged } };
+    }));
+    return merged;
+  },
+
+  /** One integration's enabled flag, merged inside the write queue — see
+   *  patchIntegrationConfig for why the nested spread cannot sit outside it. */
+  async patchIntegrationEnabled(id: string, enabled: boolean): Promise<void> {
+    syncTimeZone(await store.update((current) => ({
+      ...current,
+      integrationEnabled: { ...current.integrationEnabled, [id]: enabled },
+    })));
+  },
+
+  /**
    * Allocate one or more ids AND advance the floor as one serialized
    * read-modify-write.
    *

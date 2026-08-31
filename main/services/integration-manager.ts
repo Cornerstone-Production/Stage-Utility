@@ -26,7 +26,7 @@ import {
   sensourceService,
 } from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
-import type { ConnectionManagedId } from "./integration-ids.js";
+import type { ConnectionManagedId, IntegrationId } from "./integration-ids.js";
 import type { ConnState } from "./integration-base.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
@@ -593,10 +593,15 @@ export interface OutOfBandSetup {
  * panel that would let them finish. `empty-schema-configured.test.ts` fails if a
  * schema-less integration is added without an entry.
  */
-const OUT_OF_BAND_CONFIGURED: Record<
-  string,
+// Keyed by IntegrationId, not by string. A typo'd key on a `Record<string, …>`
+// is a valid entry that nothing ever looks up, so the integration it was meant
+// for stays permanently "Not set up" — the exact failure this table was added to
+// fix, arriving back through the table itself. Partial because most
+// integrations answer from their config and belong nowhere near here.
+const OUT_OF_BAND_CONFIGURED: Partial<Record<
+  IntegrationId,
   (setup: OutOfBandSetup) => boolean
-> = {
+>> = {
   wireless: (s) => s.wirelessConnections > 0,
   osc: (s) => s.oscTargets > 0,
   rosstalk: (s) => s.rossTalkTargets > 0,
@@ -660,9 +665,12 @@ export function foldConfigEntries(
       console.warn(`[integration-manager] ignoring unusable config key on ${id}: ${rawKey}`);
       continue;
     }
-    // Narrowed to the matched text, so what is written is provably the string
-    // the pattern accepted rather than the one that arrived.
-    const key = CONFIG_KEY.exec(rawKey)![0];
+    // `rawKey` itself, and it is safe to write. CONFIG_KEY is fully anchored and
+    // carries no flags, so `exec(rawKey)![0]` was always exactly `rawKey` — a
+    // no-op dressed as a narrowing step, which reads as a guard that is not one.
+    // What makes the write safe is the anchored test above plus the reserved
+    // list, both already done, on a null-prototype object.
+    const key = rawKey;
     if (secretKeys.includes(key)) {
       // Only update the secret if the caller provided a real value (not the mask).
       if (value !== "••••" && value !== "") secrets[key] = String(value);
@@ -686,7 +694,11 @@ export function configuredFor(
   inbound: boolean,
 ): boolean {
   if (inbound) return true; // the other end dials us — nothing to set up
-  const outOfBand = OUT_OF_BAND_CONFIGURED[state.id];
+  // Cast at the READ, deliberately: the ids reaching here come off HTTP bodies
+  // and descriptors as plain strings, while the table is keyed by IntegrationId
+  // so a typo in the table itself is a compile error. An unknown id here is a
+  // miss, which is the same answer a string-keyed table would have given.
+  const outOfBand = OUT_OF_BAND_CONFIGURED[state.id as IntegrationId];
   if (outOfBand) return outOfBand(setup);
   // YouTube asks for one of two sets of fields depending on how it is set to
   // check, so "any value present" would call it configured the moment the mode
@@ -708,7 +720,12 @@ export function configuredFor(
 }
 
 // Keys that are secrets for each integration id.
-const SECRET_KEYS: Record<string, string[]> = {
+//
+// Keyed by IntegrationId for the same reason as OUT_OF_BAND_CONFIGURED above,
+// and the cost of a typo here is worse: an id that does not match falls back to
+// `[]`, so every field of that integration — passwords and tokens included — is
+// written to settings.json as ordinary config instead of to secrets.bin.
+const SECRET_KEYS: Partial<Record<IntegrationId, string[]>> = {
   "planning-center": ["secret"],
   wireless: [],
   companion: [],
@@ -725,6 +742,13 @@ const SECRET_KEYS: Record<string, string[]> = {
   sensource: ["clientSecret", "apiToken"],
   "ross-tsl": [],
 };
+
+/** The secret field names for an integration id, or none. A helper rather than a
+ *  bare index because SECRET_KEYS is keyed by IntegrationId — so a typo in the
+ *  TABLE is a compile error — while every call site carries a plain string. */
+function secretKeysFor(id: string): readonly string[] {
+  return SECRET_KEYS[id as IntegrationId] ?? [];
+}
 
 class IntegrationManager {
   private states = new Map<string, IntegrationState>();
@@ -747,7 +771,7 @@ class IntegrationManager {
 
       // Merge saved non-secret config with any secret keys (masked).
       const maskedConfig: Record<string, unknown> = { ...savedConfig };
-      for (const key of SECRET_KEYS[descriptor.id] ?? []) {
+      for (const key of secretKeysFor(descriptor.id)) {
         maskedConfig[key] = secrets[key] ? "••••" : "";
       }
 
@@ -811,18 +835,7 @@ class IntegrationManager {
       // receiver or target has to reach the page that is showing "Not set up".
       // Unconditional rather than change-gated: adding a target that is switched
       // off moves `configured` without moving the badge at all.
-      if (channel === "wireless:connections-changed") {
-        this.refreshWirelessSummary();
-        this.broadcastStates();
-      }
-      if (channel === "osc:targets-changed") {
-        this.refreshOscSummary();
-        this.broadcastStates();
-      }
-      if (channel === "rosstalk:targets-changed") {
-        this.refreshRossTalkSummary();
-        this.broadcastStates();
-      }
+      this.onSetupListChanged(channel);
     });
     await this.applyRossTsl();
 
@@ -961,26 +974,21 @@ class IntegrationManager {
     const state = this.states.get(id);
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
-    const secretKeys = SECRET_KEYS[id] ?? [];
+    const secretKeys = secretKeysFor(id);
     const { config: nonSecretConfig, secrets: newSecrets } = foldConfigEntries(config, secretKeys, id);
 
     // Persist non-secret config.
     //
-    // patch, not load-mutate-save. Saving the whole object writes back every
-    // field as it was read, so anything written in between is undone -- and one
-    // of those fields is idFloors, the high-water mark that stops a deleted view
-    // or display id being handed out again. Creating a view while this saved
-    // would have rolled the floor back to before it existed.
-    const settings = await settingsStore.load();
-    // Built once and used for BOTH the write and the mask below. The masked
-    // config used to be read back off the object this mutated in place, so
-    // dropping the mutation without this would leave the state holding the
-    // PREVIOUS config -- which is credentials saved and the integration never
-    // started.
-    const merged = { ...(settings.integrationConfigs?.[id] ?? {}), ...nonSecretConfig };
-    await settingsStore.patch({
-      integrationConfigs: { ...settings.integrationConfigs, [id]: merged },
-    });
+    // patchIntegrationConfig, not load-then-patch. `patch` is atomic for the
+    // values handed to it, and this hands it a whole `integrationConfigs` map
+    // built from a load() taken OUTSIDE the write queue — so two integrations
+    // saved at once both read the map before either write lands, and the second
+    // writes one that never heard of the first. Merging inside store.update is
+    // what makes the read and the write indivisible.
+    //
+    // It returns the merged config because the mask below needs it. Reading it
+    // back off a second load() is the other half of the same race.
+    const merged = await settingsStore.patchIntegrationConfig(id, nonSecretConfig);
 
     // Persist secrets (merge with existing so unchanged ones survive).
     if (Object.keys(newSecrets).length > 0) {
@@ -1036,13 +1044,10 @@ class IntegrationManager {
 
     this.states.set(id, { ...state, enabled });
 
-    // patch, for the reason spelled out in the config save above: a whole-object
-    // save undoes anything written between the read and the write, id floors
-    // included.
-    const settings = await settingsStore.load();
-    await settingsStore.patch({
-      integrationEnabled: { ...settings.integrationEnabled, [id]: enabled },
-    });
+    // Merged inside the write queue, for the reason spelled out in the config
+    // save above: a nested spread built from a load() outside the queue is a
+    // read-modify-write, and two integrations toggled at once lose one of them.
+    await settingsStore.patchIntegrationEnabled(id, enabled);
 
     if (id === "wireless") {
       // Master toggle: re-apply connections without reloading from disk.
@@ -1458,6 +1463,56 @@ class IntegrationManager {
    * directly would start polling ESPN for an operator who had deliberately
    * switched the integration off.
    */
+  /**
+   * Channels announcing a change to a list that IS an integration's setup, and
+   * what each one has to re-derive.
+   *
+   * A table rather than four identical `if` clauses, and it is not only tidying:
+   * scores was the ONE out-of-band integration wired by an explicit call from
+   * its route instead of by this broadcast, so a second writer of setFavourites
+   * that forgot `refreshScores()` would leave the poller stopped with the panel
+   * saying it was following teams. The store now announces the change like the
+   * other three, and this is where all four are answered.
+   */
+  private get setupListRefreshers(): Record<string, () => void | Promise<void>> {
+    return {
+      "wireless:connections-changed": () => this.refreshWirelessSummary(),
+      "osc:targets-changed": () => this.refreshOscSummary(),
+      "rosstalk:targets-changed": () => this.refreshRossTalkSummary(),
+      "scores:favourites-changed": () => this.applyScores(),
+    };
+  }
+
+  /**
+   * One of those lists changed: re-derive, then send the states frame.
+   *
+   * Both halves matter. The summary is the badge ("2 of 3 target(s)"), which
+   * only init and the master toggle used to refresh; the broadcast is what
+   * carries `configured`, which follows the list length, so adding the first
+   * receiver or target has to reach the page that is showing "Not set up".
+   * Unconditional rather than change-gated: adding a target that is switched off
+   * moves `configured` without moving the badge at all.
+   *
+   * The frame goes out AFTER the refresh, including for the async one, so the
+   * badge and `configured` in it agree. The catch is the top of this chain —
+   * a broadcast listener has no caller to hand a failure back to — so it says so
+   * on the tagged line, and the frame still goes out.
+   */
+  private onSetupListChanged(channel: string): void {
+    const refresh = this.setupListRefreshers[channel];
+    if (!refresh) return;
+    void (async () => {
+      try {
+        await refresh();
+      } catch (err) {
+        console.warn(
+          `[integration-manager] ${scrub(channel)} refresh failed: ${scrub(errorMessage(err))}`,
+        );
+      }
+      this.broadcastStates();
+    })();
+  }
+
   async refreshScores(): Promise<void> {
     await this.applyScores();
     // The followed-teams list IS scores' setup, so `configured` just changed and

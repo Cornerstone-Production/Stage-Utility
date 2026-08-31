@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 
 import {
   parseWorkspace, layerSignature, anchorDriftSec, driftedLayers,
-  cueSuccessors, hasUnknownCue, isPlaylistsResponse, withNextCues,
+  cueSuccessors, hasUnknownCue, isPlaylistsResponse, isWorkspaceResponse, withNextCues,
 } from "./pvp-parse.js";
 import type { PvpLayerDTO, PvpStatusDTO } from "../types/pvp.js";
 
@@ -187,50 +187,93 @@ describe("layerSignature", () => {
     assert.equal(layerSignature(later), layerSignature(base));
   });
 
-  test("a new media uuid DOES change the signature", () => {
-    const next = base.map((l, i) => (i === 0 ? { ...l, mediaUuid: "media-9999" } : l));
-    assert.notEqual(layerSignature(next), layerSignature(base));
-  });
-
-  test("hiding, muting, opacity and rate all change the signature", () => {
-    for (const patch of [{ hidden: true }, { muted: true }, { opacity: 0.5 }, { playbackRate: 0 }]) {
+  test("EVERY field in the signature is actually in it", () => {
+    // The whole list, one patch each. Five of the twelve were unpinned, and a
+    // signature shortened to uuid/mediaUuid/nextCueName left the file green —
+    // which is a still going to video, and a cue change under the same media,
+    // never reaching a display at all.
+    //
+    // A Partial<PvpLayerDTO> per field rather than a loop over keys, because the
+    // patch has to be a DIFFERENT value from the fixture's and only a human can
+    // say what that is. Adding a field to layerSignature without adding a line
+    // here fails the count below.
+    const patches: Partial<PvpLayerDTO>[] = [
+      { uuid: "layer-9999" },
+      { name: "Renamed" },
+      { index: 7 },
+      { state: "empty" },
+      { mediaUuid: "media-9999" },
+      { lastCueName: "SOME OTHER CUE" },
+      { lastCueUuid: "cue-9999" },
+      { nextCueName: "THE ONE AFTER" },
+      { hidden: true },
+      { muted: true },
+      { opacity: 0.5 },
+      { playbackRate: 3 },
+    ];
+    for (const patch of patches) {
       const next = base.map((l, i) => (i === 0 ? { ...l, ...patch } : l));
       assert.notEqual(layerSignature(next), layerSignature(base), `${JSON.stringify(patch)} was not noticed`);
+    }
+
+    // EXACT, not a floor. The signature is an array of arrays, one per layer;
+    // a field dropped from it and from the list above would otherwise pass.
+    const decoded = JSON.parse(layerSignature(base)) as unknown[][];
+    assert.equal(decoded.length, base.length);
+    for (const row of decoded) {
+      assert.equal(row.length, patches.length, "the signature and the list above have drifted apart");
+    }
+  });
+
+  test("the fields deliberately LEFT OUT stay out", () => {
+    // The efficiency decision, field by field. Any of these moving on every poll
+    // during playback, so including one turns a 1 Hz poll into a 1 Hz SSE frame.
+    for (const patch of [
+      { anchorElapsedSec: 12.3 },
+      { durationSec: 20 },
+      // The uuid beside it is the identity; a name change under a stable uuid is
+      // a relabel, not a cue.
+      { mediaName: "something_else.mp4" },
+    ] as Partial<PvpLayerDTO>[]) {
+      const next = base.map((l, i) => (i === 0 ? { ...l, ...patch } : l));
+      assert.equal(
+        layerSignature(next),
+        layerSignature(base),
+        `${JSON.stringify(patch)} would send a frame on every poll`,
+      );
     }
   });
 
   test("a layer disappearing changes the signature", () => {
     assert.notEqual(layerSignature(base.slice(1)), layerSignature(base));
   });
-
-  test("a media name changing under the same uuid does not change the signature", () => {
-    // The uuid is the identity. A name is a label, and the observed workspace
-    // had seven files whose names differed only by a trailing digit.
-    const next = base.map((l, i) => (i === 0 ? { ...l, mediaName: "something_else.mp4" } : l));
-    assert.equal(layerSignature(next), layerSignature(base));
-  });
 });
 
 describe("anchorDriftSec", () => {
+  // EXACT values throughout. `< 0.01` and `> 1` were bounds around numbers that
+  // are stable and computable — the whole function is arithmetic on its
+  // arguments — so the loose form only ever hid which answer was actually
+  // returned.
   test("ordinary playback has no drift", () => {
     // 10.0s elapsed, one second later, at rate 1 -> 11.0s. Exactly as predicted.
-    assert.ok(anchorDriftSec(10, 0, 11, 1000, 1) < 0.01);
+    assert.equal(anchorDriftSec(10, 0, 11, 1000, 1), 0);
   });
 
   test("a loop restarting on the SAME media is a large drift", () => {
     // The case a media-uuid diff cannot see: one clip looping. Predicted 20.5,
     // observed 0.3.
-    assert.ok(anchorDriftSec(19.5, 0, 0.3, 1000, 1) > 1);
+    assert.equal(anchorDriftSec(19.5, 0, 0.3, 1000, 1), 20.2);
   });
 
   test("a pause is a drift", () => {
-    assert.ok(anchorDriftSec(10, 0, 10, 5000, 1) > 1);
+    // Predicted 15.0 after five seconds at rate 1; observed 10.0.
+    assert.equal(anchorDriftSec(10, 0, 10, 5000, 1), 5);
   });
 
   test("a still frame never drifts, so it never re-anchors", () => {
     // rate 0 predicts no movement, and there is none. A still must not force a
     // frame on every poll for the rest of the service.
-    assert.ok(anchorDriftSec(0, 0, 0, 60_000, 0) < 0.01);
+    assert.equal(anchorDriftSec(0, 0, 0, 60_000, 0), 0);
   });
 
   test("a null anchor on either side is no drift, not NaN", () => {
@@ -304,6 +347,27 @@ describe("driftedLayers", () => {
 // The derivation was verified there too: the live `playingItem` uuid matched
 // index 1 of a playlist and the entry after it was the one this function names.
 
+describe("isWorkspaceResponse", () => {
+  // Asserted nowhere until this block existed: `return true` left the whole
+  // file green. It is the only guard between the API-DOCUMENTATION port — which
+  // answers 200 with JSON — and Test connection cheerfully reporting
+  // "Connected — 0 layers" for the exact wrong port it exists to catch.
+  test("accepts the real workspace, and an empty one", () => {
+    assert.equal(isWorkspaceResponse(FIXTURE), true);
+    // A real workspace with no layers. Not an error, and must not read as one.
+    assert.equal(isWorkspaceResponse({ data: [] }), true);
+  });
+
+  test("rejects anything else that answered 200 with JSON", () => {
+    assert.equal(isWorkspaceResponse({}), false);
+    assert.equal(isWorkspaceResponse(null), false);
+    assert.equal(isWorkspaceResponse({ data: "nope" }), false);
+    // The playlist tree is a different endpoint on the same host. Reading it as
+    // a workspace would report every layer gone.
+    assert.equal(isWorkspaceResponse(PLAYLISTS), false);
+  });
+});
+
 describe("isPlaylistsResponse", () => {
   test("accepts the real tree", () => {
     assert.equal(isPlaylistsResponse(PLAYLISTS), true);
@@ -343,7 +407,19 @@ describe("cueSuccessors", () => {
     // cue-0009 ends Masters and cue-0002 opens Pre-service. PVP does not advance
     // that way, and a widget that said so would name a cue from another part of
     // the service.
-    assert.notEqual(map.get("cue-0009"), "LOWER THIRD");
+    //
+    // Stated as "it is the END", not as "it is not LOWER THIRD": notEqual passes
+    // for undefined and for every other wrong successor, and the exact assertion
+    // in the test above already implies it.
+    assert.equal(map.get("cue-0009"), null, "the last cue of a playlist ran on into the next one");
+    // And the trap is still in the fixture: cue-0002 "LOWER THIRD" opens the
+    // NEXT playlist, so a walk that flattened the tree would name it here.
+    assert.equal(map.has("cue-0002"), true, "the fixture no longer contains the cue that opens the next playlist");
+    assert.equal(
+      [...map.values()].includes("LOWER THIRD"),
+      false,
+      "a cue is followed by the first entry of another playlist",
+    );
   });
 
   test("nested playlists are walked, because the format allows them", () => {

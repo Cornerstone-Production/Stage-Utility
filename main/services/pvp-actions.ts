@@ -80,14 +80,12 @@ async function resolveLayer(
 ): Promise<{ layer: PvpLayerDTO } | { error: string }> {
   const want = String(params.layer ?? "").trim().toLowerCase();
   if (!want) return { error: "no layer name configured" };
-  let layers: readonly PvpLayerDTO[];
-  try {
-    layers = await pvpDeps.readLayers();
-  } catch (e) {
-    // Returned, not logged. The operator's rule did not run and they are owed
-    // the reason.
-    return { error: `could not read ProVideoPlayer's layers: ${errorMessage(e)}` };
-  }
+  // Through readWorkspace, which is the same try/catch producing the same
+  // message. Two copies of a read that turns a throw into an operator-facing
+  // string is two places for the wording, and the recovery, to drift.
+  const got = await readWorkspace();
+  if ("error" in got) return got;
+  const layers = got.layers;
   const layer = layers.find((l) => l.name.trim().toLowerCase() === want);
   if (!layer) {
     const known = layers.map((l) => `"${l.name}"`).join(", ") || "no layers";
