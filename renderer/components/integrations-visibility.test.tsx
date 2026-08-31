@@ -14,7 +14,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, settle, idle, assertAbsent } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -38,10 +38,24 @@ after(async () => {
   teardown();
 });
 
+/**
+ * A loaded page.
+ *
+ * `idle()`, never a fixed delay. Every card on this page comes from the
+ * `integrations:list` query, so until that resolves there are ZERO cards — and
+ * this file's first assertion is that there are sixteen. Waiting 30ms for one
+ * fetch is enough on an idle machine and a coin toss on a loaded one, which is
+ * how "all 16 cards are in the document on the first render" failed once inside
+ * a full-suite run and passed in isolation and on every clean run after.
+ *
+ * Waiting for "sixteen cards" instead would be waiting for the thing under test
+ * and would prove nothing. `idle()` asks react-query whether it has finished,
+ * which is independent of every assertion below — see the harness.
+ */
 async function panel(overrides: Record<string, Partial<IntegrationState>> = {}) {
   server = installFakeServer(overrides);
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await settle();
+  await idle();
   return c;
 }
 

@@ -25,7 +25,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle } = await import(
+const { installFakeServer, withQueryClient, settle, until, idle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
@@ -43,23 +43,6 @@ after(async () => {
   server.restore();
   teardown();
 });
-
-/**
- * Wait until `ok()` holds.
- *
- * The cap is a failure mode, not a schedule: on a fast machine this returns on
- * the first poll, and on one slow enough to have produced the original flake it
- * simply polls for longer. `say` is called only on the way out, so the message
- * reports where things actually got to rather than just "timed out".
- */
-async function until(ok: () => boolean, say: () => string, capMs = 5000): Promise<void> {
-  const deadline = Date.now() + capMs;
-  for (;;) {
-    if (ok()) return;
-    if (Date.now() >= deadline) assert.fail(`${say()} (gave up after ${capMs}ms)`);
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
 
 /** Where focus is, in a few words — never the node itself. See the note below. */
 const where = (el: Element | null): string => {
@@ -80,13 +63,20 @@ const card = (c: { container: HTMLElement }, id: string) => {
 };
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]');
 
+/**
+ * A loaded page.
+ *
+ * `idle()`, not "wait for the card to appear". The cards come from the
+ * `integrations:list` query, and a wait that only asks whether one card exists
+ * can be satisfied before the query has resolved at all — this helper used to do
+ * exactly that and left the enable-then-close sequence running against a
+ * half-loaded grid. Asking react-query whether it has finished is the honest
+ * condition; see the harness.
+ */
 async function panel() {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await until(
-    () => find(c, "reaper") !== null,
-    () => "the grid never drew the REAPER card",
-  );
+  await idle();
   return c;
 }
 

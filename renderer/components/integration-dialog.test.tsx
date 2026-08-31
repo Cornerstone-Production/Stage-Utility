@@ -14,7 +14,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, settle, idle, assertAbsent } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -42,7 +42,7 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 async function open(id: string) {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await settle();
+  await idle();
   fireEvent.click(c.container.querySelector<HTMLElement>(`[data-integration-card="${id}"]`)!);
   await settle(60);
   const d = dialog();

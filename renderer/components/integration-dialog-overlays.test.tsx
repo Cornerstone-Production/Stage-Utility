@@ -16,7 +16,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle } = await import(
+const { installFakeServer, withQueryClient, settle, idle, until } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
@@ -44,10 +44,12 @@ async function open(
 ) {
   server = installFakeServer(overrides, routes);
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await settle();
+  await idle();
   fireEvent.click(c.container.querySelector<HTMLElement>(`[data-integration-card="${id}"]`)!);
-  await settle();
-  assert.ok(dialog(), `the ${id} dialog did not open`);
+  await until(
+    () => dialog() !== null,
+    () => `the ${id} dialog did not open`,
+  );
   return c;
 }
 

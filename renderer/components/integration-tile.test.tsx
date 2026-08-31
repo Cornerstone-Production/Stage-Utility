@@ -9,7 +9,7 @@ import { INTEGRATION_IDS } from "@main/services/integration-ids.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, blankState, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, settle, idle, blankState, assertAbsent } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -36,7 +36,7 @@ after(async () => {
 async function panel(overrides: Record<string, Partial<IntegrationState>> = {}) {
   server = installFakeServer(overrides);
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await settle();
+  await idle();
   return c;
 }
 
