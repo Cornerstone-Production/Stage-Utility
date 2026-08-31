@@ -21,6 +21,7 @@ import { execFileSync } from "node:child_process";
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
+import { serverPort } from "./server-port.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
 import { logRoutes } from "./routes/log-routes.js";
 
@@ -124,7 +125,7 @@ export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = 
 // the files sat correctly in libexec/build/renderer.
 const RENDERER_BUILD_DIR = path.join(APP_ROOT, "build", "renderer");
 
-const PORT = Number(process.env.STAGE_UTILITY_PORT) || 8788;
+const PORT = serverPort();
 // "Friendly" port so operators can browse without typing the port. We bind it in
 // ADDITION to PORT (8788 always stays up for Companion + existing links). Default
 // 80; set STAGE_UTILITY_FRIENDLY_PORT=0 to disable. Binding is best-effort — if the

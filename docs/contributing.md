@@ -122,6 +122,25 @@ the body.
   one-line fix — goes through a pull request off `beta`. Release automation is the
   exception: it commits the version bump and tag to those branches by design.
 
+## Running it locally
+
+```bash
+npm run server   # the Node server, port 8788
+npm run dev      # the UI on 3000, proxying /api to that server
+```
+
+Both halves read `STAGE_UTILITY_PORT`, so they move together:
+
+```bash
+STAGE_UTILITY_PORT=8799 npm run server
+STAGE_UTILITY_PORT=8799 npm run dev
+```
+
+Set it on one and not the other and the UI talks to whatever is on 8788 —
+which, on a machine that already runs a Stage Utility, is somebody's live
+instance. The dev server prints its target on start; read it before you edit
+anything.
+
 ## Before you open a PR
 
 ```bash
