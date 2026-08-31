@@ -168,6 +168,14 @@ calendar is a couple of times a week. It skips the read entirely when no screen
 is showing a calendar. The channel is hydrated on connect, so a display opened
 mid-month is not blank until something happens to change.
 
+**One read at a time.** Changing a view's filters asks for a refresh at once
+rather than waiting for the timer, so several quick changes could otherwise put
+several reads of Planning Center in the air together — and whichever finished
+last decided what every wall showed, which is not the same as whichever started
+last. Refreshes that arrive while one is running are folded into a single pass
+that follows it, so the grid always ends on the newest filters, and the log says
+when that happened.
+
 **Month navigation** is a separate path. Chevrons in the header page back and
 forward up to 36 months, and any month other than the current one is a one-shot
 `?month=YYYY-MM` read that nothing subscribes to — a past month is not going to
