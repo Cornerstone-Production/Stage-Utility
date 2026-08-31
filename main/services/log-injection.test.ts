@@ -41,7 +41,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 
-import { consoleCalls, describeOffender, logOffenders } from "./console-scan.js";
+import { consoleCalls, describeOffender, formatStringOffenders, logOffenders } from "./console-scan.js";
 import { scrub, scrubError } from "./scrub.js";
 import { fileURLToPath } from "node:url";
 
@@ -289,3 +289,62 @@ describe("log injection at the request boundary", () => {
     assert.ok(safe.includes("log-injection.test.ts"), `the stack did not survive: ${safe}`);
   });
 });
+
+/**
+ * The sites that build a format string out of a value and are allowed to,
+ * because the value is the app's own.
+ *
+ * `console.log(fmt, …rest)` reads `fmt` as a format string, so a `%s` in it
+ * consumes one of the arguments that follow. The rule therefore covers EVERY
+ * service that logs, not just the request-facing ones — unlike the scrub rules
+ * it needs no judgement about a value's provenance to CHECK, only to excuse.
+ *
+ * Each entry names the interpolated value and why it cannot carry a `%`. A
+ * constant, a fixed union member, a number and an errno code are all things the
+ * app produced; none is a string somebody typed. Anything that is not on that
+ * list belongs in an argument.
+ */
+const FORMAT_STRING_ALLOWED = new Map<string, string>([
+  ["app-paths.ts", "two paths built from constants"],
+  ["branding-image-store.ts", "`key`, iterated out of the constant BRANDING_IMAGE_KEYS"],
+  ["broadcaster.ts", "`channel`, a member of the fixed channel union"],
+  ["config-snapshot.ts", "`what`, an internal label for the thing being quieted"],
+  ["data-store.ts", "`this.filename`, the store's own constant"],
+  ["live-poller.ts", "`who`, the internal name of the caller that ticked"],
+  ["osc-manager.ts", "a port number"],
+  ["secrets.ts", "a Node errno code"],
+  ["service-recorder.ts", "`this.label`, the recorder's own constant"],
+]);
+
+describe("a value never becomes the format string", () => {
+  it("in any service that logs, not only the request-facing ones", () => {
+    // The third rule, swept wider than the other two.
+    //
+    // `console.error(`[x] row ${scrub(label)} failed:`, scrubError(err))` passes
+    // both scrub rules and still loses the error, because a checklist row
+    // reading "Batteries 100% charged" puts a `%s` in the format string and the
+    // `%s` eats the argument after it. The operator is told that something
+    // failed and not told why. scrub() cannot help: `%` is an ordinary
+    // character and comes through it untouched. The value is safe; the POSITION
+    // is not.
+    //
+    // Keyed by FILE, not by line: a line number breaks on any edit above it,
+    // and the fact under test is which files still do this. A second site in an
+    // allowed file also fails, because the same key then appears twice on one
+    // side of the comparison and once on the other.
+    const sites = loggingServices().flatMap((rel) =>
+      formatStringOffenders(readFileSync(path.join(HERE, rel), "utf8")).map(
+        (o) => `${rel}  ${o.line}  ${o.text}`,
+      ),
+    );
+    const files = sites.map((s) => s.split("  ")[0]).sort();
+    assert.deepEqual(
+      files,
+      [...FORMAT_STRING_ALLOWED.keys()].sort(),
+      "a console call interpolates into its format string with further arguments after it. " +
+        "Move the value into an argument and leave the format string a literal, or add it to " +
+        `FORMAT_STRING_ALLOWED with the reason its value cannot carry a '%':\n  ${sites.join("\n  ")}`,
+    );
+  });
+});
+

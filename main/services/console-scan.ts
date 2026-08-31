@@ -194,30 +194,97 @@ export function isLiteralExpression(text: string): boolean {
   return stack.length === 0 && sawLiteral && /^[\s+]*$/.test(outsideLiterals);
 }
 
-/** An argument or interpolation already made safe. `scrubError` is scrub() for
- *  an Error's stack — see scrub.ts. */
-const SCRUBBED = /^scrub(Error)?\(/;
+/**
+ * True when `text` is a scrub() or scrubError() call AND NOTHING ELSE.
+ *
+ * The rule was `/^scrub(Error)?\(/`, which asks only how the argument STARTS —
+ * the same mistake as the `/^[`'"]/` it replaced. `scrub(id) + err` satisfied
+ * it, with `err` outside the barrier.
+ */
+export function isScrubCall(text: string): boolean {
+  const head = /^scrub(?:Error)?\s*\(/.exec(text);
+  if (!head) return false;
+  const open = head[0].length - 1;
+  const stack: string[] = [];
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    const top = stack[stack.length - 1];
+    if (top === '"' || top === "'") {
+      if (c === "\\") i++;
+      else if (c === top) stack.pop();
+      continue;
+    }
+    if (top === "`") {
+      if (c === "\\") i++;
+      else if (c === "`") stack.pop();
+      else if (c === "$" && text[i + 1] === "{") {
+        stack.push("${");
+        i++;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") stack.push(c);
+    else if (c === "(" || c === "[" || c === "{") stack.push(c);
+    else if (c === ")" || c === "]" || c === "}") {
+      stack.pop();
+      // The scrub call has closed. Anything after it is concatenated on.
+      if (stack.length === 0) return text.slice(i + 1).trim() === "";
+    }
+  }
+  return false;
+}
 
-/** Something in `source` that reaches a log line without passing scrub(). */
+/**
+ * True when this call hands console a FORMAT STRING it did not write itself.
+ *
+ * `console.log(fmt, ...rest)` treats `fmt` as a format string: a `%s`, `%d`,
+ * `%i`, `%f`, `%j`, `%o`, `%O` or `%c` in it consumes one of the arguments that
+ * follow. When outside data is interpolated into `fmt`, the data chooses.
+ * "Batteries 100% charged" is a checklist row somebody will type, and
+ *
+ *   console.error(`[x] row ${scrub(label)} failed:`, scrubError(err))
+ *
+ * then prints the row and swallows the error — the operator is told that
+ * something failed and not told why, and the eaten value can be replayed inside
+ * the message.
+ *
+ * Orthogonal to the other two rules, which are about the VALUE. scrub() cannot
+ * help here: `%` is an ordinary character and survives it untouched. This is
+ * about the POSITION the value occupies, so the fix is to move it out of the
+ * first argument and leave the format string a literal.
+ *
+ * With no further arguments there is nothing to consume and the shape is
+ * harmless, which is why the count is part of the rule.
+ */
+function formatStringOffender(args: string[]): boolean {
+  return args.length > 1 && args[0].includes("${");
+}
+
+/** Something in `source` that reaches a log line unsafely. */
 export interface LogOffender {
   line: number;
-  /** "interpolation" or "argument" — which of the two rules it broke. */
-  kind: "interpolation" | "argument";
+  /** Which of the three rules it broke. */
+  kind: "interpolation" | "argument" | "format-string";
   text: string;
 }
 
 /**
- * Every value in `source` that reaches console without scrub() around it.
+ * Every value in `source` that reaches console unsafely.
  *
- * Two rules, because a value can reach `/log` two ways and covering only the
- * first is how `console.warn("… status:", status)` was written in this repo with
- * a comment explaining that the interpolation rule did not apply to it:
+ * Three rules, because a value can go wrong three ways and each of the first two
+ * was written here believing it was the whole story:
  *
  *   1. every `${…}` inside a console call contains `scrub(`;
- *   2. every top-level ARGUMENT is a literal expression or a scrub() call.
+ *   2. every top-level ARGUMENT is a literal expression or a scrub() call —
+ *      `console.warn("… status:", status)` was written in this repo with a
+ *      comment explaining that rule 1 did not apply to it;
+ *   3. no call interpolates into its FORMAT STRING while further arguments
+ *      follow — rules 1 and 2 both pass on a perfectly scrubbed value that eats
+ *      the error standing next to it.
  *
- * Matched on the interpolation and the argument, never on the word "scrub"
- * appearing in the file, so a comment saying the right thing cannot satisfy it.
+ * Matched on the interpolation, the argument and the call's shape, never on the
+ * word "scrub" appearing in the file, so a comment saying the right thing cannot
+ * satisfy any of them.
  */
 export function logOffenders(source: string): LogOffender[] {
   const out: LogOffender[] = [];
@@ -227,13 +294,27 @@ export function logOffenders(source: string): LogOffender[] {
         out.push({ line: call.line, kind: "interpolation", text: m[0].replace(/\s+/g, " ") });
       }
     }
-    for (const argument of consoleArguments(call.text)) {
+    const args = consoleArguments(call.text);
+    for (const argument of args) {
       if (argument === "") continue;
-      if (isLiteralExpression(argument) || SCRUBBED.test(argument)) continue;
+      if (isLiteralExpression(argument) || isScrubCall(argument)) continue;
       out.push({ line: call.line, kind: "argument", text: argument.replace(/\s+/g, " ").slice(0, 120) });
+    }
+    if (formatStringOffender(args)) {
+      out.push({
+        line: call.line,
+        kind: "format-string",
+        text: `${args[0].replace(/\s+/g, " ").slice(0, 100)} … + ${args.length - 1} more argument(s)`,
+      });
     }
   }
   return out;
+}
+
+/** Just the format-string rule, for the tree-wide sweep — the only one of the
+ *  three that needs no judgement about where a value came from. */
+export function formatStringOffenders(source: string): LogOffender[] {
+  return logOffenders(source).filter((o) => o.kind === "format-string");
 }
 
 /** `file:line  kind  text`, the form both guards report offenders in. */

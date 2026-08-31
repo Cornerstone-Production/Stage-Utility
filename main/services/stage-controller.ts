@@ -390,7 +390,8 @@ export class StageController {
     if (converted.length > 0) {
       settings = await settingsStore.patch(patch);
       console.log(
-        `[stage-controller] moved ${scrub(converted.length)} branding image(s) out of settings:`,
+        "[stage-controller] moved branding image(s) out of settings:",
+        scrub(converted.length),
         scrub(converted.join(", ")),
       );
     }
@@ -1473,8 +1474,12 @@ export class StageController {
           best = { type, plan: nearest };
         }
       } catch (err) {
+        // The type id stays OUT of the format string. It comes from PCO, and a
+        // `%s` in the first argument would eat the error standing beside it —
+        // the operator told that fetching failed and not told why.
         console.error(
-          `[stage-controller] selectGlobalNextPlan — error fetching plans for type ${scrub(type.id)}:`,
+          "[stage-controller] selectGlobalNextPlan — error fetching plans for type:",
+          scrub(type.id),
           scrubError(err),
         );
       }
@@ -3241,7 +3246,8 @@ export class StageController {
       // plan; only a roster for some OTHER plan is worse than nothing.
       if (this.teamMembersKey === key && this.teamMembers.length > 0) {
         console.error(
-          `[stage-controller] fetchTeamMembers failed — keeping ${scrub(this.teamMembers.length)} known member(s):`,
+          "[stage-controller] fetchTeamMembers failed — keeping known member(s):",
+          scrub(this.teamMembers.length),
           scrubError(err),
         );
         return;

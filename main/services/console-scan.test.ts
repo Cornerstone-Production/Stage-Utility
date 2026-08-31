@@ -15,6 +15,7 @@ import {
   consoleArguments,
   consoleCalls,
   isLiteralExpression,
+  isScrubCall,
   logOffenders,
 } from "./console-scan.js";
 
@@ -127,5 +128,61 @@ describe("logOffenders", () => {
       "",
     ].join("\n");
     assert.deepEqual(logOffenders(source), []);
+  });
+});
+
+describe("isScrubCall", () => {
+  it("accepts a scrub call that is the whole argument", () => {
+    assert.equal(isScrubCall("scrub(id)"), true);
+    assert.equal(isScrubCall("scrubError(err)"), true);
+    assert.equal(isScrubCall("scrub(a, 200)"), true);
+    assert.equal(isScrubCall("scrub(`${x}`)"), true);
+  });
+
+  it("rejects a scrub call with something concatenated onto it", () => {
+    // The hole the old `/^scrub(Error)?\(/` left: it asked only how the
+    // argument STARTS, exactly the mistake the `/^[`'"]/` rule made before it.
+    assert.equal(isScrubCall("scrub(id) + err"), false);
+    assert.equal(isScrubCall('scrub(id) + ":"'), false);
+    assert.equal(isScrubCall("scrubbedElsewhere(id)"), false);
+    assert.equal(isScrubCall("err"), false);
+  });
+});
+
+describe("the format-string rule", () => {
+  it("fires when a value is interpolated into the format string and arguments follow", () => {
+    // The shape CodeQL found: a `%s` in the row label eats the error beside it.
+    const source = "console.error(`[x] row ${scrub(label)} failed:`, scrubError(err));\n";
+    assert.deepEqual(
+      logOffenders(source).map((o) => o.kind),
+      ["format-string"],
+    );
+  });
+
+  it("does NOT fire when the same call has no further arguments", () => {
+    // Nothing to consume, so nothing to lose. Churning these would be noise.
+    assert.deepEqual(logOffenders("console.error(`[x] row ${scrub(label)} failed`);\n"), []);
+  });
+
+  it("does NOT fire when the format string is a literal and the value is an argument", () => {
+    // The fix, asserted as passing so nobody satisfies the rule by deleting the
+    // log line instead of moving the value.
+    assert.deepEqual(
+      logOffenders('console.error("[x] row failed:", scrub(label), scrubError(err));\n'),
+      [],
+    );
+  });
+
+  it("fires whatever the value's own safety, because the value is not the problem", () => {
+    // Both scrub rules pass on this. The position is what is wrong.
+    const source = "console.warn(`[x] ${scrub(a)}`, scrub(b));\n";
+    assert.deepEqual(
+      logOffenders(source).map((o) => o.kind),
+      ["format-string"],
+    );
+  });
+
+  it("ignores an interpolation in a LATER argument, which console does not read as a format", () => {
+    assert.deepEqual(logOffenders('console.warn("[x] failed:", `${scrub(b)}`);\n'), []);
   });
 });

@@ -973,7 +973,13 @@ class IntegrationManager {
     id: string,
     config: Record<string, unknown>,
   ): Promise<IntegrationState> {
-    console.log(`[integration-manager] setConfig ${scrub(id)}`, scrub(Object.keys(config).join(", ")));
+    // `id` is a path segment and is not checked against the known set until the
+    // line below, so it stays out of the format-string position.
+    console.log(
+      "[integration-manager] setConfig",
+      scrub(id),
+      scrub(Object.keys(config).join(", ")),
+    );
     const state = this.states.get(id);
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
