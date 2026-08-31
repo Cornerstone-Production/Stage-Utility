@@ -12,18 +12,22 @@
 //      which is the exact bug it would claim to catch, and the one that made
 //      the scores unreadable near the seam.
 //
-//   2. THE STACK'S MEASURED HEIGHTS. Every offsetHeight in jsdom is 0, so
-//      layoutStack returns 0 for any input and every card lands at
-//      translateY(0). A test would assert the cards do not overlap and pass
-//      while they all sat on top of each other, and it would pass equally with
-//      the measurement taken from the grid item being animated — the mistake
-//      that placed every card below the focused one too high and made the card
-//      underneath unclickable.
+//   2. THE STACK'S HEIGHTS AS A BROWSER MEASURES THEM. Every offsetHeight in
+//      jsdom is 0, so a test that RENDERED the stack and asserted the cards do
+//      not overlap would pass while they all sat on top of each other.
 //
-// Both are verified in a real browser instead, against the checklist in Task 5
-// step 7 of docs/superpowers/plans/2026-08-29-live-scores.md. What IS guarded
-// here is everything that is pure logic and therefore cannot lie to jsdom: the
-// hold timer, the rev guard, the seed, and which of four things the bar says.
+//      Its ARITHMETIC is a different question and is guarded, at the bottom of
+//      this file. layoutStack is pure and takes its elements as a parameter, so
+//      the heights can be stubbed the way page-scroll-reset.test.tsx stubs
+//      scrollTop — and the bug was a measurement-SOURCE error, which is exactly
+//      what a stub can tell apart: the body reports its natural height and the
+//      grid item around it reports the 0 it is leaving.
+//
+// The rendered geometry is verified in a real browser instead, against the
+// checklist in Task 5 step 7 of docs/superpowers/plans/2026-08-29-live-scores.md.
+// What IS guarded here is everything that is pure logic and therefore cannot lie
+// to jsdom: the hold timer, the rev guard, the seed, the stack arithmetic, and
+// which of four things the bar says.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, mock, test } from "node:test";
@@ -37,9 +41,8 @@ const teardown = installDom();
 
 const { render, cleanup } = await import("@testing-library/react");
 const { createScoreActivity, SCORE_HOLD_MS } = await import("./score-activity-store.js");
-const { ScoreActivityHost, ScoreCapsule, capsuleView, liveIndex, scoredSide } = await import(
-  "./score-activity.js"
-);
+const { ScoreActivityHost, ScoreCapsule, capsuleView, layoutStack, liveIndex, scoredSide } =
+  await import("./score-activity.js");
 
 // Unconditional, not a call at the end of each test body: a test that FAILS
 // never reaches its own cleanup, and proving these guards against the bug is
@@ -498,5 +501,111 @@ describe("the panel floats over the page rather than pushing it down", () => {
       /pointer-events:\s*none/,
       "a dismissed panel keeps eating presses while it fades - the 420ms hole between the fade and the collapse",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * A height jsdom will hand back.
+ *
+ * jsdom lays nothing out, so `offsetHeight` is 0 on every element whatever the
+ * sheet says. Redefining it as a plain value is what makes the arithmetic below
+ * observable at all — the same trick page-scroll-reset.test.tsx uses for
+ * `scrollTop`, and for the same reason: a version of this test written against
+ * the real property passes on the bug, because 24 + 40 + 8 and 24 + 0 + 8 are
+ * both 0 when every term is 0.
+ *
+ * THESE NUMBERS ARE NOT A CLAIM ABOUT PIXELS. What is being checked is which
+ * element the focused card's extra height is read from, and that is a fact about
+ * the code, not about a browser's layout.
+ */
+function stubHeight(el: HTMLElement, px: number): HTMLElement {
+  Object.defineProperty(el, "offsetHeight", { get: () => px, configurable: true });
+  return el;
+}
+
+/**
+ * A card shaped the way ScoreCard renders one.
+ *
+ * The nesting is load-bearing rather than decorative. `.score-card-body` is the
+ * GRID ITEM that animates 0fr -> 1fr, and it is stubbed at 0: mid-transition it
+ * reports the height it is leaving, which is what made reading it the bug. The
+ * `[data-score-body]` inside it is `.score-more`, which sits under the clip and
+ * always reports its natural height — the reason THAT is what layoutStack reads.
+ */
+function card(stripPx: number, bodyPx: number): HTMLElement {
+  const el = document.createElement("div");
+  el.setAttribute("data-score-card", "");
+  const strip = document.createElement("div");
+  strip.setAttribute("data-score-strip", "");
+  const gridItem = document.createElement("div");
+  gridItem.className = "score-card-body";
+  const clip = document.createElement("div");
+  clip.className = "score-card-body-in";
+  const body = document.createElement("div");
+  body.className = "score-more";
+  body.setAttribute("data-score-body", "");
+  clip.append(stubHeight(body, bodyPx));
+  gridItem.append(clip);
+  el.append(stubHeight(strip, stripPx), stubHeight(gridItem, 0));
+  document.body.append(el);
+  return el;
+}
+
+/** The number out of `translateY(<n>px)`. */
+function topOf(el: HTMLElement): number {
+  const m = /translateY\((-?[\d.]+)px\)/.exec(el.style.transform);
+  assert.ok(m, `card was never placed: transform is ${JSON.stringify(el.style.transform)}`);
+  return Number(m[1]);
+}
+
+describe("placing the stack", () => {
+  const GAP = 8;
+
+  test("THE GUARD: the focused card's extra height comes from its BODY, not the grid item", () => {
+    // The reported bug. Reading the grid item returns the height it is LEAVING —
+    // 0 at the instant focus changes — so every card below the focused one was
+    // placed as though the panel had not opened, and the open panel painted over
+    // a card the operator then could not click.
+    const cards = [card(24, 40), card(24, 40), card(24, 40)];
+    const height = layoutStack(cards, 0, GAP, true);
+
+    assert.equal(topOf(cards[0]), 0);
+    // 24 strip + 40 body + 8 gap. Off the grid item this is 24 + 0 + 8 = 32.
+    assert.equal(topOf(cards[1]), 24 + 40 + GAP);
+    assert.equal(topOf(cards[2]), 24 + 40 + GAP + 24 + GAP);
+    // The height the container animates to: the last card's bottom, with no
+    // trailing gap.
+    assert.equal(height, 24 + 40 + GAP + 24 + GAP + 24);
+  });
+
+  test("only the FOCUSED card is given its body's height", () => {
+    const cards = [card(24, 40), card(24, 40)];
+    layoutStack(cards, 1, GAP, true);
+    assert.equal(topOf(cards[0]), 0);
+    // Card 0 is not focused, so it contributes its strip and nothing else.
+    assert.equal(topOf(cards[1]), 24 + GAP);
+  });
+
+  test("strips are normalised to the tallest, so leagues do not sit at different heights", () => {
+    // A four-row baseball centre and a two-row hockey centre in one stack.
+    const cards = [card(24, 0), card(36, 0)];
+    const height = layoutStack(cards, -1, GAP, true);
+    assert.equal(cards[0].querySelector<HTMLElement>("[data-score-strip]")?.style.height, "36px");
+    assert.equal(cards[1].querySelector<HTMLElement>("[data-score-strip]")?.style.height, "36px");
+    assert.equal(topOf(cards[1]), 36 + GAP);
+    assert.equal(height, 36 + GAP + 36);
+  });
+
+  test("the focused card is raised above the ones it grew into", () => {
+    const cards = [card(24, 40), card(24, 40)];
+    layoutStack(cards, 1, GAP, true);
+    assert.equal(cards[0].style.zIndex, "1");
+    assert.equal(cards[1].style.zIndex, "5");
+  });
+
+  test("an empty stack has no height and nothing to place", () => {
+    assert.equal(layoutStack([], 0, GAP, true), 0);
   });
 });
