@@ -229,8 +229,9 @@ function DaySquare({
 }) {
   const { shown, hidden } = visibleEvents(day.events);
   return (
+    // A LIST ITEM, not a gridcell — see the container below.
     <div
-      role="gridcell"
+      role="listitem"
       data-date={day.date}
       data-in-month={day.inMonth ? "true" : "false"}
       aria-current={isToday ? "date" : undefined}
@@ -481,7 +482,22 @@ export function CalendarMonth({
       {/* grid-rows-6 with min-h-0 on the squares: six equal rows that share the
           height they are given, rather than six rows sized by their busiest
           event list and a container that scrolls off a wall nobody can scroll. */}
-      <div role="grid" aria-label={grid.monthLabel} className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 border-l border-t border-line">
+      {/* A LIST, NOT A GRID, and the choice is deliberate.
+          This was `role="grid"` over forty-two direct `role="gridcell"`
+          children with no `role="row"` between them. That is invalid ARIA, and
+          invalid is worse than none: a reader is asked to report a position in
+          rows that do not exist.
+          Adding the row layer would need `display: contents` wrappers, because
+          the squares have to stay direct children of this CSS grid to be placed
+          by it — and it would still be a lie of a different kind. `grid` is a
+          COMPOSITE WIDGET role: it promises arrow-key navigation between cells
+          and a roving tabindex, and there is none here. The squares are not
+          focusable and never were. `role="table"` with a columnheader row would
+          be honest, but the weekday names are a separate CSS grid above this one
+          and moving them in is a layout change, not a fix to invalid markup.
+          So: what this actually is. Forty-two day squares with no navigation
+          model, announced as a list of forty-two with the month as its name. */}
+      <div role="list" aria-label={grid.monthLabel} className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 border-l border-t border-line">
         {grid.days.map((day) => (
           <DaySquare
             key={day.date}
