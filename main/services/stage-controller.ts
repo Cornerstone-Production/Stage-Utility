@@ -895,18 +895,31 @@ export class StageController {
    * PCO stops matching, which is the right behaviour: the operator renamed the
    * thing they were pointing at, and silently following a rename would be a
    * guess about intent this app is not entitled to make.
+   *
+   * Two independent lists, and each is optional — an omitted one is KEPT, the
+   * way setBarItems keeps the set it was not given. `[]` is a real value
+   * meaning "match nothing", so it must stay distinguishable from "not sent":
+   * this took both lists positionally and cleared whichever the caller could
+   * not name.
    */
-  async setChecklistSources(categories: string[], teams: string[]): Promise<StageState> {
+  async setChecklistSources(next: { categories?: string[]; teams?: string[] }): Promise<StageState> {
     const clean = (xs: string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
+    const categories = next.categories === undefined
+      ? this.state.checklistNoteCategories
+      : clean(next.categories);
+    const teams = next.teams === undefined ? this.state.checklistNoteTeams : clean(next.teams);
     await settingsStore.patch({
-      checklistNoteCategories: clean(categories),
-      checklistNoteTeams: clean(teams),
+      checklistNoteCategories: categories,
+      checklistNoteTeams: teams,
     });
     this.state = {
       ...this.state,
-      checklistNoteCategories: clean(categories),
-      checklistNoteTeams: clean(teams),
+      checklistNoteCategories: categories,
+      checklistNoteTeams: teams,
     };
+    console.log(
+      `[stage-controller] setChecklistSources categories=${categories.length} teams=${teams.length}`,
+    );
     this.broadcast();
     return this.state;
   }

@@ -277,6 +277,11 @@ recorder is running. Pass `{override: true}` to go anyway.
 `/api/saved-colors`, `/api/icon-color`, `/api/icon-glyph`,
 `/api/caption-colors`.
 
+`/api/checklist-sources` takes `{categories}` and `{teams}` — plan-note category
+and team names, not ids. Either may be omitted and is then left as it stands; a
+present one must be a `string[]`, and `[]` clears that list. A body naming
+neither is a 400.
+
 **Branding & events**
 | Method | Path | Purpose |
 |--------|------|---------|
