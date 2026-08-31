@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { DISC, INK_DARK, INK_LIGHT, contrastRatio, discInk, inkFor, luminance } from "./score-ink.js";
+import { DISC, INK_DARK, INK_LIGHT, contrastOf, discInk, inkFor, luminance } from "./score-ink.js";
 
 /**
  * Real team colours, straight off ESPN payloads. Half of them need dark ink and
@@ -40,8 +40,8 @@ describe("inkFor", () => {
     for (const c of TEAM_COLOURS) {
       const ink = inkFor(c);
       assert.ok(
-        contrastRatio(c, ink) >= 4.5,
-        `${c} → ${ink} is ${contrastRatio(c, ink).toFixed(2)}:1`,
+        contrastOf(c, ink) >= 4.5,
+        `${c} → ${ink} is ${contrastOf(c, ink).toFixed(2)}:1`,
       );
     }
   });
@@ -59,17 +59,17 @@ describe("inkFor", () => {
   });
 });
 
-describe("contrastRatio", () => {
+describe("contrastOf", () => {
   test("black on white is the 21:1 maximum", () => {
-    assert.equal(Math.round(contrastRatio("#000000", "#ffffff")), 21);
+    assert.equal(Math.round(contrastOf("#000000", "#ffffff")), 21);
   });
 
   test("a colour against itself is 1:1", () => {
-    assert.equal(contrastRatio("#0e3386", "#0e3386"), 1);
+    assert.equal(contrastOf("#0e3386", "#0e3386"), 1);
   });
 
   test("is symmetric — the order of the pair cannot change the answer", () => {
-    assert.equal(contrastRatio("#ffb612", "#0a0a0a"), contrastRatio("#0a0a0a", "#ffb612"));
+    assert.equal(contrastOf("#ffb612", "#0a0a0a"), contrastOf("#0a0a0a", "#ffb612"));
   });
 
   test("accepts a bare hex as well as a prefixed one", () => {
@@ -83,7 +83,7 @@ describe("the disc behind every team mark", () => {
     // on this app's near-black cards the Yankees and the Packers were marks you
     // could not see. Darken DISC and this fails.
     assert.ok(
-      contrastRatio(DISC, "#161616") > 10,
+      contrastOf(DISC, "#161616") > 10,
       `the disc ${DISC} does not stand off the near-black card it sits on`,
     );
     assert.ok(luminance(DISC) > 0.7, `the disc ${DISC} is not light`);
@@ -112,7 +112,7 @@ describe("the disc behind every team mark", () => {
     assert.equal(discInk("#fdb927"), INK_DARK); // Lakers gold
     assert.equal(discInk("#ffffff"), INK_DARK); // observed on a college team
     for (const c of [discInk("#ffb612"), discInk("#fdb927")]) {
-      assert.ok(contrastRatio(c, DISC) >= 4.5, `${c} is unreadable on the disc`);
+      assert.ok(contrastOf(c, DISC) >= 4.5, `${c} is unreadable on the disc`);
     }
   });
 
@@ -121,12 +121,36 @@ describe("the disc behind every team mark", () => {
     assert.notEqual(discInk(null), INK_LIGHT);
   });
 
+  test("THE GUARD: a colour it cannot read never comes back OUT of it", () => {
+    // The bug: the hand-rolled luminance returned 0 for junk, so junk measured
+    // as black — 18.76:1 against the disc — and discInk handed the string
+    // straight back. `--score-disc-ink: nope` is invalid at computed-value time,
+    // so .score-logo fell through to the inherited white ink and a dark-brand
+    // team's abbreviation was invisible on the light disc. Exactly what discInk
+    // is for, produced by discInk.
+    //
+    // inkFor's own contract already said "ESPN can send anything"; discInk sits
+    // behind the same boundary and had the opposite behaviour.
+    for (const bad of ["", "nope", "#12345", "rgb(1,2,3)", "#gggggg", "red"]) {
+      assert.equal(discInk(bad), INK_DARK, bad);
+    }
+  });
+
+  test("takes ESPN's bare hex as readily as a prefixed one", () => {
+    // ESPN sends "0e3386", not "#0e3386". scores-parse normalises on the way in
+    // and this module normalises again, because its stated contract is that the
+    // payload can be anything.
+    assert.equal(discInk("0e3386"), discInk("#0e3386"));
+    assert.equal(inkFor("0b162a"), inkFor("#0b162a"));
+    assert.equal(luminance("0e3386"), luminance("#0e3386"));
+  });
+
   test("every colour it returns is legible on the disc", () => {
     // The property, over the real team colours above: whatever comes back,
     // reading it against the disc is never below AA for small text.
     for (const c of TEAM_COLOURS) {
       assert.ok(
-        contrastRatio(discInk(c), DISC) >= 4.5,
+        contrastOf(discInk(c), DISC) >= 4.5,
         `${c} yielded ${discInk(c)}, which is unreadable on the disc`,
       );
     }

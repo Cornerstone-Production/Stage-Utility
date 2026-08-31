@@ -95,17 +95,44 @@ export function ScoreSide({
 /**
  * How much of a side there is room for.
  *
- * "full" is a card: mark, name, record, score. "compact" is a wall tile or a
- * stack peek: mark and score. "capsule" is the context bar, where the same two
- * things are drawn smaller still.
+ * "full" is a card: mark, name, record, score. "capsule" is the context bar,
+ * where width is genuinely scarce and a side is a mark and a score.
+ *
+ * There was a third, "compact", described as the wall tile and the stack peek.
+ * It was wrong about both — the wall tile (scores-object.tsx) and the activity
+ * stack (score-activity.tsx) both take the "full" default, and the only sites
+ * that name a size at all are the two capsule ones — so no call site ever passed
+ * it and six `.score-strip-compact` rules were unreachable. The width-based
+ * name-hiding it described is owned by `.score-strip`'s own
+ * `@container (max-width: 460px)` rule, which answers about the STRIP's box
+ * rather than about a prop a caller has to remember to set: one decision, one
+ * mechanism.
  */
-export type ScoreStripSize = "capsule" | "compact" | "full";
+export type ScoreStripSize = "capsule" | "full";
+
+/**
+ * How a game reads out: both teams, both scores, and where it is up to.
+ *
+ * ONE copy. It was written out three times — here, on the activity stack's
+ * card, and on the context-bar capsule with a different trailing sentence — so
+ * "no score" becoming "not reported" was a three-place edit that could land in
+ * two.
+ *
+ * @param suffix what the surface adds about ITSELF (a control says what pressing
+ *   it does). Omitted for a plain readout.
+ */
+export function gameLabel(game: ScoreGameDTO, suffix?: string): string {
+  const away = `${game.away.displayName} ${game.away.score ?? "no score"}`;
+  const home = `${game.home.displayName} ${game.home.score ?? "no score"}`;
+  return `${away}, ${home}. ${suffix ?? game.shortDetail}`;
+}
 
 export function ScoreStrip({
   game,
   size = "full",
   scored = null,
   detail = true,
+  labelled = true,
   className,
 }: {
   game: ScoreGameDTO;
@@ -114,6 +141,15 @@ export function ScoreStrip({
   scored?: "away" | "home" | null;
   /** Draw the sport-specific centre, or just the status line. See ScoreCenter. */
   detail?: boolean;
+  /**
+   * False when the caller has ALREADY labelled a wrapper around this strip.
+   *
+   * A screen reader in browse mode announces a labelled element and then the
+   * labelled element inside it, so a card that names the game and then draws a
+   * strip that names the game reads the whole fixture twice. Default true,
+   * because the wall widget has no wrapper to carry it.
+   */
+  labelled?: boolean;
   className?: string;
 }) {
   return (
@@ -121,8 +157,8 @@ export function ScoreStrip({
       // The stack measures this element to normalise every card to the tallest
       // strip in it — see layoutStack.
       data-score-strip=""
-      className={cn("score-strip", size === "compact" && "score-strip-compact", className)}
-      aria-label={`${game.away.displayName} ${game.away.score ?? "no score"}, ${game.home.displayName} ${game.home.score ?? "no score"}. ${game.shortDetail}`}
+      className={cn("score-strip", className)}
+      aria-label={labelled ? gameLabel(game) : undefined}
     >
       <ScoreSide team={game.away} side="away" size={size} scored={scored === "away"} />
       <ScoreCenter game={game} detail={detail} />

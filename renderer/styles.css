@@ -929,13 +929,6 @@ body {
      in a wall tile, and the viewport says nothing useful about any of them. */
   container-type: inline-size;
 }
-.score-strip-compact {
-  min-height: 56px;
-}
-.score-strip-compact .score-side {
-  gap: 8px;
-  padding: 8px 11px;
-}
 
 /* THE DISC BEHIND EVERY TEAM MARK, and the one class that draws it: the strip,
    the capsule and the settings picker all use this, so the disc cannot end up
@@ -964,11 +957,6 @@ body {
   font-weight: 600;
   background: var(--score-disc);
   color: var(--score-disc-ink, #0a0a0a);
-}
-.score-strip-compact .score-logo {
-  width: 22px;
-  height: 22px;
-  font-size: 8px;
 }
 /* THE MARK IS INSCRIBED IN THE DISC, not stretched across it.
    It used to be `width: 100%; height: 100%`, which sizes a SQUARE image box to
@@ -1045,9 +1033,6 @@ body {
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
-.score-strip-compact .score-value {
-  font-size: 20px;
-}
 .score-side-away .score-value {
   margin-left: auto;
   padding-left: 10px;
@@ -1073,11 +1058,6 @@ body {
   color: var(--score-subtle);
   z-index: 1;
 }
-.score-strip-compact .score-center {
-  width: 68px;
-  gap: 3px;
-  padding: 6px 2px;
-}
 .score-period {
   font-size: 9.5px;
   letter-spacing: .05em;
@@ -1089,9 +1069,6 @@ body {
   color: var(--score-fg);
   font-variant-numeric: tabular-nums;
   letter-spacing: -.01em;
-}
-.score-strip-compact .score-clock {
-  font-size: 11px;
 }
 .score-downdistance {
   font-size: 10px;
