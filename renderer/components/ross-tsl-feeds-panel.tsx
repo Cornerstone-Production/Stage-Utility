@@ -14,7 +14,8 @@ import {
   toast,
 } from "./ui";
 import { PlusIcon, TrashIcon, Loader2Icon } from "lucide-react";
-import { feedId } from "./integration-panel-helpers";
+import { feedId, sameRows, withDefaults } from "./integration-panel-helpers";
+import { useReportUnsavedWork } from "./unsaved-work";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
 // ---- Ross TSL feeds editor --------------------------------------------------
@@ -39,7 +40,14 @@ export function RossTslFeedsPanel({
 }) {
   const people = usePeopleCountState();
   const zones = people?.zones ?? [];
-  const initial = Array.isArray(state.config.feeds) ? (state.config.feeds as TslFeed[]) : [];
+  // Defaulted on the way in, the same as the ProPresenter instances: prefix and
+  // suffix are optional in storage and always shown as "", so typing into one
+  // and clearing it again wrote a key a feed saved by an older build never had
+  // — and the dialog would then claim unsaved work over an unchanged feed.
+  const initial = withDefaults(
+    Array.isArray(state.config.feeds) ? (state.config.feeds as TslFeed[]) : [],
+    { prefix: "", suffix: "" },
+  );
   const [feeds, setFeeds] = useState<TslFeed[]>(initial);
   const [saving, setSaving] = useState(false);
 
@@ -56,7 +64,8 @@ export function RossTslFeedsPanel({
     ]);
   }
 
-  async function save() {
+  /** Save, and say whether it landed. A false must not be followed by a close. */
+  async function save(): Promise<boolean> {
     setSaving(true);
     try {
       const next = await invoke<IntegrationState>("integrations:setConfig", {
@@ -65,12 +74,20 @@ export function RossTslFeedsPanel({
       });
       onStateChange(next);
       toast.success("TSL feeds saved.");
+      return true;
     } catch (err) {
+      console.error("[RossTslFeedsPanel:save]", err);
       toast.error(`Could not save feeds: ${String(err)}`);
+      return false;
     } finally {
       setSaving(false);
     }
   }
+
+  // These feeds live here, not in the dialog's form, and `feeds` is not in the
+  // descriptor's configSchema (host + port only) — so the dialog cannot see them
+  // and Escape used to throw a half-built feed away without asking. Report up.
+  useReportUnsavedWork("ross-tsl-feeds", !sameRows(feeds, initial), save);
 
   return (
     // Metric + zone + TSL # + prefix + suffix is ~620px of row and the widest

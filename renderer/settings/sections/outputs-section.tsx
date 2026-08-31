@@ -678,7 +678,12 @@ export function OutputsSection({
             computes the wrong drop target as soon as there are two. */}
         <SortableContext items={outputs.map((o) => o.id)} strategy={rectSortingStrategy}>
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
-            {outputs.map((output) => (
+            {outputs.map((output) => {
+              // Once per row, not twice: it scans every view to answer, and the
+              // colour and the glyph are the same question asked about the same
+              // screen — they cannot be allowed to answer differently either.
+              const iconKey = iconKeyFor(output, stageState.views);
+              return (
               <OutputRow
                 key={output.id}
                 output={output}
@@ -686,8 +691,8 @@ export function OutputsSection({
                 baseUrl={baseUrl}
                 online={connected.has(output.id)}
                 canRemove={outputs.length > 1}
-                iconColor={stageState.iconColors?.[iconKeyFor(output, stageState.views)]}
-                iconKey={iconKeyFor(output, stageState.views)}
+                iconColor={stageState.iconColors?.[iconKey]}
+                iconKey={iconKey}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
                 onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
@@ -708,7 +713,8 @@ export function OutputsSection({
                   onEditLayout && output.viewId ? () => onEditLayout(output.viewId!) : undefined
                 }
               />
-            ))}
+              );
+            })}
             {/* The add tile sits IN the grid. As a button under eight cards it
                 was below the fold on the page where you would want it. */}
             <button

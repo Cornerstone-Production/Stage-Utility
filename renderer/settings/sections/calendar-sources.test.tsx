@@ -176,6 +176,37 @@ describe("choosing a tag reaches the server", () => {
     assert.ok(screen.queryByText(/reading the calendars/i) === null, "still claiming to be loading after the read landed");
   });
 
+  it("does not call a stored choice missing before it knows", async () => {
+    // "(not in Planning Center)" is a CLAIM, and only a landed read can make it.
+    // The checklist picker carries the same guard and the same note: it has to
+    // be OPENED to see, because with nothing offered the options and the
+    // selection are the same list and the trigger reads "All (N)".
+    // Held in an object: assigning inside the closure narrows a bare `let` to
+    // `never` at the call below.
+    const landed: { fn: () => void } = { fn: () => {} };
+    sourcesReply = () =>
+      new Promise((r) => {
+        landed.fn = () => r({ calendars: [], tags: [{ id: "tag-1", name: "Alpha Ministry" }] });
+      });
+    draw();
+
+    assert.ok(screen.getByText(/reading the calendars/i), "not in the state this is about");
+    const panel = document.querySelector('[data-field="tags"]');
+    assert.ok(panel);
+    fireEvent.click(within(panel as HTMLElement).getByRole("button"));
+    const rows = document.querySelector("[data-radix-popper-content-wrapper]");
+    assert.ok(rows, "the picker did not open");
+    assert.equal(
+      /not in Planning Center/.test(rows.textContent ?? ""),
+      false,
+      "a stored choice was marked missing while the read was still in flight",
+    );
+
+    landed.fn();
+    await settle();
+    await settle();
+  });
+
   it("says the read failed when it did", async () => {
     sourcesReply = () => Promise.reject(new Error("nope"));
     draw();

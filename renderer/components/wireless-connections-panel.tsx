@@ -285,7 +285,10 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                 ) : field.type === "number" ? (
                   <NumberInput
                     value={typeof value === "number" ? value : Number(value) || 0}
-                    onChange={(n) => handleConfigChange(field.key, String(n))}
+                    // The number, not String(n): the next blur writes this
+                    // straight into the connection's config, and a stringified
+                    // port is not what the provider is typed to read.
+                    onChange={(n) => handleConfigChange(field.key, n)}
                     onCommit={() => handleConfigFieldBlur(field.key)}
                     min={field.min}
                     max={field.max}

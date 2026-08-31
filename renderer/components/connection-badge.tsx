@@ -52,7 +52,7 @@ export function ConnectionBadge({
   return (
     <span className="flex items-center gap-1">
       <Status variant={inbound ? "neutral" : "warning"} />
-      <span className="text-caption1 text-gray-9">{inbound ? "No clients yet" : "Disconnected"}</span>
+      <span className="text-caption1 text-fg-muted">{inbound ? "No clients yet" : "Disconnected"}</span>
     </span>
   );
 }

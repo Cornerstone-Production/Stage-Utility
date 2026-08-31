@@ -33,7 +33,14 @@ describe("the console rail's icon", () => {
   test("renders no interactive element of its own", () => {
     // The whole rule, stated once: nothing in here may be focusable, because all
     // of it lands inside the row's <button>.
-    assert.doesNotMatch(ICON.split("return (")[1] ?? "", /<button|<a\s|<input/, "an interactive element is back inside the row");
+    //
+    // The `?? ""` used to stand alone, and an empty string matches nothing — so
+    // restructuring the component to `return <>` handed this an empty body and
+    // the guard passed having checked no markup at all. The body has to be
+    // FOUND before it can be cleared.
+    const body = ICON.split("return (")[1];
+    assert.ok(body, "no `return (` in the component — this guard was reading nothing");
+    assert.doesNotMatch(body, /<button|<a\s|<input/, "an interactive element is back inside the row");
   });
 
   test("wears the operator's colour ONLY while it is the current page", () => {
@@ -51,7 +58,10 @@ describe("the console rail's icon", () => {
   test("and falls through to the row's own styling when none is set", () => {
     // `undefined`, not a computed default: an inactive row, or a console the
     // operator never coloured, has to inherit exactly what every other tab does.
-    assert.match(ICON, /: undefined/);
+    //
+    // The absence is the whole claim. An `assert.match(ICON, /: undefined/)`
+    // used to sit above this line and was satisfied by the `: undefined` the
+    // test before it already pins, so it could never fail on its own.
     assert.doesNotMatch(ICON, /color:\s*(DEFAULT_TINT|"var\()/, "a fallback colour here overrides the row");
   });
 

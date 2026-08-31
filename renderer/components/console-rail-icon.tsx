@@ -12,7 +12,7 @@
 
 import { createElement, useState } from "react";
 import { SlidersHorizontalIcon } from "lucide-react";
-import { invoke } from "../lib/api";
+import { saveIcon } from "./editable-icon";
 import { IconMenu } from "./icon-menu";
 import { resolveIcon } from "./icon-set";
 import { useStageState } from "../main/use-stage-state";
@@ -66,8 +66,8 @@ export function ConsoleRailIcon({
           anchor={anchor}
           label={`${label} icon`}
           current={glyphs[viewId] ?? null}
-          onPick={(name) => void invoke("icons:setIcon", { key: viewId, glyph: name })}
-          onClear={() => void invoke("icons:setIcon", { key: viewId, glyph: "" })}
+          onPick={(name) => saveIcon(viewId, name)}
+          onClear={() => saveIcon(viewId, "")}
           onClose={() => setAnchor(null)}
         />
       )}

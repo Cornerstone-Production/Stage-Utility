@@ -26,6 +26,18 @@ countdown, so the app needs it.
 | [RossTalk (Carbonite / Ultrix)](rosstalk.md) | Commands to Ross gear — custom controls, switching, routing, salvos |
 | [Live scores](scores.md) | Followed teams' live scores (ESPN public scoreboard) |
 
+## Closing a settings dialog with unsaved edits
+
+Each integration's settings open in a dialog. Escape, the close button and a
+click outside all ask before they discard: with unsaved edits you get **Keep
+editing / Discard / Save & close**, and *Save & close* only closes if the save
+was accepted — a credential the device refuses stays on screen.
+
+That question covers the form and the repeater lists a dialog can hold — the
+Ross TSL **multiviewer feeds** and the ProPresenter **additional instances**,
+which each have their own Save button. Saving from the confirm writes those
+lists as well as the form.
+
 ## Adding a new integration
 
 REAPER is the cleanest end-to-end template for a polling integration — see

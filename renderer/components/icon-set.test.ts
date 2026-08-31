@@ -66,4 +66,15 @@ describe("searching it", () => {
   test("a query matching nothing returns nothing rather than everything", () => {
     assert.deepEqual(searchIcons("zzzzzzz"), []);
   });
+
+  test("a keyword is matched as a SUBSTRING, so a clipped one is unreachable", () => {
+    // The projector's keywords read "beamer screen imag". The match is
+    // `"name keywords".includes(query)`, so typing the whole word found nothing
+    // while typing four fifths of it worked — the failure mode of a clipped
+    // keyword is invisible until somebody types the word it was meant to be.
+    assert.ok(
+      searchIcons("image").some((c) => c.name === "Projector"),
+      "typing the whole word finds nothing — a keyword is clipped",
+    );
+  });
 });

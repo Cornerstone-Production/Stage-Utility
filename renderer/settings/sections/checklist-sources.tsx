@@ -1,14 +1,12 @@
 // Which of a plan's notes become the pre-service checklist.
 //
-// The options are read LIVE from Planning Center rather than stored, because a
-// category renamed there has to appear under its new name. A picker built from a
-// remembered copy is how somebody ends up choosing an option that matches
-// nothing and cannot tell why their checklist is empty.
+// Why the options are read live and why a stored name PCO no longer offers is
+// kept and marked: see pco-options.ts, which both live pickers share. Here the
+// cost of dropping one is a checklist that goes silently empty — the same
+// failure the ScriptView preset code documents from the other direction.
 //
-// A stored name that PCO no longer offers is kept in the list and marked, rather
-// than dropped. Dropping it would silently unselect the operator's choice and
-// leave the widget empty with nothing on screen to explain it — the same failure
-// the ScriptView preset code documents from the other direction.
+// NOTHING CHOSEN MEANS THE CHECKLIST IS OFF, the opposite of the calendar
+// picker's rule: a list that filled itself with every note on the plan is noise.
 
 import { useEffect, useState } from "react";
 
@@ -21,10 +19,10 @@ import {
   FieldLabel,
   FieldSet,
   MultiSelect,
-  type MultiSelectOption,
+  toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
-import { toast } from "../../components/ui";
+import { optionsFor as pcoOptions } from "./pco-options";
 import { errorMessage } from "@main/services/errors";
 import type { SectionProps } from "../types";
 
@@ -33,21 +31,29 @@ interface Sources {
   teams: string[];
 }
 
-/** Options for one picker: what PCO offers, plus any stored name it no longer does. */
-function optionsFor(offered: readonly string[], chosen: readonly string[]): MultiSelectOption[] {
-  const live = new Set(offered);
-  const missing = chosen.filter((c) => !live.has(c));
-  return [
-    ...offered.map((name) => ({ value: name, label: name })),
-    ...missing.map((name) => ({ value: name, label: `${name} (not in Planning Center)` })),
-  ];
-}
+/** Options for one picker. The NAME is the stored value here, so it is both the
+ *  id MultiSelect works in and the label the operator reads. */
+const optionsFor = (offered: readonly string[], chosen: readonly string[]) =>
+  pcoOptions(offered, chosen, { id: (s) => s, label: (s) => s });
+
+/**
+ * Three states, not two.
+ *
+ * A `Sources | null` said "could not read Planning Center" for the whole of
+ * every page load, because null is also what it starts as — an operator opening
+ * Plan settings was told the read had failed before it had been attempted. The
+ * calendar picker documents the same bug and carries the same union.
+ */
+type Load =
+  | { at: "loading" }
+  | { at: "failed"; serviceTypeId: string }
+  | { at: "loaded"; serviceTypeId: string; sources: Sources };
 
 export function ChecklistSources({
   stageState,
   handlers,
 }: Pick<SectionProps, "stageState" | "handlers">) {
-  const [sources, setSources] = useState<Sources | null>(null);
+  const [result, setResult] = useState<Load>({ at: "loading" });
 
   const categories = stageState.checklistNoteCategories ?? [];
   const teams = stageState.checklistNoteTeams ?? [];
@@ -59,18 +65,52 @@ export function ChecklistSources({
     if (!serviceTypeId) return;
     let current = true;
     invoke<Sources>("checklist:sources")
-      .then((s) => { if (current) setSources(s); })
-      // Left null rather than emptied: an empty picker and a picker that could
-      // not be loaded look identical, and the description below says which.
-      .catch(() => { if (current) setSources(null); });
+      .then((s) => { if (current) setResult({ at: "loaded", serviceTypeId, sources: s }); })
+      // Failed is its own state, not the absence of one: an empty picker, a
+      // picker still loading and a picker that could not be loaded look
+      // identical, and the description below is what says which.
+      .catch(() => { if (current) setResult({ at: "failed", serviceTypeId }); });
     return () => { current = false; };
   }, [serviceTypeId]);
 
-  // Derived rather than cleared in the effect: without a service type there are
-  // no categories to offer, and clearing state synchronously inside an effect
-  // cascades a render for something the render can simply decide.
-  const offered = serviceTypeId ? sources : null;
+  // Derived rather than reset in the effect: an answer belonging to the PREVIOUS
+  // service type is still "loading" as far as this one is concerned, and
+  // deciding that here costs no cascading render.
+  const load: Load =
+    result.at !== "loading" && result.serviceTypeId === serviceTypeId ? result : { at: "loading" };
+
+  // Without a service type there are no categories to offer at all.
+  const offered = serviceTypeId && load.at === "loaded" ? load.sources : null;
   const chosen = categories.length + teams.length;
+
+  /**
+   * What to list, given that "(not in Planning Center)" is a CLAIM.
+   *
+   * Only a landed read can make it. Until then `offered` is empty, and passing
+   * that straight to optionsFor routes every stored name through the missing
+   * branch — so opening the picker during the round trip showed every choice
+   * the operator made marked as gone, directly under a line saying the read is
+   * still happening. The picker is enabled throughout, so it is reachable.
+   *
+   * Not visible while the picker is SHUT, as it happens: with nothing offered,
+   * options and chosen are the same list, and MultiSelect's trigger takes its
+   * `chosen.length === options.length` branch and reads "All (N)". That is luck,
+   * not a design — one live option arriving mid-render would put the marked
+   * label straight onto the trigger.
+   *
+   * Listing the stored choices unmarked until something is known says nothing
+   * untrue, and a landed read still marks what it genuinely no longer offers.
+   */
+  const listing = (live: string[] | undefined, stored: string[]) =>
+    optionsFor(offered ? (live ?? []) : stored, stored);
+
+  const status = !serviceTypeId
+    ? " Choose a service type first."
+    : load.at === "loading"
+      ? " Reading the categories from Planning Center…"
+      : load.at === "failed"
+        ? " Could not read the categories from Planning Center."
+        : "";
 
   return (
     <FieldSet>
@@ -83,19 +123,21 @@ export function ChecklistSources({
               becomes a row you can tick off on Home; a note with no bullets becomes one row per
               line. Ticks are kept here only — Planning Center does not see them — and start fresh
               with each new plan.
-              {!serviceTypeId && " Choose a service type first."}
-              {serviceTypeId && !offered && " Could not read the categories from Planning Center."}
+              {status}
             </FieldDescription>
           </FieldContent>
         </Field>
 
-        <Field>
+        {/* data-field names the two pickers apart, as the calendar picker's do.
+            They are otherwise identical controls whose only distinguishing text
+            is a SUMMARY that changes with the selection. */}
+        <Field data-field="categories">
           <FieldContent>
             <FieldLabel>Note categories</FieldLabel>
             <FieldDescription>Every note filed under these becomes part of the list.</FieldDescription>
           </FieldContent>
           <MultiSelect
-            options={optionsFor(offered?.categories ?? [], categories)}
+            options={listing(offered?.categories, categories)}
             selected={categories}
             onChange={(next) => { void handlers.handleSetChecklistSources(next, teams); }}
             placeholder="None"
@@ -103,7 +145,7 @@ export function ChecklistSources({
           />
         </Field>
 
-        <Field>
+        <Field data-field="teams">
           <FieldContent>
             <FieldLabel>Teams</FieldLabel>
             <FieldDescription>
@@ -111,7 +153,7 @@ export function ChecklistSources({
             </FieldDescription>
           </FieldContent>
           <MultiSelect
-            options={optionsFor(offered?.teams ?? [], teams)}
+            options={listing(offered?.teams, teams)}
             selected={teams}
             onChange={(next) => { void handlers.handleSetChecklistSources(categories, next); }}
             placeholder="None"
