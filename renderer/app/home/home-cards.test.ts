@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import {
+  cardsForNow,
   COLUMNS,
   SIZES,
   SIZE_ORDER,
@@ -120,6 +121,24 @@ describe("what is on the page", () => {
     // @ts-expect-error "unknown" is not a HomeMode and must never be filterable
     const forced = visibleCards(list, "unknown");
     assert.deepEqual(forced.map((o) => o.id), ["a"]);
+  });
+});
+
+describe("the grid before the live channel has answered", () => {
+  const list = [card("a", "clock"), card("b", "spl-meter")];
+
+  test("THE GUARD: null, not a filtered grid, while the mood is unknown", () => {
+    // The hold. pco:live hydrates separately from the stage state Home's spinner
+    // waits on, so treating "unknown" as "idle" drew the whole rest-of-the-week
+    // set mid-service and took it away a frame later. Null is the answer that
+    // holds the grid, and it used to be the middle arm of a nested ternary where
+    // a later reader could take it for a tidy default.
+    assert.equal(cardsForNow(list, "unknown"), null);
+  });
+
+  test("and the filtered list once it has", () => {
+    assert.deepEqual(cardsForNow(list, "idle"), visibleCards(list, "idle"));
+    assert.deepEqual(cardsForNow(list, "live"), visibleCards(list, "live"));
   });
 });
 

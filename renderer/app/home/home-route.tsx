@@ -33,7 +33,7 @@ import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
 import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
-import { addCard, removeCard, replaceCard, setSize, setWhen, visibleCards } from "./home-cards";
+import { addCard, cardsForNow, removeCard, replaceCard, setSize, setWhen } from "./home-cards";
 import { SIZES, SIZE_ORDER, WHEN_LABELS, sizeOf, whenOf } from "./home-cards";
 import { pickedValue, togglesFor, withToggle } from "./card-toggles";
 import { gameOptions } from "../../main/scores-object";
@@ -318,17 +318,10 @@ export function HomeRoute() {
 
   // Editing shows EVERY card, including ones whose mood is not the current one —
   // you cannot arrange what the page is hiding from you. Off the editor, Home
-  // shows only what belongs to right now.
-  //
-  // Null while the live channel has not answered: the grid is HELD, not guessed
-  // at. pco:live hydrates separately from the stage state the spinner above
-  // waits on, so without this the first paint of every visit filtered on
-  // "idle" — and mid-service that drew the whole rest-of-the-week set and then
-  // took it away a frame later. There is nothing true to draw yet, so nothing
-  // is drawn; measured at 8-20ms, and bounded by the read's own timeout even if
-  // the server never answers.
-  const cards: LayoutObject[] | null =
-    editing ? objects : mode === "unknown" ? null : visibleCards(objects, mode);
+  // shows only what belongs to right now, and may draw nothing at all until the
+  // live channel has answered: see cardsForNow, which is where that third
+  // outcome and the reason it is not a default are written down.
+  const cards: LayoutObject[] | null = editing ? objects : cardsForNow(objects, mode);
 
   // The card the open menu belongs to, read fresh. A card removed from under an
   // open menu closes it rather than leaving a menu of dead actions.
