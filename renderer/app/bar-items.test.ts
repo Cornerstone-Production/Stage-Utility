@@ -131,11 +131,20 @@ describe("visibleBarItems", () => {
   });
 
   test("falls back to the default rather than rendering an empty bar", () => {
-    // A bar showing nothing reads as broken, not as configured.
+    // A bar showing nothing reads as broken, not as configured. Nothing was
+    // ever saved here, so there is no arrangement to keep.
     assert.deepEqual(visibleBarItems([]), DEFAULT_BAR_ORDER);
     assert.deepEqual(visibleBarItems(undefined), DEFAULT_BAR_ORDER);
-    // A saved order that is nothing BUT spacers is still an empty bar.
-    assert.deepEqual(visibleBarItems([BAR_SPACER, BAR_SPACER]), DEFAULT_BAR_ORDER);
+  });
+
+  test("but a bar the operator EMPTIED stays empty", () => {
+    // Drag every item out and the configurator commits [], which
+    // normalizeBarRows saves as ["spacer"]. Reading that back as "empty, use
+    // the defaults" refilled the strip with five items nobody asked for, while
+    // the editor below it still said "Drag something in." — the two disagreed
+    // on screen at the same time and the removal was undone.
+    assert.deepEqual(visibleBarItems([BAR_SPACER]), [BAR_SPACER]);
+    assert.deepEqual(visibleBarItems([BAR_SPACER, BAR_SPACER]), [BAR_SPACER]);
   });
 
   test("falls back when every saved id is unknown", () => {
@@ -168,10 +177,13 @@ describe("the fixed gap", () => {
     );
   });
 
-  test("a bar of nothing but gaps is still an empty bar", () => {
-    // Spacing is not a reading. Falling back beats rendering a strip that is
-    // 100% gap and looks broken.
-    assert.deepEqual(visibleBarItems([BAR_SPACE, BAR_SPACER, BAR_SPACE]), DEFAULT_BAR_ORDER);
+  test("a bar of nothing but gaps is the bar that was saved", () => {
+    // Gaps are the shape of a strip somebody cleared. Handing back the defaults
+    // instead put five items on a bar the operator had just emptied.
+    assert.deepEqual(
+      visibleBarItems([BAR_SPACE, BAR_SPACER, BAR_SPACE]),
+      [BAR_SPACE, BAR_SPACER, BAR_SPACE],
+    );
   });
 
   test("normalizing keeps fixed gaps and still guarantees a flexible one", () => {

@@ -275,8 +275,19 @@ function collapseSpacers(rows: readonly BarRowId[]): BarRowId[] {
  * integration removed, can leave a saved order naming something this build does
  * not have, and a hole in the bar is worse than a shorter bar.
  *
- * An empty or entirely-unknown result falls back to the default, because a bar
- * that renders nothing reads as broken rather than as configured.
+ * A result with NOTHING RECOGNISED IN IT falls back to the default, because a
+ * bar that renders nothing reads as broken rather than as configured. That is
+ * `[]`, `undefined`, and the downgrade where every saved id names an item this
+ * build does not have.
+ *
+ * A saved order that is nothing but GAPS is not that case, and used to be
+ * treated as if it were. An operator who drags every item out of the strip
+ * commits `[]`, which `normalizeBarRows` saves as `["spacer"]` — so the very
+ * next read saw gaps only, called the bar empty and handed back the five
+ * defaults. The strip refilled itself while the editor two inches below still
+ * said "Drag something in.", and the removal the operator had just made was
+ * undone. An empty bar is a thing somebody can ask for; a bar nothing was ever
+ * saved for is not.
  *
  * A saved order with NO spacer predates them, and gets one where the old rule
  * cut. That inference is safe only because `normalizeBarRows` — which is what
@@ -290,8 +301,9 @@ export function visibleBarItems(saved: readonly string[] | undefined): BarRowId[
     if (id === BAR_SPACE) return [BAR_SPACE];
     return id in BAR_ITEMS ? [id as BarItemId] : [];
   });
-  // Gaps are not readings. A bar of nothing but spacing is an empty bar.
-  if (!rows.some((id) => !isBarGap(id))) return DEFAULT_BAR_ORDER;
+  // Nothing was recognised — see above. A strip the operator emptied on purpose
+  // reaches here as its gaps and is left alone.
+  if (rows.length === 0) return DEFAULT_BAR_ORDER;
   if (!rows.includes(BAR_SPACER)) return withLegacySpacer(rows);
   return collapseSpacers(rows);
 }

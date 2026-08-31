@@ -82,6 +82,9 @@ item, as a tile; below it is the bar itself, live, showing real readings.
 - A tile already in the bar is dimmed. **Space** and **Flexible space** never
   dim, because you can use as many of either as you like.
 - **Use the default set** puts the bar back to how it ships.
+- **A bar you empty stays empty.** Take every item off and the strip is
+  blank until you put something back; it does not refill itself with the
+  default set.
 
 **Desktop and Phone** at the top of the dialog choose which of the two bars you
 are arranging. The strip below shows the one you picked, at the width it will
