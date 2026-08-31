@@ -329,7 +329,7 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "key": "channel",
         "label": "Channel",
         "type": "text",
-        "placeholder": "@yourchurch or UC…",
+        "placeholder": "@yourchurch or a channel id",
         "showIf": {
           "key": "mode",
           "equals": "key"

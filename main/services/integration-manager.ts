@@ -395,7 +395,7 @@ const YOUTUBE_DESCRIPTOR: IntegrationDescriptor = {
       key: "channel",
       label: "Channel",
       type: "text",
-      placeholder: "@yourchurch or UC…",
+      placeholder: "@yourchurch or a channel id",
       showIf: { key: "mode", equals: "key" },
       help: "The channel handle or id. Found in your channel's URL.",
     },

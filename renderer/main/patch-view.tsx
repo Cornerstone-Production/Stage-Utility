@@ -128,15 +128,25 @@ export function PatchView() {
         </div>
 
         {/* Context */}
-        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-line bg-surface px-4 py-3">
-          <div className="flex flex-col">
-            <span className="text-caption2 uppercase tracking-wider text-fg-subtle">This week</span>
+        {/* The eyebrow sits ABOVE the row rather than stacked inside it. As one
+            column of two lines it was the tallest thing on a centred flex row, so
+            everything beside it centred against the PAIR: the plan title's
+            baseline landed 8px above the service type's, and the two names read
+            as belonging to different lines. Lifted out, every item on the row is
+            a single line and they align on the baseline they share. */}
+        <div className="mt-4 rounded-xl border border-line bg-surface px-4 py-3">
+          <span className="block text-caption2 uppercase tracking-wider text-fg-subtle">This week</span>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="text-body font-semibold">{state?.serviceTypeName ?? "—"}</span>
+            {resolved?.variantName && (
+              // self-center: a chip is a box, not a word, and its own baseline
+              // would hang it below the names it sits between.
+              <span className="self-center rounded-full bg-fill px-2.5 py-1 text-caption1 text-fg">
+                Base: {resolved.variantName}
+              </span>
+            )}
+            {state?.planTitle && <span className="text-footnote text-fg-muted">{state.planTitle}</span>}
           </div>
-          {resolved?.variantName && (
-            <span className="rounded-full bg-fill px-2.5 py-1 text-caption1 text-fg">Base: {resolved.variantName}</span>
-          )}
-          {state?.planTitle && <span className="text-footnote text-fg-muted">{state.planTitle}</span>}
         </div>
 
         {/* Sheet tabs (only when more than one sheet has a patch) */}
