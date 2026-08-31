@@ -44,6 +44,9 @@ const { createScoreActivity, SCORE_HOLD_MS, scoreActivity } =
   await import("./score-activity-store.js");
 const { ScoreActivityHost, ScoreCapsule, capsuleView, layoutStack, liveIndex, scoredSide } =
   await import("./score-activity.js");
+// The app's own contrast maths, not a second copy: raising or lowering what
+// color-math computes must move what this file measures.
+const { contrastRatio, formatColor, parseColor } = await import("../components/ui/color-math.js");
 
 // Unconditional, not a call at the end of each test body: a test that FAILS
 // never reaches its own cleanup, and proving these guards against the bug is
@@ -666,6 +669,107 @@ describe("a card names its game once, not twice", () => {
     const label = el?.getAttribute("aria-label") ?? "";
     assert.match(label, /Chicago Cubs 6/, "the capsule stopped naming the game");
     assert.match(label, /Cincinnati Reds 2/);
+  });
+});
+
+describe("the quiet ink on a score surface is readable", () => {
+  // THE BUG. --score-subtle was rgba(255,255,255,.38) and painted #6f6f6f on
+  // --score-surface: 3.60:1, under WCAG AA's 4.5:1 floor for text of any size,
+  // and all four of its uses were 9.5px or smaller. --score-muted, which is
+  // what those four were meant to read at, is 7.43:1.
+  //
+  // WHAT JSDOM CANNOT SAY: anything about type size or the painted result. No
+  // stylesheet is applied and nothing is laid out, so getComputedStyle here
+  // returns Tailwind's defaults and a "9.5px" claim would assert nothing. The
+  // DECLARATIONS are what can be read, and the arithmetic over them is the app's
+  // own — so this measures exactly what a browser will paint, without one.
+  //
+  // Enumerated FROM THE SHEET rather than from a list written here: a token
+  // added tomorrow and painted as text is measured by this the day it lands.
+
+  /** A translucent ink as it is actually painted on an opaque ground. */
+  function painted(ink: string, ground: string): string {
+    const f = parseColor(ink);
+    const b = parseColor(ground);
+    assert.ok(f && b, `unparseable colour: ${ink} on ${ground}`);
+    return formatColor({
+      r: f.r * f.a + b.r * (1 - f.a),
+      g: f.g * f.a + b.g * (1 - f.a),
+      b: f.b * f.a + b.b * (1 - f.a),
+      a: 1,
+    });
+  }
+
+  /** Every `--score-*: <colour>` the sheet declares. */
+  function scoreTokens(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const m of stylesheet().matchAll(
+      /--score-([a-z0-9-]+):\s*(#[0-9a-f]{3,8}|rgba?\([^)]*\))\s*;/gi,
+    )) {
+      out.set(m[1], m[2].trim());
+    }
+    return out;
+  }
+
+  // Ink that does NOT sit on --score-surface, and is therefore not this file's
+  // to measure. Both are computed per team colour in score-ink.ts and held to
+  // 4.5:1 by score-ink.test.ts against the ground they actually land on.
+  const NOT_ON_THE_SURFACE = ["disc-ink", "ink"];
+
+  test("THE GUARD: every score token painted as text clears 4.5:1 on the surface", () => {
+    const tokens = scoreTokens();
+    const surface = tokens.get("surface");
+    assert.ok(surface, "--score-surface is gone, so there is no ground to measure against");
+
+    const used = [
+      ...new Set(
+        [...stylesheet().matchAll(/color:\s*var\(--score-([a-z0-9-]+)/gi)].map((m) => m[1]),
+      ),
+    ].sort();
+
+    // MEASURED FIRST, so the failure reads as the ratio it is rather than as a
+    // list that changed shape.
+    const onSurface = used.filter((n) => !NOT_ON_THE_SURFACE.includes(n));
+    for (const name of onSurface) {
+      const value = tokens.get(name);
+      assert.ok(value, `--score-${name} is used as a colour but never declared`);
+      const ratio = contrastRatio(painted(value, surface), surface);
+      assert.ok(
+        ratio >= 4.5,
+        `--score-${name} paints ${painted(value, surface)} on ${surface} at ${ratio.toFixed(2)}:1 — under the 4.5:1 floor`,
+      );
+    }
+
+    // EXACT, both halves, and only after the measuring. A floor would let a new
+    // quiet-ink token be painted as text and never measured; naming the excluded
+    // pair here rather than skipping anything the parser cannot resolve means a
+    // THIRD unresolvable token fails loudly instead of vanishing from the loop.
+    assert.deepEqual(
+      used.filter((n) => NOT_ON_THE_SURFACE.includes(n)).sort(),
+      [...NOT_ON_THE_SURFACE].sort(),
+      "the ink that sits on a team colour changed — score-ink.test.ts owns those",
+    );
+    assert.deepEqual(
+      onSurface,
+      ["fg", "mark", "muted"],
+      "a different set of tokens is painted as text on the score surface than this guard measures",
+    );
+  });
+
+  test("and the quiet tier is one token, at the ratio it was meant to have", () => {
+    // The specific numbers, so the swap cannot be undone by re-tuning the alpha
+    // back down while leaving one token standing.
+    const tokens = scoreTokens();
+    const surface = tokens.get("surface") ?? "";
+    const muted = tokens.get("muted") ?? "";
+    assert.equal(surface, "#161616");
+    assert.equal(painted(muted, surface), "#a6a6a6");
+    assert.equal(contrastRatio(painted(muted, surface), surface).toFixed(2), "7.43");
+    assert.equal(
+      tokens.has("subtle"),
+      false,
+      "--score-subtle is back, and nothing on this surface can use it legibly",
+    );
   });
 });
 
