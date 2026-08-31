@@ -49,9 +49,7 @@ import {
   BAR_SPACE_ITEM,
   BAR_SPACER,
   BAR_SPACER_ITEM,
-  BAR_PROSE_ITEMS,
   isBarGap,
-  isProseItem,
   hasMobileBar,
   phoneShowsEditedSet,
   visibleBarItems,
@@ -64,10 +62,8 @@ import {
 import { useBarFit } from "./bar-fit";
 import { MOBILE_MAX_WIDTH } from "../lib/use-media-query";
 import {
-  BAR_ITEM_CLASS,
   BAR_STRIP_CLASS,
-  BarSpacerEl,
-  BarSpaceEl,
+  BarStripRows,
   renderBarItem,
   useBarContext,
   type BarItemContext,
@@ -371,35 +367,9 @@ function NarrowProbe({
       style={{ width: NARROWEST }}
     >
       <div ref={ref} className={BAR_STRIP_CLASS}>
-        <BarStripRows rows={rows} ctx={ctx} />
+        <BarStripRows rows={rows} ctx={ctx} preview />
       </div>
     </div>
-  );
-}
-
-/** The rows of a strip, rendered the way the real bar renders them. Shared so a
- *  preview and a probe cannot lay out differently from the bar they speak for. */
-function BarStripRows({ rows, ctx }: { rows: readonly BarRowId[]; ctx: BarItemContext }) {
-  return (
-    <>
-      {rows.map((id, i) => {
-        if (id === BAR_SPACER) return <BarSpacerEl key={`${id}-${i}`} />;
-        if (id === BAR_SPACE) return <BarSpaceEl key={`${id}-${i}`} />;
-        const content = renderBarItem(id as BarItemId, { ...ctx, preview: true });
-        if (content === null) return null;
-        return (
-          // The name goes on the ITEM's own box, not on a wrapper inside it, and
-          // that is load-bearing rather than tidy: the floor is expressed as
-          // `.bar-item:has(> .bar-prose)`, so anything between the two — even a
-          // `display: contents` span, which changes no layout — stops the item
-          // being allowed to shrink. A first pass did exactly that, and the probe
-          // reported an arrangement 2px too long that in the real bar fits.
-          <span key={id} className={BAR_ITEM_CLASS} data-prose={isProseItem(id) ? BAR_PROSE_ITEMS[id] : undefined}>
-            {content}
-          </span>
-        );
-      })}
-    </>
   );
 }
 

@@ -7,8 +7,10 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-const { contextBarState, renderBarItem, integrationHealth } = await import("./context-bar.js");
-const { BAR_ITEMS, BAR_PROSE_ITEMS } = await import("./bar-items.js");
+const { BarStripRows, contextBarState, renderBarItem, integrationHealth } = await import(
+  "./context-bar.js"
+);
+const { BAR_ITEMS, BAR_PROSE_ITEMS, BAR_SPACER } = await import("./bar-items.js");
 const { renderToStaticMarkup } = await import("react-dom/server");
 
 after(() => {
@@ -531,5 +533,72 @@ describe("what a rung leaves behind", () => {
       pair.map((id) => visibleAt(0, renderBarItem(id, loaded))),
       [SERVICE_TYPE, PLAN_TITLE],
     );
+  });
+});
+
+describe("the bar and its probe are the same loop", () => {
+  // BarStripRows' docblock promised "a preview and a probe cannot lay out
+  // differently from the bar they speak for", and for a while it was shared only
+  // between the preview and the probe: ContextBar kept its own copy of the same
+  // spacer/space/null-drop loop. They are one component now, and these are the
+  // two ways the copies had already drifted.
+  const NOW = Date.parse("2026-08-14T14:05:00.000Z");
+  const SERVICE_TYPE = "Weekend Service";
+  const PLAN_TITLE = "Carry The Light";
+  const ROWS = ["service-type", BAR_SPACER, "plan"] as const;
+
+  const ctx = {
+    state: { serviceTypeName: SERVICE_TYPE, planTitle: PLAN_TITLE } as unknown as StageState,
+    bar: contextBarState(LIVE_ITEM, NOW, 0),
+    now: NOW,
+    obs: null,
+    reaper: null,
+    integrations: { states: [], labels: {} },
+    resi: null,
+    youtube: null,
+    scores: null,
+  };
+
+  /** The strip as the bar draws it (preview false) or as the probe does (true). */
+  function strip(preview: boolean): HTMLElement {
+    const box = document.createElement("div");
+    box.innerHTML = renderToStaticMarkup(
+      <BarStripRows rows={[...ROWS]} ctx={ctx} preview={preview} /> as never,
+    );
+    return box;
+  }
+
+  test("THE GUARD: the prose reading is a DIRECT child of the item box, in both", () => {
+    // The floor is written as `.bar-item:has(> .bar-prose)`, so anything
+    // inserted between the two — even a `display: contents` span, which changes
+    // no layout — stops that item being allowed to shrink. Do it in one copy and
+    // the probe reports a rung the bar does not land on.
+    for (const preview of [false, true]) {
+      const items = [...strip(preview).querySelectorAll(".bar-item")];
+      const withProse = items.filter((el) => el.querySelector(".bar-prose"));
+      assert.equal(withProse.length, 2, `both prose items are on the strip (preview=${preview})`);
+      for (const el of withProse) {
+        assert.equal(
+          el.querySelector(".bar-prose")?.parentElement,
+          el,
+          `.bar-prose is wrapped inside .bar-item (preview=${preview}) - the floor selector stops matching and the item can no longer shrink`,
+        );
+      }
+    }
+  });
+
+  test("THE GUARD: the bar names its prose exactly as the probe does", () => {
+    // The drift that was actually there: the bar's own copy carried no
+    // data-prose at all, so the two strips were not the same markup.
+    const names = (preview: boolean) =>
+      [...strip(preview).querySelectorAll<HTMLElement>("[data-prose]")].map((n) => n.dataset.prose);
+    assert.deepEqual(names(false), ["the service type", "the plan title"]);
+    assert.deepEqual(names(false), names(true));
+  });
+
+  test("a gap renders as its own element and never as an item box", () => {
+    const box = strip(false);
+    assert.equal(box.children.length, 3, "three rows in, three elements out");
+    assert.equal(box.querySelectorAll(".bar-item").length, 2, "the spacer became an item box");
   });
 });
