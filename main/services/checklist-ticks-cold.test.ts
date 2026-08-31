@@ -74,3 +74,42 @@ describe("a tick that could not be saved is not shown as done", () => {
     );
   });
 });
+
+// A checklist row is free text an operator typed. `%` is an ordinary character
+// in one — "Batteries 100% charged" is a row somebody will write — and
+// console.error treats its FIRST argument as a format string, so a row label in
+// that position turns `%s` into a directive that swallows the error itself.
+// The one line telling an operator why a tick would not save is then the one
+// line that has lost the reason.
+describe("a row label cannot eat the error it is reported beside", () => {
+  it("keeps the failure reason when the row contains a format directive", async () => {
+    await fs.rm(FILE, { force: true, recursive: true });
+    await fs.mkdir(FILE);
+
+    const calls: unknown[][] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      calls.push(args);
+    };
+    try {
+      await assert.rejects(() =>
+        checklistTicksStore.set("77005566", "Production|Batteries %s%d%j charged", true),
+      );
+    } finally {
+      console.error = realError;
+    }
+
+    const line = calls.find((args) => String(args[0]).includes("[checklist]"));
+    assert.ok(line, "the failed save reported nothing at all");
+
+    assert.ok(
+      !String(line[0]).includes("%"),
+      "the row label reached the format-string position — a row containing %s consumes the " +
+        `Error and the operator is told the save failed without being told why: ${String(line[0])}`,
+    );
+    assert.ok(
+      line.some((arg) => arg instanceof Error),
+      "the Error never reached the log line, so /log cannot say why the save failed",
+    );
+  });
+});

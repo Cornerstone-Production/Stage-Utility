@@ -140,7 +140,12 @@ async function saveOrReport(
     const what = key === undefined
       ? `${action} plan ${scrub(planId, 64)}`
       : `${action} "${scrub(key, 80)}" on plan ${scrub(planId, 64)}`;
-    console.error(`[checklist] could not save — ${what} was NOT recorded:`, err);
+    // `what` is an ARGUMENT, never the format string. console.error treats its
+    // first argument as a format string, so a row label containing `%s` would
+    // swallow `err` into the message and the operator would be told a save
+    // failed without being told why. Scrubbing does not help — `%` is a
+    // perfectly ordinary character in a checklist row.
+    console.error("[checklist] could not save, NOT recorded:", what, err);
     throw err;
   }
 }
