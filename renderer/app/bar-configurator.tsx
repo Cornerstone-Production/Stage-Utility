@@ -53,6 +53,7 @@ import {
   isBarGap,
   isProseItem,
   hasMobileBar,
+  phoneShowsEditedSet,
   visibleBarItems,
   DEFAULT_BAR_ORDER,
   normalizeBarRows,
@@ -476,6 +477,10 @@ export function BarConfigurator({
   const saved: readonly BarRowId[] = visibleBarItems(
     editing === "mobile" && !inheriting ? savedMobile : savedDesktop,
   );
+  // Whether the 320px sentence is about this set at all — see
+  // `phoneShowsEditedSet`. A desktop set the phone has stopped following is
+  // never rendered on a phone, so there is nothing true to say about it here.
+  const shownOnPhone = phoneShowsEditedSet(editing, savedMobile);
 
   // The rows staying put during this drag, measured once at drag start. Safe to
   // cache precisely because nothing shifts mid-drag.
@@ -532,7 +537,7 @@ export function BarConfigurator({
     if (narrow.cut.length === 0) return null;
     return `On a ${NARROWEST}px phone this runs out of room, and ${nameList(narrow.cut)} will be cut short. Take ${narrow.cut.length > 1 ? "one of them" : "it"} off the phone's bar to keep every reading whole.`;
   }
-  const warning = narrowWarning();
+  const warning = shownOnPhone ? narrowWarning() : null;
 
   /** Every change goes through here, so nothing reaches the server unnormalised
    *  and the preview shows what was actually saved.
@@ -740,11 +745,21 @@ export function BarConfigurator({
               laptop is not a phone's; this sentence is the part that is about a
               phone. It only ever has bad news about prose, because prose is the
               only thing the ladder cannot fit without cutting — and being able to
-              take prose off is the whole reason the phone has a set of its own. */}
-          <NarrowProbe rows={rowIds} ctx={ctx} onFit={setNarrow} />
-          <p className={cn("mt-2 text-caption1", warning ? "text-warn-11" : "text-fg-subtle")}>
-            {warning ?? `Fits on a ${NARROWEST}px phone with nothing cut.`}
-          </p>
+              take prose off is the whole reason the phone has a set of its own.
+
+              ONLY FOR A SET A PHONE ACTUALLY RENDERS. Both the probe and the
+              sentence used to be unconditional, so a desktop set the phone had
+              stopped following was measured at 320px and reported on — a width
+              `barRowsFor` will never hand it, one line under "Shown from 640px
+              wide up". */}
+          {shownOnPhone && (
+            <>
+              <NarrowProbe rows={rowIds} ctx={ctx} onFit={setNarrow} />
+              <p className={cn("mt-2 text-caption1", warning ? "text-warn-11" : "text-fg-subtle")}>
+                {warning ?? `Fits on a ${NARROWEST}px phone with nothing cut.`}
+              </p>
+            </>
+          )}
 
           {/* Portalled to the body, NOT left inside the dialog.
               DragOverlay positions itself `fixed`, and the dialog is centred

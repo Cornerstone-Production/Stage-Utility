@@ -11,6 +11,7 @@ import {
   DEFAULT_BAR_ORDER,
   barRowsFor,
   hasMobileBar,
+  phoneShowsEditedSet,
   isBarGap,
   normalizeBarRows,
   visibleBarItems,
@@ -296,6 +297,29 @@ describe("which set a viewport reads", () => {
     // Same rule visibleBarItems already applies: a downgrade, or an integration
     // removed, must not leave a bar that renders nothing and reads as broken.
     assert.deepEqual(barRowsFor(DESKTOP, ["not-an-item", "gone-too"], true), DEFAULT_BAR_ORDER);
+  });
+});
+
+describe("whether the 320px sentence is about the set being edited", () => {
+  const PHONE = ["live-timer", BAR_SPACER, "integration-health"];
+
+  test("THE GUARD: not about a desktop set the phone has stopped following", () => {
+    // barRowsFor never puts the desktop rows below 640px once the phone has a
+    // set of its own, so measuring them at 320px reports on a strip that cannot
+    // exist — one line under "Shown from 640px wide up".
+    assert.equal(phoneShowsEditedSet("desktop", PHONE), false);
+  });
+
+  test("but IS about the desktop set while the phone still follows it", () => {
+    // Following means the phone renders these very rows, so the warning is the
+    // only place an operator hears about them being cut.
+    assert.equal(phoneShowsEditedSet("desktop", []), true);
+    assert.equal(phoneShowsEditedSet("desktop", undefined), true);
+  });
+
+  test("and always about the phone's own set", () => {
+    assert.equal(phoneShowsEditedSet("mobile", PHONE), true);
+    assert.equal(phoneShowsEditedSet("mobile", []), true);
   });
 });
 

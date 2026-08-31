@@ -32,6 +32,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import type { BarSet } from "./set-bar-items";
+
 export type BarItemId =
   | "clock"
   | "service-type"
@@ -333,6 +335,24 @@ export function normalizeBarRows(rows: readonly BarRowId[]): BarRowId[] {
  */
 export function hasMobileBar(saved: readonly string[] | undefined): boolean {
   return (saved ?? []).length > 0;
+}
+
+/**
+ * Does the set being edited actually reach a phone?
+ *
+ * The configurator's 320px sentence is about what a narrow screen does to an
+ * arrangement, so it may only be said about an arrangement a narrow screen
+ * renders. The phone's own set always qualifies. The desktop set qualifies only
+ * while the phone is still following it: once the phone has been forked,
+ * `barRowsFor` never puts the desktop rows below 640px, and warning about them
+ * there is advice about a strip that cannot exist — directly under the line
+ * saying this set is "Shown from 640px wide up".
+ */
+export function phoneShowsEditedSet(
+  editing: BarSet,
+  mobile: readonly string[] | undefined,
+): boolean {
+  return editing === "mobile" || !hasMobileBar(mobile);
 }
 
 /**
