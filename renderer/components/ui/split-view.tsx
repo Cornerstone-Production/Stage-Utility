@@ -34,8 +34,20 @@ const SWIPE_MIN = 48; // px of horizontal travel to count as a swipe
  * Responsive two-panel shell with three states:
  *  - desktop expanded  → inline sidebar at `expandedWidth`
  *  - desktop collapsed → inline icon rail at `railWidth` (parent toggles `collapsed`)
- *  - mobile            → sidebar hidden; a hamburger (or edge-swipe) opens it as a
- *                        slide-over drawer; swipe left to close
+ *  - mobile            → sidebar hidden; the hamburger opens it as a slide-over
+ *                        drawer; swipe left to close
+ *
+ * THE HAMBURGER IS THE ONLY WAY IN. There was also a 16px left-edge strip that
+ * opened the drawer, and it is gone. It sat inside iOS Safari's back-gesture
+ * zone with `touch-action: auto`, so an edge drag raced the browser's own
+ * navigation and lost non-deterministically; nothing followed the finger (the
+ * drawer appeared at `transform: none` ~20ms after release); and a drag under
+ * the 48px threshold did nothing at all. Under Android's gesture navigation the
+ * system takes the edge before Chrome sees it, so the same gesture silently did
+ * nothing there. Claiming the edge also spends the browser's back gesture, which
+ * is the operator's most reliable exit from a console with no chrome.
+ *
+ * Do not reintroduce it. See docs/superpowers/research/2026-08-30-console-chrome-free.md.
  *
  * The sidebar subtree is wrapped in a SidebarChromeProvider so its items render
  * icon-only + tooltip when railed and close the drawer on selection (mobile).
@@ -63,20 +75,21 @@ export function SplitView({
   const closeDrawer = React.useCallback(() => setDrawerOpen(false), []);
   const chrome = { collapsed: railed, isMobile, closeDrawer };
 
-  // Touch swipe: edge-swipe right opens the drawer, swipe left closes it.
+  // Touch swipe: swipe left on the open drawer closes it. There is no
+  // open-swipe — see the note above the component.
   const touchStart = React.useRef<{ x: number; y: number } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
     const t = e.touches[0];
     touchStart.current = { x: t.clientX, y: t.clientY };
   };
-  const onSwipeEnd = (act: (dx: number) => void) => (e: React.TouchEvent) => {
+  const onTouchEndClose = (e: React.TouchEvent) => {
     const start = touchStart.current;
     touchStart.current = null;
     if (!start) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - start.x;
     const dy = t.clientY - start.y;
-    if (Math.abs(dx) > SWIPE_MIN && Math.abs(dx) > Math.abs(dy) * 1.5) act(dx);
+    if (dx < -SWIPE_MIN && Math.abs(dx) > Math.abs(dy) * 1.5) closeDrawer();
   };
 
   if (isMobile) {
@@ -96,22 +109,13 @@ export function SplitView({
 
         <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
 
-        {/* Left-edge swipe target to open the drawer (only while closed). */}
-        {!drawerOpen && (
-          <div
-            className="fixed left-0 top-0 z-30 h-full w-4"
-            onTouchStart={onTouchStart}
-            onTouchEnd={onSwipeEnd((dx) => { if (dx > 0) setDrawerOpen(true); })}
-          />
-        )}
-
         <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
           <DialogPrimitive.Portal>
             <DialogOverlay />
             <DialogPrimitive.Content
               aria-describedby={undefined}
               onTouchStart={onTouchStart}
-              onTouchEnd={onSwipeEnd((dx) => { if (dx < 0) closeDrawer(); })}
+              onTouchEnd={onTouchEndClose}
               // bg-rail, not bg-surface: on mobile this drawer IS the rail, so
               // anything showing through it — an overscroll bounce, a rounding
               // gap — should be the rail's colour rather than the content's.

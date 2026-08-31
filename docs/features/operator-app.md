@@ -38,6 +38,12 @@ Consoles you have built get a row each, above the groups — see
 its right edge to resize it, or collapse it to icons; on a phone it becomes a
 drawer.
 
+**On a phone the hamburger is the only way in.** There is no swipe from the left
+edge of the screen — that edge belongs to the browser's own back gesture, and a
+page that takes it works on one platform, does nothing on another, and costs you
+the most reliable way out of a page. The hamburger works everywhere, in a tab and
+in an app added to the home screen alike.
+
 A page you open arrives at the top, whatever you were reading before it. Picking
 the page you are already on does the same, and resets it to its top view. Back
 and Forward are the exception: they return you to where you were on that page,
