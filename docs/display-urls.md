@@ -94,7 +94,13 @@ displays**, and it is global rather than per screen.
 
 ## Icon colors
 
-Every display icon can be retinted by clicking it on the Screens page. Colors are
-keyed to the display id, so a colour set in one place shows everywhere.
+Every display icon can be retinted by clicking it on the Screens page. The colour
+and the glyph are stored under one key, so a change made in one place shows
+everywhere the same thing is drawn. That key is the **view id** for a screen
+showing a control surface — the Screens card and the console's sidebar tab are one
+icon between them — and the **display id** for every other screen.
+
+A colour or glyph set before that key moved is still read off the display id, and
+moves onto the current key the next time you change it.
 
 Untinted icons use the theme accent. Clearing a color returns it to that default.

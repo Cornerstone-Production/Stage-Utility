@@ -34,14 +34,43 @@ import { useStageState } from "../main/use-stage-state";
  * calendar-sources.tsx and checklist-sources.tsx both report theirs.
  *
  * @param glyph the icon's stored name, or "" to go back to the built-in one.
+ * @param legacyKey a key this item USED to be stored under. Cleared once the new
+ *   entry has landed, so the operator's glyph MOVES rather than being read out of
+ *   two places for ever. Cleared second on purpose: clearing first and then
+ *   failing to write would lose the choice outright.
  */
-export function saveIcon(key: string, glyph: string): void {
-  void invoke("icons:setIcon", { key, glyph }).catch((e: unknown) => {
-    // Tagged as well as toasted: a toast is gone in four seconds and leaves
-    // /log with nothing to read on the Sunday morning it happened.
-    console.error("[editable-icon:setIcon]", key, glyph, e);
-    toast.error(`Could not change the icon: ${errorMessage(e)}`);
-  });
+export function saveIcon(key: string, glyph: string, legacyKey?: string): void {
+  void invoke("icons:setIcon", { key, glyph })
+    .then(() => {
+      if (!legacyKey || legacyKey === key) return;
+      return invoke("icons:setIcon", { key: legacyKey, glyph: "" });
+    })
+    .catch((e: unknown) => {
+      // Tagged as well as toasted: a toast is gone in four seconds and leaves
+      // /log with nothing to read on the Sunday morning it happened.
+      console.error("[editable-icon:setIcon]", key, glyph, e);
+      toast.error(`Could not change the icon: ${errorMessage(e)}`);
+    });
+}
+
+/**
+ * Look up an icon entry for a key that may have MOVED.
+ *
+ * ONE function for both maps, because `iconColors` and `iconGlyphs` are keyed
+ * identically and a screen whose colour was found while its glyph was not would
+ * be a stranger bug than the one this fixes. The Screens card's colour goes
+ * through `resolveIconEntry` in outputs-section.tsx and its glyph through
+ * `useEditableIcon` below; both land here.
+ *
+ * The legacy key is read ONLY when the current one holds nothing, so a migrated
+ * value — or one the sidebar tab had already set — always outranks it.
+ */
+export function iconEntryAt(
+  entries: Record<string, string> | undefined,
+  key: string,
+  legacyKey?: string,
+): string | undefined {
+  return entries?.[key] ?? (legacyKey && legacyKey !== key ? entries?.[legacyKey] : undefined);
 }
 
 export interface EditableIconParts {
@@ -56,9 +85,20 @@ export function useEditableIcon(
   itemKey: string,
   /** The item's built-in icon, used until the operator picks another. */
   fallback: LucideIcon,
+  /**
+   * A key this item was stored under BEFORE the one above, read when the current
+   * key holds nothing.
+   *
+   * A Screens card showing a control surface was re-keyed from the output id to
+   * the view id. With no fallback a glyph the operator had already chosen simply
+   * stopped being found: the card went back to its built-in icon and the stored
+   * entry was read by nothing. Migrated on the next WRITE rather than on read —
+   * a render must not save.
+   */
+  legacyKey?: string,
 ): EditableIconParts {
   const { state } = useStageState();
-  const chosen = state?.iconGlyphs?.[itemKey] ?? null;
+  const chosen = iconEntryAt(state?.iconGlyphs, itemKey, legacyKey) ?? null;
   // resolveIcon answers null for a name this build does not know, which is what
   // stops a set trimmed in a later release leaving a hole where an icon was.
   const glyph = resolveIcon(chosen) ?? fallback;
@@ -68,8 +108,8 @@ export function useEditableIcon(
     iconEditing: {
       glyph,
       current: chosen,
-      onPick: (name) => saveIcon(itemKey, name),
-      onClear: () => saveIcon(itemKey, ""),
+      onPick: (name) => saveIcon(itemKey, name, legacyKey),
+      onClear: () => saveIcon(itemKey, "", legacyKey),
     },
   };
 }
