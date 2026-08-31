@@ -665,11 +665,12 @@ body {
    accessibility tree with it, so a screen reader would lose a reading that a
    sighted reader still has in the item beside it. This is the sr-only clip:
    out of the layout, still in the document. */
-.context-strip[data-fit="1"] .bar-drop-1,
-.context-strip[data-fit="2"] .bar-drop-1,
-.context-strip[data-fit="3"] .bar-drop-1,
-.context-strip[data-fit="2"] .bar-drop-2,
-.context-strip[data-fit="3"] .bar-drop-2 {
+/* `:is()` takes the specificity of its most specific argument, and every
+   argument here is one attribute selector — so each of these reads exactly as
+   `.context-strip[data-fit="n"] …` did, (0,3,0), and nothing in the cascade
+   moves. The ladder is cumulative: level 3 does everything level 2 does. */
+.context-strip:is([data-fit="1"], [data-fit="2"], [data-fit="3"]) .bar-drop-1,
+.context-strip:is([data-fit="2"], [data-fit="3"]) .bar-drop-2 {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -685,13 +686,11 @@ body {
    `.bar-drop-2` rule above), gaps and edge padding tighten, and the capsule
    gives up the space around its logos. Counts keep their digits: the plug
    appears BESIDE the 6, never instead of it. */
-.context-strip[data-fit="2"],
-.context-strip[data-fit="3"] {
+.context-strip:is([data-fit="2"], [data-fit="3"]) {
   column-gap: 8px;
   padding-inline: 8px;
 }
-.context-strip[data-fit="2"] .bar-glyph,
-.context-strip[data-fit="3"] .bar-glyph {
+.context-strip:is([data-fit="2"], [data-fit="3"]) .bar-glyph {
   display: block;
 }
 .bar-glyph {
@@ -702,28 +701,25 @@ body {
 /* The capsule at level 2. Smaller marks and smaller figures, and a shorter
    runway for the team colour to fade across — but every digit of both scores is
    still there, at a size that is still the largest type on the strip. */
-.context-strip[data-fit="2"] .score-capsule .score-side,
-.context-strip[data-fit="3"] .score-capsule .score-side {
-  gap: 5px;
-  padding: 4px 7px;
-}
-.context-strip[data-fit="2"] .score-capsule .score-side-away,
-.context-strip[data-fit="3"] .score-capsule .score-side-away {
-  padding-right: 14px;
-}
-.context-strip[data-fit="2"] .score-capsule .score-side-home,
-.context-strip[data-fit="3"] .score-capsule .score-side-home {
-  padding-left: 14px;
-}
-.context-strip[data-fit="2"] .score-capsule .score-logo,
-.context-strip[data-fit="3"] .score-capsule .score-logo {
-  width: 15px;
-  height: 15px;
-  font-size: 7px;
-}
-.context-strip[data-fit="2"] .score-capsule .score-value,
-.context-strip[data-fit="3"] .score-capsule .score-value {
-  font-size: 13px;
+.context-strip:is([data-fit="2"], [data-fit="3"]) .score-capsule {
+  & .score-side {
+    gap: 5px;
+    padding: 4px 7px;
+  }
+  & .score-side-away {
+    padding-right: 14px;
+  }
+  & .score-side-home {
+    padding-left: 14px;
+  }
+  & .score-logo {
+    width: 15px;
+    height: 15px;
+    font-size: 7px;
+  }
+  & .score-value {
+    font-size: 13px;
+  }
 }
 
 /* Level 3 — THE FLOOR, and the only rung that costs the reader anything they
@@ -738,6 +734,11 @@ body {
    It exists because a strip that has run out of room has to do SOMETHING, and of
    the four things available — ellipsise, wrap, scroll, or clip — only this one
    keeps one row, keeps every number, and tells the reader a word was cut. */
+/* NOT collapsed into one `:is()` like the rules above. `:has(> .bar-prose)`
+   is a class inside a functional pseudo-class, so `:is(.bar-prose, .bar-item:has(> .bar-prose))`
+   would take the (0,2,0) of the second arm and hand it to the first — raising
+   `.bar-prose` from (0,3,0) to (0,4,0). The collapse above is safe because every
+   arm there is a bare attribute selector. */
 .context-strip[data-fit="3"] .bar-prose,
 .context-strip[data-fit="3"] .bar-item:has(> .bar-prose) {
   flex: 0 1 auto;
@@ -820,22 +821,31 @@ body {
      is nowhere near a strip. Mirrors DISC in score-ink.ts, which is where the
      reasoning is written down. */
   --score-disc: #f2f2f2;
+  /* Here for the same reason: .score-object-empty is a standalone sibling of a
+     strip, not a descendant of one, so a token declared on .score-strip cannot
+     reach it — and it restated both of these as literals to compensate. One
+     source, so a change to the surface cannot land on three of four states.
+
+     The ground every score surface sits on is neutral dark whatever the app
+     theme, because a stage display is dark and the context bar is dark. Strictly
+     R=G=B. */
+  --score-surface: #161616;
+  --score-subtle: rgba(255, 255, 255, .38);
 }
 
-/* The card these sit on is neutral dark whatever the app theme: a stage display
-   is dark, and the context bar is dark. Strictly R=G=B. */
+/* The ink for that ground. Strictly R=G=B, like the surface it sits on.
+   --score-surface and --score-subtle are on :root instead, with --score-disc:
+   the empty state is a standalone sibling and cannot inherit from here. */
 .score-strip,
 .score-card,
 .score-capsule {
   --score-fg: rgba(255, 255, 255, .92);
   --score-muted: rgba(255, 255, 255, .62);
-  --score-subtle: rgba(255, 255, 255, .38);
   --score-line: rgba(255, 255, 255, .10);
   --score-dim: rgba(255, 255, 255, .15);
   /* The one warm accent: bases, outs, possession, power play. It marks a state
      ON a neutral surface and never tints the surface itself. */
   --score-mark: #f5c451;
-  --score-surface: #161616;
 }
 
 /* THE MASK GOES ON A BACKGROUND LAYER, NEVER ON THE ELEMENT.
@@ -1519,8 +1529,8 @@ button.score-capsule:focus-visible {
   width: 100%;
   height: 100%;
   border-radius: 12px;
-  background: #161616;
-  color: rgba(255, 255, 255, .38);
+  background: var(--score-surface);
+  color: var(--score-subtle);
   font-size: clamp(12px, calc(12px * var(--score-fit-scale, 1)), 44px);
   letter-spacing: .05em;
   text-align: center;
