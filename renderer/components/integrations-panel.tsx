@@ -578,7 +578,11 @@ export function IntegrationDialog({
                 ) : field.type === "number" ? (
                   <NumberInput
                     value={typeof value === "number" ? value : Number(value) || 0}
-                    onChange={(n) => setField(field.key, String(n))}
+                    // The number, not String(n): initialConfig stores a number
+                    // for a numeric field, so "4455" !== 4455 and one stepper
+                    // click left the dialog permanently dirty — raising the
+                    // unsaved-changes modal over a config identical to the saved one.
+                    onChange={(n) => setField(field.key, n)}
                     min={field.min}
                     max={field.max}
                     className="w-44 max-sm:w-full"

@@ -94,6 +94,21 @@ const button = (root: HTMLElement, label: string): HTMLButtonElement => {
   return el;
 };
 
+const portField = (): HTMLInputElement => {
+  const el = settings().querySelector<HTMLInputElement>('[data-config-field="port"] input');
+  assert.ok(el, "no port field");
+  return el;
+};
+
+/** One of NumberInput's themed steppers on the port field. */
+const stepper = (label: "Increase" | "Decrease"): HTMLButtonElement => {
+  const el = settings().querySelector<HTMLButtonElement>(
+    `[data-config-field="port"] button[aria-label="${label}"]`,
+  );
+  assert.ok(el, `no ${label} stepper on the port field`);
+  return el;
+};
+
 const type = (value: string) => fireEvent.change(hostField(), { target: { value } });
 const escape = () => fireEvent.keyDown(settings(), { key: "Escape" });
 
@@ -163,6 +178,28 @@ describe("dismissing a dialog with unsaved changes", () => {
     await settle();
 
     assert.equal(confirmDialog(), undefined, "a clean dialog asked about unsaved work");
+    assert.equal(o.closes, 1);
+  });
+
+  test("a stepper click and back again leaves nothing to ask about", async () => {
+    // The modal must fire for a real edit and nothing else. NumberInput's
+    // onChange hands over a NUMBER; storing String(n) made 4455 and "4455"
+    // unequal for ever, so one click on the port stepper left Save enabled and
+    // put the blocking confirm in front of a config identical to the saved one.
+    const o = await openObs();
+    fireEvent.click(stepper("Increase"));
+    await settle();
+    fireEvent.click(stepper("Decrease"));
+    await settle();
+
+    assert.equal(portField().value, "4455", "the round trip did not land back on the saved port");
+    // The disabled PROPERTY, not a class: a utility layer can restyle a button
+    // that is still clickable.
+    assert.equal(button(settings(), "Save").disabled, true, "Save stayed armed for an unchanged port");
+
+    escape();
+    await settle();
+    assert.equal(confirmDialog(), undefined, "the confirm blocked a dismissal with nothing to save");
     assert.equal(o.closes, 1);
   });
 
