@@ -61,6 +61,7 @@ const REQUEST_FACING = [
   "automation-routes.ts",
   "branding-routes.ts",
   "calendar-routes.ts",
+  "checklist-ticks-store.ts",
   "context.ts",
   "display-settings-routes.ts",
   "history-routes.ts",
@@ -201,6 +202,11 @@ function requestFacingFiles(): string[] {
     // then foldConfigEntries warns with the rejected KEY. That key is an
     // attacker's string, verbatim, and this file was missing from the list.
     path.join(HERE, "integration-manager.ts"),
+    // The plan id and the checklist row label both arrive in an HTTP body. It
+    // reached beta AFTER this scan's coverage half was written, and the coverage
+    // half caught it on its first run against a tree that had it — which is the
+    // whole reason that half exists.
+    path.join(HERE, "checklist-ticks-store.ts"),
     ...inRoutes,
   ];
 }
