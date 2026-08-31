@@ -3,6 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
+import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
@@ -571,12 +572,24 @@ export class StageController {
       );
     }
     const result = migrateSurfaces(cleaned, outputs);
+    // A stored slug is only ever checked on the way IN, so a path the app claims
+    // for itself later silently shadows the screen holding it. Re-checked here,
+    // on both load paths, for the same reason the surface migration is.
+    const slugs = migrateReservedSlugs(result.outputs);
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
-    const outputsChanged = result.outputs.some((o, i) => o !== outputs[i]);
+    const outputsChanged =
+      slugs.changed.length > 0 || result.outputs.some((o, i) => o !== outputs[i]);
     if (!viewsChanged && !outputsChanged) return { views, outputs };
 
     if (viewsChanged) await viewsStore.save(result.views);
-    if (outputsChanged) await settingsStore.patch({ outputs: result.outputs });
+    if (outputsChanged) await settingsStore.patch({ outputs: slugs.outputs });
+
+    // Logged in full, and this one is not optional: the operator's screen has a
+    // different URL than it did yesterday, and the only way they learn that is
+    // by being told.
+    for (const line of slugMigrationLog(slugs)) {
+      console.warn(`[slug-migration] ${scrub(line)}`);
+    }
 
     // Logged in full: a stray live-controls left on a wall display years ago
     // will pull that screen into panel mode, and the only way an operator learns
@@ -584,7 +597,7 @@ export class StageController {
     for (const line of migrationLog(result)) {
       console.log(`[surface-migration] ${scrub(line)}`);
     }
-    return { views: result.views, outputs: result.outputs };
+    return { views: result.views, outputs: slugs.outputs };
   }
 
   // ── PCO credentials ───────────────────────────────────────────────────

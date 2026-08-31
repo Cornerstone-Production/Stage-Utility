@@ -26,7 +26,7 @@ Slugs are rejected, with the reason shown on the card, if they are reserved, sta
 with `preview-`, collide with another display's id or slug, or contain anything
 outside `a-z`, `0-9` and `-`.
 
-Reserved: the empty path, `settings`, `log`, `photos`, `enroll`, and every
+Reserved: the empty path, `settings`, `log`, `logs`, `photos`, `enroll`, and every
 operator page below — `history`, `baptism`, `patch`, `scriptview`, `automation`,
 `plan`, `screens`, `consoles`, `views`, `displays` — plus the `preview-` prefix.
 These are pages in their own right: a display slugged `history` would render the
@@ -35,6 +35,14 @@ History page rather than the display.
 The reserved list is derived from the app's own route table rather than written
 out a second time, so a page added to the app is reserved the moment it is
 routed.
+
+Slugs are re-checked at every start, not only when they are saved. When an update
+claims a path a display was already using — `/logs` became the log viewer's second
+spelling — that display is moved aside rather than left shadowed: `logs` becomes
+`logs-2`, and a `[slug-migration]` line on [`/log`](ops/updates-and-logs.md) names
+the screen, the old URL and the new one. The `/<id>` address is untouched, so a Pi,
+a bookmark or a printed QR pointed at it keeps working, and the new alias is what
+the screen's card shows.
 
 Where both exist, the id wins, so a display is always reachable at its permanent
 address.
