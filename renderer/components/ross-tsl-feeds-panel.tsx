@@ -14,7 +14,7 @@ import {
   toast,
 } from "./ui";
 import { PlusIcon, TrashIcon, Loader2Icon } from "lucide-react";
-import { feedId, sameRows } from "./integration-panel-helpers";
+import { feedId, sameRows, withDefaults } from "./integration-panel-helpers";
 import { useReportUnsavedWork } from "./unsaved-work";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
@@ -40,7 +40,14 @@ export function RossTslFeedsPanel({
 }) {
   const people = usePeopleCountState();
   const zones = people?.zones ?? [];
-  const initial = Array.isArray(state.config.feeds) ? (state.config.feeds as TslFeed[]) : [];
+  // Defaulted on the way in, the same as the ProPresenter instances: prefix and
+  // suffix are optional in storage and always shown as "", so typing into one
+  // and clearing it again wrote a key a feed saved by an older build never had
+  // — and the dialog would then claim unsaved work over an unchanged feed.
+  const initial = withDefaults(
+    Array.isArray(state.config.feeds) ? (state.config.feeds as TslFeed[]) : [],
+    { prefix: "", suffix: "" },
+  );
   const [feeds, setFeeds] = useState<TslFeed[]>(initial);
   const [saving, setSaving] = useState(false);
 

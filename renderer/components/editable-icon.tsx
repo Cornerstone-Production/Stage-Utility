@@ -36,9 +36,12 @@ import { useStageState } from "../main/use-stage-state";
  * @param glyph the icon's stored name, or "" to go back to the built-in one.
  */
 export function saveIcon(key: string, glyph: string): void {
-  void invoke("icons:setIcon", { key, glyph }).catch((e: unknown) =>
-    toast.error(`Could not change the icon: ${errorMessage(e)}`),
-  );
+  void invoke("icons:setIcon", { key, glyph }).catch((e: unknown) => {
+    // Tagged as well as toasted: a toast is gone in four seconds and leaves
+    // /log with nothing to read on the Sunday morning it happened.
+    console.error("[editable-icon:setIcon]", key, glyph, e);
+    toast.error(`Could not change the icon: ${errorMessage(e)}`);
+  });
 }
 
 export interface EditableIconParts {

@@ -17,11 +17,15 @@ import {
 } from "./ui";
 import { PlusIcon, TrashIcon, Loader2Icon } from "lucide-react";
 import { ConnectionBadge } from "./connection-badge";
-import { feedId, sameRows } from "./integration-panel-helpers";
+import { feedId, sameRows, withDefaults } from "./integration-panel-helpers";
 import { useReportUnsavedWork } from "./unsaved-work";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
 // ---- ProPresenter extra instances -------------------------------------------
+
+/** The poll interval the field shows, and therefore the one a row carries.
+ *  Optional in storage, so it is filled in at load — see withDefaults. */
+const DEFAULT_POLL_MS = 500;
 
 interface PropInstanceRow {
   id: string;
@@ -61,7 +65,14 @@ export function ProPresenterInstancesPanel({
   state: IntegrationState;
   onStateChange: (next: IntegrationState) => void;
 }) {
-  const initial = Array.isArray(state.config.instances) ? (state.config.instances as PropInstanceRow[]) : [];
+  // Defaulted on the way in, not just on the way out to the field: the poll
+  // interval is optional in storage and always shown, so a stepper nudged up and
+  // back down wrote a key the saved row never had and left the dialog claiming
+  // unsaved work over an unchanged instance.
+  const initial = withDefaults(
+    Array.isArray(state.config.instances) ? (state.config.instances as PropInstanceRow[]) : [],
+    { pollMs: DEFAULT_POLL_MS },
+  );
   const [rows, setRows] = useState<PropInstanceRow[]>(initial);
   const [saving, setSaving] = useState(false);
   // Live per-instance status from the backend (keyed by instance id).
@@ -76,7 +87,13 @@ export function ProPresenterInstancesPanel({
     setRows((prev) => prev.filter((_, i) => i !== idx));
   }
   function add() {
-    setRows((prev) => [...prev, { id: feedId(), name: `Auditorium ${prev.length + 2}`, host: "", port: 1025 }]);
+    setRows((prev) => [
+      ...prev,
+      // pollMs included, not left to the field's fallback: the row is saved as
+      // it is built, and a buffer a key short of what comes back reads as
+      // unsaved work the moment the save lands.
+      { id: feedId(), name: `Auditorium ${prev.length + 2}`, host: "", port: 1025, pollMs: DEFAULT_POLL_MS },
+    ]);
   }
   /** Save, and say whether it landed. A false must not be followed by a close. */
   async function save(): Promise<boolean> {
@@ -191,7 +208,7 @@ export function ProPresenterInstancesPanel({
                     <FieldDescription>500 (lower = snappier, more requests)</FieldDescription>
                   </FieldContent>
                   <NumberInput
-                    value={r.pollMs ?? 500}
+                    value={r.pollMs ?? DEFAULT_POLL_MS}
                     step={100}
                     min={200}
                     max={10000}

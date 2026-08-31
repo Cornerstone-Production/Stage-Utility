@@ -104,6 +104,18 @@ export function CalendarSources({ view, pcoConfigured }: { view: View; pcoConfig
   const tags = view.calendarTags ?? [];
   const sources = load.at === "loaded" ? load.sources : null;
 
+  /**
+   * What to list, given that "(not in Planning Center)" is a CLAIM.
+   *
+   * Only a landed read can make it. Until then `sources` is null, and passing an
+   * empty list to optionsFor routes every stored choice through the missing
+   * branch — so opening either picker during the round trip showed every choice
+   * marked as gone, under a description saying the read is still happening. The
+   * checklist picker carries the same note, and the same fix.
+   */
+  const listing = (live: CalendarOption[] | undefined, stored: CalendarSelection[]) =>
+    optionsFor(sources ? (live ?? []) : stored, stored);
+
   useEffect(() => {
     let current = true;
     invoke<Sources>("calendar:sources")
@@ -166,7 +178,7 @@ export function CalendarSources({ view, pcoConfigured }: { view: View; pcoConfig
             </FieldDescription>
           </FieldContent>
           <MultiSelect
-            options={optionsFor(sources?.calendars ?? [], calendars)}
+            options={listing(sources?.calendars, calendars)}
             selected={idsOf(calendars)}
             onChange={(next) => save(toSelections(next, sources?.calendars ?? [], calendars), tags)}
             placeholder="All calendars"
@@ -184,7 +196,7 @@ export function CalendarSources({ view, pcoConfigured }: { view: View; pcoConfig
             </FieldDescription>
           </FieldContent>
           <MultiSelect
-            options={optionsFor(sources?.tags ?? [], tags)}
+            options={listing(sources?.tags, tags)}
             selected={idsOf(tags)}
             onChange={(next) => save(calendars, toSelections(next, sources?.tags ?? [], tags))}
             placeholder="All tags"

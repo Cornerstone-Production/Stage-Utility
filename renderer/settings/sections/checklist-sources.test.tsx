@@ -105,6 +105,37 @@ describe("what the panel says while it is reading", () => {
     );
   });
 
+  it("does not call a stored choice missing before it knows", async () => {
+    // "(not in Planning Center)" is a CLAIM, and only a landed read can make it.
+    // With `offered` empty during the round trip, every stored name went through
+    // optionsFor's missing branch, so opening the picker mid-read showed every
+    // choice the operator made marked as gone — under a line saying the read is
+    // still happening. It has to be OPENED to see: with nothing offered, options
+    // and chosen are the same list and the trigger takes MultiSelect's
+    // "All (N)" branch, which is why a closed-picker assertion passes on the bug.
+    sourcesReply = () =>
+      new Promise((r) => {
+        resolveSources = () => r({ categories: ["Production Notes"], teams: [] });
+      });
+    render(props({ categories: ["Production Notes"] }).node);
+
+    assert.ok(screen.getByText(/reading the categories/i), "not in the state this is about");
+    open("categories");
+    assert.equal(
+      /not in Planning Center/.test(rows().textContent ?? ""),
+      false,
+      "a stored choice was marked missing while the read was still in flight",
+    );
+    assert.ok(
+      within(rows()).getByText("Production Notes"),
+      "the stored choice is not listed at all while the read is in flight",
+    );
+
+    resolveSources?.();
+    await settle();
+    await settle();
+  });
+
   it("says the read failed when it did", async () => {
     sourcesReply = () => Promise.reject(new Error("nope"));
     render(props({}).node);

@@ -83,6 +83,27 @@ export function ChecklistSources({
   const offered = serviceTypeId && load.at === "loaded" ? load.sources : null;
   const chosen = categories.length + teams.length;
 
+  /**
+   * What to list, given that "(not in Planning Center)" is a CLAIM.
+   *
+   * Only a landed read can make it. Until then `offered` is empty, and passing
+   * that straight to optionsFor routes every stored name through the missing
+   * branch — so opening the picker during the round trip showed every choice
+   * the operator made marked as gone, directly under a line saying the read is
+   * still happening. The picker is enabled throughout, so it is reachable.
+   *
+   * Not visible while the picker is SHUT, as it happens: with nothing offered,
+   * options and chosen are the same list, and MultiSelect's trigger takes its
+   * `chosen.length === options.length` branch and reads "All (N)". That is luck,
+   * not a design — one live option arriving mid-render would put the marked
+   * label straight onto the trigger.
+   *
+   * Listing the stored choices unmarked until something is known says nothing
+   * untrue, and a landed read still marks what it genuinely no longer offers.
+   */
+  const listing = (live: string[] | undefined, stored: string[]) =>
+    optionsFor(offered ? (live ?? []) : stored, stored);
+
   const status = !serviceTypeId
     ? " Choose a service type first."
     : load.at === "loading"
@@ -116,7 +137,7 @@ export function ChecklistSources({
             <FieldDescription>Every note filed under these becomes part of the list.</FieldDescription>
           </FieldContent>
           <MultiSelect
-            options={optionsFor(offered?.categories ?? [], categories)}
+            options={listing(offered?.categories, categories)}
             selected={categories}
             onChange={(next) => { void handlers.handleSetChecklistSources(next, teams); }}
             placeholder="None"
@@ -132,7 +153,7 @@ export function ChecklistSources({
             </FieldDescription>
           </FieldContent>
           <MultiSelect
-            options={optionsFor(offered?.teams ?? [], teams)}
+            options={listing(offered?.teams, teams)}
             selected={teams}
             onChange={(next) => { void handlers.handleSetChecklistSources(categories, next); }}
             placeholder="None"

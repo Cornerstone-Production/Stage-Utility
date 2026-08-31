@@ -15,7 +15,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, blankState } = await import(
+const { installFakeServer, withQueryClient, settle, blankState, assertAbsent } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -230,17 +230,21 @@ describe("dismissing a dialog with unsaved changes", () => {
 const propSettings = (): HTMLElement => settingsWith(/Additional instances/);
 
 /**
+ * @param config saved config to open on — `{}` is a fresh install.
  * @param strict wrap in StrictMode, which is how the app itself mounts
  *   (renderer/app/index.tsx). It simulates mount → unmount → mount, so a panel
  *   that registered its unsaved work in an effect and deregistered it in a
  *   cleanup has to end up registered anyway.
  */
-async function openProPresenter(strict = false): Promise<Opened> {
+async function openProPresenter(
+  config: Record<string, unknown> = {},
+  strict = false,
+): Promise<Opened> {
   const closed = { n: 0 };
   const dialog = withQueryClient(
     <IntegrationDialog
       descriptor={PROPRESENTER}
-      state={blankState("propresenter")}
+      state={blankState("propresenter", { config })}
       onStateChange={() => {}}
       onClose={() => {
         closed.n += 1;
@@ -290,7 +294,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
     // StrictMode runs mount → unmount → mount, so the panel's registration
     // effect fires, its deregistration cleanup fires, and the effect fires
     // again. Ending clean there would put the guard back to where it was.
-    const o = await openProPresenter(true);
+    const o = await openProPresenter({}, true);
     await addInstance("Chapel");
 
     fireEvent.keyDown(propSettings(), { key: "Escape" });
@@ -298,6 +302,58 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
 
     assert.ok(confirmDialog(), "a StrictMode remount deregistered the panel's unsaved work");
     assert.equal(o.closes, 0);
+  });
+
+  test("a sub-panel's stepper, up and back down, leaves nothing to ask about", async () => {
+    // The same shape as the OBS port case above, one panel over — and the panel
+    // path is the one the registry made load-bearing. `pollMs` is optional in
+    // storage but always shown, so a row saved without it, nudged 500 → 600 →
+    // 500, gained a key the saved copy never had: sameRows reported unsaved
+    // work and Escape raised the modal over an unchanged instance.
+    //
+    // The seeded row deliberately has NO pollMs — that is what is on disk for
+    // every instance saved before this, and the shape the panel must tolerate.
+    const o = await openProPresenter({
+      instances: [{ id: "inst-invented-1", name: "Chapel", host: "192.0.2.40", port: 1025 }],
+    });
+
+    // Anchored on the FIELD's own input, not on a div whose text mentions "Poll
+    // interval": every enclosing div does, and the first one also holds the API
+    // Port steppers — which round-trip cleanly, so the first cut of this test
+    // passed on the bug it was written for.
+    const pollInput = (): HTMLInputElement => {
+      const el = propSettings().querySelector<HTMLInputElement>('input[aria-label="Instance poll interval"]');
+      assert.ok(el, "no poll interval field");
+      return el;
+    };
+    const poll = (label: "Increase" | "Decrease") => {
+      const el = pollInput().parentElement?.querySelector<HTMLButtonElement>(
+        `button[aria-label="${label}"]`,
+      );
+      assert.ok(el, `no ${label} stepper on the poll interval`);
+      return el;
+    };
+
+    const before = pollInput().value;
+    fireEvent.click(poll("Increase"));
+    await settle();
+    assert.notEqual(pollInput().value, before, "the Increase stepper moved nothing");
+    fireEvent.click(poll("Decrease"));
+    await settle();
+    assert.equal(pollInput().value, before, "the round trip did not land back on the shown value");
+
+    fireEvent.keyDown(propSettings(), { key: "Escape" });
+    await settle();
+
+    // assertAbsent, never assert.equal(node, undefined): assert serialises
+    // whatever it is handed, and a whole jsdom dialog takes long enough that
+    // node:test SIGKILLs the FILE and reports 'test failed' at 1:1 instead of
+    // this line. That happened while writing this test.
+    assertAbsent(
+      confirmDialog(),
+      "the confirm blocked a dismissal over an instance nothing had changed",
+    );
+    assert.equal(o.closes, 1);
   });
 
   test("a sub-panel with nothing added still closes on Escape with no question", async () => {
