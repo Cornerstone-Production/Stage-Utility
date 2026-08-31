@@ -16,10 +16,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { IconGrid } from "./icon-grid";
-// The Tab cycle the expanded-tile overlay uses. Focus INTO the menu is IconGrid's
-// own: it puts the caret in its search field on mount, because typing is how a
-// set that size is used. Focus back out belongs to whoever owns the open state —
-// this component is unmounted by the close and cannot restore anything.
+// The Tab cycle the expanded-tile overlay uses. Focus INTO the menu is gated on
+// placement below — the grid puts the caret in its search field on mount, which
+// a browser ignores while this menu is still hidden. Focus back OUT belongs to
+// whoever owns the open state: this is unmounted by the close and cannot.
 import { trapTab } from "../lib/dialog-focus";
 
 /** Roughly the panel's size, for keeping it on screen before it has rendered. */
@@ -56,6 +56,29 @@ export function IconMenu({
       left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)),
     });
   }, [anchor]);
+
+  /**
+   * Focus lands in the search field once the menu has somewhere to be.
+   *
+   * IconGrid focuses that field on ITS mount, which is right where it mounts
+   * into something already on screen — pressing "Change icon" inside an open
+   * colour panel. Here it is not: until `pos` lands this menu is
+   * `visibility: hidden`, and a browser IGNORES focus() on a hidden element.
+   * So the grid's own call did nothing, focus stayed on the rail row behind the
+   * menu, and Tab walked the sidebar rather than the icons.
+   *
+   * jsdom cannot see this — it models no visibility, so the grid's call
+   * "succeeded" there and every test was green while the browser did nothing.
+   * Found by opening the menu in Chrome. The guard in icon-key.test.tsx
+   * therefore teaches jsdom the one rule that matters; see the shim there.
+   *
+   * Re-focusing a field the grid already focused is a no-op, so the two do not
+   * fight.
+   */
+  const placed = pos !== null;
+  useEffect(() => {
+    if (placed) panel.current?.querySelector<HTMLElement>("input")?.focus();
+  }, [placed]);
 
   // Same manners as every other floating panel here.
   useEffect(() => {

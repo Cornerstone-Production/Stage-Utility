@@ -327,6 +327,28 @@ describe("the panel is a dialog, and now behaves like one", () => {
     const first = inside[0];
     const last = inside[inside.length - 1];
 
+    // FROM THE PANEL ITSELF first, which is where focus actually is when the
+    // dialog opens. The container carries tabIndex -1 and is therefore not one
+    // of the stops, so it is neither the first nor the last and a trap that only
+    // watches those two ends does nothing here — the browser then walks
+    // backwards out of the portal into the page behind. Chrome landed on
+    // "Refresh all" on the Screens page; jsdom simulates no default Tab
+    // movement, so only the handler's own action is visible and that is what is
+    // asserted.
+    panel().focus();
+    fireEvent.keyDown(panel(), { key: "Tab" });
+    assert.ok(
+      document.activeElement === first,
+      `Tab from the panel itself landed on ${where(document.activeElement)} rather than stepping into it`,
+    );
+
+    panel().focus();
+    fireEvent.keyDown(panel(), { key: "Tab", shiftKey: true });
+    assert.ok(
+      document.activeElement === last,
+      `Shift+Tab from the panel itself landed on ${where(document.activeElement)} rather than stepping into it — in a browser this walks out into the page behind the dialog`,
+    );
+
     last.focus();
     fireEvent.keyDown(last, { key: "Tab" });
     assert.ok(

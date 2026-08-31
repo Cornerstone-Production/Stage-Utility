@@ -40,6 +40,22 @@ export function trapTab(panel: HTMLElement | null, e: ReactKeyboardEvent<HTMLEle
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
   const active = document.activeElement;
+
+  // FOCUS ON THE PANEL ITSELF steps into the list, from whichever end the key
+  // is heading. A dialog with no obvious first control takes focus on its own
+  // container (tabIndex -1) when it opens — the colour panel does — and that
+  // container is deliberately NOT in `focusable`, so it is neither `first` nor
+  // `last` and the two cases below both miss it. The browser then does its
+  // default thing: a portal is rendered at the end of <body>, so Shift+Tab
+  // walked backwards into the page the dialog is covering. Measured in Chrome,
+  // where Shift+Tab off the open colour panel landed on "Refresh all" behind
+  // it; jsdom simulates no default Tab movement, so it saw nothing wrong.
+  if (active === null || !focusable.includes(active as HTMLElement)) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+    return;
+  }
+
   if (e.shiftKey && active === first) {
     e.preventDefault();
     last.focus();

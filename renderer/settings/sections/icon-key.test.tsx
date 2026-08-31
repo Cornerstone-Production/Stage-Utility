@@ -308,6 +308,68 @@ describe("the icon set is reachable without a mouse", () => {
    */
   const openMenus = () => document.querySelectorAll("[data-icon-menu]").length;
 
+  /**
+   * Teach jsdom the one browser rule this menu's focus depends on.
+   *
+   * A browser IGNORES focus() on an element inside a `visibility: hidden`
+   * subtree. jsdom models no visibility at all, so it happily focuses one — and
+   * that difference hid a real bug: the menu is `visibility: hidden` until it
+   * has been placed, so IconGrid's focus-on-mount did nothing in Chrome, focus
+   * stayed on the rail row behind the menu, and Tab walked the sidebar. Every
+   * jsdom test was green. It was found by opening the menu in a browser.
+   *
+   * Rather than leave that uncheckable, this shim reproduces the rule off the
+   * INLINE style, which jsdom does record. Installed for one test and removed
+   * again, so nothing else in the file inherits it.
+   */
+  function withBrowserVisibilityRule(): () => void {
+    const proto = globalThis.HTMLElement.prototype as unknown as { focus: () => void };
+    const real = proto.focus;
+    const hidden = (el: HTMLElement): boolean => {
+      for (let n: HTMLElement | null = el; n; n = n.parentElement) {
+        if (n.style?.visibility === "hidden") return true;
+      }
+      return false;
+    };
+    proto.focus = function patched(this: HTMLElement, ...args: unknown[]) {
+      if (hidden(this)) return;
+      return (real as (...a: unknown[]) => void).apply(this, args);
+    } as () => void;
+    return () => {
+      proto.focus = real;
+    };
+  }
+
+  test("THE GUARD: focus lands in the menu, which needs it to be placed first", async () => {
+    // The menu is hidden until it knows where to go, and a browser will not
+    // focus into a hidden subtree — see the shim above for why this is the only
+    // way the rule is visible here at all.
+    const undo = withBrowserVisibilityRule();
+    try {
+      const row = drawRow();
+      await settle();
+      row.focus();
+      fireEvent.keyDown(row, { key: "ContextMenu" });
+      await settle();
+      assert.equal(openMenus(), 1, "the menu never opened, so this asserts nothing");
+
+      const menu = document.querySelector("[data-icon-menu]");
+      assert.ok(menu, "no menu");
+      const active = document.activeElement;
+      assert.ok(
+        active !== null && menu.contains(active),
+        `the menu opened but focus stayed outside it on <${active?.tagName.toLowerCase() ?? "nothing"}> — it was focused while still hidden, so the browser ignored the call`,
+      );
+      assert.equal(
+        (active as HTMLElement).tagName,
+        "INPUT",
+        "focus went into the menu but not to the field you type in",
+      );
+    } finally {
+      undo();
+    }
+  });
+
   test("THE GUARD: Shift+F10 on the focused row opens the set", async () => {
     const row = drawRow();
     await settle();
