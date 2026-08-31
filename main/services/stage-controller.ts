@@ -195,11 +195,16 @@ export class LayoutConflictError extends Error {
  * injection and it is right to: both icon setters had the same three lines, and
  * both were reachable from an unauthenticated POST on the LAN.
  *
- * Two defences, because either alone is thinner than it looks. The key SHAPE is
+ * Three defences, because each alone is thinner than it looks. The key SHAPE is
  * checked — real keys are display ids ("display-1"), tool paths ("/baptism") and
- * view ids, none of which need anything outside this class. And the map is
- * rebuilt with a null prototype, so an assignment has no prototype to reach even
- * if a future caller skips the check.
+ * view ids, none of which need anything outside this class. The map is rebuilt
+ * with a null prototype, so an assignment has no prototype to reach even if a
+ * future caller skips the check. And the map COMING IN is filtered too: a
+ * reserved name can already be sitting in one, because settings.json is
+ * JSON.parse'd and a restored config snapshot is a file somebody uploaded, and
+ * on a null-prototype target it lands as an ORDINARY own key that then rides the
+ * spread back out and gets written to disk again. It can never be a real icon
+ * key — the shape check refuses to create one — so it is dropped, loudly.
  */
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -212,7 +217,14 @@ export function writeIconEntry(
   if (!/^[A-Za-z0-9/_-]{1,64}$/.test(key) || FORBIDDEN_KEYS.has(key)) {
     throw new Error(`${label} — key must be an id or a tool path`);
   }
-  const next: Record<string, string> = Object.assign(Object.create(null), current ?? {});
+  const next: Record<string, string> = Object.create(null);
+  for (const [k, v] of Object.entries(current ?? {})) {
+    if (FORBIDDEN_KEYS.has(k)) {
+      console.warn(`[stage-controller] ${label} — dropped a reserved key from the stored map: ${scrub(k)}`);
+      continue;
+    }
+    next[k] = v;
+  }
   if (value === "") delete next[key];
   else next[key] = value;
   // Back to an ordinary object for JSON.stringify, which skips a null-prototype
