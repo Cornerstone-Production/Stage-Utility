@@ -47,7 +47,7 @@ export const ICON_SET: IconChoice[] = [
   // Screens and surfaces
   { name: "Monitor", icon: MonitorIcon, keywords: "screen display wall tv" },
   { name: "Tv", icon: TvIcon, keywords: "screen display television" },
-  { name: "Projector", icon: ProjectorIcon, keywords: "beamer screen imag" },
+  { name: "Projector", icon: ProjectorIcon, keywords: "beamer screen image" },
   { name: "Presentation", icon: PresentationIcon, keywords: "projector slides screen" },
   { name: "ScreenShare", icon: ScreenShareIcon, keywords: "share cast output" },
   { name: "Cast", icon: CastIcon, keywords: "stream airplay send" },

@@ -98,6 +98,16 @@ describe("a scroll inside the dialog's scroll", () => {
     const body = dialog()!.querySelector<HTMLElement>(".overflow-y-auto");
     assert.ok(body, "the dialog body does not scroll");
 
+    // WHAT THIS IS AND IS NOT.
+    //
+    // It reads a CLASS NAME, so it is a check on the source shape, not on the
+    // layout: it goes red if the bound is deleted, and stays green if a later
+    // `@layer utilities` rule overrides max-h-48 — which is this repo's named
+    // scar, recorded a few lines from the code under test
+    // (integrations-visibility.test.tsx's su-card assertion says the same).
+    // jsdom runs no cascade and lays nothing out, so a real bound cannot be
+    // measured here; what CAN be pinned is that the intent is still written
+    // down, and it is asserted at that altitude deliberately.
     const list = [...dialog()!.querySelectorAll<HTMLElement>("div")].find((el) =>
       el.className.includes("max-h-48"),
     );

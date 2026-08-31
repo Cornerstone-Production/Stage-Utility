@@ -213,6 +213,43 @@ function initialConfig(
 }
 
 /**
+ * Flick an integration's enable switch.
+ *
+ * One function, at module scope, because there are two switches for it: the
+ * card's and the dialog header's. They were the same call, the same toast and
+ * the same error string twice over, differing only in their bookkeeping — a
+ * boolean busy flag against a busy id, and the dialog's `onBeforeMove` against
+ * the page's `captureCardPositions`. Those last two are the same thing said
+ * twice: record where every card is, because this is what moves one between the
+ * two grids.
+ */
+async function toggleIntegration(
+  id: string,
+  enabled: boolean,
+  {
+    onBeforeMove,
+    setBusy,
+    onStateChange,
+  }: {
+    /** Called before the state comes back — the moment to record card positions. */
+    onBeforeMove?: () => void;
+    setBusy: (busy: boolean) => void;
+    onStateChange: (next: IntegrationState) => void;
+  },
+): Promise<void> {
+  setBusy(true);
+  onBeforeMove?.();
+  try {
+    onStateChange(await ipc<IntegrationState>("integrations:setEnabled", { id, enabled }));
+  } catch (err) {
+    console.error("[IntegrationsPanel:toggle]", id, enabled, err);
+    toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+/**
  * A panel that REPLACES the schema form, or null when the schema form is shown.
  *
  * These five have no ConfigField-shaped settings at all — a searchable team
@@ -444,18 +481,12 @@ export function IntegrationDialog({
     }
   }
 
-  async function toggleEnabled(enabled: boolean) {
-    setToggling(true);
-    onBeforeMove?.();
-    try {
-      const next = await ipc<IntegrationState>("integrations:setEnabled", { id: descriptor.id, enabled });
-      onStateChange(next);
-    } catch (err) {
-      toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
-    } finally {
-      setToggling(false);
-    }
-  }
+  const toggleEnabled = (enabled: boolean) =>
+    toggleIntegration(descriptor.id, enabled, {
+      onBeforeMove,
+      setBusy: setToggling,
+      onStateChange,
+    });
 
   async function handleRefresh() {
     setIsRefreshing(true);
@@ -872,18 +903,12 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const handleToggle = useCallback(
-    async (id: string, enabled: boolean) => {
-      setTogglingId(id);
-      captureCardPositions();
-      try {
-        const next = await ipc<IntegrationState>("integrations:setEnabled", { id, enabled });
-        handleStateChange(next);
-      } catch (err) {
-        toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${String(err)}`);
-      } finally {
-        setTogglingId(null);
-      }
-    },
+    (id: string, enabled: boolean) =>
+      toggleIntegration(id, enabled, {
+        onBeforeMove: captureCardPositions,
+        setBusy: (busy) => setTogglingId(busy ? id : null),
+        onStateChange: handleStateChange,
+      }),
     [captureCardPositions, handleStateChange],
   );
 
