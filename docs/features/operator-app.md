@@ -161,6 +161,44 @@ corner when the pointer comes within reach. It opens the layout editor on the
 same URL, and **Done** returns you to the live console. See
 [Layout editor](../reference/layout-editor.md#editing-a-console-in-place).
 
+### Running a console without the app's chrome
+
+A console can have the app get out of its way. In Screens, open the console and
+press the **bar** button beside *A control surface you operate*. Both bands go —
+the top bar and the [context bar](context-bar.md) — and the console gets the
+whole window.
+
+On a 390x844 phone that is **89px back out of 844**: the console runs from the
+very top of the page to the bottom instead of starting 89px down. On a desktop
+it is the context bar, and with it the page's name; the sidebar stays, because
+the sidebar is not a band and is the way back. The setting is honoured at every
+width, deliberately — a setting that does nothing on the device you set it on is
+worse than one that is occasionally unnecessary.
+
+**A menu button floats over the console, and it never fades.** Bottom-left, above
+the phone's home indicator, 44px square. It is the way back, and it is the only
+one that works in every place this app gets opened: a browser's Back and its
+toolbar are gone in an app added to the home screen, and Back needs history that
+a console opened from a bookmark does not have. So it does not dim, and it does
+not hide until you tap the screen — on a live console that first tap belongs to
+whatever is underneath it.
+
+**It sits on top of the console, and it takes the tap.** A console is buttons, so
+a fixed position covers something on some layout and the app cannot know which.
+It is exactly its own 44px and no more — there is no reserved strip along the
+bottom, because a strip would give back half of what hiding the bars won — and it
+carries its own background so it stays readable over a dark canvas. If it lands
+on a control you use, move that control in the layout editor, or turn the bars
+back on.
+
+**Want some context back rather than all of it?** Do not use this — give the
+phone its own [context bar](context-bar.md#a-phone-can-have-its-own-set) item
+set and trim it to the two readings you actually want. That keeps the bar and
+loses the clutter.
+
+This is a different setting from a screen's **Hide top bar**, which is set per
+screen and hides the *display's* bar on a wall, in a different page entirely.
+
 ## Read-only links to hand out
 
 Two pages are meant to be sent to people outside Production, and are read-only

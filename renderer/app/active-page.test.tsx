@@ -23,7 +23,7 @@ const teardown = installDom();
 const { render, cleanup } = await import("@testing-library/react");
 const { router } = await import("./router.js");
 const { MOVED_ROUTES } = await import("./redirects.js");
-const { consolePageFor, consolePages, resolvePage } = await import("./active-page.js");
+const { consoleHidesChrome, consolePageFor, consolePages, resolvePage } = await import("./active-page.js");
 const { PageTitle } = await import("./page-title.js");
 const { PageActionsProvider } = await import("./page-actions.js");
 
@@ -214,5 +214,70 @@ describe("the strip's page name draws what the resolver found", () => {
       "the editor draws its own heading; a second one in the strip above it is the bug",
     );
     cleanup();
+  });
+});
+
+describe("a console can ask for the shell's chrome to be hidden", () => {
+  // Both bands go together — 45px top bar + 44px context bar — so this boolean
+  // is the whole switch. What it must NOT do is leak onto anything else.
+  const HIDDEN = "view-booth-console";
+  const withFlag = [
+    ...VIEWS,
+    { id: HIDDEN, name: "Booth", kind: "custom", surface: "console", hideChrome: true, createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "view-wall", name: "Wall", kind: "custom", surface: "display", hideChrome: true, createdAt: "2026-01-01T00:00:00.000Z" },
+  ] as unknown as NonNullable<Parameters<typeof consolePages>[0]>;
+
+  test("the console that set it", () => {
+    assert.equal(consoleHidesChrome(`/consoles/${HIDDEN}`, withFlag), true);
+  });
+
+  test("and no other console", () => {
+    assert.equal(
+      consoleHidesChrome(`/consoles/${CONSOLE_ID}`, withFlag),
+      false,
+      "one console's setting reached another",
+    );
+  });
+
+  test("a console that never set it keeps its chrome", () => {
+    assert.equal(consoleHidesChrome(`/consoles/${CONSOLE_ID}`, VIEWS), false);
+  });
+
+  test("no other page loses its chrome", () => {
+    for (const path of ["/", "/screens", "/patch", "/history"]) {
+      assert.equal(consoleHidesChrome(path, withFlag), false, `${path} lost its chrome`);
+    }
+  });
+
+  test("a CHILD route of the hidden console keeps its chrome", () => {
+    // Exact, never prefix. A prefix match would hide the bands over a page the
+    // operator never set the flag on, and that page draws its own heading.
+    assert.equal(
+      consoleHidesChrome(`/consoles/${HIDDEN}/anything`, withFlag),
+      false,
+      "the flag prefix-matched a child route",
+    );
+  });
+
+  test("a DISPLAY view carrying the flag hides nothing", () => {
+    // It is stored rather than refused, so flipping a console to a display and
+    // back does not lose the setting — but a display is served by a document
+    // with no shell in it, and /consoles/<display id> is not a console page.
+    assert.equal(consoleHidesChrome("/consoles/view-wall", withFlag), false);
+  });
+
+  test("Home cannot be made chromeless by this route", () => {
+    const homeHidden = [
+      { id: "home", name: "Home", kind: "custom", surface: "console", hideChrome: true, createdAt: "2026-01-01T00:00:00.000Z" },
+    ] as unknown as NonNullable<Parameters<typeof consolePages>[0]>;
+    // Home is filtered out of the console list (the rail once carried two Home
+    // entries), and /consoles/home redirects to /.
+    assert.equal(consoleHidesChrome("/consoles/home", homeHidden), false);
+    assert.equal(consoleHidesChrome("/", homeHidden), false);
+  });
+
+  test("no views at all is not a crash", () => {
+    assert.equal(consoleHidesChrome(`/consoles/${HIDDEN}`, undefined), false);
+    assert.equal(consoleHidesChrome(`/consoles/${HIDDEN}`, []), false);
   });
 });

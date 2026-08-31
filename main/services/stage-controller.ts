@@ -2177,6 +2177,26 @@ export class StageController {
   }
 
   /**
+   * Hide or show the operator app's chrome while this View is open as a console.
+   *
+   * Stored on any View rather than refused for a display: the flag is dormant
+   * there (a display has no shell), and refusing it would lose the setting every
+   * time a console was flipped to a display and back.
+   */
+  async setViewHideChrome(id: string, hideChrome: boolean): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setHideChrome — view ${id} not found`);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, hideChrome } : v));
+    console.log(`[stage-controller] setViewHideChrome id=${scrub(id)} → ${scrub(hideChrome ? "HIDDEN" : "shown")}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
    * Replace a custom View's layout (visual editor save).
    *
    * `expectedRev` is the revision the editor opened. When it no longer matches,

@@ -21,6 +21,9 @@ interface SplitViewProps {
    *  element rather than read from a context: this is a layout primitive, and it
    *  should not know what a page action is. */
   mobileActions?: React.ReactNode;
+  /** Drop the mobile top bar and float the hamburger over the content instead.
+   *  The caller hides its own band too — this primitive owns only its own. */
+  chromeless?: boolean;
   expandedWidth?: number;
   railWidth?: number;
   /** Suppress the collapse width animation — set while the sidebar is being
@@ -57,6 +60,7 @@ export function SplitView({
   collapsed = false,
   mobileTitle,
   mobileActions,
+  chromeless = false,
   expandedWidth = 200,
   railWidth = 56,
   resizing = false,
@@ -86,17 +90,66 @@ export function SplitView({
       <div className={cn("flex flex-col h-full w-full overflow-hidden", className)}>
         {/* Top bar — pads past the status bar so the hamburger stays reachable in
             standalone (added-to-homescreen) mode where the page extends to the top. */}
-        <div className="shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
-          <div className="flex items-center gap-2 h-11 px-2">
-            <Button variant="transparent" size="small" iconOnly aria-label="Open navigation" onClick={() => setDrawerOpen(true)}>
-              <MenuIcon className="size-5 text-fg-muted" />
-            </Button>
-            {mobileTitle && <span className="text-[14px] font-semibold text-fg truncate">{mobileTitle}</span>}
-            {mobileActions && <div className="ml-auto flex items-center gap-1.5 shrink-0">{mobileActions}</div>}
+        {!chromeless && (
+          <div className="shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
+            <div className="flex items-center gap-2 h-11 px-2">
+              <Button variant="transparent" size="small" iconOnly aria-label="Open navigation" onClick={() => setDrawerOpen(true)}>
+                <MenuIcon className="size-5 text-fg-muted" />
+              </Button>
+              {mobileTitle && <span className="text-[14px] font-semibold text-fg truncate">{mobileTitle}</span>}
+              {mobileActions && <div className="ml-auto flex items-center gap-1.5 shrink-0">{mobileActions}</div>}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
+
+        {/* THE ONLY WAY OUT, so it never fades and never dims.
+            Of every route off a chrome-free console this is the only one that
+            exists in every container: the browser's toolbar and address bar are
+            absent in an installed home-screen app, and "back" needs history a
+            bookmarked console does not have.
+
+            Two things it deliberately is not. It does not fade after inactivity
+            and return on tap — on a live console the first press would land on
+            the reveal instead of the fader underneath it. And it does not dim to
+            stay pressable, which would make the one guaranteed exit the least
+            visible thing on a screen an operator reaches for under pressure.
+
+            BOTTOM-LEFT. Bottom, because the top of an 844px phone is the hardest
+            place to reach one-handed and is exactly the band this is giving back.
+            Left, because the drawer comes from the left, so the control and the
+            panel it opens agree about direction. Inset above the safe area so
+            Safari's bottom bar and the home indicator do not sit under it.
+
+            IT OVERLAPS WHATEVER IS UNDER IT, and takes the tap. A console IS
+            buttons, so any fixed position covers something on some layout and the
+            app cannot know which. Two things keep that honest rather than
+            hiding it: it is exactly its own 44px footprint, with no reserved lane
+            and no larger hit region — a 44px band across the bottom would give
+            back half of what this change won — and it carries its own opaque
+            ground so it is legible over a near-black canvas, which is what the
+            operator needs to see it and move their object out from under it.
+            44x44 is 0.6% of a 390x844 screen; the chrome it replaces is 10.5%. */}
+        {chromeless && (
+          <Button
+            variant="transparent"
+            iconOnly
+            aria-label="Open navigation"
+            onClick={() => setDrawerOpen(true)}
+            // Its OWN ground, not the page's. A console canvas is near-black in
+            // both themes, so a control wearing the page tokens comes out at
+            // about 1.1:1 on it — the same trap the console's Edit button hit.
+            // The popover surface carries its own contrast over anything.
+            className={cn(
+              "fixed left-3 z-40 size-11 rounded-full",
+              "bottom-[calc(env(safe-area-inset-bottom)+0.75rem)]",
+              "border border-line-strong bg-popover/95 shadow-lg backdrop-blur-xl",
+            )}
+          >
+            <MenuIcon className="size-5 text-fg" />
+          </Button>
+        )}
 
         <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
           <DialogPrimitive.Portal>

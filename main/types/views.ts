@@ -161,6 +161,32 @@ export interface View {
    */
   slotsLayout?: SlotsLayout | null;
   /**
+   * Hide the operator app's chrome — BOTH bands — while this View is open as a
+   * console at /consoles/<id>. Absent/false = the normal shell.
+   *
+   * On a phone that is the 45px top bar and the 44px context bar, 89px of an
+   * 844px screen returned to the console. On a desktop it is the context bar,
+   * which is also where the page's name lives; the rail stays, because the rail
+   * is not a band and is the way back. Honoured at every width, deliberately:
+   * a setting that does nothing on the device you set it on is worse than one
+   * that is occasionally unnecessary.
+   *
+   * NOT the same mechanism as {@link Output.hideTopBar}, and it must not be
+   * merged with it. That one is per OUTPUT — a physical screen — and hides the
+   * KIOSK top bar in a different document. A console has no Output row at all.
+   * Same idea, second surface.
+   *
+   * ONE flag, not two. An operator who wants some live context back on a phone
+   * already has a better tool: the phone's own context-bar item set, which can
+   * be trimmed to two items without hiding the bar.
+   *
+   * DORMANT on a display View, the way `slotsLayout` is dormant on a non-slots
+   * one: a display is served by a different document with no shell in it, so
+   * there is no chrome for this to hide. It is stored rather than refused so
+   * flipping a console to a display and back does not lose the setting.
+   */
+  hideChrome?: boolean;
+  /**
    * @deprecated No longer read or written — the PCO Live Prev/Next controls were
    * removed from the script display. Kept only so an existing `views.json` still
    * parses; nothing sets it, and nothing renders from it. Drop it once no

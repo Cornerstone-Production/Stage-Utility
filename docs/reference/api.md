@@ -56,7 +56,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 |--------|------|---------|
 | GET | `/api/views` | List views |
 | POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201` |
-| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `scriptViewLayoutId`, or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
+| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `scriptViewLayoutId`, `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots |
 | POST | `/api/views/resolve-slots` | Resolve a slot set against the current plan without saving it — what the editor previews with |
 | POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines |

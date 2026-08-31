@@ -72,6 +72,25 @@ export function consolePages(views: readonly View[] | undefined): PageIdentity[]
   return consoleViewList(views).map(consolePageFor);
 }
 
+/**
+ * Does the console at this pathname want the shell's chrome hidden?
+ *
+ * EXACT match on `/consoles/<id>`, never a prefix. A prefix would carry the
+ * setting onto any child route of a console, which would hide the bands over a
+ * page the operator never set it on.
+ *
+ * The lookup goes through {@link consoleViewList}, so it can only ever be true
+ * for a View that is actually a console: a display View is served by a different
+ * document with no shell in it, and Home is not in that list.
+ */
+export function consoleHidesChrome(
+  pathname: string,
+  views: readonly View[] | undefined,
+): boolean {
+  const view = consoleViewList(views).find((v) => pathname === `/consoles/${v.id}`);
+  return view?.hideChrome === true;
+}
+
 /** Nested routes that the shell titles. The rest fall back to their parent
  *  destination's name, because they draw their own heading. */
 const TITLED_NESTED: readonly PageIdentity[] = NESTED_ROUTES.flatMap((r) =>

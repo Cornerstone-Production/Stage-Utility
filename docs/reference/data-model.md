@@ -49,6 +49,13 @@ screens, rather than silently unbinding them.
 Only **custom** views can be consoles: the built-in kinds have no editable layout,
 so there is nowhere to put a control.
 
+A console can also ask the app to get out of its way. See
+[Running a console without the app's chrome](../features/operator-app.md#running-a-console-without-the-apps-chrome).
+The flag is stored on the view, so it follows the console to every phone that
+opens it, and it is carried by a duplicate and by an exported view bundle. It is
+a different thing from a screen's **Hide top bar**, which is per screen and hides
+the *display's* bar in a different page altogether.
+
 ### Home
 
 Home is a view too, but a deliberately odd one. It stores which widgets the front
