@@ -26,7 +26,7 @@
 // solution for one drawer, one axis and two resting states.
 
 import * as React from "react";
-import { prefersReducedMotion } from "./use-slide-on-move";
+import { prefersReducedMotion } from "./reduced-motion";
 
 /** Fling speed, px/ms, that closes the drawer whatever the distance travelled.
  *  A fast 30px throw is a dismissal; distance alone would strand it. */
@@ -475,9 +475,22 @@ export function useDrawerDrag(onClose: () => void): DrawerDragHandlers {
     // `gesture` would be adopted by the NEXT drawer, because a mouse reuses
     // pointerId 1: the drawer would jump to an offset computed from a startX
     // recorded before it was ever mounted.
+    //
+    // THIS IS THE UNMOUNT, not the effect below. The hook lives on SplitView,
+    // which stays mounted for the life of the page; only the element leaves,
+    // with the Radix dialog. So the cleanup at :344 never runs on a close, and a
+    // settle timer armed for the element that left would land against whatever
+    // replaced it — for a settle heading "closed" that is an onClose() on a
+    // drawer the operator has since reopened, shutting it with no gesture
+    // behind it. Cleared inline rather than through cancelSettle() so this
+    // callback keeps the empty dep array its identity depends on.
     if (!el) {
       gesture.current = null;
       inFlight.current = null;
+      if (settleTimer.current !== null) {
+        clearTimeout(settleTimer.current);
+        settleTimer.current = null;
+      }
       if (frame.current) {
         cancelAnimationFrame(frame.current);
         frame.current = 0;

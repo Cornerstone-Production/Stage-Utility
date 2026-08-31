@@ -218,3 +218,40 @@ describe("a stray touch does not undo a close", () => {
     assert.equal(el.style.transform, "", "a tap left an inline transform behind");
   });
 });
+
+describe("a settle does not outlive the element it was scheduled for", () => {
+  test("a drawer that unmounts mid-settle does not close the one that replaces it", async () => {
+    // The hook lives on SplitView, which stays mounted; the drawer element
+    // unmounts with the Radix dialog. So the unmount effect never runs on a
+    // close, and a settle timer armed against the element that left keeps
+    // ticking. When it lands, finish() runs against whatever `drawer` now holds
+    // — and for a settle heading "closed" that means calling onClose() on a
+    // drawer the operator has since REOPENED, shutting it again with no gesture
+    // behind it.
+    const { h, closes } = mountHook();
+    const first = drawerEl();
+    act(() => { h().drawerRef(first); });
+    act(() => { h().onPointerDown(pe("pointerdown", 200)); });
+    act(() => { h().onPointerMove(pe("pointermove", 190)); }); // engage
+    // Past half the width, so it settles closed. The settle is armed and the
+    // drawer is still travelling.
+    for (const x of [140, 80, 20]) act(() => { h().onPointerMove(pe("pointermove", x)); });
+    act(() => { h().onPointerUp(pe("pointerup", 20)); });
+    assert.equal(closes(), 0, "the close fired before the drawer had travelled");
+
+    // Escape closes the dialog before the settle lands: the element leaves, the
+    // hook stays.
+    act(() => { h().drawerRef(null); });
+    // The operator opens it straight back up, inside the settle window.
+    const second = drawerEl();
+    act(() => { h().drawerRef(second); });
+
+    const before = closes();
+    await act(async () => { await wait(120); });
+    assert.equal(
+      closes(),
+      before,
+      "a settle armed for the drawer that unmounted closed the one that replaced it",
+    );
+  });
+});

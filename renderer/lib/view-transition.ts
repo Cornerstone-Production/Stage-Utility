@@ -1,4 +1,4 @@
-import { prefersReducedMotion } from "./use-slide-on-move";
+import { prefersReducedMotion } from "./reduced-motion";
 
 // Wrap a state update in the View Transitions API for a gentle crossfade between
 // settings sections / kiosk views. Progressive enhancement: a no-op (runs the

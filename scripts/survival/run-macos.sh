@@ -14,6 +14,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 NODE="$(command -v node)"
 LABEL="com.cornerstone.stage-survival-test"
+
+# wait_for_spawn / report_no_spawn — shared with run-linux.sh.
+# shellcheck source=scripts/survival/lib.sh
+. "$HERE/lib.sh"
 PLIST="$(mktemp -t survival).plist"
 LOG="$(mktemp)"
 
@@ -41,26 +45,8 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 # bootstrap does not reliably honour RunAtLoad, so start it explicitly.
 launchctl kickstart "gui/$(id -u)/$LABEL"
 
-# Wait for the CHILD TO EXIST, rather than guessing how long that takes.
-#
-# `sleep 4` was a budget, not a condition: on a slow runner the parent had
-# written PARENT-START and not yet reached its spawn, so the teardown hit a
-# parent with no child, nothing could survive, and the run failed exactly as a
-# real survival failure does. Windows hit that twice in a row. PARENT-SPAWNED is
-# the precondition the test needs -- there IS a detached child to outlive the
-# teardown -- so all three platforms wait for it.
-wait_for_spawn() {
-  deadline=$(( $(date +%s) + 60 ))
-  while [ "$(date +%s)" -lt "$deadline" ]; do
-    if grep -q "PARENT-SPAWNED" "$1" 2>/dev/null; then return 0; fi
-    sleep 0.25
-  done
-  return 1
-}
-
 if ! wait_for_spawn "$LOG"; then
-  echo "  macos survival: INCONCLUSIVE - no child was spawned within 60s"
-  echo "  Nothing was torn down, so this does not indicate a survival failure."
+  report_no_spawn macos "launchd job" "$LOG"
   exit 1
 fi
 launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
