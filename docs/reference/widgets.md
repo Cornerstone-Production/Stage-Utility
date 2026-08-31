@@ -98,7 +98,9 @@ month; a console that was paged away returns to it after ten minutes. Which cale
 draws are set on the view, not globally, so two screens can show two departments
 — see [Planning Center Calendar](../integrations/planning-center.md#calendar).
 There is no booking-versus-event setting, because Planning Center does not model
-the difference.
+the difference. Today and the running event are decided on the server's clock, in
+the app time zone, rather than on the screen's own clock — so a display whose
+clock has drifted still marks the right day.
 
 ## Status
 
