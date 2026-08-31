@@ -549,3 +549,132 @@ describe("when the playlist tree is read again", () => {
     assert.equal(reads, 2, `read the tree ${reads} times in a minute`);
   });
 });
+
+// ── Switching PVP hosts while a read is in the air ──────────────────────────
+//
+// Both hostnames below are invented and end in `.invalid`, which is reserved and
+// resolves nowhere. This is a public repository and no address here names a real
+// machine.
+
+/** Let every pending microtask and immediate run. connect() is fired, not awaited. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+}
+
+describe("the target changing while a read is in flight", () => {
+  test("THE GUARD: the old host's failure does not blank the new one", async () => {
+    // configure() calls restart(), which clears `running` and sets it straight
+    // back — so a check on `running` alone never sees a host change, and the
+    // in-flight read against the machine the operator just moved away from
+    // resolves as if it were the new one's. refreshSuccessors 100 lines up
+    // already guards on `this.target !== t`; connect() did not.
+    const svc = new PvpService();
+    started.push(svc);
+    const reports: { state: string; message: string | null }[] = [];
+    svc.setConnectionListener((state, message) => reports.push({ state, message }));
+
+    let failOldHost!: (err: Error) => void;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      // The old box never answers until this test says so.
+      if (url.includes("old-desk.invalid")) {
+        return await new Promise<Response>((_resolve, reject) => (failOldHost = reject));
+      }
+      // The playlist tree is not what is under test, and PVP answers 404 for a
+      // disabled Network API — a shape this integration already handles.
+      if (url.includes("/data/playlists")) return new Response("", { status: 404 });
+      return new Response(FIXTURE_TEXT, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    svc.configure("old-desk.invalid", 8080, false, null);
+    await settle();
+    assert.equal(svc.getLatest().connected, false, "the old host answered when it was meant to hang");
+
+    // The operator picks a different machine in Settings.
+    svc.configure("new-desk.invalid", 8080, false, null);
+    await settle();
+    const settledLayers = svc.getLatest().layers.length;
+    assert.equal(svc.getLatest().connected, true, "the new host never came up");
+    assert.ok(settledLayers > 0, "the new host's workspace was empty, so this proves nothing");
+
+    // NOW the read against the machine nobody is using any more gives up.
+    failOldHost(new Error("connect ECONNREFUSED"));
+    await settle();
+
+    assert.equal(
+      svc.getLatest().connected,
+      true,
+      "a failure from the host the operator switched AWAY from took the new one offline",
+    );
+    assert.equal(
+      svc.getLatest().layers.length,
+      settledLayers,
+      "every PVP object blanked because the old host's read failed",
+    );
+    const namingOldHost = reports.filter((r) => r.message?.includes("old-desk.invalid"));
+    assert.deepEqual(
+      namingOldHost,
+      [],
+      `the operator was shown ${JSON.stringify(namingOldHost)} about a host they had already switched away from`,
+    );
+  });
+
+  test("THE GUARD: a SUCCESSFUL read from the old host does not carry on down the poll", async () => {
+    // The other side of the same guard. The read against the machine the
+    // operator moved away from can also succeed — two boxes running the same
+    // show is the normal case for a switch — and connect() then ran its whole
+    // tail on the old target: a second request to the old box for its playlist
+    // tree, and a scheduleIn() that replaces the timer the new target's own poll
+    // had just set.
+    //
+    // BOTH boxes are held here, and the old one answers FIRST — which is the
+    // ordinary case when the new machine is the slower to reply. Its workspace
+    // was then emitted as the new target's and the panel said "Connected to
+    // ProVideoPlayer at <the host nobody chose>".
+    const svc = new PvpService();
+    started.push(svc);
+    const reports: { state: string; message: string | null }[] = [];
+    svc.setConnectionListener((state, message) => reports.push({ state, message }));
+
+    const holding = new Map<string, (res: Response) => void>();
+    const workspace = (): Response =>
+      new Response(FIXTURE_TEXT, { status: 200, headers: { "content-type": "application/json" } });
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/data/playlists")) return new Response("", { status: 404 });
+      const which = url.includes("old-desk.invalid") ? "old" : "new";
+      return await new Promise<Response>((resolve) => holding.set(which, resolve));
+    }) as typeof fetch;
+
+    svc.configure("old-desk.invalid", 8080, false, null);
+    await settle();
+    svc.configure("new-desk.invalid", 8080, false, null);
+    await settle();
+    assert.deepEqual([...holding.keys()].sort(), ["new", "old"], "both reads should be in the air");
+
+    holding.get("old")?.(workspace());
+    await settle();
+
+    assert.equal(
+      svc.getLatest().connected,
+      false,
+      "a workspace from the host the operator switched away from was published as the new one's",
+    );
+    assert.deepEqual(svc.getLatest().layers, [], "those layers reached every PVP object on every wall");
+    const namingOldHost = reports.filter((r) => r.message?.includes("old-desk.invalid"));
+    assert.deepEqual(
+      namingOldHost,
+      [],
+      `the panel reported ${JSON.stringify(namingOldHost)} for a host nobody had chosen`,
+    );
+
+    // And the target that WAS chosen still comes up when it answers.
+    holding.get("new")?.(workspace());
+    await settle();
+    assert.equal(svc.getLatest().connected, true, "the new host never came up");
+    assert.ok(svc.getLatest().layers.length > 0);
+  });
+});
