@@ -88,10 +88,14 @@ export function chooseFitLevel(current: number, fitsAt: (level: number) => boole
 /**
  * Keep an element on the rung that fits it.
  *
- * Returns the ref to put on the strip and the level it landed on. The level is
- * written to `data-fit` on the element itself — the ladder is expressed in CSS
- * keyed off that attribute — and also returned, because the configurator shows
- * the operator which rung their arrangement lands on.
+ * Returns the ref to put on the strip. THE RUNG DOES NOT COME BACK OUT: it is
+ * written to `data-fit` on the element itself and the ladder is expressed in CSS
+ * keyed off that attribute, so nothing in React has to know it. It used to be
+ * returned as well, on the strength of the configurator showing the operator
+ * which rung they had landed on — the configurator shows `over` and the list of
+ * prose that got cut, and no call site ever destructured it. The cost was a
+ * useState written on every fit, which is one extra render pass per rung change
+ * on a strip that already re-renders once a second.
  *
  * Re-fits after every render, and on resize. After every render is deliberate
  * rather than lazy: the readings change under this component constantly, and a
@@ -101,7 +105,6 @@ export function chooseFitLevel(current: number, fitsAt: (level: number) => boole
  */
 export function useBarFit<T extends HTMLElement>(): {
   ref: React.RefObject<T | null>;
-  level: number;
   /**
    * Pixels the strip is over its box once it has given up everything it can.
    * Zero for every arrangement that fits.
@@ -116,11 +119,10 @@ export function useBarFit<T extends HTMLElement>(): {
   over: number;
 } {
   const ref = useRef<T | null>(null);
-  const [level, setLevel] = useState(0);
   const [over, setOver] = useState(0);
-  // The level the DOM is actually on, read by the next fit. Kept in a ref rather
-  // than read back off `level`: setState is async, so two fits in one frame —
-  // a render and a resize — would both start from the stale value.
+  // The level the DOM is actually on, read by the next fit. A ref rather than
+  // state: setState is async, so two fits in one frame — a render and a resize —
+  // would both start from the stale value.
   const at = useRef(0);
 
   const refit = useCallback(() => {
@@ -136,7 +138,6 @@ export function useBarFit<T extends HTMLElement>(): {
     el.dataset.fit = String(next);
     at.current = next;
     const short = Math.max(0, Math.round(el.scrollWidth - el.clientWidth));
-    setLevel((prev) => (prev === next ? prev : next));
     setOver((prev) => (prev === short ? prev : short));
   }, []);
 
@@ -152,5 +153,5 @@ export function useBarFit<T extends HTMLElement>(): {
     return () => ro.disconnect();
   }, [refit]);
 
-  return { ref, level, over };
+  return { ref, over };
 }
