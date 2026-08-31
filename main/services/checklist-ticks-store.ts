@@ -16,6 +16,8 @@
 // happened, instead of silently reporting that nobody did anything.
 
 import { DataStore } from "./data-store.js";
+import { scrub } from "./scrub.js";
+import { WriteQueue } from "./write-queue.js";
 
 /** planId -> the item keys ticked on that plan. */
 type TicksFile = Record<string, string[]>;
@@ -56,24 +58,91 @@ const store = new DataStore<TicksFile>("checklist-ticks.json", {}, "runtime");
 let cache = new Map<string, Set<string>>();
 let loaded = false;
 
+/**
+ * The load in flight, so two callers share ONE.
+ *
+ * init() reassigns `cache` outright. Two ticks arriving on a store that had
+ * never been loaded — which is what every tick was, because nothing init'd this
+ * store at boot — each saw `loaded === false` and each ran init(); the second
+ * load landed on top of the first caller's tick and dropped it, with both HTTP
+ * calls reporting success. Sharing the promise makes the reassignment happen
+ * once no matter how many callers arrive cold.
+ */
+let loading: Promise<void> | null = null;
+
+/**
+ * Serialises tick writes.
+ *
+ * set() and clear() build the NEXT state as a copy and publish it only once the
+ * file is on disk, which is a read-modify-write: two unserialised ticks would
+ * each copy the same `cache` and the second would publish a copy that never saw
+ * the first. Mutating a shared Map instead is what made that safe before, and
+ * it is exactly what left a failed write reading as done.
+ */
+const writes = new WriteQueue();
+
 function toFile(map: ReadonlyMap<string, Set<string>>): TicksFile {
   return Object.fromEntries([...map].map(([plan, keys]) => [plan, [...keys]])) as TicksFile;
 }
 
+/** A deep-enough copy to mutate without touching what `get`/`all` are reading. */
+function copyOf(map: ReadonlyMap<string, Set<string>>): Map<string, Set<string>> {
+  return new Map([...map].map(([plan, keys]) => [plan, new Set(keys)]));
+}
+
 /** Drop the oldest plans until only KEEP_PLANS remain. */
-function prune(): void {
-  while (cache.size > KEEP_PLANS) {
-    const oldest = cache.keys().next().value;
+function prune(map: Map<string, Set<string>>): void {
+  while (map.size > KEEP_PLANS) {
+    const oldest = map.keys().next().value;
     if (oldest === undefined) return;
-    cache.delete(oldest);
+    map.delete(oldest);
+  }
+}
+
+async function ensureLoaded(): Promise<void> {
+  if (loaded) return;
+  loading ??= (async () => {
+    const file = await store.load();
+    cache = new Map(Object.entries(file).map(([plan, keys]) => [plan, new Set(keys)]));
+    loaded = true;
+  })();
+  try {
+    await loading;
+  } finally {
+    // Cleared whichever way it went: a load that failed must not be remembered
+    // as still in flight, or every later caller would await a dead promise.
+    loading = null;
+  }
+}
+
+/**
+ * Save, and say so on `/log` if it did not work.
+ *
+ * Rethrown, never swallowed: the caller turns this into an HTTP error the
+ * operator sees in the moment. The log line is for the other half of it — a full
+ * SD card at 9am on a Sunday shows up as a tick that will not stay ticked, and
+ * `/log` is the only place that says why.
+ */
+async function saveOrReport(next: Map<string, Set<string>>, what: string): Promise<void> {
+  try {
+    await store.save(toFile(next));
+  } catch (err) {
+    console.error(`[checklist] could not save — ${what} was NOT recorded:`, err);
+    throw err;
   }
 }
 
 export const checklistTicksStore = {
+  /**
+   * Read the file into memory. Called at boot beside the other stores, which is
+   * what makes `get` truthful on the first render after a restart — before that
+   * it answered from an empty Map and reported every completed job as not done,
+   * so the checklist asked for the whole list to be redone.
+   *
+   * Idempotent, and safe to call concurrently with a tick.
+   */
   async init(): Promise<void> {
-    const file = await store.load();
-    cache = new Map(Object.entries(file).map(([plan, keys]) => [plan, new Set(keys)]));
-    loaded = true;
+    await ensureLoaded();
   },
 
   /** The keys ticked on this plan. Empty for a plan nobody has touched. */
@@ -95,26 +164,39 @@ export const checklistTicksStore = {
    */
   async set(planId: string, key: string, done: boolean): Promise<void> {
     assertSafePlanId(planId);
-    if (!loaded) await checklistTicksStore.init();
+    return writes.enqueue(async () => {
+      await ensureLoaded();
 
-    // Re-inserting moves this plan to the end of the Map, so the plan being
-    // worked on is never the one prune drops.
-    const keys = cache.get(planId) ?? new Set<string>();
-    cache.delete(planId);
-    cache.set(planId, keys);
+      const next = copyOf(cache);
+      // Re-inserting moves this plan to the end of the Map, so the plan being
+      // worked on is never the one prune drops.
+      const keys = next.get(planId) ?? new Set<string>();
+      next.delete(planId);
+      next.set(planId, keys);
 
-    if (done) keys.add(key);
-    else keys.delete(key);
+      if (done) keys.add(key);
+      else keys.delete(key);
 
-    prune();
-    await store.save(toFile(cache));
+      prune(next);
+      // The file first, the live state second. Mutating first meant a write that
+      // failed — a full SD card is the usual way — still left the broadcast, the
+      // API and the next render calling the row done, which is the one thing
+      // this store must never say when it did not save.
+      await saveOrReport(next, `${done ? "tick" : "untick"} "${scrub(key, 80)}" on plan ${planId}`);
+      cache = next;
+    });
   },
 
   /** Clear one plan's ticks — the manual "start this week over". */
   async clear(planId: string): Promise<void> {
     assertSafePlanId(planId);
-    if (!loaded) await checklistTicksStore.init();
-    if (!cache.delete(planId)) return;
-    await store.save(toFile(cache));
+    return writes.enqueue(async () => {
+      await ensureLoaded();
+      if (!cache.has(planId)) return;
+      const next = copyOf(cache);
+      next.delete(planId);
+      await saveOrReport(next, `clear plan ${planId}`);
+      cache = next;
+    });
   },
 };

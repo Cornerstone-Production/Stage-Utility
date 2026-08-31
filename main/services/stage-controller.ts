@@ -340,6 +340,11 @@ export class StageController {
 
   async init(): Promise<void> {
     await notesStore.init();
+    // Beside notesStore, because `get` is synchronous and reads the module cache
+    // directly: without this the first render after a restart answered from an
+    // empty Map and showed every completed job as not done. It self-healed on
+    // the next tick, which is why it never got reported.
+    await checklistTicksStore.init();
     // Returns the failure rather than throwing it: the bar's saved order is
     // rewritten on the first start after the service type became an item of its
     // own, and a data directory that has filled up must not take the server down
