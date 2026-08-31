@@ -18,6 +18,7 @@ import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
 import { integrationDialogClass } from "./integration-dialog-size";
 import { UnsavedChangesDialog } from "../editor/unsaved-changes-dialog";
+import { UnsavedWorkProvider, useUnsavedWork } from "./unsaved-work";
 import {
   Button,
   Field,
@@ -387,10 +388,21 @@ export function IntegrationDialog({
   const [toggling, setToggling] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
+  // Sub-panels that hold their own unsaved buffer (the Ross TSL feeds, the
+  // ProPresenter instances) register here. Their rows are not in the
+  // descriptor's configSchema, so the comparison below is blind to them and
+  // dismissing the dialog unmounted the buffer with no question asked.
+  const panels = useUnsavedWork();
+
   // Compare against the saved config rather than tracking a flag, so Save/Discard
   // appear only for genuine edits — and disappear again on their own after a save.
   const pristine = initialConfig(descriptor, state);
-  const dirty = !bespoke && JSON.stringify(localConfig) !== JSON.stringify(pristine);
+  // A bespoke panel REPLACES the form, so nothing can move localConfig; the
+  // guard keeps a state update arriving from the panel's own save from reading
+  // as a typed edit.
+  const schemaDirty = !bespoke && JSON.stringify(localConfig) !== JSON.stringify(pristine);
+  // What a dismissal has to ask about: this form, plus every sub-panel buffer.
+  const dirty = schemaDirty || panels.dirty;
 
   function setField(key: string, value: unknown) {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
@@ -499,13 +511,21 @@ export function IntegrationDialog({
   }
 
   /** Escape, the X and a click outside all arrive here. A dismissed dialog is
-   *  never consent to throw work away. */
+   *  never consent to throw work away — this form's, or a sub-panel's. */
   function requestClose() {
     if (dirty) {
       setConfirming(true);
       return;
     }
     onClose();
+  }
+
+  /** Everything the confirm is asking about: each sub-panel's buffer, then this
+   *  form. False if any of them refused — the dialog must then stay open. */
+  async function saveEverything(): Promise<boolean> {
+    const panelsOk = await panels.saveAll();
+    const formOk = schemaDirty ? await handleSave() : true;
+    return panelsOk && formOk;
   }
 
   const body = bespoke ?? (
@@ -634,7 +654,11 @@ export function IntegrationDialog({
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{body}</div>
+          {/* The provider wraps the body, not the footer: only a sub-panel
+              inside the body reports unsaved work. */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <UnsavedWorkProvider registry={panels.registry}>{body}</UnsavedWorkProvider>
+          </div>
 
           {!bespoke && (
             <DialogFooter className="mt-0 flex-wrap justify-start gap-2 border-t border-line px-5 py-3">
@@ -682,12 +706,12 @@ export function IntegrationDialog({
                 <Button
                   variant="transparent"
                   size="small"
-                  disabled={!dirty || isSaving}
+                  disabled={!schemaDirty || isSaving}
                   onClick={() => setLocalConfig(initialConfig(descriptor, state))}
                 >
                   Discard
                 </Button>
-                <Button variant="accent" size="small" disabled={!dirty || isSaving} onClick={handleSave}>
+                <Button variant="accent" size="small" disabled={!schemaDirty || isSaving} onClick={handleSave}>
                   {isSaving ? "Saving…" : "Save"}
                 </Button>
               </div>
@@ -709,7 +733,7 @@ export function IntegrationDialog({
         onSave={async () => {
           // Only close if it actually saved. A rejected credential has to stay
           // on screen; closing on a failure is how work reads as saved and is not.
-          if (!(await handleSave())) return;
+          if (!(await saveEverything())) return;
           setConfirming(false);
           onClose();
         }}

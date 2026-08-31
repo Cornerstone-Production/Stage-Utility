@@ -17,7 +17,8 @@ import {
 } from "./ui";
 import { PlusIcon, TrashIcon, Loader2Icon } from "lucide-react";
 import { ConnectionBadge } from "./connection-badge";
-import { feedId } from "./integration-panel-helpers";
+import { feedId, sameRows } from "./integration-panel-helpers";
+import { useReportUnsavedWork } from "./unsaved-work";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
 // ---- ProPresenter extra instances -------------------------------------------
@@ -77,7 +78,8 @@ export function ProPresenterInstancesPanel({
   function add() {
     setRows((prev) => [...prev, { id: feedId(), name: `Auditorium ${prev.length + 2}`, host: "", port: 1025 }]);
   }
-  async function save() {
+  /** Save, and say whether it landed. A false must not be followed by a close. */
+  async function save(): Promise<boolean> {
     setSaving(true);
     try {
       const next = await invoke<IntegrationState>("integrations:setConfig", {
@@ -86,12 +88,20 @@ export function ProPresenterInstancesPanel({
       });
       onStateChange(next);
       toast.success("ProPresenter instances saved.");
+      return true;
     } catch (err) {
+      console.error("[ProPresenterInstancesPanel:save]", err);
       toast.error(`Could not save instances: ${String(err)}`);
+      return false;
     } finally {
       setSaving(false);
     }
   }
+
+  // These rows live here, not in the dialog's form, and `instances` is not in
+  // the descriptor's configSchema — so the dialog cannot see them and Escape
+  // used to throw a half-typed instance away without asking. Report upward.
+  useReportUnsavedWork("propresenter-instances", !sameRows(rows, initial), save);
 
   return (
     // Each instance is a four-field form ~520px wide that cannot wrap, so this

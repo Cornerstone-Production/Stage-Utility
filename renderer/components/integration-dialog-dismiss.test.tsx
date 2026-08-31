@@ -24,6 +24,7 @@ const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
 const { IntegrationDialog } = await import("./integrations-panel.js");
 
 const OBS = INTEGRATION_DESCRIPTOR_FIXTURE.find((d) => d.id === "obs")!;
+const PROPRESENTER = INTEGRATION_DESCRIPTOR_FIXTURE.find((d) => d.id === "propresenter")!;
 
 let server = installFakeServer();
 
@@ -69,11 +70,15 @@ async function openObs(): Promise<Opened> {
 }
 
 const dialogs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')];
-const settings = (): HTMLElement => {
-  const el = dialogs().find((d) => /OBS Studio/.test(d.textContent ?? ""));
-  assert.ok(el, "the settings dialog is not on screen");
+/** The settings dialog, told apart from the confirm by something only the form
+ *  carries — the confirm quotes the integration's label back at you, so a match
+ *  on the label alone finds either one. */
+const settingsWith = (marker: RegExp): HTMLElement => {
+  const el = dialogs().find((d) => marker.test(d.textContent ?? ""));
+  assert.ok(el, `the settings dialog is not on screen (looking for ${marker})`);
   return el;
 };
+const settings = (): HTMLElement => settingsWith(/OBS Studio/);
 const confirmDialog = (): HTMLElement | undefined =>
   dialogs().find((d) => /Unsaved changes/.test(d.textContent ?? ""));
 
@@ -172,5 +177,113 @@ describe("dismissing a dialog with unsaved changes", () => {
     await settle(60);
     assert.equal(server.posts.filter((p) => p.path === "/api/integrations/obs/config").length, 1);
     assert.equal(o.closes, 0, "a footer Save closed the dialog — a refusal would have gone with it");
+  });
+});
+
+// The rule has to hold for work the dialog does not itself hold.
+//
+// ProPresenter's extra instances live in ProPresenterInstancesPanel's own
+// useState behind a "Save instances" button, and `instances` is not in the
+// descriptor's configSchema — so the dialog's form-vs-saved comparison was blind
+// to them and Escape closed without asking, unmounting the buffer with the
+// dialog. Every suite above drives OBS, which has no sub-panel at all; that is
+// exactly why this shipped.
+
+const propSettings = (): HTMLElement => settingsWith(/Additional instances/);
+
+async function openProPresenter(): Promise<Opened> {
+  const closed = { n: 0 };
+  const c = render(
+    withQueryClient(
+      <IntegrationDialog
+        descriptor={PROPRESENTER}
+        state={blankState("propresenter")}
+        onStateChange={() => {}}
+        onClose={() => {
+          closed.n += 1;
+        }}
+      />,
+    ),
+  );
+  await settle();
+  return {
+    get closes() {
+      return closed.n;
+    },
+    container: c.container,
+  };
+}
+
+/** Add an instance row and name it — the operator's half-finished work. */
+async function addInstance(name: string): Promise<void> {
+  fireEvent.click(button(propSettings(), "Add instance"));
+  await settle();
+  const field = propSettings().querySelector<HTMLInputElement>('[aria-label="Instance name"]');
+  assert.ok(field, "the new instance row has no name field");
+  fireEvent.change(field, { target: { value: name } });
+  await settle();
+}
+
+const configPosts = () => server.posts.filter((p) => p.path === "/api/integrations/propresenter/config");
+
+const instancesSaved = (): { name?: string }[] => {
+  const last = configPosts().at(-1)?.body as { config?: { instances?: { name?: string }[] } } | undefined;
+  return last?.config?.instances ?? [];
+};
+
+describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
+  test("Escape raises the confirm and does not close", async () => {
+    const o = await openProPresenter();
+    await addInstance("Chapel");
+
+    fireEvent.keyDown(propSettings(), { key: "Escape" });
+    await settle();
+
+    assert.ok(confirmDialog(), "Escape threw the unsaved instance away with no question asked");
+    assert.equal(o.closes, 0, "the dialog closed anyway");
+  });
+
+  test("a sub-panel with nothing added still closes on Escape with no question", async () => {
+    const o = await openProPresenter();
+
+    fireEvent.keyDown(propSettings(), { key: "Escape" });
+    await settle();
+
+    assert.equal(confirmDialog(), undefined, "a clean dialog asked about unsaved work");
+    assert.equal(o.closes, 1);
+  });
+
+  test("Save & close writes the sub-panel's rows, then closes", async () => {
+    const o = await openProPresenter();
+    await addInstance("Chapel");
+
+    fireEvent.keyDown(propSettings(), { key: "Escape" });
+    await settle();
+    assert.ok(confirmDialog(), "Escape threw the unsaved instance away with no question asked");
+    fireEvent.click(button(confirmDialog()!, "Save & close"));
+    await settle(60);
+
+    const rows = instancesSaved();
+    assert.equal(rows.length, 1, "Save & close did not write the instance");
+    assert.equal(rows[0].name, "Chapel", "it wrote a row, but not the one that was typed");
+    assert.equal(o.closes, 1, "it saved but never closed");
+  });
+
+  test("Discard closes and writes nothing", async () => {
+    const o = await openProPresenter();
+    await addInstance("Chapel");
+
+    fireEvent.keyDown(propSettings(), { key: "Escape" });
+    await settle();
+    assert.ok(confirmDialog(), "Escape threw the unsaved instance away with no question asked");
+    fireEvent.click(button(confirmDialog()!, "Discard"));
+    await settle(60);
+
+    assert.equal(o.closes, 1, "Discard did not close the dialog");
+    assert.deepEqual(
+      server.posts.filter((p) => p.path.endsWith("/config")),
+      [],
+      "Discard saved the rows it was asked to throw away",
+    );
   });
 });
