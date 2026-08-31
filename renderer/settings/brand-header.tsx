@@ -60,7 +60,11 @@ export function BrandHeader({
         <span
           ref={textRef}
           className="block font-title font-semibold text-fg whitespace-nowrap truncate"
-          style={{ fontSize, lineHeight: 1.15, letterSpacing: "-0.01em" }}
+          // 1.3, not 1.15: the parent hides its overflow and this truncates, and
+          // 1.15 is below IBM Plex Sans's own box (~1.30em) — so the church name
+          // had the tops and tails shaved off its glyphs, worst on a name with a
+          // descender in it.
+          style={{ fontSize, lineHeight: 1.3, letterSpacing: "-0.01em" }}
         >
           {name}
         </span>

@@ -60,7 +60,6 @@ import {
   type BarRowId,
 } from "./bar-items";
 import { useBarFit } from "./bar-fit";
-import { MOBILE_MAX_WIDTH } from "../lib/use-media-query";
 import {
   BAR_STRIP_CLASS,
   BarStripRows,
@@ -631,14 +630,13 @@ export function BarConfigurator({
             phone it is also the first thing under the heading, which is where an
             operator who opened this dialog on the device they are configuring
             for will look. */}
-        <div className="flex flex-wrap items-center gap-3">
-          <SetSwitch value={editing} onChange={setEditing} />
-          <p className="text-caption1 text-fg-subtle">
-            {editing === "desktop"
-              ? `Shown from ${MOBILE_MAX_WIDTH}px wide up.`
-              : `Shown below ${MOBILE_MAX_WIDTH}px wide.`}
-          </p>
-        </div>
+        {/* The switch, and nothing beside it. It used to carry a line saying which
+            pixel widths each set appears at, which is a fact about the CSS rather
+            than about the bar: "Desktop" and "Phone" already say who each set is
+            for, and an operator configuring one is looking at the device it is
+            for. The measurement that DOES earn its place is the warning below —
+            it only ever appears when something would be cut. */}
+        <SetSwitch value={editing} onChange={setEditing} />
 
         {inheriting && (
           <p className="mt-3 rounded-lg border border-line bg-surface px-3 py-2 text-caption1 text-fg-muted">
@@ -747,9 +745,12 @@ export function BarConfigurator({
           {shownOnPhone && (
             <>
               <NarrowProbe rows={rowIds} ctx={ctx} onFit={setNarrow} />
-              <p className={cn("mt-2 text-caption1", warning ? "text-warn-11" : "text-fg-subtle")}>
-                {warning ?? `Fits on a ${NARROWEST}px phone with nothing cut.`}
-              </p>
+              {/* Only the bad news. The reassurance that a set "fits on a 320px
+                  phone with nothing cut" was a line of prose under a bar the
+                  operator can already see fitting, and it named a width to
+                  explain itself. The warning stays: it is the one thing here an
+                  operator cannot work out by looking. */}
+              {warning && <p className="mt-2 text-caption1 text-warn-11">{warning}</p>}
             </>
           )}
 

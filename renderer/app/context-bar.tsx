@@ -182,7 +182,17 @@ export const BAR_STRIP_CLASS = "context-strip flex items-center h-11";
  *  shrink-0 on EVERY item. With min-w-0 they squeezed past their own content on
  *  a phone and printed over each other. Prose items opt back into shrinking at
  *  the floor, and only there — see `.bar-prose`. */
-export const BAR_ITEM_CLASS = "bar-item flex items-center gap-2.5 shrink-0";
+/*  items-BASELINE, not items-center. An item mixes sizes — the 11px "LIVE"
+ *  beside 13px prose beside a 13px mono timer — and centring aligns their
+ *  BOXES, which puts their baselines at `22 + (ascent - descent) / 2`. That
+ *  term moves with the font size, so LIVE sat half a pixel above the words
+ *  either side of it: one whole device pixel on a Retina screen, and enough
+ *  to read as crooked on a strip whose whole job is to be scanned.
+ *
+ *  Anything with no text of its own has no baseline, and flex would align its
+ *  bottom margin edge to the text baseline instead — so the live dot and the
+ *  item glyphs centre themselves, which is where they belonged all along. */
+export const BAR_ITEM_CLASS = "bar-item flex items-baseline gap-2.5 shrink-0";
 
 /**
  * A flexible space: it draws nothing and eats the slack.
@@ -352,7 +362,7 @@ function Idle({ glyph: Glyph, children }: { glyph: LucideIcon; children: ReactNo
           take a word would have taken the difference. One sentence learns the
           whole vocabulary: the icon means resting, the icon struck through means
           it is not there. */}
-      <Glyph aria-hidden="true" className="bar-glyph size-3.5 text-fg-subtle" />
+      <Glyph aria-hidden="true" className="bar-glyph size-3.5 self-center text-fg-subtle" />
       {/* CLIPPED OUT OF THE LAYOUT, not removed. `display: none` would take the
           word out of the accessibility tree too, and the icon replacing it has
           no accessible name of its own — so a screen reader would lose the
@@ -471,7 +481,7 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       return (
         <>
           <span
-            className={cn("size-1.5 rounded-full", bar.isLive ? "bg-live-9" : "bg-fg-faint")}
+            className={cn("size-1.5 shrink-0 self-center rounded-full", bar.isLive ? "bg-live-9" : "bg-fg-faint")}
             aria-hidden="true"
           />
           <span
