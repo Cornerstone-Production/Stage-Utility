@@ -756,13 +756,15 @@ export function EditorCanvas({
             // toward the right/bottom. An inset shadow frames it without changing
             // the box, so overlay, grid, and content share one coordinate space.
             boxShadow: "inset 0 0 0 1px var(--gray-a4)",
-            // Mirror the kiosk: default/legacy backgrounds show the shared kiosk
-            // surface so the editor preview matches every other view.
+            // ONLY a background the operator actually chose. Default and legacy
+            // canvases fall through to .kiosk-surface, which is on this same
+            // element and already paints var(--kiosk-bg) — so the token has one
+            // source rather than a class and an inline copy that can drift.
             background:
-              canvas.background == null ||
-              ["#000", "#000000", "#080810", "#0a0a0a"].includes(canvas.background)
-                ? "var(--kiosk-bg)"
-                : canvas.background,
+              canvas.background != null &&
+              !["#000", "#000000", "#080810", "#0a0a0a"].includes(canvas.background)
+                ? canvas.background
+                : undefined,
           }}
           onPointerDown={interactive ? startMarquee : undefined}
           onContextMenu={interactive && onContextMenu ? onContextMenu : undefined}
