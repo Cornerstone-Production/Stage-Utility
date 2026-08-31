@@ -272,7 +272,13 @@ export function TeamPicker({
         <button
           type="button"
           className={cn(
-            "flex h-7 items-center justify-between gap-1 rounded-md border border-gray-a6 bg-gray-a2",
+            // shrink-0 and whitespace-nowrap, because the row is
+            // `justify-between` against a block that may take the width. Without
+            // them "Add a team" is allowed to wrap to its widest WORD, and it
+            // wrapped to two lines inside a box `h-7` tall — so the second line
+            // was cut off and the control read as broken.
+            "flex h-7 shrink-0 items-center justify-between gap-1 whitespace-nowrap",
+            "rounded-md border border-gray-a6 bg-gray-a2",
             "px-2.5 py-1 text-footnote text-gray-12",
             "focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus",
           )}
