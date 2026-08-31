@@ -847,6 +847,19 @@ const hydratedSet = HYDRATED_SET;
 /** Last payload seen per hydrated channel, for replay to late subscribers. */
 const lastPayload = new Map<string, unknown>();
 
+/**
+ * Test seam — forget the replay cache, so a case can model a COLD page.
+ *
+ * The cache is module-level and a test file shares one module registry across
+ * every case in it, so a frame emitted by one case is replayed into the next
+ * one's first subscriber. That is right in a browser and wrong in a suite: a
+ * case whose premise is "the server was down at page load" would be handed a
+ * state frame from the case above it, and pass or fail on test ORDER.
+ */
+export function __resetReplayCacheForTests(): void {
+  lastPayload.clear();
+}
+
 // Stable per-context client id, sent on the SSE URL so the server can scope this
 // stream's channel filter to us. crypto.randomUUID is unavailable in an insecure
 // context (prod is plain HTTP), so guard it and fall back.
