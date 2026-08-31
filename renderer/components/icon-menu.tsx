@@ -13,9 +13,14 @@
 // interactive goes inside that button now: the row shows a plain glyph, and the
 // menu opens beside it from the document body.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { IconGrid } from "./icon-grid";
+// The Tab cycle the expanded-tile overlay uses. Focus INTO the menu is IconGrid's
+// own: it puts the caret in its search field on mount, because typing is how a
+// set that size is used. Focus back out belongs to whoever owns the open state —
+// this component is unmounted by the close and cannot restore anything.
+import { trapTab } from "../lib/dialog-focus";
 
 /** Roughly the panel's size, for keeping it on screen before it has rendered. */
 const W = 268;
@@ -75,6 +80,11 @@ export function IconMenu({
       data-icon-menu=""
       role="dialog"
       aria-label={label}
+      aria-modal="true"
+      // Tab cycles inside. A portal is rendered at the END of document.body, so
+      // without this a Tab out of the grid landed in the browser chrome and a
+      // Shift+Tab walked the whole rail behind the menu.
+      onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => trapTab(panel.current, e)}
       style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, width: W, visibility: pos ? "visible" : "hidden" }}
       className="fixed z-[100] rounded-lg border border-line-strong bg-popover/95 p-3 shadow-2xl backdrop-blur-xl"
       // A PORTAL IS NOT AN ESCAPE FROM BUBBLING. React sends events up the

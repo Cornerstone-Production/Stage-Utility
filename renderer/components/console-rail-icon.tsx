@@ -10,11 +10,12 @@
 // Right-click, on the GLYPH rather than the row. The row is a navigation target;
 // a menu that opened from anywhere on it would fire while aiming at the label.
 
-import { createElement, useState } from "react";
+import { createElement, useRef, useState } from "react";
 import { SlidersHorizontalIcon } from "lucide-react";
 import { saveIcon } from "./editable-icon";
 import { IconMenu } from "./icon-menu";
 import { resolveIcon } from "./icon-set";
+import { useReturnFocus } from "../lib/dialog-focus";
 import { useStageState } from "../main/use-stage-state";
 
 export function ConsoleRailIcon({
@@ -28,6 +29,7 @@ export function ConsoleRailIcon({
   active: boolean;
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const host = useRef<HTMLSpanElement>(null);
   const { state } = useStageState();
   const glyphs = state?.iconGlyphs ?? {};
 
@@ -49,9 +51,25 @@ export function ConsoleRailIcon({
   // iconKeyFor), so the two are one colour rather than two that can disagree.
   const colour = active ? state?.iconColors?.[viewId] : undefined;
 
+  /**
+   * Focus comes back to the rail row when the menu closes.
+   *
+   * NOT to the anchor the menu was placed against. That anchor is the GLYPH, and
+   * picking an icon replaces it — a different lucide component is a different
+   * element, so the node the menu opened from is detached by the time it closes
+   * and focus() on it does nothing at all. The span around it is the same node
+   * throughout, so the row is found from there at the moment of closing rather
+   * than remembered. `isConnected` covers the case where the whole row went away
+   * — a console deleted from another tab.
+   */
+  useReturnFocus(anchor !== null, () =>
+    host.current?.isConnected ? host.current.closest("button") : null,
+  );
+
   return (
     <>
       <span
+        ref={host}
         className="contents"
         onContextMenu={(e) => {
           e.preventDefault();

@@ -265,3 +265,125 @@ describe("the icon and its colour are one panel", () => {
     assert.equal(existsSync(new URL("../icon-picker.tsx", import.meta.url)), false);
   });
 });
+
+describe("the panel is a dialog, and now behaves like one", () => {
+  // THE BUG. This panel has carried role="dialog" since it was written and none
+  // of what that role promises: focus never moved into it, Tab was never
+  // trapped, and closing it dropped focus on <body>. A keyboard operator opened
+  // the picker and their next Tab started at the top of the page, walking every
+  // control the panel is covering.
+  //
+  // WHAT JSDOM CANNOT SAY: nothing is laid out, so "the panel is on screen where
+  // focus went" is not checkable and is not asserted — the placement suite next
+  // door is equally explicit about that. What IS checkable is where
+  // document.activeElement is, and that is the whole of this finding.
+
+  /**
+   * Where focus is, in a few words.
+   *
+   * assert.equal on two DOM NODES is not an option here: when they differ, the
+   * runner serialises both to build its diff, and serialising a jsdom element
+   * walks the whole document — the process was SIGKILLed at 20s on the very
+   * failure these guards exist to produce. So identity is asserted as a boolean
+   * and this supplies the message.
+   */
+  const where = (el: Element | null): string => {
+    if (!el) return "nothing";
+    if (el === document.body) return "<body>";
+    const id = el.id ? `#${el.id}` : "";
+    const role = el.getAttribute("role");
+    return `<${el.tagName.toLowerCase()}${id}${role ? ` role=${role}` : ""}>`;
+  };
+
+  /** Everything in the panel a Tab can land on, in order. */
+  const stops = (): HTMLElement[] =>
+    [
+      ...panel().querySelectorAll<HTMLElement>(
+        'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter((el) => !el.hasAttribute("disabled") && el.tabIndex !== -1);
+
+  test("THE GUARD: focus moves into the panel when it opens", async () => {
+    drawFields(1);
+    await settle();
+    fireEvent.click(triggers()[0]);
+    await settle();
+    assert.ok(
+      document.activeElement === panel(),
+      `opening the panel left focus on ${where(document.activeElement)} rather than the dialog — the next Tab walks the page behind it`,
+    );
+  });
+
+  test("THE GUARD: Tab cycles inside the panel instead of walking out of it", async () => {
+    drawFields(1);
+    await settle();
+    fireEvent.click(triggers()[0]);
+    await settle();
+
+    const inside = stops();
+    // More than one, or the wrap has nothing to wrap between and both
+    // assertions below would be trivially true.
+    assert.ok(inside.length > 1, `the panel has ${inside.length} tab stops, so this asserts nothing`);
+    const first = inside[0];
+    const last = inside[inside.length - 1];
+
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    assert.ok(
+      document.activeElement === first,
+      `Tab off the last control landed on ${where(document.activeElement)} — it left the dialog`,
+    );
+
+    first.focus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    assert.ok(
+      document.activeElement === last,
+      `Shift+Tab off the first control landed on ${where(document.activeElement)} — it left the dialog`,
+    );
+  });
+
+  test("THE GUARD: closing puts focus back on the swatch, not on <body>", async () => {
+    drawFields(1);
+    await settle();
+    const swatch = triggers()[0];
+    fireEvent.click(swatch);
+    await settle();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await settle();
+    assert.equal(panels().length, 0, "Escape did not close the panel, so this asserts nothing");
+    assert.ok(
+      document.activeElement === swatch,
+      `closing the panel left focus on ${where(document.activeElement)} instead of the control that opened it`,
+    );
+  });
+
+  test("THE GUARD: and it finds the swatch again after the node has been replaced", async () => {
+    // The trap this repository has hit before: the node that opened a dialog can
+    // be gone by the time the dialog closes. This panel commits as you drag and
+    // saves an icon in place, so the card the swatch sits in can be re-rendered
+    // while the panel is up — and focus() on a detached node does nothing at
+    // all, silently.
+    //
+    // The swap is done to the DOM directly because that IS the condition: a new
+    // element in the same place, carrying the same id. An implementation holding
+    // the node it was given passes every other test in this describe and fails
+    // this one.
+    drawFields(1);
+    await settle();
+    const stale = triggers()[0];
+    fireEvent.click(stale);
+    await settle();
+
+    const fresh = stale.cloneNode(true) as HTMLButtonElement;
+    assert.ok(fresh.id, "the swatch carries no id, so there is nothing to look it up by");
+    stale.replaceWith(fresh);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await settle();
+    assert.ok(
+      document.activeElement === fresh,
+      `focus went to ${where(document.activeElement)} — the swatch node that was on the page when the panel OPENED, and that node is no longer in the document`,
+    );
+  });
+});
