@@ -47,9 +47,13 @@ describe("a streaming widget that is not live", () => {
   test("carries no third strength between dim and full", () => {
     // --color-fg-muted here was the 70% that made off air the brightest quiet
     // thing in the row.
+    //
+    // The CODE only. There was a second assertion that the comment explaining
+    // the removal is still in the file, which is a test of prose: it goes red on
+    // a reword with nothing wrong, stays green on a reword that says the
+    // opposite, and guards no behaviour either way. A comment is worth keeping
+    // because the next reader needs it, not because a test counts it.
     assert.doesNotMatch(streamingCode(), /color-fg-muted/, "a third quiet strength is back");
-    // And the comment explaining its removal is still there to be found.
-    assert.match(streaming(), /color-fg-muted/, "the reasoning went with it");
   });
 
   test("colours the value only when it IS live", () => {

@@ -634,12 +634,11 @@ export function CalendarView({
     // Same gate as the push effect below, and for the reason the two must agree:
     // without an id the push has nothing to key on, so a hydrate here would
     // fetch the unfiltered grid once and then sit frozen at mount for the page's
-    // life with nothing on screen saying so. Marked failed instead, so the
-    // surface states it is not going to update rather than looking current.
-    if (!viewId) {
-      setLiveFailed(true);
-      return;
-    }
+    // life with nothing on screen saying so. What the surface says about it is
+    // DERIVED where `failed` is passed down, not set from here — a synchronous
+    // setState in an effect cascades a render, which is the same objection this
+    // file's `paged` tag was written against.
+    if (!viewId) return;
     let cancelled = false;
     invoke<CalendarGrid>("calendar:getGrid", { viewId }).then(
       (g) => {
@@ -772,7 +771,12 @@ export function CalendarView({
       // Whichever month is on screen answers for itself. Returning to the
       // current month must not inherit the paged month's failure, and a pushed
       // frame must not clear one.
-      failed={shown === 0 ? liveFailed : pagedFailed}
+      //
+      // `!viewId` is a failure with no request behind it: neither effect above
+      // runs without an id, so nothing is loading and nothing ever will be, and
+      // a spinner would say the opposite. Derived rather than pushed into
+      // liveFailed, so no effect has to set state synchronously to say it.
+      failed={shown === 0 ? liveFailed || !viewId : pagedFailed}
       nav={
         interactive
           ? {

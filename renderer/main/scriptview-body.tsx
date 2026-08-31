@@ -143,7 +143,7 @@ export function ScriptViewBody({
       {showError ? (
         <div className="flex items-center justify-center h-full text-red-10 text-body px-6 text-center">{error}</div>
       ) : !rundown ? (
-        <div className="flex items-center justify-center h-full"><Loader2Icon className="size-8 text-gray-7 animate-spin" /></div>
+        <div className="flex items-center justify-center h-full"><Loader2Icon className="size-8 text-fg-subtle animate-spin" /></div>
       ) : items.length === 0 ? (
         <div className="flex items-center justify-center h-full text-fg-faint text-body">
           {rundown.planId ? "No items in this plan" : "No upcoming plan for this service type"}
