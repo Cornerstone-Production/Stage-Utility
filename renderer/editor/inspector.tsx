@@ -48,7 +48,7 @@ import { useSplState } from "../main/use-spl-state";
 import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsState } from "../main/use-obs-state";
-import { hasContent } from "@main/types/pvp";
+import { hasContent, type PvpStatusDTO } from "@main/types/pvp";
 import { usePvpState } from "../main/use-pvp-state";
 import { useQuery } from "@tanstack/react-query";
 import { useReaperState } from "../main/use-reaper-state";
@@ -68,7 +68,7 @@ import {
   typeLabel,
   usesPropInstance,
 } from "../main/layout-objects";
-import { IDIOM_TYPES, DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
+import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
@@ -85,6 +85,21 @@ import {
 
 
 const RECORDED_LATEST = "__latest__";
+
+/**
+ * The live PVP reading the inspector prints above every PVP object.
+ *
+ * One function because it was written twice, once counting a precomputed
+ * `withContent` and once inlining the same filter — so the two lines could
+ * disagree about what "with content" means while both looked correct. The
+ * definition itself already lives once, in `hasContent`; this is the sentence
+ * built from it.
+ */
+function pvpSummary(pvp: PvpStatusDTO | null): string {
+  if (!pvp?.connected) return "Not connected";
+  const withContent = pvp.layers.filter(hasContent).length;
+  return `${pvp.layers.length} layers, ${withContent} with content`;
+}
 
 /** Inspector controls for the people-graph object: live vs. a recorded service,
  *  PCO markers, hover tooltip, and a kiosk-visible live/recorded toggle. */
@@ -345,9 +360,15 @@ export function Inspector({
   // The followed teams, for the scores object's team select. The SAME query key
   // the settings panel writes through, so following a new team there populates
   // this select without a reload.
+  //
+  // Gated for the reason home-route.tsx gates the identical query: unconditional,
+  // it fires an integration read on every Inspector mount, for every object type
+  // — selecting a text box asked the scores service who the operator follows.
+  // Only the two objects below have a team select to fill.
   const { data: scoresConfig } = useQuery({
     queryKey: ["scores:getFavourites"],
     queryFn: () => invoke<ScoresConfig>("scores:getFavourites"),
+    enabled: c.type === "scores" || c.type === "home-scores",
     retry: 1,
   });
   const planItems = usePlanItems();
@@ -967,14 +988,9 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "pvp-layers" && (() => {
-        const withContent = (pvp?.layers ?? []).filter(hasContent).length;
-        const live = !pvp?.connected
-          ? "Not connected"
-          : `${pvp.layers.length} layers, ${withContent} with content`;
-        return (
+      {c.type === "pvp-layers" && (
           <>
-            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{live}</span></Row>
+            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
             <RowSelect
               label="Show"
               value={c.show ?? "with-content"}
@@ -1005,18 +1021,13 @@ export function Inspector({
             <RowSwitch label="Progress bar" hint="A hairline rule under each rolling clip. The time remaining is always shown." checked={c.showProgress ?? false} onChange={(v) => onConfig({ ...c, showProgress: v })} />
             <RowSwitch label="Hide when nothing is on screen" checked={c.hideWhenEmpty ?? false} onChange={(v) => onConfig({ ...c, hideWhenEmpty: v })} />
           </>
-        );
-      })()}
+      )}
       {c.type === "home-pvp" && (
         <RowSwitch label="Progress bar" hint="A hairline rule under each rolling clip. The time remaining is always shown." checked={c.showProgress ?? false} onChange={(v) => onConfig({ ...c, showProgress: v })} />
       )}
-      {(c.type === "pvp-now" || c.type === "home-pvp-now") && (() => {
-        const live = !pvp?.connected
-          ? "Not connected"
-          : `${pvp.layers.length} layers, ${(pvp.layers ?? []).filter(hasContent).length} with content`;
-        return (
+      {(c.type === "pvp-now" || c.type === "home-pvp-now") && (
           <>
-            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{live}</span></Row>
+            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
             {c.type === "pvp-now" && (
               /* Free text, not a select, for the reason the layer list's field
                  is: a dropdown is populated only while PVP is connected, so an
@@ -1040,8 +1051,7 @@ export function Inspector({
               onChange={(v) => onConfig({ ...c, showNextCue: v })}
             />
           </>
-        );
-      })()}
+      )}
       {/* Both scores widgets, because both carry `game` and it means the same
           thing on each. The sport-detail switch below is the wall object's
           alone — the Home card draws a list of rows, not a strip with a
@@ -1470,7 +1480,7 @@ export function Inspector({
               first click would then appear to do nothing. */}
           <Row label="Align">
             <AlignPad
-              h={s.textAlign ?? (IDIOM_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
+              h={s.textAlign ?? (sizesTypeFromItsBox(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
               v={s.vAlign ?? "middle"}
               onChange={onStyle}
             />
