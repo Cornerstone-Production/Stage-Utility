@@ -113,10 +113,15 @@ export type ScoreStripSize = "capsule" | "full";
 /**
  * How a game reads out: both teams, both scores, and where it is up to.
  *
- * ONE copy. It was written out three times — here, on the activity stack's
- * card, and on the context-bar capsule with a different trailing sentence — so
- * "no score" becoming "not reported" was a three-place edit that could land in
- * two.
+ * The string is written out THREE times — here, on the activity stack's card,
+ * and on the context-bar capsule with a different trailing sentence — so "no
+ * score" becoming "not reported" is a three-place edit that can land in two.
+ *
+ * ONLY THIS COPY IS CONVERTED so far. The other two live in
+ * renderer/app/score-activity.tsx:246 and :321 and are still literals; both
+ * should become gameLabel(game) and gameLabel(game, `${open ? "Hide" : "Show"}
+ * details.`), which is what `suffix` was added for and why it currently has no
+ * caller.
  *
  * @param suffix what the surface adds about ITSELF (a control says what pressing
  *   it does). Omitted for a plain readout.
@@ -148,6 +153,11 @@ export function ScoreStrip({
    * labelled element inside it, so a card that names the game and then draws a
    * strip that names the game reads the whole fixture twice. Default true,
    * because the wall widget has no wrapper to carry it.
+   *
+   * NOT YET PASSED by the caller that needs it: ScoreCard in
+   * renderer/app/score-activity.tsx labels its own role="button" wrapper at :246
+   * and renders this strip at :255 without it, so the double announcement is
+   * still there. The prop is the half of the fix that lives in this file.
    */
   labelled?: boolean;
   className?: string;

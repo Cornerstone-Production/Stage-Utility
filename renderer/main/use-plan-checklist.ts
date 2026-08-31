@@ -81,19 +81,40 @@ interface Snapshot {
 let snapshot: Snapshot = { data: null, pending: {}, error: null };
 const subscribers = new Set<() => void>();
 
-/** The plan a read is in flight for, so many mounting consumers issue one. */
-let fetchingFor: string | null = null;
+/**
+ * The read in flight, and the plan it is for.
+ *
+ * The TOKEN is a request number, not the plan id, because `checklist:get` takes
+ * no plan argument — every read is the same request to the same URL, so a plan
+ * id cannot tell two of them apart. Keyed on the plan, A → B → A with nothing
+ * cached puts three reads in flight and the token belongs to the third: the
+ * FIRST then matches, clears the token and publishes, and the third is dropped
+ * as stale. If that first answer describes a plan that is no longer selected,
+ * `fresh` refuses its rows, `error` is null so nothing says why, and no effect
+ * re-runs to try again — every widget on the page wedged at once, which is the
+ * risk a single shared store carries that per-consumer state did not.
+ */
+let readSeq = 0;
+let inFlightRead: { seq: number; planId: string } | null = null;
 
 /**
- * Which write is the newest, so an older answer cannot overwrite it.
+ * Which write is the newest FOR A GIVEN ROW, so an older answer cannot overwrite
+ * it.
  *
  * Two quick taps on one row are two requests, and nothing guarantees the first
  * resolves first. Without this the row can settle on the FIRST tap's result and
  * disagree with what is on disk until the next fetch — a checkbox that reads the
- * opposite of what was saved. Module-level now rather than a ref, because the
- * two taps can land on two different mounted checklists.
+ * opposite of what was saved.
+ *
+ * PER ROW, not one counter for the store. `pending` is keyed per row, so a
+ * single counter makes two ticks on DIFFERENT rows collide: the second bumps the
+ * counter, and when the first resolves its cleanup sees a newer sequence and
+ * never removes its own optimistic value. Tick CO2, tick Batteries, and let the
+ * CO2 save fail — the toast says it did not save and the box stays ticked for
+ * the life of the page, which is precisely the "silently kept locally" outcome
+ * this file's header says the optimism must never produce.
  */
-let writeSeq = 0;
+const writeSeq = new Map<string, number>();
 
 function publish(next: Snapshot): void {
   snapshot = next;
@@ -114,20 +135,35 @@ const getSnapshot = (): Snapshot => snapshot;
  *
  * Refetching when the PLAN changes is also what makes last week's ticks
  * disappear: a new plan is a new set of keys, so nothing carries over.
+ *
+ * ONE READ PER PLAN, not one per mount, and that is a trade worth stating. A
+ * nine-tile wall used to issue nine identical `checklist:get`s; it now issues
+ * one. The cost is that a consumer mounting later no longer pulls a fresh copy,
+ * so a note edited in Planning Center after the page loaded is not picked up
+ * until the plan changes or the page reloads. There is no live channel to fix
+ * that with — history-routes exposes GET and POST and broadcasts nothing — and
+ * the old per-mount refetch only ever helped a surface that happened to mount
+ * late.
+ *
+ * A FAILED read is the exception: `error` is left set, so the guard below does
+ * not short-circuit and the next consumer to mount tries again. Same shape as
+ * useStageState's retry-on-new-subscriber, and for the same reason — a server
+ * that was down at page load must not blank the wall for ever.
  */
 function ensure(planId: string | null): void {
-  if (!planId || fetchingFor === planId) return;
+  if (!planId || inFlightRead?.planId === planId) return;
   if (snapshot.data?.planId === planId && !snapshot.error) return;
-  fetchingFor = planId;
+  const seq = ++readSeq;
+  inFlightRead = { seq, planId };
   invoke<PlanChecklistDTO>("checklist:get")
     .then((d) => {
-      if (fetchingFor !== planId) return;
-      fetchingFor = null;
+      if (inFlightRead?.seq !== seq) return;
+      inFlightRead = null;
       publish({ data: d, pending: {}, error: null });
     })
     .catch((e: unknown) => {
-      if (fetchingFor !== planId) return;
-      fetchingFor = null;
+      if (inFlightRead?.seq !== seq) return;
+      inFlightRead = null;
       // REPORTED, not invented. No toast on a page load — Planning Center may
       // simply be unreachable and there is nothing an operator can do about it
       // from a wall — but the failure reaches every consumer as `error` so the
@@ -154,11 +190,14 @@ function ensure(planId: string | null): void {
  * beside it in the same commit.
  */
 async function toggleRow(key: string, done: boolean): Promise<void> {
-  const seq = ++writeSeq;
+  const seq = (writeSeq.get(key) ?? 0) + 1;
+  writeSeq.set(key, seq);
   publish({ ...snapshot, pending: { ...snapshot.pending, [key]: done } });
   try {
     const next = await invoke<PlanChecklistDTO>("checklist:tick", { key, done });
-    if (seq !== writeSeq) return;
+    // Superseded for THIS row only. A tick on another row is not news about this
+    // one, and treating it as such is what left a failed tick showing as saved.
+    if (writeSeq.get(key) !== seq) return;
     publish({ ...snapshot, data: next, error: null });
   } catch (e) {
     // Rethrowing here would reach no one — this is a click handler. Reporting is
@@ -168,9 +207,11 @@ async function toggleRow(key: string, done: boolean): Promise<void> {
     // toast as well as the row snapping back.
     toast.error(`Could not save that tick: ${errorMessage(e)}`);
   } finally {
-    // Only the newest write clears the optimistic value; an older one finishing
-    // later must not un-hold the row the newest is still waiting on.
-    if (seq === writeSeq) {
+    // Only the newest write ON THIS ROW clears its optimistic value; an older
+    // one finishing later must not un-hold the row the newest is still waiting
+    // on. A write on a DIFFERENT row is not a reason to hold this one at all.
+    if (writeSeq.get(key) === seq) {
+      writeSeq.delete(key);
       const { [key]: _dropped, ...rest } = snapshot.pending;
       publish({ ...snapshot, pending: rest });
     }
@@ -181,8 +222,9 @@ async function toggleRow(key: string, done: boolean): Promise<void> {
 export function __resetForTests(): void {
   snapshot = { data: null, pending: {}, error: null };
   subscribers.clear();
-  fetchingFor = null;
-  writeSeq = 0;
+  inFlightRead = null;
+  readSeq = 0;
+  writeSeq.clear();
 }
 
 export function usePlanChecklist(): PlanChecklist {

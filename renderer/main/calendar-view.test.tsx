@@ -717,6 +717,23 @@ describe("paging is per screen, and the current month stays live", () => {
       "a view-less calendar sat on a spinner that resolves to nothing",
     );
     assert.ok(screen.getByText(/could not read the calendar/i));
+
+    // And PAGING does not get round it. The gate was on the live read alone at
+    // first; api.ts omits the parameter for a null id, so one press of a chevron
+    // fetched the UNFILTERED grid and drew every calendar in the organisation,
+    // frozen and with no way to filter it — one click outside the assertions
+    // above.
+    fireEvent.click(screen.getByRole("button", { name: /next month/i }));
+    await pastDebounce();
+    assert.deepEqual(
+      sent.filter((r) => r.url.includes("/api/pco/calendar")),
+      [],
+      "paging a view-less calendar fetched the unfiltered month",
+    );
+    assert.ok(
+      screen.queryByText(/loading the calendar/i) === null,
+      "paging swapped the notice for a spinner that resolves to nothing",
+    );
   });
 
   it("asks for the current month with NO month parameter, so it is the live one", async () => {

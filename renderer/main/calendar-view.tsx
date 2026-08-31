@@ -708,7 +708,14 @@ export function CalendarView({
   const pagedGrid = paged && paged.key === wantedKey ? paged.grid : null;
 
   useEffect(() => {
-    if (wantedKey === null) return;
+    // The SAME id gate the live read and the push have, for the same reason and
+    // one click further out. api.ts omits the parameter for a null id, so the
+    // route answers 200 with the UNFILTERED grid: a view-less calendar draws its
+    // "could not read" notice on the current month, and one press of a chevron
+    // replaced it with every calendar in the organisation, frozen and with no
+    // way to filter it. Gating all three is what makes "no view, nothing drawn"
+    // one answer rather than three that disagree.
+    if (wantedKey === null || !viewId) return;
     let cancelled = false;
     // Debounced, so a held-down chevron walks the offset without firing a
     // request per step.
@@ -772,11 +779,14 @@ export function CalendarView({
       // current month must not inherit the paged month's failure, and a pushed
       // frame must not clear one.
       //
-      // `!viewId` is a failure with no request behind it: neither effect above
-      // runs without an id, so nothing is loading and nothing ever will be, and
-      // a spinner would say the opposite. Derived rather than pushed into
-      // liveFailed, so no effect has to set state synchronously to say it.
-      failed={shown === 0 ? liveFailed || !viewId : pagedFailed}
+      // `!viewId` is a failure with no request behind it, on EITHER month:
+      // neither effect above runs without an id, so nothing is loading and
+      // nothing ever will be, and a spinner would say the opposite. Outside the
+      // month ternary because it is true of both — inside it, paging away from a
+      // view-less calendar swapped the notice for a blank spinner. Derived
+      // rather than pushed into liveFailed, so no effect has to set state
+      // synchronously to say it.
+      failed={!viewId || (shown === 0 ? liveFailed : pagedFailed)}
       nav={
         interactive
           ? {

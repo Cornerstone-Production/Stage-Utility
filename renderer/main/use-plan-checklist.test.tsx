@@ -38,6 +38,10 @@ let checklistRowsOnServer = [
 ];
 /** Set to fail the checklist read — Planning Center unreachable. */
 let checklistFails = false;
+/** Row keys whose TICK fails, the write half of the same outage. */
+const tickFails = new Set<string>();
+/** Held until released, so two ticks can genuinely overlap in flight. */
+let holdTick: Promise<void> | null = null;
 /** Every checklist:get the page issued, so "one read for the page" is countable. */
 let checklistReads = 0;
 
@@ -49,6 +53,10 @@ let checklistReads = 0;
 
   if (url.includes("/api/pco/checklist/tick")) {
     const body = JSON.parse(String(init?.body ?? "{}")) as { key: string; done: boolean };
+    if (holdTick) await holdTick;
+    if (tickFails.has(body.key)) {
+      return { ok: false, status: 502, json: async () => ({ error: "save failed" }), text: async () => '{"error":"save failed"}' };
+    }
     checklistRowsOnServer = checklistRowsOnServer.map((r) =>
       r.key === body.key ? { ...r, done: body.done } : r,
     );
@@ -88,6 +96,8 @@ beforeEach(() => {
   stage.__resetForTests();
   checklistFails = false;
   checklistReads = 0;
+  tickFails.clear();
+  holdTick = null;
   checklistRowsOnServer = [
     { key: "prod:batteries", text: "Wireless batteries fresh", done: false },
     { key: "prod:co2", text: "CO2 tank hooked up", done: false },
@@ -150,6 +160,42 @@ describe("one list behind every widget", () => {
       row("object", "prod:co2")?.textContent,
       "done",
       "the second checklist kept the old value — there are two stores, not one",
+    );
+  });
+
+  test("THE GUARD: a failed tick snaps its row back, even with another tick in flight", async () => {
+    // The optimistic value is keyed per ROW; the sequence that decides which
+    // answer wins must be too. With one counter for the whole store, ticking a
+    // second row bumps it, and when the FIRST row's save comes back its cleanup
+    // sees a newer sequence and never removes its own optimistic value. The
+    // toast then says the save failed while the box stays ticked for the life of
+    // the page — "an operator whose tick was silently kept locally does not
+    // know", which this hook's header says the optimism must never produce.
+    //
+    // Both writes are held open so they genuinely overlap, which is the whole
+    // case: released in the order they were started, so the first is the one
+    // whose cleanup runs against the second's sequence.
+    tickFails.add("prod:co2");
+    let release!: () => void;
+    holdTick = new Promise<void>((r) => { release = r; });
+
+    render(React.createElement(Widget, { name: "object" }));
+    await settled();
+
+    fireEvent.click(row("object", "prod:co2") as HTMLElement);
+    fireEvent.click(row("object", "prod:batteries") as HTMLElement);
+    release();
+    await settled();
+
+    assert.equal(
+      row("object", "prod:co2")?.textContent,
+      "todo",
+      "a tick that the server refused stayed ticked on screen",
+    );
+    assert.equal(
+      row("object", "prod:batteries")?.textContent,
+      "done",
+      "the tick that did save was rolled back with the one that did not",
     );
   });
 
