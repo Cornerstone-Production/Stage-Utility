@@ -12,22 +12,14 @@
 // hook, and what has to hold is that each one writes BOTH fields.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-const SRC = readFileSync(new URL("./use-stage-settings.ts", import.meta.url), "utf8");
-
-function body(name: string): string {
-  const i = SRC.indexOf(`async function ${name}(`);
-  assert.ok(i >= 0, `${name} is gone — the pairing it carries went with it`);
-  // To the start of the next top-level handler.
-  const rest = SRC.slice(i + 10);
-  const j = rest.indexOf("\n  async function ");
-  return rest.slice(0, j === -1 ? undefined : j);
-}
+// The cut is shared with surface-swap-order.test.ts — see the module for why one
+// rule rather than the two that had drifted apart.
+import { handlerBody } from "./settings-handler-source.js";
 
 describe("setting a screen to a control surface", () => {
-  const src = body("handleSetOutputMode");
+  const src = handlerBody("handleSetOutputMode");
 
   test("also sets the view it shows, or the rail never lists it", () => {
     assert.match(src, /views:setSurface/, "the view's surface is never written");
@@ -46,7 +38,7 @@ describe("setting a screen to a control surface", () => {
 });
 
 describe("setting a view to a control surface", () => {
-  const src = body("handleSetViewSurface");
+  const src = handlerBody("handleSetViewSurface");
 
   test("also sets every screen showing it, or its buttons render dead", () => {
     assert.match(src, /outputs:setMode/, "the screens' modes are never written");
@@ -64,5 +56,26 @@ describe("setting a view to a control surface", () => {
 
   test("does nothing further when the first write was refused", () => {
     assert.match(src, /if \(!\(await writeState\(/);
+  });
+});
+
+describe("the cut these assertions run over", () => {
+  test("THE GUARD: a handler's text stops before the JSDoc of the next one", () => {
+    // A source-text assertion satisfied by PROSE is the exact failure CLAUDE.md
+    // lists, and this file used to cut at the next `async function` only — so
+    // the block comment introducing the NEXT handler was inside this one's
+    // "body". Today that comment names no IPC channel and the matches above are
+    // honest; it is one sentence away from not being.
+    const src = handlerBody("handleSetOutputMode");
+    assert.ok(
+      !src.includes("/**"),
+      "the cut swallowed a block comment, so a sentence can satisfy an assertion about code",
+    );
+    assert.ok(
+      !src.includes("async function handleSetViewSurface"),
+      "the cut ran into the next handler entirely",
+    );
+    // And it did not cut so early that there is nothing left to assert on.
+    assert.match(src, /outputs:setMode/);
   });
 });

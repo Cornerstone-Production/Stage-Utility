@@ -138,8 +138,15 @@ export function useStageSettings(pinnedViewId?: string) {
   }
 
   /** The StageState as it stands right now, from the cache every write updates.
-   *  Read fresh at each step: these handlers make TWO writes and the second has
-   *  to see what the first did. */
+   *
+   *  A FUNCTION rather than a value destructured in the hook body, because a
+   *  value would be the state as of the render that made the closure — stale by
+   *  the time a click arrives, which is how a handler comes to pick the wrong
+   *  side to move first.
+   *
+   *  It is NOT a re-read between the two writes. Both of the paired handlers
+   *  below decide everything from one read, before either write goes out; this
+   *  used to claim otherwise, and so did the test guarding it. */
   const stateNow = () => queryClient.getQueryData<StageState>(["stage:getState"]);
 
   /** The same, for the writes that return a fresh StageState. */

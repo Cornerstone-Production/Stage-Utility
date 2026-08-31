@@ -14,20 +14,11 @@
 // does.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-const SRC = readFileSync(new URL("./use-stage-settings.ts", import.meta.url), "utf8");
-
-function body(name: string): string {
-  const i = SRC.indexOf(`async function ${name}(`);
-  assert.ok(i >= 0, `${name} is gone — the ordering it carries went with it`);
-  const rest = SRC.slice(i + 10);
-  const j = rest.indexOf("\n  /**");
-  const k = rest.indexOf("\n  async function ");
-  const end = [j, k].filter((n) => n > 0).sort((a, b) => a - b)[0];
-  return rest.slice(0, end ?? undefined);
-}
+// The cut is shared with surface-pairing.test.ts — see the module for why one
+// rule rather than the two that had drifted apart.
+import { handlerBody, SETTINGS_SRC } from "./settings-handler-source.js";
 
 /** Which write appears first in a branch of the source. */
 function firstWrite(src: string): "view" | "output" | null {
@@ -40,7 +31,7 @@ function firstWrite(src: string): "view" | "output" | null {
 }
 
 describe("turning a screen back into a display", () => {
-  const src = body("handleSetOutputMode");
+  const src = handlerBody("handleSetOutputMode");
   const branch = src.slice(src.indexOf('mode === "display"'));
 
   test("changes the VIEW first, or the server refuses and nothing moves", () => {
@@ -53,7 +44,7 @@ describe("turning a screen back into a display", () => {
 });
 
 describe("making a screen a control surface", () => {
-  const src = body("handleSetOutputMode");
+  const src = handlerBody("handleSetOutputMode");
   const tail = src.slice(src.lastIndexOf("if (!(await writeState(\"outputs:setMode\""));
 
   test("changes the SCREEN first — the view cannot lead here", () => {
@@ -63,7 +54,7 @@ describe("making a screen a control surface", () => {
 });
 
 describe("turning a view into a control surface", () => {
-  const src = body("handleSetViewSurface");
+  const src = handlerBody("handleSetViewSurface");
   const branch = src.slice(src.indexOf('surface === "console"'));
 
   test("changes the SCREENS first, all of them", () => {
@@ -77,7 +68,7 @@ describe("turning a view into a control surface", () => {
 });
 
 describe("turning a view back into a wall screen", () => {
-  const src = body("handleSetViewSurface");
+  const src = handlerBody("handleSetViewSurface");
   const tail = src.slice(src.lastIndexOf('if (!(await writeState("views:setSurface"'));
 
   test("changes the VIEW first", () => {
@@ -86,10 +77,15 @@ describe("turning a view back into a wall screen", () => {
 });
 
 describe("both handlers", () => {
-  test("read the state fresh, because the second write must see the first", () => {
-    assert.match(SRC, /const stateNow = \(\) => queryClient\.getQueryData<StageState>/);
+  test("decide from the cache at CALL TIME, not a snapshot the hook closed over", () => {
+    // NOT a claim that either handler re-reads between its two writes — neither
+    // does, and the name this test used to carry said it did. What it catches is
+    // the real regression: replacing stateNow() with a value destructured in the
+    // hook body, which is stale by the time a click arrives and would pick the
+    // wrong side to move first.
+    assert.match(SETTINGS_SRC, /const stateNow = \(\) => queryClient\.getQueryData<StageState>/);
     for (const fn of ["handleSetOutputMode", "handleSetViewSurface"]) {
-      assert.match(body(fn), /stateNow\(\)/, `${fn} works from a stale snapshot`);
+      assert.match(handlerBody(fn), /stateNow\(\)/, `${fn} works from a stale snapshot`);
     }
   });
 });
