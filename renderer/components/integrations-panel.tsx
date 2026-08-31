@@ -166,6 +166,18 @@ function firstString(config: Record<string, unknown>, keys: string[]): string {
  * down. Derived from the descriptor rather than a per-id table, so adding an
  * integration cannot leave a card with a blank line under its name.
  */
+/**
+ * The integration's page in `docs/integrations/`, on GitHub.
+ *
+ * The repo is public, so this is a link an operator can open from a console on
+ * the LAN without the app having to serve the docs itself. `docs` is a required
+ * field on the descriptor rather than derived from `id` — `pvp`'s page is
+ * `provideoplayer.md`, and deriving would 404 on exactly that one.
+ */
+export function docsUrl(descriptor: IntegrationDescriptor): string {
+  return `https://github.com/Cornerstone-Production/Stage-Utility/blob/main/docs/integrations/${descriptor.docs}.md`;
+}
+
 export function summaryLine(descriptor: IntegrationDescriptor, state: IntegrationState): string {
   const host = firstString(state.config, HOST_KEYS);
   if (host) {
@@ -636,7 +648,13 @@ export function IntegrationDialog({
                     value={typeof value === "string" || typeof value === "number" ? String(value) : ""}
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setField(field.key, e.target.value)}
                     placeholder={field.placeholder ?? ""}
-                    className="w-44 max-sm:w-full"
+                    // w-80, where a number or a select still gets w-44. What goes
+                    // in here is an email, a host, a channel or a token, and 176px
+                    // cut `hstreuber@cornerstonelife.com` 31px short — an ordinary
+                    // work address, scrolled out of sight in the field an operator
+                    // is trying to check. 320px holds a 44-character address with
+                    // room; the row had 470px going spare to give it.
+                    className="w-80 max-sm:w-full"
                     aria-label={field.label}
                   />
                 )}
@@ -679,7 +697,22 @@ export function IntegrationDialog({
             <div className="min-w-0">
               <DialogTitle>{descriptor.label}</DialogTitle>
               {descriptor.description && (
-                <DialogDescription>{descriptor.description}</DialogDescription>
+                <DialogDescription>
+                  {descriptor.description}{" "}
+                  {/* Where the setup steps went. The descriptions used to walk an
+                      operator through the OTHER application's preferences, which
+                      made every card a paragraph and a grid of sixteen a wall. The
+                      steps are in docs/integrations/, and this is the only thing
+                      in the app that points at them. */}
+                  <a
+                    href={docsUrl(descriptor)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="whitespace-nowrap text-accent-11 underline underline-offset-2 hover:text-accent-12"
+                  >
+                    Setup guide
+                  </a>
+                </DialogDescription>
               )}
             </div>
             {/* Room for the X in the corner. */}

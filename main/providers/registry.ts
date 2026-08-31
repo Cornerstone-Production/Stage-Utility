@@ -25,10 +25,14 @@ function shureFields(channelsPlaceholder: string): ConfigField[] {
 const DRIVER_IDS = new Set<string>(["none", "shure-ulxd", "shure-axient", "shure-psm", "shure-charger", "sennheiser-ewg4", "sennheiser-ewdx", "sennheiser-spectera"]);
 
 // All provider descriptors — shown in the UI dropdown.
+//
+// Every one carries docs: "wireless". These are receiver MODELS rather than
+// integrations of their own, and docs/integrations/wireless.md is the page that
+// covers all of them — there is no per-model page to point at.
 const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
   [
     "none",
-    { id: "none", kind: "wireless", label: "None", configSchema: [] },
+    { id: "none", kind: "wireless", label: "None", docs: "wireless", configSchema: [] },
   ],
   [
     "shure-axient",
@@ -36,6 +40,7 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       id: "shure-axient",
       kind: "wireless",
       label: "Shure Axient Digital",
+      docs: "wireless",
       configSchema: shureFields("4"),
     },
   ],
@@ -45,6 +50,7 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       id: "shure-psm",
       kind: "wireless",
       label: "Shure PSM (In-Ear)",
+      docs: "wireless",
       configSchema: shureFields("2"),
     },
   ],
@@ -54,6 +60,7 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       id: "shure-ulxd",
       kind: "wireless",
       label: "Shure ULX-D",
+      docs: "wireless",
       configSchema: shureFields("4"),
     },
   ],
@@ -63,6 +70,7 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       id: "shure-charger",
       kind: "wireless",
       label: "Shure SBC Charger",
+      docs: "wireless",
       configSchema: shureFields("2"),
     },
   ],
@@ -72,6 +80,7 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       id: "sennheiser-ewg4",
       kind: "wireless",
       label: "Sennheiser ewG4 (SSC)",
+      docs: "wireless",
       description:
         "Reads RF and battery telemetry from ewG4 receivers over Sennheiser SSC (Sound Control), UDP port 45. Best-effort and hardware-unverified — validate against your gear, and set SENNHEISER_DEBUG=1 to log raw frames if values read blank.",
       configSchema: [
@@ -87,6 +96,7 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       id: "sennheiser-ewdx",
       kind: "wireless",
       label: "Sennheiser EW-DX",
+      docs: "wireless",
       description:
         "Reads RF and battery telemetry from an EW-DX receiver (EM2/EM4) or CHG 70N charger over Sennheiser SSC, UDP port 45. The model you pick sets how many channels or charging bays appear and how telemetry is read.",
       configSchema: [
@@ -110,6 +120,7 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       id: "sennheiser-spectera",
       kind: "wireless",
       label: "Sennheiser Spectera",
+      docs: "wireless",
       description:
         "Reads telemetry from a Spectera Base Station over SSCv2, HTTPS on port 443. Set an API password on the base station first (WebUI / LinkDesk) — the API stays disabled until one exists — and enter it below. The username is fixed at controlSennheiser.",
       configSchema: [

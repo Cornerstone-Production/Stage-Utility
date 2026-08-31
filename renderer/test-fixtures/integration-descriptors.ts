@@ -13,9 +13,10 @@
 export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   {
     "id": "planning-center",
+    "docs": "planning-center",
     "kind": "lineup",
     "label": "Planning Center",
-    "description": "Pulls your Planning Center service plans into Stage — the live rundown, item order, and pre-service countdown. Connects to Planning Center Online over the internet with a Personal Access Token (App ID + Secret). Create the token at api.planningcenteronline.com and paste both halves below.",
+    "description": "Pulls your Planning Center service plans into Stage — the live rundown, item order and pre-service countdown.",
     "configSchema": [
       {
         "key": "appId",
@@ -81,24 +82,27 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "wireless",
+    "docs": "wireless",
     "kind": "wireless",
     "label": "Wireless Gear",
-    "description": "Monitors your wireless mics — RF, audio, and battery/charger status — on stage displays. Connects to receivers over your LAN (Shure and Sennheiser supported). Add one connection per receiver below; each channel can then be placed on a layout.",
+    "description": "Puts your wireless mics' RF, audio and battery on a stage display, one channel per slot. Shure and Sennheiser receivers.",
     "configSchema": []
   },
   {
     "id": "companion",
+    "docs": "companion",
     "kind": "control",
     "label": "Bitfocus Companion",
-    "description": "Lets a Bitfocus Companion (Stream Deck) surface control and read Stage. The Companion module connects to this app, so there's nothing to configure here — and nothing to switch on: just point the module at this server's IP and port, shown below. This row reflects how many Companion clients are connected.",
+    "description": "Lets a Bitfocus Companion surface — a Stream Deck — control Stage and read its state. Nothing to set up here: the module dials in, and this row counts the clients attached.",
     "inbound": true,
     "configSchema": []
   },
   {
     "id": "propresenter",
+    "docs": "propresenter",
     "kind": "control",
     "label": "ProPresenter",
-    "description": "Shows the current and next slide, section, and slide thumbnails from ProPresenter. Connects to ProPresenter's local network API over your LAN (7.9+). Enable the API under ProPresenter → Preferences → Network, then add each instance below.",
+    "description": "Shows ProPresenter's current and next slide, its section, and slide thumbnails.",
     "configSchema": [
       {
         "key": "name",
@@ -128,9 +132,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "prodcom",
+    "docs": "prodcom",
     "kind": "lineup",
     "label": "ProdCom",
-    "description": "Streams live production transcription (captions) onto a stage display. Connects to ProdCom's Application API over your LAN. Enter the host and port below; an API key is optional depending on your ProdCom setup.",
+    "description": "Puts live production transcription — captions — on a stage display.",
     "configSchema": [
       {
         "key": "host",
@@ -154,9 +159,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "smaart",
+    "docs": "smaart",
     "kind": "control",
     "label": "Smaart (SPL)",
-    "description": "Brings FOH sound-level (SPL) readings from Rational Acoustics Smaart onto stage displays. Connects to Smaart v8's API over your LAN (8.3+, JSON over WebSocket). Turn the API on in Smaart, then enter its host, port, and password below.",
+    "description": "Puts FOH sound-level (SPL) readings from Smaart on a stage display.",
     "configSchema": [
       {
         "key": "host",
@@ -180,9 +186,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "obs",
+    "docs": "obs",
     "kind": "control",
     "label": "OBS Studio",
-    "description": "Shows whether OBS is recording, streaming, or running its virtual camera, on a stage display. Connects to OBS's built-in obs-websocket server over your LAN. Enable it under OBS → Tools → WebSocket Server Settings, then enter the host, port, and password below.",
+    "description": "Shows whether OBS is recording, streaming, or running its virtual camera.",
     "configSchema": [
       {
         "key": "host",
@@ -206,9 +213,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "reaper",
+    "docs": "reaper",
     "kind": "control",
     "label": "REAPER",
-    "description": "Shows whether REAPER is recording, on a stage display. Polls REAPER's built-in Web Interface over your LAN. Turn it on under REAPER → Preferences → Control/OSC/web (Web browser interface), leaving that page's Username:password field blank, then enter the host and port below.",
+    "description": "Shows whether REAPER is recording.",
     "configSchema": [
       {
         "key": "host",
@@ -226,9 +234,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "pvp",
+    "docs": "provideoplayer",
     "kind": "control",
     "label": "ProVideoPlayer",
-    "description": "Shows what ProVideoPlayer has on each layer, and lets automation rules fire cues and clear, hide, mute and fade layers. Polls PVP's Network API over your LAN. Turn it on under ProVideoPlayer → Preferences → Network → Network API, note the port shown there, and enter it below. That port is not the same one PVP serves its API documentation on. If Require Authentication is on, paste the generated token. PVP offers no preview image of any kind, so this reports names, states and times, never a picture.",
+    "description": "Shows what ProVideoPlayer has on each layer, and lets automation rules fire cues and clear, hide, mute and fade layers. Names, states and times — PVP offers no preview image of any kind.",
     "configSchema": [
       {
         "key": "host",
@@ -270,9 +279,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "resi",
+    "docs": "resi",
     "kind": "control",
     "label": "Resi",
-    "description": "Shows whether Resi is streaming, wherever the recording widgets appear. Uses your Resi account sign-in, because Resi's published API can only report on streams it started itself — it cannot see one that began on a Resi schedule. That means this rides an endpoint Resi does not document and could change without notice; if it stops working, nothing else is affected.",
+    "description": "Shows whether Resi is streaming, wherever the recording widgets appear. Signs in with your Resi account, because Resi's own API cannot see a stream that started on a schedule.",
     "configSchema": [
       {
         "key": "username",
@@ -295,9 +305,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "youtube",
+    "docs": "youtube",
     "kind": "control",
     "label": "YouTube",
-    "description": "Shows whether you are live on YouTube and for how long, with the real start time YouTube reports. Public channel is the easy setup: make a project at console.cloud.google.com, enable the YouTube Data API v3, create an API key, and paste it below with your channel. Private broadcasts need OAuth instead — the same project, but an OAuth client (Desktop app) authorised once for the youtube.readonly scope, and its refresh token pasted here. If Resi restreams to YouTube, this reports that same broadcast.",
+    "description": "Shows whether you are live on YouTube and for how long, with the start time YouTube itself reports.",
     "configSchema": [
       {
         "key": "mode",
@@ -367,23 +378,26 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "osc",
+    "docs": "osc",
     "kind": "control",
     "label": "OSC",
-    "description": "Adds layout buttons that send OSC commands to LAN gear (consoles, media servers) and reflect device state back. There's nothing to enter here — manage OSC targets in the list below, then add an OSC button object to a layout.",
+    "description": "Adds layout buttons that send OSC to gear on your LAN — consoles, media servers — and reflect that gear's state back.",
     "configSchema": []
   },
   {
     "id": "rosstalk",
+    "docs": "rosstalk",
     "kind": "control",
     "label": "RossTalk (Carbonite / Ultrix)",
-    "description": "Sends RossTalk commands to Ross gear — custom controls and switching on a Carbonite, routing and salvos on an Ultrix. Connects over your LAN on TCP 7788. Add one target per device below, then place a RossTalk button on a layout or drive it from an automation rule. Simulate mode logs commands without sending them.",
+    "description": "Sends RossTalk commands to Ross gear: custom controls and switching on a Carbonite, routing and salvos on an Ultrix.",
     "configSchema": []
   },
   {
     "id": "sensource",
+    "docs": "sensource",
     "kind": "control",
     "label": "SenSource Vea",
-    "description": "Brings live people counts — attendance and room occupancy — from SenSource Vea onto displays and graphs. Connects to the Vea cloud API with an API client ID + secret (created in Vea → API clients). Pick which zones to count below.",
+    "description": "Brings live attendance and room occupancy from SenSource Vea onto displays and graphs.",
     "configSchema": [
       {
         "key": "clientId",
@@ -420,9 +434,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "ross-tsl",
+    "docs": "ross-tsl",
     "kind": "control",
     "label": "Ross MultiViewer (TSL UMD)",
-    "description": "Pushes a people count onto a Ross multiviewer tile as on-tile text, over your LAN using TSL UMD. Enter the switcher host and TSL port below, then map a count to a tile's TSL address in the feeds panel.",
+    "description": "Puts a people count onto a Ross multiviewer tile as on-tile text, over TSL UMD.",
     "configSchema": [
       {
         "key": "host",
@@ -440,9 +455,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "scores",
+    "docs": "scores",
     "kind": "control",
     "label": "Live scores",
-    "description": "Follows your teams' live scores from ESPN's public scoreboard and shows them in the context bar, on Home, and on a stage display. No account or key is needed. ESPN does not document or support this API, so it can change without notice, and the app polls on a schedule to stay well inside what a free public endpoint will tolerate.",
+    "description": "Follows your teams' live scores from ESPN and shows them in the context bar, on Home, and on a stage display.",
     "configSchema": []
   }
 ];
