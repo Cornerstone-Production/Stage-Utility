@@ -306,7 +306,7 @@ describe("a pin names a LEAGUE as well as a team", () => {
 //   • that the strip is never laid out narrower than the width its design is
 //     drawn at, which is what keeps the fix from being a redesign.
 
-const { fitStrip } = await import("./scores-object.js");
+const { fitStrip, FIT_MIN, NATURAL_W } = await import("./scores-object.js");
 
 /** The strip's measured natural height at its designed width, from the browser:
  *  86px for baseball with the detail centre. */
@@ -395,9 +395,44 @@ describe("filling the box is not a redesign", () => {
     // at whatever width the tile happens to be, which drops the team names
     // through .score-strip's own 460px container rule and re-proportions
     // everything against a design drawn for 520.
+    //
+    // SWEPT, not sampled over BOXES. Stated over BOXES the property held only
+    // because the narrowest fixture is 166px wide. Against the real fitStrip it
+    // is false below NATURAL_W * FIT_MIN, where the zoom clamps and the layout
+    // width falls away with the box: 150x89 lays out at 500.0, 130x89 at 433.3
+    // (also under 460, so the names drop), 100x60 at 333.3. A guard that passes
+    // because of its fixture rather than its code is one the next tile size
+    // deletes, and this file already sweeps elsewhere for the same reason.
+    //
+    // Below the clamp there is no width that both fills the box and keeps the
+    // design width, and FILLING WINS — see "still fills when the zoom hits
+    // either clamp". So the boundary is stated rather than papered over, and it
+    // is stated with the constants themselves so that moving FIT_MIN or
+    // NATURAL_W moves it here too.
+    const CLAMPS_BELOW = NATURAL_W * FIT_MIN;
+    const narrow: string[] = [];
+    const wrongBelowClamp: string[] = [];
+    for (let w = 1; w <= 2400; w += 7) {
+      for (let h = 1; h <= 1400; h += 11) {
+        const fit = fitStrip(w, h, NAT_H);
+        if (w >= CLAMPS_BELOW) {
+          if (fit.width < NATURAL_W - 0.01) narrow.push(`${w}x${h} -> ${fit.width.toFixed(1)}`);
+        } else if (Math.abs(fit.width - w / FIT_MIN) > 0.01) {
+          // The other arm is a CLAIM, not an escape hatch: under the clamp the
+          // strip is laid out at exactly the box divided by the floor zoom, so a
+          // fit that quietly did something else here would be caught too.
+          wrongBelowClamp.push(`${w}x${h} -> ${fit.width.toFixed(1)}, want ${(w / FIT_MIN).toFixed(1)}`);
+        }
+      }
+    }
+    assert.deepEqual(narrow.slice(0, 5), [], "laid out narrower than the design width above the zoom clamp");
+    assert.deepEqual(wrongBelowClamp.slice(0, 5), [], "under the zoom clamp the strip stopped filling its box");
+
+    // And the boxes the object is really given all sit above the clamp, which is
+    // the concrete claim the sweep generalises.
     for (const [name, w, h] of BOXES) {
       const fit = fitStrip(w, h, NAT_H);
-      assert.ok(fit.width >= 520 - 0.01, `${name}: laid out at ${fit.width}, want >= 520`);
+      assert.ok(fit.width >= NATURAL_W - 0.01, `${name}: laid out at ${fit.width}, want >= ${NATURAL_W}`);
     }
   });
 

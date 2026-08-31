@@ -203,8 +203,8 @@ export function ScoresObject({
  * huge tile is not absurd, a floor so a squeezed one stays legible rather than
  * vanishing.
  */
-const FIT_MAX = 3;
-const FIT_MIN = 0.3;
+export const FIT_MAX = 3;
+export const FIT_MIN = 0.3;
 
 /**
  * The width the strip is DESIGNED at, in CSS pixels.
@@ -219,7 +219,7 @@ const FIT_MIN = 0.3;
  * sizing, so as a bare flex item it measured zero and spilled 164px out of a box
  * it had no width in.
  */
-const NATURAL_W = 520;
+export const NATURAL_W = 520;
 
 /**
  * The strip's natural height when it cannot be measured — jsdom, and the first

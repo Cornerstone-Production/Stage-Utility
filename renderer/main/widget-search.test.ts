@@ -56,11 +56,19 @@ describe("searching the widget registry", () => {
     // only says "SPL meter". Dropping the blurb from the predicate is invisible
     // against label matches, so this asserts on words the label cannot supply.
     const withBlurbOnlyWords = TYPES.filter((t) => blurbOnlyWords(t).length > 0);
-    // A floor here would be satisfied by luck; the registry writes a required
-    // blurb for every type, so nearly all of them have one of these words.
-    assert.ok(
-      withBlurbOnlyWords.length > TYPES.length / 2,
-      `only ${withBlurbOnlyWords.length} of ${TYPES.length} types have a blurb-only word — check the extractor`,
+    // The loop below runs over this FILTERED list, so whatever bounds it bounds
+    // the coverage of the whole test. A floor at half the registry would let
+    // thirty types drop out of the extractor in silence and stay green; and a
+    // floor is how three config stores went missing from every backup.
+    //
+    // Named, not counted: the failure has to say WHICH type stopped producing a
+    // blurb-only word, since that is the thing to go and look at. Every one of
+    // the registry's types has one today, so the answer is the empty list — and
+    // an empty list is the one assertion that cannot be satisfied by luck.
+    assert.deepEqual(
+      TYPES.filter((t) => blurbOnlyWords(t).length === 0),
+      [],
+      "these types' blurbs say nothing their labels do not, so this test no longer checks them",
     );
     for (const t of withBlurbOnlyWords) {
       const word = blurbOnlyWords(t)[0];

@@ -251,7 +251,21 @@ describe("the editor's add paths", () => {
       .map((m) => m[0].replace(/\s+/g, " "))
       // the declaration itself is `function makeObject(`, not a call
       .filter((c) => !/^makeObject\(\s*type: /.test(c));
-    assert.ok(calls.length >= 4, `expected every add path, found ${calls.length}`);
+
+    // TWO counts, because one cannot be trusted on its own. The argument scan
+    // above stops at the first `;`, so a call carrying one — an inline object
+    // literal is enough — silently drops out of `calls` and is never checked.
+    // A floor let that happen with the suite green; an exact count on `calls`
+    // alone would too, since the number it is compared against is the number of
+    // matches rather than the number of call sites. So the sites are counted a
+    // second way, by the name alone, and the two must agree.
+    //
+    // A bare `makeObject(` written in a COMMENT inflates `sites` and turns this
+    // red, which is the safe direction: this scan cannot be satisfied by prose,
+    // only broken by it.
+    const sites = [...src.matchAll(/\bmakeObject\(/g)].length - 1; // -1: the declaration
+    assert.equal(calls.length, sites, `the argument scan missed a makeObject call: ${calls.length} of ${sites}`);
+    assert.equal(sites, 4, `an add path was added or removed — decide its destination, do not bump this number`);
     for (const c of calls) {
       assert.match(c, /HOME_VIEW_ID/, `a makeObject call decides the frame by default: ${c}`);
     }
