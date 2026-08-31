@@ -17,6 +17,8 @@ import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INTEGRATION_DESCRIPTORS } from "./integration-manager.js";
+import type { IntegrationDescriptor } from "../types/integrations.js";
+import { docsUrl } from "../../renderer/lib/docs-url.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DOCS = path.join(HERE, "..", "..", "docs", "integrations");
@@ -70,4 +72,41 @@ describe("the setup steps are still reachable", () => {
       );
     });
   }
+});
+
+// THE HALF THE FIRST VERSION OF THIS FILE MISSED, and it shipped a 404 because
+// of it. Checking that the page exists in THIS tree proves nothing about the
+// URL: the link hardcoded `blob/main/`, and ProVideoPlayer and Live scores are
+// beta-only integrations whose pages are beta-only too. The file was right there
+// on disk, the test was green, and the two links an operator on beta could
+// actually reach were the two that 404'd.
+//
+// So the invariant is not "the page exists" but "the page exists ON THE REF THE
+// LINK NAMES" — and the only ref we can verify from here is our own. The link
+// therefore has to name our own branch, which is what this asserts.
+describe("the link names the ref whose pages we can vouch for", () => {
+  for (const branch of ["beta", "main", "apple-ndi"]) {
+    it(`a build on ${branch} links to ${branch}`, () => {
+      const url = docsUrl({ docs: "provideoplayer" } as IntegrationDescriptor, branch);
+      assert.ok(
+        url.includes(`/blob/${branch}/`),
+        `a build on ${branch} sends the operator to a different ref, whose pages this build cannot vouch for: ${url}`,
+      );
+    });
+  }
+
+  it("falls back to main when the branch is unknown", () => {
+    // A packaged install may have no checkout to read a branch from. main is the
+    // ref whose pages are a superset of what such a build can show.
+    for (const unknown of [null, undefined, ""]) {
+      const url = docsUrl({ docs: "obs" } as IntegrationDescriptor, unknown);
+      assert.ok(url.includes("/blob/main/"), `an unknown branch gave ${url}`);
+    }
+  });
+
+  it("refuses a branch name that could rewrite the URL", () => {
+    // The branch arrives from the update status, which reads it off a checkout.
+    const url = docsUrl({ docs: "obs" } as IntegrationDescriptor, "../../evil?x=1");
+    assert.ok(url.includes("/blob/main/"), `a branch with path characters in it reached the URL: ${url}`);
+  });
 });

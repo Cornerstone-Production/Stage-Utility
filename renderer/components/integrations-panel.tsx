@@ -17,6 +17,8 @@ import { ProPresenterInstancesPanel } from "./propresenter-instances-panel";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
 import { integrationDialogClass } from "./integration-dialog-size";
+import { useUpdateStatus } from "../app/queries";
+import { docsUrl } from "../lib/docs-url";
 import { UnsavedChangesDialog } from "../editor/unsaved-changes-dialog";
 import { UnsavedWorkProvider, useUnsavedWork } from "./unsaved-work";
 import {
@@ -166,18 +168,6 @@ function firstString(config: Record<string, unknown>, keys: string[]): string {
  * down. Derived from the descriptor rather than a per-id table, so adding an
  * integration cannot leave a card with a blank line under its name.
  */
-/**
- * The integration's page in `docs/integrations/`, on GitHub.
- *
- * The repo is public, so this is a link an operator can open from a console on
- * the LAN without the app having to serve the docs itself. `docs` is a required
- * field on the descriptor rather than derived from `id` — `pvp`'s page is
- * `provideoplayer.md`, and deriving would 404 on exactly that one.
- */
-export function docsUrl(descriptor: IntegrationDescriptor): string {
-  return `https://github.com/Cornerstone-Production/Stage-Utility/blob/main/docs/integrations/${descriptor.docs}.md`;
-}
-
 export function summaryLine(descriptor: IntegrationDescriptor, state: IntegrationState): string {
   const host = firstString(state.config, HOST_KEYS);
   if (host) {
@@ -425,6 +415,9 @@ export function IntegrationDialog({
   onBeforeMove,
 }: IntegrationDialogProps) {
   const bespoke = bespokePanelFor(descriptor, state);
+  // Which ref the Setup guide link points at. Already fetched and cached for the
+  // rail's version line, so this costs nothing.
+  const { data: updateStatus } = useUpdateStatus();
 
   const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(
     () => initialConfig(descriptor, state),
@@ -705,7 +698,7 @@ export function IntegrationDialog({
                       steps are in docs/integrations/, and this is the only thing
                       in the app that points at them. */}
                   <a
-                    href={docsUrl(descriptor)}
+                    href={docsUrl(descriptor, updateStatus?.branch)}
                     target="_blank"
                     rel="noreferrer"
                     className="whitespace-nowrap text-accent-11 underline underline-offset-2 hover:text-accent-12"
