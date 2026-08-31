@@ -14,6 +14,13 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
+import { prefersReducedMotion } from "./reduced-motion";
+
+/** Re-exported so the call sites that already ask this module keep working; it
+ *  lives in reduced-motion.ts because two of its callers are plain utilities
+ *  with no React. */
+export { prefersReducedMotion };
+
 /** Cards keyed by id survive being remounted somewhere else, which a card that
  *  changes GROUP does — so the before/after pair is found by id, not by node. */
 const DEFAULT_ID_ATTRIBUTE = "data-card-id";
@@ -21,19 +28,6 @@ const DEFAULT_ID_ATTRIBUTE = "data-card-id";
 /** How long a card takes to travel. Exported so a caller that has to act once
  *  the card has landed — scrolling to it, say — waits the right amount. */
 export const SLIDE_MS = 180;
-
-/** Does this viewer want motion at all?
- *
- * Asked here, in JS, and not left to the global CSS override: that rule cannot
- * reach an inline `style.transform`, which is what a FLIP writes. Read at the
- * moment of the move rather than cached, so changing the system setting takes
- * effect without a reload.
- */
-export function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined"
-    && typeof window.matchMedia === "function"
-    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
 
 /**
  * @param deps  a value that changes when a card may have moved — a SIGNATURE

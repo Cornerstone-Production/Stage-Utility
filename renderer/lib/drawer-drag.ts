@@ -26,7 +26,7 @@
 // solution for one drawer, one axis and two resting states.
 
 import * as React from "react";
-import { prefersReducedMotion } from "./use-slide-on-move";
+import { prefersReducedMotion } from "./reduced-motion";
 
 /** Fling speed, px/ms, that closes the drawer whatever the distance travelled.
  *  A fast 30px throw is a dismissal; distance alone would strand it. */
