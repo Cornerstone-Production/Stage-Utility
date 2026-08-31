@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { VALUE_SCALE, valueSizeFor, CONTENT_SCALE, PAD_SCALE, fitComposition } from "./readout-size.js";
+// The LEADINGS and the gap, imported rather than restated. Every "used" sum
+// below is the composition's own arithmetic run a second time, and with 1.05,
+// 1.1, 1.2 and 0.03 typed out it was a second COPY of it: raise VALUE_LEADING
+// and the real `used` grows while the test's stays put, which is a fit check
+// that stops checking the fit. (:32-35 would have gone red first, so this was
+// one line from being updated in isolation.)
+import {
+  CAPTION_LEADING,
+  CONTENT_SCALE,
+  GAP_SCALE,
+  PAD_SCALE,
+  SUB_LEADING,
+  VALUE_FLOOR_SCALE,
+  VALUE_LEADING,
+  VALUE_SCALE,
+  fitComposition,
+  valueSizeFor,
+} from "./readout-size.js";
 
 // The composition is caption / value / sub, sized from the widget's own height.
 // These are the proportions the comparison page was approved at, plus the one
@@ -30,7 +47,7 @@ describe("the three-line composition", () => {
     // it — a hard-coded budget would cap the value however high the constant went.
     assert.ok(CONTENT_SCALE > VALUE_SCALE, "the budget does not contain the value");
     assert.ok(
-      Math.abs(CONTENT_SCALE - (VALUE_SCALE * 1.05 + 0.105 * 1.1 + 0.115 * 1.2 + 0.06)) < 1e-9,
+      Math.abs(CONTENT_SCALE - (VALUE_SCALE * VALUE_LEADING + 0.105 * CAPTION_LEADING + 0.115 * SUB_LEADING + 2 * GAP_SCALE)) < 1e-9,
       "the budget is no longer derived from VALUE_SCALE",
     );
   });
@@ -64,9 +81,9 @@ describe("the line counts that actually occur", () => {
     // is a clipped number.
     for (const [cap, sub] of [[0, 0], [CAPTION, 0], [0, SUB], [CAPTION, SUB]]) {
       const used =
-        valueSizeFor(BOX, cap, sub) * 1.05 +
-        (cap > 0 ? cap * 1.1 + BOX * 0.03 : 0) +
-        (sub > 0 ? sub * 1.2 + BOX * 0.03 : 0);
+        valueSizeFor(BOX, cap, sub) * VALUE_LEADING +
+        (cap > 0 ? cap * CAPTION_LEADING + BOX * GAP_SCALE : 0) +
+        (sub > 0 ? sub * SUB_LEADING + BOX * GAP_SCALE : 0);
       assert.ok(used <= BOX * CONTENT_SCALE + 0.01, `caption=${cap} sub=${sub} used ${used}px`);
     }
   });
@@ -94,7 +111,7 @@ describe("the composition fits the box it paints", () => {
     const box = 54;
     const cap = Math.max(9, box * 0.105);
     const sub = 0;
-    const used = valueSizeFor(box, cap, sub) * 1.05 + cap * 1.1 + box * 0.03 + 2 * box * PAD_SCALE;
+    const used = valueSizeFor(box, cap, sub) * VALUE_LEADING + cap * CAPTION_LEADING + box * GAP_SCALE + 2 * box * PAD_SCALE;
     assert.ok(used <= box + 0.01, `a ${box}px widget renders ${used.toFixed(1)}px of content`);
   });
 });
@@ -107,7 +124,7 @@ describe("small boxes", () => {
     const tiny = 30;
     const px = valueSizeFor(tiny, 9, 10);
     assert.ok(px > 0, "the value collapsed to nothing");
-    assert.ok(px >= (tiny * 0.18) / 1.05 - 0.01, `value floor not applied: ${px}px`);
+    assert.ok(px >= (tiny * VALUE_FLOOR_SCALE) / VALUE_LEADING - 0.01, `value floor not applied: ${px}px`);
   });
 });
 
@@ -127,11 +144,11 @@ describe("a widget that has been made small", () => {
     for (let box = 6; box <= 400; box += 2) {
       for (const { caption, sub } of LINES) {
         const { captionPx, valuePx, subPx } = fitComposition(box, caption, sub);
-        const gap = box * 0.03;
+        const gap = box * GAP_SCALE;
         const used =
-          valuePx * 1.05 +
-          (captionPx > 0 ? captionPx * 1.1 + gap : 0) +
-          (subPx > 0 ? subPx * 1.2 + gap : 0);
+          valuePx * VALUE_LEADING +
+          (captionPx > 0 ? captionPx * CAPTION_LEADING + gap : 0) +
+          (subPx > 0 ? subPx * SUB_LEADING + gap : 0);
         const avail = box - 2 * box * PAD_SCALE;
         assert.ok(
           used <= avail + 0.01,
@@ -202,9 +219,9 @@ describe("a uniform grid of tiles", () => {
       for (const [caption, sub] of [[true, true], [true, false], [false, false]] as const) {
         const { captionPx, valuePx, subPx } = fitComposition(box, caption, sub, true);
         const used =
-          valuePx * 1.05 +
-          (captionPx > 0 ? captionPx * 1.1 + box * 0.03 : 0) +
-          (subPx > 0 ? subPx * 1.2 + box * 0.03 : 0);
+          valuePx * VALUE_LEADING +
+          (captionPx > 0 ? captionPx * CAPTION_LEADING + box * GAP_SCALE : 0) +
+          (subPx > 0 ? subPx * SUB_LEADING + box * GAP_SCALE : 0);
         assert.ok(used <= box - 2 * box * PAD_SCALE + 0.01, `${box}px box overflowed: ${used}`);
       }
     }
@@ -301,13 +318,13 @@ describe("the readout's optional rule and footer", () => {
     for (const box of [8, 12, 20, 28, 40, 54, 120, 200, 480]) {
       for (const extras of [{ meter: true }, { footer: true }, BOTH]) {
         const { captionPx, valuePx, subPx, meterPx, footerPx } = fitComposition(box, true, true, false, extras);
-        const gap = box * 0.03;
+        const gap = box * GAP_SCALE;
         const used =
-          valuePx * 1.05 +
-          (captionPx > 0 ? captionPx * 1.1 + gap : 0) +
-          (subPx > 0 ? subPx * 1.2 + gap : 0) +
+          valuePx * VALUE_LEADING +
+          (captionPx > 0 ? captionPx * CAPTION_LEADING + gap : 0) +
+          (subPx > 0 ? subPx * SUB_LEADING + gap : 0) +
           (meterPx > 0 ? meterPx + gap : 0) +
-          (footerPx > 0 ? footerPx * 1.2 + gap : 0);
+          (footerPx > 0 ? footerPx * SUB_LEADING + gap : 0);
         assert.ok(
           used <= box - 2 * box * PAD_SCALE + 0.01,
           `${box}px box overflowed with ${JSON.stringify(extras)}: ${used}`,

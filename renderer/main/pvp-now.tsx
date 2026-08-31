@@ -13,7 +13,7 @@
 // thumbnail, preview or frame endpoint at all.
 
 import { fmtDuration } from "./pco-timer";
-import { computePvpProgress, pvpMeterKey, type PvpProgress } from "./pvp-progress";
+import { computePvpProgress, noSuchLayer, pvpMeterKey, pvpUnavailableReason, type PvpProgress } from "./pvp-progress";
 import { Readout } from "./readout";
 import type { LayoutHAlign } from "@main/types/views";
 import { hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
@@ -105,12 +105,16 @@ function Badge({ badge }: { badge: PvpNowBadge }) {
  * one is that we have not heard yet.
  */
 export function nowEmptyReason(status: PvpStatusDTO | null, layerName: string | null | undefined): string {
-  if (!status) return "—";
-  if (!status.connected) return "ProVideoPlayer offline";
+  // The first two rungs are pvp-object's too — see pvp-progress.ts. It answers
+  // non-null for exactly the cases where `status` is unusable, so everything
+  // below it is reached with a connected snapshot in hand.
+  const unavailable = pvpUnavailableReason(status);
+  if (unavailable !== null) return unavailable;
   const want = (layerName ?? "").trim();
   if (want) {
-    const found = status.layers.some((l) => l.name.trim().toLowerCase() === want.toLowerCase());
-    return found ? "Nothing on this layer" : `No layer named ${want}`;
+    const layers = status?.layers ?? [];
+    const found = layers.some((l) => l.name.trim().toLowerCase() === want.toLowerCase());
+    return found ? "Nothing on this layer" : noSuchLayer(want);
   }
   return "Nothing on screen";
 }

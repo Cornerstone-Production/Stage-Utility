@@ -169,6 +169,32 @@ export interface LayoutRenderCtx {
  */
 type EmbedCopy = "tile" | "panel";
 
+/**
+ * The expanded copy of an embed tile's body, at the panel's height.
+ *
+ * BOTH heights are the panel's, which is the difference from the tile: on a tile
+ * the object's font is a fraction of the parent canvas while the child view's
+ * canvas is the measured box, and expanded there is no parent canvas left to be
+ * a fraction of — the panel IS the screen. See EmbedFontBox.
+ *
+ * `panelH || fallback` for the frame before the panel has measured itself, where
+ * the canvas height is the only number available. That fallback was written out
+ * four times, twice in each of the two embed objects, which is two places for
+ * one decision about what an unmeasured panel is worth.
+ *
+ * Only this much is shared, not a whole EmbedTile wrapper: the two objects
+ * differ in the parts a wrapper would have to take as parameters anyway — one
+ * carries a label bar with a presence dot, one early-returns its notices while
+ * the other resolves them per copy, and their expand gates are different
+ * expressions. The fallback is the piece that actually has to agree.
+ */
+function panelBody(
+  body: (canvasH: number, childH: number, where: EmbedCopy) => ReactNode,
+  fallbackH: number,
+): (panelH: number) => ReactNode {
+  return (panelH) => body(panelH || fallbackH, panelH || fallbackH, "panel");
+}
+
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -517,19 +543,6 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
 }
 
 /**
- * Home cards that have a WALL twin, and which platform each asks about.
- *
- * These three are listed in the palette as "Resi status" and "YouTube status"
- * under their own groups, so they are what an operator picks for a console as
- * well as for Home — and on a console they sit beside OBS status and REAPER
- * status, which are wall widgets. Same object, two presentations, chosen by the
- * surface rather than by which of two near-identical types got picked.
- *
- * `null` means "every platform at once", which is what the caption "Streaming"
- * says. An explicit record rather than a prefix test: the prefix would also
- * catch a future home-streaming-* card that has no wall twin.
- */
-/**
  * Whether a status widget paints its whole box while the thing it watches is
  * ACTIVE — recording, or live.
  *
@@ -580,6 +593,19 @@ export function obsModeText(mode: string): { active: string; idle: string } {
     : STATUS_TEXT.obs.recording;
 }
 
+/**
+ * Home cards that have a WALL twin, and which platform each asks about.
+ *
+ * These three are listed in the palette as "Resi status" and "YouTube status"
+ * under their own groups, so they are what an operator picks for a console as
+ * well as for Home — and on a console they sit beside OBS status and REAPER
+ * status, which are wall widgets. Same object, two presentations, chosen by the
+ * surface rather than by which of two near-identical types got picked.
+ *
+ * `null` means "every platform at once", which is what the caption "Streaming"
+ * says. An explicit record rather than a prefix test: the prefix would also
+ * catch a future home-streaming-* card that has no wall twin.
+ */
 const WALL_TWIN = {
   "home-streaming": null,
   "home-streaming-resi": "Resi",
@@ -624,20 +650,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   );
 
   /**
-   * The WALL composition for a streaming widget: caption, the state as a word,
-   * and the ticking number underneath.
-   *
-   * Deliberately the same one obs-status and reaper-status use. They answer the
-   * same kind of question on the same wall, and reading differently made the
-   * streaming ones look like a different app — a duration where its neighbour
-   * had a word.
-   *
-   * A function because TWO things need it: the `stream-status` object, and the
-   * three home-streaming cards when they are placed on something that is not
-   * Home. Those went to Home's card composition on every surface for a release,
-   * which put a small three-line mono tile in a row of large ALL-CAPS ones.
-   */
-  /**
    * A recorder's state as a readout: OBS, REAPER, and the generic recorder.
    *
    * The three of them ended in the same pair of Readouts -- active with the red
@@ -676,6 +688,20 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     />
   );
 
+  /**
+   * The WALL composition for a streaming widget: caption, the state as a word,
+   * and the ticking number underneath.
+   *
+   * Deliberately the same one obs-status and reaper-status use. They answer the
+   * same kind of question on the same wall, and reading differently made the
+   * streaming ones look like a different app — a duration where its neighbour
+   * had a word.
+   *
+   * A function because TWO things need it: the `stream-status` object, and the
+   * three home-streaming cards when they are placed on something that is not
+   * Home. Those went to Home's card composition on every surface for a release,
+   * which put a small three-line mono tile in a row of large ALL-CAPS ones.
+   */
   const streamingReadout = (
     only: string | null,
     opts: { showElapsed?: boolean; hideWhenIdle?: boolean; fillWhenLive?: boolean },
@@ -2381,7 +2407,7 @@ function ViewEmbedObject({
           Expanding one of those enlarges the same sentence, which is harmless;
           a screen tile's states are gated because they change mid-service. */}
       {control(view.name)}
-      {overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H, "panel"), view.name)}
+      {overlay(panelBody(body, ctx.H), view.name)}
     </div>
   );
 }
@@ -2498,8 +2524,7 @@ function ScreenEmbedObject({
       )}
       <div ref={boxRef} className="min-h-0 flex-1">{body(ctx.H, boxH || ctx.H, "tile")}</div>
       {expandable && control(expandable.name)}
-      {expandable &&
-        overlay((panelH) => body(panelH || ctx.H, panelH || ctx.H, "panel"), expandable.name)}
+      {expandable && overlay(panelBody(body, ctx.H), expandable.name)}
     </div>
   );
 }

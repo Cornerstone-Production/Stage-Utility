@@ -357,16 +357,43 @@ describe("the view kind", () => {
     assert.equal(screen.k === "view" && screen.view, null);
   });
 
-  test("every non-slots kind reaches its own arm", () => {
-    for (const kind of ["dashboard", "stage", "transcription", "script", "spl-rundown"] as const) {
-      const screen = resolveScreen(input({
-        state: stageState({
-          views: [{ id: "v1", name: "V", kind }] as unknown as View[],
-          resolvedByOutput: { "display-1": resolvedOutput({ kind }) },
-        }),
-      }));
-      assert.equal(screen.k, "view", `${kind} should render a view`);
-      assert.equal(screen.k === "view" && screen.kind, kind);
+  test("every non-slots kind reaches its own arm, with or without Planning Center", () => {
+    // A RECORD over ViewKind, not a hand-written list. The list covered five of
+    // eight and `calendar` was tested nowhere, so moving it into the slots gate
+    // in stage-screen.ts compiled, satisfied the `never` check at the bottom of
+    // that file, left every test here green — and put the "connect Planning
+    // Center" screen on a calendar wall at an install that has no PCO, which is
+    // precisely what that arm's comment says must not happen.
+    //
+    // The compiler names a kind nobody classified, so an eighth kind cannot be
+    // added and quietly go unchecked.
+    const REACHES: Record<ViewKind, "own arm" | "slots gate" | "needs a layout"> = {
+      slots: "slots gate", // covered by the two slots tests below
+      custom: "needs a layout", // covered by its own test above
+      dashboard: "own arm",
+      stage: "own arm",
+      transcription: "own arm",
+      script: "own arm",
+      "spl-rundown": "own arm",
+      calendar: "own arm",
+    };
+
+    for (const kind of (Object.keys(REACHES) as ViewKind[]).filter((k) => REACHES[k] === "own arm")) {
+      // BOTH ways round. Reaching a view with PCO connected says nothing about
+      // whether the kind is gated on it — that is the half the hard-coded list
+      // could not have caught, since slots is the only kind whose content comes
+      // from Planning Center at all.
+      for (const pcoConfigured of [true, false]) {
+        const screen = resolveScreen(input({
+          state: stageState({
+            pcoConfigured,
+            views: [{ id: "v1", name: "V", kind }] as unknown as View[],
+            resolvedByOutput: { "display-1": resolvedOutput({ kind }) },
+          }),
+        }));
+        assert.equal(screen.k, "view", `${kind} should render a view (pcoConfigured: ${pcoConfigured})`);
+        assert.equal(screen.k === "view" && screen.kind, kind);
+      }
     }
   });
 

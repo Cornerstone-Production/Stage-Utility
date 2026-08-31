@@ -51,8 +51,8 @@ class StageErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundar
       return (
         <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-4">
           <AlertCircleIcon className="size-8 text-red-10" />
-          <p className="text-headline text-gray-9">Display error — please reload</p>
-          <p className="text-caption1 text-gray-7">{this.state.error.message}</p>
+          <p className="text-headline text-fg">Display error — please reload</p>
+          <p className="text-caption1 text-fg-muted">{this.state.error.message}</p>
         </div>
       );
     }
@@ -243,8 +243,8 @@ function ScreenTopBar({ state, screen }: { state: StageState; screen: ScreenChro
 function KioskLoading() {
   return (
     <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
-      <Loader2Icon className="size-8 text-gray-7 animate-spin" />
-      <p className="text-headline text-gray-7">Loading stage…</p>
+      <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
+      <p className="text-headline text-fg-muted">Loading stage…</p>
     </div>
   );
 }
@@ -254,9 +254,9 @@ function KioskNotConfigured({ state, screen }: { state: StageState; screen: Scre
     <div className="flex flex-col h-[100dvh] kiosk-surface">
       <ScreenTopBar state={state} screen={screen} />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
-        <MonitorIcon className="size-12 text-gray-7" />
-        <p className="text-title3 text-gray-9 font-semibold">Planning Center not configured</p>
-        <p className="text-body text-gray-7">
+        <MonitorIcon className="size-12 text-fg-subtle" />
+        <p className="text-title3 text-fg font-semibold">Planning Center not configured</p>
+        <p className="text-body text-fg-muted">
           Open Settings or scan the QR code from a phone to add your PCO credentials.
         </p>
       </div>
@@ -269,11 +269,11 @@ function KioskEmpty({ state, screen }: { state: StageState; screen: ScreenChrome
     <div className="flex flex-col h-[100dvh] kiosk-surface">
       <ScreenTopBar state={state} screen={screen} />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
-        <MonitorIcon className="size-12 text-gray-7" />
-        <p className="text-title3 text-gray-9 font-semibold">
+        <MonitorIcon className="size-12 text-fg-subtle" />
+        <p className="text-title3 text-fg font-semibold">
           {state.planTitle ? state.planTitle : "No plan selected"}
         </p>
-        <p className="text-body text-gray-7">No mic slots assigned yet. Add slots in Settings.</p>
+        <p className="text-body text-fg-muted">No mic slots assigned yet. Add slots in Settings.</p>
       </div>
     </div>
   );
@@ -285,9 +285,9 @@ function KioskUnrouted({ state, screen }: { state: StageState; screen: ScreenChr
     <div className="flex flex-col h-[100dvh] kiosk-surface">
       <ScreenTopBar state={state} screen={screen} />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
-        <MonitorIcon className="size-12 text-gray-7" />
-        <p className="text-title3 text-gray-9 font-semibold">Display not configured</p>
-        <p className="text-body text-gray-7">
+        <MonitorIcon className="size-12 text-fg-subtle" />
+        <p className="text-title3 text-fg font-semibold">Display not configured</p>
+        <p className="text-body text-fg-muted">
           No view is assigned to this display. Assign one under Screens.
         </p>
       </div>
@@ -301,14 +301,21 @@ function KioskUnrouted({ state, screen }: { state: StageState; screen: ScreenChr
 // saying "no view is assigned" would send the operator looking for a routing
 // problem that is not there. Before this existed the same state fell through to
 // the slots kind and drew an empty mic-slot grid, which said nothing at all.
+// text-fg / text-fg-muted / text-fg-subtle throughout this file, never
+// text-gray-*. The Radix gray scale follows the APP theme, which .kiosk-surface
+// deliberately does not pin — its comment in styles.css records the 1.14:1 bug
+// that made it pin --color-fg-* and nothing else. On the kiosk's near-black
+// ground the dark scale measured text-gray-9 at 3.88:1 and text-gray-7 at
+// 2.16:1, so every one of these screens said what was wrong in body copy nobody
+// could read. The fg ramp is 16.67 / 9.71 / 4.50:1 and is inside the guarantee.
 function KioskViewMissing({ state, screen }: { state: StageState; screen: ScreenChrome }) {
   return (
     <div className="flex flex-col h-[100dvh] kiosk-surface">
       <ScreenTopBar state={state} screen={screen} />
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-12 text-center">
-        <MonitorIcon className="size-12 text-gray-7" />
-        <p className="text-title3 text-gray-9 font-semibold">View not found</p>
-        <p className="text-body text-gray-7">
+        <MonitorIcon className="size-12 text-fg-subtle" />
+        <p className="text-title3 text-fg font-semibold">View not found</p>
+        <p className="text-body text-fg-muted">
           The view this preview points at has been deleted. Pick another under Screens.
         </p>
       </div>
@@ -327,8 +334,8 @@ function KioskError({ message, title = "Could not load stage state" }: { message
   return (
     <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-4 px-12 text-center">
       <AlertCircleIcon className="size-10 text-red-10" />
-      <p className="text-title3 text-gray-9 font-semibold">{title}</p>
-      <p className="text-caption1 text-gray-7">{message}</p>
+      <p className="text-title3 text-fg font-semibold">{title}</p>
+      <p className="text-caption1 text-fg-muted">{message}</p>
     </div>
   );
 }

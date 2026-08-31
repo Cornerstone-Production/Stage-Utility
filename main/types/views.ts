@@ -650,8 +650,14 @@ export type LayoutObjectConfig =
       game?: "auto" | string;
     }
   // A followed team's live score, from the ESPN scores integration
-  // (`scores:status` channel). Renders the shared ScoreStrip -- the same strip
-  // the context-bar capsule and the Home card draw, at wall size.
+  // (`scores:status` channel). Renders ScoreStrip at wall size, scaled to fill
+  // its tile.
+  //
+  // It is the only surface that draws the whole strip. The context-bar capsule
+  // composes two ScoreSides directly, and the Home card deliberately draws
+  // neither -- see ScoresCard, which explains why a tile of brand colour would
+  // out-shout the quiet cards beside it. What all three DO share is score-ink,
+  // so they cannot disagree about whether a team's colour takes white text.
   | {
       type: "scores";
       /** Which followed game this object shows. `"auto"` follows whichever

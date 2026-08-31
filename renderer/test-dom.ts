@@ -101,3 +101,60 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
     dom.window.close();
   };
 }
+
+/**
+ * installDom, plus the three things a REACT render needs on top of it.
+ *
+ * Three files in renderer/main opened with byte-identical copies of exactly
+ * this: the act-environment flag, one clientHeight for every element, and a
+ * do-nothing EventSource. StubEventSource alone is at eleven copies across the
+ * repo. Each was correct; three copies of a correct thing is still three places
+ * a platform gap has to be patched, and installDom already stubs ResizeObserver
+ * for the same reason.
+ *
+ * What is NOT here is the fetch stub. The three differ — one records every
+ * request, one answers a route the others do not — and a stub that took a
+ * config object per caller would be a worse version of writing four lines.
+ *
+ * @param clientHeight what every element reports for clientHeight. jsdom does no
+ *   layout, so the real answer is 0 and a component that sizes a child by
+ *   MEASURING its box gets nothing to work with. One number for every element is
+ *   enough: nothing here asserts a computed size — that is readout-size's job,
+ *   and it is arithmetic with no DOM at all — only that a measurement was used
+ *   instead of a fraction of the canvas.
+ */
+export function installRenderDom({ clientHeight }: { clientHeight?: number } = {}): () => void {
+  const teardown = installDom();
+  const g = globalThis as unknown as Record<string, unknown>;
+
+  // React runs act() quietly only when told it is in a test environment; without
+  // this every awaited render logs "not configured to support act(...)".
+  g.IS_REACT_ACT_ENVIRONMENT = true;
+
+  if (clientHeight !== undefined) {
+    Object.defineProperty((g.HTMLElement as { prototype: object }).prototype, "clientHeight", {
+      get: () => clientHeight,
+      configurable: true,
+    });
+  }
+
+  // jsdom ships no EventSource, and a render reaches one: the state hooks open
+  // the state stream. Left unstubbed the hook throws on mount; left real it
+  // outlives the test and settles after the DOM has gone, which surfaces as the
+  // FILE failing while every test in it passes.
+  g.EventSource = class {
+    static readonly CONNECTING = 0;
+    readyState = 0;
+    onmessage: unknown = null;
+    onerror: unknown = null;
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    close(): void {}
+  };
+
+  return () => {
+    delete g.EventSource;
+    delete g.IS_REACT_ACT_ENVIRONMENT;
+    teardown();
+  };
+}

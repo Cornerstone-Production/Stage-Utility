@@ -461,6 +461,42 @@
   --color-fg-muted:       rgba(255, 255, 255, 0.70);
   --color-fg-subtle:      rgba(255, 255, 255, 0.45);
   --color-fg-faint:       rgba(255, 255, 255, 0.34);
+
+  /* Not only foregrounds. The nine above cover text and lines; a kiosk surface
+     also draws FILLS and a WARNING colour, and those resolved from :root too —
+     which for a light page means colours picked to sit on #f7f8fa, landing on
+     #0a0a0a. Measured on this ground:
+
+       --gray-a5 (#0000001f, the light --su-fill-active) → 1.01:1. Darker than
+       the backdrop, so the calendar's running-event pill was a font-weight
+       change and nothing else — the same outcome the pill already shipped with
+       once, when it was written against a token Tailwind emits nothing for.
+       The dark #ffffff22 reads as a lift at 1.39:1, which is what a fill is for.
+
+       --amber-11 (#ab6400) → 4.29:1, under the 4.5:1 floor for the 11px type
+       the calendar states a failure in. The dark #ffca16 is 12.93:1.
+
+     Literals, matching the .dark values of the same Radix steps, for the same
+     reason the nine above are literals: redefining --gray-a5 here would reach
+     everything else derived from it. */
+  --color-fill-active:    rgba(255, 255, 255, 0.13);
+  --color-warn-11:        #ffca16;
+}
+
+/* The accent, on a kiosk surface embedded in the LIGHT app only.
+ *
+ * Deliberately not in the block above: on the real kiosk (and in the dark app)
+ * --brand-accent is already the lighter #6aa6df, 7.67:1 on this ground, and
+ * lifting it there would leave accent-coloured chrome inside a kiosk surface a
+ * different blue from the same chrome outside one. It is the light default,
+ * #2e6691 at 3.23:1, that is thin — over the 3:1 non-text floor, but not by
+ * enough for the 1px ring the calendar marks "happening right now" with.
+ *
+ * DERIVED, never a literal: the accent is themeable per organisation, and a
+ * fixed hex here would quietly ignore the operator's choice. Lifted toward white
+ * exactly as .kiosk and .dark lift their own accent states. #2e6691 → 5.22:1. */
+:root:not(.dark) .kiosk-surface {
+  --color-accent: color-mix(in srgb, var(--brand-accent), white 22%);
 }
 
 
@@ -893,13 +929,6 @@ body {
      in a wall tile, and the viewport says nothing useful about any of them. */
   container-type: inline-size;
 }
-.score-strip-compact {
-  min-height: 56px;
-}
-.score-strip-compact .score-side {
-  gap: 8px;
-  padding: 8px 11px;
-}
 
 /* THE DISC BEHIND EVERY TEAM MARK, and the one class that draws it: the strip,
    the capsule and the settings picker all use this, so the disc cannot end up
@@ -928,11 +957,6 @@ body {
   font-weight: 600;
   background: var(--score-disc);
   color: var(--score-disc-ink, #0a0a0a);
-}
-.score-strip-compact .score-logo {
-  width: 22px;
-  height: 22px;
-  font-size: 8px;
 }
 /* THE MARK IS INSCRIBED IN THE DISC, not stretched across it.
    It used to be `width: 100%; height: 100%`, which sizes a SQUARE image box to
@@ -1009,9 +1033,6 @@ body {
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
-.score-strip-compact .score-value {
-  font-size: 20px;
-}
 .score-side-away .score-value {
   margin-left: auto;
   padding-left: 10px;
@@ -1037,11 +1058,6 @@ body {
   color: var(--score-subtle);
   z-index: 1;
 }
-.score-strip-compact .score-center {
-  width: 68px;
-  gap: 3px;
-  padding: 6px 2px;
-}
 .score-period {
   font-size: 9.5px;
   letter-spacing: .05em;
@@ -1053,9 +1069,6 @@ body {
   color: var(--score-fg);
   font-variant-numeric: tabular-nums;
   letter-spacing: -.01em;
-}
-.score-strip-compact .score-clock {
-  font-size: 11px;
 }
 .score-downdistance {
   font-size: 10px;

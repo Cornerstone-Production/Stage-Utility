@@ -83,3 +83,32 @@ export function computePvpProgress(
 export function pvpMeterKey(layer: PvpLayerDTO | null): string | null {
   return layer ? `${layer.uuid} ${layer.mediaUuid ?? layer.mediaName ?? ""}` : null;
 }
+
+/**
+ * The first two rungs of "why is there nothing to show", shared by both widgets.
+ *
+ * `null` status is NO SNAPSHOT YET, not "PVP is down" — the distinction the whole
+ * ladder exists to preserve. It lasts only until the first hydrate, and an
+ * unconfigured PVP hydrates to connected:false, so it does not linger.
+ *
+ * Here, beside pvpMeterKey, rather than in either widget: pvp-now and pvp-object
+ * each wrote out the same two answers before diverging on the third, and a
+ * wording change to "ProVideoPlayer offline" that landed in one of them would
+ * put two names for one machine on one wall. Each widget's own test still pins
+ * its full ladder, so a divergence goes red rather than silent — but a shared
+ * prefix cannot diverge in the first place.
+ *
+ * @returns the sentence, or null when the answer is further down the widget's
+ *   own ladder.
+ */
+export function pvpUnavailableReason(status: { connected: boolean } | null): string | null {
+  if (!status) return "—";
+  if (!status.connected) return "ProVideoPlayer offline";
+  return null;
+}
+
+/** "No layer named X" — the same sentence in both widgets, for the same case:
+ *  the layout names a layer PVP is not reporting. */
+export function noSuchLayer(layerName: string): string {
+  return `No layer named ${layerName}`;
+}

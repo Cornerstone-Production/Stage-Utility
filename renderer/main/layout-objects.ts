@@ -893,8 +893,22 @@ export function isEmbeddableViewKind(kind: ViewKind): boolean {
   return EMBEDDABLE_VIEW_KINDS.includes(kind);
 }
 
-/** Offered in the embed picker. Every kind renders now, so the picker no longer
- *  needs to offer kinds it cannot draw — the two lists are the same list. */
+/**
+ * Offered in the embed picker.
+ *
+ * A PERMANENT ALIAS for isEmbeddableViewKind, and deliberately kept as one.
+ * There was a period when the picker offered kinds the renderer could not draw
+ * and the two answers genuinely differed; every kind renders now, and there is
+ * no future in which "can this be drawn in a box" and "may this be offered as
+ * something to draw in a box" are allowed to disagree — offering a kind that
+ * cannot be drawn is the bug the two lists were merged to end.
+ *
+ * It stays a separate name only because the picker reads better calling it, and
+ * because a caller asking "is this offerable" should not have to know that the
+ * answer happens to be a renderability question. If the two ever need to
+ * diverge, that is a decision to make here, in the open, rather than by letting
+ * this body drift from the one above it.
+ */
 export function isOfferableInEmbedPicker(kind: ViewKind): boolean {
   return isEmbeddableViewKind(kind);
 }

@@ -24,34 +24,15 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installRenderDom } from "../test-dom.js";
 import type { LayoutRenderCtx } from "./layout-renderer";
 
-const teardown = installDom();
-
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-/** jsdom does no layout, so every element measures 0 — and a tile sizes its
- *  child's canvas by MEASURING its body. */
+// See installRenderDom for the act flag, the clientHeight and the EventSource
+// stub, which this file and two of its neighbours each wrote out verbatim.
+// jsdom does no layout, so the real clientHeight is 0 and a tile sizes its
+// child's canvas by MEASURING its body.
 const BOX_PX = 270;
-Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-  get: () => BOX_PX,
-  configurable: true,
-});
-
-// jsdom ships neither, and both are reached by a render: the state hooks open
-// the state stream, and every view fetches on mount. Left real, a request
-// outlives the test and settles after teardown has removed `window`.
-class StubEventSource {
-  static readonly CONNECTING = 0;
-  readyState = 0;
-  onmessage: unknown = null;
-  onerror: unknown = null;
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
-}
-(globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
+const teardown = installRenderDom({ clientHeight: BOX_PX });
 
 /** The routed view draws this and nothing else does. */
 const VIEW_MARKER = "ROUTED VIEW BODY";

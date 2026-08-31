@@ -89,7 +89,7 @@ describe("which list the object shows", () => {
   test("the PLAN's rows, when the object has none of its own", () => {
     // The whole point of the change: an object with nothing stored is not empty,
     // it shows the checklist the operator keeps in Planning Center.
-    const rows = checklistRows([], PLAN);
+    const { rows } = checklistRows([], PLAN);
     assert.deepEqual(
       rows.map((r) => r.text),
       ["Wireless batteries fresh", "CO2 tank hooked up"],
@@ -98,20 +98,33 @@ describe("which list the object shows", () => {
   });
 
   test("carries each row's tick across, not just its text", () => {
-    assert.deepEqual(checklistRows([], PLAN).map((r) => r.done), [false, true]);
+    assert.deepEqual(checklistRows([], PLAN).rows.map((r) => r.done), [false, true]);
   });
 
   test("keys a row by the plan row's key, so a tick can be addressed", () => {
-    assert.equal(checklistRows([], PLAN)[0].id, "Production wireless batteries fresh");
+    assert.equal(checklistRows([], PLAN).rows[0].id, "Production wireless batteries fresh");
   });
 
   test("an object's OWN items still win, so no stored data is hidden", () => {
     const own = [{ id: "a", text: "Something stored", done: false }];
-    assert.deepEqual(checklistRows(own, PLAN).map((r) => r.text), ["Something stored"]);
+    assert.deepEqual(checklistRows(own, PLAN).rows.map((r) => r.text), ["Something stored"]);
   });
 
   test("is empty only when BOTH are", () => {
-    assert.deepEqual(checklistRows([], []), []);
+    assert.deepEqual(checklistRows([], []).rows, []);
+  });
+
+  test("says WHERE the rows came from, so a tick cannot be routed to the other store", () => {
+    // The caller needs this answer to decide whether a tick writes to the plan
+    // or to the object's own items, and it was computing `own.length === 0` a
+    // second time to get it. Two derivations of one decision is a checkbox that
+    // moves and then moves back: rows drawn from the plan, tick written to the
+    // object's store, and the next render putting the plan's value straight back.
+    assert.equal(checklistRows([], PLAN).fromPlan, true);
+    assert.equal(checklistRows([{ id: "a", text: "Stored", done: false }], PLAN).fromPlan, false);
+    // Empty on BOTH sides is still the plan's list — an object with no items of
+    // its own has no store of its own to tick into.
+    assert.equal(checklistRows([], []).fromPlan, true);
   });
 });
 

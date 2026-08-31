@@ -133,9 +133,15 @@ export interface ChecklistRow {
 export function checklistRows(
   own: readonly ChecklistRow[],
   planRows: readonly { key: string; text: string; done: boolean }[],
-): ChecklistRow[] {
-  if (own.length > 0) return [...own];
-  return planRows.map((r) => ({ id: r.key, text: r.text, done: r.done }));
+): { rows: ChecklistRow[]; fromPlan: boolean } {
+  // Returns WHICH LIST as well as the rows, because the caller needs the same
+  // answer to route a tick and was re-deriving it: `own.length === 0`, computed
+  // a second time two lines below. One of them changing without the other means
+  // the rows come from the plan while the tick writes to the object's own store,
+  // which is a checkbox that moves and then moves back — and this function was
+  // extracted precisely so the choice could be tested in one place.
+  if (own.length > 0) return { rows: [...own], fromPlan: false };
+  return { rows: planRows.map((r) => ({ id: r.key, text: r.text, done: r.done })), fromPlan: true };
 }
 
 /**
@@ -172,8 +178,7 @@ export function ChecklistObject({
   const own = content.items ?? [];
   const plan = usePlanChecklist();
 
-  const fromPlan = own.length === 0;
-  const rows = checklistRows(own, plan.rows);
+  const { rows, fromPlan } = checklistRows(own, plan.rows);
 
   function toggle(id: string) {
     if (fromPlan) { void plan.toggle(id, !rows.find((r) => r.id === id)?.done); return; }
@@ -187,8 +192,19 @@ export function ChecklistObject({
         <div style={{ opacity: 0.5 }}>
           {/* Says which thing is missing. "Empty" for a wall display, because a
               passer-by cannot act on it and a settings instruction on a screen
-              in the auditorium is noise. */}
-          {editable ? "No plan notes chosen — Settings, Plan" : "Empty"}
+              in the auditorium is noise.
+
+              A FAILED READ outranks both, and only because the hook now says so:
+              it used to answer a failure with an empty DTO, so the operator was
+              sent to a Plan setting that was already correct while Planning
+              Center being unreachable went unmentioned anywhere. */}
+          {plan.error
+            ? editable
+              ? `Could not read the plan's notes: ${plan.error}`
+              : "Plan notes unavailable"
+            : editable
+              ? "No plan notes chosen — Settings, Plan"
+              : "Empty"}
         </div>
       )}
       {rows.map((i) => (

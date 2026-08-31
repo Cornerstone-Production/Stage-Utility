@@ -203,16 +203,16 @@ export function ScoreCenter({
       );
     }
 
-    case "basketball":
-    case "hockey": {
-      const { period, clock } = splitDetail(game.shortDetail, game.clock);
-      return (
-        <div className="score-center">
-          <Period>{period}</Period>
-          {clock && <span className="score-clock">{clock}</span>}
-        </div>
-      );
-    }
+    // Basketball and hockey deliberately have no arm of their own. They were
+    // written as one, byte-identical to the default below — the same splitDetail
+    // call and the same JSX — so deleting the labels changed nothing at all and
+    // the switch claimed a specialisation that did not exist. ESPN's
+    // pre-formatted period and clock are already right for both, and there is no
+    // situation object to draw: a bases diamond in a basketball game is the
+    // nonsense this switch exists to prevent, not a shot clock nobody sends.
+    //
+    // Give either one a centre of its own when there is something sport-specific
+    // to put in it — a power play, a bonus — and it gets a case then.
 
     default: {
       // No situation at all. ESPN's own pre-formatted string is already
