@@ -41,7 +41,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 
-import { describeOffender, logOffenders } from "./console-scan.js";
+import { consoleCalls, describeOffender, logOffenders } from "./console-scan.js";
 import { scrub, scrubError } from "./scrub.js";
 import { fileURLToPath } from "node:url";
 
@@ -83,6 +83,106 @@ const REQUEST_FACING = [
   "view-routes.ts",
 ];
 
+/**
+ * Every non-test `.ts` under main/services that actually makes a console call,
+ * relative to this directory.
+ *
+ * Matched with the shared scan rather than on the word "console", so a file that
+ * only talks about logging in a comment is not counted as logging.
+ *
+ * This exists because the list above described what the walk FOUND, not what
+ * exists. `routes/` is walked, so a new route forces a decision; everything
+ * outside it was four hardcoded paths, and a new service that logs wire data was
+ * simply never looked at — with the exact-list assertion still green, because
+ * the list and the walk agreed with each other about a set that was too small.
+ * That is the failure mode this whole file is about, one level up.
+ */
+function loggingServices(dir = HERE, prefix = ""): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...loggingServices(path.join(dir, entry.name), rel));
+    else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
+      if (consoleCalls(readFileSync(path.join(dir, entry.name), "utf8")).length > 0) out.push(rel);
+    }
+  }
+  return out.sort();
+}
+
+/** Held to the same rule by a different guard. */
+const ELSEWHERE = "held to this rule by pco-link-safety.test.ts, which scans both PCO clients";
+
+/** The scope this file's header already states, applied consistently. */
+const DEVICE =
+  "logs what a device, an appliance or a provider said back — the threat model the " +
+  "wireless drivers are already excluded for at the top of this file, and a different change";
+
+/**
+ * The honest label. Being here is a decision RECORDED, not a clean bill of
+ * health: keyed-record-store.ts logs a record's file name, and for some stores
+ * that name comes from a key the operator typed. Moving one of these into the
+ * scanned set is the cheap follow-up, and the exclusion is written down so
+ * somebody can.
+ */
+const UNAUDITED =
+  "logs its own operation and its own failures; not audited line by line — listed so " +
+  "the set is closed, NOT certified clean";
+
+/** Files that log and are deliberately NOT scanned, each with its reason. */
+const NOT_SCANNED = new Map<string, string>([
+  ["pco-calendar-service.ts", ELSEWHERE],
+
+  ["device-manager.ts", DEVICE],
+  ["kiosk-responder.ts", DEVICE],
+  ["live-poller.ts", DEVICE],
+  ["obs-protocol.ts", DEVICE],
+  ["obs-service.ts", DEVICE],
+  ["osc-manager.ts", DEVICE],
+  ["prodcom-service.ts", DEVICE],
+  ["propresenter-service.ts", DEVICE],
+  ["pvp-service.ts", DEVICE],
+  ["reaper-service.ts", DEVICE],
+  ["remote-server.ts", DEVICE],
+  ["resi-service.ts", DEVICE],
+  ["rosstalk-manager.ts", DEVICE],
+  ["scores-service.ts", DEVICE],
+  ["sensource-service.ts", DEVICE],
+  ["smaart-service.ts", DEVICE],
+  ["tsl-service.ts", DEVICE],
+  ["wireless-manager.ts", DEVICE],
+  ["youtube-service.ts", DEVICE],
+
+  ["app-paths.ts", UNAUDITED],
+  ["app-root.ts", UNAUDITED],
+  ["archive/archive-bundle.ts", UNAUDITED],
+  ["archive/csv-appender.ts", UNAUDITED],
+  ["backup-scheduler.ts", UNAUDITED],
+  ["baptism-timer-service.ts", UNAUDITED],
+  ["bar-config-store.ts", UNAUDITED],
+  ["branding-image-store.ts", UNAUDITED],
+  ["broadcaster.ts", UNAUDITED],
+  ["cache-maintenance.ts", UNAUDITED],
+  ["calendar-broadcaster.ts", UNAUDITED],
+  ["config-snapshot.ts", UNAUDITED],
+  ["data-store.ts", UNAUDITED],
+  ["encryption.ts", UNAUDITED],
+  ["history-edit.ts", UNAUDITED],
+  ["keyed-record-store.ts", UNAUDITED],
+  ["layout-image-store.ts", UNAUDITED],
+  ["layout-library.ts", UNAUDITED],
+  ["pco-attachment-cache.ts", UNAUDITED],
+  ["photo-cache.ts", UNAUDITED],
+  ["reconcile-records.ts", UNAUDITED],
+  ["scriptview-layouts-store.ts", UNAUDITED],
+  ["secrets.ts", UNAUDITED],
+  ["service-recorder.ts", UNAUDITED],
+  ["slots-store.ts", UNAUDITED],
+  ["spl-recorder.ts", UNAUDITED],
+  ["stream-start-store.ts", UNAUDITED],
+  ["update/relaunch.ts", UNAUDITED],
+  ["updater.ts", UNAUDITED],
+]);
+
 /** The files an HTTP request's own data can reach, as paths. */
 function requestFacingFiles(): string[] {
   const routes = path.join(HERE, "routes");
@@ -118,6 +218,42 @@ describe("log injection at the request boundary", () => {
       [...REQUEST_FACING].sort(),
       "the request-facing set has changed; add the new file to REQUEST_FACING deliberately, " +
         "having first checked that its log lines are scrubbed",
+    );
+  });
+
+  it("and every service that logs at all is either scanned or excluded on purpose", () => {
+    // The boundary itself, DERIVED rather than declared. The list above is only
+    // as good as the walk that feeds it: `routes/` is read off disk, so a new
+    // route forces a decision, but everything outside it was four hardcoded
+    // paths — and a new service logging wire data was never looked at while this
+    // suite stayed green, because the list and the walk agreed with each other
+    // about a set that was too small.
+    //
+    // It has already happened: checklist-ticks-store.ts arrived logging a plan
+    // id and a row label that both come off the wire, CodeQL found an unscrubbed
+    // interpolation in it, and nothing here would ever have opened the file.
+    //
+    // Both directions are asserted, so neither half can drift. Nothing that logs
+    // may be unaccounted for; and no exclusion may name a file that has stopped
+    // logging or stopped existing — which is also what catches a walk that
+    // silently returns nothing, since every exclusion would then be stale.
+    const logging = loggingServices();
+    const scanned = new Set(files.map((f) => path.relative(HERE, f)));
+
+    const unaccounted = logging.filter((f) => !scanned.has(f) && !NOT_SCANNED.has(f));
+    assert.deepEqual(
+      unaccounted,
+      [],
+      "these files under main/services log and nothing has decided whether an HTTP request " +
+        "can reach what they log. Add each to requestFacingFiles() or to NOT_SCANNED with a " +
+        `reason:\n  ${unaccounted.join("\n  ")}`,
+    );
+
+    const stale = [...NOT_SCANNED.keys()].filter((f) => !logging.includes(f)).sort();
+    assert.deepEqual(
+      stale,
+      [],
+      `these exclusions name a file that no longer logs, or no longer exists:\n  ${stale.join("\n  ")}`,
     );
   });
 
