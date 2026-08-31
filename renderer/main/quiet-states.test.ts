@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { withoutComments } from "../lib/source-comments.js";
+import { withoutComments } from "../source-comments.js";
 
 /**
  * The component's source with every comment blanked.
@@ -28,7 +28,7 @@ import { withoutComments } from "../lib/source-comments.js";
  *
  * Blanked character for character, so the `indexOf` cuts below land where they
  * did. The stripper is a scanner rather than a regex, and its own shapes are
- * asserted in renderer/lib/source-comments.test.ts.
+ * asserted in renderer/source-comments.test.ts.
  */
 const SRC = withoutComments(readFileSync(new URL("./layout-renderer.tsx", import.meta.url), "utf8"));
 

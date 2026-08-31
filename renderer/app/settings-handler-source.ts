@@ -21,7 +21,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { withoutComments } from "../lib/source-comments.js";
+import { withoutComments } from "../source-comments.js";
 
 const RAW = readFileSync(new URL("./use-stage-settings.ts", import.meta.url), "utf8");
 /** The same text with every comment blanked — character for character, so an
