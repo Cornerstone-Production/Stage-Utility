@@ -52,7 +52,7 @@ import { useResiState, useYouTubeState } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
 import { useScoresState } from "../../main/use-scores-state";
 import { inkFor } from "../../main/score-ink";
-import { pickGame } from "../../main/scores-object";
+import { emptyReason, pickGame } from "../../main/scores-object";
 
 /**
  * The same set as a VALUE, so a renderer can ask before it starts matching.
@@ -745,14 +745,11 @@ export function ScoresCard({ game = "auto" }: { game?: "auto" | string }) {
   const games = featured ? [featured, ...all.filter((g) => g !== featured)] : all;
 
   if (games.length === 0) {
-    // Three different facts, kept apart. "No games today" for a failed request
-    // is a factual lie about the operator's own schedule.
-    const why = scores?.error
-      ? "Scores unavailable"
-      : scores?.connected
-        ? "No games today"
-        : "No teams followed";
-    return <Stat label="Scores" value={why} />;
+    // Three different facts, kept apart — "No games today" for a failed request
+    // is a factual lie about the operator's own schedule. Shared with the wall
+    // widget so the two cannot drift; the branches used to be written out here
+    // in a different order from there, which is how they would have.
+    return <Stat label="Scores" value={emptyReason(scores)} />;
   }
 
   return (

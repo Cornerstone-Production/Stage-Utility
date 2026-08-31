@@ -609,3 +609,40 @@ describe("placing the stack", () => {
     assert.equal(layoutStack([], 0, GAP, true), 0);
   });
 });
+
+describe("a card names its game once, not twice", () => {
+  // ScoreCard sets an aria-label on its role="button" wrapper and then renders a
+  // ScoreStrip, which labels itself by default. A screen reader in browse mode
+  // announces a labelled element and then the labelled element inside it, so the
+  // whole reading — both teams, both scores, the inning — arrives twice for one
+  // card. `labelled={false}` on the inner strip is what stops that.
+  //
+  // Counted, not merely checked for presence: the pre-fix DOM has the label
+  // twice, so an assertion that one exists passes on the bug.
+  test("THE GUARD: the reading is not announced twice", () => {
+    const { container } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    const cards = [...container.querySelectorAll("[data-score-card]")];
+    assert.ok(cards.length > 0, "no cards rendered, so this asserts nothing");
+
+    for (const card of cards) {
+      // The card's own label plus any label on a descendant.
+      const labelled = [card, ...card.querySelectorAll("[aria-label]")]
+        .filter((el) => (el.getAttribute("aria-label") ?? "").includes("Chicago Cubs"));
+      assert.equal(
+        labelled.length,
+        1,
+        `the game is named ${labelled.length} times inside one card — a browse-mode reader says it all again`,
+      );
+    }
+  });
+
+  test("and the capsule still names the game, with its own suffix", () => {
+    // NOT preview: a preview chip renders an inert <span> with no label at all
+    // (it is the configurator's dead sample), so asserting on it asserts nothing.
+    const { container } = render(<ScoreCapsule game={game()} scored={null} />);
+    const el = container.querySelector("[aria-label]");
+    const label = el?.getAttribute("aria-label") ?? "";
+    assert.match(label, /Chicago Cubs 6/, "the capsule stopped naming the game");
+    assert.match(label, /Cincinnati Reds 2/);
+  });
+});
