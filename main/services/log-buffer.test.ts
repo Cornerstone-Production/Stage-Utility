@@ -99,3 +99,41 @@ describe("getLevelCounts", () => {
     assert.equal(after.errors, before.errors + 2);
   });
 });
+
+// A /log tab left open across a restart.
+//
+// seq is per-process and starts again at 1 — the LogLine doc says so and calls
+// it deliberate. The viewer does not know a restart happened: it keeps polling
+// with the cursor it held, which is now ABOVE anything this process has written.
+// The filter matches nothing, the client's apply() takes its early-out on an
+// empty non-reset response and leaves `since` exactly where it was, and the page
+// goes permanently silent with its header still ticking. Once the new process
+// logs past that number it starts appending again, having dropped every line in
+// between — which is the run-up to whatever the operator opened /log to look at.
+describe("a cursor from before a restart", () => {
+  test("is answered with the whole buffer and reset, not silence", () => {
+    const stale = getLogSince(null).latestSeq + 500; // a higher-numbered process
+    const slice = getLogSince(stale);
+
+    assert.equal(
+      slice.reset,
+      true,
+      "the viewer was told to append nothing, so it keeps its dead cursor and never updates again",
+    );
+    assert.equal(slice.lines.length, getLogLines().length, "the reset handed back an empty buffer");
+    assert.ok(slice.latestSeq < stale, "this test needs a cursor that really is past the newest line");
+  });
+
+  test("does not drop the new process's first lines", () => {
+    // The second half of the failure: even a client that somehow recovered its
+    // cursor would have lost everything logged below the stale number.
+    const stale = getLogSince(null).latestSeq + 500;
+    addLogLine("error", "the failure the operator opened /log to read");
+
+    const slice = getLogSince(stale);
+    assert.ok(
+      slice.lines.some((l) => l.msg === "the failure the operator opened /log to read"),
+      "a line written after the restart was invisible to a tab that was already open",
+    );
+  });
+});

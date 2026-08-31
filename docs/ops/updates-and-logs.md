@@ -111,6 +111,11 @@ a token typed against either spelling works. `/log` is the canonical URL and is
 what the app itself links to. Both are reserved, so neither can be taken as a
 display slug.
 
+`/logs` was a legal display slug before it became this alias. A display already
+holding it is renamed at the next start — see
+[Friendly URLs](../display-urls.md#friendly-urls) — and the change is logged
+under `[slug-migration]`.
+
 The token gate covers `/log`, `/logs` and `/api/log` alike. A 401 on any of them
 means the token is missing or wrong, not that the server is down. An unauthorised
 `/logs` answers 401 rather than redirecting, so a client that does not follow

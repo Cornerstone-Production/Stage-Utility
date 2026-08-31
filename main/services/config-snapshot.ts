@@ -23,6 +23,7 @@ import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage } from "./image-files.js";
 import { configFilenames, storesOfClass } from "./stores.js";
 import { initialFloor, type IdKind } from "./id-allocator.js";
+import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
@@ -208,18 +209,56 @@ function mergeIdFloors(contents: object, live: Record<string, unknown> | null, f
     output: idsIn((contents as { outputs?: unknown }).outputs),
   };
 
+  /**
+   * A floor is a number or it is nothing.
+   *
+   * The value comes out of a snapshot file — hand-edited, corrupted or hostile —
+   * and validate() checks only `kind` and `files`. Anything else is dropped to 0
+   * and SAID SO below rather than coerced: falling back to the collision walk
+   * gives an id nothing else is using, where a coerced floor would hand out one
+   * that is.
+   */
   const asNumber = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-  const merged: Record<string, number> = {};
+  // A Map, and Object.fromEntries at the end: the keys are snapshot-controlled,
+  // and this way nothing is ever written to a computed property name.
+  const merged = new Map<string, number>();
+  const ignored: string[] = [];
   for (const kind of new Set([...Object.keys(live ?? {}), ...Object.keys(incoming), ...Object.keys(restoredIds)])) {
-    // initialFloor rather than a second id parser: it routes through nextId, so
-    // the number parsing and the collision walk cannot disagree with the
-    // allocator that will consume this floor.
-    const fromRestored = kind in restoredIds ? initialFloor(kind as IdKind, restoredIds[kind as IdKind]) : 0;
+    // Unknown kinds are carried through — a snapshot from a newer build knows
+    // about ids this one cannot allocate — but never these three. They are not
+    // id kinds, they are the names an attacker reaches for, and the same set is
+    // refused by notes-store and checklist-ticks-store for the same reason.
+    if (kind === "__proto__" || kind === "constructor" || kind === "prototype") {
+      ignored.push(kind);
+      continue;
+    }
+    // hasOwn rather than `in`: the key is untrusted, and "constructor" is `in`
+    // every object — which is not theoretical here. A snapshot holding
+    // `"idFloors": {"view": 3, "constructor": 1}` made this branch true, handed
+    // initialFloor Object.prototype.constructor, and threw
+    // "TypeError: function is not iterable" out of nextId's `new Set(...)`.
+    // writeSnapshot writes one file at a time, so views.json was already on disk
+    // when the loop died: a half-restored box, with views referencing output ids
+    // the un-restored settings.json does not have. routes/context.ts:60 carries
+    // the same note for the same reason.
+    const fromRestored = Object.hasOwn(restoredIds, kind)
+      ? initialFloor(kind as IdKind, restoredIds[kind as IdKind])
+      : 0;
+    if (Object.hasOwn(incoming, kind) && asNumber(incoming[kind]) === 0 && incoming[kind] !== 0) {
+      ignored.push(kind);
+    }
     const best = Math.max(asNumber(live?.[kind]), asNumber(incoming[kind]), fromRestored);
-    if (best > 0) merged[kind] = best;
+    if (best > 0) merged.set(kind, best);
   }
-  if (Object.keys(merged).length === 0) return contents;
-  return { ...(contents as Record<string, unknown>), idFloors: merged };
+  if (ignored.length > 0) {
+    console.warn(
+      `[config-snapshot] ignored ${ignored.length} id floor(s) the snapshot could not supply — ` +
+        `not a number, or not a usable name: ${scrub(ignored.join(", "))}. ` +
+        "Ids for those kinds fall back to the collision walk.",
+    );
+  }
+  if (merged.size === 0) return contents;
+  return { ...(contents as Record<string, unknown>), idFloors: Object.fromEntries(merged) };
 }
 
 /**

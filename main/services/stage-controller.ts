@@ -3,6 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
+import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
@@ -44,6 +45,7 @@ import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { updater } from "./updater.js";
 import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
+import { WriteQueue } from "./write-queue.js";
 import { scriptViewRolesStore, seedRoles } from "./scriptview-roles-store.js";
 import type { CategoryRole } from "../types/scriptview-roles.js";
 
@@ -336,10 +338,34 @@ export class StageController {
   /** A roster tick is in flight — a slow one must not overlap the next. */
   private rosterRefreshing = false;
 
+  /**
+   * Serialises every rewrite of `state.outputs`.
+   *
+   * All five of them share one shape — read `this.state.outputs`, compute the
+   * next array, assign, persist the WHOLE array — and settingsStore.patch is
+   * "atomic only for the values it is handed" (its own words). An array computed
+   * from a read taken before a concurrent rewrite's write lands replaces the
+   * list and silently drops whatever that one added: add a screen while a screen
+   * is being renamed and settings.json keeps one of the two, with both calls
+   * reporting success and the screen gone at the next restart.
+   *
+   * Fixing it five times over would be five copies to drift; serialising the
+   * read-compute-assign-write instead makes each one indivisible, which is what
+   * they all already assumed they were. Nothing in here re-enters, so it cannot
+   * deadlock: the slug/view/mode setters validate and then call
+   * commitOutputPatch, they do not nest.
+   */
+  private outputWrites = new WriteQueue();
+
   // ── Init ─────────────────────────────────────────────────────────────
 
   async init(): Promise<void> {
     await notesStore.init();
+    // Beside notesStore, because `get` is synchronous and reads the module cache
+    // directly: without this the first render after a restart answered from an
+    // empty Map and showed every completed job as not done. It self-healed on
+    // the next tick, which is why it never got reported.
+    await checklistTicksStore.init();
     // Returns the failure rather than throwing it: the bar's saved order is
     // rewritten on the first start after the service type became an item of its
     // own, and a data directory that has filled up must not take the server down
@@ -546,12 +572,24 @@ export class StageController {
       );
     }
     const result = migrateSurfaces(cleaned, outputs);
+    // A stored slug is only ever checked on the way IN, so a path the app claims
+    // for itself later silently shadows the screen holding it. Re-checked here,
+    // on both load paths, for the same reason the surface migration is.
+    const slugs = migrateReservedSlugs(result.outputs);
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
-    const outputsChanged = result.outputs.some((o, i) => o !== outputs[i]);
+    const outputsChanged =
+      slugs.changed.length > 0 || result.outputs.some((o, i) => o !== outputs[i]);
     if (!viewsChanged && !outputsChanged) return { views, outputs };
 
     if (viewsChanged) await viewsStore.save(result.views);
-    if (outputsChanged) await settingsStore.patch({ outputs: result.outputs });
+    if (outputsChanged) await settingsStore.patch({ outputs: slugs.outputs });
+
+    // Logged in full, and this one is not optional: the operator's screen has a
+    // different URL than it did yesterday, and the only way they learn that is
+    // by being told.
+    for (const line of slugMigrationLog(slugs)) {
+      console.warn(`[slug-migration] ${scrub(line)}`);
+    }
 
     // Logged in full: a stray live-controls left on a wall display years ago
     // will pull that screen into panel mode, and the only way an operator learns
@@ -559,7 +597,7 @@ export class StageController {
     for (const line of migrationLog(result)) {
       console.log(`[surface-migration] ${scrub(line)}`);
     }
-    return { views: result.views, outputs: result.outputs };
+    return { views: result.views, outputs: slugs.outputs };
   }
 
   // ── PCO credentials ───────────────────────────────────────────────────
@@ -2373,13 +2411,19 @@ export class StageController {
         this.state = { ...this.state, notesByObject: notesStore.all() };
       }
     }
-    // Unroute any outputs pointing at this view (render placeholder, never fail).
-    const outputs = this.state.outputs.map((o) =>
-      o.viewId === id ? { ...o, viewId: null } : o,
-    );
-    this.state = { ...this.state, views, outputs };
+    this.state = { ...this.state, views };
     await viewsStore.save(views);
-    await settingsStore.patch({ outputs });
+    // Unroute any outputs pointing at this view (render placeholder, never fail).
+    // views.json is still written first, so a crash between the two leaves an
+    // output pointing at a view that is gone — which renders a placeholder —
+    // rather than a view nothing routes to that comes back on the next boot.
+    await this.outputWrites.enqueue(async () => {
+      const outputs = this.state.outputs.map((o) =>
+        o.viewId === id ? { ...o, viewId: null } : o,
+      );
+      this.state = { ...this.state, outputs };
+      await settingsStore.patch({ outputs });
+    });
     await slotsStore.removeDisplay(id);
     this.rawSlotsByView.delete(id);
     this.recomputeResolved();
@@ -2430,22 +2474,34 @@ export class StageController {
     // outputs list that could not be built until the id existed. The whole
     // read-allocate-write happens inside the settings write queue, so two
     // concurrent adds cannot be handed the same id.
-    const { output, outputs } = await settingsStore.allocateIds(
-      "output",
-      (next): { output: Output; outputs: Output[] } => {
-        const id = next(this.state.outputs.map((o) => o.id));
-        const num = parseInt(id.replace("display-", ""), 10);
-        const created: Output = {
-          id,
-          name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
-          viewId: viewId ?? null,
-        };
-        return { output: created, outputs: [...this.state.outputs, created] };
-      },
-      (allocated) => ({ outputs: allocated.outputs }),
-    );
+    const output = await this.outputWrites.enqueue(async () => {
+      const allocated = await settingsStore.allocateIds(
+        "output",
+        (next): { output: Output; outputs: Output[] } => {
+          const id = next(this.state.outputs.map((o) => o.id));
+          const num = parseInt(id.replace("display-", ""), 10);
+          const created: Output = {
+            id,
+            name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
+            viewId: viewId ?? null,
+          };
+          const outputs = [...this.state.outputs, created];
+          // State FIRST, in the same synchronous turn as the read above and
+          // before the write — what createView, duplicateView and
+          // commitOutputPatch all do. Assigning it after the await instead let
+          // this line clobber, in memory, an edit that landed while the write
+          // was in flight. The queue above is what stops the disk half: that
+          // edit's patch used to land AFTER this write and replace the whole
+          // array, so settings.json lost the new display and the screen was
+          // gone at the next restart.
+          this.state = { ...this.state, outputs };
+          return { output: created, outputs };
+        },
+        (a) => ({ outputs: a.outputs }),
+      );
+      return allocated.output;
+    });
     console.log(`[stage-controller] addOutput id=${scrub(output.id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
-    this.state = { ...this.state, outputs };
     this.recomputeResolved();
     this.broadcast();
     return { state: this.state, output };
@@ -2490,10 +2546,12 @@ export class StageController {
     patch: Partial<Output>,
     logLine: string,
   ): Promise<StageState> {
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, ...patch } : o));
     console.log(logLine);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
+    await this.outputWrites.enqueue(async () => {
+      const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, ...patch } : o));
+      this.state = { ...this.state, outputs };
+      await settingsStore.patch({ outputs });
+    });
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -2681,19 +2739,21 @@ export class StageController {
 
   /** Reorder outputs to match the given id order (drag-and-drop). */
   async reorderOutputs(orderedIds: string[]): Promise<StageState> {
-    const byId = new Map(this.state.outputs.map((o) => [o.id, o]));
-    const reordered: Output[] = [];
-    for (const id of orderedIds) {
-      const o = byId.get(id);
-      if (o) {
-        reordered.push(o);
-        byId.delete(id);
+    await this.outputWrites.enqueue(async () => {
+      const byId = new Map(this.state.outputs.map((o) => [o.id, o]));
+      const reordered: Output[] = [];
+      for (const id of orderedIds) {
+        const o = byId.get(id);
+        if (o) {
+          reordered.push(o);
+          byId.delete(id);
+        }
       }
-    }
-    for (const o of byId.values()) reordered.push(o);
-    console.log(`[stage-controller] reorderOutputs → ${scrub(reordered.map((o) => o.id).join(", "))}`);
-    this.state = { ...this.state, outputs: reordered };
-    await settingsStore.patch({ outputs: reordered });
+      for (const o of byId.values()) reordered.push(o);
+      console.log(`[stage-controller] reorderOutputs → ${scrub(reordered.map((o) => o.id).join(", "))}`);
+      this.state = { ...this.state, outputs: reordered };
+      await settingsStore.patch({ outputs: reordered });
+    });
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -2707,9 +2767,11 @@ export class StageController {
       throw new Error(`outputs:remove — output ${id} not found`);
     }
     console.log(`[stage-controller] removeOutput id=${scrub(id)}`);
-    const outputs = this.state.outputs.filter((o) => o.id !== id);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
+    await this.outputWrites.enqueue(async () => {
+      const outputs = this.state.outputs.filter((o) => o.id !== id);
+      this.state = { ...this.state, outputs };
+      await settingsStore.patch({ outputs });
+    });
     this.recomputeResolved();
     this.broadcast();
     return this.state;

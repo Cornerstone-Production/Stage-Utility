@@ -129,3 +129,53 @@ describe("the file does not grow without limit", () => {
     );
   });
 });
+
+// A refused plan id is the one value here that reaches a message WITHOUT having
+// gone through the validator — it is refused precisely because it did not match.
+// The message names the id that was refused, and `/log` is a LAN-visible page
+// rendering one record per line, so a control character in it forges a record.
+//
+// Written as escapes rather than literal bytes: a source file holding real
+// control characters is treated as binary by git and cannot be reviewed.
+describe("a refused plan id cannot forge a log record", () => {
+  // eslint-disable-next-line no-control-regex
+  const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+
+  const REFUSED: ReadonlyArray<readonly [string, string]> = [
+    ["a newline", "x\n[stage-controller] plan switched to 77001122"],
+    ["a carriage return", "x\r[updater] restarting"],
+    ["a terminal escape", "x\u001b[2J"],
+  ];
+
+  for (const [what, planId] of REFUSED) {
+    it(`refuses ${what} without carrying it into the message`, async () => {
+      const err = await checklistTicksStore
+        .set(planId, "Production|Batteries fresh", true)
+        .then(
+          () => null,
+          (e: unknown) => e as Error,
+        );
+
+      assert.ok(err, `${what} in a plan id must be refused, not stored`);
+      assert.ok(
+        !CONTROL.test(err.message),
+        `the refusal carried ${what} straight into its message — one record on /log ` +
+          "becomes two, and the second is indistinguishable from one the server wrote: " +
+          JSON.stringify(err.message),
+      );
+    });
+  }
+
+  it("still names the id that was refused, so the message is worth reading", async () => {
+    const err = await checklistTicksStore
+      .set("plan\nid", "Production|Batteries fresh", true)
+      .then(
+        () => null,
+        (e: unknown) => e as Error,
+      );
+    assert.ok(
+      err?.message.includes("plan\\nid"),
+      `escaping must not swallow the id — an operator has to see WHICH id was refused: ${err?.message}`,
+    );
+  });
+});

@@ -208,3 +208,57 @@ describe("a restore never lowers an id floor", () => {
     );
   });
 });
+
+// A snapshot's id floors are read with keys the snapshot itself chose, and a
+// restore that dies half-way is worse than one that never started: writeSnapshot
+// writes files one at a time, so views.json is already on disk when the loop
+// aborts — views referencing output ids the un-restored settings.json does not
+// have. validate() checks `kind` and `files` and nothing about idFloors.
+describe("a hand-edited id floor cannot abort a restore half-written", () => {
+  const SETTINGS = path.join(TMP, "settings.json");
+  const VIEWS = path.join(TMP, "views.json");
+
+  afterEach(async () => {
+    quiet();
+    await fs.rm(SETTINGS, { force: true });
+    await fs.rm(VIEWS, { force: true });
+  });
+
+  it("finishes the restore when a floor key is a prototype name", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", idFloors: { view: 5 } }), "utf8");
+
+    // `"constructor" in restoredIds` is TRUE on a plain object literal, so
+    // initialFloor was handed Object.prototype.constructor and nextId's
+    // `new Set(existingIds)` threw "function is not iterable". views.json is
+    // listed first so it is already written when that happens.
+    const applied = await configSnapshot.apply(
+      snapshotOf({
+        "views.json": [{ id: "view-2", name: "V2", kind: "slots" }],
+        "settings.json": { appName: "Restored", idFloors: { view: 3, constructor: 1 } },
+      }),
+    );
+
+    assert.deepEqual(
+      applied,
+      ["views.json", "settings.json"],
+      "the restore died between two files — views.json is on disk and settings.json is not",
+    );
+    const written = JSON.parse(await fs.readFile(SETTINGS, "utf8")) as {
+      appName: string;
+      idFloors?: Record<string, unknown>;
+    };
+    assert.equal(written.appName, "Restored");
+    // view: the live 5 beats the snapshot's 3. output: its reserved minimum,
+    // because display-1 is the primary output and is never allocated. Nothing
+    // named "constructor".
+    assert.deepEqual(
+      written.idFloors,
+      { view: 5, output: 2 },
+      "the live floor should still win, and nothing else be recorded",
+    );
+    assert.ok(
+      !Object.hasOwn(written.idFloors ?? {}, "constructor"),
+      "a prototype name was written into settings.json as an id kind",
+    );
+  });
+});
