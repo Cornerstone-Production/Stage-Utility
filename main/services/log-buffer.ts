@@ -127,8 +127,8 @@ export interface LogSlice {
 }
 
 /**
- * Lines newer than `since`, or everything when `since` is null or has already
- * been evicted.
+ * Lines newer than `since`, or everything when `since` is null, has already been
+ * evicted, or belongs to a different process.
  *
  * The eviction test compares against the OLDEST retained seq rather than
  * counting: a client that has seen seq N is only safe to append to if seq N+1 is
@@ -137,12 +137,24 @@ export interface LogSlice {
 export function getLogSince(since: number | null): LogSlice {
   const latestSeq = lines.length ? lines[lines.length - 1].seq : 0;
   const oldest = lines.length ? lines[0].seq : 0;
-  if (since === null || !Number.isFinite(since) || since < 0) {
-    return { lines: lines.slice(), reset: true, latestSeq };
-  }
-  if (lines.length > 0 && since + 1 < oldest) {
-    return { lines: lines.slice(), reset: true, latestSeq };
-  }
+  const everything = (): LogSlice => ({ lines: lines.slice(), reset: true, latestSeq });
+
+  if (since === null || !Number.isFinite(since) || since < 0) return everything();
+
+  // A cursor from BEFORE a restart. seq is per-process and starts again at 1, so
+  // a cursor ABOVE the newest line cannot be a position in this buffer at all —
+  // and the viewer never notices, because a poll that returns nothing takes its
+  // early-out and leaves `since` where it was. The page then sits silent with its
+  // header still ticking, and once the new process has logged past that number it
+  // starts appending, having dropped every line in between. This is the surface
+  // CLAUDE.md points at for production evidence, and it broke precisely when
+  // somebody had left it open across the restart they were investigating.
+  //
+  // Answered as a reset — the same signal the client already handles for
+  // eviction — which puts its cursor back into this process's numbering.
+  if (since > latestSeq) return everything();
+
+  if (lines.length > 0 && since + 1 < oldest) return everything();
   return { lines: lines.filter((l) => l.seq > since), reset: false, latestSeq };
 }
 
