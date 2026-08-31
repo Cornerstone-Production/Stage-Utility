@@ -4,7 +4,7 @@
 
 import { errorMessage } from "./errors.js";
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
-import { scrub } from "./scrub.js";
+import { scrub, scrubError } from "./scrub.js";
 import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
@@ -662,7 +662,12 @@ export function foldConfigEntries(
   const secrets: Record<string, string> = Object.create(null);
   for (const [rawKey, value] of Object.entries(entries)) {
     if (!CONFIG_KEY.test(rawKey) || RESERVED_KEYS.has(rawKey)) {
-      console.warn(`[integration-manager] ignoring unusable config key on ${id}: ${rawKey}`);
+      // `rawKey` is a key straight off an HTTP body: POST /api/integrations/:id/config
+      // checks only that `config` is an object, so a key carrying a newline used to
+      // become a second record on /log, which renders `white-space: pre-wrap`.
+      console.warn(
+        `[integration-manager] ignoring unusable config key on ${scrub(id)}: ${scrub(rawKey)}`,
+      );
       continue;
     }
     // `rawKey` itself, and it is safe to write. CONFIG_KEY is fully anchored and
@@ -844,9 +849,7 @@ class IntegrationManager {
     const { automationEngine } = await import("./automation-engine.js");
     await automationEngine.init();
 
-    console.log("[integration-manager] init complete", {
-      integrations: Array.from(this.states.keys()),
-    });
+    console.log("[integration-manager] init complete", scrub(Array.from(this.states.keys()).join(", ")));
   }
 
   // ── Public API ─────────────────────────────────────────────────────────
@@ -970,7 +973,7 @@ class IntegrationManager {
     id: string,
     config: Record<string, unknown>,
   ): Promise<IntegrationState> {
-    console.log(`[integration-manager] setConfig ${id}`, Object.keys(config));
+    console.log(`[integration-manager] setConfig ${scrub(id)}`, scrub(Object.keys(config).join(", ")));
     const state = this.states.get(id);
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
@@ -1027,7 +1030,7 @@ class IntegrationManager {
       void this.verifyPcoCredentials()
         .then((ok) => (ok ? stageController.refresh() : undefined))
         .catch((err) => {
-          console.error("[integration-manager] post-save PCO refresh failed", err);
+          console.error("[integration-manager] post-save PCO refresh failed", scrubError(err));
         });
     }
 
@@ -1067,7 +1070,7 @@ class IntegrationManager {
   }
 
   async test(id: string): Promise<{ ok: boolean; message?: string }> {
-    console.log(`[integration-manager] test ${id}`);
+    console.log(`[integration-manager] test ${scrub(id)}`);
     const state = this.states.get(id);
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
@@ -1760,11 +1763,13 @@ class IntegrationManager {
       // Idempotent: start() is a no-op when it is already running.
       void import("./live-poller.js")
         .then((m) => m.livePoller.start())
-        .catch((err) => console.error("[integration-manager] could not restart the live poller:", err));
+        .catch((err) =>
+          console.error("[integration-manager] could not restart the live poller:", scrubError(err)),
+        );
       return true;
     } catch (err) {
       const msg = errorMessage(err);
-      console.warn(`[integration-manager] PCO credential check failed: ${msg}`);
+      console.warn(`[integration-manager] PCO credential check failed: ${scrub(msg)}`);
       this.setConnectionState("planning-center", "error", msg);
       this.broadcastStates();
       return false;
