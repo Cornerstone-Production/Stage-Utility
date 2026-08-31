@@ -15,6 +15,7 @@ import type {
   CalendarTagRefDTO,
   CalendarWindow,
 } from "../types/calendar.js";
+import { CALENDAR_REFRESH_MS } from "../types/calendar.js";
 import type { PcoNode, PcoResponse } from "./pco-service.js";
 import { pcoService, readPcoPages } from "./pco-service.js";
 import { scrub } from "./scrub.js";
@@ -53,8 +54,20 @@ export const CALENDAR_API_VERSION = "2018-11-01";
  * one shared map costs the live path its cache at the worst possible moment.
  */
 const MAX_CACHE_ENTRIES = 200;
-/** Event instances: an operator moves an event and expects to see it move. */
-const TTL_EVENTS_MS = 3 * 60_000;
+/**
+ * Event instances: an operator moves an event and expects to see it move.
+ *
+ * DERIVED from the broadcaster's refresh period, and strictly shorter than it.
+ * The two were written out separately as three minutes each, and a cache entry
+ * is stamped when its read COMPLETES — so the timer tick three minutes later
+ * landed a few hundred milliseconds inside the entry and was served it. Every
+ * other tick did a real read: the true interval was six minutes while two files
+ * and the docs said three. A minute of headroom is far more than the read itself
+ * can take (the request budget is well under that), so every tick is now a real
+ * read, and this cache goes on absorbing the ad-hoc reads it is there for —
+ * a browser opening the calendar, a second view with the same filters.
+ */
+const TTL_EVENTS_MS = CALENDAR_REFRESH_MS - 60_000;
 /** Calendars and tags: an org's vocabulary, effectively static within a session. */
 const TTL_METADATA_MS = 15 * 60_000;
 /**

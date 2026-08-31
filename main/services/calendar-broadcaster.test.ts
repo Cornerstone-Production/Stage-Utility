@@ -39,7 +39,7 @@ const { addBroadcastListener, setSubscriberCheck } = await import("./broadcaster
 let frames: { channel: string; payload: unknown }[] = [];
 
 /** What getCalendarGrid will answer with next, by view id. */
-let answer: (viewId: string | null) => CalendarGrid = () => grid([]);
+let answer: (viewId: string | null) => CalendarGrid | Promise<CalendarGrid> = () => grid([]);
 
 /** How many times Planning Center was actually asked. */
 let reads = 0;
@@ -82,7 +82,9 @@ before(() => {
   // leaves every later test reading a stub that ignores `answer`.
   (stageController as unknown as { getCalendarGrid: unknown }).getCalendarGrid = async (viewId: string | null) => {
     reads++;
-    return answer(viewId);
+    // `answer` may hand back a promise, which is how the overlapping-refresh
+    // test holds one read open while a second arrives.
+    return await answer(viewId);
   };
 });
 
@@ -241,5 +243,94 @@ describe("a view that could not be read", () => {
     const failed = await calendarBroadcaster.refresh();
     assert.deepEqual(failed.map((f) => f.viewId), ["v-bad"]);
     assert.equal(calendarBroadcaster.getLatest()["v-good"].days[0].events[0].name, "Alpha");
+  });
+});
+
+describe("two refreshes at once", () => {
+  it("THE GUARD: the wall does not revert to what the slower read saw", async () => {
+    // The settings picker fires a forced refresh per toggle and does not wait
+    // for it. Two clicks in quick succession therefore put two reads of Planning
+    // Center in the air, and whichever finished LAST wrote `latest` and
+    // broadcast — which is the FIRST one whenever it is the slower. The operator
+    // watched the month they had just filtered revert in front of them, with
+    // nothing failing and nothing logged.
+    let releaseFirst!: (g: CalendarGrid) => void;
+    let calls = 0;
+    answer = () => {
+      calls++;
+      // The first read hangs until this test lets it go; the second is instant.
+      if (calls === 1) return new Promise<CalendarGrid>((r) => (releaseFirst = r));
+      return grid(["Fresh"]);
+    };
+
+    const first = calendarBroadcaster.refresh();
+    const second = calendarBroadcaster.refresh(true);
+
+    assert.equal(
+      reads,
+      1,
+      `${reads} reads of Planning Center were in the air at once; a refresh must wait for the one already running`,
+    );
+
+    releaseFirst(grid(["Stale"]));
+    await Promise.all([first, second]);
+
+    assert.equal(reads, 2, `the trailing pass ran ${reads - 1} times, not once`);
+    assert.equal(
+      calendarBroadcaster.getLatest()["v-cal"].days[0].events[0].name,
+      "Fresh",
+      "the grid reverted to the month the slower, earlier read had seen",
+    );
+  });
+
+  it("many arrivals during one read collapse into ONE trailing pass", async () => {
+    // An exact count, not a ceiling: the coalesce is the whole point, and five
+    // toggles must not become five reads of Planning Center.
+    let releaseFirst!: (g: CalendarGrid) => void;
+    let calls = 0;
+    answer = () => {
+      calls++;
+      if (calls === 1) return new Promise<CalendarGrid>((r) => (releaseFirst = r));
+      return grid(["Fresh"]);
+    };
+
+    const waiting = [
+      calendarBroadcaster.refresh(),
+      calendarBroadcaster.refresh(true),
+      calendarBroadcaster.refresh(),
+      calendarBroadcaster.refresh(true),
+      calendarBroadcaster.refresh(),
+    ];
+    releaseFirst(grid(["Stale"]));
+    await Promise.all(waiting);
+
+    assert.equal(reads, 2, `five overlapping refreshes read Planning Center ${reads} times`);
+    assert.equal(calendarBroadcaster.getLatest()["v-cal"].days[0].events[0].name, "Fresh");
+  });
+
+  it("a forced arrival still forces the pass it is folded into", async () => {
+    // The gate is shut, so only `force` can make the trailing pass read at all.
+    // Losing the flag on the way through the coalesce would leave the operator's
+    // filter change unapplied on an unwatched building.
+    setSubscriberCheck(() => false);
+    try {
+      let releaseFirst!: (g: CalendarGrid) => void;
+      let calls = 0;
+      answer = () => {
+        calls++;
+        if (calls === 1) return new Promise<CalendarGrid>((r) => (releaseFirst = r));
+        return grid(["Fresh"]);
+      };
+
+      const first = calendarBroadcaster.refresh(true);
+      const second = calendarBroadcaster.refresh(true);
+      releaseFirst(grid(["Stale"]));
+      await Promise.all([first, second]);
+
+      assert.equal(reads, 2, `the forced trailing pass was gated out (${reads} reads)`);
+      assert.equal(calendarBroadcaster.getLatest()["v-cal"].days[0].events[0].name, "Fresh");
+    } finally {
+      setSubscriberCheck(() => true);
+    }
   });
 });

@@ -80,11 +80,18 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       const favourites = (body.favourites as ScoreFavourite[]).filter(
         (f) => f && typeof f.teamId === "string" && f.teamId !== "" && leagueById(f.league),
       );
+      // No explicit re-apply here. setFavourites announces on
+      // "scores:favourites-changed", and integration-manager answers that
+      // channel by re-applying and re-sending the states frame — see
+      // setupListRefreshers there, and setup-list-broadcasts.test.ts. The
+      // announcement was added to REPLACE this route's own call, which was
+      // never deleted, so every save applied the change twice.
+      //
+      // Through the manager either way, never scoresService.configure(): the
+      // applier is what honours the enabled flag, and configuring the service
+      // straight from here would start polling for an operator who switched
+      // scores off.
       const saved = await scoresStore.setFavourites(favourites);
-      // Through the manager, not scoresService.configure() directly: the applier
-      // is what honours the enabled flag, and configuring the service straight
-      // from here would start polling for an operator who switched scores off.
-      await integrationManager.refreshScores();
       json(res, saved);
       return;
     }

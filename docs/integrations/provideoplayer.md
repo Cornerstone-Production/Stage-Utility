@@ -20,6 +20,9 @@ its **Network API** over HTTP:
 - The poll runs ~1 s while a display or an automation rule is using the
   `pvp:status` channel, drops to ~5 s when nothing is, and backs off
   exponentially while PVP is unreachable.
+- Changing the host or port in Settings takes effect on the next poll, and a
+  reply still arriving from the machine you switched away from is discarded —
+  neither its layers nor a failure it reports reaches a display.
 - It broadcasts **on change**, not on poll: the time codes are excluded from the
   comparison and the client ticks the progress bar itself from an anchor. With a
   video rolling that is around five frames per thirty seconds rather than thirty.

@@ -10,7 +10,7 @@
 // display shows a stale-data notice instead of silently freezing on numbers that
 // stopped being true an hour ago.
 
-import { zonedDateKey } from "./app-timezone.js";
+import { startOfZonedDay, zonedDateKey } from "./app-timezone.js";
 import { errorMessage } from "./errors.js";
 import { fetchScoreboard, fetchTeams } from "./espn-client.js";
 import { StatusIntegration } from "./integration-base.js";
@@ -56,11 +56,37 @@ export function todayStamp(): string {
   return zonedDateKey(Date.now()).replaceAll("-", "");
 }
 
+/**
+ * The stamp for the day BEFORE the app zone's current one.
+ *
+ * ESPN buckets an event under ITS OWN date, not the UTC one: `dates=20260831`
+ * answers with a game listed `2026-09-01T01:40Z`, because that is 21:40 on the
+ * 31st where it is being played. Verified against the live endpoint. So a game
+ * that is still being played when local midnight passes is on YESTERDAY's slate
+ * and on no other — see connect().
+ *
+ * Local midnight minus a millisecond, not `now - 86_400_000`: the subtraction is
+ * an hour out on both DST transition days, and every wall-clock question in this
+ * app goes through app-timezone.ts rather than arithmetic on an instant.
+ */
+export function yesterdayStamp(): string {
+  const startOfToday = startOfZonedDay(zonedDateKey(Date.now()));
+  return zonedDateKey(startOfToday - 1).replaceAll("-", "");
+}
+
 class ScoresService extends StatusIntegration<ScoresStatusDTO> {
   private favourites: ScoreFavourite[] = [];
   private baseline: ScoreBaseline = new Map();
   private seeded = false;
   private scoreRev = 0;
+  /**
+   * Date stamps whose slate held a followed game still `in` on the last
+   * successful poll. Read by connect() to decide whether yesterday is still
+   * worth asking for; see the comment there.
+   */
+  private liveSlates = new Set<string>();
+  /** So the extra slate is announced once per night, not once per poll. */
+  private carryLogged = false;
   /** One league's team list, cached for the picker. Teams change about once a
    *  decade; re-opening a dropdown must not re-fetch 30 rows. */
   private teamCache = new Map<LeagueId, { at: number; teams: ScoreFavourite[] }>();
@@ -80,6 +106,8 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
     // having just happened.
     this.baseline = new Map();
     this.seeded = false;
+    this.liveSlates.clear();
+    this.carryLogged = false;
     this.resetReport();
     this.restart();
     // restart() only starts when configured. Following nobody is a legitimate
@@ -105,28 +133,76 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.configured) return;
-    const stamp = todayStamp();
-    const games: ScoreGameDTO[] = [];
-    const failures: string[] = [];
+
+    // WHICH DAYS TO ASK FOR.
+    //
+    // Today, always — and yesterday too while a followed game from it is still
+    // being played. ESPN buckets an event under its OWN date, so a Sunday night
+    // game listed 21:40 local sits on Sunday's slate and appears on no other,
+    // including while it is in the 8th at ten past midnight. Asking only for
+    // "today" therefore dropped a live game out of the slate the moment the
+    // local date rolled: the board went to `games: []`, which a display renders
+    // as "No games today" — the exact wrong statement fail() below exists to
+    // avoid — and with the baseline wiped and nothing left to call live the
+    // poller fell to the 30-minute dormant tier, so nothing brought it back.
+    //
+    // The extra request is issued only across that handover, and only while a
+    // game is genuinely running, so the ordinary cost of a poll is unchanged.
+    const today = todayStamp();
+    const yesterday = yesterdayStamp();
+    const carrying = this.liveSlates.has(yesterday);
+    const stamps = carrying ? [yesterday, today] : [today];
+    if (carrying && !this.carryLogged) {
+      this.carryLogged = true;
+      console.log(
+        `[scores] a followed game from ${yesterday} is still being played past local midnight — also asking ESPN for that slate`,
+      );
+    } else if (!carrying) {
+      this.carryLogged = false;
+    }
+
+    // Keyed by event id so a game that somehow appears on both slates is one
+    // card and one baseline entry, not two.
+    const byEvent = new Map<string, ScoreGameDTO>();
+    const failures = new Set<string>();
+    const failedStamps = new Set<string>();
+    const liveSlates = new Set<string>();
 
     for (const id of this.activeLeagues()) {
       const meta = leagueById(id);
       if (!meta) continue;
-      try {
-        const payload = await fetchScoreboard(meta.path, stamp);
-        games.push(...parseScoreboard(id, payload, this.followedIn(id)));
-      } catch (err) {
-        // Collected, not swallowed. A function that can partially fail returns
-        // what failed; the operator decides what it means that MLB is reachable
-        // and the NHL is not.
-        failures.push(`${meta.label}: ${errorMessage(err)}`);
+      for (const stamp of stamps) {
+        try {
+          const payload = await fetchScoreboard(meta.path, stamp);
+          const parsed = parseScoreboard(id, payload, this.followedIn(id));
+          for (const g of parsed) byEvent.set(g.eventId, g);
+          if (parsed.some((g) => g.state === "in")) liveSlates.add(stamp);
+        } catch (err) {
+          // Collected, not swallowed. A function that can partially fail returns
+          // what failed; the operator decides what it means that MLB is reachable
+          // and the NHL is not.
+          failures.add(`${meta.label}: ${errorMessage(err)}`);
+          failedStamps.add(stamp);
+        }
       }
     }
     if (!this.running) return;
 
+    // A slate we could not read this time keeps whatever it last said about
+    // being live. Otherwise one failed request would end the carry and drop the
+    // running game — the same disappearance, arrived at from the other side.
+    // Bounded, because `stamps` only ever names today and yesterday: an older
+    // stamp is never re-added and falls out on the next roll.
+    for (const stamp of failedStamps) {
+      if (this.liveSlates.has(stamp)) liveSlates.add(stamp);
+    }
+    this.liveSlates = liveSlates;
+
+    const games = [...byEvent.values()];
+
     // EVERY league failed. That is a connection failure, not a partial result.
-    if (failures.length > 0 && games.length === 0) {
-      this.fail(failures.join("; "));
+    if (failures.size > 0 && games.length === 0) {
+      this.fail([...failures].join("; "));
       return;
     }
 
@@ -142,7 +218,7 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
     }
     // A partial failure is reported but does not stop the feature: the leagues
     // that answered still show.
-    if (failures.length > 0) this.report("error", failures.join("; "));
+    if (failures.size > 0) this.report("error", [...failures].join("; "));
 
     this.emitIfChanged({
       connected: true,
@@ -152,7 +228,7 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
       // `scoreRev` moves and ignores them otherwise.
       lastEvents: events,
       fetchedAt: new Date().toISOString(),
-      error: failures.length > 0 ? failures.join("; ") : null,
+      error: failures.size > 0 ? [...failures].join("; ") : null,
     });
 
     const decision = nextPoll(sorted, Date.now(), this.inDemand);

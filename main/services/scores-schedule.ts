@@ -50,15 +50,31 @@ export function nextPoll(
     return { delayMs: inDemand ? ACTIVE_MS : UNWATCHED_MS };
   }
 
+  // A LISTED START THAT HAS ALREADY PASSED IS THE RAMP'S BEST CASE, NOT A ROW
+  // TO DISCARD.
+  //
+  // ESPN flips a game to "in" at the opening kickoff or the first pitch, which
+  // is minutes after the listed start on an ordinary day and hours after it
+  // through a rain delay. Between those two moments the game is still "pre" with
+  // a start in the past. Dropping those left `starts` empty and the poller
+  // asleep for the DORMANT half hour, so a wall following a 1pm game sat on the
+  // pre-game card until 1:31 while the first quarter was played in front of it.
+  //
+  // The cost of being wrong here is bounded: an unparseable start still falls
+  // through to dormant below, and a game that never leaves "pre" only holds the
+  // two-minute tier for the rest of the day's slate — the same tier the hour
+  // before every start already runs at.
   const starts = games
     .filter((g) => g.state === "pre")
     .map((g) => Date.parse(g.startsAt))
-    .filter((t) => Number.isFinite(t) && t > now)
+    .filter((t) => Number.isFinite(t))
     .sort((a, b) => a - b);
 
   const next = starts[0];
   if (next === undefined) return { delayMs: DORMANT_MS };
 
+  // Negative when the start has passed, which is inside the window by
+  // definition — that is the case above.
   const until = next - now;
   if (until <= RAMP_WINDOW_MS) return { delayMs: RAMP_MS };
 

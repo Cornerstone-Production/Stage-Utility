@@ -350,7 +350,13 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
     const startedAtMs = Date.now();
     try {
       const layers = await this.fetchWorkspace(t);
-      if (!this.running) return;
+      // `this.target !== t` as well as `running`, the same guard refreshSuccessors
+      // carries and for the same reason: the operator can switch PVP hosts in
+      // Settings while this read is in flight. configure() calls restart(), which
+      // clears `running` and sets it straight back, so a check on `running` alone
+      // never sees the change — and a workspace from the OLD machine would be
+      // broadcast as the new one's, with nothing to say so.
+      if (!this.running || this.target !== t) return;
       if (!this.last.connected) {
         this.resetBackoff();
         this.report("connected", `Connected to ProVideoPlayer at ${t.host}:${t.port}`);
@@ -384,6 +390,14 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
       });
     } catch (err) {
       const msg = errorMessage(err);
+      // The same guard on the failure side, where it matters most. A host change
+      // makes the in-flight read against the OLD box fail — of course it does,
+      // the operator moved on from it — and without this that failure was
+      // reported as the NEW target's: an error naming a host nobody asked about,
+      // every PVP object blanked by goOffline(), and the healthy poll timer the
+      // restart had just scheduled replaced by a back-off. Nothing to report and
+      // nothing to schedule: the new target's own poll is already running.
+      if (!this.running || this.target !== t) return;
       if (this.attempt === 0) console.warn(`[pvp] ${t.host}:${t.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${t.host}:${t.port} — ${msg}`);
       this.goOffline();
