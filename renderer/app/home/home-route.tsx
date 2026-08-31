@@ -196,7 +196,10 @@ export function HomeRoute() {
   const secondsToStart = timer?.mode === "preservice" ? timer.seconds : null;
   const mode = homeMode(pcoLiveKnown, pcoLive, secondsToStart);
 
-  const home = (state.views ?? []).find((v) => v.id === HOME_VIEW_ID);
+  // The same view homeView already found — that lookup runs before the loading
+  // guard, which is the only reason it needs the optional chaining and this
+  // did not. One find(), not two.
+  const home = homeView;
   // A Home whose layout was cleared (a hand-edited views.json, a kind change)
   // gets this build's default rather than an editor whose switches do nothing.
   const layout = home?.layout ?? defaultHomeLayout();
