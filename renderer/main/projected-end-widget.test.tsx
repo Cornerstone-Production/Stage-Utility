@@ -21,7 +21,9 @@ const teardown = installDom();
 const { render, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { ObjectContent } = await import("./layout-renderer.js");
+const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
 const { setDisplayHourCycle } = await import("../lib/clock-format.js");
+type LayoutRenderCtx = import("./layout-renderer").LayoutRenderCtx;
 
 after(() => {
   cleanup();
@@ -32,7 +34,7 @@ after(() => {
 // 15:00 UTC. Invented ids throughout — nothing here names a real plan or org.
 const T0 = Date.parse("2026-08-30T15:00:00.000Z");
 
-const PLAN = {
+const PLAN: NonNullable<LayoutRenderCtx["planItems"]> = {
   planId: "plan-1",
   noteCategories: [],
   items: [
@@ -42,7 +44,7 @@ const PLAN = {
   ],
 };
 
-const LIVE = {
+const LIVE: NonNullable<LayoutRenderCtx["pcoLive"]> = {
   mode: "item",
   currentItemId: "welcome",
   label: "Welcome",
@@ -58,7 +60,7 @@ const LIVE = {
 
 /** A live service timeline running 2:00 behind: the welcome ran 5:00 over its
  *  planned 3:00, and the song has been live for 0:00. */
-const TIMELINE = {
+const TIMELINE: NonNullable<LayoutRenderCtx["serviceTimeline"]> = {
   serviceKey: "svc-1",
   serviceTypeId: null,
   planId: "plan-1",
@@ -82,24 +84,34 @@ const TIMELINE = {
   ],
 };
 
-/** A render context with only the fields the pacing widget reads. `timezone` is
- *  the app's configured zone; `null` means "follow the viewer". */
-function ctx(over: Record<string, unknown> = {}) {
-  return {
-    home: false,
+/**
+ * A render context with only the fields the pacing widget reads.
+ *
+ * makeRenderCtx, not a hand-built object cast `as never`. This file listed nine
+ * fields and omitted embedChain, insideEmbedTile, onlineOutputIds and
+ * propresenter, and the cast is what let it: embedChain is required precisely so
+ * that a surface cannot forget it, and a cast defeats exactly that. See
+ * test-render-ctx.ts — nine files adopted it in the same work that added this
+ * one, which then went in hand-built.
+ *
+ * `timezone` is the app's configured zone; `null` means "follow the viewer".
+ */
+function ctx(over: Partial<LayoutRenderCtx> = {}): LayoutRenderCtx {
+  return makeRenderCtx({
     now: T0,
-    skewMs: 0,
-    H: 1080,
-    interactive: false,
     pcoLive: LIVE,
     planItems: PLAN,
-    serviceTimeline: null,
-    state: { timezone: null, outputs: [] },
     ...over,
-  } as never;
+  });
 }
 
-function draw(config: Record<string, unknown>, over: Record<string, unknown> = {}): string {
+/** The app's configured zone, spread into an override. Every other field of the
+ *  state stays at makeRenderCtx's quiet default. */
+function inZone(timezone: string): Partial<LayoutRenderCtx> {
+  return { state: { ...DEFAULT_STAGE_STATE, timezone } };
+}
+
+function draw(config: Record<string, unknown>, over: Partial<LayoutRenderCtx> = {}): string {
   cleanup();
   const o = { id: "o1", x: 0, y: 0, w: 0.2, h: 0.1, z: 1, config, style: {} } as never;
   const { container } = render(React.createElement(ObjectContent as never, { o, ctx: ctx(over) }));
@@ -126,7 +138,7 @@ describe("with the projected end turned on", () => {
   test("the value is the wall-clock time the plan runs out", () => {
     // 15:00Z + 5:00 + 20:00 + 30:00 = 15:55Z.
     setDisplayHourCycle("24h");
-    assert.equal(draw({ type: "service-pacing", showProjectedEnd: true }, { state: { timezone: "UTC", outputs: [] } }), "15:55");
+    assert.equal(draw({ type: "service-pacing", showProjectedEnd: true }, inZone("UTC")), "15:55");
   });
 
   test("in the zone the APP reasons in, not the machine's", () => {
@@ -135,30 +147,30 @@ describe("with the projected end turned on", () => {
     // runner and no operator's browser is in it, so this can only pass by
     // honouring the configured zone. 15:55Z is 05:55 the next morning there.
     setDisplayHourCycle("24h");
-    const text = draw({ type: "service-pacing", showProjectedEnd: true }, { state: { timezone: "Pacific/Kiritimati", outputs: [] } });
+    const text = draw({ type: "service-pacing", showProjectedEnd: true }, inZone("Pacific/Kiritimati"));
     assert.equal(text, "05:55");
   });
 
   test("and in the 12h/24h every other clock in the app is using", () => {
     setDisplayHourCycle("12h");
-    const twelve = draw({ type: "service-pacing", showProjectedEnd: true }, { state: { timezone: "UTC", outputs: [] } });
+    const twelve = draw({ type: "service-pacing", showProjectedEnd: true }, inZone("UTC"));
     assert.match(twelve, /^3:55\s?(?:PM|pm)$/, `12h setting ignored: ${twelve}`);
     setDisplayHourCycle("24h");
-    assert.equal(draw({ type: "service-pacing", showProjectedEnd: true }, { state: { timezone: "UTC", outputs: [] } }), "15:55");
+    assert.equal(draw({ type: "service-pacing", showProjectedEnd: true }, inZone("UTC")), "15:55");
   });
 
   test("it answers with no service-timeline recording at all", () => {
     // The drift needs a recorder running; the projection needs only PCO Live and
     // the plan. Sharing one idle test would have blanked it in the common case.
     setDisplayHourCycle("24h");
-    assert.equal(draw({ type: "service-pacing", showProjectedEnd: true }, { state: { timezone: "UTC", outputs: [] } }), "15:55");
+    assert.equal(draw({ type: "service-pacing", showProjectedEnd: true }, inZone("UTC")), "15:55");
   });
 
   test("the drift joins it on the sub-line when the label is on", () => {
     setDisplayHourCycle("24h");
     const text = draw(
       { type: "service-pacing", showProjectedEnd: true, showLabel: true },
-      { serviceTimeline: TIMELINE, state: { timezone: "UTC", outputs: [] } },
+      { serviceTimeline: TIMELINE, ...inZone("UTC") },
     );
     assert.equal(text, "15:552:00 behind");
   });
@@ -167,7 +179,7 @@ describe("with the projected end turned on", () => {
     setDisplayHourCycle("24h");
     const text = draw(
       { type: "service-pacing", showProjectedEnd: true },
-      { serviceTimeline: TIMELINE, state: { timezone: "UTC", outputs: [] } },
+      { serviceTimeline: TIMELINE, ...inZone("UTC") },
     );
     assert.equal(text, "15:55");
   });
@@ -181,7 +193,7 @@ describe("with the projected end turned on", () => {
     };
     const text = draw(
       { type: "service-pacing", showProjectedEnd: true },
-      { planItems: bare, pcoLive: { ...LIVE, lengthSec: null }, state: { timezone: "UTC", outputs: [] } },
+      { planItems: bare, pcoLive: { ...LIVE, lengthSec: null }, ...inZone("UTC") },
     );
     assert.equal(text, "—");
   });
@@ -189,7 +201,7 @@ describe("with the projected end turned on", () => {
   test("and hides entirely when the object asked to be hidden while idle", () => {
     const text = draw(
       { type: "service-pacing", showProjectedEnd: true, hideWhenIdle: true },
-      { pcoLive: { ...LIVE, serviceEnded: true }, state: { timezone: "UTC", outputs: [] } },
+      { pcoLive: { ...LIVE, serviceEnded: true }, ...inZone("UTC") },
     );
     assert.equal(text, "");
   });

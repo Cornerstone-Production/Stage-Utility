@@ -440,6 +440,14 @@ describe("StageView no longer names a screen after its URL", () => {
         { id: "display-2", name: "Stage right", viewId: "v1" },
       ],
     }));
+    // A POSITIVE ANCHOR FIRST. Both assertions below are negative, and a blank
+    // render, the loading screen and the error screen all satisfy an absence —
+    // so without this the test says "the slug is not on a bar" when what it can
+    // actually prove is "the slug is not anywhere, including on nothing".
+    // "Weekend: A plan" is the top bar; asserting it makes the absence an
+    // absence FROM A BAR THAT EXISTS.
+    assert.ok(says(c, "Weekend: A plan"), `no top bar to be missing the slug from: ${c.textContent}`);
+    assert.ok(says(c, "View not found"), `this is not the view-missing screen: ${c.textContent}`);
     assert.ok(!says(c, "preview-gone"), c.textContent ?? "");
     assert.ok(!says(c, "preview-"), c.textContent ?? "");
   });

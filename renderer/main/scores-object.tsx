@@ -164,6 +164,29 @@ function Empty({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Why there is no game to draw.
+ *
+ * THREE DIFFERENT FACTS, kept apart: "No games today" for a failed request is a
+ * factual lie about the operator's own schedule, and "No teams followed" for an
+ * outage sends them to a settings page that is already correct.
+ *
+ * One copy. The wall widget and the Home card made the same decision over the
+ * same three strings, with the branches in a different order and the same
+ * explanatory comment on each — two places for one wording change, and the
+ * difference between them was only that one used if-returns and the other a
+ * ternary.
+ *
+ * Not split by whether the object is pinned. A pin falls through to `auto` now,
+ * so the only way to reach the last line is an empty schedule, and "Not playing
+ * today" under a pin that has already handed over would name the wrong reason.
+ */
+export function emptyReason(scores: ScoresStatusDTO | null): string {
+  if (scores?.error) return "Scores unavailable";
+  if (!scores?.connected) return "No teams followed";
+  return "No games today";
+}
+
 export function ScoresObject({
   config,
   scores,
@@ -173,17 +196,7 @@ export function ScoresObject({
 }) {
   const game = pickGame(scores, config.game);
 
-  if (!game) {
-    // The three reasons there is nothing, kept apart. "No games today" for a
-    // failed request is a factual lie about the operator's schedule.
-    if (scores?.error) return <Empty>Scores unavailable</Empty>;
-    if (!scores?.connected) return <Empty>No teams followed</Empty>;
-    // No longer split by whether the object is pinned. A pin falls through to
-    // `auto` now, so the only way to reach here is an empty schedule — and
-    // "Not playing today" under a pin that has already handed over would name
-    // the wrong reason for the empty box.
-    return <Empty>No games today</Empty>;
-  }
+  if (!game) return <Empty>{emptyReason(scores)}</Empty>;
 
   return (
     <ScoresFitted
@@ -203,8 +216,8 @@ export function ScoresObject({
  * huge tile is not absurd, a floor so a squeezed one stays legible rather than
  * vanishing.
  */
-const FIT_MAX = 3;
-const FIT_MIN = 0.3;
+export const FIT_MAX = 3;
+export const FIT_MIN = 0.3;
 
 /**
  * The width the strip is DESIGNED at, in CSS pixels.
@@ -219,7 +232,7 @@ const FIT_MIN = 0.3;
  * sizing, so as a bare flex item it measured zero and spilled 164px out of a box
  * it had no width in.
  */
-const NATURAL_W = 520;
+export const NATURAL_W = 520;
 
 /**
  * The strip's natural height when it cannot be measured — jsdom, and the first
@@ -360,6 +373,21 @@ function ScoresFitted({ game, detail }: { game: ScoreGameDTO; detail: boolean })
   return (
     <div ref={boxRef} className="score-object">
       <div className="score-object-scale">
+        {/* NO `scored`, and that is a gap rather than a decision — recorded here
+            because it was not recorded anywhere. The sweep and the value bump
+            fire on the operator's activity stack and on the context-bar capsule,
+            and not on the wall widget, which is the surface built to be read
+            from across a room and therefore the one that most wants a score to
+            announce itself.
+
+            What it needs: scoredSide (which side of THIS game an event landed
+            on), scoreKey (the remount key that lets a SECOND score in the same
+            game replay the animation) and the reduced-motion gate. All three
+            live in renderer/app/score-activity.tsx today. Wiring this means
+            lifting them into a module both surfaces can import — copying them
+            here would put the "match on the game's own two team ids" rule in two
+            places, and sweeping a light across the team that did not score is
+            worse than sweeping nothing. */}
         <ScoreStrip game={game} detail={detail} className="score-object-strip" />
       </div>
     </div>

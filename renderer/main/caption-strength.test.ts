@@ -50,14 +50,13 @@ describe("the reading", () => {
     assert.match(CODE, /opacity: dim \? 0\.35 : 0\.7/, "the footer stopped dimming at all");
   });
 
-  test("still dims at the strength the rest of the app uses", () => {
-    assert.match(CODE, /opacity: dim \? 0\.45 : 1/);
-  });
+  // "still dims at the strength the rest of the app uses" was a third assertion
+  // on the same regex, and the exact count above already implies it: three is
+  // not three of something else.
 });
 
-describe("the reasoning", () => {
-  test("is still recorded where the opacity used to be", () => {
-    // Stripped from CODE above, so this looks at the real source.
-    assert.match(SRC, /A caption NAMES the box/);
-  });
-});
+// A test that the comment "A caption NAMES the box" is still in the source used
+// to live here. It asserted PROSE: red on a reword that changed nothing, green
+// on a reword that said the opposite, and no behaviour guarded either way. What
+// the comment explains is asserted directly above — the caption is outside the
+// dim, and exactly three reporting elements carry it.

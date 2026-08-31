@@ -10,6 +10,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 import { PvpLayerRow } from "./pvp-layer-row";
+import { noSuchLayer, pvpUnavailableReason } from "./pvp-progress";
 import type { LayoutObjectConfig } from "@main/types/stage";
 import { hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
 
@@ -43,13 +44,15 @@ export function visibleLayers(layers: readonly PvpLayerDTO[], c: Config): PvpLay
  * would go looking for a fault in the wrong machine.
  */
 export function emptyReason(status: PvpStatusDTO | null, c: Config): string {
-  // null is "no snapshot yet", not "PVP is down" — the same distinction the rest
-  // of this function exists to preserve. It lasts only until the first hydrate,
-  // and an unconfigured PVP hydrates to connected:false, so this does not linger.
-  if (!status) return "—";
-  if (!status.connected) return "ProVideoPlayer offline";
+  // The first two rungs are pvp-now's too, and the reasoning for them — a null
+  // status is "no snapshot yet", not "PVP is down" — lives beside them in
+  // pvp-progress.ts.
+  const unavailable = pvpUnavailableReason(status);
+  if (unavailable !== null) return unavailable;
   if (c.show === "one") {
-    return (c.layerName ?? "").trim() ? `No layer named ${c.layerName}` : "No layer chosen";
+    // The untrimmed name, as it was: the sentence quotes back what the operator
+    // typed into the layout, not a tidied version of it.
+    return (c.layerName ?? "").trim() ? noSuchLayer(c.layerName ?? "") : "No layer chosen";
   }
   return "Nothing on screen";
 }

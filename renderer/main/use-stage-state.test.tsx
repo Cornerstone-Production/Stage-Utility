@@ -155,10 +155,13 @@ describe("the state is fetched once for everyone", () => {
     requests.length = 0;
     const first = render(React.createElement(OneConsumer));
     await settle();
-    const after = requests.length;
+    // Not `after`: that is node:test's own `after`, imported at the top of this
+    // file. Harmless while the only after() call sits outside this body, and a
+    // trap the moment somebody adds a per-case teardown here.
+    const before = requests.length;
     render(React.createElement(OneConsumer));
     await settle();
-    assert.equal(requests.length, after, "a second consumer refetched what was already in hand");
+    assert.equal(requests.length, before, "a second consumer refetched what was already in hand");
     first.unmount();
   });
 

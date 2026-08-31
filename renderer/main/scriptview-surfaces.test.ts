@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { EMBEDDABLE_VIEW_KINDS, isEmbeddableViewKind } from "./layout-objects.js";
 import { embedRefusal } from "./embed-chain.js";
-import { everyViewKind } from "../../main/types/stage.js";
+import { everyViewKind, type ViewKind } from "../../main/types/views.js";
 
 /** Every kind a View can be — so "exactly these are embeddable" is checked
  *  against the real set rather than a list that can quietly fall behind. */
@@ -98,28 +98,54 @@ describe("the rundown has one implementation", () => {
     }
   });
 
-  // Matched inside a className, never as a bare token. The first draft of this
-  // scan looked for "100dvh" anywhere and failed on a COMMENT explaining why the
-  // viewport height must not be used — a guard satisfied (here, broken) by prose
-  // is the recurring bug in this repo, and stripping comments to fix it has its
-  // own history of swallowing real code. A class attribute is a shape prose does
-  // not take.
-  const viewportHeightInClass = () => /className="[^"]*(?:h-\[100dvh\]|h-\[100vh\]|h-screen)/;
+  // ANY quoted string, not `className="…"`.
+  //
+  // The narrower form could not fail on four of the six files it was widened to
+  // cover. It required a double quote immediately after `className=`, and these
+  // files overwhelmingly write className={cn("flex h-screen", …)} or a template
+  // literal — so writing the defect back in the shape those files already use
+  // left the scan green.
+  //
+  // The comment hazard the first draft hit is still real: scriptview-body.tsx's
+  // own docblock names `h-[100dvh]` in backticks to explain why not to use it.
+  // Handled by skipping lines that OPEN with a comment marker, which is far
+  // narrower than stripping comments wholesale — that has its own history here
+  // of swallowing real code and hiding a route. A line beginning `*` or `//` is
+  // prose in this codebase; a line beginning with code is code, and a trailing
+  // comment naming the token on such a line turns this red, which is the safe
+  // direction.
+  const VIEWPORT_HEIGHT = /["'`][^"'`\n]*(?:h-\[100dvh\]|h-\[100vh\]|h-screen)/;
+  const isProse = (line: string) => /^\s*(?:\/\/|\*|\/\*)/.test(line);
+  const viewportHeightLines = (src: string) =>
+    src.split("\n").filter((l) => !isProse(l) && VIEWPORT_HEIGHT.test(l));
 
-  /** Every component that renders both on a display and inside an Embedded
-   *  view tile, so it must fill whatever box it is given rather than assume
-   *  it owns the screen. Six, not two: the multiview work put dashboard,
-   *  stage, transcription and SPL-rundown views under the identical contract
-   *  ScriptView already had, and a scan covering only the original pair is
-   *  how the other four regress silently. */
-  const VIEWPORT_HEIGHT_GUARDED = [
-    SHARED,
-    SURFACES.viewKind,
-    "dashboard-view.tsx",
-    "stage-display-view.tsx",
-    "transcription-view.tsx",
-    "spl-rundown-view.tsx",
-  ] as const;
+  /**
+   * Every component that renders both on a display and inside an Embedded view
+   * tile, so it must fill whatever box it is given rather than assume it owns
+   * the screen.
+   *
+   * A RECORD over ViewKind, not a list. The list arrived stale: it said "six,
+   * not two" while the same work added a fifth surface, calendar-view.tsx,
+   * which draws both on a display (stage-view.tsx) and in a tile
+   * (embedded-view.tsx) — and it simply was not scanned. A Record makes the
+   * COMPILER name a kind nobody added, the shape KIND_DRAWS_TOP_BAR already
+   * uses.
+   *
+   * The value is the file that owns the kind's body on every surface it appears
+   * on — for `slots` and `custom` that is a shared component rather than a
+   * *-view.tsx, which is the point: it is the body that must not claim the
+   * screen, wherever the route around it lives.
+   */
+  const VIEWPORT_HEIGHT_GUARDED: Record<ViewKind, string> = {
+    slots: "../components/slots-columns.tsx",
+    dashboard: "dashboard-view.tsx",
+    stage: "stage-display-view.tsx",
+    transcription: "transcription-view.tsx",
+    custom: "layout-renderer.tsx",
+    script: SURFACES.viewKind,
+    "spl-rundown": "spl-rundown-view.tsx",
+    calendar: "calendar-view.tsx",
+  };
 
   it("no view surface sizes itself to the viewport", () => {
     // It is embedded in boxes of several different shapes — a page, a tile, a
@@ -127,12 +153,14 @@ describe("the rundown has one implementation", () => {
     // the box it was given — on the page that pushes the last rows past the
     // clip, hidden by the sticky footer, so it looks right and scrolls short.
     // An earlier draft of the shared rundown body did exactly that.
-    for (const file of VIEWPORT_HEIGHT_GUARDED) {
-      assert.ok(
-        !viewportHeightInClass().test(read(file)),
-        `${file} must not size itself to the viewport — use h-full`,
-      );
+    //
+    // SHARED is scanned alongside the kinds: it is not a ViewKind of its own,
+    // but it is the body three of them render.
+    const offenders: string[] = [];
+    for (const file of [SHARED, ...Object.values(VIEWPORT_HEIGHT_GUARDED)]) {
+      for (const line of viewportHeightLines(read(file))) offenders.push(`${file}: ${line.trim()}`);
     }
+    assert.deepEqual(offenders, [], "a view surface sized itself to the viewport — use h-full");
   });
 });
 
@@ -156,15 +184,22 @@ describe("embedding cannot recurse", () => {
   });
 
   it("offers exactly the kinds that render in a box", () => {
-    // EXACT, not a floor. Every kind renders now, so this is every kind — and it
-    // stays a written-out list so that adding a View kind is a deliberate
-    // decision to make it embeddable rather than something that happens by
-    // accident. EmbeddedView's switch is exhaustive over ViewKind, so a kind
-    // added and forgotten here is a compile error there.
-    assert.deepEqual(
-      [...EMBEDDABLE_VIEW_KINDS],
-      ["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown", "calendar"],
-    );
+    // ONE assertion, against ALL_VIEW_KINDS.
+    //
+    // There were two, and they contradicted each other. The first was a
+    // written-out literal — ALL_VIEW_KINDS reordered — defended by a comment
+    // saying it kept embeddability "a deliberate decision"; the second asserted
+    // the two sets are equal, which makes any deliberate EXCLUSION a failure.
+    // The second is the one that describes the code: every kind renders in a
+    // box, and EmbeddedView's switch is exhaustive over ViewKind.
+    //
+    // It is also the only one of the two that can fail usefully. ALL_VIEW_KINDS
+    // is built by everyViewKind, which the compiler holds to the full union, so
+    // a kind added to ViewKind and forgotten in EMBEDDABLE_VIEW_KINDS turns this
+    // red. Against a hand-written literal it would have stayed green.
+    //
+    // Excluding a kind later is still open — it just has to be done here, in the
+    // open, rather than by a literal drifting.
     assert.deepEqual([...EMBEDDABLE_VIEW_KINDS].sort(), [...ALL_VIEW_KINDS].sort());
   });
 

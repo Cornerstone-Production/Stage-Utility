@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
-import { invoke, onNotification } from "../lib/api";
+import { invoke } from "../lib/api";
 import { useResyncOn } from "../lib/use-resync-on";
+import { useStatusChannel } from "./use-status-channel";
 
 /**
  * Live ProVideoPlayer layer state, pushed on the "pvp:status" channel. Hydrates
@@ -11,33 +12,13 @@ import { useResyncOn } from "../lib/use-resync-on";
  * `enabled` is the gate the layout renderer uses, and it matters more here than
  * for most: the channel's demand is what decides the poll cadence at the other
  * end, so an ungated hook would hold PVP at 1 Hz for a screen showing a clock.
+ *
+ * Ordering between the hydrate and the first push is useStatusChannel's job —
+ * see the note there for the staleness this used to have.
  */
 export function usePvpState(enabled = true): PvpStatusDTO | null {
-  const [pvp, setPvp] = useState<PvpStatusDTO | null>(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    invoke<PvpStatusDTO>("pvp:getStatus")
-      .then((s) => {
-        if (!cancelled && s) setPvp(s);
-      })
-      .catch(() => {
-        // A failed hydrate is not an error state: the next broadcast fills it in,
-        // and the Integrations panel is where a connection problem is reported.
-        // Nothing is swallowed here that anyone could act on.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    return onNotification("pvp:status", (p) => setPvp(p as PvpStatusDTO));
-  }, [enabled]);
-
-  return pvp;
+  const read = useCallback(() => invoke<PvpStatusDTO>("pvp:getStatus"), []);
+  return useStatusChannel<PvpStatusDTO>(read, "pvp:status", enabled);
 }
 
 /**

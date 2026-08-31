@@ -68,13 +68,19 @@ describe("a team mark fits inside its disc", () => {
   });
 
   test("the size is a percentage, so every chip size is covered by it", () => {
-    // The disc is drawn at 32px in a card, 22px compact and 18px in the capsule,
-    // and the capsule's width is not settled. A px value would be right at one of
-    // those and wrong at the other two.
+    // The disc is drawn at 32px in a card and 18px in the capsule, and the
+    // capsule's width is not settled. A px value would be right at one of those
+    // and wrong at the other.
+    //
+    // matchAll and an EXACT count, like the assertion two tests above. A
+    // non-global match takes only the FIRST `.score-logo img` rule, so a later
+    // override — `.score-strip-compact .score-logo img { width: 24px }` was
+    // exactly that shape, and lived in this stylesheet until it was deleted as
+    // unreachable — leaves this green while the mark is sized in px.
     const css = stylesheet();
-    const rule = css.match(/\.score-logo img\s*\{([^}]*)\}/);
-    assert.ok(rule, "the rule that sizes a team mark is gone");
-    const body = rule[1];
+    const rules = [...css.matchAll(/\.score-logo img\s*\{([^}]*)\}/g)];
+    assert.equal(rules.length, 1, `${rules.length} rules size a team mark; the last one wins`);
+    const body = rules[0][1];
     assert.match(body, /width:\s*var\(--score-logo-fit\)/, "the mark's width is not the declared fit");
     assert.match(body, /height:\s*var\(--score-logo-fit\)/, "the mark's height is not the declared fit");
     assert.doesNotMatch(body, /\d+px/, "the mark is sized in px, so it is wrong at two of its three sizes");

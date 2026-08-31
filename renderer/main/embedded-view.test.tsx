@@ -16,41 +16,19 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installRenderDom } from "../test-dom.js";
 
-const teardown = installDom();
-
-// React runs act() quietly only when told it is in a test environment; without
-// this every awaited render logs "not configured to support act(...)".
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-/**
- * jsdom does no layout, so every element measures 0 — and the embed sizes its
- * child's canvas by MEASURING its rendered box. One height for every element is
- * enough: the only assertion that reads it is the box-sizing test below, and it
- * cares that the number came from the box rather than from the object's
- * fraction of a canvas.
- */
+// The act flag, one clientHeight for every element, and a do-nothing
+// EventSource — all three were written out verbatim here and in two neighbouring
+// files. See installRenderDom.
+//
+// jsdom does no layout, so the real clientHeight is 0 and this embed sizes its
+// child's canvas by MEASURING its rendered box. One height for every element is
+// enough: the only assertion that reads it is the box-sizing test below, and it
+// cares that the number came from the box rather than from the object's fraction
+// of a canvas.
 const BOX_PX = 270;
-Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-  get: () => BOX_PX,
-  configurable: true,
-});
-
-// jsdom ships neither, and both are reached by a render: the state hooks open
-// the state stream, and every view fetches on mount. Left real, a request
-// outlives the test and settles after teardown has removed `window`, which
-// surfaces as the FILE failing while every test in it passes.
-class StubEventSource {
-  static readonly CONNECTING = 0;
-  readyState = 0;
-  onmessage: unknown = null;
-  onerror: unknown = null;
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
-}
-(globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
+const teardown = installRenderDom({ clientHeight: BOX_PX });
 
 const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
 

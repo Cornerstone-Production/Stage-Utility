@@ -92,7 +92,7 @@ export function ScriptViewIndex() {
           {error ? (
             <p className="text-body text-red-10 text-center px-4">{error}</p>
           ) : !types || stateLoading ? (
-            <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-gray-7 animate-spin" /></div>
+            <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-fg-subtle animate-spin" /></div>
           ) : rows.length === 0 ? (
             <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Turn them on in Settings → ScriptView.</p>
           ) : (

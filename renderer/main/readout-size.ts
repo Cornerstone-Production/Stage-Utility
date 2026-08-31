@@ -56,7 +56,7 @@ export const SUB_LEADING = 1.2;
 
 /** Below this share of the box the value stops shrinking, however little budget
  *  the caption and sub-line have left it. */
-const VALUE_FLOOR_SCALE = 0.18;
+export const VALUE_FLOOR_SCALE = 0.18;
 
 /**
  * What the whole composition may occupy, as a share of the box.
@@ -102,33 +102,6 @@ export function valueSizeFor(boxH: number, captionPx: number, subPx: number): nu
 }
 
 /**
- * The whole composition, guaranteed to fit the box it is painted in.
- *
- * `valueSizeFor` shares out a BUDGET, and a budget is a proportion — which stops
- * being enough at the small end, where the caption and sub-line sit on pixel
- * floors that do not shrink with the box. Below about 16px of content height the
- * caption alone is taller than everything available, and the value was rendered
- * anyway and clipped: the exact "OFFLINE cut in half" a status widget shows when
- * it is made small in the editor.
- *
- * So the lines are DROPPED rather than overflowed, least important first. A
- * widget too short for three lines shows two; too short for two shows the value,
- * which is the line it exists for. Nothing is ever painted outside the box.
- *
- * @param boxH the height the composition actually has, in layout pixels — the
- *   content box, not the object's outer height.
- */
-/**
- * @param uniform size the VALUE as though the composition had all three lines,
- *   whatever this tile actually carries.
- *
- *   For a GRID of same-height tiles, which is what Home is. There the caption
- *   and sub-line are the surface's, not the operator's, and a tile that happens
- *   to have neither — the clock — took the whole budget and rendered at 52px in a
- *   row of 35px values. On a wall, where a widget is placed alone at a size
- *   somebody chose, filling the box is still right, so this is off by default.
- */
-/**
  * The two OPTIONAL pieces below the sub-line, and what they cost.
  *
  * Additive, and off by default, so every existing caller gets exactly the
@@ -169,6 +142,31 @@ export const METER_MIN_PX = 2;
  */
 export const VALUE_OVER_SUB = 1.4;
 
+/**
+ * The whole composition, guaranteed to fit the box it is painted in.
+ *
+ * `valueSizeFor` shares out a BUDGET, and a budget is a proportion — which stops
+ * being enough at the small end, where the caption and sub-line sit on pixel
+ * floors that do not shrink with the box. Below about 16px of content height the
+ * caption alone is taller than everything available, and the value was rendered
+ * anyway and clipped: the exact "OFFLINE cut in half" a status widget shows when
+ * it is made small in the editor.
+ *
+ * So the lines are DROPPED rather than overflowed, least important first. A
+ * widget too short for three lines shows two; too short for two shows the value,
+ * which is the line it exists for. Nothing is ever painted outside the box.
+ *
+ * @param boxH the height the composition actually has, in layout pixels — the
+ *   content box, not the object's outer height.
+ * @param uniform size the VALUE as though the composition had all three lines,
+ *   whatever this tile actually carries.
+ *
+ *   For a GRID of same-height tiles, which is what Home is. There the caption
+ *   and sub-line are the surface's, not the operator's, and a tile that happens
+ *   to have neither — the clock — took the whole budget and rendered at 52px in a
+ *   row of 35px values. On a wall, where a widget is placed alone at a size
+ *   somebody chose, filling the box is still right, so this is off by default.
+ */
 export function fitComposition(
   boxH: number,
   hasCaption: boolean,
