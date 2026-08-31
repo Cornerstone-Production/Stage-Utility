@@ -136,6 +136,18 @@ describe("the disc behind every team mark", () => {
     }
   });
 
+  test("the SIX-DIGIT gate is unchanged by sharing the parse", () => {
+    // parseColor also accepts #rgb, #rrggbbaa and rgba(); the hand-rolled parse
+    // this replaced did not, and widening what a boundary accepts is a behaviour
+    // change however harmless it looks. "#0e3" would now resolve to a light
+    // #00ee33 and take dark ink, where before it fell through to the neutral
+    // treatment. chipText holds the same line for the same reason.
+    for (const wider of ["#0e3", "#0e3386ff", "rgba(14, 51, 134, 1)"]) {
+      assert.equal(discInk(wider), INK_DARK, wider);
+      assert.equal(inkFor(wider), INK_LIGHT, wider);
+    }
+  });
+
   test("takes ESPN's bare hex as readily as a prefixed one", () => {
     // ESPN sends "0e3386", not "#0e3386". scores-parse normalises on the way in
     // and this module normalises again, because its stated contract is that the

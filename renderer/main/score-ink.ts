@@ -27,21 +27,33 @@
 
 import { contrastRatio, parseColor, relativeLuminance } from "../components/ui/color-math";
 
-/** ESPN's bare "0e3386" as the "#0e3386" parseColor requires. */
-function withHash(hex: string): string {
+/**
+ * ESPN's bare "0e3386" as the "#0e3386" parseColor requires — or null.
+ *
+ * THE SIX-DIGIT GATE STAYS, and the leading hash stays optional, which is
+ * exactly what the hand-rolled parse this replaces accepted. parseColor also
+ * takes #rgb, #rrggbbaa and rgba(); widening what this accepts is a behaviour
+ * change however harmless it looks (`#abc` used to choose white ink and would
+ * now choose dark), and the point of sharing the parse was to keep the OUTPUT
+ * identical for everything well-formed. chipText's docblock makes the same call
+ * for the same reason.
+ */
+function teamHex(hex: string): string | null {
+  if (!/^#?[0-9a-f]{6}$/i.test(hex)) return null;
   return hex.startsWith("#") ? hex : `#${hex}`;
 }
 
 /** sRGB relative luminance, or 0 for a colour that cannot be read. */
 export function luminance(hex: string): number {
-  const c = parseColor(withHash(hex));
+  const normalised = teamHex(hex);
+  const c = normalised ? parseColor(normalised) : null;
   return c ? relativeLuminance(c) : 0;
 }
 
 /** WCAG contrast ratio, 1..21 — 1 for anything unreadable, so a colour that
  *  will not parse FAILS every floor rather than clearing all of them. */
 export function contrastOf(a: string, b: string): number {
-  return contrastRatio(withHash(a), withHash(b));
+  return contrastRatio(teamHex(a), teamHex(b));
 }
 
 /** Near-black rather than pure black: pure black on a mid brand colour reads as
@@ -51,7 +63,7 @@ export const INK_LIGHT = "#ffffff";
 
 /** Whichever of the two inks contrasts better against this team's colour. */
 export function inkFor(hex: string | null): string {
-  if (!hex || !parseColor(withHash(hex))) return INK_LIGHT;
+  if (!hex || !teamHex(hex)) return INK_LIGHT;
   return contrastOf(hex, INK_LIGHT) >= contrastOf(hex, INK_DARK) ? INK_LIGHT : INK_DARK;
 }
 
@@ -94,9 +106,10 @@ export function discInk(color: string | null): string {
   // becomes an invalid custom-property value, and the declaration behind it is
   // the white ink — so an unreadable colour produced exactly the invisible mark
   // this function exists to prevent.
-  if (!color || !parseColor(withHash(color))) return INK_DARK;
-  // withHash on the way OUT as well. ESPN's own form, "0e3386", is not a CSS
+  const normalised = color ? teamHex(color) : null;
+  if (!normalised) return INK_DARK;
+  // NORMALISED on the way out as well. ESPN's own form, "0e3386", is not a CSS
   // colour, so handing the input back verbatim was the same invalid-value
   // failure by a shorter route.
-  return contrastOf(color, DISC) >= 4.5 ? withHash(color) : INK_DARK;
+  return contrastOf(normalised, DISC) >= 4.5 ? normalised : INK_DARK;
 }
