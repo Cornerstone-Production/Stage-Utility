@@ -1,0 +1,53 @@
+{
+  "_comment": [
+    "ESPN's scoreboard for dates=20260901 — the day AFTER the late slate. The followed",
+    "team is not on it: the game it is playing at ten past midnight belongs to the 31st",
+    "and appears on no other slate, so asking only for 'today' answers with nothing.",
+    "Every identifier is invented. This is a public repository."
+  ],
+  "events": [
+    {
+      "id": "700010",
+      "date": "2026-09-01T22:40Z",
+      "status": {
+        "displayClock": "0:00",
+        "type": { "state": "pre", "name": "STATUS_SCHEDULED", "detail": "5:40 PM ET", "shortDetail": "5:40 PM ET" }
+      },
+      "competitions": [
+        {
+          "venue": { "fullName": "Otter Creek Yard" },
+          "competitors": [
+            {
+              "id": "9203",
+              "homeAway": "away",
+              "score": "0",
+              "records": [{ "type": "total", "summary": "60-76" }],
+              "team": {
+                "id": "9203",
+                "abbreviation": "LFA",
+                "shortDisplayName": "Falcons",
+                "displayName": "Lakeside Falcons",
+                "color": "2f6f3a",
+                "logo": "https://example.invalid/logos/9203.png"
+              }
+            },
+            {
+              "id": "9201",
+              "homeAway": "home",
+              "score": "0",
+              "records": [{ "type": "total", "summary": "70-67" }],
+              "team": {
+                "id": "9201",
+                "abbreviation": "COT",
+                "shortDisplayName": "Otters",
+                "displayName": "Cedar Hollow Otters",
+                "color": "1d4f7a",
+                "logo": "https://example.invalid/logos/9201.png"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

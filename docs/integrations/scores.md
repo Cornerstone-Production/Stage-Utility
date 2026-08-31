@@ -101,6 +101,15 @@ Only leagues with a followed team are asked at all, and one league failing does
 not blank the others. Broadcasts go out on change only, so a poll that found
 nothing new is not an update to every display.
 
+**A game does not vanish at midnight.** ESPN files a game under the date it is
+played on where it is played, so a Sunday night game listed 9:40pm stays on
+Sunday's scoreboard while it is being played — including at ten past midnight.
+While a followed game from the previous day is still in progress, that day is
+asked for as well as the current one, and the board carries straight over. The
+second request stops as soon as the game is over, and a night with nothing
+running past midnight costs exactly one request per league per poll as before.
+The log says so on the poll that starts carrying it.
+
 That is what keeps the college leagues free: eight leagues on offer costs nothing
 until one is followed, and each followed league adds one request per poll — so a
 church following the Cubs never asks about college baseball.
