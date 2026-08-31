@@ -44,7 +44,7 @@ const FORBIDDEN_IDS = new Set(["__proto__", "constructor", "prototype"]);
 
 function assertSafePlanId(planId: string): void {
   if (!SAFE_PLAN_ID.test(planId) || FORBIDDEN_IDS.has(planId)) {
-    throw new Error(`checklist ticks: refusing an unsafe plan id "${planId.slice(0, 32)}"`);
+    throw new Error(`checklist ticks: refusing an unsafe plan id "${scrub(planId, 32)}"`);
   }
 }
 
@@ -123,10 +123,23 @@ async function ensureLoaded(): Promise<void> {
  * SD card at 9am on a Sunday shows up as a tick that will not stay ticked, and
  * `/log` is the only place that says why.
  */
-async function saveOrReport(next: Map<string, Set<string>>, what: string): Promise<void> {
+async function saveOrReport(
+  next: Map<string, Set<string>>,
+  action: string,
+  planId: string,
+  key?: string,
+): Promise<void> {
   try {
     await store.save(toFile(next));
   } catch (err) {
+    // The plan id and the row label both arrive from the wire, and `/log` is a
+    // LAN-visible page where a newline in either forges a record. Scrubbed HERE
+    // rather than at the call sites so a third caller cannot reintroduce the
+    // hole by composing its own string — the only thing a caller passes is the
+    // raw value.
+    const what = key === undefined
+      ? `${action} plan ${scrub(planId, 64)}`
+      : `${action} "${scrub(key, 80)}" on plan ${scrub(planId, 64)}`;
     console.error(`[checklist] could not save — ${what} was NOT recorded:`, err);
     throw err;
   }
@@ -182,7 +195,7 @@ export const checklistTicksStore = {
       // failed — a full SD card is the usual way — still left the broadcast, the
       // API and the next render calling the row done, which is the one thing
       // this store must never say when it did not save.
-      await saveOrReport(next, `${done ? "tick" : "untick"} "${scrub(key, 80)}" on plan ${planId}`);
+      await saveOrReport(next, done ? "tick" : "untick", planId, key);
       cache = next;
     });
   },
@@ -195,7 +208,7 @@ export const checklistTicksStore = {
       if (!cache.has(planId)) return;
       const next = copyOf(cache);
       next.delete(planId);
-      await saveOrReport(next, `clear plan ${planId}`);
+      await saveOrReport(next, "clear", planId);
       cache = next;
     });
   },
