@@ -573,13 +573,24 @@ export function RecordingCard({ recorder = "any" }: { recorder?: string }) {
  * word in one colour at a distance; Home wants three lines that read as a row
  * with the cards beside them, and those cards are Stat.
  */
-export function StreamingCard({ platform = "any", now }: { platform?: string; now: number }) {
+export function StreamingCard({
+  platform = "any",
+  now,
+  showElapsed = true,
+}: {
+  platform?: string;
+  now: number;
+  /** Home's "Elapsed time" switch. Off, the card keeps the platform's name on
+   *  the sub-line and drops the running clock — which is what the same switch
+   *  does to the same object on a wall. */
+  showElapsed?: boolean;
+}) {
   const list = streamers(useResiState(), useYouTubeState(), useObsState());
   // The clock comes DOWN, from the one tick the page already runs. A card that
   // started its own interval would be a second clock per streaming widget, all
   // of them a fraction out of step with the countdown above them.
   const chosen = platform === "any" ? list : list.filter((s) => s.name === platform);
-  const ind = streamIndicator(chosen, now, { name: platform === "any" ? null : platform });
+  const ind = streamIndicator(chosen, now, { name: platform === "any" ? null : platform, showElapsed });
   return (
     <Stat
       label={platform === "any" ? "Streaming" : platform}
@@ -903,13 +914,13 @@ export function HomeCard({
     case "home-recording-reaper":
       return <RecordingCard recorder="REAPER" />;
     case "home-streaming":
-      return <StreamingCard now={now} />;
+      return <StreamingCard now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-scores":
       return <ScoresCard game={c.game ?? "auto"} />;
     case "home-streaming-resi":
-      return <StreamingCard platform="Resi" now={now} />;
+      return <StreamingCard platform="Resi" now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-streaming-youtube":
-      return <StreamingCard platform="YouTube" now={now} />;
+      return <StreamingCard platform="YouTube" now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-spl":
       return <SplCard />;
     case "home-pvp":

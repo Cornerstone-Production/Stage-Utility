@@ -59,10 +59,21 @@ const APPLIES = {
   // what makes that a promise rather than an intention: a fifth type carrying
   // `showProgress` and not listed here fails the build.
   //
-  // These two are the first entries that a Home card actually READS. Every
-  // setting above is written into the object and ignored by the card that drew
-  // it, because HomeCard only ever received a type; it takes the whole config
-  // now, so a switch here changes what Home draws.
+  // EVERY pair in this record reaches a render. It is worth saying because for
+  // one release it was not true: HomeCard was handed a bare `type`, so the six
+  // entries naming a home card wrote a setting into the object that the card
+  // drawing it never looked at. HomeCard takes the whole config now, and the
+  // last three — the streaming cards — were wired with it.
+  //
+  // "Reaches a render" means on at least one of the two surfaces the object is
+  // drawn on, not on both. `hideWhenIdle` and `fillWhenLive` on a streaming card
+  // are the wall twin's, deliberately: Home draws these as Stats in a row of
+  // Stats, and the same object on a console fills and hides. The menu still
+  // offers them there because they are the same object, and the tick has to tell
+  // the truth about the config it writes.
+  //
+  // card-toggle-parity.test.tsx renders every pair here, both ways, and requires
+  // the output to differ.
   showProgress: { "pvp-layers": true, "home-pvp": true, "pvp-now": true, "home-pvp-now": true },
   showNextCue: { "pvp-now": true, "home-pvp-now": true },
 } satisfies { [K in ToggleKey]: Record<TypesWith<K>, true> };
@@ -85,6 +96,17 @@ const PICKS = {
 } satisfies { [K in PickKey]: Record<TypesWith<K>, true> };
 
 type PickKey = "game";
+
+/**
+ * Every (widget type, setting) pair the menu can write, flattened.
+ *
+ * Derived from APPLIES rather than written out, so it cannot fall behind it —
+ * the guard that renders each pair both ways is only worth having if the list it
+ * walks is the list the menu uses.
+ */
+export const TOGGLE_PAIRS: readonly { type: string; key: ToggleKey }[] = Object.entries(
+  APPLIES as Record<string, Record<string, true>>,
+).flatMap(([key, types]) => Object.keys(types).map((type) => ({ type, key: key as ToggleKey })));
 
 /** Every setting Home's menu can write into a card's config. */
 export type SettingKey = ToggleKey | PickKey;

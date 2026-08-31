@@ -145,6 +145,14 @@ recording**, which colours just the word instead), hide the number, or make it a
 tally light with **Hide when idle** — nothing drawn at all until something is
 going out.
 
+The Home streaming tiles — **Streaming**, **Resi** and **YouTube** — are the same
+object in two presentations. On Home they are a card in a row of cards; put one on
+a screen and it wears the composition above, beside OBS status and REAPER status.
+So all three of their settings are offered on Home, and two of them describe what
+the tile does on a screen: **Elapsed time** applies on both surfaces, while **Fill
+the card when live** and **Hide when idle** shape the screen presentation, which
+is the only one that fills or hides.
+
 ## OBS
 
 | Widget | What it shows | Source |

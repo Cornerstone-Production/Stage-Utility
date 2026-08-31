@@ -785,8 +785,17 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // an operator picks for a console, where they sit beside OBS status and
     // REAPER status. One object, two presentations, chosen by the surface it is
     // drawn on rather than by which of two near-identical types got picked.
-    const platform = WALL_TWIN[c.type as keyof typeof WALL_TWIN];
-    if (!ctx.home && platform !== undefined) return streamingReadout(platform, {});
+    // A type guard rather than an index-and-compare, so that the config reaches
+    // streamingReadout NARROWED — carrying the three settings — instead of as
+    // the whole home-card union.
+    const hasWallTwin = (x: typeof c): x is Extract<typeof c, { type: keyof typeof WALL_TWIN }> =>
+      x.type in WALL_TWIN;
+    // `c`, not `{}`. The three settings Home's right-click menu writes onto a
+    // streaming card — elapsed time, hide when idle, fill when live — are the
+    // three `streamingReadout` takes, and passing an empty object dropped every
+    // one of them on the surface they are loudest on. The menu wrote them, the
+    // object stored them, the wall ignored them.
+    if (!ctx.home && hasWallTwin(c)) return streamingReadout(WALL_TWIN[c.type], c);
     const live = ctx.home && ctx.interactive;
     return (
       <div className={live ? "w-full h-full" : "w-full h-full pointer-events-none"}>
