@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 
 import {
   parseWorkspace, layerSignature, anchorDriftSec, driftedLayers,
-  cueSuccessors, hasUnknownCue, isPlaylistsResponse, withNextCues,
+  cueSuccessors, hasUnknownCue, isPlaylistsResponse, isWorkspaceResponse, withNextCues,
 } from "./pvp-parse.js";
 import type { PvpLayerDTO, PvpStatusDTO } from "../types/pvp.js";
 
@@ -303,6 +303,27 @@ describe("driftedLayers", () => {
 //
 // The derivation was verified there too: the live `playingItem` uuid matched
 // index 1 of a playlist and the entry after it was the one this function names.
+
+describe("isWorkspaceResponse", () => {
+  // Asserted nowhere until this block existed: `return true` left the whole
+  // file green. It is the only guard between the API-DOCUMENTATION port — which
+  // answers 200 with JSON — and Test connection cheerfully reporting
+  // "Connected — 0 layers" for the exact wrong port it exists to catch.
+  test("accepts the real workspace, and an empty one", () => {
+    assert.equal(isWorkspaceResponse(FIXTURE), true);
+    // A real workspace with no layers. Not an error, and must not read as one.
+    assert.equal(isWorkspaceResponse({ data: [] }), true);
+  });
+
+  test("rejects anything else that answered 200 with JSON", () => {
+    assert.equal(isWorkspaceResponse({}), false);
+    assert.equal(isWorkspaceResponse(null), false);
+    assert.equal(isWorkspaceResponse({ data: "nope" }), false);
+    // The playlist tree is a different endpoint on the same host. Reading it as
+    // a workspace would report every layer gone.
+    assert.equal(isWorkspaceResponse(PLAYLISTS), false);
+  });
+});
 
 describe("isPlaylistsResponse", () => {
   test("accepts the real tree", () => {

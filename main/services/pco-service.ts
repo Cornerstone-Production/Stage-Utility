@@ -51,7 +51,7 @@ const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
  * newest date from the version selector, read its changelog entry for field or
  * pagination changes, then change this string.
  */
-const PCO_API_VERSION = "2018-11-01";
+export const PCO_API_VERSION = "2018-11-01";
 
 /**
  * Is `candidate` an absolute URL on the same origin as `base`?
@@ -110,6 +110,69 @@ export function withOffset(url: string, offset: number): string {
   const u = new URL(url);
   u.searchParams.set("offset", String(offset));
   return u.toString();
+}
+
+/** A PCO collection response, carrying the pagination link PCO puts beside it. */
+export type PcoPage<T extends PcoNode = PcoNode> = PcoResponse<T> & { links?: { next?: string } };
+
+/**
+ * Walk every page of a PCO collection, handing each page to `onPage`.
+ *
+ * ONE loop, for every paginated reader in this app. It was three verbatim
+ * copies — two here and a third in pco-calendar-service.ts — and pagination
+ * that is right in one place and subtly wrong in the other two is this
+ * repository's most expensive recurring mistake. The rules below are exactly the
+ * kind that drift:
+ *
+ *  - An OFFSET, not a URL. `links.next` arrives in a response BODY and the
+ *    request it would feed carries the operator's App ID and secret; it used to
+ *    be handed straight back to request(), so a redirected or spoofed response
+ *    could walk those credentials to another host. An integer cannot carry a
+ *    host, a path or a scheme, so no string from a PCO response body reaches
+ *    fetch() at all — the rest of the URL is the one we built.
+ *  - STRICTLY FORWARD. A next-link that repeats or rewinds the offset would
+ *    otherwise fetch the same page for ever. PCO does not do that, which is
+ *    exactly why nothing would catch it if it started.
+ *  - BOUNDED, and reaching the bound is LOGGED. A bound is the right defence
+ *    against a runaway loop, but exiting on it is otherwise indistinguishable
+ *    from having read everything, and a caller cannot tell a whole month from
+ *    the first `maxPages × per_page` of it. Two of the three copies truncated in
+ *    total silence; absence with no signal is the failure this guards against.
+ *
+ * `label` is the log tag the truncation warning carries, so an operator reading
+ * /log can tell which collection came back short.
+ */
+export async function readPcoPages<T extends PcoNode = PcoNode>(
+  firstUrl: string,
+  maxPages: number,
+  label: string,
+  request: (url: string) => Promise<PcoPage<T>>,
+  onPage: (page: PcoPage<T>) => void,
+): Promise<void> {
+  // Highest offset already asked for, so a next-link that does not move forward
+  // ends the loop instead of fetching one page for ever.
+  let seenOffset = -1;
+  let url: string | null = firstUrl;
+  let rows = 0;
+
+  for (let page = 0; url && page < maxPages; page++) {
+    const json: PcoPage<T> = await request(url);
+    rows += Array.isArray(json.data) ? json.data.length : 1;
+    onPage(json);
+    const offset = nextOffset(json.links?.next);
+    url = offset === null || offset <= seenOffset ? null : withOffset(url, offset);
+    seenOffset = offset ?? seenOffset;
+  }
+
+  // `url` still set means the bound stopped us, not PCO. `label` is a caller's
+  // constant today, but the house rule for this file is that EVERY value
+  // interpolated into a log line goes through scrub — a rule with one exception
+  // is a rule the next tag gets added to as a second exception.
+  if (url) {
+    console.warn(
+      `[${scrub(label)}] page limit reached after ${scrub(rows)} row(s); the rest of this collection was not read`,
+    );
+  }
 }
 
 /**
@@ -262,6 +325,12 @@ const TTL_FAILED_MS = 30_000;
 /** Short-lived cache for attachment `open` signed URLs (PCO issues ~1h links). */
 const ATTACH_OPEN_TTL_MS = 10 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
+/** Pagination ceiling for /services/v2 collections. 100 × 6 is far past the
+ *  longest plan or attachment list this has to draw, and a bound is what stops a
+ *  malformed next-link becoming an infinite loop. Reaching it warns; see
+ *  readPcoPages. */
+const MAX_PAGES = 6;
+
 const MAX_RETRIES = 3;
 /** Concurrent in-flight PCO requests. PCO allows roughly 100 per 20s per app, so
  *  the ceiling is well under that even when every slot is retrying. */
@@ -779,33 +848,23 @@ class PcoService {
 
     const out: PcoAttachmentDTO[] = [];
     const seen = new Set<string>();
-    // Highest offset already requested, so a next-link that does not move forward
-    // ends the loop instead of repeating a page for ever.
-    let seenOffset = -1;
-    let url: string | null =
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments?per_page=100`;
 
-    // Follow pagination (bounded) so big plans don't truncate, without runaway loops.
-    for (let page = 0; url && page < 6; page++) {
-      const json: PcoResponse & { links?: { next?: string } } = await this.request(url, appId, secret);
-      for (const n of Array.isArray(json.data) ? json.data : [json.data]) {
-        if (!seen.has(n.id)) {
-          seen.add(n.id);
-          out.push(this.mapAttachment(n));
+    // Follow pagination (bounded) so big plans don't truncate, without runaway
+    // loops. The offset rules live in readPcoPages, once, for all three readers.
+    await readPcoPages(
+      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments?per_page=100`,
+      MAX_PAGES,
+      "pco",
+      (url) => this.request(url, appId, secret),
+      (json) => {
+        for (const n of Array.isArray(json.data) ? json.data : [json.data]) {
+          if (!seen.has(n.id)) {
+            seen.add(n.id);
+            out.push(this.mapAttachment(n));
+          }
         }
-      }
-      // An OFFSET, not a URL. `links.next` arrives in a response BODY and used to
-      // be handed straight back to request(), which attaches the operator's PCO
-      // credentials -- so a redirected or spoofed response could walk them to
-      // another host. Taking only the integer means no string from the body
-      // reaches fetch() at all; the rest of the URL is the one we built.
-      // Strictly forward. A next-link that repeats or rewinds the offset would
-      // otherwise fetch the same page for ever; PCO does not do that, which is
-      // exactly why nothing would catch it if it started.
-      const offset = nextOffset(json.links?.next);
-      url = offset === null || offset <= seenOffset ? null : withOffset(url, offset);
-      seenOffset = offset ?? seenOffset;
-    }
+      },
+    );
 
     this.cacheSet(cacheKey, out, mediumTtlMs);
     return out;
@@ -1081,72 +1140,60 @@ class PcoService {
     if (cached) return cached;
 
     const out: PlanItemDTO[] = [];
-    // Highest offset already requested, so a next-link that does not move forward
-    // ends the loop instead of repeating a page for ever.
-    let seenOffset = -1;
-    let url: string | null =
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes,arrangement&per_page=100`;
 
-    for (let page = 0; url && page < 6; page++) {
-      const json: PcoResponse & { links?: { next?: string } } = await this.request(url, appId, secret);
-      const items = Array.isArray(json.data) ? json.data : [json.data];
+    await readPcoPages(
+      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes,arrangement&per_page=100`,
+      MAX_PAGES,
+      "pco",
+      (url) => this.request(url, appId, secret),
+      (json) => {
+        const items = Array.isArray(json.data) ? json.data : [json.data];
 
-      // Index included ItemNote nodes by id (carry content + category_name).
-      const notesById = new Map<string, { category: string; content: string }>();
-      // Index included Arrangement nodes by id (carry bpm + arrangement name).
-      const arrById = new Map<string, { bpm: number | null; name: string | null }>();
-      for (const n of json.included ?? []) {
-        if (n.type === "ItemNote") {
-          const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
-          const content = typeof n.attributes.content === "string" ? n.attributes.content : "";
-          if (category && content) notesById.set(n.id, { category, content });
-        } else if (n.type === "Arrangement") {
-          arrById.set(n.id, {
-            bpm: typeof n.attributes.bpm === "number" ? n.attributes.bpm : null,
-            name: typeof n.attributes.name === "string" && n.attributes.name ? n.attributes.name : null,
-          });
-        }
-      }
-
-      for (const item of items) {
-        const a = item.attributes;
-        const noteRefs = item.relationships?.item_notes?.data;
-        const notesByCategory: Record<string, string> = {};
-        if (Array.isArray(noteRefs)) {
-          for (const ref of noteRefs) {
-            const note = notesById.get(ref.id);
-            if (note) notesByCategory[note.category] = note.content;
+        // Index included ItemNote nodes by id (carry content + category_name).
+        const notesById = new Map<string, { category: string; content: string }>();
+        // Index included Arrangement nodes by id (carry bpm + arrangement name).
+        const arrById = new Map<string, { bpm: number | null; name: string | null }>();
+        for (const n of json.included ?? []) {
+          if (n.type === "ItemNote") {
+            const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
+            const content = typeof n.attributes.content === "string" ? n.attributes.content : "";
+            if (category && content) notesById.set(n.id, { category, content });
+          } else if (n.type === "Arrangement") {
+            arrById.set(n.id, {
+              bpm: typeof n.attributes.bpm === "number" ? n.attributes.bpm : null,
+              name: typeof n.attributes.name === "string" && n.attributes.name ? n.attributes.name : null,
+            });
           }
         }
-        const arrRef = item.relationships?.arrangement?.data;
-        const arr = arrRef && !Array.isArray(arrRef) ? arrById.get(arrRef.id) : undefined;
-        out.push({
-          id: item.id,
-          title: String(a.title ?? a.description ?? "Untitled"),
-          itemType: typeof a.item_type === "string" ? a.item_type : "item",
-          lengthSec: typeof a.length === "number" ? a.length : 0,
-          sequence: typeof a.sequence === "number" ? a.sequence : out.length,
-          notesByCategory,
-          description: typeof a.description === "string" && a.description ? a.description : null,
-          songKey: typeof a.key_name === "string" && a.key_name ? a.key_name : null,
-          bpm: arr?.bpm ?? null,
-          arrangementName: arr?.name ?? null,
-          servicePosition: typeof a.service_position === "string" ? a.service_position : null,
-        });
-      }
 
-      // An OFFSET, not a URL. `links.next` arrives in a response BODY and used to
-      // be handed straight back to request(), which attaches the operator's PCO
-      // credentials -- so a redirected or spoofed response could walk them to
-      // another host. Taking only the integer means no string from the body
-      // reaches fetch() at all; the rest of the URL is the one we built.
-      // Strictly forward. A next-link that repeats or rewinds the offset would
-      // otherwise fetch the same page for ever; PCO does not do that, which is
-      // exactly why nothing would catch it if it started.
-      const offset = nextOffset(json.links?.next);
-      url = offset === null || offset <= seenOffset ? null : withOffset(url, offset);
-      seenOffset = offset ?? seenOffset;
-    }
+        for (const item of items) {
+          const a = item.attributes;
+          const noteRefs = item.relationships?.item_notes?.data;
+          const notesByCategory: Record<string, string> = {};
+          if (Array.isArray(noteRefs)) {
+            for (const ref of noteRefs) {
+              const note = notesById.get(ref.id);
+              if (note) notesByCategory[note.category] = note.content;
+            }
+          }
+          const arrRef = item.relationships?.arrangement?.data;
+          const arr = arrRef && !Array.isArray(arrRef) ? arrById.get(arrRef.id) : undefined;
+          out.push({
+            id: item.id,
+            title: String(a.title ?? a.description ?? "Untitled"),
+            itemType: typeof a.item_type === "string" ? a.item_type : "item",
+            lengthSec: typeof a.length === "number" ? a.length : 0,
+            sequence: typeof a.sequence === "number" ? a.sequence : out.length,
+            notesByCategory,
+            description: typeof a.description === "string" && a.description ? a.description : null,
+            songKey: typeof a.key_name === "string" && a.key_name ? a.key_name : null,
+            bpm: arr?.bpm ?? null,
+            arrangementName: arr?.name ?? null,
+            servicePosition: typeof a.service_position === "string" ? a.service_position : null,
+          });
+        }
+      },
+    );
 
     out.sort((a, b) => a.sequence - b.sequence);
     this.cacheSet(cacheKey, out, mediumTtlMs);

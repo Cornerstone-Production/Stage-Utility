@@ -16,7 +16,7 @@ import type {
   CalendarWindow,
 } from "../types/calendar.js";
 import type { PcoNode, PcoResponse } from "./pco-service.js";
-import { nextOffset, pcoService, withOffset } from "./pco-service.js";
+import { pcoService, readPcoPages } from "./pco-service.js";
 import { scrub } from "./scrub.js";
 
 const CALENDAR_BASE = "https://api.planningcenteronline.com/calendar/v2";
@@ -40,7 +40,7 @@ const CALENDAR_BASE = "https://api.planningcenteronline.com/calendar/v2";
  * https://api.planningcenteronline.com/docs/apps/calendar, read its changelog
  * entry for field or pagination changes, then change this string.
  */
-const CALENDAR_API_VERSION = "2018-11-01";
+export const CALENDAR_API_VERSION = "2018-11-01";
 
 /**
  * Its own cache, not the /services/v2 client's.
@@ -208,16 +208,12 @@ class PcoCalendarService {
   /**
    * Every page of a collection, flattened.
    *
-   * Written once for all three readers below. Pagination that is right in one of
-   * three places and subtly wrong in the other two is this repository's most
-   * expensive recurring mistake, and the offset rules here are exactly the kind
-   * that drift: strictly forward, bounded, and carrying an INTEGER rather than a
-   * URL out of the response body.
-   *
-   * Reaching MAX_PAGES is LOGGED. A bound is the right defence against a runaway
-   * loop, but exiting on it is otherwise indistinguishable from having read
-   * everything, and a caller cannot tell a whole month from the first 1200 of
-   * it. Absence with no signal is the failure this whole file is written against.
+   * Written once for all three readers below. The paging LOOP itself — strictly
+   * forward, bounded, carrying an INTEGER rather than a URL out of the response
+   * body, and warning when the bound is what stopped it — lives in
+   * readPcoPages, shared with the two /services/v2 readers that used to carry
+   * verbatim copies of it. What is local here is only the dedupe and the
+   * `included` accumulation.
    */
   private async readAll(
     firstUrl: string,
@@ -227,34 +223,22 @@ class PcoCalendarService {
     const data: PcoNode[] = [];
     const included: PcoNode[] = [];
     const seenIds = new Set<string>();
-    // Highest offset already asked for, so a next-link that does not move
-    // forward ends the loop instead of fetching one page for ever. PCO does not
-    // do that, which is precisely why nothing would catch it if it started.
-    let seenOffset = -1;
-    let url: string | null = firstUrl;
 
-    for (let page = 0; url && page < MAX_PAGES; page++) {
-      const json: PcoResponse & { links?: { next?: string } } = await this.request(url, appId, secret);
-      for (const node of Array.isArray(json.data) ? json.data : [json.data]) {
-        if (seenIds.has(node.id)) continue;
-        seenIds.add(node.id);
-        data.push(node);
-      }
-      included.push(...(json.included ?? []));
-      // An OFFSET, not a URL. `links.next` arrives in a response BODY and the
-      // request it would feed carries the operator's App ID and secret; an
-      // integer cannot carry a host, a path or a scheme, so no string from PCO
-      // reaches fetch() at all.
-      const offset = nextOffset(json.links?.next);
-      url = offset === null || offset <= seenOffset ? null : withOffset(url, offset);
-      seenOffset = offset ?? seenOffset;
-    }
+    await readPcoPages(
+      firstUrl,
+      MAX_PAGES,
+      "pco-calendar",
+      (url) => this.request(url, appId, secret),
+      (json) => {
+        for (const node of Array.isArray(json.data) ? json.data : [json.data]) {
+          if (seenIds.has(node.id)) continue;
+          seenIds.add(node.id);
+          data.push(node);
+        }
+        included.push(...(json.included ?? []));
+      },
+    );
 
-    if (url) {
-      console.warn(
-        `[pco-calendar] page limit reached after ${scrub(data.length)} row(s); the rest of this collection was not read`,
-      );
-    }
     return { data, included };
   }
 

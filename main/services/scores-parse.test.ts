@@ -73,10 +73,37 @@ describe("parseScoreboard", () => {
   });
 
   test("colours arrive prefixed with #", () => {
+    // The assertion used to sit inside `if (t.color !== null)`, which meant it
+    // skipped itself the moment the parser stopped producing a colour at all:
+    // returning `color: null` from parseTeam left the whole file green. So the
+    // exact hex is named, and the count is exact — every competitor in the
+    // fixture carries a colour, so anything less than all of them is the bug.
     const games = parseScoreboard("mlb", MLB, new Set([NYY]));
-    for (const t of [games[0].away, games[0].home]) {
-      if (t.color !== null) assert.match(t.color, /^#[0-9a-f]{6}$/i, `${t.abbreviation}: ${t.color}`);
-    }
+    assert.equal(games[0].home.color, "#132448", "the home team's colour is not the fixture's");
+    assert.equal(games[0].away.color, "#0d2b56", "the away team's colour is not the fixture's");
+
+    const slate = parseScoreboard("mlb", MLB, allTeamIds(MLB));
+    const colours = slate.flatMap((g) => [g.away.color, g.home.color]);
+    assert.equal(colours.length, 34, "the fixture must carry 17 games' worth of competitors");
+    assert.equal(
+      colours.filter((c) => c !== null).length,
+      34,
+      "a competitor lost its colour: every one in this fixture has one",
+    );
+    for (const c of colours) assert.match(c!, /^#[0-9a-f]{6}$/, `${c} is not a css hex colour`);
+  });
+
+  test("ESPN's bare six-digit hex is the only thing read as a colour", () => {
+    // The `#` prefix is added here, so a parser that passed the raw value
+    // through would hand CSS a string it silently ignores. Anything that is not
+    // six hex digits is not a colour and must be null rather than "#undefined".
+    const doctored = structuredClone(MLB);
+    const comps = doctored.events[0].competitions[0].competitors;
+    comps[0].team.color = "not-a-colour";
+    delete comps[1].team.color;
+    const g = parseScoreboard("mlb", doctored, new Set([NYY]))[0];
+    assert.equal(g.home.color, null);
+    assert.equal(g.away.color, null);
   });
 
   test("a football payload with no baseball fields still folds", () => {
