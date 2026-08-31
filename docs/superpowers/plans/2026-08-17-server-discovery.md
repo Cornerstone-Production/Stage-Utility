@@ -578,7 +578,7 @@ deduplicates by `serverId`, and always resolves — never rejects on a timeout,
 because "nothing answered" is an answer.
 
 Then `scripts/stage-utility-find` is a thin node wrapper printing one line per
-server: `FOH  http://192.168.16.61  (s1)`.
+server: `FOH  http://192.168.1.50  (s1)`.
 
 - [ ] **Step 4: Run the tests**
 

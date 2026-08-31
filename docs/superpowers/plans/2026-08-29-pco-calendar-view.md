@@ -21,10 +21,10 @@ Every claim below came back from the real org's API during planning. Do not re-d
 | `published_starts_at` is a real ISO instant, and is sometimes `null` | Use `published_starts_at ?? starts_at`. A plan that assumes it is always present renders blanks. |
 | `kind` is `"standard"` for events, vans, rooms and childcare alike | **`kind` is useless here. Do not filter on it.** |
 | All-day events arrive as `05:00Z` (local midnight, CDT) | Day bucketing MUST use the app time zone. A UTC host puts every all-day event on the wrong day. |
-| Two calendars: `Cornerstone Church`, `FLC`. FLC events also appear on the church calendar | Calendar filtering alone does NOT remove the noise. Tags do. |
+| Two calendars: a main one and a second building's. The second building's events also appear on the main calendar | Calendar filtering alone does NOT remove the noise. Tags do. |
 | 91 instances / 14 days unfiltered; 13 on the busiest day; **3** filtered to one department tag | Filtering solves density. Truncation is the fallback, not the strategy. |
 
-**Explicitly out of scope, by the owner's decision:** a booking-vs-event toggle. The data cannot support it — resource bookings inherit the tag of whoever reserved them (`CR - Van` is tagged `Groups` while its parent `Cornerstone Recovery` is `Pastoral`), so no rule separates them. Do not infer one from names.
+**Explicitly out of scope, by the owner's decision:** a booking-vs-event toggle. The data cannot support it — resource bookings inherit the tag of whoever reserved them (a ministry's van is tagged `Groups` while the ministry that booked it is `Pastoral`), so no rule separates them. Do not infer one from names.
 
 ## Global Constraints
 
