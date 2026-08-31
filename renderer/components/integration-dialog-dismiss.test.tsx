@@ -326,6 +326,51 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
     assert.equal(o.closes, 1, "it saved but never closed");
   });
 
+  test("the confirm goes busy for the WHOLE save, panels included", async () => {
+    // `saving` used to be the FORM's flag, and a dismissal whose only unsaved
+    // work is a sub-panel's never sets it — so all three confirm buttons stayed
+    // live for the length of the panel's round trip and a second click ran the
+    // save again. Driven with a slow reply, since an instant one closes the
+    // dialog before a second click is possible.
+    const o = await openProPresenter();
+    await addInstance("Chapel");
+
+    const g = globalThis as unknown as { fetch: (...a: unknown[]) => Promise<unknown> };
+    const real = g.fetch;
+    g.fetch = async (...a: unknown[]) => {
+      const res = await real(...a);
+      await new Promise((r) => setTimeout(r, 80));
+      return res;
+    };
+    try {
+      fireEvent.keyDown(propSettings(), { key: "Escape" });
+      await settle();
+      fireEvent.click(button(confirmDialog()!, "Save & close"));
+      await settle(20);
+
+      // The three choices, not Radix's own X in the corner.
+      const busy = [...confirmDialog()!.querySelectorAll("button")].filter((b) =>
+        /Keep editing|Discard|Save & close|Saving/.test(b.textContent ?? ""),
+      );
+      assert.equal(busy.length, 3, `expected three choices, saw ${busy.length}`);
+      assert.deepEqual(
+        busy.map((b) => b.disabled),
+        [true, true, true],
+        "the confirm's choices stayed live while the panel was still saving",
+      );
+
+      await settle(160);
+      assert.equal(
+        configPosts().length,
+        1,
+        `the save ran ${configPosts().length} times for one click`,
+      );
+      assert.equal(o.closes, 1);
+    } finally {
+      g.fetch = real;
+    }
+  });
+
   test("Discard closes and writes nothing", async () => {
     const o = await openProPresenter();
     await addInstance("Chapel");

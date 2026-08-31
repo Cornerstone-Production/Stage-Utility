@@ -424,6 +424,8 @@ export function IntegrationDialog({
   const [isClearing, setIsClearing] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  /** True for the whole of the confirm's "Save & close", panels included. */
+  const [closingSave, setClosingSave] = useState(false);
 
   // Sub-panels that hold their own unsaved buffer (the Ross TSL feeds, the
   // ProPresenter instances) register here. Their rows are not in the
@@ -554,9 +556,18 @@ export function IntegrationDialog({
   /** Everything the confirm is asking about: each sub-panel's buffer, then this
    *  form. False if any of them refused — the dialog must then stay open. */
   async function saveEverything(): Promise<boolean> {
-    const panelsOk = await panels.saveAll();
-    const formOk = schemaDirty ? await handleSave() : true;
-    return panelsOk && formOk;
+    // Its own flag, not isSaving: that one belongs to the form's save, and a
+    // dismissal whose only unsaved work is a sub-panel's never sets it — which
+    // left the confirm's three buttons live for the length of the panel's
+    // round trip, so a second click ran the whole thing again.
+    setClosingSave(true);
+    try {
+      const panelsOk = await panels.saveAll();
+      const formOk = schemaDirty ? await handleSave() : true;
+      return panelsOk && formOk;
+    } finally {
+      setClosingSave(false);
+    }
   }
 
   const body = bespoke ?? (
@@ -757,7 +768,7 @@ export function IntegrationDialog({
 
       <UnsavedChangesDialog
         open={confirming}
-        saving={isSaving}
+        saving={isSaving || closingSave}
         description={`Your changes to ${descriptor.label} have not been saved.`}
         saveLabel="Save & close"
         onCancel={() => setConfirming(false)}
