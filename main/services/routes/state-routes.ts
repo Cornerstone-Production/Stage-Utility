@@ -6,6 +6,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { type RouteCtx, json, error } from "./context.js";
+import { errorMessage } from "../errors.js";
 import { stageController } from "../stage-controller.js";
 import { SERVER_VERSION } from "../server-version.js";
 
@@ -31,14 +32,26 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "GET" && pathname === "/api/service-types") {
-      const types = await stageController.listServiceTypes();
-      json(res, types);
+      try {
+        json(res, await stageController.listServiceTypes());
+      } catch (err) {
+      // 502, not 500: the request was well-formed, so reaching Planning Center
+      // is the only way this fails, and a 500 tells the operator this app broke
+      // when the upstream is down. The calendar routes make the same argument
+      // the other way round: a 400 would blame the caller. Without a try this
+      // reached the dispatcher's generic arm, which is 500 by design because a
+      // status is opt-in.
+        error(res, errorMessage(err), 502);
+      }
       return;
     }
 
     if (method === "GET" && pathname === "/api/team-positions") {
-      const positions = await stageController.listTeamPositions();
-      json(res, positions);
+      try {
+        json(res, await stageController.listTeamPositions());
+      } catch (err) {
+        error(res, errorMessage(err), 502);
+      }
       return;
     }
 
@@ -48,8 +61,11 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
         error(res, "serviceTypeId query param required");
         return;
       }
-      const plans = await stageController.listPlans(serviceTypeId);
-      json(res, plans);
+      try {
+        json(res, await stageController.listPlans(serviceTypeId));
+      } catch (err) {
+        error(res, errorMessage(err), 502);
+      }
       return;
     }
 

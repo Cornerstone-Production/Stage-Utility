@@ -65,11 +65,25 @@ describe("an empty allowlist means every service type", () => {
  */
 const ID_ARRAY = /\[\s*"\d{3,}"\s*(?:,\s*"\d{3,}"\s*)+,?\s*\]/;
 
-/** Full-line comments removed, so prose about the bug cannot satisfy the scan. */
+/**
+ * The same shape, global, for the whole-file scan below.
+ *
+ * `\s` already crosses newlines, so the pattern needs no change to see an array
+ * the formatter has wrapped — only a scan that reads the whole file does.
+ */
+const ID_ARRAY_ALL = new RegExp(ID_ARRAY.source, "g");
+
+/**
+ * Full-line comments blanked, so prose about the bug cannot satisfy the scan.
+ *
+ * Blanked rather than deleted: the whole-file scan reports the line a match
+ * starts on, and dropping lines would number every offender against a file that
+ * does not exist on disk.
+ */
 function stripLineComments(src: string): string {
   return src
     .split("\n")
-    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? "" : l))
     .join("\n");
 }
 
@@ -91,10 +105,17 @@ describe("no organisation's ids are baked into the source", () => {
   it("has no hardcoded service-type id list anywhere under main/", () => {
     const offenders: string[] = [];
     for (const file of sourceFiles(MAIN)) {
+      // WHOLE FILE, not line by line. This scan used to test each line on its
+      // own, and oxfmt wraps an array literal once it passes the print width —
+      // so whether this SECURITY guard fired came down to how long the pasted
+      // ids happened to be. Four invented ids on one line were caught; the same
+      // four wrapped across lines walked straight past it.
       const code = stripLineComments(fs.readFileSync(file, "utf8"));
-      code.split("\n").forEach((line, i) => {
-        if (ID_ARRAY.test(line)) offenders.push(`${path.relative(MAIN, file)}:${i + 1}: ${line.trim()}`);
-      });
+      for (const m of code.matchAll(ID_ARRAY_ALL)) {
+        const line = code.slice(0, m.index).split("\n").length;
+        // Collapsed so a wrapped literal is reported as the one thing it is.
+        offenders.push(`${path.relative(MAIN, file)}:${line}: ${m[0].replace(/\s+/g, " ")}`);
+      }
     }
     // EXACT, not a floor. A floor with slack is how three of these survived.
     assert.deepEqual(offenders, [], "these lines hardcode a list of numeric ids");

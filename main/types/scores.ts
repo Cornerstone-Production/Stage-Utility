@@ -62,7 +62,6 @@ export function leagueById(id: string): (typeof LEAGUES)[number] | null {
  * identity is always the PAIR, and anything that stores one team on its own
  * stores `league:teamId` — see teamPin in scores-object.tsx. The
  * display fields are a CACHE for rendering the settings row before the first
- * display fields are a CACHE for rendering the settings row before the first
  * successful fetch; they are re-resolved from /teams, and the id is the thing
  * that is authoritative.
  */

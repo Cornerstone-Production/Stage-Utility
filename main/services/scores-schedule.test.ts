@@ -34,7 +34,6 @@ const NOON = Date.parse("2026-08-29T17:00:00.000Z");
 describe("nextPoll", () => {
   test("a live game with something watching polls at the active cadence", () => {
     const d = nextPoll([game({ state: "in" })], NOON, true);
-    assert.equal(d.poll, true);
     assert.equal(d.delayMs, 25_000);
   });
 
@@ -44,46 +43,44 @@ describe("nextPoll", () => {
     // channel — an unattended appliance is exactly where "nobody is watching"
     // is permanent.
     const d = nextPoll([game({ state: "in" })], NOON, false);
-    assert.equal(d.poll, true);
     assert.equal(d.delayMs, 300_000);
   });
 
   test("a game starting within the hour polls every two minutes", () => {
     const soon = new Date(NOON + 30 * 60_000).toISOString();
     const d = nextPoll([game({ state: "pre", startsAt: soon })], NOON, true);
-    assert.equal(d.poll, true);
     assert.equal(d.delayMs, 120_000);
   });
 
-  test("every followed game finished: STOP, and say when to look again", () => {
+  test("every followed game finished: drop to the dormant cadence", () => {
+    // Not "stop". The poller fetches on every wake-up — the schedule's only
+    // lever is how long it waits — and these titles used to say STOP on the
+    // strength of a `poll: false` nothing read.
     const d = nextPoll([game({ state: "post" })], NOON, true);
-    assert.equal(d.poll, false);
-    assert.ok(d.delayMs >= 30 * 60_000, "a stopped poller still wakes to re-read the schedule");
+    assert.equal(d.delayMs, 30 * 60_000);
   });
 
-  test("no games at all: stop, do not spin", () => {
+  test("no games at all: dormant, not a spin", () => {
     const d = nextPoll([], NOON, true);
-    assert.equal(d.poll, false);
+    assert.equal(d.delayMs, 30 * 60_000);
   });
 
   test("a game far in the future does not hold the fast cadence open", () => {
     const later = new Date(NOON + 6 * 3_600_000).toISOString();
     const d = nextPoll([game({ state: "pre", startsAt: later })], NOON, true);
-    assert.equal(d.poll, false);
     // It must wake in time to catch the pre-game ramp, never sleep past it.
     assert.ok(NOON + d.delayMs <= Date.parse(later) - 60 * 60_000 + 1000);
   });
 
   test("live beats finished: one live game keeps the fast cadence", () => {
     const d = nextPoll([game({ state: "post" }), game({ eventId: "e2", state: "in" })], NOON, true);
-    assert.equal(d.poll, true);
     assert.equal(d.delayMs, 25_000);
   });
 
   test("an unparseable start time never yields NaN", () => {
     const d = nextPoll([game({ state: "pre", startsAt: "" })], NOON, true);
-    assert.equal(d.poll, false);
     assert.ok(Number.isFinite(d.delayMs), `delayMs was ${d.delayMs}`);
+    assert.equal(d.delayMs, 30 * 60_000, "a start time that will not parse falls back to dormant");
   });
 
   test("a delay is never zero or negative, whatever the input", () => {

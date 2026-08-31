@@ -195,11 +195,16 @@ export class LayoutConflictError extends Error {
  * injection and it is right to: both icon setters had the same three lines, and
  * both were reachable from an unauthenticated POST on the LAN.
  *
- * Two defences, because either alone is thinner than it looks. The key SHAPE is
+ * Three defences, because each alone is thinner than it looks. The key SHAPE is
  * checked — real keys are display ids ("display-1"), tool paths ("/baptism") and
- * view ids, none of which need anything outside this class. And the map is
- * rebuilt with a null prototype, so an assignment has no prototype to reach even
- * if a future caller skips the check.
+ * view ids, none of which need anything outside this class. The map is rebuilt
+ * with a null prototype, so an assignment has no prototype to reach even if a
+ * future caller skips the check. And the map COMING IN is filtered too: a
+ * reserved name can already be sitting in one, because settings.json is
+ * JSON.parse'd and a restored config snapshot is a file somebody uploaded, and
+ * on a null-prototype target it lands as an ORDINARY own key that then rides the
+ * spread back out and gets written to disk again. It can never be a real icon
+ * key — the shape check refuses to create one — so it is dropped, loudly.
  */
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -212,7 +217,19 @@ export function writeIconEntry(
   if (!/^[A-Za-z0-9/_-]{1,64}$/.test(key) || FORBIDDEN_KEYS.has(key)) {
     throw new Error(`${label} — key must be an id or a tool path`);
   }
-  const next: Record<string, string> = Object.assign(Object.create(null), current ?? {});
+  const next: Record<string, string> = Object.create(null);
+  for (const [k, v] of Object.entries(current ?? {})) {
+    if (FORBIDDEN_KEYS.has(k)) {
+      // Both interpolations scrubbed. `label` is our own literal today, but this
+      // file is request-facing and log-injection.test.ts holds every one of them
+      // to scrub() so nobody has to judge that case by case.
+      console.warn(
+        `[stage-controller] ${scrub(label)} — dropped a reserved key from the stored map: ${scrub(k)}`,
+      );
+      continue;
+    }
+    next[k] = v;
+  }
   if (value === "") delete next[key];
   else next[key] = value;
   // Back to an ordinary object for JSON.stringify, which skips a null-prototype
@@ -895,17 +912,36 @@ export class StageController {
    * PCO stops matching, which is the right behaviour: the operator renamed the
    * thing they were pointing at, and silently following a rename would be a
    * guess about intent this app is not entitled to make.
+   *
+   * Two independent lists, and each is optional — an omitted one is KEPT, the
+   * way setBarItems keeps the set it was not given. `[]` is a real value
+   * meaning "match nothing", so it must stay distinguishable from "not sent":
+   * this took both lists positionally and cleared whichever the caller could
+   * not name.
    */
-  async setChecklistSources(categories: string[], teams: string[]): Promise<StageState> {
+  async setChecklistSources(next: { categories?: string[]; teams?: string[] }): Promise<StageState> {
     const clean = (xs: string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
-    // Computed ONCE each, then written to both. Calling clean() four times made
-    // what is saved and what is broadcast two independent computations of the
-    // same thing — which is only harmless while they agree, and the whole point
-    // of a normalising step is that somebody will change it.
-    const checklistNoteCategories = clean(categories);
-    const checklistNoteTeams = clean(teams);
-    await settingsStore.patch({ checklistNoteCategories, checklistNoteTeams });
-    this.state = { ...this.state, checklistNoteCategories, checklistNoteTeams };
+    // An OMITTED list is kept, not cleared: a body naming only one of the two
+    // used to wipe the other and answer 200. And each list is cleaned ONCE and
+    // reused for both the patch and the state — calling clean() per destination
+    // made what is saved and what is broadcast two independent computations of
+    // the same thing, which is only harmless while they agree.
+    const categories = next.categories === undefined
+      ? this.state.checklistNoteCategories
+      : clean(next.categories);
+    const teams = next.teams === undefined ? this.state.checklistNoteTeams : clean(next.teams);
+    await settingsStore.patch({
+      checklistNoteCategories: categories,
+      checklistNoteTeams: teams,
+    });
+    this.state = {
+      ...this.state,
+      checklistNoteCategories: categories,
+      checklistNoteTeams: teams,
+    };
+    console.log(
+      `[stage-controller] setChecklistSources categories=${categories.length} teams=${teams.length}`,
+    );
     this.broadcast();
     return this.state;
   }

@@ -37,6 +37,7 @@ process.env.HOME = path.join(TMP, "home");
 const { automationEngine } = await import("./automation-engine.js");
 const { automationStore } = await import("./automation-store.js");
 const { AUTOMATION_TRIGGERS } = await import("./automation-triggers.js");
+const { AUTOMATION_CONDITIONS } = await import("./automation-conditions.js");
 const { reaperService } = await import("./reaper-service.js");
 const { propresenterService } = await import("./propresenter-service.js");
 const { prodcomService } = await import("./prodcom-service.js");
@@ -304,11 +305,41 @@ describe("demand is registered for everything automation reads", () => {
     );
   });
 
+  it("every channel a condition reads has a consumer registered", () => {
+    // The counterpart to the trigger check above, and the one that was missing.
+    // Conditions are PULLED at fire time, so they never reach the bus and the
+    // trigger loop cannot see them: a rule triggering on PCO and merely ASKING
+    // about a ProVideoPlayer layer reads a snapshot at the idle cadence, with
+    // nothing anywhere saying so.
+    //
+    // Derived from AUTOMATION_CONDITIONS, the same registry the engine
+    // registers from, so a condition added tomorrow is covered the moment it is
+    // written. It replaces a hand-maintained table in automation-engine.ts that
+    // no test read at all — deleting five of its ten entries left 1725 tests
+    // green.
+    const channels = [
+      ...new Set(
+        Object.values(AUTOMATION_CONDITIONS)
+          .map((c) => c.channel)
+          .filter((c): c is string => c !== null),
+      ),
+    ].sort();
+    assert.ok(channels.length > 0, "no condition names a channel — the registry moved");
+    const unregistered = channels.filter((c) => channelDemandSourceCount(c) === 0);
+    assert.deepEqual(
+      unregistered,
+      [],
+      `No in-process demand registered for: ${unregistered.join(", ")}. ` +
+        "A qualifier on that channel answers from whatever the idle cadence last " +
+        "left behind, and the rule it gates is wrong with no error anywhere.",
+    );
+  });
+
   it("reaper:status has one, which no trigger channel would have given it", () => {
     // reaper:status carries no trigger — its automation surface is the
     // reaper.is-recording CONDITION, which is pulled rather than broadcast. An
-    // exact count, so dropping the condition table shows up here rather than as a
-    // qualifier quietly answering from a five-second-old snapshot.
+    // exact count, so dropping the condition registration shows up here rather
+    // than as a qualifier quietly answering from a five-second-old snapshot.
     assert.equal(channelDemandSourceCount("reaper:status"), 1);
   });
 });
