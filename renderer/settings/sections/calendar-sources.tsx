@@ -1,17 +1,7 @@
 // Which calendars and tags a calendar View draws.
 //
-// The options are read LIVE from Planning Center rather than stored, because a
-// tag renamed there has to appear under its new name. A picker built from a
-// remembered copy is how somebody ends up choosing an option that matches
-// nothing and cannot tell why their calendar is empty.
-//
-// A stored choice that PCO no longer offers is kept in the list and marked,
-// rather than dropped — the same rule the pre-service checklist follows, and for
-// the same reason: dropping it would silently unselect the operator's choice and
-// widen the filter to everything, with nothing on screen to explain it. The
-// difference here is that the STORED NAME is what makes that possible at all.
-// PCO filters by id and ids are unreadable, so a choice whose tag has been
-// deleted would otherwise show as a hex string or as nothing.
+// Why the options are read live and why a stored choice PCO no longer offers is
+// kept and marked: see pco-options.ts, which both live pickers share.
 //
 // NOTHING CHOSEN MEANS EVERYTHING, which is the opposite of the checklist's
 // rule. A checklist that fills itself with every note on the plan is noise; a
@@ -32,6 +22,7 @@ import {
   type MultiSelectOption,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
+import { optionsFor as pcoOptions } from "./pco-options";
 import { errorMessage } from "@main/services/errors";
 import type { CalendarSelection, CalendarSourceDTO, CalendarTagDTO } from "@main/types/calendar";
 import type { View } from "@main/types/stage";
@@ -41,27 +32,35 @@ interface Sources {
   tags: CalendarTagDTO[];
 }
 
-/** What PCO offers, plus any stored choice it no longer does, marked. */
+/** A calendar or a tag as PCO offers it. A stored choice is the same, minus the
+ *  group, which is why `chosen` widens to this rather than the other way round. */
+interface CalendarOption {
+  id: string;
+  name: string;
+  groupName?: string;
+}
+
+/**
+ * What PCO offers, plus any stored choice it no longer does, marked.
+ *
+ * Planning Center filters by ID and ids are unreadable, so the stored NAME is
+ * what makes a deleted tag say anything at all — it falls back to the id only
+ * when there was never a name to keep.
+ */
 export function optionsFor(
-  offered: readonly { id: string; name: string; groupName?: string }[],
+  offered: readonly CalendarOption[],
   chosen: readonly CalendarSelection[],
 ): MultiSelectOption[] {
-  const live = new Set(offered.map((o) => o.id));
-  const missing = chosen.filter((c) => !live.has(c.id));
-  return [
-    ...offered.map((o) => ({
-      value: o.id,
-      // The group is part of the label rather than a heading, because PCO
-      // composes several tags as OR within a group and AND across them — two
-      // tags from different groups match far less than an operator expects, and
-      // a flat list hides that entirely.
-      label: o.groupName ? `${o.groupName} · ${o.name}` : o.name,
-    })),
-    ...missing.map((c) => ({
-      value: c.id,
-      label: `${c.name || c.id} (not in Planning Center)`,
-    })),
-  ];
+  // Explicit, because `chosen` is the narrower CalendarSelection — a stored
+  // choice has no group — and inference would take the narrower of the two.
+  return pcoOptions<CalendarOption>(offered, chosen, {
+    id: (o) => o.id,
+    // The group is part of the label rather than a heading, because PCO
+    // composes several tags as OR within a group and AND across them — two
+    // tags from different groups match far less than an operator expects, and
+    // a flat list hides that entirely. A stored choice carries no group.
+    label: (o) => (o.groupName ? `${o.groupName} · ${o.name}` : o.name || o.id),
+  });
 }
 
 /** The stored selections, as the ids MultiSelect works in. */

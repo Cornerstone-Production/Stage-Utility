@@ -1,14 +1,12 @@
 // Which of a plan's notes become the pre-service checklist.
 //
-// The options are read LIVE from Planning Center rather than stored, because a
-// category renamed there has to appear under its new name. A picker built from a
-// remembered copy is how somebody ends up choosing an option that matches
-// nothing and cannot tell why their checklist is empty.
+// Why the options are read live and why a stored name PCO no longer offers is
+// kept and marked: see pco-options.ts, which both live pickers share. Here the
+// cost of dropping one is a checklist that goes silently empty — the same
+// failure the ScriptView preset code documents from the other direction.
 //
-// A stored name that PCO no longer offers is kept in the list and marked, rather
-// than dropped. Dropping it would silently unselect the operator's choice and
-// leave the widget empty with nothing on screen to explain it — the same failure
-// the ScriptView preset code documents from the other direction.
+// NOTHING CHOSEN MEANS THE CHECKLIST IS OFF, the opposite of the calendar
+// picker's rule: a list that filled itself with every note on the plan is noise.
 
 import { useEffect, useState } from "react";
 
@@ -21,10 +19,10 @@ import {
   FieldLabel,
   FieldSet,
   MultiSelect,
-  type MultiSelectOption,
+  toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
-import { toast } from "../../components/ui";
+import { optionsFor as pcoOptions } from "./pco-options";
 import { errorMessage } from "@main/services/errors";
 import type { SectionProps } from "../types";
 
@@ -33,15 +31,10 @@ interface Sources {
   teams: string[];
 }
 
-/** Options for one picker: what PCO offers, plus any stored name it no longer does. */
-function optionsFor(offered: readonly string[], chosen: readonly string[]): MultiSelectOption[] {
-  const live = new Set(offered);
-  const missing = chosen.filter((c) => !live.has(c));
-  return [
-    ...offered.map((name) => ({ value: name, label: name })),
-    ...missing.map((name) => ({ value: name, label: `${name} (not in Planning Center)` })),
-  ];
-}
+/** Options for one picker. The NAME is the stored value here, so it is both the
+ *  id MultiSelect works in and the label the operator reads. */
+const optionsFor = (offered: readonly string[], chosen: readonly string[]) =>
+  pcoOptions(offered, chosen, { id: (s) => s, label: (s) => s });
 
 /**
  * Three states, not two.
