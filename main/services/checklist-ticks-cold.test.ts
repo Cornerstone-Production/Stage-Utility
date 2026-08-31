@@ -107,9 +107,13 @@ describe("a row label cannot eat the error it is reported beside", () => {
       "the row label reached the format-string position — a row containing %s consumes the " +
         `Error and the operator is told the save failed without being told why: ${String(line[0])}`,
     );
+    // The reason, not the Error object: it goes through scrubError, which renders
+    // the stack as one escaped line so /log cannot be forged by an error message.
+    // Asserting the TEXT survives is also the stronger claim — it is what an
+    // operator reads, and it stays true whichever way the error is rendered.
     assert.ok(
-      line.some((arg) => arg instanceof Error),
-      "the Error never reached the log line, so /log cannot say why the save failed",
+      line.slice(1).some((arg) => /EISDIR|illegal operation|rename/i.test(String(arg))),
+      `the failure reason never reached the log line, so /log cannot say why the save failed: ${JSON.stringify(line)}`,
     );
   });
 });

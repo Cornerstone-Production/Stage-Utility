@@ -77,7 +77,7 @@ map rather than inventing a second format.
   "version": 1,
   "appVersion": "1.11.0",
   "createdAt": "2026-08-17T14:12:00.000Z",
-  "source": { "server": "Cornerstone Worship" },
+  "source": { "server": "Main Auditorium" },
   "views": [ /* the chosen view, then any it embeds */ ],
   "sideData": {
     "slots": { "<objectId|viewId>": { "<serviceTypeId>": [ /* rows */ ] } },

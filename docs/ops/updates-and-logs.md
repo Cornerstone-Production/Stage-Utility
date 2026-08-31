@@ -142,6 +142,21 @@ Timestamps are drawn in the **app time zone** (Settings → Advanced), which the
 header names. Not the server's UTC and not the viewer's browser zone: a log is
 read against a service that happened at a wall-clock time in the building.
 
+### Why a value on the page can read `\n`
+
+One record per line is what makes the page readable, and plenty of what gets
+logged comes from outside the app: a plan title typed into Planning Center, a
+config key posted to `/api/integrations/:id/config`, a device's reply, an error
+message from an integration. A newline inside any of those would otherwise start
+a second line that looks exactly like a record the server wrote — most misleading
+at the moment the log matters most.
+
+So every outside value is escaped on its way into a log line. A control character
+is shown rather than obeyed: a newline reads `\n`, a tab `\t`, anything else
+`\x1b`. Long values are cut at 200 characters with an ellipsis, and a stack trace
+at 2,000. Seeing `\n` in the middle of a plan title on this page means the title
+really contains one — not that the page is broken.
+
 ### Timestamps that run backwards
 
 The buffer is not chronological, and cannot be. On boot the previous run's

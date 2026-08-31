@@ -18,7 +18,7 @@ import { savedColorsStore } from "./saved-colors-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
-import { scrub } from "./scrub.js";
+import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
@@ -105,7 +105,7 @@ export function retuneEmbedFontSize(views: View[]): { views: View[]; changed: nu
   });
   if (changed > 0) {
     console.log(
-      `[stage-controller] retuned ${changed} embedded view(s) from the old ${EMBED_FONT_OLD_DEFAULT} font size to ${EMBED_FONT_NEW_DEFAULT}`,
+      `[stage-controller] retuned ${scrub(changed)} embedded view(s) from the old ${scrub(EMBED_FONT_OLD_DEFAULT)} font size to ${scrub(EMBED_FONT_NEW_DEFAULT)}`,
     );
   }
   return { views: next, changed };
@@ -374,7 +374,10 @@ export class StageController {
     // to read.
     const barMigration = await barConfigStore.init();
     if (barMigration) {
-      console.error("[bar-config] could not save the migrated bar; retrying next start:", barMigration.message);
+      console.error(
+        "[bar-config] could not save the migrated bar; retrying next start:",
+        scrub(barMigration.message),
+      );
     }
     await savedColorsStore.init();
     console.log("[stage-controller] init");
@@ -386,7 +389,11 @@ export class StageController {
     const { patch, converted } = await migrateInlineBrandingImages(settings);
     if (converted.length > 0) {
       settings = await settingsStore.patch(patch);
-      console.log(`[stage-controller] moved ${scrub(converted.length)} branding image(s) out of settings:`, converted.join(", "));
+      console.log(
+        "[stage-controller] moved branding image(s) out of settings:",
+        scrub(converted.length),
+        scrub(converted.join(", ")),
+      );
     }
 
     const showQr = settings.showQr ?? true;
@@ -469,16 +476,22 @@ export class StageController {
     await this.loadAllViewRawSlots(settings.serviceTypeId);
     this.recomputeResolved();
 
-    console.log("[stage-controller] loaded settings", {
-      serviceTypeId: this.state.serviceTypeId,
-      planId: this.state.planId,
-      planMode: this.state.planMode,
-      showQr: this.state.showQr,
-      kioskDiscovery: this.state.kioskDiscovery,
-      views: views.length,
-      outputs: outputs.length,
-      allowedServiceTypeIds: this.state.allowedServiceTypeIds,
-    });
+    console.log(
+      "[stage-controller] loaded settings",
+      scrub(
+        {
+          serviceTypeId: this.state.serviceTypeId,
+          planId: this.state.planId,
+          planMode: this.state.planMode,
+          showQr: this.state.showQr,
+          kioskDiscovery: this.state.kioskDiscovery,
+          views: views.length,
+          outputs: outputs.length,
+          allowedServiceTypeIds: this.state.allowedServiceTypeIds,
+        },
+        600,
+      ),
+    );
   }
 
   /**
@@ -525,7 +538,7 @@ export class StageController {
     await viewsStore.save(views);
     await settingsStore.patch({ outputs });
     console.log(
-      `[stage-controller] migrated ${legacy.length} legacy display(s) → ${views.length} view(s) + ${outputs.length} output(s)`,
+      `[stage-controller] migrated ${scrub(legacy.length)} legacy display(s) → ${scrub(views.length)} view(s) + ${scrub(outputs.length)} output(s)`,
     );
     return this.applySurfaceMigration(views, outputs);
   }
@@ -565,7 +578,7 @@ export class StageController {
     if (!alreadyCleaned) await settingsStore.patch({ layoutDefaultsCleaned: true });
     if (cleanedCount > 0) {
       console.log(
-        `[layout-defaults] ${cleanedCount} object${cleanedCount === 1 ? "" : "s"} carried a card ground written by ` +
+        `[layout-defaults] ${scrub(cleanedCount)} object${scrub(cleanedCount === 1 ? "" : "s")} carried a card ground written by ` +
           "the object registry rather than chosen — a translucent one, which let the page read through the " +
           "widget, or the older #191919 card, which left one layout wearing two different cards. Replaced " +
           "with the current opaque card, once. Still editable per object in the layout editor.",
@@ -978,7 +991,7 @@ export class StageController {
       checklistNoteTeams: teams,
     };
     console.log(
-      `[stage-controller] setChecklistSources categories=${categories.length} teams=${teams.length}`,
+      `[stage-controller] setChecklistSources categories=${scrub(categories.length)} teams=${scrub(teams.length)}`,
     );
     this.broadcast();
     return this.state;
@@ -1134,7 +1147,7 @@ export class StageController {
     );
     if (orphaned.length > 0) {
       console.log(
-        `[stage-controller] ${orphaned.length} view(s) referenced a deleted ScriptView preset — ` +
+        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ScriptView preset — ` +
           `cleared to all columns: ${orphaned.map((v) => scrub(v.name)).join(", ")}`,
       );
       const views = this.state.views.map((v) =>
@@ -1337,11 +1350,11 @@ export class StageController {
     if (Date.now() < end + StageController.ROLLOVER_GRACE_MS) return;
 
     console.log(
-      `[stage-controller] auto rollover — plan ${this.state.planId} ended >1h ago, selecting next`,
+      `[stage-controller] auto rollover — plan ${scrub(this.state.planId)} ended >1h ago, selecting next`,
     );
     this.autoAdvancedFromPlanId = this.state.planId;
     await this.selectGlobalNextPlan().catch((err) =>
-      console.error("[stage-controller] auto rollover error:", err),
+      console.error("[stage-controller] auto rollover error:", scrubError(err)),
     );
   }
 
@@ -1414,7 +1427,7 @@ export class StageController {
         : allTypes.filter((t) => allowed.includes(t.id));
 
     console.log(
-      `[stage-controller] selectGlobalNextPlan — ${candidates.length} candidate types: ${candidates.map((c) => c.id).join(", ")}`,
+      `[stage-controller] selectGlobalNextPlan — ${scrub(candidates.length)} candidate types: ${scrub(candidates.map((c) => c.id).join(", "))}`,
     );
 
     // For each candidate, fetch its nearest upcoming plan.
@@ -1461,7 +1474,14 @@ export class StageController {
           best = { type, plan: nearest };
         }
       } catch (err) {
-        console.error(`[stage-controller] selectGlobalNextPlan — error fetching plans for type ${scrub(type.id)}:`, err);
+        // The type id stays OUT of the format string. It comes from PCO, and a
+        // `%s` in the first argument would eat the error standing beside it —
+        // the operator told that fetching failed and not told why.
+        console.error(
+          "[stage-controller] selectGlobalNextPlan — error fetching plans for type:",
+          scrub(type.id),
+          scrubError(err),
+        );
       }
     }
 
@@ -1483,8 +1503,12 @@ export class StageController {
       return this.state;
     }
 
+    // The service type's name and the plan's title are whatever somebody typed
+    // into Planning Center. A plan titled `Sunday AM\n[stage-controller] plan
+    // switched to 99999` used to become a second line on /log — which renders
+    // `white-space: pre-wrap` — with no attacker anywhere in the picture.
     console.log(
-      `[stage-controller] selectGlobalNextPlan → type=${best.type.id} (${best.type.name}) plan=${best.plan.id} (${best.plan.title}) sortDate=${best.plan.sortDate}`,
+      `[stage-controller] selectGlobalNextPlan → type=${scrub(best.type.id)} (${scrub(best.type.name)}) plan=${scrub(best.plan.id)} (${scrub(best.plan.title)}) sortDate=${scrub(best.plan.sortDate)}`,
     );
 
     // Switch service type if needed and reload display slots.
@@ -1548,7 +1572,7 @@ export class StageController {
       } catch (err) {
         // Never throws to a caller — there isn't one. A failed sweep leaves the
         // previous plan in place, which is the safe outcome mid-service.
-        console.error("[stage-controller] background plan re-selection failed:", err);
+        console.error("[stage-controller] background plan re-selection failed:", scrubError(err));
       } finally {
         this.reselectInFlight = null;
       }
@@ -1678,7 +1702,7 @@ export class StageController {
     next.hour = clamp(Math.round(next.hour), 0, 23);
     next.dayOfWeek =
       next.dayOfWeek == null ? null : clamp(Math.round(next.dayOfWeek), 0, 6);
-    console.log(`[stage-controller] setAutoUpdate →`, next);
+    console.log(`[stage-controller] setAutoUpdate →`, scrub(next));
     this.state = { ...this.state, autoUpdate: next };
     await settingsStore.patch({ autoUpdate: next });
     this.broadcast();
@@ -1779,7 +1803,7 @@ export class StageController {
       serviceWindow.setWindows(windows);
       console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
     } catch (err) {
-      console.warn("[stage-controller] refreshServiceWindows failed:", err instanceof Error ? err.message : err);
+      console.warn("[stage-controller] refreshServiceWindows failed:", scrubError(err));
     }
   }
 
@@ -1810,7 +1834,7 @@ export class StageController {
         await updater.applyUpdate({ deferRestart: this.state.autoUpdate.mode === "auto-install" });
       }
     } catch (err) {
-      console.error("[stage-controller] update check failed:", err);
+      console.error("[stage-controller] update check failed:", scrubError(err));
     }
   }
 
@@ -1878,13 +1902,17 @@ export class StageController {
       settingsNext.defaultAvatarCrop = null;
     }
 
-    console.log(`[stage-controller] setBranding`, {
-      name: stateNext.appName,
-      logo: partial.logo === undefined ? "(unchanged)" : partial.logo ? "(set)" : "(cleared)",
-      monochrome: stateNext.appLogoMonochrome,
-      emptyLogo: partial.emptyLogo === undefined ? "(unchanged)" : partial.emptyLogo ? "(set)" : "(cleared)",
-      avatar: partial.avatar === undefined ? "(unchanged)" : partial.avatar ? "(set)" : "(cleared)",
-    });
+    console.log(
+      `[stage-controller] setBranding`,
+      scrub({
+        name: stateNext.appName,
+        logo: partial.logo === undefined ? "(unchanged)" : partial.logo ? "(set)" : "(cleared)",
+        monochrome: stateNext.appLogoMonochrome,
+        emptyLogo:
+          partial.emptyLogo === undefined ? "(unchanged)" : partial.emptyLogo ? "(set)" : "(cleared)",
+        avatar: partial.avatar === undefined ? "(unchanged)" : partial.avatar ? "(set)" : "(cleared)",
+      }),
+    );
     this.state = { ...this.state, ...stateNext };
     await settingsStore.patch(settingsNext);
     this.broadcast();
@@ -2546,7 +2574,7 @@ export class StageController {
     patch: Partial<Output>,
     logLine: string,
   ): Promise<StageState> {
-    console.log(logLine);
+    console.log(scrub(logLine, 400));
     await this.outputWrites.enqueue(async () => {
       const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, ...patch } : o));
       this.state = { ...this.state, outputs };
@@ -2682,9 +2710,9 @@ export class StageController {
     const saved = await barConfigStore.set(next);
     this.state = { ...this.state, barItems: saved.items, barMobileItems: saved.mobileItems };
     console.log(
-      `[stage-controller] setBarItems desktop=${saved.items.length} mobile=${
-        saved.mobileItems.length === 0 ? "(follows desktop)" : saved.mobileItems.length
-      }`,
+      `[stage-controller] setBarItems desktop=${scrub(saved.items.length)} mobile=${scrub(
+        saved.mobileItems.length === 0 ? "(follows desktop)" : saved.mobileItems.length,
+      )}`,
     );
     this.broadcast();
     return this.state;
@@ -2871,7 +2899,7 @@ export class StageController {
       // The roster read itself already reports its own failure and keeps the
       // last-known names on screen rather than blanking them.
       void this.rosterRefreshTick().catch((err) => {
-        console.error("[stage-controller] roster refresh failed:", err);
+        console.error("[stage-controller] roster refresh failed:", scrubError(err));
       });
     }, ROSTER_WINDOW_INTERVAL_MS);
   }
@@ -2920,7 +2948,7 @@ export class StageController {
       console.log("[stage-controller] auto-refresh tick");
       await this.refresh(false);
     } catch (err) {
-      console.error("[stage-controller] auto-refresh failed:", err);
+      console.error("[stage-controller] auto-refresh failed:", scrubError(err));
     } finally {
       this.isRefreshing = false;
     }
@@ -3218,12 +3246,13 @@ export class StageController {
       // plan; only a roster for some OTHER plan is worse than nothing.
       if (this.teamMembersKey === key && this.teamMembers.length > 0) {
         console.error(
-          `[stage-controller] fetchTeamMembers failed — keeping ${this.teamMembers.length} known member(s):`,
-          err,
+          "[stage-controller] fetchTeamMembers failed — keeping known member(s):",
+          scrub(this.teamMembers.length),
+          scrubError(err),
         );
         return;
       }
-      console.error("[stage-controller] fetchTeamMembers error:", err);
+      console.error("[stage-controller] fetchTeamMembers error:", scrubError(err));
       this.teamMembers = [];
       this.teamMembersKey = null;
     }

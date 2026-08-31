@@ -458,7 +458,10 @@ export async function importArchive(
         // told the import succeeded while the raw sample layer was absent. Record
         // it and let the caller decide what to say.
         const reason = errorMessage(err);
-        console.error(`[archive] could not write ${dest} from the bundle:`, err);
+        // `dest` carries a name out of the uploaded bundle. Out of the format
+        // string: a `%s` in it would consume `err` and leave the operator with
+        // "could not write" and no reason.
+        console.error("[archive] could not write from the bundle:", dest, err);
         rawFilesFailed.push({ file: path.relative(archiveRoot(), dest), reason });
       }
     }

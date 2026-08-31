@@ -8,7 +8,7 @@ it an output in the app binds it permanently.
 
 **Problem it replaces:** every mic-slot Pi is hand-configured — Debian installed
 by hand, a boot script that opens a browser at a hardcoded
-`http://192.168.16.61/display-1`. The server's address is baked into the SD card,
+`http://192.168.1.50/display-1`. The server's address is baked into the SD card,
 so moving the server breaks every screen, and replacing a dead Pi means
 repeating the whole setup under time pressure.
 
@@ -113,7 +113,7 @@ against the device and updates them on each probe.
    swapped-SD-card case.
 2. **Telling two identical Pis apart** in the Devices list, without walking to
    each screen.
-3. **Support.** "Which box is `192.168.16.74`?" is answerable from the app.
+3. **Support.** "Which box is `192.168.1.53`?" is answerable from the app.
 
 **Why not identity.** Modern OSes randomise Wi-Fi MACs — usually stable per
 network, but not guaranteed, and a network change rotates them. A NIC swap changes

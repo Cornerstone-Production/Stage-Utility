@@ -14,29 +14,29 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-const SRC = readFileSync(new URL("./layout-renderer.tsx", import.meta.url), "utf8");
+import { withoutComments } from "../source-comments.js";
 
-/** The body of the streaming readout helper. */
+/**
+ * The component's source with every comment blanked.
+ *
+ * COMMENTS REMOVED, once, for every assertion in this file. One of the four used
+ * to strip them and the other three did not, so `assert.match(streaming(),
+ * /dim:\s*!live,/)` was satisfied by a sentence about dimming and
+ * `assert.doesNotMatch(status(), /var\(--green-/)` failed on one — a comment
+ * naming the thing the scan looks for, which is the shape CLAUDE.md lists twice
+ * among the guards here that passed on their own defect.
+ *
+ * Blanked character for character, so the `indexOf` cuts below land where they
+ * did. The stripper is a scanner rather than a regex, and its own shapes are
+ * asserted in renderer/source-comments.test.ts.
+ */
+const SRC = withoutComments(readFileSync(new URL("./layout-renderer.tsx", import.meta.url), "utf8"));
+
+/** The body of the streaming readout helper, code only. */
 function streaming(): string {
   const i = SRC.indexOf("const streamingReadout = (");
   assert.ok(i >= 0, "streamingReadout is gone");
   return SRC.slice(i, SRC.indexOf("\n  };", i));
-}
-
-/**
- * The same, with COMMENTS REMOVED.
- *
- * The first cut of the test below searched the whole body for
- * `--color-fg-muted` and passed on the comment that explains why it was taken
- * out — a comment naming the broken thing satisfying the check for it, which is
- * a shape this repo has been caught by before. Only full-line `//` comments are
- * dropped, so nothing with code on it is swallowed.
- */
-function streamingCode(): string {
-  return streaming()
-    .split("\n")
-    .filter((l) => !/^\s*\/\//.test(l))
-    .join("\n");
 }
 
 describe("a streaming widget that is not live", () => {
@@ -53,7 +53,7 @@ describe("a streaming widget that is not live", () => {
     // a reword with nothing wrong, stays green on a reword that says the
     // opposite, and guards no behaviour either way. A comment is worth keeping
     // because the next reader needs it, not because a test counts it.
-    assert.doesNotMatch(streamingCode(), /color-fg-muted/, "a third quiet strength is back");
+    assert.doesNotMatch(streaming(), /color-fg-muted/, "a third quiet strength is back");
   });
 
   test("colours the value only when it IS live", () => {

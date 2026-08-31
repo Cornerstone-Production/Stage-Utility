@@ -8,6 +8,7 @@
 import * as http from "http";
 
 import type { ViewKind } from "../../types/stage.js";
+import { scrub } from "../scrub.js";
 
 /** Everything a route handler needs about the request in flight. */
 export interface RouteCtx {
@@ -55,10 +56,16 @@ export function json(res: http.ServerResponse, data: unknown, status = 200): voi
   // client. It is logged rather than swallowed, because a route replying twice is
   // something to go and fix.
   if (res.headersSent || res.writableEnded) {
-    // Not interpolated: this file is request-facing, and log-injection.test.ts
-    // holds every interpolation in it to scrub(). `status` is our own number, but
-    // the rule exists so nobody has to judge that case by case.
-    console.warn("[routes] ignored a second reply — the response was already sent; status:", status);
+    // Scrubbed: this file is request-facing, and log-injection.test.ts holds
+    // every interpolation AND every argument in it to scrub(). `status` is our
+    // own number, but the rule exists so nobody has to judge that case by case —
+    // moving a value out of the template and into an argument used to step
+    // around the interpolation half of it, which is why there is an argument
+    // half.
+    console.warn(
+      "[routes] ignored a second reply — the response was already sent; status:",
+      scrub(status),
+    );
     return;
   }
   res.writeHead(status, { "Content-Type": "application/json" });

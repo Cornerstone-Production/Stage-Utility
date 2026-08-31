@@ -16,7 +16,7 @@ import { describe, test } from "node:test";
 
 // The cut is shared with surface-swap-order.test.ts — see the module for why one
 // rule rather than the two that had drifted apart.
-import { handlerBody } from "./settings-handler-source.js";
+import { handlerBody, handlerBodyRaw } from "./settings-handler-source.js";
 
 describe("setting a screen to a control surface", () => {
   const src = handlerBody("handleSetOutputMode");
@@ -64,17 +64,24 @@ describe("the cut these assertions run over", () => {
     // A source-text assertion satisfied by PROSE is the exact failure CLAUDE.md
     // lists, and this file used to cut at the next `async function` only — so
     // the block comment introducing the NEXT handler was inside this one's
-    // "body". Today that comment names no IPC channel and the matches above are
-    // honest; it is one sentence away from not being.
-    const src = handlerBody("handleSetOutputMode");
+    // "body". The cut was also the ONLY defence: a `//` line inside the handler
+    // naming an IPC channel satisfied a match for that channel with the write
+    // deleted, which is no longer possible because the text every assertion here
+    // reads has its comments blanked.
+    //
+    // The RAW cut for the boundary, because the blanked one has no comment left
+    // to find and the question here is where the cut LANDS.
+    const raw = handlerBodyRaw("handleSetOutputMode");
     assert.ok(
-      !src.includes("/**"),
+      !raw.includes("/**"),
       "the cut swallowed a block comment, so a sentence can satisfy an assertion about code",
     );
     assert.ok(
-      !src.includes("async function handleSetViewSurface"),
+      !raw.includes("async function handleSetViewSurface"),
       "the cut ran into the next handler entirely",
     );
+    const src = handlerBody("handleSetOutputMode");
+    assert.doesNotMatch(src, /\/\/|\/\*/, "a comment survived into the text the assertions read");
     // And it did not cut so early that there is nothing left to assert on.
     assert.match(src, /outputs:setMode/);
   });

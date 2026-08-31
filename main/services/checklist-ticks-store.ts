@@ -16,7 +16,7 @@
 // happened, instead of silently reporting that nobody did anything.
 
 import { DataStore } from "./data-store.js";
-import { scrub } from "./scrub.js";
+import { scrub, scrubError } from "./scrub.js";
 import { WriteQueue } from "./write-queue.js";
 
 /** planId -> the item keys ticked on that plan. */
@@ -133,19 +133,24 @@ async function saveOrReport(
     await store.save(toFile(next));
   } catch (err) {
     // The plan id and the row label both arrive from the wire, and `/log` is a
-    // LAN-visible page where a newline in either forges a record. Scrubbed HERE
+    // LAN-visible page where a newline in either forges a record. Composed HERE
     // rather than at the call sites so a third caller cannot reintroduce the
-    // hole by composing its own string — the only thing a caller passes is the
+    // hole by building its own string — the only thing a caller passes is the
     // raw value.
     const what = key === undefined
-      ? `${action} plan ${scrub(planId, 64)}`
-      : `${action} "${scrub(key, 80)}" on plan ${scrub(planId, 64)}`;
-    // `what` is an ARGUMENT, never the format string. console.error treats its
+      ? `${action} plan ${planId}`
+      : `${action} "${key}" on plan ${planId}`;
+    // Both are ARGUMENTS, never the format string. console.error treats its
     // first argument as a format string, so a row label containing `%s` would
-    // swallow `err` into the message and the operator would be told a save
-    // failed without being told why. Scrubbing does not help — `%` is a
-    // perfectly ordinary character in a checklist row.
-    console.error("[checklist] could not save, NOT recorded:", what, err);
+    // swallow the error and the operator would be told a save failed without
+    // being told why. Scrubbing does not help there — `%` is a perfectly
+    // ordinary character in a checklist row; the position is the fix.
+    //
+    // scrubError, not scrub: log-buffer renders a raw Error as its stack, and
+    // every line of that stack is its own record on /log. scrub alone would
+    // close that by throwing the stack away, which is the half an operator
+    // actually reads at 9am on a Sunday.
+    console.error("[checklist] could not save, NOT recorded:", scrub(what, 200), scrubError(err));
     throw err;
   }
 }
