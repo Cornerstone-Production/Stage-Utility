@@ -371,6 +371,17 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
   }, [scores]);
 
   const relayout = useCallback(() => {
+    // CLOSED MEASURES NOTHING. layoutStack clears each strip's height and then
+    // reads offsetHeight, which forces a synchronous layout — and the effect
+    // below runs after every render and again on the next frame, so a context
+    // strip that ticks its clock once a second was costing two forced reflows a
+    // second on every operator page for a panel nobody had opened.
+    //
+    // Skipping is safe because opening is itself a render: `isOpen` flips, the
+    // layout effect runs, and the panel is measured before the browser paints it.
+    // Nothing is RESET here either — the stack keeps the height it last had, so
+    // the exit stays the entrance reversed. The motion is untouched.
+    if (!isOpen) return;
     const el = stackRef.current;
     if (!el) return;
     const cards = [...el.querySelectorAll<HTMLElement>("[data-score-card]")];
@@ -378,12 +389,16 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
     const instant = prefersReducedMotion();
     el.style.transition = instant ? "none" : "";
     el.style.height = `${layoutStack(cards, clamped, STACK_GAP, instant)}px`;
-  }, [clamped]);
+  }, [clamped, isOpen]);
 
   // After EVERY render, then again on the next frame. No dependency list on
   // purpose: any change to the games, the focus or the open state changes what
   // has to be measured, and a list is a place to forget one of them.
+  //
+  // The closed check is repeated here rather than left to relayout, so a closed
+  // panel does not schedule a frame per render either.
   useLayoutEffect(() => {
+    if (!isOpen) return;
     relayout();
     const id = requestAnimationFrame(relayout);
     return () => cancelAnimationFrame(id);
