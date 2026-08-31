@@ -69,7 +69,7 @@ class FakeEventSource {
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
-const { render, cleanup } = await import("@testing-library/react");
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { ConsoleRailIcon } = await import("../../components/console-rail-icon.js");
 const { IconTint } = await import("../../components/icon-tint.js");
@@ -258,6 +258,115 @@ describe("a glyph set before the key moved", () => {
       glyphOf(container),
       glyphFor(legacy),
       "the card drew its built-in icon — the glyph stored before the re-key is read by nothing",
+    );
+  });
+});
+
+describe("the icon set is reachable without a mouse", () => {
+  // THE BUG. Right-click on the glyph was the ONLY way to open the set. A
+  // keyboard operator could tab to the console's rail row and had no way at all
+  // to change its icon.
+  //
+  // The fix is the platform's own gesture — Shift+F10 and the ContextMenu key,
+  // the two a browser fires its own `contextmenu` for — bound on the ROW rather
+  // than on the glyph. It has to be the row: the glyph's span is
+  // `display: contents` and holds nothing interactive (the row is a <button>,
+  // and a button inside a button is the scar the component's header documents),
+  // so the span never takes focus and a key pressed on the focused row cannot
+  // reach a handler on a child of it.
+  //
+  // WHAT JSDOM CANNOT SAY: whether a real browser delivers those keys, and where
+  // the menu lands on screen — nothing is laid out here. Both were walked in a
+  // browser and the result is in the PR. What IS checkable is the wiring: the
+  // gesture opens the menu, an ordinary key does not, and focus comes back.
+
+  /** The rail row as the sidebar draws it: the glyph INSIDE a <button>. */
+  const drawRow = (): HTMLButtonElement => {
+    const { container } = render(
+      React.createElement(
+        "button",
+        { type: "button" },
+        React.createElement(ConsoleRailIcon, {
+          viewId: "console-a",
+          label: "Console A",
+          active: false,
+        }),
+      ),
+    );
+    const row = container.querySelector("button");
+    assert.ok(row, "no row rendered");
+    return row as HTMLButtonElement;
+  };
+
+  /**
+   * How many icon menus are on screen.
+   *
+   * A COUNT, not the node. assert.equal on a DOM element makes the runner
+   * serialise it to build a diff, and serialising a jsdom element walks the
+   * whole document — the process was SIGKILLed at 43s on the very failure these
+   * guards exist to produce. Exact counts also say more than "something opened".
+   */
+  const openMenus = () => document.querySelectorAll("[data-icon-menu]").length;
+
+  test("THE GUARD: Shift+F10 on the focused row opens the set", async () => {
+    const row = drawRow();
+    await settle();
+    row.focus();
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    await settle();
+    assert.equal(
+      openMenus(),
+      1,
+      "Shift+F10 on the console's row opened nothing — right-click is still the only way in",
+    );
+  });
+
+  test("THE GUARD: so does the ContextMenu key", async () => {
+    const row = drawRow();
+    await settle();
+    row.focus();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    await settle();
+    assert.equal(openMenus(), 1, "the ContextMenu key on the console's row opened nothing");
+  });
+
+  test("and an ordinary key does not, because the row is a navigation target", async () => {
+    // The other half of the rule. Enter on this row goes to the console; a fix
+    // that opened the set on any key would have taken that away. F10 without
+    // Shift is in the list on purpose — it is the near miss.
+    const row = drawRow();
+    await settle();
+    row.focus();
+    for (const key of ["Enter", " ", "F10", "ArrowDown"]) {
+      fireEvent.keyDown(row, { key });
+      await settle();
+      assert.equal(openMenus(), 0, `${key} on the console's row opened the icon set`);
+    }
+  });
+
+  test("THE GUARD: closing it puts focus back on the row, not on <body>", async () => {
+    // The glyph the menu is anchored to is REPLACED whenever an icon is picked,
+    // so the node it opened from cannot be the node focus returns to — see the
+    // component. Identity is asserted as a boolean: assert.equal on two DOM
+    // nodes makes the runner serialise both to build its diff, and serialising a
+    // jsdom element walks the whole document.
+    const row = drawRow();
+    await settle();
+    row.focus();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    await settle();
+    assert.equal(openMenus(), 1, "the menu never opened, so this asserts nothing");
+    assert.ok(
+      document.activeElement !== row,
+      "the menu opened and left focus on the row — nothing moved into it",
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await settle();
+    assert.equal(openMenus(), 0, "Escape did not close the menu");
+    assert.ok(
+      document.activeElement === row,
+      `closing the icon set left focus on ${document.activeElement?.tagName.toLowerCase() ?? "nothing"} instead of the console's row`,
     );
   });
 });
