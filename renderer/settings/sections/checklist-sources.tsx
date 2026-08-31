@@ -137,6 +137,7 @@ export function ChecklistSources({
             <FieldDescription>Every note filed under these becomes part of the list.</FieldDescription>
           </FieldContent>
           <MultiSelect
+            label="Note categories"
             options={listing(offered?.categories, categories)}
             selected={categories}
             onChange={(next) => { void handlers.handleSetChecklistSources(next, teams); }}
@@ -153,6 +154,7 @@ export function ChecklistSources({
             </FieldDescription>
           </FieldContent>
           <MultiSelect
+            label="Teams"
             options={listing(offered?.teams, teams)}
             selected={teams}
             onChange={(next) => { void handlers.handleSetChecklistSources(categories, next); }}

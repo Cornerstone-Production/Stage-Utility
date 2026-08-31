@@ -11,6 +11,7 @@
 import { strict as assert } from "node:assert";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement, ReactNode } from "react";
+import { act } from "@testing-library/react";
 import { TooltipProvider } from "../components/ui/tooltip-provider";
 import { INTEGRATION_DESCRIPTOR_FIXTURE } from "./integration-descriptors";
 
@@ -162,6 +163,7 @@ export function withQueryClient(children: ReactNode): ReactElement {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
+  lastClient = client;
   return (
     <QueryClientProvider client={client}>
       <TooltipProvider>{children}</TooltipProvider>
@@ -169,8 +171,96 @@ export function withQueryClient(children: ReactNode): ReactElement {
   );
 }
 
-/** Let react-query resolve, React commit, and Radix finish its animation frames. */
+/**
+ * The client the most recent withQueryClient() built.
+ *
+ * Module state, and safe as such: node:test gives each FILE its own process, and
+ * these files render one panel at a time. It exists so `idle()` below can ask
+ * react-query whether the page has finished loading instead of guessing.
+ */
+let lastClient: QueryClient | null = null;
+
+/**
+ * Give the event loop a turn.
+ *
+ * FOR TEARDOWN, and for nothing else. A fixed delay used to synchronise a test
+ * with the UI is a bet that some number of milliseconds is enough — true on an
+ * idle machine, a coin toss on a loaded one, and precisely how two files here
+ * failed inside a full-suite run and passed on every clean run after. To wait
+ * for something, use `until()` or `idle()`; use this only to let pending timers
+ * drain before the DOM is torn down.
+ */
 export const settle = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Wait until `ok()` holds.
+ *
+ * The cap is a failure mode, not a schedule: on a fast machine this returns on
+ * the first poll, and on one slow enough to have produced a flake it simply
+ * polls for longer. `say` runs only on the way out, so the message reports where
+ * things actually got to rather than just "timed out".
+ */
+export async function until(ok: () => boolean, say: () => string, capMs = 5000): Promise<void> {
+  const deadline = Date.now() + capMs;
+  for (;;) {
+    if (ok()) return;
+    if (Date.now() >= deadline) assert.fail(`${say()} (gave up after ${capMs}ms)`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+/**
+ * Wait until the page has finished loading — every query resolved, none in
+ * flight.
+ *
+ * THIS IS DELIBERATELY NOT AN ASSERTION IN DISGUISE. IntegrationsPanel draws its
+ * cards from the `integrations:list` query, so until that resolves there are
+ * ZERO cards on the page — which made "all 16 cards are in the document" a race
+ * against one fetch finishing inside 30ms. Waiting for "16 cards" instead would
+ * be waiting for the very thing under test and would prove nothing; asking
+ * react-query whether it is done is independent of every assertion these files
+ * make.
+ *
+ * Both halves are needed: `fetchStatus` says "not fetching" and `status` says
+ * "has an answer", and a query that has never run is idle too. Requiring at
+ * least one query in the cache rules out the window before the panel's effects
+ * have registered it.
+ */
+export async function idle(capMs = 5000): Promise<void> {
+  const queries = () => lastClient?.getQueryCache().getAll() ?? [];
+  const settled = () => {
+    const qs = queries();
+    return (
+      qs.length > 0 &&
+      qs.every((q) => q.state.fetchStatus === "idle" && q.state.status !== "pending")
+    );
+  };
+  const say = () => {
+    if (!lastClient) return "no query client — withQueryClient() was never called";
+    const qs = queries();
+    if (qs.length === 0) return "the page registered no queries at all";
+    return `the page never finished loading: ${qs
+      .map((q) => `${JSON.stringify(q.queryKey)} ${q.state.status}/${q.state.fetchStatus}`)
+      .join(", ")}`;
+  };
+
+  const deadline = Date.now() + capMs;
+  for (;;) {
+    await until(settled, say, Math.max(0, deadline - Date.now()));
+    // THE DATA LANDING IS NOT THE PAGE BEING DRAWN, and the difference is not
+    // theoretical: the first version of this returned as soon as the query cache
+    // went idle, and `no card for companion` came back from a batch run four
+    // times in eight — React had the answer and had not yet committed it, so the
+    // page was still its skeleton. act() flushes React's pending work as a
+    // GUARANTEE rather than giving the scheduler a turn and hoping, which is the
+    // same fixed-delay bet in smaller clothes.
+    await act(async () => {});
+    // A render can start a dependent query, which puts the cache back to work.
+    // Loop rather than assume one pass is enough.
+    if (settled()) return;
+    if (Date.now() >= deadline) assert.fail(`${say()} (gave up after ${capMs}ms)`);
+  }
+}
 
 /**
  * Assert a DOM node is not there.

@@ -9,7 +9,7 @@
 // hex box, and the palette the app is actually built from. It commits as you
 // drag, so the canvas behind it updates live rather than on close.
 
-import { createElement, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { LucideIcon } from "lucide-react";
 import { IconGrid } from "../icon-grid";
 
@@ -34,6 +34,9 @@ import { createPortal } from "react-dom";
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
 
 import { cn } from "../../lib/cn";
+// The same Tab cycle and focus restoration the expanded-tile overlay uses. This
+// panel had a role="dialog" on it and none of the behaviour that role promises.
+import { trapTab, useReturnFocus } from "../../lib/dialog-focus";
 import { useSavedColors } from "./use-saved-colors";
 import {
   formatColor,
@@ -229,15 +232,40 @@ function ColorPanel({
     // portal, so nothing scrolls it back.
   }, [anchor, pickingIcon]);
 
+  /**
+   * Focus moves into the panel, once it has somewhere to be.
+   *
+   * ONTO THE PANEL ITSELF, not onto its first control: there is no close button
+   * to land on the way the expanded-tile overlay has, and the first control is a
+   * slider — arriving on one, with the dialog's own name never announced, tells
+   * the operator nothing about where they are. From the panel root the label is
+   * read and Tab steps into the body.
+   *
+   * AFTER PLACEMENT, and that is not cosmetic: until `pos` lands the panel is
+   * `visibility: hidden`, and focus() on a hidden element is a no-op — the panel
+   * would come up with focus still on the swatch and Tab would walk the page
+   * behind it. The grid swaps in the same way, so this runs again for it.
+   */
+  const placed = pos !== null;
+  useEffect(() => {
+    if (placed) panelRef.current?.focus();
+  }, [placed, pickingIcon]);
+
   return createPortal(
     <div
       ref={panelRef}
       role="dialog"
       aria-label={label}
+      aria-modal="true"
       data-color-panel=""
+      // -1 so the panel can be focused on open without joining the tab order:
+      // Tab from the last control inside cycles back to the first, and a stop on
+      // the container itself would be a stop on nothing.
+      tabIndex={-1}
+      onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => trapTab(panelRef.current, e)}
       style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, width: PANEL_W, visibility: pos ? "visible" : "hidden" }}
       className={cn(
-        "fixed z-[100] rounded-lg p-3",
+        "fixed z-[100] rounded-lg p-3 focus:outline-none",
         "border border-line-strong bg-popover/95 shadow-2xl backdrop-blur-xl",
         "flex flex-col gap-2.5",
       )}
@@ -490,6 +518,20 @@ export function ColorField({
   const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
   const parsed = parseColor(value) ?? parseColor(fallback) ?? { r: 255, g: 255, b: 255, a: 1 };
 
+  /**
+   * Focus goes back to the swatch when the panel closes.
+   *
+   * BY ID, LOOKED UP FRESH, not through the `trigger` node above. This panel
+   * commits as you drag and picks an icon in place, and both of those save — the
+   * card or inspector row the swatch sits in can be re-rendered out from under
+   * it while the panel is up, leaving `trigger` pointing at a detached node.
+   * focus() on one of those silently does nothing, which is the same "nothing
+   * happened" the missing restoration was. The id survives the remount; the node
+   * does not.
+   */
+  const swatchId = `${useId()}-swatch`;
+  useReturnFocus(open, () => document.getElementById(swatchId));
+
   // Close on a click elsewhere or on Escape — the same manners as every other
   // floating panel here.
   useEffect(() => {
@@ -518,6 +560,7 @@ export function ColorField({
     <div ref={wrap} className={cn("relative inline-flex", className)}>
       <button
         ref={setTrigger}
+        id={swatchId}
         type="button"
         aria-label={label}
         aria-haspopup="dialog"

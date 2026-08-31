@@ -181,6 +181,7 @@ export function ScriptViewSection() {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-5">
         <span className="text-caption1 text-gray-11">Shown on the landing page</span>
         <MultiSelect
+          label="Shown on the landing page"
           className="w-64 max-sm:w-full"
           options={types.map((t) => ({ value: t.id, label: t.name }))}
           selected={shownIds}
@@ -278,6 +279,10 @@ export function ScriptViewSection() {
                       <div className="flex items-center gap-2 text-caption1 text-gray-11">
                         Shows
                         <MultiSelect
+                          // The layout's name is in it because the page repeats
+                          // this control once per layout: "Shows" alone names
+                          // every one of them and tells them apart not at all.
+                          label={`Shows, ${l.name}`}
                           className="w-64"
                           options={ELEMENTS.map((e) => ({ value: e.key, label: e.label }))}
                           selected={ELEMENTS.filter((e) => elementOn(e, l)).map((e) => e.key)}

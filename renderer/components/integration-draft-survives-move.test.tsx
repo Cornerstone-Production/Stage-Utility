@@ -21,7 +21,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, settle, idle, assertAbsent } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
@@ -61,7 +61,7 @@ describe("a draft survives the card moving between groups", () => {
     // OBS starts dormant: the exact position the bug was reported from.
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await settle();
+    await idle();
 
     fireEvent.click(tile(c, "obs"));
     await settle();
@@ -98,7 +98,7 @@ describe("a draft survives the card moving between groups", () => {
     // whichever component rendered it — so this compares the node itself.
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await settle();
+    await idle();
     fireEvent.click(tile(c, "obs"));
     await settle();
 
@@ -122,7 +122,7 @@ describe("a draft survives the card moving between groups", () => {
     // the edit, and a value that reappeared later would be a surprise.
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
-    await settle();
+    await idle();
 
     fireEvent.click(tile(c, "obs"));
     await settle();

@@ -65,6 +65,11 @@ few seconds after a score; tapping the capsule, pressing anywhere else, or Escap
 all close it, and any of those cancels the countdown so a dismissal is never
 undone.
 
+From the keyboard the capsule is the only way in. While the panel is shut its
+cards are out of the tab order and out of the screen reader's reading — Tab goes
+straight past to the next bar item. Open it and each card becomes a control:
+Tab reaches them and Enter or Space brings one to the front.
+
 It **floats over the page** rather than pushing it down. Nothing below the bar
 moves when a score arrives, and the page underneath stays where you left it —
 opening the panel on Screens used to slide the whole grid of cards down the

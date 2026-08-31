@@ -155,7 +155,11 @@ function cell(date: string): HTMLElement {
 describe("the grid draws what it was given", () => {
   test("renders six weeks, so the layout does not jump between months", () => {
     render(React.createElement(CalendarMonth, { pcoConfigured: true, grid: grid(), nowMs: Date.parse("2026-08-14T18:00:00Z") }));
-    assert.equal(screen.getAllByRole("gridcell").length, 42);
+    // By data-date, not by role: an event list inside a square is a <ul> whose
+    // rows carry the implicit listitem role too, so a role query would count
+    // squares plus events on any grid that had some. The squares' ARIA is
+    // guarded on its own, below.
+    assert.equal(document.querySelectorAll("[data-date]").length, 42);
     assert.ok(screen.getByText("August 2026"));
   });
 
@@ -185,6 +189,100 @@ describe("the grid draws what it was given", () => {
   test("marks no square at all when today is outside the month shown", () => {
     render(React.createElement(CalendarMonth, { pcoConfigured: true, grid: grid(), nowMs: Date.parse("2027-01-05T18:00:00Z") }));
     assert.equal(document.querySelectorAll('[aria-current="date"]').length, 0);
+  });
+});
+
+/**
+ * Which owning role each ARIA role has to sit inside, per WAI-ARIA's "required
+ * context role". Only the ones a month grid could plausibly grow.
+ */
+const REQUIRED_OWNER: Record<string, string[]> = {
+  gridcell: ["row"],
+  cell: ["row"],
+  columnheader: ["row"],
+  rowheader: ["row"],
+  row: ["grid", "table", "treegrid", "rowgroup"],
+  rowgroup: ["grid", "table", "treegrid"],
+  listitem: ["list"],
+  option: ["listbox"],
+  tab: ["tablist"],
+};
+
+/** Every element carrying an explicit role whose required owner is missing. */
+function orphanedRoles(root: HTMLElement): string[] {
+  const bad: string[] = [];
+  for (const el of root.querySelectorAll<HTMLElement>("[role]")) {
+    const role = el.getAttribute("role") ?? "";
+    const owners = REQUIRED_OWNER[role];
+    if (!owners) continue;
+    let p = el.parentElement;
+    let found = false;
+    while (p && !found) {
+      // A presentational wrapper is transparent to the ownership chain, which is
+      // what a `display: contents` row layer would rely on. Anything else with a
+      // role of its own ends the search: an intervening role means this element
+      // is owned by THAT, not by something further up.
+      const pr = p.getAttribute("role");
+      if (pr && pr !== "presentation" && pr !== "none") {
+        found = owners.includes(pr);
+        break;
+      }
+      p = p.parentElement;
+    }
+    if (!found) bad.push(role);
+  }
+  return bad;
+}
+
+describe("the month's ARIA describes a structure that is actually there", () => {
+  // THE BUG. The month was `role="grid"` over forty-two DIRECT `role="gridcell"`
+  // children and no `role="row"` anywhere. Invalid ARIA is worse than none: a
+  // screen reader is asked to report a position in rows that do not exist, and
+  // `grid` additionally promises arrow-key navigation between cells that has
+  // never existed here — the squares are not focusable.
+  //
+  // WHAT JSDOM CANNOT SAY: how any of this is announced. No AT runs here, and
+  // nothing is laid out, so "a reader says row 3 of 6" is not checkable and is
+  // not asserted. What IS checkable is the ownership chain the roles claim, and
+  // that is what the walk below reads — off the rendered DOM, not off the
+  // source, so a comment naming a role cannot satisfy it.
+  test("THE GUARD: no role sits outside the role that has to own it", () => {
+    const { container } = render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: grid({ "2026-08-14": [event("a", "2026-08-14T19:00:00Z", "2026-08-14T20:00:00Z")] }),
+        nowMs: Date.parse("2026-08-10T18:00:00Z"),
+      }),
+    );
+    assert.deepEqual(
+      orphanedRoles(container),
+      [],
+      "a role in the month grid has no element of the role that must own it",
+    );
+  });
+
+  test("and it is a list of forty-two squares, exactly", () => {
+    // Exact counts, not floors. A fix that dropped `role="gridcell"` and forgot
+    // to give the squares anything at all would leave the walk above green —
+    // there is nothing left to be orphaned — while taking the whole structure
+    // out of the reading.
+    const { container } = render(
+      React.createElement(CalendarMonth, {
+        pcoConfigured: true,
+        grid: grid(),
+        nowMs: Date.parse("2026-08-14T18:00:00Z"),
+      }),
+    );
+    const count = (role: string) => container.querySelectorAll(`[role="${role}"]`).length;
+    assert.equal(count("list"), 1, "the month is not one list");
+    assert.equal(count("listitem"), 42, "the month is not forty-two squares");
+    assert.equal(count("grid"), 0, "the composite grid role is back");
+    assert.equal(count("gridcell"), 0, "the gridcell role is back");
+    assert.equal(
+      container.querySelector('[role="list"]')?.getAttribute("aria-label"),
+      "August 2026",
+      "the list lost the month's name",
+    );
   });
 });
 
@@ -417,7 +515,7 @@ describe("empty and broken states", () => {
         failed: true,
       }),
     );
-    assert.equal(screen.getAllByRole("gridcell").length, 42, "the month was thrown away");
+    assert.equal(document.querySelectorAll("[data-date]").length, 42, "the month was thrown away");
     assert.ok(cell("2026-08-14").textContent?.includes("Event a"), "its events went with it");
     assert.ok(screen.getByText(/could not reach planning center/i), "nothing said it was stale");
   });
@@ -658,7 +756,7 @@ describe("paging is per screen, and the current month stays live", () => {
       screen.queryByText(/could not read that month/i) === null,
       "the paged failure survived the return to today",
     );
-    assert.ok(screen.getByRole("grid"), "the live month is not on screen at all");
+    assert.ok(screen.getByRole("list", { name: "August 2026" }), "the live month is not on screen at all");
   });
 
   it("does not let a pushed frame clear a PAGED month's failure", async () => {

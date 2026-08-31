@@ -39,11 +39,12 @@ import { Maximize2Icon, XIcon } from "lucide-react";
 
 import { useEmbedBoxHeight } from "./embed-box";
 import { prefersReducedMotion } from "../lib/use-slide-on-move";
+// The Tab cycle and the return of focus, shared with the colour panel and the
+// console rail's icon menu. This file had the only correct copy; three copies of
+// it is the mistake this repository makes most often, so it moved to lib.
+import { trapTab, useReturnFocus } from "../lib/dialog-focus";
 
 const OPEN_MS = 260;
-
-/** Everything a Tab can land on inside the panel. */
-const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 // Every open panel's `close`, in the order it opened — module-level because a
 // tile nested inside an expanded panel mounts its OWN instance of this hook,
@@ -117,47 +118,20 @@ export function useExpand(enabled: boolean) {
   // BEHIND the panel, walking every tile the panel is covering. Tab is trapped
   // inside the panel for the same reason, and focus is returned to the tile on
   // close so the next key press carries on where it was.
-  // Written as one effect on both edges rather than an effect with a cleanup:
-  // the node to return focus to is the one on the page WHEN THE PANEL CLOSES,
-  // and a cleanup that reads a ref at that moment is the pattern the exhaustive
-  // -deps rule (correctly, in general) warns about.
-  const wasExpanded = useRef(false);
   useEffect(() => {
-    if (expanded) {
-      wasExpanded.current = true;
-      closeRef.current?.focus();
-      return;
-    }
-    if (!wasExpanded.current) return;
-    wasExpanded.current = false;
-    // The expand control REMOUNTS as the panel goes away, so the node to return
-    // to is the new one — the old button was unmounted by the render that
-    // opened the panel. `isConnected` covers the closes where it does not come
-    // back: the surface stopped being interactive, or the screen went dark.
-    if (controlRef.current?.isConnected) controlRef.current.focus();
+    if (expanded) closeRef.current?.focus();
   }, [expanded]);
+  // The expand control REMOUNTS as the panel goes away, so the node to return to
+  // is the new one — the old button was unmounted by the render that opened the
+  // panel. `isConnected` covers the closes where it does not come back: the
+  // surface stopped being interactive, or the screen went dark.
+  useReturnFocus(expanded, () =>
+    controlRef.current?.isConnected ? controlRef.current : null,
+  );
 
   /** Tab cycles within the panel — see the focus effect above. */
-  function trapTab(e: ReactKeyboardEvent<HTMLDivElement>) {
-    if (e.key !== "Tab") return;
-    const panel = panelRef.current;
-    if (!panel) return;
-    const focusable = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-      (el) => !el.hasAttribute("disabled") && el.tabIndex !== -1,
-    );
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    // No "focus is outside the panel" case: this handler is on the portal root,
-    // so a keydown only reaches it when focus is already inside.
-    const active = document.activeElement;
-    if (e.shiftKey && active === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault();
-      first.focus();
-    }
+  function onPanelKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    trapTab(panelRef.current, e);
   }
 
   // FLIP: start on the tile, end filling the screen.
@@ -244,7 +218,7 @@ export function useExpand(enabled: boolean) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        onKeyDown={trapTab}
+        onKeyDown={onPanelKeyDown}
         // z-90: above every piece of app chrome (which tops out at z-50) and
         // BELOW the z-100 layer the toasts, context menus and pickers use. An
         // expanded tile still holds live controls, and a toast reporting that

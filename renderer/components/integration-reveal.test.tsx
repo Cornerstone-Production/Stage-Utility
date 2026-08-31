@@ -15,7 +15,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, settle, idle, assertAbsent } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const flashModule = await import("../app/flash.js");
@@ -45,7 +45,7 @@ const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[r
 async function panel() {
   server = installFakeServer();
   const c = render(withQueryClient(<IntegrationsPanel />));
-  await settle();
+  await idle();
   return c;
 }
 

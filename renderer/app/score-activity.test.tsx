@@ -40,9 +40,13 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup } = await import("@testing-library/react");
-const { createScoreActivity, SCORE_HOLD_MS } = await import("./score-activity-store.js");
+const { createScoreActivity, SCORE_HOLD_MS, scoreActivity } =
+  await import("./score-activity-store.js");
 const { ScoreActivityHost, ScoreCapsule, capsuleView, layoutStack, liveIndex, scoredSide } =
   await import("./score-activity.js");
+// The app's own contrast maths, not a second copy: raising or lowering what
+// color-math computes must move what this file measures.
+const { contrastRatio, formatColor, parseColor } = await import("../components/ui/color-math.js");
 
 // Unconditional, not a call at the end of each test body: a test that FAILS
 // never reaches its own cleanup, and proving these guards against the bug is
@@ -610,6 +614,23 @@ describe("placing the stack", () => {
   });
 });
 
+/**
+ * The panel's open state, set on the ONE store the host reads.
+ *
+ * ScoreActivityHost renders from the module singleton, not from a store handed
+ * in, and several tests above leave it open — a rerender carrying a new scoreRev
+ * calls scored(), which opens the panel and starts a 6.5s hold. So anything that
+ * depends on open-versus-shut says which it wants rather than inheriting
+ * whatever ran before it.
+ */
+function openPanel(): void {
+  scoreActivity.close();
+  scoreActivity.toggle();
+}
+function shutPanel(): void {
+  scoreActivity.close();
+}
+
 describe("a card names its game once, not twice", () => {
   // ScoreCard sets an aria-label on its role="button" wrapper and then renders a
   // ScoreStrip, which labels itself by default. A screen reader in browse mode
@@ -620,6 +641,10 @@ describe("a card names its game once, not twice", () => {
   // Counted, not merely checked for presence: the pre-fix DOM has the label
   // twice, so an assertion that one exists passes on the bug.
   test("THE GUARD: the reading is not announced twice", () => {
+    // OPEN, explicitly: a shut panel's cards carry no label at all now (they are
+    // aria-hidden — see the tab-order guard below), so this would assert nothing
+    // about the double reading if it ran against a collapsed stack.
+    openPanel();
     const { container } = render(<ScoreActivityHost scores={twoGames(0)} />);
     const cards = [...container.querySelectorAll("[data-score-card]")];
     assert.ok(cards.length > 0, "no cards rendered, so this asserts nothing");
@@ -644,5 +669,178 @@ describe("a card names its game once, not twice", () => {
     const label = el?.getAttribute("aria-label") ?? "";
     assert.match(label, /Chicago Cubs 6/, "the capsule stopped naming the game");
     assert.match(label, /Cincinnati Reds 2/);
+  });
+});
+
+describe("the quiet ink on a score surface is readable", () => {
+  // THE BUG. --score-subtle was rgba(255,255,255,.38) and painted #6f6f6f on
+  // --score-surface: 3.60:1, under WCAG AA's 4.5:1 floor for text of any size,
+  // and all four of its uses were 9.5px or smaller. --score-muted, which is
+  // what those four were meant to read at, is 7.43:1.
+  //
+  // WHAT JSDOM CANNOT SAY: anything about type size or the painted result. No
+  // stylesheet is applied and nothing is laid out, so getComputedStyle here
+  // returns Tailwind's defaults and a "9.5px" claim would assert nothing. The
+  // DECLARATIONS are what can be read, and the arithmetic over them is the app's
+  // own — so this measures exactly what a browser will paint, without one.
+  //
+  // Enumerated FROM THE SHEET rather than from a list written here: a token
+  // added tomorrow and painted as text is measured by this the day it lands.
+
+  /** A translucent ink as it is actually painted on an opaque ground. */
+  function painted(ink: string, ground: string): string {
+    const f = parseColor(ink);
+    const b = parseColor(ground);
+    assert.ok(f && b, `unparseable colour: ${ink} on ${ground}`);
+    return formatColor({
+      r: f.r * f.a + b.r * (1 - f.a),
+      g: f.g * f.a + b.g * (1 - f.a),
+      b: f.b * f.a + b.b * (1 - f.a),
+      a: 1,
+    });
+  }
+
+  /** Every `--score-*: <colour>` the sheet declares. */
+  function scoreTokens(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const m of stylesheet().matchAll(
+      /--score-([a-z0-9-]+):\s*(#[0-9a-f]{3,8}|rgba?\([^)]*\))\s*;/gi,
+    )) {
+      out.set(m[1], m[2].trim());
+    }
+    return out;
+  }
+
+  // Ink that does NOT sit on --score-surface, and is therefore not this file's
+  // to measure. Both are computed per team colour in score-ink.ts and held to
+  // 4.5:1 by score-ink.test.ts against the ground they actually land on.
+  const NOT_ON_THE_SURFACE = ["disc-ink", "ink"];
+
+  test("THE GUARD: every score token painted as text clears 4.5:1 on the surface", () => {
+    const tokens = scoreTokens();
+    const surface = tokens.get("surface");
+    assert.ok(surface, "--score-surface is gone, so there is no ground to measure against");
+
+    const used = [
+      ...new Set(
+        [...stylesheet().matchAll(/color:\s*var\(--score-([a-z0-9-]+)/gi)].map((m) => m[1]),
+      ),
+    ].sort();
+
+    // MEASURED FIRST, so the failure reads as the ratio it is rather than as a
+    // list that changed shape.
+    const onSurface = used.filter((n) => !NOT_ON_THE_SURFACE.includes(n));
+    for (const name of onSurface) {
+      const value = tokens.get(name);
+      assert.ok(value, `--score-${name} is used as a colour but never declared`);
+      const ratio = contrastRatio(painted(value, surface), surface);
+      assert.ok(
+        ratio >= 4.5,
+        `--score-${name} paints ${painted(value, surface)} on ${surface} at ${ratio.toFixed(2)}:1 — under the 4.5:1 floor`,
+      );
+    }
+
+    // EXACT, both halves, and only after the measuring. A floor would let a new
+    // quiet-ink token be painted as text and never measured; naming the excluded
+    // pair here rather than skipping anything the parser cannot resolve means a
+    // THIRD unresolvable token fails loudly instead of vanishing from the loop.
+    assert.deepEqual(
+      used.filter((n) => NOT_ON_THE_SURFACE.includes(n)).sort(),
+      [...NOT_ON_THE_SURFACE].sort(),
+      "the ink that sits on a team colour changed — score-ink.test.ts owns those",
+    );
+    assert.deepEqual(
+      onSurface,
+      ["fg", "mark", "muted"],
+      "a different set of tokens is painted as text on the score surface than this guard measures",
+    );
+  });
+
+  test("and the quiet tier is one token, at the ratio it was meant to have", () => {
+    // The specific numbers, so the swap cannot be undone by re-tuning the alpha
+    // back down while leaving one token standing.
+    const tokens = scoreTokens();
+    const surface = tokens.get("surface") ?? "";
+    const muted = tokens.get("muted") ?? "";
+    assert.equal(surface, "#161616");
+    assert.equal(painted(muted, surface), "#a6a6a6");
+    assert.equal(contrastRatio(painted(muted, surface), surface).toFixed(2), "7.43");
+    assert.equal(
+      tokens.has("subtle"),
+      false,
+      "--score-subtle is back, and nothing on this surface can use it legibly",
+    );
+  });
+});
+
+describe("a shut panel is not a row of invisible tab stops", () => {
+  // THE BUG. The cards stay mounted while the panel is shut — the open
+  // animation scales a stack whose heights are already measured — and they kept
+  // `role="button" tabIndex={0}` the whole time. The panel rides the context bar
+  // on EVERY operator page, so a church following four games had four tab stops
+  // that landed on nothing, and Enter on one sprang the panel open from a
+  // control the operator could not see.
+  //
+  // WHAT JSDOM CANNOT SAY, and is therefore not asserted here: that the shut
+  // stack is invisible. Nothing is laid out, no stylesheet is applied, and every
+  // box measures 0 — so a pixel claim would pass with the rule that hides the
+  // stack deleted. The CSS side (`.score-host:not(.is-open) .score-shell`) is
+  // verified in a browser and the walk-through is in the PR. What IS checkable
+  // is the two lists a control nobody can see must be off: the tab order and
+  // the accessibility tree.
+  test("THE GUARD: a collapsed card is not a control, in either list", () => {
+    shutPanel();
+    const { container } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    const cards = [...container.querySelectorAll<HTMLElement>("[data-score-card]")];
+    // EXACT, not a floor: two games in, two cards out. A zero here would make
+    // every assertion below vacuously true.
+    assert.equal(cards.length, 2, "the shut stack did not render its cards");
+
+    for (const card of cards) {
+      assert.equal(
+        card.hasAttribute("tabindex"),
+        false,
+        "a card in a SHUT panel still carries a tabindex — an invisible tab stop on every operator page",
+      );
+      // The computed value too, and it is not the same check: a bare <div>
+      // reports -1, which is what keeps aria-hidden legal here. An explicit
+      // tabIndex={-1} would satisfy the attribute check above while leaving the
+      // node programmatically focusable inside a hidden subtree.
+      assert.equal(card.tabIndex, -1, "a collapsed card is still focusable");
+      assert.equal(
+        card.getAttribute("aria-hidden"),
+        "true",
+        "a card in a SHUT panel is still in the accessibility tree",
+      );
+      assert.equal(
+        card.getAttribute("role"),
+        null,
+        "a collapsed card still announces itself as a button",
+      );
+      assert.equal(card.getAttribute("aria-label"), null);
+    }
+  });
+
+  test("and it is a real control again the moment the panel opens", () => {
+    // The other half of the rule. Taking the tab stop away must not have taken
+    // the card away: a fix that left the cards inert while open would satisfy
+    // the guard above and remove the panel's only keyboard path.
+    openPanel();
+    const { container } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    const cards = [...container.querySelectorAll<HTMLElement>("[data-score-card]")];
+    assert.equal(cards.length, 2);
+    for (const card of cards) {
+      assert.equal(card.getAttribute("role"), "button", "an open card is not a control");
+      assert.equal(card.getAttribute("tabindex"), "0", "an open card is not tab-reachable");
+      assert.equal(card.getAttribute("aria-hidden"), null, "an open card is hidden from readers");
+      assert.ok(card.getAttribute("aria-label"), "an open card lost its name");
+    }
+    // UNMOUNT FIRST, then put the store back. Closing it while the host is still
+    // mounted publishes to a live subscriber, and React schedules that re-render
+    // for after this test body returns — by which time the file's `after()` has
+    // taken `window` away and the render throws inside prefersReducedMotion().
+    // cleanup() is idempotent, so the file's own afterEach still works.
+    cleanup();
+    shutPanel();
   });
 });

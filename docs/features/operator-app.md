@@ -156,6 +156,11 @@ also drive a physical screen, but only one whose mode is set to **panel**; the
 server refuses a console view on a screen left in display mode, so a wall cannot
 end up rendering a live button by accident.
 
+**Its icon.** Right-click the glyph in that sidebar row to pick another one, or
+focus the row and press **Shift+F10** (or the ContextMenu key) for the same set.
+The console shares one icon with any Screens card pointed at it, so changing it
+in either place changes both.
+
 **Editing one.** A quiet **Edit** button appears near the console's top-right
 corner when the pointer comes within reach. It opens the layout editor on the
 same URL, and **Done** returns you to the live console. See

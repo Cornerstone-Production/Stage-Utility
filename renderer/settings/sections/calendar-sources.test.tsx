@@ -215,6 +215,36 @@ describe("choosing a tag reaches the server", () => {
     assert.ok(screen.getByText(/could not read the calendars/i));
   });
 
+  it("THE GUARD: the two pickers announce their own captions, not just a summary", async () => {
+    // Their captions are FieldLabel <span>s, which associate with no control,
+    // so the trigger's only text was the summary of what is chosen. Read
+    // through getByRole's `name`, which computes the ACCESSIBLE NAME the way a
+    // browser does rather than reading DOM text — the caption is clipped, not
+    // written into the markup beside the summary. jsdom settles nothing about
+    // the clip itself; that is the app's existing sr-only utility.
+    draw();
+    await settle();
+    assert.equal(
+      screen.queryAllByRole("button", { name: "Calendars All calendars" }).length,
+      1,
+      "no control announces itself as the calendars picker",
+    );
+    assert.equal(
+      // Anchored rather than exact: the tags trigger's summary is whatever this
+      // fixture happens to have selected, and it is the CAPTION in front of it
+      // that this is about.
+      screen.queryAllByRole("button", { name: /^Tags / }).length,
+      1,
+      "no control announces itself as the tags picker",
+    );
+    // Before the fix each announced its summary alone.
+    assert.equal(
+      screen.queryAllByRole("button", { name: "All calendars" }).length,
+      0,
+      "a picker still announces nothing but its summary",
+    );
+  });
+
   it("says Planning Center is not connected rather than showing two empty pickers", async () => {
     // An unconfigured install answers with two empty lists, not an error, so
     // without this the panel is silently blank.

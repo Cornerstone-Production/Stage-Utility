@@ -866,17 +866,24 @@ body {
      theme, because a stage display is dark and the context bar is dark. Strictly
      R=G=B. */
   --score-surface: #161616;
-  --score-subtle: rgba(255, 255, 255, .38);
+  /* THE QUIET INK, and there is exactly one of it.
+     There were two. --score-subtle was rgba(255,255,255,.38), which paints
+     #6f6f6f on this surface: 3.60:1, under WCAG AA's 4.5:1 floor for text of
+     any size, and every one of its four uses was 9.5px or smaller — the period,
+     the capsule's middle line, a card's venue/league/time row, and the empty
+     object's caption. This one paints #a6a6a6 at 7.43:1, which is what those
+     four were meant to read at. Both ratios measured through the app's own
+     contrastRatio; the guard in score-activity.test.tsx measures them again. */
+  --score-muted: rgba(255, 255, 255, .62);
 }
 
 /* The ink for that ground. Strictly R=G=B, like the surface it sits on.
-   --score-surface and --score-subtle are on :root instead, with --score-disc:
+   --score-surface and --score-muted are on :root instead, with --score-disc:
    the empty state is a standalone sibling and cannot inherit from here. */
 .score-strip,
 .score-card,
 .score-capsule {
   --score-fg: rgba(255, 255, 255, .92);
-  --score-muted: rgba(255, 255, 255, .62);
   --score-line: rgba(255, 255, 255, .10);
   --score-dim: rgba(255, 255, 255, .15);
   /* The one warm accent: bases, outs, possession, power play. It marks a state
@@ -1065,7 +1072,7 @@ body {
   flex-shrink: 0;
   width: 100px;
   padding: 10px 2px;
-  color: var(--score-subtle);
+  color: var(--score-muted);
   z-index: 1;
 }
 .score-period {
@@ -1230,7 +1237,7 @@ button.score-capsule:focus-visible {
 .score-capsule-mid {
   padding: 0 7px;
   font-size: 9.5px;
-  color: var(--score-subtle);
+  color: var(--score-muted);
   letter-spacing: .05em;
   white-space: nowrap;
   z-index: 1;
@@ -1451,7 +1458,7 @@ button.score-capsule:focus-visible {
   gap: 15px;
   font-size: 9.5px;
   letter-spacing: .05em;
-  color: var(--score-subtle);
+  color: var(--score-muted);
 }
 .score-stale {
   font-size: 11px;
@@ -1543,7 +1550,7 @@ button.score-capsule:focus-visible {
   height: 100%;
   border-radius: 12px;
   background: var(--score-surface);
-  color: var(--score-subtle);
+  color: var(--score-muted);
   font-size: clamp(12px, calc(12px * var(--score-fit-scale, 1)), 44px);
   letter-spacing: .05em;
   text-align: center;
