@@ -785,8 +785,17 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // an operator picks for a console, where they sit beside OBS status and
     // REAPER status. One object, two presentations, chosen by the surface it is
     // drawn on rather than by which of two near-identical types got picked.
-    const platform = WALL_TWIN[c.type as keyof typeof WALL_TWIN];
-    if (!ctx.home && platform !== undefined) return streamingReadout(platform, {});
+    // A type guard rather than an index-and-compare, so that the config reaches
+    // streamingReadout NARROWED — carrying the three settings — instead of as
+    // the whole home-card union.
+    const hasWallTwin = (x: typeof c): x is Extract<typeof c, { type: keyof typeof WALL_TWIN }> =>
+      x.type in WALL_TWIN;
+    // `c`, not `{}`. The three settings Home's right-click menu writes onto a
+    // streaming card — elapsed time, hide when idle, fill when live — are the
+    // three `streamingReadout` takes, and passing an empty object dropped every
+    // one of them on the surface they are loudest on. The menu wrote them, the
+    // object stored them, the wall ignored them.
+    if (!ctx.home && hasWallTwin(c)) return streamingReadout(WALL_TWIN[c.type], c);
     const live = ctx.home && ctx.interactive;
     return (
       <div className={live ? "w-full h-full" : "w-full h-full pointer-events-none"}>
@@ -2805,8 +2814,20 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
 
   const transcript = useTranscript(want(["transcript-strip"]));
   const spl = useSplState(want(["spl-meter"]));
-  const obs = useObsState(want(["obs-status"]));
-  const reaper = useReaperState(want(["reaper-status"]));
+  // Declared ABOVE the recorder gates because OBS is one of the three streamers
+  // `streamingReadout` reads: a wall showing only `stream-status` — or one of the
+  // three Home streaming cards wearing its wall twin — has to open the OBS
+  // channel as well, or the "OBS" row of that widget reports a platform that is
+  // simply not subscribed.
+  const streamWanted = want(["stream-status", "home-streaming", "home-streaming-resi", "home-streaming-youtube"]);
+  // `record-status` is in BOTH. It is the any-recorder widget — the one an
+  // operator picks INSTEAD of the gated pair, so that a layout survives a switch
+  // from OBS to REAPER unchanged — and it reads ctx.obs and ctx.reaper directly.
+  // Named in neither gate, a layout whose only recorder widget was that one
+  // subscribed to nothing and said NO RECORDER through the whole service.
+  // gate-render-parity.test.ts is what now holds every arm to its channels.
+  const obs = useObsState(want(["obs-status", "record-status"]) || streamWanted);
+  const reaper = useReaperState(want(["reaper-status", "record-status"]));
   // Gated harder than most: the channel's DEMAND is what decides the poll cadence
   // at the server, so an ungated hook would hold PVP at 1 Hz for a wall screen
   // showing a clock.
@@ -2822,9 +2843,9 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // Gated like every other integration hook: a clock-only wall screen must not
   // hold a poll open against ESPN.
   const scores = useScoresState(want(["scores", "home-scores"]));
-  // Both gated on the streaming objects: a clock-only wall screen must not hold
-  // a poll open against two cloud APIs, one of which has a daily quota.
-  const streamWanted = want(["stream-status", "home-streaming", "home-streaming-resi", "home-streaming-youtube"]);
+  // Both gated on the streaming objects (`streamWanted`, declared above the
+  // recorder gates): a clock-only wall screen must not hold a poll open against
+  // two cloud APIs, one of which has a daily quota.
   const resi = useResiState(streamWanted);
   const youtube = useYouTubeState(streamWanted);
   const osc = useOscState(want(["osc-button"]));

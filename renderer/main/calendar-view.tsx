@@ -27,6 +27,7 @@ import { invoke, onNotification } from "../lib/api";
 import { formatClock } from "../lib/clock-format";
 import { cn } from "../lib/cn";
 import { contrastRatio, formatColor, parseColor } from "../components/ui/color-math";
+import { useCorrectedNow } from "./use-corrected-now";
 import { zonedDateKey } from "@main/services/app-timezone";
 import { MAX_MONTH_OFFSET } from "@main/services/calendar-grid";
 import type { CalendarDay, CalendarEventDTO, CalendarGrid } from "@main/types/calendar";
@@ -579,6 +580,13 @@ export function CalendarView({
    * current month.
    */
   interactive?: boolean;
+  /**
+   * The caller's corrected clock, where it already holds one — an embedded tile
+   * passes `ctx.now + ctx.skewMs`. Omit it and this subscribes for its own, which
+   * is the same clock: what must never happen is the component answering "which
+   * square is today" from the raw browser clock, because the DISPLAY route is a
+   * wall Pi on a LAN with no NTP.
+   */
   nowMs?: number;
 }) {
   /** The month pushed on the channel. Always the CURRENT one. */
@@ -610,7 +618,19 @@ export function CalendarView({
    */
   const [liveFailed, setLiveFailed] = useState(false);
   const [pagedFailed, setPagedFailed] = useState(false);
-  const [tick, setTick] = useState(() => Date.now());
+  /**
+   * This surface's own clock, for when the caller passes none.
+   *
+   * CORRECTED, not `Date.now()`. A minute is enough for both things it decides:
+   * the highlight moves between events, and the day rolls over. A one-second tick
+   * would re-render the whole grid sixty times as often for a change nobody can
+   * see — and `useCorrectedNow` keeps that cadence, because it quantises the skew
+   * to whole seconds rather than re-rendering on every `pco:live` push.
+   *
+   * Off entirely when the caller passed one, so an embedded tile does not run a
+   * second clock beside the one it is already handing down.
+   */
+  const ownNow = useCorrectedNow(60_000, nowMs === undefined);
 
   /**
    * Months from the current one. REACT STATE, per client, and deliberately not
@@ -759,21 +779,12 @@ export function CalendarView({
     return () => clearTimeout(t);
   }, [offset]);
 
-  // A minute is enough: the highlight moves between events, and the day rolls
-  // over. A one-second tick would re-render the whole grid sixty times as often
-  // for a change nobody can see.
-  useEffect(() => {
-    if (nowMs !== undefined) return;
-    const t = setInterval(() => setTick(Date.now()), 60_000);
-    return () => clearInterval(t);
-  }, [nowMs]);
-
   return (
     <CalendarMonth
       // The live month on 0, the one-shot otherwise. The current month is never
       // served from pagedGrid — see the effect above for why that matters.
       grid={shown === 0 ? liveGrid : pagedGrid}
-      nowMs={nowMs ?? tick}
+      nowMs={nowMs ?? ownNow}
       pcoConfigured={pcoConfigured}
       // Whichever month is on screen answers for itself. Returning to the
       // current month must not inherit the paged month's failure, and a pushed

@@ -98,7 +98,9 @@ month; a console that was paged away returns to it after ten minutes. Which cale
 draws are set on the view, not globally, so two screens can show two departments
 — see [Planning Center Calendar](../integrations/planning-center.md#calendar).
 There is no booking-versus-event setting, because Planning Center does not model
-the difference.
+the difference. Today and the running event are decided on the server's clock, in
+the app time zone, rather than on the screen's own clock — so a display whose
+clock has drifted still marks the right day.
 
 ## Status
 
@@ -144,6 +146,14 @@ Per widget you can turn that off (**Fill green when live** / **Fill when
 recording**, which colours just the word instead), hide the number, or make it a
 tally light with **Hide when idle** — nothing drawn at all until something is
 going out.
+
+The Home streaming tiles — **Streaming**, **Resi** and **YouTube** — are the same
+object in two presentations. On Home they are a card in a row of cards; put one on
+a screen and it wears the composition above, beside OBS status and REAPER status.
+So all three of their settings are offered on Home, and two of them describe what
+the tile does on a screen: **Elapsed time** applies on both surfaces, while **Fill
+the card when live** and **Hide when idle** shape the screen presentation, which
+is the only one that fills or hides.
 
 ## OBS
 
