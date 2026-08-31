@@ -228,6 +228,7 @@ function ScoreCard({
   focused,
   scored,
   error,
+  collapsed,
 }: {
   game: ScoreGameDTO;
   index: number;
@@ -235,21 +236,44 @@ function ScoreCard({
   /** Which side a score just landed on, or null. Reduced motion is already applied. */
   scored: "away" | "home" | null;
   error: string | null;
+  /**
+   * The panel is shut, so this card is drawn but not on screen — see the host.
+   * A collapsed card is INERT: not a control, not in the tab order, not in the
+   * accessibility tree.
+   */
+  collapsed: boolean;
 }) {
   return (
+    // THE CARDS STAY MOUNTED WHILE THE PANEL IS SHUT, and that is deliberate:
+    // the shell's open animation scales a stack whose heights are already
+    // measured, so unmounting them would mean measuring on the frame the
+    // animation starts. What must NOT survive the close is the interactivity.
+    //
+    // Every operator page carries this panel, so a card that keeps `role=
+    // "button" tabIndex={0}` while shut is one invisible tab stop per followed
+    // game — four of them, on every page — and Enter on one springs open a
+    // panel from a control nobody can see. Removed from BOTH lists at once:
+    // `tabIndex` undefined takes a plain <div> out of the tab order entirely
+    // (an explicit -1 would leave it programmatically focusable, which is what
+    // makes aria-hidden invalid), and aria-hidden takes it out of the reading.
     <div
       data-score-card=""
       className={cn("score-card", focused && "is-focused")}
-      role="button"
-      tabIndex={0}
-      aria-expanded={focused}
-      aria-label={gameLabel(game)}
-      onClick={() => scoreActivity.focus(index)}
-      onKeyDown={(e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        scoreActivity.focus(index);
-      }}
+      role={collapsed ? undefined : "button"}
+      tabIndex={collapsed ? undefined : 0}
+      aria-hidden={collapsed || undefined}
+      aria-expanded={collapsed ? undefined : focused}
+      aria-label={collapsed ? undefined : gameLabel(game)}
+      onClick={collapsed ? undefined : () => scoreActivity.focus(index)}
+      onKeyDown={
+        collapsed
+          ? undefined
+          : (e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              scoreActivity.focus(index);
+            }
+      }
     >
       {/* Keyed on this game's own two scores — see scoreKey. */}
       {/* labelled={false}: the card above already names the game, and a screen
@@ -488,6 +512,7 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
                   focused={i === clamped}
                   scored={motion ? scoredSide(game, scores?.lastEvents ?? []) : null}
                   error={scores?.error ?? null}
+                  collapsed={!isOpen}
                 />
               ))}
             </div>

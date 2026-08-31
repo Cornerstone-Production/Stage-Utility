@@ -40,7 +40,8 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup } = await import("@testing-library/react");
-const { createScoreActivity, SCORE_HOLD_MS } = await import("./score-activity-store.js");
+const { createScoreActivity, SCORE_HOLD_MS, scoreActivity } =
+  await import("./score-activity-store.js");
 const { ScoreActivityHost, ScoreCapsule, capsuleView, layoutStack, liveIndex, scoredSide } =
   await import("./score-activity.js");
 
@@ -610,6 +611,23 @@ describe("placing the stack", () => {
   });
 });
 
+/**
+ * The panel's open state, set on the ONE store the host reads.
+ *
+ * ScoreActivityHost renders from the module singleton, not from a store handed
+ * in, and several tests above leave it open — a rerender carrying a new scoreRev
+ * calls scored(), which opens the panel and starts a 6.5s hold. So anything that
+ * depends on open-versus-shut says which it wants rather than inheriting
+ * whatever ran before it.
+ */
+function openPanel(): void {
+  scoreActivity.close();
+  scoreActivity.toggle();
+}
+function shutPanel(): void {
+  scoreActivity.close();
+}
+
 describe("a card names its game once, not twice", () => {
   // ScoreCard sets an aria-label on its role="button" wrapper and then renders a
   // ScoreStrip, which labels itself by default. A screen reader in browse mode
@@ -620,6 +638,10 @@ describe("a card names its game once, not twice", () => {
   // Counted, not merely checked for presence: the pre-fix DOM has the label
   // twice, so an assertion that one exists passes on the bug.
   test("THE GUARD: the reading is not announced twice", () => {
+    // OPEN, explicitly: a shut panel's cards carry no label at all now (they are
+    // aria-hidden — see the tab-order guard below), so this would assert nothing
+    // about the double reading if it ran against a collapsed stack.
+    openPanel();
     const { container } = render(<ScoreActivityHost scores={twoGames(0)} />);
     const cards = [...container.querySelectorAll("[data-score-card]")];
     assert.ok(cards.length > 0, "no cards rendered, so this asserts nothing");
@@ -644,5 +666,77 @@ describe("a card names its game once, not twice", () => {
     const label = el?.getAttribute("aria-label") ?? "";
     assert.match(label, /Chicago Cubs 6/, "the capsule stopped naming the game");
     assert.match(label, /Cincinnati Reds 2/);
+  });
+});
+
+describe("a shut panel is not a row of invisible tab stops", () => {
+  // THE BUG. The cards stay mounted while the panel is shut — the open
+  // animation scales a stack whose heights are already measured — and they kept
+  // `role="button" tabIndex={0}` the whole time. The panel rides the context bar
+  // on EVERY operator page, so a church following four games had four tab stops
+  // that landed on nothing, and Enter on one sprang the panel open from a
+  // control the operator could not see.
+  //
+  // WHAT JSDOM CANNOT SAY, and is therefore not asserted here: that the shut
+  // stack is invisible. Nothing is laid out, no stylesheet is applied, and every
+  // box measures 0 — so a pixel claim would pass with the rule that hides the
+  // stack deleted. The CSS side (`.score-host:not(.is-open) .score-shell`) is
+  // verified in a browser and the walk-through is in the PR. What IS checkable
+  // is the two lists a control nobody can see must be off: the tab order and
+  // the accessibility tree.
+  test("THE GUARD: a collapsed card is not a control, in either list", () => {
+    shutPanel();
+    const { container } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    const cards = [...container.querySelectorAll<HTMLElement>("[data-score-card]")];
+    // EXACT, not a floor: two games in, two cards out. A zero here would make
+    // every assertion below vacuously true.
+    assert.equal(cards.length, 2, "the shut stack did not render its cards");
+
+    for (const card of cards) {
+      assert.equal(
+        card.hasAttribute("tabindex"),
+        false,
+        "a card in a SHUT panel still carries a tabindex — an invisible tab stop on every operator page",
+      );
+      // The computed value too, and it is not the same check: a bare <div>
+      // reports -1, which is what keeps aria-hidden legal here. An explicit
+      // tabIndex={-1} would satisfy the attribute check above while leaving the
+      // node programmatically focusable inside a hidden subtree.
+      assert.equal(card.tabIndex, -1, "a collapsed card is still focusable");
+      assert.equal(
+        card.getAttribute("aria-hidden"),
+        "true",
+        "a card in a SHUT panel is still in the accessibility tree",
+      );
+      assert.equal(
+        card.getAttribute("role"),
+        null,
+        "a collapsed card still announces itself as a button",
+      );
+      assert.equal(card.getAttribute("aria-label"), null);
+    }
+  });
+
+  test("and it is a real control again the moment the panel opens", () => {
+    // The other half of the rule. Taking the tab stop away must not have taken
+    // the card away: a fix that left the cards inert while open would satisfy
+    // the guard above and remove the panel's only keyboard path.
+    openPanel();
+    const { container } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    const cards = [...container.querySelectorAll<HTMLElement>("[data-score-card]")];
+    assert.equal(cards.length, 2);
+    for (const card of cards) {
+      assert.equal(card.getAttribute("role"), "button", "an open card is not a control");
+      assert.equal(card.getAttribute("tabindex"), "0", "an open card is not tab-reachable");
+      assert.equal(card.getAttribute("aria-hidden"), null, "an open card is hidden from readers");
+      assert.ok(card.getAttribute("aria-label"), "an open card lost its name");
+    }
+    // UNMOUNT FIRST, then put the store back. Closing it while the host is still
+    // mounted publishes to a live subscriber, and React schedules that re-render
+    // for after this test body returns — by which time the file's `after()` has
+    // taken `window` away and the render throws inside prefersReducedMotion().
+    // cleanup() is idempotent, so the file's own afterEach still works.
+    cleanup();
+    shutPanel();
   });
 });
