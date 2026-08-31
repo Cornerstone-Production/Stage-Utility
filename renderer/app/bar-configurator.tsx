@@ -545,23 +545,39 @@ export function BarConfigurator({
    *  It writes to whichever set is being edited, and ONLY that one. A change made
    *  on the phone tab while it was still following the desktop bar is what forks
    *  it: there is no separate "give the phone its own set" step to forget, because
-   *  wanting a different arrangement IS the thing that step would ask about. */
-  function commit(next: Row[]) {
+   *  wanting a different arrangement IS the thing that step would ask about.
+   *
+   *  A REFUSED WRITE PUTS THE ROWS BACK, and this is the only place that can.
+   *  `setBarItems` is optimistic, but its optimism does not reach here: it writes
+   *  `["stage:getState"]` in React Query, and every bar surface — this preview
+   *  included — reads `useBarContext` -> `useDashboardState` -> `useStageState`,
+   *  the independent SSE module store, which live-wiring only ever pushes INTO
+   *  the cache. So the rollback the shared helper performs is invisible on this
+   *  screen, and without the re-seed below the editor went on drawing a rejected
+   *  arrangement under "The bar, as it will appear" while the real strip above
+   *  showed the old one. `saved` is this render's reading of the server's
+   *  arrangement, which is exactly what a refusal leaves in place. */
+  async function commit(next: Row[]) {
     setRows(next);
-    void setBarItems(queryClient, editing, normalizeBarRows(next.map((r) => r.id)));
+    const ok = await setBarItems(queryClient, editing, normalizeBarRows(next.map((r) => r.id)));
+    if (!ok) setRows(saved.map((id) => ({ key: nextKey.current(), id })));
   }
 
   /** Hand the phone back to the desktop bar. The one way out of a fork, and the
-   *  reason forking on first edit is safe rather than a trap. */
-  function followDesktop() {
-    void setBarItems(queryClient, "mobile", []);
+   *  reason forking on first edit is safe rather than a trap.
+   *
+   *  Rolls back for the same reason `commit` does: a refused write left the strip
+   *  showing the desktop arrangement it had just failed to adopt. */
+  async function followDesktop() {
+    const before = rows;
     setRows(visibleBarItems(savedDesktop).map((id) => ({ key: nextKey.current(), id })));
+    if (!(await setBarItems(queryClient, "mobile", []))) setRows(before);
   }
 
   function add(id: BarRowId, at = rows.length) {
     const next = [...rows];
     next.splice(at, 0, { key: nextKey.current(), id });
-    commit(next);
+    void commit(next);
   }
 
   /** The gap this pointer position means, or null for "not a place".
@@ -608,7 +624,7 @@ export function BarConfigurator({
     const fromPalette = e.active.data.current?.from === "palette";
     if (g === null) {
       // Not a place. A row dragged out of the bar goes; a tile flies home.
-      if (!fromPalette) commit(rows.filter((r) => r.key !== e.active.id));
+      if (!fromPalette) void commit(rows.filter((r) => r.key !== e.active.id));
       return;
     }
 
@@ -622,7 +638,7 @@ export function BarConfigurator({
 
     const next = [...staying];
     next.splice(g, 0, moved);
-    commit(next);
+    void commit(next);
   }
 
   return (
@@ -732,7 +748,7 @@ export function BarConfigurator({
                   <BarRow
                     row={row}
                     ctx={ctx}
-                    onRemove={() => commit(rows.filter((r) => r.key !== row.key))}
+                    onRemove={() => void commit(rows.filter((r) => r.key !== row.key))}
                   />
                 </Fragment>
               ))}
@@ -794,12 +810,14 @@ export function BarConfigurator({
             <Button
               variant="transparent"
               size="small"
-              onClick={() => commit(DEFAULT_BAR_ORDER.map((id) => ({ key: nextKey.current(), id })))}
+              onClick={() =>
+                void commit(DEFAULT_BAR_ORDER.map((id) => ({ key: nextKey.current(), id })))
+              }
             >
               Use the default set
             </Button>
             {editing === "mobile" && !inheriting && (
-              <Button variant="transparent" size="small" onClick={followDesktop}>
+              <Button variant="transparent" size="small" onClick={() => void followDesktop()}>
                 Follow the desktop bar
               </Button>
             )}
