@@ -610,11 +610,11 @@ export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = Object.keys(OUT_OF_
  * Fold a request body into the config to persist and the secrets to store.
  *
  * EXPORTED, and the only copy. This lived inline in `setConfig`, and the test
- * that guarded it reimplemented the loop — so deleting the guard below left the
- * suite green, which was demonstrated before this was extracted. `setConfig`
- * cannot be driven from a unit test (it needs `init()`, which starts the
- * reconnect timers, and it ends by dialling the integration), so the choice was
- * a copy in the test or one function both use. This is the latter.
+ * guarding it reimplemented the loop — so deleting the guard left the suite
+ * green, which was demonstrated before the extraction. `setConfig` cannot be
+ * driven from a unit test (it needs `init()`, which starts the reconnect timers
+ * and never lets the process exit, and it ends by dialling the integration), so
+ * the choice was a copy in the test or one function both use. This is the latter.
  *
  * The key comes off an HTTP body, and `out[key] = value` is a property write
  * with a caller-chosen name. `JSON.parse` keeps "__proto__" as an own
@@ -622,17 +622,32 @@ export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = Object.keys(OUT_OF_
  * object's PROTOTYPE rather than a field on it. CodeQL calls this
  * js/remote-property-injection and rates it high.
  *
- * Two defences, deliberately both:
- *   - the reserved names are skipped, so they never reach an assignment;
- *   - the target has a NULL prototype, so even an assignment that slipped past
- *     would create an ordinary own key and could not reach any prototype.
- * The second costs one word and does not depend on the list above staying
- * complete.
+ * A key is now ACCEPTED rather than screened — it must match
+ * {@link CONFIG_KEY} and must not be one of the two reserved names that pattern
+ * still admits. A positive rule cannot be outflanked by a name nobody thought
+ * of, which a skip-list can.
+ *
+ * The pattern was chosen against the data, not guessed: all 23 config keys the
+ * 16 integrations use match it, INCLUDING the two that no `configSchema`
+ * declares — sensource's `zoneIds` and `locationId`, which carry the operator's
+ * zone selection. An allowlist built from the schemas, which is what the CodeQL
+ * rule nudges toward, would silently delete that selection on the next save.
+ *
+ * And the targets have NULL prototypes, so even a write that reached one could
+ * only make an ordinary own key. Belt and braces: the pattern does not depend on
+ * the reserved list, and the null prototype does not depend on either.
  *
  * Skipped rather than rejected: an integration has a fixed set of fields and
- * none is called this, so a body carrying one is junk or an attempt, and
- * neither deserves a 500.
+ * none is called this, so a body carrying one is junk or an attempt, and neither
+ * deserves a 500.
  */
+/** The shape of every config key the app actually uses. Anchored, no `_`, so
+ *  "__proto__" cannot match however it is spelled. */
+const CONFIG_KEY = /^[A-Za-z][A-Za-z0-9]*$/;
+
+/** The two names {@link CONFIG_KEY} admits that must still never be written. */
+const RESERVED_KEYS: ReadonlySet<string> = new Set(["constructor", "prototype"]);
+
 export function foldConfigEntries(
   entries: Record<string, unknown>,
   secretKeys: readonly string[],
@@ -640,11 +655,14 @@ export function foldConfigEntries(
 ): { config: Record<string, unknown>; secrets: Record<string, string> } {
   const config: Record<string, unknown> = Object.create(null);
   const secrets: Record<string, string> = Object.create(null);
-  for (const [key, value] of Object.entries(entries)) {
-    if (key === "__proto__" || key === "constructor" || key === "prototype") {
-      console.warn(`[integration-manager] ignoring reserved config key on ${id}: ${key}`);
+  for (const [rawKey, value] of Object.entries(entries)) {
+    if (!CONFIG_KEY.test(rawKey) || RESERVED_KEYS.has(rawKey)) {
+      console.warn(`[integration-manager] ignoring unusable config key on ${id}: ${rawKey}`);
       continue;
     }
+    // Narrowed to the matched text, so what is written is provably the string
+    // the pattern accepted rather than the one that arrived.
+    const key = CONFIG_KEY.exec(rawKey)![0];
     if (secretKeys.includes(key)) {
       // Only update the secret if the caller provided a real value (not the mask).
       if (value !== "••••" && value !== "") secrets[key] = String(value);

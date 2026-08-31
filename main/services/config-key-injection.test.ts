@@ -46,6 +46,20 @@ describe("config keys from a request body", () => {
     }
   });
 
+  test("every config key the 16 integrations actually use is accepted", () => {
+    // The pattern was chosen against the data. If a real key ever fails it, the
+    // operator loses that setting silently on their next save — which is exactly
+    // what an allowlist built from `configSchema` would have done to sensource's
+    // zone selection, since neither key below is declared in any schema.
+    const REAL = [
+      "host", "port", "password", "appId", "secret", "clientId", "clientSecret",
+      "apiToken", "pollSeconds", "url", "channel", "streamKey", "enabled",
+      "zoneIds", "locationId",
+    ];
+    const { config } = foldConfigEntries(Object.fromEntries(REAL.map((k) => [k, 1])), [], "test");
+    assert.deepEqual(Object.keys(config).sort(), [...REAL].sort(), "a real config key was rejected");
+  });
+
   test("the real field is kept, the secret is split out, the reserved names are dropped", () => {
     const { config, secrets } = foldConfigEntries(hostile(), ["password"], "test");
     assert.equal(config.host, "203.0.113.7", "the legitimate field was lost");
