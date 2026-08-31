@@ -46,12 +46,25 @@ import { onNotification } from "../lib/api";
  *              of the shape here — a channel named only by prose satisfying that
  *              scan is a trap this repo has already fallen into once.)
  * @param pushChannel  SSE channel carrying the live frames.
+ * @param options.clearOnReadFailure  drop back to null when the hydrate fails,
+ *   instead of keeping whatever was already there. OFF by default, which is what
+ *   every integration status wants: a value that was true a moment ago is better
+ *   than a blank readout, and the live channel will correct it. ON for a set that
+ *   is a CLAIM ABOUT THE PRESENT — display presence is the one, where keeping the
+ *   old set across an `enabled` false→true flip reports screens as Connected on
+ *   the strength of a read that just failed. Empty is the honest reading of "we
+ *   do not know" there, and it fails toward "go and look at the screen".
  */
 export function useStatusChannel<T extends { rev?: number }>(
   read: () => Promise<T | null | undefined>,
   pushChannel: string,
   enabled = true,
+  options: { clearOnReadFailure?: boolean } = {},
 ): T | null {
+  // Destructured, not carried as an object: an options literal is a new object
+  // every render, and as an effect dependency that re-subscribes and re-hydrates
+  // on every one.
+  const clearOnReadFailure = options.clearOnReadFailure ?? false;
   const [value, setValue] = useState<T | null>(null);
 
   // Highest rev applied from a push during THIS hydration window.
@@ -80,14 +93,33 @@ export function useStatusChannel<T extends { rev?: number }>(
         if (seen !== null && typeof s.rev === "number" && s.rev < seen) return;
         setValue(s);
       })
-      .catch(() => {
-        // Not configured yet, or the integration is down — the same swallow the
-        // seven call sites this replaces each carried, kept in ONE place rather
-        // than seven. There is no caller to hand the failure to: this read is
-        // only the first paint before the live channel takes over, and the
-        // channel remains the source of truth either way. A hard failure worth
-        // an operator's attention surfaces on the Integrations page, which
-        // reports connection state separately.
+      .catch((err: unknown) => {
+        // ── What a caller can and cannot learn from this ────────────────────
+        //
+        // Not much, on purpose. This hook returns `T | null`, so "not configured
+        // yet", "the integration is down" and "the read fails on every mount"
+        // are one value — and unlike useStageState, which was given an `error`
+        // field in the same work, that is the right shape HERE. The read is only
+        // the first paint before the live channel takes over; the channel stays
+        // the source of truth either way; and the place that reports a
+        // connection problem an operator can act on is the Integrations page,
+        // which asks the server directly rather than inferring it from a widget.
+        // An `error` on every one of the nine status hooks would be a field with
+        // no reader, and a widget saying "OBS unreachable" in a wall tile is the
+        // second, quieter answer to a question that page already answers loudly.
+        //
+        // What was genuinely missing is any trace at all. Nine hooks swallowed
+        // nine failures in silence, so an integration widget that never filled
+        // in left nothing behind to read. It is logged now, tagged and naming
+        // the channel, the same way useStageState logs its hydrate — that is the
+        // 9am-on-a-Sunday answer, and it costs no caller anything.
+        //
+        // If a surface ever does need to tell the three apart, the change is to
+        // return `{ value, error }` and let useStatusChannel keep the plain
+        // shape as a wrapper — not to add a tenth hand-rolled hydrate.
+        if (cancelled) return;
+        console.warn(`[status-channel] hydrate failed for ${pushChannel}`, err);
+        if (clearOnReadFailure) setValue(null);
       });
 
     return () => {
@@ -98,7 +130,7 @@ export function useStatusChannel<T extends { rev?: number }>(
     // useCallback). An unmemoised one would re-subscribe and re-hydrate on every
     // render — wasteful, but not wrong: the ordering rule still holds, because a
     // fresh window resets the counter above.
-  }, [enabled, pushChannel, read]);
+  }, [enabled, pushChannel, read, clearOnReadFailure]);
 
   return value;
 }
