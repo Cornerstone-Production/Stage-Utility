@@ -49,10 +49,9 @@ import {
   BAR_SPACE_ITEM,
   BAR_SPACER,
   BAR_SPACER_ITEM,
-  BAR_PROSE_ITEMS,
   isBarGap,
-  isProseItem,
   hasMobileBar,
+  phoneShowsEditedSet,
   visibleBarItems,
   DEFAULT_BAR_ORDER,
   normalizeBarRows,
@@ -63,10 +62,8 @@ import {
 import { useBarFit } from "./bar-fit";
 import { MOBILE_MAX_WIDTH } from "../lib/use-media-query";
 import {
-  BAR_ITEM_CLASS,
   BAR_STRIP_CLASS,
-  BarSpacerEl,
-  BarSpaceEl,
+  BarStripRows,
   renderBarItem,
   useBarContext,
   type BarItemContext,
@@ -370,35 +367,9 @@ function NarrowProbe({
       style={{ width: NARROWEST }}
     >
       <div ref={ref} className={BAR_STRIP_CLASS}>
-        <BarStripRows rows={rows} ctx={ctx} />
+        <BarStripRows rows={rows} ctx={ctx} preview />
       </div>
     </div>
-  );
-}
-
-/** The rows of a strip, rendered the way the real bar renders them. Shared so a
- *  preview and a probe cannot lay out differently from the bar they speak for. */
-function BarStripRows({ rows, ctx }: { rows: readonly BarRowId[]; ctx: BarItemContext }) {
-  return (
-    <>
-      {rows.map((id, i) => {
-        if (id === BAR_SPACER) return <BarSpacerEl key={`${id}-${i}`} />;
-        if (id === BAR_SPACE) return <BarSpaceEl key={`${id}-${i}`} />;
-        const content = renderBarItem(id as BarItemId, { ...ctx, preview: true });
-        if (content === null) return null;
-        return (
-          // The name goes on the ITEM's own box, not on a wrapper inside it, and
-          // that is load-bearing rather than tidy: the floor is expressed as
-          // `.bar-item:has(> .bar-prose)`, so anything between the two — even a
-          // `display: contents` span, which changes no layout — stops the item
-          // being allowed to shrink. A first pass did exactly that, and the probe
-          // reported an arrangement 2px too long that in the real bar fits.
-          <span key={id} className={BAR_ITEM_CLASS} data-prose={isProseItem(id) ? BAR_PROSE_ITEMS[id] : undefined}>
-            {content}
-          </span>
-        );
-      })}
-    </>
   );
 }
 
@@ -476,6 +447,10 @@ export function BarConfigurator({
   const saved: readonly BarRowId[] = visibleBarItems(
     editing === "mobile" && !inheriting ? savedMobile : savedDesktop,
   );
+  // Whether the 320px sentence is about this set at all — see
+  // `phoneShowsEditedSet`. A desktop set the phone has stopped following is
+  // never rendered on a phone, so there is nothing true to say about it here.
+  const shownOnPhone = phoneShowsEditedSet(editing, savedMobile);
 
   // The rows staying put during this drag, measured once at drag start. Safe to
   // cache precisely because nothing shifts mid-drag.
@@ -532,7 +507,7 @@ export function BarConfigurator({
     if (narrow.cut.length === 0) return null;
     return `On a ${NARROWEST}px phone this runs out of room, and ${nameList(narrow.cut)} will be cut short. Take ${narrow.cut.length > 1 ? "one of them" : "it"} off the phone's bar to keep every reading whole.`;
   }
-  const warning = narrowWarning();
+  const warning = shownOnPhone ? narrowWarning() : null;
 
   /** Every change goes through here, so nothing reaches the server unnormalised
    *  and the preview shows what was actually saved.
@@ -540,23 +515,39 @@ export function BarConfigurator({
    *  It writes to whichever set is being edited, and ONLY that one. A change made
    *  on the phone tab while it was still following the desktop bar is what forks
    *  it: there is no separate "give the phone its own set" step to forget, because
-   *  wanting a different arrangement IS the thing that step would ask about. */
-  function commit(next: Row[]) {
+   *  wanting a different arrangement IS the thing that step would ask about.
+   *
+   *  A REFUSED WRITE PUTS THE ROWS BACK, and this is the only place that can.
+   *  `setBarItems` is optimistic, but its optimism does not reach here: it writes
+   *  `["stage:getState"]` in React Query, and every bar surface — this preview
+   *  included — reads `useBarContext` -> `useDashboardState` -> `useStageState`,
+   *  the independent SSE module store, which live-wiring only ever pushes INTO
+   *  the cache. So the rollback the shared helper performs is invisible on this
+   *  screen, and without the re-seed below the editor went on drawing a rejected
+   *  arrangement under "The bar, as it will appear" while the real strip above
+   *  showed the old one. `saved` is this render's reading of the server's
+   *  arrangement, which is exactly what a refusal leaves in place. */
+  async function commit(next: Row[]) {
     setRows(next);
-    void setBarItems(queryClient, editing, normalizeBarRows(next.map((r) => r.id)));
+    const ok = await setBarItems(queryClient, editing, normalizeBarRows(next.map((r) => r.id)));
+    if (!ok) setRows(saved.map((id) => ({ key: nextKey.current(), id })));
   }
 
   /** Hand the phone back to the desktop bar. The one way out of a fork, and the
-   *  reason forking on first edit is safe rather than a trap. */
-  function followDesktop() {
-    void setBarItems(queryClient, "mobile", []);
+   *  reason forking on first edit is safe rather than a trap.
+   *
+   *  Rolls back for the same reason `commit` does: a refused write left the strip
+   *  showing the desktop arrangement it had just failed to adopt. */
+  async function followDesktop() {
+    const before = rows;
     setRows(visibleBarItems(savedDesktop).map((id) => ({ key: nextKey.current(), id })));
+    if (!(await setBarItems(queryClient, "mobile", []))) setRows(before);
   }
 
   function add(id: BarRowId, at = rows.length) {
     const next = [...rows];
     next.splice(at, 0, { key: nextKey.current(), id });
-    commit(next);
+    void commit(next);
   }
 
   /** The gap this pointer position means, or null for "not a place".
@@ -603,7 +594,7 @@ export function BarConfigurator({
     const fromPalette = e.active.data.current?.from === "palette";
     if (g === null) {
       // Not a place. A row dragged out of the bar goes; a tile flies home.
-      if (!fromPalette) commit(rows.filter((r) => r.key !== e.active.id));
+      if (!fromPalette) void commit(rows.filter((r) => r.key !== e.active.id));
       return;
     }
 
@@ -617,7 +608,7 @@ export function BarConfigurator({
 
     const next = [...staying];
     next.splice(g, 0, moved);
-    commit(next);
+    void commit(next);
   }
 
   return (
@@ -718,7 +709,13 @@ export function BarConfigurator({
                 NO_SELECT,
               )}
             >
-              {rows.length === 0 && !dragging && (
+              {/* Gaps are not readings, so a strip carrying nothing else is still
+                  an empty bar and says so. Reachable on REOPEN now that an
+                  emptied bar stays empty: the arrangement that gets saved is
+                  ["spacer"], and without this the dialog opened on a blank strip
+                  with nothing to explain it. `[].every()` is true, so this still
+                  covers the strip you have just dragged the last item out of. */}
+              {rows.every((r) => isBarGap(r.id)) && !dragging && (
                 <span className="text-footnote text-fg-subtle">Drag something in.</span>
               )}
               {rows.map((row) => (
@@ -727,7 +724,7 @@ export function BarConfigurator({
                   <BarRow
                     row={row}
                     ctx={ctx}
-                    onRemove={() => commit(rows.filter((r) => r.key !== row.key))}
+                    onRemove={() => void commit(rows.filter((r) => r.key !== row.key))}
                   />
                 </Fragment>
               ))}
@@ -740,11 +737,21 @@ export function BarConfigurator({
               laptop is not a phone's; this sentence is the part that is about a
               phone. It only ever has bad news about prose, because prose is the
               only thing the ladder cannot fit without cutting — and being able to
-              take prose off is the whole reason the phone has a set of its own. */}
-          <NarrowProbe rows={rowIds} ctx={ctx} onFit={setNarrow} />
-          <p className={cn("mt-2 text-caption1", warning ? "text-warn-11" : "text-fg-subtle")}>
-            {warning ?? `Fits on a ${NARROWEST}px phone with nothing cut.`}
-          </p>
+              take prose off is the whole reason the phone has a set of its own.
+
+              ONLY FOR A SET A PHONE ACTUALLY RENDERS. Both the probe and the
+              sentence used to be unconditional, so a desktop set the phone had
+              stopped following was measured at 320px and reported on — a width
+              `barRowsFor` will never hand it, one line under "Shown from 640px
+              wide up". */}
+          {shownOnPhone && (
+            <>
+              <NarrowProbe rows={rowIds} ctx={ctx} onFit={setNarrow} />
+              <p className={cn("mt-2 text-caption1", warning ? "text-warn-11" : "text-fg-subtle")}>
+                {warning ?? `Fits on a ${NARROWEST}px phone with nothing cut.`}
+              </p>
+            </>
+          )}
 
           {/* Portalled to the body, NOT left inside the dialog.
               DragOverlay positions itself `fixed`, and the dialog is centred
@@ -779,12 +786,14 @@ export function BarConfigurator({
             <Button
               variant="transparent"
               size="small"
-              onClick={() => commit(DEFAULT_BAR_ORDER.map((id) => ({ key: nextKey.current(), id })))}
+              onClick={() =>
+                void commit(DEFAULT_BAR_ORDER.map((id) => ({ key: nextKey.current(), id })))
+              }
             >
               Use the default set
             </Button>
             {editing === "mobile" && !inheriting && (
-              <Button variant="transparent" size="small" onClick={followDesktop}>
+              <Button variant="transparent" size="small" onClick={() => void followDesktop()}>
                 Follow the desktop bar
               </Button>
             )}

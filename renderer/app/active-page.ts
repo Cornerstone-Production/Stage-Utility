@@ -50,6 +50,14 @@ export function consoleViewList(views: readonly View[] | undefined): View[] {
   return screensListViews(views ?? []).filter((v) => viewSurface(v) === "console");
 }
 
+/** Where a console View lives. ONE spelling of the path shape, because it was
+ *  written out four times — the page, the chrome lookup, the rail's selected
+ *  test and the shell's pre-hydrate guess — and a change to the route would have
+ *  had to find all of them. */
+export function consolePath(id: string): string {
+  return `/consoles/${id}`;
+}
+
 /**
  * One console View as a page.
  *
@@ -59,7 +67,7 @@ export function consoleViewList(views: readonly View[] | undefined): View[] {
  */
 export function consolePageFor(view: View): PageIdentity {
   return {
-    path: `/consoles/${view.id}`,
+    path: consolePath(view.id),
     label: view.name,
     // No subtitle. A console is full-bleed and wants every pixel of height it
     // can get; a line of boilerplate under its name buys nothing.
@@ -87,7 +95,7 @@ export function consoleHidesChrome(
   pathname: string,
   views: readonly View[] | undefined,
 ): boolean {
-  const view = consoleViewList(views).find((v) => pathname === `/consoles/${v.id}`);
+  const view = consoleViewList(views).find((v) => pathname === consolePath(v.id));
   return view?.hideChrome === true;
 }
 

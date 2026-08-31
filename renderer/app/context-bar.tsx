@@ -30,7 +30,15 @@ import { cn } from "../lib/cn";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import { BarConfigurator } from "./bar-configurator";
-import { BAR_SPACE, BAR_SPACER, barRowsFor, type BarItemId } from "./bar-items";
+import {
+  BAR_PROSE_ITEMS,
+  BAR_SPACE,
+  BAR_SPACER,
+  barRowsFor,
+  isProseItem,
+  type BarItemId,
+  type BarRowId,
+} from "./bar-items";
 import { useBarFit } from "./bar-fit";
 import { useIsMobile } from "../lib/use-media-query";
 import { recordIndicator, recorders, streamingStat, streamers } from "./recording-status";
@@ -204,6 +212,59 @@ export function BarSpaceEl({ className }: { className?: string }) {
 }
 
 /**
+ * The rows of a strip, rendered the way the bar renders them.
+ *
+ * ONE loop, used by the bar itself, by the configurator's off-screen probe, and
+ * by anything else that has to lay a strip out. Shared so a probe cannot lay out
+ * differently from the bar it speaks for: the fit floor is expressed as
+ * `.bar-item:has(> .bar-prose)`, so anything inserted between an item's box and
+ * its prose in one copy — even a `display: contents` span, which changes no
+ * layout — stops that item being allowed to shrink, and the two copies land on
+ * different rungs for the same arrangement. A first pass did exactly that, and
+ * the probe reported an arrangement 2px too long that in the real bar fits.
+ *
+ * `preview` is the only thing the copies ever legitimately differed on: items
+ * that are interactive in the bar render as plain readings in the configurator.
+ */
+export function BarStripRows({
+  rows,
+  ctx,
+  preview = false,
+}: {
+  rows: readonly BarRowId[];
+  ctx: BarItemContext;
+  preview?: boolean;
+}) {
+  const itemCtx = preview ? { ...ctx, preview: true } : ctx;
+  return (
+    <>
+      {rows.map((id, i) => {
+        if (id === BAR_SPACER) return <BarSpacerEl key={`${id}-${i}`} />;
+        if (id === BAR_SPACE) return <BarSpaceEl key={`${id}-${i}`} />;
+        const content = renderBarItem(id, itemCtx);
+        // An item that renders nothing is DROPPED, not wrapped in an empty span.
+        // The strip is a flex row with a column gap, and gap is charged between
+        // items whatever their width — so a zero-width span would leave a doubled
+        // gap exactly where the capsule used to be, which is the stray hole this
+        // whole change was meant to remove.
+        if (content === null) return null;
+        return (
+          // The name goes on the ITEM's own box, not on a wrapper inside it —
+          // see the floor rule above.
+          <span
+            key={id}
+            className={BAR_ITEM_CLASS}
+            data-prose={isProseItem(id) ? BAR_PROSE_ITEMS[id] : undefined}
+          >
+            {content}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+/**
  * `active` is PASSED IN, never resolved here.
  *
  * The shell resolves the active page once and hands the same answer to this
@@ -251,22 +312,7 @@ export function ContextBar({ active }: { active: ActivePage | null }) {
             sideways when the band went. It is also the only shrinkable element
             on the row, which is what makes it the first thing to give way. */}
         <PageTitle active={active} />
-        {rows.map((id, i) => {
-          if (id === BAR_SPACER) return <BarSpacerEl key={`${id}-${i}`} />;
-          if (id === BAR_SPACE) return <BarSpaceEl key={`${id}-${i}`} />;
-          const content = renderBarItem(id, ctx);
-          // An item that renders nothing is DROPPED, not wrapped in an empty
-          // span. The strip is a flex row with a column gap, and gap is charged
-          // between items whatever their width — so a zero-width span would
-          // leave a doubled gap exactly where the capsule used to be, which is
-          // the stray hole this whole change was meant to remove.
-          if (content === null) return null;
-          return (
-            <span key={id} className={BAR_ITEM_CLASS}>
-              {content}
-            </span>
-          );
-        })}
+        <BarStripRows rows={rows} ctx={ctx} />
         {/* LAST CHILD, so the controls sit at the right edge where the header
             put them. `visibleBarItems` guarantees the rows carry at least one
             flexible spacer, so there is always something between the operator's
@@ -533,6 +579,15 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
         <ScoreCapsule game={view.game} scored={scored} preview={ctx.preview} />
       );
     }
-
   }
+
+  // EVERY id has a case, and the compiler is what says so. Without this a new
+  // BarItemId with no case compiled, returned undefined, and BarStripRows'
+  // `content === null` did not drop it — leaving an empty .bar-item that still
+  // charges the strip a gap. That is the hole the service-type note above is
+  // about, and the no-reflow guard cannot catch it: assert.notEqual(x, null)
+  // passes on undefined. The same three lines HomeCard's switch already ends on.
+  const _never: never = id;
+  void _never;
+  return null;
 }

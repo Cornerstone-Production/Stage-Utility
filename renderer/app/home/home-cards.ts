@@ -8,7 +8,7 @@
 
 import type { HomeCardSize, HomeVisibility, LayoutObject, LayoutObjectConfig } from "@main/types/views";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
-import type { HomeMode } from "./home-mode";
+import type { HomeMode, HomeModeOrUnknown } from "./home-mode";
 
 /** Columns in the grid. Every size is a whole number of these. */
 export const COLUMNS = 3;
@@ -64,6 +64,25 @@ export function defaultSize(type: string): HomeCardSize {
 
 export function defaultWhen(type: string): HomeVisibility {
   return LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS]?.homeWhen ?? "always";
+}
+
+/**
+ * What Home draws when it is NOT being edited, or null for HOLD THE GRID.
+ *
+ * The null is load-bearing rather than a tidy default, and it is named here
+ * rather than buried in a third arm of a ternary on the call site. `pco:live`
+ * hydrates separately from the stage state the page's spinner waits on, so
+ * answering "idle" while the live channel has not spoken made the first paint of
+ * every visit draw the whole rest-of-the-week set mid-service and then take it
+ * away a frame later. There is nothing true to draw yet, so nothing is drawn;
+ * measured at 8-20ms, and bounded by the read's own timeout even if the server
+ * never answers.
+ */
+export function cardsForNow(
+  objects: readonly LayoutObject[],
+  mode: HomeModeOrUnknown,
+): LayoutObject[] | null {
+  return mode === "unknown" ? null : visibleCards(objects, mode);
 }
 
 /** The cards on the page right now, in order. */

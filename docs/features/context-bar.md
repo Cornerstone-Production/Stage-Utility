@@ -82,11 +82,19 @@ item, as a tile; below it is the bar itself, live, showing real readings.
 - A tile already in the bar is dimmed. **Space** and **Flexible space** never
   dim, because you can use as many of either as you like.
 - **Use the default set** puts the bar back to how it ships.
+- **A bar you empty stays empty.** Take every item off and the strip is
+  blank until you put something back; it does not refill itself with the
+  default set.
 
 **Desktop and Phone** at the top of the dialog choose which of the two bars you
 are arranging. The strip below shows the one you picked, at the width it will
-have, and the line under it says what will happen on a 320px phone — the
-narrowest screen the bar promises to fit.
+have.
+
+Under it, a line says what will happen on a 320px phone — the narrowest screen
+the bar promises to fit. It appears only for a set a phone actually shows: the
+Phone tab always, and the Desktop tab while the phone is still following the
+desktop bar. Once the phone has a set of its own, the desktop bar is never drawn
+below 640px and the line goes.
 
 Every change saves as you make it. There is nothing to apply.
 
