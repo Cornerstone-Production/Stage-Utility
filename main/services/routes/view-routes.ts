@@ -287,6 +287,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         && (body.slotsLayout === null || typeof body.slotsLayout === "object");
       const hasScriptViewLayout = "scriptViewLayoutId" in body
         && (body.scriptViewLayoutId === null || typeof body.scriptViewLayoutId === "string");
+      const hasHideChrome = typeof body.hideChrome === "boolean";
       // Both calendar lists move together — a picker change sends the pair, so a
       // request carrying one and not the other is a client that has lost half its
       // state, not a partial update to honour.
@@ -303,8 +304,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // as anything reading the code — or analysing it — can tell.
       const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
       const hasSurface = surface !== null;
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface && !calendarFilters) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.scriptViewLayoutId (string|null), or body.calendarSources + body.calendarTags (arrays) required");
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasScriptViewLayout && !hasSurface && !hasHideChrome && !calendarFilters) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.scriptViewLayoutId (string|null), body.hideChrome (boolean), or body.calendarSources + body.calendarTags (arrays) required");
         return;
       }
       let state = stageController.getState();
@@ -339,6 +340,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       }
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
       if (hasScriptViewLayout) state = await stageController.setViewScriptViewLayout(id, body.scriptViewLayoutId as string | null);
+      if (hasHideChrome) state = await stageController.setViewHideChrome(id, body.hideChrome as boolean);
       if (calendarFilters) {
         state = await stageController.setViewCalendarFilters(id, calendarFilters.sources, calendarFilters.tags);
         // Forced past the subscriber gate and NOT awaited. The operator who just

@@ -512,6 +512,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { scriptViewLayoutId: p.scriptViewLayoutId });
     }
 
+    case "views:setHideChrome": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { hideChrome: p.hideChrome });
+    }
+
     // Both lists, always together: the server refuses one without the other,
     // because a request carrying half of them is a client that has lost state
     // rather than a partial update.

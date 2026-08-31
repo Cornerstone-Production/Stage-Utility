@@ -19,13 +19,14 @@ import { PAGE_SCROLLER_ID, useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
 import { PageActionsProvider, PageActionsSlot } from "./page-actions";
 import { ContextBar } from "./context-bar";
-import { consolePages, resolvePage } from "./active-page";
+import { consoleHidesChrome, consolePages, resolvePage } from "./active-page";
 import { useStageState } from "../main/use-stage-state";
 import { useStageLiveWiring } from "./live-wiring";
 import { UpdateNotices } from "./update-notices";
 import { useStageStateQuery } from "./queries";
 import { useSidebarCollapsed } from "../lib/use-sidebar-collapsed";
 import { useSidebarWidth, RAIL_WIDTH } from "../lib/use-sidebar-width";
+import { cn } from "../lib/cn";
 
 export function Shell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -35,6 +36,29 @@ export function Shell() {
   const { state: liveState } = useStageState();
   const consoles = useMemo(() => consolePages(liveState?.views), [liveState?.views]);
   const active = useMemo(() => resolvePage(pathname, consoles), [pathname, consoles]);
+  // A console the operator has asked to run without the app's chrome. BOTH bands
+  // go — the phone's top bar (SplitView's, hidden through `chromeless`) and the
+  // context bar below — because 89px of an 844px phone is the number that makes
+  // this worth doing, and half of it is the merge the header study already
+  // rejected. On a desktop only the context bar exists to hide; the rail stays,
+  // and the rail is the way back.
+  //
+  // Read from the LIVE state, the same source the rail reads, so turning it on
+  // takes effect on the console you are standing at rather than on the next
+  // reload.
+  //
+  // UNKNOWN IS NOT "SHOW THE BARS". `liveState` is null from first paint until
+  // the hydrate lands — a real interval on a Pi — and answering `false` there
+  // drew both bands and then tore them off again on every cold load of a
+  // chrome-free console, re-laying-out the console under them. So on a console
+  // route the bands wait until the answer is actually known. Nothing is lost by
+  // waiting: ConsoleRoute itself renders null without `stageState`, so the
+  // content area is empty for exactly that window either way.
+  const views = liveState?.views;
+  const chromeless = useMemo(
+    () => (views ? consoleHidesChrome(pathname, views) : pathname.startsWith("/consoles/")),
+    [pathname, views],
+  );
   const { collapsed, toggle } = useSidebarCollapsed();
   const resetKey = useRouteResetKey();
   // Mounted HERE, not on a route: these subscriptions must outlive any single
@@ -71,6 +95,7 @@ export function Shell() {
         // accessibility tree rather than merely off the screen. That is the
         // arrangement the page header already had; the merge did not change it.
         mobileActions={<PageActionsSlot />}
+        chromeless={chromeless}
         sidebar={
           <Rail
             onToggleCollapsed={toggle}
@@ -81,7 +106,7 @@ export function Shell() {
         }
       >
         <div className="flex flex-col h-full min-w-0">
-          <ContextBar active={active} />
+          {!chromeless && <ContextBar active={active} />}
           {/* Page gutter, applied ONCE here rather than by each route. Routes were
                 padding themselves individually and the ones added recently did not,
                 so the editor and Screens sat flush against the right edge. */}
@@ -96,7 +121,15 @@ export function Shell() {
               header and gets no padding here, so nothing below 640px moves. */}
           <main
             data-scroll-restoration-id={PAGE_SCROLLER_ID}
-            className="flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3 sm:pt-4"
+            className={cn(
+              "flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3",
+              // `sm:pt-4` is the air between the band and the page. With no band
+              // there is nothing for it to separate, and it would hand 16px of
+              // the reclaimed height straight back as padding. The HORIZONTAL
+              // gutter stays: a console cancels it with its own negative margins,
+              // so dropping it here would push the console off the left edge.
+              !chromeless && "sm:pt-4",
+            )}
           >
             {/* Keyed so re-selecting the active rail item remounts the route,
                 returning it to its top view. */}

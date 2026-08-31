@@ -59,9 +59,9 @@ import {
   ScoreActivityHost,
   ScoreCapsule,
   capsuleView,
-  prefersReducedMotion,
   scoredSide,
 } from "./score-activity";
+import { prefersReducedMotion } from "../lib/use-slide-on-move";
 
 /** Everything an item needs to render. Gathered by `useBarContext`. */
 export interface BarItemContext {

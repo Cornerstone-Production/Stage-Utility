@@ -1,3 +1,5 @@
+import { prefersReducedMotion } from "./use-slide-on-move";
+
 // Wrap a state update in the View Transitions API for a gentle crossfade between
 // settings sections / kiosk views. Progressive enhancement: a no-op (runs the
 // update immediately) when the browser lacks startViewTransition or the user
@@ -6,8 +8,7 @@
 // transition.
 export function withViewTransition(update: () => void): void {
   const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  if (reduced || typeof doc.startViewTransition !== "function") {
+  if (prefersReducedMotion() || typeof doc.startViewTransition !== "function") {
     update();
     return;
   }
