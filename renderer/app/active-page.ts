@@ -1,6 +1,7 @@
 // The one answer to "what page is this".
 //
-// Three copies of that question lived in the shell. PageHeader matched
+// Three copies of that question lived in the shell. The desktop page header —
+// since folded into the context bar — matched
 // `d.path === pathname` EXACTLY, Shell matched by longest prefix, and the rail
 // matched by longest prefix over a different candidate list. All three read the
 // static route table only, so a route built from the operator's own data matched
@@ -12,7 +13,8 @@
 // it is a real distinction, not the accident it looked like:
 //
 //   prefix  "which section am I in"  — rail highlight, mobile top bar
-//   exact   "does the shell own this page's heading" — desktop PageHeader
+//   exact   "does the shell own this page's heading" — the name the desktop
+//           context bar draws, see page-title.tsx
 //
 // A child route renders its own heading (the layout editor puts the view's name
 // in an editable field, a ScriptView plan draws ScriptViewHeader), so the shell

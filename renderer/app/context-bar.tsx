@@ -14,6 +14,13 @@
 //
 // WHICH items appear, in what order, and where the left/right split falls are
 // all the operator's, and all live in bar-items.ts. This file renders them.
+//
+// ON A DESKTOP THIS STRIP IS ALSO THE PAGE HEADER. The name of the page sits at
+// its head and the route's own controls at its tail, so a desktop page carries
+// one band of chrome instead of two. Neither is a bar item and neither is
+// configurable — see page-title.tsx for why that distinction is what keeps the
+// ladder's promises intact. Below 640px both are hidden and the phone's own top
+// bar carries them, exactly as it always has.
 
 import { useEffect, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -32,6 +39,8 @@ import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { useResiState, useYouTubeState } from "../main/use-stream-state";
 import { DisconnectedPopover } from "./disconnected-popover";
+import { PageActionsEnd, PageTitle } from "./page-title";
+import type { ActivePage } from "./active-page";
 import { clockParts } from "../lib/clock-format";
 import {
   CalendarIcon,
@@ -194,7 +203,15 @@ export function BarSpaceEl({ className }: { className?: string }) {
   return <span aria-hidden="true" className={cn("block", BAR_SPACE_CLASS, className)} />;
 }
 
-export function ContextBar() {
+/**
+ * `active` is PASSED IN, never resolved here.
+ *
+ * The shell resolves the active page once and hands the same answer to this
+ * strip and to the mobile top bar. Two resolutions is precisely how the header
+ * and the bar came to disagree about what page you were on — see active-page.ts
+ * — and merging them into one row is no reason to make a third.
+ */
+export function ContextBar({ active }: { active: ActivePage | null }) {
   const ctx = useBarContext();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [configuring, setConfiguring] = useState(false);
@@ -229,6 +246,11 @@ export function ContextBar() {
   return (
     <>
       <header ref={stripRef} className={cn("shrink-0", BAR_STRIP_CLASS)} onContextMenu={openMenu}>
+        {/* FIRST CHILD, so the name sits where the header's h1 sat — the strip's
+            20px inset is the same one the header used, so nothing moved
+            sideways when the band went. It is also the only shrinkable element
+            on the row, which is what makes it the first thing to give way. */}
+        <PageTitle active={active} />
         {rows.map((id, i) => {
           if (id === BAR_SPACER) return <BarSpacerEl key={`${id}-${i}`} />;
           if (id === BAR_SPACE) return <BarSpaceEl key={`${id}-${i}`} />;
@@ -245,6 +267,11 @@ export function ContextBar() {
             </span>
           );
         })}
+        {/* LAST CHILD, so the controls sit at the right edge where the header
+            put them. `visibleBarItems` guarantees the rows carry at least one
+            flexible spacer, so there is always something between the operator's
+            last reading and these. */}
+        <PageActionsEnd active={active} />
       </header>
 
       {/* The panel belongs to the ITEM: a bar without the capsule has no panel to

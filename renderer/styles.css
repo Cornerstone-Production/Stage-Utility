@@ -627,6 +627,34 @@ body {
   display: none;
 }
 
+/* The page's name, at the head of the strip on a desktop. NOT an item: it is the
+   shell's own chrome, which is what lets it shorten without breaking "never drop
+   an item the operator chose". See page-title.tsx.
+
+   IT IS THE ONLY SHRINKABLE THING ON THE ROW above the floor — every `.bar-item`
+   is `shrink-0`, and prose items opt into shrinking at `data-fit="3"` and only
+   there. So flexbox takes this name's width first, before the fitter is ever
+   asked for a rung, and the ladder starts walking only once the name has reached
+   the floor it is given inline. That is "the title is the first thing to
+   shorten" expressed as geometry rather than as a fifth rung: no renumbering of
+   `data-fit`, and no rung whose meaning depends on which page you are on.
+
+   `min-width` is set INLINE, per name — `max-content` for a name at or under the
+   floor so it cannot shrink at all, `14ch` for one longer. It is not declared
+   here because it is not one value.
+
+   The extra 4px past the strip's 12px column gap is the whole separation between
+   the shell's name and the operator's first reading. It is deliberately small:
+   the size and weight step from 13px muted to 15px semibold is what tells them
+   apart, and a rule or a wider gap would spend width at exactly the sizes where
+   the row is short of it. */
+.bar-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-inline-end: 4px;
+}
+
 /* Level 1 — qualifiers. Context the operator already has: the clock's seconds,
    the capsule's inning, the pre-service label beside a countdown that is plainly
    a countdown. Never an item's ONLY reading — the service-type name was taken

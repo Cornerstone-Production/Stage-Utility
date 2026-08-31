@@ -5,6 +5,12 @@ one is running, and whether anything needs attention. It is the same on every
 page, so `/patch` and `/history` know a service is live without carrying their
 own copy of the state.
 
+On a desktop it also carries the **page's name** at its left and the page's own
+controls at its right, so a page has one band of chrome above it rather than two.
+See [Every page says its name](operator-app.md#every-page-says-its-name). Neither
+is an item and neither can be configured — the readings below are what you
+arrange.
+
 **Right-click the bar and choose "Configure bar"**, or use **Settings → Advanced
 → Context bar**. Both open the same thing. There are two arrangements, both
 shared by everybody: the one above a desktop page, and the one a phone shows.
@@ -97,7 +103,7 @@ it shows what the phone is already showing. The first change you make there is
 what splits the two apart; **Follow the desktop bar** puts them back together.
 
 "A phone" means **narrower than 640px**, the same width at which the sidebar
-becomes a drawer and the page header goes. It is one number for the whole app,
+becomes a drawer and the page's name moves from this strip to the top bar. It is one number for the whole app,
 not a second one the bar invented.
 
 Curating a phone's set is how you keep a reading whole rather than cut. The
@@ -113,6 +119,7 @@ in a fixed order, and the order is the design:
 
 | | What goes |
 |---|---|
+| *(before any of these)* | On a desktop, the **page's name** gives up width first — down to about 14 characters and no further. Every built-in page name is shorter than that and so is never shortened at all; only a console you have given a long name ever ends in an ellipsis here. |
 | **Full** | Nothing. Everything at its full length. |
 | **Qualifiers** | The clock's seconds. The score capsule's inning or period. The label beside a pre-service countdown. |
 | **Compact** | Every idle word becomes that item's own mark — `No item`, `Off air`, `Standby`, `All connected`. The word `LIVE` goes; its dot does not. Gaps and edge padding tighten. The score capsule tightens. |
@@ -129,7 +136,9 @@ Four things it may never do:
 - **Never drop an item.** Every reading on the strip is one somebody put there on
   purpose — and shortening an item to nothing is dropping it, so no step takes an
   item's only reading. (Live scores is still the one item that draws nothing when
-  no followed game is on — see above.)
+  no followed game is on — see above.) The page's name is the shell's rather than
+  one you placed, which is why it is the one thing on the row allowed to give way,
+  and why it has a floor of its own so it can never be shortened to nothing.
 - **Never wrap and never scroll.**
 
 Every word taken is clipped out of the layout rather than deleted, so a screen
@@ -162,6 +171,28 @@ once.
 One row, no scrolling and no wrapping in all 40 of those, and every reading whole
 in 36 of them. Only the narrowest phone made shortens anything, and only when the
 strip is carrying five readings or more.
+
+### Measured, with the page's name on the row
+
+The same plan and service type, in both themes, with the sidebar at its default
+224px. Three arrangements: two readings, the set an unconfigured bar shows, and
+every item at once. Three page names: the shortest built-in one, the longest
+built-in one, and a console named past the floor.
+
+| Window | strip | Two readings | Unconfigured | Everything |
+|---|---|---|---|---|
+| 1024px | 800 | Full | Full | `Home` Qualifiers · `Integrations` Compact · long console name Compact |
+| 1280px | 1056 | Full | Full | Full |
+| 1440px | 1216 | Full | Full | Full |
+| 1920px | 1696 | Full | Full | Full |
+
+`scrollWidth` equalled `clientWidth` in every one of those, nothing was ever cut
+short, and the page's name kept every character in all of them — including the
+22-character console name, which has room to spare well below the floor it would
+give way to. Light and dark measured identically, to the pixel.
+
+Only a 1024px window carrying every item at once ever gives anything up, and what
+it gives up is words the ladder was built to give up.
 
 ## 12-hour or 24-hour
 

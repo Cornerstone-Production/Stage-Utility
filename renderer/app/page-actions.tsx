@@ -1,17 +1,17 @@
-// A slot on the page header for the active route's own controls.
+// A slot in the shell's chrome for the active route's own controls.
 //
-// The header is rendered once by the Shell, above the outlet, so a route cannot
+// That chrome is rendered once by the Shell, above the outlet, so a route cannot
 // put anything in it. Home worked around that with a second row of its own below
 // the header — a title row, then a nearly empty row holding one link, then the
 // widgets. Two rows of chrome before any content, on the page whose whole job is
 // to show as much at a glance as it can.
 //
-// So the header takes actions from whichever route supplies them:
+// So the shell takes actions from whichever route supplies them:
 //
 //   usePageActions(<Button … />, [dep]);
 //
-// Rendered right-aligned on the title row. A route that supplies nothing gets
-// the header it always had.
+// Rendered at the right of the context bar on a desktop and of the top bar on a
+// phone. A route that supplies nothing gets the chrome it always had.
 
 import {
   createContext,
@@ -52,7 +52,7 @@ export function PageActionsSlot() {
 }
 
 /**
- * Put controls in the page header for as long as this component is mounted.
+ * Put controls in the shell's chrome for as long as this component is mounted.
  *
  * CLEARS ON UNMOUNT, which is the whole reason this is an effect rather than a
  * render-time registration: navigating away from Home must take Home's buttons
