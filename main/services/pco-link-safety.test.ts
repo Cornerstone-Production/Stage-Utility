@@ -19,6 +19,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { consoleCalls, describeOffender, logOffenders } from "./console-scan.js";
 import { sameOrigin, pcoUrlFrom, nextOffset, pcoService, withOffset, pinnedToPco } from "./pco-service.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -178,160 +179,42 @@ function linesOf(file: string): string[] {
   return fs.readFileSync(path.join(HERE, file), "utf8").split("\n");
 }
 
-/**
- * One console call as SOURCE TEXT, however many lines it spans.
- *
- * This scan used to look at single lines, which meant a call written as
- *
- *   console.warn(
- *     `[pco] ... ${value} ...`,
- *   );
- *
- * was invisible to it: the line matching `console.warn(` holds no interpolation,
- * and the line holding the interpolation does not match. Both PCO clients
- * contain exactly such a call, so the rule had a shape it structurally could not
- * see -- found by breaking one on purpose and watching the guard stay green,
- * which is the only way any of these have ever been found here.
- *
- * The block runs to the first line containing `);`, capped. Over-inclusion is
- * deliberate: sweeping in an extra line can only ever ADD an interpolation to
- * check, so the error direction is a false FAILURE, which someone reads. Ending
- * the block early would drop one, which nobody does.
- */
-function consoleCalls(lines: string[]): { line: number; text: string }[] {
-  const calls: { line: number; text: string }[] = [];
-  lines.forEach((line, i) => {
-    if (isComment(line)) return;
-    if (!/console\.(log|warn|error)\s*\(/.test(line)) return;
-    const block: string[] = [];
-    for (let j = i; j < lines.length && j < i + 10; j++) {
-      block.push(lines[j]);
-      if (lines[j].includes(");")) break;
-    }
-    calls.push({ line: i + 1, text: block.join("\n") });
-  });
-  return calls;
-}
-
-/**
- * The TOP-LEVEL arguments of one captured console call, as source text.
- *
- * Split on commas that are actually separators: not the ones inside a nested
- * call, an array, an object, a quoted string or a template's `${…}`. A splitter
- * that cut on every comma would read `scrub(a, b)` as two arguments and excuse
- * the second one for not starting with `scrub(`.
- *
- * Deliberately a scanner rather than a parser. It is small enough to read, and
- * the test below feeds it the three shapes it has to get right.
- */
-function consoleArguments(callText: string): string[] {
-  // The console call's OWN paren, not the first one on the line: these are
-  // routinely written `if (DEBUG_PCO) console.log(...)`, and starting at the
-  // `if (` would report the guard as an argument.
-  const head = /console\.(?:log|warn|error)\s*\(/.exec(callText);
-  if (!head) return [];
-  const open = head.index + head[0].length - 1;
-  const args: string[] = [];
-  let current = "";
-  let depth = 0;
-  // The quote character we are inside, or "" when we are not.
-  let quote = "";
-  for (let i = open + 1; i < callText.length; i++) {
-    const c = callText[i];
-    // Inside a literal, EVERYTHING runs to the closing quote — a comma in there
-    // is never a separator, in a template's `${…}` or anywhere else.
-    if (quote) {
-      current += c;
-      if (c === "\\") current += callText[++i] ?? "";
-      else if (c === quote) quote = "";
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      quote = c;
-      current += c;
-      continue;
-    }
-    if (c === "(" || c === "[" || c === "{") depth++;
-    else if (c === ")" || c === "]" || c === "}") {
-      if (c === ")" && depth === 0) break; // the call's own closing paren
-      depth--;
-    } else if (c === "," && depth === 0) {
-      args.push(current);
-      current = "";
-      continue;
-    }
-    current += c;
-  }
-  if (current.trim() !== "") args.push(current);
-  return args.map((a) => a.trim());
-}
-
 describe("scrub coverage in every PCO client", () => {
+  // The scan is console-scan.ts, shared with log-injection.test.ts. This file
+  // and that one held two copies of it, and the copies drifted: block capture
+  // and the argument rule were added here and never carried across, so the scan
+  // over stage-controller.ts reported zero offenders in a file with 22. Its own
+  // shapes — a wrapped call, a nested template, a concatenation — are asserted
+  // in console-scan.test.ts.
+  //
+  // Two holes this file had of its own, both closed by moving to the shared
+  // scan: it matched only log/warn/error, though log-buffer.ts captures
+  // console.info too; and its argument rule was `/^[`'"]/`, which asks only how
+  // an argument STARTS, so `console.error("[pco] failed: " + err)` passed it.
   for (const file of PCO_CLIENTS) {
-    it(`${file}: every console call interpolates only scrubbed values`, () => {
-      // Matched on the interpolation, not on the word "scrub": a comment saying
-      // the right thing cannot satisfy this. An EXACT check over every log site,
-      // so a newly-added unscrubbed one fails rather than riding along under a
-      // floor.
-      const offenders: string[] = [];
-      for (const call of consoleCalls(linesOf(file))) {
-        // Every `${...}` in the call must have scrub( inside it.
-        for (const m of call.text.matchAll(/\$\{([^}]*)\}/g)) {
-          if (!m[1].includes("scrub(")) offenders.push(`${call.line}: ${m[0]}`);
-        }
-      }
-      assert.deepEqual(offenders, [], `${file}: these log sites interpolate unscrubbed values`);
-    });
-
-    it(`${file}: every console ARGUMENT is a literal or scrubbed`, () => {
-      // The interpolation scan above only ever looked inside `${...}`, so
-      //
-      //   console.error("[pco] failed:", err)
-      //
-      // passed it without being examined at all — the value never touches a
-      // template, and a newline in it forges a line on the LAN-visible /log page
-      // exactly the same way. Latent rather than live when found; widened here
-      // so it stays that way.
-      //
-      // The rule: each top-level argument is either a string/template literal
-      // (whose interpolations the scan above has already checked) or a scrub()
-      // call. Nothing else reaches console.
-      const offenders: string[] = [];
-      for (const call of consoleCalls(linesOf(file))) {
-        for (const argument of consoleArguments(call.text)) {
-          const a = argument.trim();
-          if (a === "") continue;
-          if (/^[`'"]/.test(a) || a.startsWith("scrub(")) continue;
-          offenders.push(`${call.line}: ${a}`);
-        }
-      }
-      assert.deepEqual(offenders, [], `${file}: these log arguments reach /log unscrubbed`);
+    it(`${file}: every value reaching a log line is scrubbed`, () => {
+      // Matched on the interpolation and the argument, not on the word "scrub":
+      // a comment saying the right thing cannot satisfy this. An EXACT check
+      // over every log site, so a newly-added unscrubbed one fails rather than
+      // riding along under a floor.
+      const offenders = logOffenders(fs.readFileSync(path.join(HERE, file), "utf8")).map((o) =>
+        describeOffender(file, o),
+      );
+      assert.deepEqual(offenders, [], `${file}: these log sites reach /log unscrubbed`);
     });
   }
 
   it("and the scan can actually SEE a call that spans several lines", () => {
-    // The guard on the guard. Both clients contain a multi-line console.warn; a
-    // line-based scan reports zero interpolations for it and passes on anything.
-    const seen = PCO_CLIENTS.map((f) => consoleCalls(linesOf(f)))
+    // The guard on the guard, kept against the real files rather than a fixture:
+    // both clients contain a multi-line console.warn, and a line-based scan
+    // reports zero interpolations for it and then passes on anything.
+    const seen = PCO_CLIENTS.map((f) => consoleCalls(fs.readFileSync(path.join(HERE, f), "utf8")))
       .flat()
       .filter((c) => c.text.includes("\n"));
     assert.ok(seen.length >= 2, `found ${seen.length} multi-line console calls; expected at least 2`);
     for (const c of seen) {
       assert.match(c.text, /\$\{/, `a multi-line call was captured without its body: ${c.text}`);
     }
-  });
-
-  it("and the argument split survives commas that are not separators", () => {
-    // The guard on that guard. A splitter that cut on every comma would read
-    // `scrub(a, b)` as two arguments and `${x ? "a," : "b"}` as three, and would
-    // then flag or excuse the wrong halves.
-    assert.deepEqual(consoleArguments('console.warn("a, b", scrub(c, 2), `${d}, e`)'), [
-      '"a, b"',
-      "scrub(c, 2)",
-      "`${d}, e`",
-    ]);
-    // And it catches the shape this rule exists for.
-    assert.deepEqual(consoleArguments('console.error("[pco] failed:", err)'), ['"[pco] failed:"', "err"]);
   });
 });
 

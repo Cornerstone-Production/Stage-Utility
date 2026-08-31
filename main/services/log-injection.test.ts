@@ -12,6 +12,24 @@
 // time zone comes off an HTTP body. The repeated-pattern drift CLAUDE.md calls
 // this repo's most expensive recurring mistake.
 //
+// WHAT THIS FILE USED TO MISS, because the same drift happened to the guard:
+//
+//   - it read one LINE at a time, so a call wrapped as `console.log(` on one
+//     line and the `${…}` on the next matched neither test. Run over
+//     stage-controller.ts it reported 0 offenders against 22 real ones,
+//     including the plan title on the auto-select line.
+//   - integration-manager.ts, which folds a config object straight off an HTTP
+//     body and warns with the rejected KEY, was not in the list at all.
+//   - the list was held to `length > 8` while holding 24, so fifteen could
+//     vanish in silence — the floor-with-slack CLAUDE.md names.
+//   - `console.info` was absent, though log-buffer.ts captures it.
+//   - only interpolations were checked, so moving the value into an ARGUMENT
+//     stepped around the rule. routes/context.ts carried a comment saying
+//     exactly that.
+//
+// The scan itself now lives in console-scan.ts, shared with
+// pco-link-safety.test.ts, because these two had already drifted apart once.
+//
 // SCOPE, stated so the gap is deliberate rather than forgotten: this covers the
 // files that see HTTP REQUEST data. The wireless drivers log device replies from
 // the LAN — around 200 more interpolations — which is a different threat model
@@ -23,12 +41,49 @@ import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 
-import { scrub } from "./scrub.js";
+import { describeOffender, logOffenders } from "./console-scan.js";
+import { scrub, scrubError } from "./scrub.js";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-/** The files an HTTP request's own data can reach. */
+/**
+ * The files an HTTP request's own data can reach, by basename.
+ *
+ * Written out rather than counted, because a count says only how many there are
+ * and this list's failure mode is one going missing. A new request-facing file
+ * fails here until somebody adds it, which is the moment to ask whether its log
+ * lines are scrubbed.
+ */
+const REQUEST_FACING = [
+  "archive-routes.ts",
+  "automation-engine.ts",
+  "automation-routes.ts",
+  "branding-routes.ts",
+  "calendar-routes.ts",
+  "context.ts",
+  "display-settings-routes.ts",
+  "history-routes.ts",
+  "integration-manager.ts",
+  "integration-routes.ts",
+  "kiosk-device-routes.ts",
+  "log-paths.ts",
+  "log-routes.ts",
+  "operator-paths.ts",
+  "pco-service.ts",
+  "preset-routes.ts",
+  "proxy-routes.ts",
+  "rosstalk-routes.ts",
+  "route-harness.ts",
+  "scriptview-routes.ts",
+  "stage-controller.ts",
+  "state-routes.ts",
+  "status-routes.ts",
+  "system-routes.ts",
+  "view-routes.ts",
+];
+
+/** The files an HTTP request's own data can reach, as paths. */
 function requestFacingFiles(): string[] {
   const routes = path.join(HERE, "routes");
   const inRoutes = readdirSync(routes)
@@ -42,44 +97,34 @@ function requestFacingFiles(): string[] {
     // sense this scan means. It logged nothing at all until a failed rule started
     // being surfaced on /log, which is when it acquired the exposure.
     path.join(HERE, "automation-engine.ts"),
+    // POST /api/integrations/:id/config checks only that `config` is an object,
+    // then foldConfigEntries warns with the rejected KEY. That key is an
+    // attacker's string, verbatim, and this file was missing from the list.
+    path.join(HERE, "integration-manager.ts"),
     ...inRoutes,
   ];
-}
-
-/** `${…}` inside a console call, without scrub() around it. */
-function unscrubbed(file: string): string[] {
-  const out: string[] = [];
-  readFileSync(file, "utf8")
-    .split("\n")
-    .forEach((line, i) => {
-      if (!/console\.(log|warn|error|debug)\(/.test(line)) return;
-      for (const m of line.matchAll(/\$\{([^}]*)\}/g)) {
-        if (!m[1].includes("scrub(")) out.push(`${path.basename(file)}:${i + 1}  ${line.trim().slice(0, 90)}`);
-      }
-    });
-  return out;
 }
 
 describe("log injection at the request boundary", () => {
   const files = requestFacingFiles();
 
-  it("the scan reads a real set of files", () => {
-    // Guards the walk. An empty list would make every assertion below vacuous —
-    // how a route-coverage scan in this repo once went green while missing the
-    // route it was written for.
-    assert.ok(files.length > 8, `only found ${files.length} request-facing files`);
-    assert.ok(
-      files.some((f) => f.endsWith("stage-controller.ts")),
-      "stage-controller.ts is the file this test was written for and it is not in the list",
-    );
-    assert.ok(
-      files.some((f) => f.endsWith("automation-engine.ts")),
-      "automation-engine.ts logs operator-authored rule names to /log and must be scanned",
+  it("the scan reads exactly the set of files it is meant to", () => {
+    // Guards the walk. An empty or shrunken list would make the assertion below
+    // vacuous — how a route-coverage scan in this repo once went green while
+    // missing the route it was written for. EXACT, not a floor: this list was
+    // held to `> 8` while holding 24.
+    assert.deepEqual(
+      files.map((f) => path.basename(f)).sort(),
+      [...REQUEST_FACING].sort(),
+      "the request-facing set has changed; add the new file to REQUEST_FACING deliberately, " +
+        "having first checked that its log lines are scrubbed",
     );
   });
 
-  it("every interpolation in every one of them is scrubbed", () => {
-    const offenders = files.flatMap(unscrubbed);
+  it("every value reaching a log line in every one of them is scrubbed", () => {
+    const offenders = files.flatMap((f) =>
+      logOffenders(readFileSync(f, "utf8")).map((o) => describeOffender(path.basename(f), o)),
+    );
     assert.deepEqual(
       offenders,
       [],
@@ -94,5 +139,17 @@ describe("log injection at the request boundary", () => {
     const safe = scrub(forged);
     assert.doesNotMatch(safe, /\n/, "a newline survived scrub");
     assert.match(safe, /\\n/, "the newline should be escaped and visible, not silently dropped");
+  });
+
+  it("scrubError keeps the stack and still neutralises the line", () => {
+    // The reason the argument rule could be applied to `console.error("…:", err)`
+    // without losing what an operator reads at 9am on a Sunday: log-buffer
+    // renders a raw Error as `err.stack`, every line of it its own record, and
+    // scrub() alone would answer that by throwing the stack away.
+    const err = new Error("upstream said\n[stage-controller] plan switched to 12345");
+    const safe = scrubError(err);
+    assert.doesNotMatch(safe, /\n/, "a newline survived scrubError");
+    assert.match(safe, /upstream said/, "the message should still be readable");
+    assert.ok(safe.includes("log-injection.test.ts"), `the stack did not survive: ${safe}`);
   });
 });
