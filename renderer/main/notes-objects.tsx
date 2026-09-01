@@ -14,6 +14,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { toast } from "../components/ui";
+import { usePlanChecklist } from "./use-plan-checklist";
 
 interface NotesContent {
   text?: string;
@@ -111,6 +112,55 @@ export function NotesObject({
   );
 }
 
+/** One row as the checklist draws it, whichever source it came from. */
+export interface ChecklistRow {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
+/**
+ * Which list the object shows.
+ *
+ * The plan's notes, unless this object has items of its own — a path nothing in
+ * the app can create, kept because the store is config-classified and this app
+ * does not delete an operator's data to tidy something up.
+ *
+ * Pulled out of the component so the CHOICE can be tested without a DOM. The
+ * component was shipped once with no source at all and rendered "No items yet"
+ * for its whole life; that is a decision, and a decision is worth a test.
+ */
+export function checklistRows(
+  own: readonly ChecklistRow[],
+  planRows: readonly { key: string; text: string; done: boolean }[],
+): { rows: ChecklistRow[]; fromPlan: boolean } {
+  // Returns WHICH LIST as well as the rows, because the caller needs the same
+  // answer to route a tick and was re-deriving it: `own.length === 0`, computed
+  // a second time two lines below. One of them changing without the other means
+  // the rows come from the plan while the tick writes to the object's own store,
+  // which is a checkbox that moves and then moves back — and this function was
+  // extracted precisely so the choice could be tested in one place.
+  if (own.length > 0) return { rows: [...own], fromPlan: false };
+  return { rows: planRows.map((r) => ({ id: r.key, text: r.text, done: r.done })), fromPlan: true };
+}
+
+/**
+ * A checklist on a custom layout.
+ *
+ * Its rows come from the PLAN's notes in Planning Center — the same source, and
+ * the same hook, as the readiness card on Home. Ticking here shows there and the
+ * other way round, because there is one list and one store behind both.
+ *
+ * Before this, the object had no source at all: it rendered `content.items` and
+ * NOTHING in the app ever created one, so it read "No items yet" forever. The
+ * only write was the toggle below. Rather than build a second place to author a
+ * checklist, it now draws the one an operator already keeps in PCO.
+ *
+ * An object that somehow HAS its own items still renders them. That path is
+ * unreachable through the UI, but the store is config-classified and this app
+ * does not delete an operator's data to tidy something up — if bytes exist, they
+ * are shown.
+ */
 export function ChecklistObject({
   objectId,
   config,
@@ -125,19 +175,39 @@ export function ChecklistObject({
   ts: CSSProperties;
 }) {
   const [content, save] = useSavedContent(objectId, all);
-  const items = content.items ?? [];
+  const own = content.items ?? [];
+  const plan = usePlanChecklist();
+
+  const { rows, fromPlan } = checklistRows(own, plan.rows);
 
   function toggle(id: string) {
-    save({ ...content, items: items.map((i) => (i.id === id ? { ...i, done: !i.done } : i)) });
+    if (fromPlan) { void plan.toggle(id, !rows.find((r) => r.id === id)?.done); return; }
+    save({ ...content, items: own.map((i) => (i.id === id ? { ...i, done: !i.done } : i)) });
   }
 
   return (
     <div style={{ ...ts, width: "100%", height: "100%", overflow: "auto" }}>
       {config.title && <div style={{ fontWeight: 600, marginBottom: "0.35em" }}>{config.title}</div>}
-      {items.length === 0 && (
-        <div style={{ opacity: 0.5 }}>{editable ? "No items yet" : "Empty"}</div>
+      {rows.length === 0 && (
+        <div style={{ opacity: 0.5 }}>
+          {/* Says which thing is missing. "Empty" for a wall display, because a
+              passer-by cannot act on it and a settings instruction on a screen
+              in the auditorium is noise.
+
+              A FAILED READ outranks both, and only because the hook now says so:
+              it used to answer a failure with an empty DTO, so the operator was
+              sent to a Plan setting that was already correct while Planning
+              Center being unreachable went unmentioned anywhere. */}
+          {plan.error
+            ? editable
+              ? `Could not read the plan's notes: ${plan.error}`
+              : "Plan notes unavailable"
+            : editable
+              ? "No plan notes chosen — Settings, Plan"
+              : "Empty"}
+        </div>
       )}
-      {items.map((i) => (
+      {rows.map((i) => (
         <label
           key={i.id}
           style={{

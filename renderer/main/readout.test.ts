@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { VALUE_SCALE, valueSizeFor, CONTENT_SCALE, PAD_SCALE, fitComposition } from "./readout-size.js";
+// The LEADINGS and the gap, imported rather than restated. Every "used" sum
+// below is the composition's own arithmetic run a second time, and with 1.05,
+// 1.1, 1.2 and 0.03 typed out it was a second COPY of it: raise VALUE_LEADING
+// and the real `used` grows while the test's stays put, which is a fit check
+// that stops checking the fit. (:32-35 would have gone red first, so this was
+// one line from being updated in isolation.)
+import {
+  CAPTION_LEADING,
+  CONTENT_SCALE,
+  GAP_SCALE,
+  PAD_SCALE,
+  SUB_LEADING,
+  VALUE_FLOOR_SCALE,
+  VALUE_LEADING,
+  VALUE_SCALE,
+  fitComposition,
+  valueSizeFor,
+} from "./readout-size.js";
 
 // The composition is caption / value / sub, sized from the widget's own height.
 // These are the proportions the comparison page was approved at, plus the one
@@ -30,7 +47,7 @@ describe("the three-line composition", () => {
     // it — a hard-coded budget would cap the value however high the constant went.
     assert.ok(CONTENT_SCALE > VALUE_SCALE, "the budget does not contain the value");
     assert.ok(
-      Math.abs(CONTENT_SCALE - (VALUE_SCALE * 1.05 + 0.105 * 1.1 + 0.115 * 1.2 + 0.06)) < 1e-9,
+      Math.abs(CONTENT_SCALE - (VALUE_SCALE * VALUE_LEADING + 0.105 * CAPTION_LEADING + 0.115 * SUB_LEADING + 2 * GAP_SCALE)) < 1e-9,
       "the budget is no longer derived from VALUE_SCALE",
     );
   });
@@ -64,9 +81,9 @@ describe("the line counts that actually occur", () => {
     // is a clipped number.
     for (const [cap, sub] of [[0, 0], [CAPTION, 0], [0, SUB], [CAPTION, SUB]]) {
       const used =
-        valueSizeFor(BOX, cap, sub) * 1.05 +
-        (cap > 0 ? cap * 1.1 + BOX * 0.03 : 0) +
-        (sub > 0 ? sub * 1.2 + BOX * 0.03 : 0);
+        valueSizeFor(BOX, cap, sub) * VALUE_LEADING +
+        (cap > 0 ? cap * CAPTION_LEADING + BOX * GAP_SCALE : 0) +
+        (sub > 0 ? sub * SUB_LEADING + BOX * GAP_SCALE : 0);
       assert.ok(used <= BOX * CONTENT_SCALE + 0.01, `caption=${cap} sub=${sub} used ${used}px`);
     }
   });
@@ -94,7 +111,7 @@ describe("the composition fits the box it paints", () => {
     const box = 54;
     const cap = Math.max(9, box * 0.105);
     const sub = 0;
-    const used = valueSizeFor(box, cap, sub) * 1.05 + cap * 1.1 + box * 0.03 + 2 * box * PAD_SCALE;
+    const used = valueSizeFor(box, cap, sub) * VALUE_LEADING + cap * CAPTION_LEADING + box * GAP_SCALE + 2 * box * PAD_SCALE;
     assert.ok(used <= box + 0.01, `a ${box}px widget renders ${used.toFixed(1)}px of content`);
   });
 });
@@ -107,7 +124,7 @@ describe("small boxes", () => {
     const tiny = 30;
     const px = valueSizeFor(tiny, 9, 10);
     assert.ok(px > 0, "the value collapsed to nothing");
-    assert.ok(px >= (tiny * 0.18) / 1.05 - 0.01, `value floor not applied: ${px}px`);
+    assert.ok(px >= (tiny * VALUE_FLOOR_SCALE) / VALUE_LEADING - 0.01, `value floor not applied: ${px}px`);
   });
 });
 
@@ -127,11 +144,11 @@ describe("a widget that has been made small", () => {
     for (let box = 6; box <= 400; box += 2) {
       for (const { caption, sub } of LINES) {
         const { captionPx, valuePx, subPx } = fitComposition(box, caption, sub);
-        const gap = box * 0.03;
+        const gap = box * GAP_SCALE;
         const used =
-          valuePx * 1.05 +
-          (captionPx > 0 ? captionPx * 1.1 + gap : 0) +
-          (subPx > 0 ? subPx * 1.2 + gap : 0);
+          valuePx * VALUE_LEADING +
+          (captionPx > 0 ? captionPx * CAPTION_LEADING + gap : 0) +
+          (subPx > 0 ? subPx * SUB_LEADING + gap : 0);
         const avail = box - 2 * box * PAD_SCALE;
         assert.ok(
           used <= avail + 0.01,
@@ -202,10 +219,116 @@ describe("a uniform grid of tiles", () => {
       for (const [caption, sub] of [[true, true], [true, false], [false, false]] as const) {
         const { captionPx, valuePx, subPx } = fitComposition(box, caption, sub, true);
         const used =
-          valuePx * 1.05 +
-          (captionPx > 0 ? captionPx * 1.1 + box * 0.03 : 0) +
-          (subPx > 0 ? subPx * 1.2 + box * 0.03 : 0);
+          valuePx * VALUE_LEADING +
+          (captionPx > 0 ? captionPx * CAPTION_LEADING + box * GAP_SCALE : 0) +
+          (subPx > 0 ? subPx * SUB_LEADING + box * GAP_SCALE : 0);
         assert.ok(used <= box - 2 * box * PAD_SCALE + 0.01, `${box}px box overflowed: ${used}`);
+      }
+    }
+  });
+});
+
+// ── The optional rule and footer, and what they may cost ────────────────────
+//
+// They are OFF by default, so every widget that shipped before them must get
+// exactly the composition it got before. When they are on they take their room
+// from the VALUE — there is nowhere else, because CONTENT_SCALE was derived for
+// the three-line composition and leaves less spare than the footer wants.
+//
+// TWO DEFECTS THESE EXIST FOR, one in each direction:
+//
+//   1. Refusing to touch the value. `used` then exceeded `avail` at every size,
+//      the drop-a-line loop gave the footer up every time, and the footer
+//      rendered at NO box height between 1 and 2000px — while the inspector
+//      switch and the Home card toggle both wrote a setting for it.
+//   2. Charging the extras to `used` AND subtracting them from the value. The
+//      two cancelled exactly, `used` came out invariant to them, the loop never
+//      fired, and the value silently absorbed the whole cost — falling below its
+//      own sub-line, and to font-size 0 around a 60px box.
+//
+// Both were green under a "the footer is dropped in order" assertion, which is
+// satisfied by a footer that is dropped ALWAYS. The tests below assert it is
+// kept as well.
+
+describe("the readout's optional rule and footer", () => {
+  const BOTH = { meter: true, footer: true } as const;
+
+  test("change nothing at all when they are off", () => {
+    // The whole safety of the addition: fifteen widget types go through this
+    // function and none of them asks for an extra.
+    for (const box of [12, 28, 54, 120, 200, 480]) {
+      for (const [caption, sub] of [[true, true], [true, false], [false, false]] as const) {
+        for (const uniform of [false, true]) {
+          const plain = fitComposition(box, caption, sub, uniform);
+          const explicit = fitComposition(box, caption, sub, uniform, { meter: false, footer: false });
+          assert.deepEqual(explicit, plain, `${box}px box drifted with the extras explicitly off`);
+        }
+      }
+    }
+  });
+
+  test("ARE ACTUALLY DRAWN, at every size a widget is really placed at", () => {
+    // Defect 1, as an assertion. 159 is the short side of the dashboard tile the
+    // browser sweep uses; 300 and 640 are wall sizes; 112 is the Home card the
+    // composition was approved at.
+    for (const box of [112, 159, 200, 300, 480, 640, 1080]) {
+      const f = fitComposition(box, true, true, false, BOTH);
+      assert.ok(f.footerPx > 0, `${box}px box drew no footer, so "next cue" is a setting nothing renders`);
+      assert.ok(f.meterPx > 0, `${box}px box drew no progress rule`);
+    }
+  });
+
+  test("and the value still outranks every line under it", () => {
+    // Defect 2, as an assertion. Whenever an extra is actually drawn, the value
+    // is the biggest thing in the composition — that is what makes it the value.
+    for (let box = 12; box <= 1200; box += 4) {
+      const f = fitComposition(box, true, true, false, BOTH);
+      if (f.footerPx === 0 && f.meterPx === 0) continue;
+      assert.ok(f.valuePx > 0, `${box}px box rendered the value at font-size 0`);
+      assert.ok(
+        f.valuePx >= f.subPx,
+        `${box}px box: value ${f.valuePx.toFixed(1)} is smaller than its sub-line ${f.subPx.toFixed(1)}`,
+      );
+      assert.ok(
+        f.valuePx >= f.footerPx,
+        `${box}px box: value ${f.valuePx.toFixed(1)} is smaller than the footer ${f.footerPx.toFixed(1)}`,
+      );
+    }
+  });
+
+  test("are given up in order: the footer, then the rule, then the sub-line", () => {
+    // The footer is a QUALIFIED answer and goes first; the rule restates a
+    // number that is already written out; the sub-line qualifies the value.
+    let sawFooterDropped = false;
+    let sawMeterDropped = false;
+    for (let box = 1200; box >= 8; box -= 4) {
+      const f = fitComposition(box, true, true, false, BOTH);
+      if (f.footerPx === 0) sawFooterDropped = true;
+      if (f.meterPx === 0) sawMeterDropped = true;
+      assert.ok(!(f.footerPx > 0 && f.meterPx === 0), `${box}px kept the footer and dropped the rule`);
+      assert.ok(!(f.meterPx > 0 && f.subPx === 0), `${box}px kept the rule and dropped the sub-line`);
+    }
+    // Otherwise the loop above is green because nothing was ever dropped — and
+    // the test above is what stops it being green because nothing was ever kept.
+    assert.ok(sawFooterDropped, "the footer was never dropped at any size, so the order is untested");
+    assert.ok(sawMeterDropped, "the rule was never dropped at any size, so the order is untested");
+  });
+
+  test("never overflow the box, extras included", () => {
+    for (const box of [8, 12, 20, 28, 40, 54, 120, 200, 480]) {
+      for (const extras of [{ meter: true }, { footer: true }, BOTH]) {
+        const { captionPx, valuePx, subPx, meterPx, footerPx } = fitComposition(box, true, true, false, extras);
+        const gap = box * GAP_SCALE;
+        const used =
+          valuePx * VALUE_LEADING +
+          (captionPx > 0 ? captionPx * CAPTION_LEADING + gap : 0) +
+          (subPx > 0 ? subPx * SUB_LEADING + gap : 0) +
+          (meterPx > 0 ? meterPx + gap : 0) +
+          (footerPx > 0 ? footerPx * SUB_LEADING + gap : 0);
+        assert.ok(
+          used <= box - 2 * box * PAD_SCALE + 0.01,
+          `${box}px box overflowed with ${JSON.stringify(extras)}: ${used}`,
+        );
       }
     }
   });

@@ -48,13 +48,138 @@ function def(t: TriggerDef): TriggerDef {
   return t;
 }
 
+// ── ProVideoPlayer ──────────────────────────────────────────────────────────
+//
+// Structurally typed against PvpLayerDTO rather than importing it, and NOT
+// because the payload crossed a socket — it did not; the broadcaster hands
+// listeners the same in-process object pvp-service constructed. The registry is
+// deliberately decoupled from the DTOs so a shape change cannot silently alter
+// what a saved rule fires on, and the same defensive reads (asObs, asLive,
+// asRec) are how every other integration in this file is written.
+
+type PvpLayer = {
+  uuid?: string;
+  name?: string;
+  state?: string;
+  mediaUuid?: string | null;
+  hidden?: boolean;
+  muted?: boolean;
+  playbackRate?: number;
+};
+type PvpSnap = { connected?: boolean; layers?: unknown };
+
+const asPvp = (v: unknown): PvpLayer[] => {
+  const raw = (v && typeof v === "object" ? (v as PvpSnap).layers : null) ?? null;
+  return Array.isArray(raw) ? raw.filter((l): l is PvpLayer => !!l && typeof l === "object") : [];
+};
+
+/** PVP is reachable in this snapshot. A dropped connection reports an empty
+ *  workspace, and every "it stopped" trigger below refuses to read that as an
+ *  event — unreachable is unknown, not stopped. */
+const pvpUp = (v: unknown): boolean => (v && typeof v === "object" ? (v as PvpSnap).connected !== false : false);
+
+/** Does this layer match the rule's `layer` param? Blank matches ANY layer, so an
+ *  unconfigured rule fires rather than silently never firing. Matched on the
+ *  NAME: a uuid is opaque in a rule editor and changes when a workspace is
+ *  rebuilt from a template. */
+const pvpNamed = (l: PvpLayer, want: unknown): boolean => {
+  const w = String(want ?? "").trim().toLowerCase();
+  return !w || (l.name ?? "").trim().toLowerCase() === w;
+};
+
+/** Pairs of (before, after) for layers present in BOTH snapshots, matched on
+ *  uuid. A layer in only one is skipped: a layer that has appeared or vanished is
+ *  unknown, not an edge, and reading a vanished layer as "cleared" would fire an
+ *  end-of-cue rule because PVP restarted. On uuid rather than position, so an
+ *  operator reordering layers does not read as every layer changing at once. */
+function pvpPairs(prev: unknown, next: unknown): { before: PvpLayer; after: PvpLayer }[] {
+  const before = new Map(asPvp(prev).map((l) => [l.uuid, l]));
+  const out: { before: PvpLayer; after: PvpLayer }[] = [];
+  for (const after of asPvp(next)) {
+    const b = after.uuid != null ? before.get(after.uuid) : undefined;
+    if (b) out.push({ before: b, after });
+  }
+  return out;
+}
+
+const PVP_LAYER_PARAM: ParamDef = {
+  key: "layer",
+  label: "Layer",
+  type: "string",
+  optional: true,
+  help: "The layer's name in ProVideoPlayer. Leave blank for any layer. Renaming the layer in PVP stops the rule.",
+};
+
+/**
+ * An edge on one ProVideoPlayer layer: everything every PVP trigger needs, with
+ * only the edge itself left to write.
+ *
+ * The preamble is not boilerplate, it is three separate guards, and each of them
+ * fails silently on its own:
+ *
+ *  - `prev === null` is the restart guard. Without it the first snapshot after
+ *    an update reads as a transition and fires every rule at once, unattended.
+ *  - `!pvpUp(next)` is what stops PVP going UNREACHABLE reading as every layer
+ *    clearing and stopping at the same instant. Unknown is not empty.
+ *  - `pvpNamed` applies the optional layer param, whose blank value means "any".
+ *
+ * Written out per trigger it was five triggers deep and a sixth could forget
+ * one — which is why pvpFlagTriggers already had this shape internally. This is
+ * the same factory, lifted so the other three share it.
+ */
+function pvpEdgeTrigger(
+  id: string,
+  label: string,
+  help: string | undefined,
+  edge: (before: PvpLayer, after: PvpLayer) => boolean,
+): TriggerDef {
+  return def({
+    id,
+    label,
+    channel: "pvp:status",
+    params: [PVP_LAYER_PARAM],
+    help,
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      if (!pvpUp(next)) return false;
+      return pvpPairs(prev, next).some(
+        ({ before, after }) => pvpNamed(after, params.layer) && edge(before, after),
+      );
+    },
+  });
+}
+
+/**
+ * A boolean layer flag flipping one way. Generated rather than written out four
+ * times over, because hidden and muted are mechanically identical and only the
+ * words differ.
+ */
+function pvpFlagTriggers(
+  key: "hidden" | "muted",
+  on: { slug: string; label: string },
+  off: { slug: string; label: string },
+): Record<string, TriggerDef> {
+  const make = (id: string, label: string, want: boolean): TriggerDef =>
+    pvpEdgeTrigger(id, label, undefined, (before, after) =>
+      before[key] !== want && after[key] === want);
+  // The slug and the words are SEPARATE arguments, the way obsOutputTriggers
+  // already keeps them, because the slug is a persisted rule id: a saved rule
+  // stores `pvp.layer-hidden`, so deriving the id from the label would mean that
+  // rewording the sentence an operator reads silently stops resolving every rule
+  // they had already built on it.
+  return {
+    [`pvp.layer-${on.slug}`]: make(`pvp.layer-${on.slug}`, on.label, true),
+    [`pvp.layer-${off.slug}`]: make(`pvp.layer-${off.slug}`, off.label, false),
+  };
+}
+
 /** Live states arrive as an array on "integrations:state-changed". */
 type IntState = { id?: string; connection?: string };
 const asStates = (v: unknown): IntState[] => (Array.isArray(v) ? (v as IntState[]) : []);
 const connOf = (v: unknown, id: string): string | null =>
   asStates(v).find((s) => s.id === id)?.connection ?? null;
 
-/** Labels for the twelve, so a rule reads "OBS connects" rather than an id.
+/** One label per integration, so a rule reads "OBS connects" rather than an id.
  *  Exported so the conditions read the same list and the two cannot diverge. */
 export const INTEGRATIONS: { id: string; label: string }[] = [
   { id: "companion", label: "Companion" },
@@ -63,10 +188,12 @@ export const INTEGRATIONS: { id: string; label: string }[] = [
   { id: "planning-center", label: "Planning Center" },
   { id: "prodcom", label: "ProdCom" },
   { id: "propresenter", label: "ProPresenter" },
+  { id: "pvp", label: "ProVideoPlayer" },
   { id: "reaper", label: "REAPER" },
   { id: "resi", label: "Resi" },
   { id: "ross-tsl", label: "Ross TSL" },
   { id: "rosstalk", label: "RossTalk" },
+  { id: "scores", label: "Live scores" },
   { id: "sensource", label: "SenSource" },
   { id: "smaart", label: "Smaart" },
   { id: "youtube", label: "YouTube" },
@@ -74,7 +201,7 @@ export const INTEGRATIONS: { id: string; label: string }[] = [
 ];
 
 /** Connect/disconnect pair for one integration. Generated rather than written out
- *  twelve times over, because the entries are mechanically identical — only the
+ *  once per integration, because the entries are mechanically identical — only the
  *  label differs, and that comes from the list above. */
 function connectionTriggers(id: string, label: string): Record<string, TriggerDef> {
   return {
@@ -319,6 +446,55 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
 
   ...streamTriggers("resi", "resi:status", "Resi"),
   ...streamTriggers("youtube", "youtube:status", "YouTube"),
+
+  ...pvpFlagTriggers(
+    "hidden",
+    { slug: "hidden", label: "A ProVideoPlayer layer is hidden" },
+    { slug: "unhidden", label: "A ProVideoPlayer layer is unhidden" },
+  ),
+  ...pvpFlagTriggers(
+    "muted",
+    { slug: "muted", label: "A ProVideoPlayer layer is muted" },
+    { slug: "unmuted", label: "A ProVideoPlayer layer is unmuted" },
+  ),
+
+  "pvp.cue-started": pvpEdgeTrigger(
+    "pvp.cue-started",
+    "A cue starts on a ProVideoPlayer layer",
+    "Fires when a layer starts showing DIFFERENT media. The same clip looping round is not a new cue and does not fire.",
+    // The media UUID, not the name: the observed workspace had seven files whose
+    // names differed only by a trailing digit, and two cues in different
+    // playlists can point at the same file.
+    //
+    // The `!== null` on the AFTER side is what stops a CLEAR reading as a new
+    // cue: going from media to nothing changes the uuid too.
+    (before, after) =>
+      (after.mediaUuid ?? null) !== null &&
+      (before.mediaUuid ?? null) !== (after.mediaUuid ?? null),
+  ),
+
+  "pvp.layer-cleared": pvpEdgeTrigger(
+    "pvp.layer-cleared",
+    "A ProVideoPlayer layer clears",
+    "A layer that was showing something now holds nothing. PVP going unreachable does not count — that is unknown, not empty.",
+    // Not the hasContent helper: these are the loosely-typed PvpLayer above, not
+    // PvpLayerDTO, because the registry is deliberately decoupled from the DTOs.
+    // Same rule, stated against the same field.
+    (before, after) => before.state !== "empty" && after.state === "empty",
+  ),
+
+  // Why this and not "the clip reached its end": timeElapsed and timeRemaining
+  // move on every poll, so they are deliberately excluded from the broadcast —
+  // otherwise a 1 Hz poll would be a 1 Hz SSE frame to every display. The engine
+  // only ever sees broadcast frames, so it cannot watch a countdown cross zero.
+  // "Stops rolling" is the same moment on the wall and it IS observable on a
+  // frame this design sends.
+  "pvp.playback-stopped": pvpEdgeTrigger(
+    "pvp.playback-stopped",
+    "A ProVideoPlayer clip stops rolling",
+    "A clip that was playing has stopped, ended or been paused. PVP going unreachable does not count.",
+    (before, after) => (before.playbackRate ?? 0) > 0 && (after.playbackRate ?? 0) === 0,
+  ),
 
   "pco.before-plan-time": def({
     id: "pco.before-plan-time",

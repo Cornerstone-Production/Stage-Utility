@@ -736,7 +736,16 @@ export function EditorCanvas({
       {boxW > 0 && boxH > 0 && (
         <div
           ref={boxRef}
-          className="relative overflow-hidden rounded-xl"
+          // kiosk-surface, the same class LayoutRenderer puts on the live
+          // container. NOT decoration: the class is what re-declares --color-fg
+          // and friends to the kiosk's white foregrounds, and a canvas that
+          // painted `var(--kiosk-bg)` without it left every widget resolving the
+          // APP's tokens. In light mode that is #161b22 text on #0a0a0a —
+          // measured in a browser at 1.05–1.14:1 on thirty of the forty-eight
+          // object types that draw text, which is invisible. Setting --su-* here
+          // would not work; see the rule in styles.css for why the class has to
+          // carry the Tailwind variables itself.
+          className="relative overflow-hidden rounded-xl kiosk-surface"
           style={{
             width: boxW,
             height: boxH,
@@ -747,13 +756,15 @@ export function EditorCanvas({
             // toward the right/bottom. An inset shadow frames it without changing
             // the box, so overlay, grid, and content share one coordinate space.
             boxShadow: "inset 0 0 0 1px var(--gray-a4)",
-            // Mirror the kiosk: default/legacy backgrounds show the shared kiosk
-            // surface so the editor preview matches every other view.
+            // ONLY a background the operator actually chose. Default and legacy
+            // canvases fall through to .kiosk-surface, which is on this same
+            // element and already paints var(--kiosk-bg) — so the token has one
+            // source rather than a class and an inline copy that can drift.
             background:
-              canvas.background == null ||
-              ["#000", "#000000", "#080810", "#0a0a0a"].includes(canvas.background)
-                ? "var(--kiosk-bg)"
-                : canvas.background,
+              canvas.background != null &&
+              !["#000", "#000000", "#080810", "#0a0a0a"].includes(canvas.background)
+                ? canvas.background
+                : undefined,
           }}
           onPointerDown={interactive ? startMarquee : undefined}
           onContextMenu={interactive && onContextMenu ? onContextMenu : undefined}
@@ -1864,6 +1875,7 @@ export function LayoutEditor({
             <ShapePreview
               shape={previewShape}
               layout={{ version: 1, canvas, objects }}
+              viewId={view.id}
               ndiSource={view.ndiSource ?? null}
               surface={viewSurface(view)}
               avail={previewAvail}
@@ -1882,7 +1894,7 @@ export function LayoutEditor({
               // `home` is the VIEW's identity, not the editor's: editing Home's
               // own layout must preview Home's cards, and editing anything else
               // must preview what that surface will draw.
-              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
+              ctx={{ ...data, state: data.state, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, integrations: data.integrationsSnap.states, integrationLabels: data.integrationsSnap.labels, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}

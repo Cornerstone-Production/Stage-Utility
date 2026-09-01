@@ -11,8 +11,15 @@ export interface ConfigField {
   /** Optional longer explanation shown behind an "i" info popover next to the label. */
   help?: string;
   /** Value pre-filled in the setup form when nothing is saved yet (so e.g. a poll
-   *  interval shows 45 instead of 0/blank). Does not override a saved value. */
+   *  interval shows its default instead of 0/blank). Must be the same value the
+   *  service falls back to, or the form advertises a rate the service does not
+   *  run. Does not override a saved value. */
   default?: string | number;
+  /** Bounds for a `number` field, enforced by the input. Without them the field
+   *  accepts 0 or a negative and the service silently clamps it, so the form
+   *  shows one rate and the poller runs another. */
+  min?: number;
+  max?: number;
   /**
    * Show this field only while another field in the same card holds this value.
    *
@@ -27,9 +34,22 @@ export interface IntegrationDescriptor {
   id: string;
   kind: "lineup" | "wireless" | "control";
   label: string;
-  /** Short paragraph shown in the settings panel's per-integration info "i":
-   *  what it surfaces, how it connects, and where to set it up. */
+  /** ONE OR TWO SENTENCES, saying what this integration does — never how to set
+   *  it up in the other application. Setup steps belong in `docs/integrations/`,
+   *  which `docs` below points the operator at: they were paragraphs here, and a
+   *  card grid of sixteen of them is a wall nobody reads. */
   description?: string;
+  /**
+   * The integration's page under `docs/integrations/`, WITHOUT the extension.
+   *
+   * Required, and deliberately not derived from `id` — `pvp`'s page is
+   * `provideoplayer.md`, so deriving it would 404 on exactly one integration and
+   * look right everywhere else. Required rather than optional because this is
+   * where the setup steps went when the descriptions were cut down: a new
+   * integration with nowhere to send the operator is the failure this field
+   * exists to prevent, and the type checker will not let it compile.
+   */
+  docs: string;
   /**
    * The other end dials US — there is nothing for this app to connect to.
    *

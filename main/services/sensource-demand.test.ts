@@ -24,7 +24,10 @@ process.env.HOME = path.join(TMP, "home");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
 const { tslService } = await import("./tsl-service.js");
 const { sensourceService } = await import("./sensource-service.js");
-const { setSubscriberCheck } = await import("./broadcaster.js");
+// The third consumer: an enabled people.count rule. Registered by the engine for
+// every trigger channel, so it is loaded here for the same side effect.
+await import("./automation-engine.js");
+const { channelDemandSourceCount, setSubscriberCheck } = await import("./broadcaster.js");
 
 // channelHasSubscribers answers TRUE until the server registers a real check —
 // fail-open, so nothing is throttled during boot. These cases are about the
@@ -32,7 +35,7 @@ const { setSubscriberCheck } = await import("./broadcaster.js");
 let browsersWatching = false;
 setSubscriberCheck(() => browsersWatching);
 
-type Gate = { demandSources: (() => boolean)[]; inDemand: boolean };
+type Gate = { inDemand: boolean };
 const gate = sensourceService as unknown as Gate;
 
 type Recorder = { current: { endedAt: string | null } | null; postMs: number };
@@ -55,13 +58,13 @@ describe("SenSource poll demand", () => {
     assert.equal(gate.inDemand, true, "the subscriber path must survive the change");
   });
 
-  it("registers both in-process consumers", () => {
-    // A count, not a floor: if a third consumer of getLatest() is added without
+  it("registers every in-process consumer", () => {
+    // A count, not a floor: if a further consumer of getLatest() is added without
     // registering, that is the same bug again and this is where it surfaces.
     assert.equal(
-      gate.demandSources.length,
-      2,
-      "expected the attendance recorder and tslService to register as consumers",
+      channelDemandSourceCount("people:count"),
+      3,
+      "expected the attendance recorder, tslService and the automation engine",
     );
   });
 

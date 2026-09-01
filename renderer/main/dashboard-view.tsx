@@ -15,6 +15,27 @@ interface DashboardViewProps {
   displayId: string;
 }
 
+/**
+ * Sizes to h-full, never the viewport: this renders both on a display and inside
+ * an embed tile. The screen height and the safe-area insets belong to the kiosk
+ * route — see stage-view.tsx.
+ *
+ * THE HEIGHT ONLY. The TYPE below is still screen-relative: every size is a
+ * clamp on vmin, which is a fraction of the SCREEN and not of the box. In an
+ * embed tile that is wrong on purpose-in-name-only — a nine-up producer
+ * multiview draws these captions at the size a full-screen wall would, in a
+ * box a third the width, and the EmbedFontBox the tile wraps this in sets an
+ * inherited px size that a vmin clamp simply ignores.
+ *
+ * Left as it is deliberately, not overlooked. Moving 24 of these onto cqmin
+ * needs `container-type: size` on the surface root, which needs a definite
+ * height to resolve against and collapses the content to zero where it does not
+ * get one — a failure that shows up only in a browser. jsdom models no layout at
+ * all (offsetHeight is always 0), so nothing in this repo's suite can tell the
+ * working version from the collapsed one, and every stage display in a building
+ * is downstream of the answer. calendar-view.tsx has no vmin at all and its
+ * header says why: it is an office display read from a desk, at absolute sizes.
+ */
 export function DashboardView({ displayId }: DashboardViewProps) {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript();
@@ -38,7 +59,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
+      <div className="flex flex-col items-center justify-center h-full kiosk-surface gap-3">
         <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
         <p className="text-headline text-fg-subtle">Loading…</p>
       </div>
@@ -46,7 +67,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   }
   if (error || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3 px-12 text-center">
+      <div className="flex flex-col items-center justify-center h-full kiosk-surface gap-3 px-12 text-center">
         <p className="text-title3 text-fg-muted font-semibold">Could not load dashboard</p>
         {error && <p className="text-caption1 text-fg-subtle">{error}</p>}
       </div>
@@ -72,7 +93,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
   const proConnected = !!pro?.connected;
 
   return (
-    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overscroll-none kiosk-surface">
       {/* Brand top bar — same as kiosk, no plan/context label. */}
       <div
         className="relative flex items-center h-10 shrink-0"

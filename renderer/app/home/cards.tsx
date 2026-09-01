@@ -20,7 +20,8 @@ import {
 
 import { AppLink } from "../app-link";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
-import { readinessChecks, outstanding, type ReadinessCheck } from "./readiness";
+import { readinessChecks, outstanding, splitByPresence, type ReadinessCheck } from "./readiness";
+import { usePlanChecklist } from "../../main/use-plan-checklist";
 import type { LayoutObjectConfig } from "@main/types/views";
 /**
  * The cards Home draws with its own markup. Derived from the config union so a
@@ -40,11 +41,18 @@ import { invoke, onNotification } from "../../lib/api";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
 import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
 import { useObsState } from "../../main/use-obs-state";
+import { usePvpState, usePvpSkewMs } from "../../main/use-pvp-state";
+import { PvpLayerRow } from "../../main/pvp-layer-row";
+import { visibleLayers } from "../../main/pvp-object";
+import { PvpNowObject } from "../../main/pvp-now";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
 import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl } from "../recording-status";
 import { useResiState, useYouTubeState } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
+import { useScoresState } from "../../main/use-scores-state";
+import { inkFor } from "../../main/score-ink";
+import { emptyReason, pickGame } from "../../main/scores-object";
 
 /**
  * The same set as a VALUE, so a renderer can ask before it starts matching.
@@ -67,7 +75,10 @@ const HOME_CARD_TYPES: Record<HomeCardType, true> = {
   "home-streaming-resi": true,
   "home-streaming-youtube": true,
   "home-spl": true,
+  "home-scores": true,
   "home-screens": true,
+  "home-pvp": true,
+  "home-pvp-now": true,
 };
 
 export function isHomeCard(
@@ -320,7 +331,12 @@ export function NextServiceCard({
 }
 
 export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] }) {
+  // The plan's own checklist, written in Planning Center. Rows an operator ticks
+  // by hand, alongside the checks the app works out for itself.
+  const { rows: planRows, toggle } = usePlanChecklist();
+
   const todo = outstanding(checks);
+  const planTodo = planRows.filter((r) => !r.done);
   // Measure the box rather than guess at it: this card is placed at four
   // different tile sizes on Home and at any size at all on a canvas, so "how
   // many rows fit" is not something the caller can be trusted to pass in.
@@ -330,8 +346,16 @@ export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] })
   // scroll and must not clip, so it shows LESS — the passing checks are the
   // ones you do not need to see, and hiding the outstanding ones would make
   // "2 to sort out" a lie about the rows underneath it.
-  const shown = rows >= checks.length ? checks : todo.slice(0, Math.max(1, rows));
-  const hidden = checks.length - shown.length;
+  //
+  // The plan's rows queue behind the app's own, because a screen that is not
+  // routed stops the service in a way that an unticked job does not.
+  const total = checks.length + planRows.length;
+  const budget = Math.max(1, rows);
+  const shownChecks = total <= budget ? checks : todo.slice(0, budget);
+  const shownPlan =
+    total <= budget ? planRows : planTodo.slice(0, Math.max(0, budget - shownChecks.length));
+  const hidden = total - shownChecks.length - shownPlan.length;
+  const stillToDo = todo.length + planTodo.length;
 
   return (
     <section ref={wrapRef} className="flex h-full w-full flex-col overflow-hidden">
@@ -340,20 +364,62 @@ export function ReadinessCard({ checks }: { checks: readonly ReadinessCheck[] })
           Ready for the next service
         </h2>
         <span className="ml-auto text-caption1 text-fg-subtle">
-          {todo.length === 0 ? "everything set" : `${todo.length} to sort out`}
+          {stillToDo === 0 ? "everything set" : `${stillToDo} to sort out`}
         </span>
       </header>
-      {shown.map((c) => (
+      {shownChecks.map((c) => (
         <CheckRow key={c.id} check={c} />
+      ))}
+      {shownPlan.map((r) => (
+        <PlanCheckRow key={r.key} row={r} onToggle={() => void toggle(r.key, !r.done)} />
       ))}
       {hidden > 0 && (
         <p className="px-4 py-2 text-caption1 text-fg-subtle">
-          {todo.length > shown.length
-            ? `+${todo.length - shown.length} more to sort out`
+          {stillToDo > shownChecks.length + shownPlan.length
+            ? `+${stillToDo - shownChecks.length - shownPlan.length} more to sort out`
             : `${hidden} already set`}
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * One row from the plan's notes.
+ *
+ * A SQUARE mark, where a derived check draws a round one. The shapes carry the
+ * difference: a round mark reports something the app worked out and cannot be
+ * ticked, a square one is a box a person ticks. Drawing both as circles made
+ * tapping a derived check look like it should do something, and it never can —
+ * the next state broadcast would undo it.
+ */
+function PlanCheckRow({
+  row,
+  onToggle,
+}: {
+  row: { key: string; text: string; done: boolean };
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={row.done}
+      className="flex w-full items-center gap-3 border-b border-line px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"
+    >
+      <span
+        className={cn(
+          "grid size-4 shrink-0 place-items-center rounded",
+          row.done ? "bg-accent text-on-accent" : "border border-fg-subtle",
+        )}
+        aria-hidden="true"
+      >
+        {row.done && <CheckIcon className="size-2.5" strokeWidth={3} />}
+      </span>
+      <span className={cn("min-w-0 flex-1 truncate text-body", row.done ? "text-fg-muted line-through" : "text-fg")}>
+        {row.text}
+      </span>
+    </button>
   );
 }
 
@@ -507,13 +573,24 @@ export function RecordingCard({ recorder = "any" }: { recorder?: string }) {
  * word in one colour at a distance; Home wants three lines that read as a row
  * with the cards beside them, and those cards are Stat.
  */
-export function StreamingCard({ platform = "any", now }: { platform?: string; now: number }) {
+export function StreamingCard({
+  platform = "any",
+  now,
+  showElapsed = true,
+}: {
+  platform?: string;
+  now: number;
+  /** Home's "Elapsed time" switch. Off, the card keeps the platform's name on
+   *  the sub-line and drops the running clock — which is what the same switch
+   *  does to the same object on a wall. */
+  showElapsed?: boolean;
+}) {
   const list = streamers(useResiState(), useYouTubeState(), useObsState());
   // The clock comes DOWN, from the one tick the page already runs. A card that
   // started its own interval would be a second clock per streaming widget, all
   // of them a fraction out of step with the countdown above them.
   const chosen = platform === "any" ? list : list.filter((s) => s.name === platform);
-  const ind = streamIndicator(chosen, now, { name: platform === "any" ? null : platform });
+  const ind = streamIndicator(chosen, now, { name: platform === "any" ? null : platform, showElapsed });
   return (
     <Stat
       label={platform === "any" ? "Streaming" : platform}
@@ -530,8 +607,250 @@ export function SplCard() {
   return <Stat label="SPL" value={loud.value} sub={loud.sub} />;
 }
 
-/** How many displays are connected, of how many exist. */
-export function ScreensCard({ online, total }: { online: number; total: number }) {
+/**
+ * ProVideoPlayer's layers, at a glance.
+ *
+ * Up to three layers with content. `visibleLayers` is the SAME filter the wall
+ * object uses and PvpLayerRow is the same row, so the two surfaces cannot
+ * disagree about whether a layer is live — which matters here more than usual,
+ * because the field that would make them disagree (`playingItem`) never clears
+ * and was wrong on four layers out of five at rest.
+ *
+ * IT CARRIES A CAPTION, which is the reason this card was rebuilt. Every other
+ * card on the page says what it is — ProPresenter, Recording, People — and this
+ * one was three rows of bare text that could have belonged to any integration in
+ * the building. The tally on the right sits where Readiness puts "2 to sort out"
+ * and where Recording and Streaming put their state.
+ *
+ * No preview image, and there is no version of this card that has one: PVP
+ * exposes no thumbnail or frame endpoint at all.
+ */
+export function PvpCard({ now, showProgress = false }: { now: number; showProgress?: boolean }) {
+  const pvp = usePvpState();
+  // PVP's own clock offset rather than the PCO-derived one this card is handed:
+  // the countdown below must not go wrong because Planning Center is down.
+  const skewMs = usePvpSkewMs(pvp);
+  const rows = visibleLayers(pvp?.layers ?? [], { type: "pvp-layers", show: "with-content" });
+  // playbackRate, never isPlaying — the one rule this integration turns on.
+  const rolling = rows.filter((l) => l.playbackRate > 0).length;
+
+  // Three different nothings, for the reason the wall object's emptyReason
+  // exists: one is a machine to go and look at, one is not, and one is that we
+  // have not heard yet.
+  if (!pvp) return <Stat label="ProVideoPlayer" value="—" />;
+  if (!pvp.connected) return <Stat label="ProVideoPlayer" value="Offline" />;
+  if (rows.length === 0) return <Stat label="ProVideoPlayer" value="Nothing on screen" />;
+
+  return (
+    // STAT_CARD, matching the Stat fallbacks above: home-pvp is a BARE type, so
+    // nothing upstream supplies the chrome, and without this the card lost its
+    // box at exactly the moment it had something to show.
+    <div className={`${STAT_CARD} min-w-0`}>
+      <div className="flex shrink-0 items-baseline gap-2">
+        <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+          ProVideoPlayer
+        </h2>
+        {/* "on screen", NOT "playing".
+            `rows` is the with-content filter, which counts a paused clip and a
+            still — and this whole widget exists because ProVideoPlayer's own
+            "playing" flag says true for a graphic that is not moving. The tally
+            would have read "3 of 11 playing" with nothing rolling, in green,
+            which is the same lie one level up. The colour follows the same rule:
+            it is live only when something actually is. */}
+        <span
+          className={cn(
+            "ml-auto font-mono text-caption2 tabular-nums",
+            rolling > 0 ? "text-live-11" : "text-fg-subtle",
+          )}
+        >
+          {rows.length} of {pvp.layers.length} on screen
+        </span>
+      </div>
+      {/* Three, not all of them. A Home tile is a glance; the wall object is
+          where an operator goes to see the whole stack. */}
+      {/* text-fg, not inheritance. Home's grid is a kiosk surface that is
+          near-black in BOTH themes, and a row with no colour of its own came out
+          black on black there — measured at 1.06:1 on two other spans before
+          this. The rows themselves inherit, so the same component still takes a
+          wall object's chosen colour. */}
+      <div className="mt-1.5 flex min-w-0 flex-col gap-0.5 text-caption1 text-fg">
+        {rows.slice(0, 3).map((l) => (
+          <PvpLayerRow
+            key={l.uuid}
+            layer={l}
+            sampledAt={pvp.sampledAt}
+            now={now}
+            skewMs={skewMs}
+            showProgress={showProgress}
+          />
+        ))}
+        {rows.length > 3 && (
+          <span className="text-caption2 text-fg-subtle">+{rows.length - 3} more</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ProVideoPlayer as ONE reading — what is up right now, and how long is left.
+ *
+ * The SAME component the wall object draws, so the two cannot disagree about
+ * which layer is chosen, when a still gets a countdown (never), or what "next"
+ * means. Home supplies only the card and `uniform`, which is what makes this a
+ * tile in a grid of same-height tiles rather than a widget filling its box.
+ */
+export function PvpNowCard({
+  now,
+  showProgress = true,
+  showNextCue = true,
+}: {
+  now: number;
+  showProgress?: boolean;
+  showNextCue?: boolean;
+}) {
+  const pvp = usePvpState();
+  const skewMs = usePvpSkewMs(pvp);
+  return (
+    <div className={STAT_CARD}>
+      <PvpNowObject
+        config={{ showProgress, showNextCue }}
+        status={pvp}
+        now={now}
+        skewMs={skewMs}
+        uniform
+      />
+    </div>
+  );
+}
+
+/**
+ * Followed scores, in Home's voice.
+ *
+ * NOT the wall strip, and this is the one deliberate departure from the plan's
+ * text: it said "each as a compact ScoreStrip", and the mockup this plan
+ * implements says the opposite, with a reason -- "no colour block here on
+ * purpose: a Home tile sits beside quiet cards, and a red panel would out-shout
+ * the readiness list next to it. The colour survives as the chip." A tile of
+ * brand colour between Readiness and Next service is exactly that panel.
+ *
+ * What is NOT duplicated is the part that could be wrong: the ink over a team's
+ * colour still comes from score-ink, so a chip and a wall widget cannot disagree
+ * about whether the Packers take white text.
+ *
+ * The trailing team is dimmed rather than the leader emphasised. Everything on
+ * this page is already at full strength, so making one row louder would make the
+ * card louder than its neighbours; making the loser quieter says the same thing
+ * and leaves the card where it sits.
+ */
+export function ScoresCard({ game = "auto" }: { game?: "auto" | string }) {
+  const scores = useScoresState();
+  const all = scores?.games ?? [];
+  // The one whose status heads the card. THE SAME function the wall object uses,
+  // so "auto" and a pinned team mean the same thing on both surfaces and a pin
+  // hands over at the same moment on each.
+  const featured = pickGame(scores, game);
+  // Led by the game the card is about, the rest behind it in start order. The
+  // list was the first three by start time, which on a pinned card is three
+  // games that need not include the pinned one.
+  const games = featured ? [featured, ...all.filter((g) => g !== featured)] : all;
+
+  if (games.length === 0) {
+    // Three different facts, kept apart — "No games today" for a failed request
+    // is a factual lie about the operator's own schedule. Shared with the wall
+    // widget so the two cannot drift; the branches used to be written out here
+    // in a different order from there, which is how they would have.
+    return <Stat label="Scores" value={emptyReason(scores)} />;
+  }
+
+  return (
+    <section className="home-scores flex h-full w-full flex-col px-4 py-3">
+      <div className="flex items-baseline gap-2">
+        <h2 className="shrink-0 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+          Scores
+        </h2>
+        {featured && (
+          <span
+            className={cn(
+              // ONE LINE, always. shortDetail is whatever ESPN sent and falls
+              // back to the longer `detail`, so a game that has not started
+              // reads "8/30 - 1:40 PM EDT" rather than "Top 2nd" -- eighteen
+              // characters where the card budgeted for seven. Wrapped, it put a
+              // second 13px line into a card with 3px spare, and the venue was
+              // the only box left able to give: its text came out sliced through
+              // the middle of the glyphs. Truncating is the same answer the team
+              // name and the venue already use in this card.
+              "ml-auto min-w-0 truncate font-mono text-caption2 text-fg-subtle",
+              featured.state === "in" && !featured.delayed && "home-scores-live",
+            )}
+          >
+            {featured.shortDetail}
+          </span>
+        )}
+      </div>
+
+      {/* mt-1 here and pt-1 on the venue below are part of the card's height
+          budget at a 120px tile, not free spacing -- home-scores-fit.test.ts
+          holds the total and .home-scores-list in styles.css says why. */}
+      <div className="home-scores-list mt-1">
+        {games.slice(0, 3).map((g) => (
+          <div key={g.eventId} className="home-scores-game">
+            <ScoresRow team={g.away} trailing={behind(g.away, g.home)} />
+            <ScoresRow team={g.home} trailing={behind(g.home, g.away)} />
+          </div>
+        ))}
+      </div>
+
+      {featured?.venue && (
+        <p className="home-scores-foot mt-auto pt-1 text-caption2 text-fg-subtle">
+          {featured.venue}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Behind, not merely "not ahead": a tied game dims neither side. */
+function behind(a: ScoreTeamDTO, b: ScoreTeamDTO): boolean {
+  return a.score != null && b.score != null && a.score < b.score;
+}
+
+function ScoresRow({ team, trailing }: { team: ScoreTeamDTO; trailing: boolean }) {
+  const ink = inkFor(team.color);
+  return (
+    <div className={cn("home-scores-row", trailing && "is-trailing")}>
+      <span
+        className="home-scores-chip"
+        // The chip is the ONLY place a team colour appears on this page, and its
+        // ink is chosen by contrast rather than fixed -- roughly a third of the
+        // league is unreadable in white.
+        style={{ background: team.color ?? "var(--color-fill)", color: ink }}
+      >
+        {team.abbreviation}
+      </span>
+      <span className="home-scores-name">{team.name}</span>
+      <span className="home-scores-value">{team.score ?? "\u2014"}</span>
+    </div>
+  );
+}
+
+/**
+ * How many screens have a browser attached, of how many exist.
+ *
+ * Takes the screens and the presence set rather than two numbers, so the
+ * intersection cannot be skipped at a call site. Handed a count, this card once
+ * read "3/2 connected": presence is not a subset of the screens that exist, and
+ * a page left open on a deleted one keeps heartbeating.
+ */
+export function ScreensCard({
+  outputs,
+  onlineOutputIds,
+}: {
+  outputs: readonly Output[];
+  onlineOutputIds: readonly string[];
+}) {
+  const online = splitByPresence(outputs, onlineOutputIds).online.length;
+  const total = outputs.length;
   return (
     <Stat
       label="Screens"
@@ -544,17 +863,6 @@ export function ScreensCard({ online, total }: { online: number; total: number }
 }
 
 /**
- * Which screens are currently showing something, from a state snapshot.
- *
- * The fallback for callers with no presence hook: an object on a wall display
- * has no business subscribing to presence, and a count that lags by a poll beats
- * one that only works inside the shell.
- */
-export function onlineFromState(state: StageState): string[] {
-  return (state.outputs ?? []).filter((o) => o.viewId).map((o) => o.id);
-}
-
-/**
  * One card, by type. THE dispatch — there is not a second one.
  *
  * Home and the layout renderer both come through here, so a fifth card is added
@@ -563,7 +871,7 @@ export function onlineFromState(state: StageState): string[] {
  * page.
  */
 export function HomeCard({
-  type,
+  config,
   state,
   pcoLive,
   now,
@@ -571,19 +879,32 @@ export function HomeCard({
   onlineOutputIds,
   secondsToStart,
 }: {
-  type: HomeCardType;
+  /**
+   * The card's WHOLE config, not just its type.
+   *
+   * It was the type alone, and that made every setting Home's own card menu
+   * writes a no-op: `togglesFor` offered "Elapsed time" on a streaming card and
+   * wrote it into the object, and the card that drew it never looked. The menu
+   * and the inspector both write here, so both have to be readable from here.
+   */
+  config: Extract<LayoutObjectConfig, { type: HomeCardType }>;
   state: StageState;
   pcoLive: PcoLiveDTO | null;
   now: number;
   skewMs: number;
-  /** Output ids currently connected, from `onlineFromState` — the single
-   *  supplier, on every path. A `useOutputPresence` hook that subscribed to the
-   *  `displays:presence` SSE channel was written for this and never wired to
-   *  anything; it is gone rather than left looking like a second route in. */
+  /**
+   * Output ids with a live heartbeat, from `useDisplayPresence` by way of
+   * `LayoutRenderCtx.onlineOutputIds` — the single supplier, on every path.
+   *
+   * This used to be `outputs.filter(o => o.viewId)`, which is ROUTED, not
+   * connected: a screen that was routed and unplugged counted as online for
+   * ever, so "all connected" on the front page meant nothing at all.
+   */
   onlineOutputIds: readonly string[];
   secondsToStart: number | null;
 }) {
-  switch (type) {
+  const c = config;
+  switch (c.type) {
     case "home-live-status":
       return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
     case "home-recording":
@@ -593,15 +914,27 @@ export function HomeCard({
     case "home-recording-reaper":
       return <RecordingCard recorder="REAPER" />;
     case "home-streaming":
-      return <StreamingCard now={now} />;
+      return <StreamingCard now={now} showElapsed={c.showElapsed ?? true} />;
+    case "home-scores":
+      return <ScoresCard game={c.game ?? "auto"} />;
     case "home-streaming-resi":
-      return <StreamingCard platform="Resi" now={now} />;
+      return <StreamingCard platform="Resi" now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-streaming-youtube":
-      return <StreamingCard platform="YouTube" now={now} />;
+      return <StreamingCard platform="YouTube" now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-spl":
       return <SplCard />;
+    case "home-pvp":
+      return <PvpCard now={now} showProgress={c.showProgress ?? false} />;
+    case "home-pvp-now":
+      return (
+        <PvpNowCard
+          now={now}
+          showProgress={c.showProgress ?? true}
+          showNextCue={c.showNextCue ?? true}
+        />
+      );
     case "home-screens":
-      return <ScreensCard online={onlineOutputIds.length} total={(state.outputs ?? []).length} />;
+      return <ScreensCard outputs={state.outputs ?? []} onlineOutputIds={onlineOutputIds} />;
     case "home-next-service":
       return <NextServiceCard state={state} secondsToStart={secondsToStart} />;
     case "home-readiness":
@@ -609,7 +942,7 @@ export function HomeCard({
     case "home-recent-services":
       return <RecentServicesCard state={state} />;
     default: {
-      const _never: never = type;
+      const _never: never = c;
       void _never;
       return null;
     }

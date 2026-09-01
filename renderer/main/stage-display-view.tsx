@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Tooltip } from "../components/ui/tooltip";
+import { parseColor } from "../components/ui/color-math";
 import { QrHint } from "../components/qr-hint";
 import { BrandLogo } from "../components/brand-logo";
 import { useDashboardState } from "./use-dashboard-state";
@@ -15,13 +16,25 @@ interface StageDisplayViewProps {
   displayId: string;
 }
 
-// White vs near-black text for a colored chip, by perceived luminance.
-function chipText(hex: string): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return "#fff";
-  const n = parseInt(m[1], 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+/**
+ * White vs near-black text for a colored chip, by perceived luminance.
+ *
+ * The PARSE is shared with every other colour helper (color-math's parseColor);
+ * the weights and the threshold are NOT, and must not be. These are YIQ weights
+ * at 0.6, answering "which text reads on this chip". color-math's isDark answers
+ * a near-enough question with different weights at 0.55, and hueOf in
+ * item-color.ts answers a third one — folding any of them together would flip
+ * text colours on a live stage display for no reason.
+ *
+ * The six-digit gate stays too. parseColor also accepts #rgb, #rrggbbaa and
+ * rgba(), and widening what this accepts is a behaviour change however harmless
+ * it looks; the leading hash stays OPTIONAL here, which it is nowhere else.
+ */
+export function chipText(hex: string): string {
+  if (!/^#?[0-9a-f]{6}$/i.test(hex)) return "#fff";
+  const c = parseColor(hex.startsWith("#") ? hex : `#${hex}`);
+  if (!c) return "#fff";
+  const lum = (0.299 * c.r + 0.587 * c.g + 0.114 * c.b) / 255;
   return lum > 0.6 ? "#111111" : "#fff";
 }
 
@@ -44,6 +57,27 @@ function SectionChip({ section, size = "md" }: { section: ProSection | null; siz
   );
 }
 
+/**
+ * Sizes to h-full, never the viewport: this renders both on a display and inside
+ * an embed tile. The screen height and the safe-area insets belong to the kiosk
+ * route — see stage-view.tsx.
+ *
+ * THE HEIGHT ONLY. The TYPE below is still screen-relative: every size is a
+ * clamp on vmin, which is a fraction of the SCREEN and not of the box. In an
+ * embed tile that is wrong on purpose-in-name-only — a nine-up producer
+ * multiview draws these captions at the size a full-screen wall would, in a
+ * box a third the width, and the EmbedFontBox the tile wraps this in sets an
+ * inherited px size that a vmin clamp simply ignores.
+ *
+ * Left as it is deliberately, not overlooked. Moving 24 of these onto cqmin
+ * needs `container-type: size` on the surface root, which needs a definite
+ * height to resolve against and collapses the content to zero where it does not
+ * get one — a failure that shows up only in a browser. jsdom models no layout at
+ * all (offsetHeight is always 0), so nothing in this repo's suite can tell the
+ * working version from the collapsed one, and every stage display in a building
+ * is downstream of the answer. calendar-view.tsx has no vmin at all and its
+ * header says why: it is an office display read from a desk, at absolute sizes.
+ */
 export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript();
@@ -62,7 +96,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3">
+      <div className="flex flex-col items-center justify-center h-full kiosk-surface gap-3">
         <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
         <p className="text-headline text-fg-subtle">Loading…</p>
       </div>
@@ -70,7 +104,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   }
   if (error || !state) {
     return (
-      <div className="flex flex-col items-center justify-center h-[100dvh] kiosk-surface gap-3 px-12 text-center">
+      <div className="flex flex-col items-center justify-center h-full kiosk-surface gap-3 px-12 text-center">
         <p className="text-title3 text-fg-muted font-semibold">Could not load stage display</p>
         {error && <p className="text-caption1 text-fg-subtle">{error}</p>}
       </div>
@@ -100,7 +134,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
   const runningTimers = pro?.timers ?? [];
 
   return (
-    <div className="flex flex-col h-[100dvh] overscroll-none kiosk-surface text-fg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overscroll-none kiosk-surface text-fg">
       {/* Brand top bar */}
       <div
         className="relative flex items-center h-10 shrink-0"

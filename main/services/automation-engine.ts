@@ -10,21 +10,21 @@
 
 import { errorMessage } from "./errors.js";
 import { randomUUID } from "node:crypto";
+import { scrub } from "./scrub.js";
 
 import type { AutomationSettings, ConditionCtx, Rule } from "../types/automation.js";
-import { addBroadcastListener, broadcast } from "./broadcaster.js";
+import { addBroadcastListener, addChannelDemandSource, broadcast } from "./broadcaster.js";
 import { AUTOMATION_ACTIONS } from "./automation-actions.js";
-import { allConditionsHold } from "./automation-conditions.js";
+import { AUTOMATION_CONDITIONS, allConditionsHold } from "./automation-conditions.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { automationLog } from "./automation-log.js";
 import { automationStore } from "./automation-store.js";
 import { integrationManager } from "./integration-manager.js";
 import { signalStore } from "./signal-store.js";
-import { smaartService } from "./smaart-service.js";
-import { sensourceService } from "./sensource-service.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
+import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
@@ -219,6 +219,20 @@ class AutomationEngine {
       outcome,
       detail,
     });
+    // A rule that FAILED is the one automation outcome that belongs in the server
+    // log as well. Everything the engine does is recorded — but only in its own
+    // store, read only by /automation, so an action that errored was invisible
+    // from /log, which is the page you are on when you are working out why the
+    // building is not doing what it should. Fires, simulations and suppressions
+    // stay out: in a normal service there are dozens of them and they would bury
+    // the failure this line exists to surface.
+    //
+    // Both halves go through scrub(): the rule name is typed by the operator into
+    // an HTTP body and the detail carries whatever a device or provider said back,
+    // so a newline in either forges a log line on a LAN-visible page.
+    if (outcome === "failed") {
+      console.warn(`[automation] rule "${scrub(rule.name)}" failed: ${scrub(detail)}`);
+    }
     // Mirror into the raw layer, but only while a service is being recorded — the
     // archive is per-service, and a rule firing on a Tuesday belongs to no service.
     // The open SPL record is the authority on which occurrence that is.
@@ -238,12 +252,20 @@ class AutomationEngine {
     const state = stageController.getState();
     const integrations: Record<string, string> = {};
     for (const s of integrationManager.getStates()) integrations[s.id] = s.connection;
+    // Read ONCE. Two getLatest() calls could straddle a poll and hand the
+    // conditions a `connected` from one snapshot and layers from the next.
+    const pvp = pvpService.getLatest();
     return {
       pcoLive: live ? { mode: live.mode, serviceTimeId: live.serviceTimeId ?? null } : null,
       serviceTypeId: state.serviceTypeId ?? null,
       integrations,
       obsRecording: obsService.getLatest().recording === true,
       reaperRecording: reaperService.getLatest().recording === true,
+      // null, not [], when PVP has never connected. An empty workspace and an
+      // integration that is switched off look identical as a list, and "the
+      // workspace has nothing on screen" must not hold for a machine we have
+      // never spoken to.
+      pvpLayers: pvp.connected ? pvp.layers : null,
       resiStreaming: resiService.getLatest().live === true,
       youtubeStreaming: youtubeService.getLatest().live === true,
       baptismPhase: baptismTimerService.getState()?.phase ?? null,
@@ -270,22 +292,62 @@ class AutomationEngine {
       (rule) => rule.enabled && AUTOMATION_TRIGGERS[rule.trigger.id]?.channel === channel,
     );
   }
+
+  /**
+   * Does any armed, enabled rule carry this condition?
+   *
+   * Conditions never touch the bus — conditionCtx() PULLS each one from its
+   * service's latest snapshot when a rule fires — so wantsChannel cannot see
+   * them. A condition reading a throttled poll is demand on that poll all the
+   * same: "REAPER is recording" qualifying a rule while REAPER polls at its idle
+   * cadence answers from a snapshot seconds old.
+   */
+  wantsCondition(conditionId: string): boolean {
+    if (this.settings.disarmed) return false;
+    return this.rules.some(
+      (rule) => rule.enabled && rule.conditions.some((c) => c.id === conditionId),
+    );
+  }
 }
 
 export const automationEngine = new AutomationEngine();
 
 // Keep the channels this engine evaluates flowing even with no browser attached.
 //
-// smaart-service skipped the broadcast entirely without SSE subscribers, so
-// spl.crossed-above / crossed-below never fired on an unattended box — the normal
-// state for an appliance. sensource's gate throttles polling rather than
-// broadcasting, so people.count triggers were evaluating counts up to a minute
-// stale. Registered here, at the consumer, matching how attendance-recorder and
-// tsl-service declare their own demand.
-smaartService.addDemandSource(() => automationEngine.wantsChannel("spl:metrics"));
-sensourceService.addDemandSource(() => automationEngine.wantsChannel("people:count"));
-// Same reasoning for the streaming polls: idle, Resi drops to two minutes and
-// YouTube to five, so "Resi goes live" on an unattended box would fire minutes
-// after the stream started. A rule reading the channel is a watcher.
-resiService.addDemandSource(() => automationEngine.wantsChannel("resi:status"));
-youtubeService.addDemandSource(() => automationEngine.wantsChannel("youtube:status"));
+// Several producers skip work when nothing is watching — smaart-service dropped
+// the push entirely, sensource and the streaming polls fell to their idle
+// cadence, stage-controller skipped the whole device re-resolve — and all of them
+// asked an SSE subscriber check, which cannot see this engine. The result was
+// enabled rules that had simply never run, with no error anywhere.
+//
+// Derived from the trigger registry rather than written out per service, because
+// the hand-written version covered four channels and missed slots:devices and
+// prodcom:transcript. A new trigger on a new channel is now covered the moment it
+// is registered; demand-gating.test.ts asserts that, exactly.
+for (const channel of new Set(Object.values(AUTOMATION_TRIGGERS).map((t) => t.channel))) {
+  addChannelDemandSource(channel, () => automationEngine.wantsChannel(channel));
+}
+
+/**
+ * Conditions, which arrive by pull rather than on the bus.
+ *
+ * conditionCtx() reads each one from its service's latest snapshot at the moment
+ * a rule fires, so the trigger loop above cannot see the demand. A condition
+ * needs its own registration even when its channel is ALSO a trigger channel:
+ * the loop above covers the channels a rule TRIGGERS on, and a rule can
+ * perfectly well trigger on PCO and merely ASK about a PVP layer. That rule
+ * would read a snapshot at the idle cadence — which for PVP, whose whole point
+ * is driving content from a rule on a booth appliance with no browser open, is
+ * the case that matters most.
+ *
+ * Derived from the registry, exactly as the trigger loop is. This was a
+ * hand-maintained table beside AUTOMATION_CONDITIONS, and deleting five of its
+ * ten entries left the whole suite green — nothing anywhere tied a condition to
+ * its channel. `ConditionDef.channel` is now required and nullable, so a new
+ * condition cannot be written without answering the question.
+ */
+for (const [conditionId, def] of Object.entries(AUTOMATION_CONDITIONS)) {
+  const { channel } = def;
+  if (channel === null) continue;
+  addChannelDemandSource(channel, () => automationEngine.wantsCondition(conditionId));
+}

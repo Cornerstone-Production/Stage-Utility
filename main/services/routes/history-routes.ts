@@ -7,6 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
+import { errorMessage } from "../errors.js";
 import { baptismTriggersStore } from "../baptism-triggers-store.js";
 import { stageController } from "../stage-controller.js";
 import { attendanceStore } from "../attendance-store.js";
@@ -179,14 +180,75 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
 
     // List the current plan's attachments (powers the layout editor's file picker).
     if (method === "GET" && pathname === "/api/pco/attachments") {
-      json(res, await stageController.listPlanAttachments());
+      try {
+        json(res, await stageController.listPlanAttachments());
+      } catch (err) {
+      // 502, not 500: the request was well-formed, so reaching Planning Center
+      // is the only way this fails, and a 500 tells the operator this app broke
+      // when the upstream is down. The calendar routes make the same argument
+      // the other way round: a 400 would blame the caller. Without a try this
+      // reached the dispatcher's generic arm, which is 500 by design because a
+      // status is opt-in.
+        error(res, errorMessage(err), 502);
+      }
       return;
     }
 
     // Full rundown of the current plan (items + note columns) for the script /
     // SPL-rundown dashboards.
     if (method === "GET" && pathname === "/api/pco/plan-items") {
-      json(res, await stageController.listCurrentPlanItems());
+      try {
+        json(res, await stageController.listCurrentPlanItems());
+      } catch (err) {
+        error(res, errorMessage(err), 502);
+      }
+      return;
+    }
+
+    // The pre-service checklist, read from the plan's notes.
+    if (method === "GET" && pathname === "/api/pco/checklist") {
+      try {
+        json(res, await stageController.listPlanChecklist());
+      } catch (err) {
+        error(res, errorMessage(err), 502);
+      }
+      return;
+    }
+
+    // The categories and teams this service type offers, for the settings picker.
+    if (method === "GET" && pathname === "/api/pco/checklist-sources") {
+      try {
+        json(res, await stageController.listChecklistSources());
+      } catch (err) {
+        error(res, errorMessage(err), 502);
+      }
+      return;
+    }
+
+    // POST /api/pco/checklist/tick — { key, done }
+    // Awaited before the response: a tick that looked saved and was not is how
+    // somebody skips a job on Sunday believing it was done.
+    if (method === "POST" && pathname === "/api/pco/checklist/tick") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.key !== "string" || typeof body.done !== "boolean") {
+        error(res, "body.key (string) and body.done (boolean) required");
+        return;
+      }
+      try {
+        json(res, await stageController.setChecklistTick(body.key, body.done));
+      } catch (err) {
+        error(res, errorMessage(err));
+      }
+      return;
+    }
+
+    // POST /api/pco/checklist/clear — start this week's list over.
+    if (method === "POST" && pathname === "/api/pco/checklist/clear") {
+      try {
+        json(res, await stageController.clearChecklistTicks());
+      } catch (err) {
+        error(res, errorMessage(err));
+      }
       return;
     }
 

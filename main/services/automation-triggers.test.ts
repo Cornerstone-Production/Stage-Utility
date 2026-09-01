@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import { AUTOMATION_TRIGGERS, triggersForChannel } from "./automation-triggers.js";
+import type { PvpLayerDTO } from "../types/pvp.js";
 
 const NOW = Date.parse("2026-07-26T10:00:00Z");
 const live = (over: Record<string, unknown> = {}) => ({
@@ -550,5 +551,158 @@ describe("service pacing and updates", () => {
     const t = AUTOMATION_TRIGGERS["update.available"];
     assert.equal(t.didFire({ releasesBehind: 0 }, { releasesBehind: 1 }, {}, NOW), true);
     assert.equal(t.didFire({ releasesBehind: 1 }, { releasesBehind: 1 }, {}, NOW), false);
+  });
+});
+
+describe("ProVideoPlayer triggers", () => {
+  const layer = (over: Partial<PvpLayerDTO> = {}): PvpLayerDTO => ({
+    uuid: "l1", name: "Graphics", index: 0, state: "video",
+    mediaName: "loop_a.mp4", mediaUuid: "m1", lastCueName: "MAIN GRAPHIC", lastCueUuid: "c1", nextCueName: null,
+    hidden: false, muted: false, opacity: 1, playbackRate: 1,
+    anchorElapsedSec: 1, durationSec: 20,
+    ...over,
+  });
+  const EMPTY = {
+    state: "empty" as const, mediaUuid: null, mediaName: null,
+    anchorElapsedSec: null, durationSec: null, playbackRate: 0,
+  };
+  const snap = (...layers: PvpLayerDTO[]) => ({
+    connected: true, layers, sampledAt: "2026-08-30T12:00:00.000Z",
+  });
+  const fire = (id: string, prev: unknown, next: unknown, params: Record<string, unknown> = {}) =>
+    AUTOMATION_TRIGGERS[id].didFire(prev, next, params, NOW);
+
+  test("a cue starting on a layer fires when the media uuid changes", () => {
+    assert.equal(
+      fire("pvp.cue-started", snap(layer()), snap(layer({ mediaUuid: "m2", mediaName: "loop_b.mp4" }))),
+      true,
+    );
+  });
+
+  test("a cue starting does NOT fire on the same media looping round", () => {
+    // The media uuid is unchanged, and a loop is not a new cue. Firing here would
+    // run the rule every twenty seconds for the whole of pre-service.
+    assert.equal(
+      fire("pvp.cue-started", snap(layer({ anchorElapsedSec: 19 })), snap(layer({ anchorElapsedSec: 0.2 }))),
+      false,
+    );
+  });
+
+  test("a cue starting fires when a layer goes from empty to holding media", () => {
+    assert.equal(fire("pvp.cue-started", snap(layer(EMPTY)), snap(layer())), true);
+  });
+
+  test("a layer going EMPTY is not a cue starting", () => {
+    // The uuid changed - to null. A rule that read that as a new cue would fire
+    // on a clear, which is what pvp.layer-cleared is for.
+    assert.equal(fire("pvp.cue-started", snap(layer()), snap(layer(EMPTY))), false);
+  });
+
+  test("a cue starting on the NAMED layer only", () => {
+    const other = layer({ uuid: "l2", name: "Lower third" });
+    const moved = { ...other, mediaUuid: "m9" };
+    assert.equal(fire("pvp.cue-started", snap(layer(), other), snap(layer(), moved), { layer: "Lower third" }), true);
+    assert.equal(fire("pvp.cue-started", snap(layer(), other), snap(layer(), moved), { layer: "Graphics" }), false);
+    // Blank means any layer, so a half-built rule fires rather than never firing.
+    assert.equal(fire("pvp.cue-started", snap(layer(), other), snap(layer(), moved), { layer: "" }), true);
+    // And the name match ignores case and stray spaces, like every other one.
+    assert.equal(fire("pvp.cue-started", snap(layer(), other), snap(layer(), moved), { layer: " lower THIRD " }), true);
+  });
+
+  test("layers are paired by UUID, not by position in the array", () => {
+    // An operator reordering layers in PVP must not read as every layer changing
+    // at once. Same two layers, swapped in the payload, nothing else different.
+    const a = layer();
+    const b = layer({ uuid: "l2", name: "Lower third", mediaUuid: "m2" });
+    assert.equal(fire("pvp.cue-started", snap(a, b), snap(b, a)), false);
+  });
+
+  test("a layer clearing fires when playingMedia goes away", () => {
+    assert.equal(fire("pvp.layer-cleared", snap(layer()), snap(layer(EMPTY))), true);
+    assert.equal(fire("pvp.layer-cleared", snap(layer(EMPTY)), snap(layer())), false);
+  });
+
+  test("a layer VANISHING from the payload is not a clear", () => {
+    // A layer PVP stopped reporting is unknown, not empty. The same rule "an
+    // integration vanishing is not a disconnect" makes.
+    assert.equal(fire("pvp.layer-cleared", snap(layer()), snap()), false);
+  });
+
+  test("a layer APPEARING in the payload is not an edge either", () => {
+    // The other direction, and the one that actually bites: a layer we have
+    // never seen before has no `before` to compare against, and treating a
+    // missing `before` as "not empty" would fire a CLEARED rule for a layer that
+    // has only just turned up empty. A workspace being opened would fire every
+    // clear rule at once.
+    const fresh = layer({ uuid: "l9", name: "New layer" });
+    assert.equal(fire("pvp.layer-cleared", snap(layer()), snap(layer(), { ...fresh, ...EMPTY })), false);
+    assert.equal(fire("pvp.cue-started", snap(layer()), snap(layer(), fresh)), false);
+    assert.equal(fire("pvp.layer-hidden", snap(layer()), snap(layer(), { ...fresh, hidden: true })), false);
+    assert.equal(fire("pvp.playback-stopped", snap(layer()), snap(layer(), { ...fresh, playbackRate: 0 })), false);
+  });
+
+  test("playback stopping fires when a rolling layer stops rolling", () => {
+    assert.equal(
+      fire("pvp.playback-stopped", snap(layer()), snap(layer({ state: "still", playbackRate: 0 }))),
+      true,
+    );
+  });
+
+  test("NOTHING fires because PVP went offline", () => {
+    // A dropped connection reports an empty workspace, so the pairing alone
+    // handles the shape the service actually emits. The `connected` check is
+    // there for the shape it does NOT: a snapshot that still carries layers
+    // while saying it is unreachable — a stale or partial frame. Both are
+    // asserted, because the first on its own cannot tell a working guard from a
+    // deleted one, and a guard that cannot go red is not a guard.
+    const offlineEmpty = { connected: false, layers: [], sampledAt: null };
+    const offlineStale = { connected: false, layers: [layer({ hidden: true, muted: true, ...EMPTY })], sampledAt: null };
+    for (const id of Object.keys(AUTOMATION_TRIGGERS).filter((k) => k.startsWith("pvp.") && !k.endsWith("connected") && !k.endsWith("disconnected"))) {
+      assert.equal(AUTOMATION_TRIGGERS[id].didFire(snap(layer()), offlineEmpty, {}, NOW), false, `${id} fired on an offline empty workspace`);
+      assert.equal(AUTOMATION_TRIGGERS[id].didFire(snap(layer()), offlineStale, {}, NOW), false, `${id} fired on an offline workspace that still carried layers`);
+    }
+  });
+
+  test("hide, unhide, mute and unmute each fire on their own edge", () => {
+    assert.equal(fire("pvp.layer-hidden", snap(layer()), snap(layer({ hidden: true }))), true);
+    assert.equal(fire("pvp.layer-hidden", snap(layer({ hidden: true })), snap(layer())), false);
+    assert.equal(fire("pvp.layer-unhidden", snap(layer({ hidden: true })), snap(layer())), true);
+    assert.equal(fire("pvp.layer-muted", snap(layer()), snap(layer({ muted: true }))), true);
+    assert.equal(fire("pvp.layer-unmuted", snap(layer({ muted: true })), snap(layer())), true);
+  });
+
+  test("a hide edge is not also a mute edge", () => {
+    // The two are generated from one function, and a generator that read the
+    // wrong key would make every hidden layer fire the mute rule too.
+    assert.equal(fire("pvp.layer-muted", snap(layer()), snap(layer({ hidden: true }))), false);
+    assert.equal(fire("pvp.layer-hidden", snap(layer()), snap(layer({ muted: true }))), false);
+  });
+
+  test("every generated flag trigger is registered under the id it declares", () => {
+    // A template-literal key and a hand-written `id` are exactly the pair that
+    // can drift, and nothing else in the suite would notice.
+    for (const [key, t] of Object.entries(AUTOMATION_TRIGGERS)) {
+      if (key.startsWith("pvp.")) assert.equal(t.id, key, `${key} declares id ${t.id}`);
+    }
+  });
+
+  test("no PVP trigger fires on a null prev", () => {
+    // The restart guard. Asserted globally for every trigger elsewhere in this
+    // file; named here too because these are the ones that would fire a whole
+    // service's worth of rules at once after an update.
+    for (const id of Object.keys(AUTOMATION_TRIGGERS).filter((k) => k.startsWith("pvp."))) {
+      assert.equal(AUTOMATION_TRIGGERS[id].didFire(null, snap(layer()), {}, NOW), false, `${id} fired on a null prev`);
+    }
+  });
+
+  test("every PVP trigger survives a malformed payload without throwing", () => {
+    for (const id of Object.keys(AUTOMATION_TRIGGERS).filter((k) => k.startsWith("pvp."))) {
+      for (const junk of [{}, { layers: null }, { layers: "no" }, { layers: [null, 7] }]) {
+        assert.doesNotThrow(
+          () => AUTOMATION_TRIGGERS[id].didFire(junk, junk, {}, NOW),
+          `${id} threw on ${JSON.stringify(junk)}`,
+        );
+      }
+    }
   });
 });

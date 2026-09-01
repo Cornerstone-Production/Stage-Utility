@@ -93,8 +93,7 @@ $env:STAGE_TRACK = "beta"; irm https://raw.githubusercontent.com/Cornerstone-Pro
 ```
 
 To pin one exact version instead of "newest on the track", add
-`STAGE_VERSION=v1.10.0-beta.30` the same way. The installer always fetches the
-installer script from `main`, whichever track it installs.
+`STAGE_VERSION=v1.10.0-beta.30` the same way.
 
 **Re-running the installer upgrades in place — do not uninstall first.** It
 unpacks the new release beside the current one, flips the `current` pointer,
@@ -295,8 +294,9 @@ backend.
 
 ## Configure
 
-Everything is configured in the Settings UI at `/settings` — nothing lives in the
-repo. Work down the sidebar:
+Everything is configured in the app — nothing lives in the repo. Open the
+server's address and work down the sidebar; what each page is for is in
+[The operator app](../features/operator-app.md).
 
 **Integrations** — connect Planning Center first, since the plan drives everything
 else. Enter an App ID and Secret from a
@@ -309,16 +309,17 @@ Manual pins one, and its picker also lists the last 30 days so you can point the
 screens at a service that has already happened. Active Service Types limits which
 types Auto considers.
 
-**Views** — the content you build. A view is a slot grid, dashboard, stage screen,
-captions, script rundown, SPL rundown, or a custom layout you design on a canvas.
-Build once, route to any number of screens.
-
-**Displays** — your physical screens. Each has its own URL and points at one view.
+**Screens** — build the content and route it to your physical screens. A view is a
+slot grid, dashboard, stage screen, captions, script rundown, SPL rundown, or a
+custom layout you design on a canvas; build once and route it to any number of
+screens, each with its own URL.
 
 **Branding, Automation, History, Baptisms, Patch** — appearance, event-driven
 rules, recorded services, the baptism timer and the stage patch sheet.
 
-**Advanced** — time zone, network address, update track, backups and the data
+**Advanced** — updates and the update track, the server log, the context bar,
+kiosk devices, time zone and clock format, the public address, how integrations
+back off between services, backup and restore, automatic backups, and the data
 archive.
 
 ### Time zone
@@ -341,14 +342,37 @@ it.
 
 | Surface | Development | Production |
 |---|---|---|
-| Display picker | `localhost:3000/` | `http://<host>/` |
+| Home, and everything an operator does | `localhost:3000/` | `http://<host>/` |
 | A display | `localhost:3000/display-1` | `http://<host>/display-1` |
 | Settings | `localhost:3000/settings` | `http://<host>/settings` |
-| ScriptView | — | `http://<host>/scriptview` |
+| ScriptView | `localhost:3000/scriptview` | `http://<host>/scriptview` |
 | API and SSE | proxied to `:8788` | `http://<host>/api/*` |
 
-The server binds `0.0.0.0:8788`, and also `:80` where the process is permitted, so
-URLs need no port — `8788` always stays up either way.
+Every address is in [Display URLs](../display-urls.md).
 
-Override with `STAGE_UTILITY_PORT`, or `STAGE_UTILITY_FRIENDLY_PORT=0` to disable
-the port-free listener. `STAGE_UTILITY_DATA` sets the data directory.
+The server binds `0.0.0.0:8788`, and also `:80` where the process is permitted, so
+URLs need no port — `8788` always stays up either way. If `:80` is refused it
+says why in the log once and keeps retrying; nothing else is affected.
+
+## Environment
+
+Set at install time by the installers, and read by the running server. Nothing
+here is required — every one has a working default.
+
+| | |
+|---|---|
+| `STAGE_UTILITY_DATA` | Where configuration, history and the encryption key live. Default `~/.stage-utility`; the installers set their own, above |
+| `STAGE_UTILITY_PORT` | The main port. Default `8788` |
+| `STAGE_UTILITY_FRIENDLY_PORT` | The extra port-free listener. Default `80`; `0` disables it |
+| `STAGE_UTILITY_LOG_TOKEN` | Require `?token=…` on `/log` and `/api/log`. Unset leaves them open on the LAN |
+| `STAGE_UTILITY_KEY_FILE` | Read the encryption key from a path of your own instead of beside the secrets — see [Reliability](reliability.md#backups) |
+| `STAGE_UTILITY_KEY` | The key itself, as raw base64 or hex. No key file is read or written |
+| `STAGE_UTILITY_ROOT` | The install directory, when it cannot be worked out. Ignored unless it holds a `package.json` or a `VERSION` |
+| `STAGE_UTILITY_INSTALL_KIND` | `git`, `tarball` or `homebrew`, when the updater cannot tell. Normally inferred |
+| `STAGE_UTILITY_DEBUG` | `1` logs every Planning Center and HTTP request. Noisy; for diagnosing, not for running |
+
+Per-integration debug logging: `PP_DEBUG`, `PRODCOM_DEBUG`, `RESI_DEBUG`,
+`SHURE_DEBUG`, `SENNHEISER_DEBUG`, `SPECTERA_DEBUG` — each `1` to turn on.
+
+The `STAGE_*` variables in the installer table further up are read by the
+installer scripts only, not by the server.

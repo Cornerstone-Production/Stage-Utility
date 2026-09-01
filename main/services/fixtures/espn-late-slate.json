@@ -1,0 +1,99 @@
+{
+  "_comment": [
+    "ESPN's scoreboard for dates=20260831, trimmed to the fields parseScoreboard reads.",
+    "EVERY identifier here is invented — team ids, names, abbreviations, colours, venues",
+    "and event ids. This is a public repository. The SHAPE is the real one: note that the",
+    "second event is listed 2026-09-01T01:40Z and is on this slate anyway, because ESPN",
+    "buckets an event under its own local date (21:40 on the 31st where it is played).",
+    "That is the whole point of this fixture — see scores-midnight.test.ts."
+  ],
+  "events": [
+    {
+      "id": "700001",
+      "date": "2026-08-31T22:40Z",
+      "status": {
+        "displayClock": "0:00",
+        "type": { "state": "post", "name": "STATUS_FINAL", "detail": "Final", "shortDetail": "Final" }
+      },
+      "competitions": [
+        {
+          "venue": { "fullName": "Otter Creek Yard" },
+          "competitors": [
+            {
+              "id": "9201",
+              "homeAway": "away",
+              "score": "2",
+              "records": [{ "type": "total", "summary": "70-66" }],
+              "team": {
+                "id": "9201",
+                "abbreviation": "COT",
+                "shortDisplayName": "Otters",
+                "displayName": "Cedar Hollow Otters",
+                "color": "1d4f7a",
+                "logo": "https://example.invalid/logos/9201.png"
+              }
+            },
+            {
+              "id": "9202",
+              "homeAway": "home",
+              "score": "5",
+              "records": [{ "type": "total", "summary": "81-55" }],
+              "team": {
+                "id": "9202",
+                "abbreviation": "GBA",
+                "shortDisplayName": "Anchors",
+                "displayName": "Granite Bay Anchors",
+                "color": "8a3b1f",
+                "logo": "https://example.invalid/logos/9202.png"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "700002",
+      "date": "2026-09-01T01:40Z",
+      "status": {
+        "displayClock": "0:00",
+        "type": { "state": "in", "name": "STATUS_IN_PROGRESS", "detail": "Top 8th", "shortDetail": "Top 8th" }
+      },
+      "competitions": [
+        {
+          "venue": { "fullName": "Sentinel Park" },
+          "situation": { "outs": 1, "balls": 2, "strikes": 1, "onFirst": true, "onSecond": false, "onThird": false },
+          "competitors": [
+            {
+              "id": "9101",
+              "homeAway": "away",
+              "score": "4",
+              "records": [{ "type": "total", "summary": "74-62" }],
+              "team": {
+                "id": "9101",
+                "abbreviation": "HKS",
+                "shortDisplayName": "Kestrels",
+                "displayName": "Harbor Kestrels",
+                "color": "0f5c4a",
+                "logo": "https://example.invalid/logos/9101.png"
+              }
+            },
+            {
+              "id": "9102",
+              "homeAway": "home",
+              "score": "3",
+              "records": [{ "type": "total", "summary": "68-68" }],
+              "team": {
+                "id": "9102",
+                "abbreviation": "PSN",
+                "shortDisplayName": "Sentinels",
+                "displayName": "Prairie Sentinels",
+                "color": "5b2a6e",
+                "logo": "https://example.invalid/logos/9102.png"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

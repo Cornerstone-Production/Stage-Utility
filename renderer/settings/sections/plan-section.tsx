@@ -17,6 +17,7 @@ import {
   Collapsible,
 } from "../../components/ui";
 import type { SectionProps } from "../types";
+import { ChecklistSources } from "./checklist-sources";
 
 export function PlanSection({
   stageState,
@@ -214,6 +215,8 @@ export function PlanSection({
           </FieldSet>
         );
       })()}
+
+      <ChecklistSources stageState={stageState} handlers={handlers} />
     </div>
   );
 }

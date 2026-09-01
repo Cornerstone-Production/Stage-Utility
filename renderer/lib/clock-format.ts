@@ -57,6 +57,79 @@ export function clockOptions(o: ClockOptions = {}): Intl.DateTimeFormatOptions {
 }
 
 /**
+ * The Intl parts for a time of day, or `null` for anything unparseable.
+ *
+ * THE ONE PLACE the guards live. Both public formatters below go through here,
+ * so a null, a NaN date and an invalid `timeZone` from a saved layout are
+ * handled identically by definition rather than by two copies staying in step —
+ * which is what `head + seconds + tail === formatClock(…)` rests on.
+ *
+ * `toLocaleTimeString` is the obvious call and the wrong one. On Node 24 — what
+ * `engines` pins and what CI runs — it emits U+0020 before the day period where
+ * `formatToParts` emits U+202F, a narrow no-break space. So "8:45:30 PM" and
+ * "8:45:30 PM" compared unequal, the split's own guard failed on CI, and it
+ * passed on a newer Node where the two APIs happen to agree. Browsers agree
+ * today too, which is exactly why this would have sat here unnoticed.
+ *
+ * Assembling a clock two ways gives it two answers. One way, then.
+ */
+function partsFor(
+  when: number | string | Date | null | undefined,
+  o: ClockOptions,
+): Intl.DateTimeFormatPart[] | null {
+  if (when === null || when === undefined) return null;
+  const d = when instanceof Date ? when : new Date(when);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat(undefined, clockOptions(o)).formatToParts(d);
+  } catch {
+    // An invalid timeZone from a saved layout must not blank the panel it is on.
+    // Not rethrown because there IS a correct answer without the zone — the
+    // viewer's own — and it is the reading every other clock on the page shows.
+    return new Intl.DateTimeFormat(undefined, clockOptions({ ...o, timeZone: null })).formatToParts(d);
+  }
+}
+
+const joinParts = (ps: readonly Intl.DateTimeFormatPart[]) => ps.map((p) => p.value).join("");
+
+/**
+ * A time of day split so the SECONDS can be hidden without reformatting.
+ *
+ * The context bar's fit ladder gives up the seconds before it gives up anything
+ * else, and it has to do that without changing the rest of the reading. Formatting
+ * twice — once with seconds, once without — and swapping the strings would put
+ * both in the DOM, so a screen reader would read the time twice; and it is 22px
+ * of duplicate node either way.
+ *
+ * Cutting the string by hand is wrong in 12h, where the day period follows the
+ * seconds: "3:20:55 PM" is not "3:20:55" plus a suffix. So the parts come from
+ * Intl itself and the seconds are lifted out with the separator that introduces
+ * them, leaving `head` and `tail` to be rendered either side.
+ *
+ * `head + seconds + tail` is exactly `formatClock(when, { seconds: true })`.
+ */
+export function clockParts(
+  when: number | string | Date | null | undefined,
+  o: ClockOptions = {},
+): { head: string; seconds: string; tail: string } {
+  const parts = partsFor(when, { ...o, seconds: true });
+  if (!parts) return { head: "", seconds: "", tail: "" };
+
+  const at = parts.findIndex((p) => p.type === "second");
+  // No second part at all should not happen with `second` requested, but a locale
+  // that ignored it would otherwise silently lose the whole reading here.
+  if (at === -1) return { head: joinParts(parts), seconds: "", tail: "" };
+  // The literal that introduces the seconds goes WITH them. Left behind it is a
+  // trailing colon on a clock that has stopped showing seconds.
+  const from = at > 0 && parts[at - 1]!.type === "literal" ? at - 1 : at;
+  return {
+    head: joinParts(parts.slice(0, from)),
+    seconds: joinParts(parts.slice(from, at + 1)),
+    tail: joinParts(parts.slice(at + 1)),
+  };
+}
+
+/**
  * A time of day, in the app's format.
  *
  * Returns "" for anything unparseable rather than "Invalid Date" — these render
@@ -64,13 +137,8 @@ export function clockOptions(o: ClockOptions = {}): Intl.DateTimeFormatOptions {
  * which is what it means.
  */
 export function formatClock(when: number | string | Date | null | undefined, o: ClockOptions = {}): string {
-  if (when === null || when === undefined) return "";
-  const d = when instanceof Date ? when : new Date(when);
-  if (Number.isNaN(d.getTime())) return "";
-  try {
-    return d.toLocaleTimeString(undefined, clockOptions(o));
-  } catch {
-    // An invalid timeZone from a saved layout should not blank the whole panel.
-    return d.toLocaleTimeString(undefined, clockOptions({ ...o, timeZone: null }));
-  }
+  // ONE path, shared with clockParts: both join the SAME parts, so a split can
+  // never disagree with the whole it came from. See partsFor.
+  const parts = partsFor(when, o);
+  return parts ? joinParts(parts) : "";
 }

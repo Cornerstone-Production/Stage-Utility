@@ -4,7 +4,7 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -23,10 +23,11 @@ import {
   confirm, Dialog} from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
+import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
-import { viewSurface, outputMode } from "@main/types/views";
+import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
@@ -49,12 +50,20 @@ interface OutputRowProps {
   onRename: (name: string) => void;
   /** This display's icon tint, or undefined for the theme default. */
   iconColor?: string;
+  /** Where this card's icon is stored — the view id for a control surface, so it
+   *  is the same entry the sidebar tab uses; the output id otherwise. */
+  iconKey: string;
+  /** Where it was stored before that key moved, if it did. Undefined when the two
+   *  are the same key. Read as a fallback, migrated on the next write. */
+  legacyIconKey?: string;
   /** Save the friendly URL slug ("" clears it). Rejects with a reason the card shows. */
   onSetSlug: (slug: string) => Promise<void>;
   onSetView: (viewId: string | null) => void;
   /** Rename the view this screen is showing (not the screen). */
   onRenameView: (viewId: string, name: string) => void;
   onSetLocked: (locked: boolean) => void;
+  /** Show or hide THIS display's kiosk top bar (brand, plan context, QR). */
+  onSetHideTopBar: (hideTopBar: boolean) => void;
   /** Awaited: switching a screen to a panel must LAND before a console view
    *  is assigned to it, because the server refuses the pair in the wrong order. */
   onSetMode: (mode: "display" | "panel") => Promise<void>;
@@ -69,9 +78,52 @@ interface OutputRowProps {
 // One card per display: the name reads as a title, the View it shows is the one
 // prominent control, Open + Lock stay in reach, and the URL sits quietly in the
 // footer. Refresh/Remove tuck into the overflow menu so they don't compete.
-function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+/**
+ * Where a screen's icon lives.
+ *
+ * A screen showing a CONTROL SURFACE is, to the operator, the same thing as the
+ * console tab in the sidebar — so both use the view's key and there is one icon
+ * between them. Anything else is a screen in its own right and keys by its id.
+ */
+export function iconKeyFor(output: { id: string; viewId?: string | null }, views: View[]): string {
+  if (!output.viewId) return output.id;
+  const view = views.find((v) => v.id === output.viewId);
+  return view && viewSurface(view) === "console" ? view.id : output.id;
+}
+
+/**
+ * Where this screen's icon is stored, where it USED to be, and the entry in hand.
+ *
+ * The key above MOVED for a console-surface screen — from the output id to the
+ * view id — and moved with no fallback and no migration, so an operator's tint
+ * reverted to the theme accent and the entry they had set was read by nothing.
+ * The old key is still read, and the next write moves the value onto the new one
+ * (see `IconTint`); reading may not save.
+ *
+ * A function rather than an expression in the card's props because it is asserted
+ * on: the version that lived inline could only be checked by rendering the whole
+ * section, so it was not checked at all.
+ */
+export function resolveIconEntry(
+  output: { id: string; viewId?: string | null },
+  views: View[],
+  entries: Record<string, string> | undefined,
+): { key: string; legacyKey?: string; value?: string } {
+  const key = iconKeyFor(output, views);
+  const legacyKey = key === output.id ? undefined : output.id;
+  return { key, legacyKey, value: iconEntryAt(entries, key, legacyKey) };
+}
+
+export function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
+  // Both bar items below are about a strip that only some kinds draw. Offering
+  // them where no bar exists is not a harmless extra: "Lock display" shipped
+  // that way, and on a calendar or a script wall it persisted a flag, turned its
+  // icon accent, and changed nothing on the screen — the operator reads that as
+  // a locked display. An unrouted screen still shows a bar (the placeholder
+  // draws one whatever the routing says), so no view assigned means keep them.
+  const drawsTopBar = assignedView ? KIND_DRAWS_TOP_BAR[assignedView.kind] : true;
   const [renamingView, setRenamingView] = useState(false);
   const [viewName, setViewName] = useState("");
 
@@ -157,7 +209,14 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           onTouchStart={(e) => e.stopPropagation()}
           className="flex shrink-0"
         >
-          <IconTint itemKey={output.id} icon={MonitorIcon} color={iconColor} label={output.name} />
+          {/* Keyed by the VIEW when this screen shows a control surface, so the
+              card and that console's tab in the sidebar are one entry. They used
+              to be two — the card by output id, the tab by view id, with the tab
+              preferring its own — so setting the icon on the card moved nothing
+              if the tab had ever been set. One key, no precedence to reason
+              about. A screen showing a wall-screen view keeps its own key: it is
+              a screen, not a thing the sidebar lists. */}
+          <IconTint itemKey={iconKey} legacyKey={legacyIconKey} icon={MonitorIcon} color={iconColor} label={output.name} />
         </span>
         <Input
           value={editName}
@@ -260,13 +319,32 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
                   : <HandIcon className="size-3.5 text-fg-subtle" />}
                 {outputMode(output) === "panel" ? "Use as a display" : "Use as a control surface"}
               </DropdownMenu.Item>
-              <DropdownMenu.Item
-                onSelect={() => onSetLocked(!(output.locked ?? false))}
-                className={MENU_ITEM}
-              >
-                {output.locked ? <LockIcon className="size-3.5 text-accent" /> : <LockOpenIcon className="size-3.5 text-fg-subtle" />}
-                {output.locked ? "Unlock display" : "Lock display"}
-              </DropdownMenu.Item>
+              {/* The lock's ONLY effect is on the top bar: it strips the home
+                  link and the QR and leaves the rest. So it belongs with the
+                  item below, and neither is offered on a screen with no bar. */}
+              {drawsTopBar && (
+                <DropdownMenu.Item
+                  onSelect={() => onSetLocked(!(output.locked ?? false))}
+                  className={MENU_ITEM}
+                >
+                  {output.locked ? <LockIcon className="size-3.5 text-accent" /> : <LockOpenIcon className="size-3.5 text-fg-subtle" />}
+                  {output.locked ? "Unlock display" : "Lock display"}
+                </DropdownMenu.Item>
+              )}
+              {/* Per display, not global: some screens want the plan context and
+                  the QR, a stage-facing wall wants that strip back. Separate from
+                  the lock above, which KEEPS the bar and only strips its links. */}
+              {drawsTopBar && (
+                <DropdownMenu.Item
+                  onSelect={() => onSetHideTopBar(!(output.hideTopBar ?? false))}
+                  className={MENU_ITEM}
+                >
+                  {output.hideTopBar
+                    ? <PanelTopDashedIcon className="size-3.5 text-accent" />
+                    : <PanelTopIcon className="size-3.5 text-fg-subtle" />}
+                  {output.hideTopBar ? "Show top bar" : "Hide top bar"}
+                </DropdownMenu.Item>
+              )}
               <DropdownMenu.Item
                 // preventDefault keeps the menu OPEN across the copy. Without it
                 // Radix closes and returns focus to the trigger, which discards
@@ -329,6 +407,10 @@ function OutputRow({ output, views, baseUrl, online, canRemove, iconColor, onRen
           // The preview iframe sets pointer-events:none, so the click lands here.
           <LazyPreview
             viewId={output.viewId}
+            // This card IS a screen, so its preview speaks for that screen and
+            // not merely for the View behind it. It is what makes "Hide top bar"
+            // below visibly do something: the card loses its bar too.
+            outputId={output.id}
             onExpand={onEditLayout}
             expandLabel={`Edit what ${output.name} shows`}
           />
@@ -623,7 +705,12 @@ export function OutputsSection({
             computes the wrong drop target as soon as there are two. */}
         <SortableContext items={outputs.map((o) => o.id)} strategy={rectSortingStrategy}>
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
-            {outputs.map((output) => (
+            {outputs.map((output) => {
+              // Once per row, not twice: it scans every view to answer, and the
+              // colour and the glyph are the same question asked about the same
+              // screen — they cannot be allowed to answer differently either.
+              const icon = resolveIconEntry(output, stageState.views, stageState.iconColors);
+              return (
               <OutputRow
                 key={output.id}
                 output={output}
@@ -631,12 +718,15 @@ export function OutputsSection({
                 baseUrl={baseUrl}
                 online={connected.has(output.id)}
                 canRemove={outputs.length > 1}
-                iconColor={stageState.iconColors?.[output.id]}
+                iconColor={icon.value}
+                iconKey={icon.key}
+                legacyIconKey={icon.legacyKey}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
                 onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
+                onSetHideTopBar={(hideTopBar) => handlers.handleSetOutputHideTopBar(output.id, hideTopBar)}
                 onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
@@ -651,7 +741,8 @@ export function OutputsSection({
                   onEditLayout && output.viewId ? () => onEditLayout(output.viewId!) : undefined
                 }
               />
-            ))}
+              );
+            })}
             {/* The add tile sits IN the grid. As a button under eight cards it
                 was below the fold on the page where you would want it. */}
             <button

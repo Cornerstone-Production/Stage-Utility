@@ -76,6 +76,7 @@ import { tslService } from "./main/services/tsl-service.js";
 import { remoteServer } from "./main/services/remote-server.js";
 import { stageController } from "./main/services/stage-controller.js";
 import { cacheMaintenance } from "./main/services/cache-maintenance.js";
+import { calendarBroadcaster } from "./main/services/calendar-broadcaster.js";
 import { reconcileOpenRecords } from "./main/services/reconcile-records.js";
 
 // ── Data directory ────────────────────────────────────────────────────────────
@@ -123,6 +124,7 @@ livePoller.start();
 
 // Keep the photo + attachment disk caches from growing unbounded over months.
 cacheMaintenance.start();
+calendarBroadcaster.start();
 
 console.log(`[server] ready — control panel at ${remoteServer.getLanUrl()}`);
 

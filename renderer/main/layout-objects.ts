@@ -32,6 +32,7 @@ export const PALETTE_GROUP_ORDER = [
   "REAPER",
   "Resi",
   "YouTube",
+  "ProVideoPlayer",
   "Control",
   "Status",
 ] as const;
@@ -136,6 +137,9 @@ export const HOST_FRAMED_TYPES = new Set<LayoutObjectType>([
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl",
   "home-screens", "home-streaming", "home-streaming-resi", "home-streaming-youtube",
+  "home-pvp",
+  "home-pvp-now",
+  "home-scores",
 ]);
 
 type CardAccent = "neutral" | "green" | "red" | "amber" | "flat";
@@ -351,6 +355,16 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     // at 1.85× the page breaks exactly that, showing about half the rundown.
     // Someone who does want it bigger has the font-size field; someone who wants
     // it to match the page had no way to get there by eye.
+    style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
+    homeSize: "l",
+  },
+  "screen-embed": {
+    label: "Embedded screen",
+    blurb: "What another screen is showing, live",
+    group: "PCO / service",
+    config: () => ({ type: "screen-embed", outputId: null, showLabel: true, showStatus: true }),
+    // Same starting size as the embedded VIEW above, and for the same reason:
+    // whatever the screen is routed to should look like it does on that screen.
     style: () => CARD({ fontSize: EMBED_FONT_FRACTION, textAlign: "left", vAlign: "top" }),
     homeSize: "l",
   },
@@ -617,6 +631,55 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     integration: { id: "reaper", label: "REAPER" },
   },
 
+  // ProVideoPlayer
+  "pvp-layers": {
+    label: "ProVideoPlayer layers",
+    blurb: "What ProVideoPlayer has on each layer, and how long is left",
+    group: "ProVideoPlayer",
+    // showProgress OFF. The time is not behind it any more — that is the reading
+    // the widget exists for — so this is the hairline rule alone, and four of
+    // them stacked in a wall tile is a texture rather than four readings. The
+    // `-now` widgets below default it ON, where there is exactly one.
+    config: () => ({ type: "pvp-layers", show: "with-content", layerName: null, showProgress: false, hideWhenEmpty: false }),
+    style: () => CARD({ fontSize: 0.05 }),
+    homeSize: "m",
+    integration: { id: "pvp", label: "ProVideoPlayer" },
+  },
+  "home-pvp": {
+    // Label unchanged. It ships, it is in the widget reference, and an operator
+    // knows it — the new card below takes a name of its own rather than this one.
+    label: "ProVideoPlayer",
+    blurb: "Every layer holding something, and how long is left",
+    group: "ProVideoPlayer",
+    config: () => ({ type: "home-pvp", showProgress: false }),
+    style: BARE,
+    // "m" rather than "s": the card carries a media name and a time, and the
+    // observed media names are long file names. "s" is a square, and a square
+    // would truncate the one thing the card exists to show.
+    homeSize: "m",
+    integration: { id: "pvp", label: "ProVideoPlayer" },
+  },
+  "pvp-now": {
+    label: "ProVideoPlayer now",
+    blurb: "What is on screen right now, and how long is left",
+    group: "ProVideoPlayer",
+    config: () => ({ type: "pvp-now", layerName: null, showProgress: true, showNextCue: true }),
+    style: () => CARD({ fontSize: 0.05 }),
+    homeSize: "m",
+    integration: { id: "pvp", label: "ProVideoPlayer" },
+  },
+  "home-pvp-now": {
+    // Its own name, not a second "ProVideoPlayer": two entries in one palette
+    // group with the same label is a choice an operator cannot make.
+    label: "On screen now",
+    blurb: "The one thing ProVideoPlayer has up, and how long is left",
+    group: "ProVideoPlayer",
+    config: () => ({ type: "home-pvp-now", showProgress: true, showNextCue: true }),
+    style: BARE,
+    homeSize: "m",
+    integration: { id: "pvp", label: "ProVideoPlayer" },
+  },
+
   // Control
   "osc-button": {
     label: "OSC button",
@@ -750,6 +813,44 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     style: () => PILL({ fontWeight: 700, uppercase: true }),
   },
 
+  // Live scores. Its own composition -- team colours, the score, and the centre
+  // each sport needs -- so it is NOT a PILL and NOT in IDIOM_TYPES: there is no
+  // caption/value/sub to squeeze it into.
+  scores: {
+    label: "Live scores",
+    blurb: "Live score for a team you follow",
+    group: "Status",
+    config: () => ({ type: "scores", game: "auto", detail: true }),
+    // BARE, like slots-grid, and for the same reason it gives: the strip paints
+    // its own neutral ground edge to edge. A card around it would be a hairline
+    // and a radius nobody could see -- the strip's own opaque ground covers both
+    // the card's corners and its fill. This DEVIATES from the plan's table, which
+    // had scores carded; the plan was written before the strip existed.
+    style: () => TEXT(),
+    homeSize: "m",
+    integration: { id: "scores", label: "Live scores" },
+  },
+
+  // The same fact on Home, in Home's own voice. A separate type rather than the
+  // wall object with a flag, exactly as the recording and streaming pairs are:
+  // the two are different compositions, and a card that wore the wall's got a
+  // panel of brand colour beside a readiness list.
+  "home-scores": {
+    label: "Scores",
+    blurb: "Followed teams' scores, on your own page",
+    group: "Status",
+    config: () => ({ type: "home-scores" }),
+    // Bare on Home, carded on a wall -- see HOST_FRAMED_TYPES.
+    style: () => TEXT(),
+    homeSize: "m",
+    // "always", by NOT saying otherwise. Sunday afternoon NFL overlaps the second
+    // service in most US churches, so "idle" as a default would mean the feature
+    // never fires on the day it exists for. The operator's own page is not
+    // stage-facing and they chose to add the card; `when` is on the config for
+    // anyone who wants it gone mid-service.
+    integration: { id: "scores", label: "Live scores" },
+  },
+
   // Video layer — native client only; the web build ignores it.
   "ndi-video": {
     label: "NDI video",
@@ -765,28 +866,51 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
 /**
  * Which View kinds a `view-embed` object may render.
  *
- * ONE function, used by both the picker and the renderer, because the two
- * disagreeing is the whole hazard. Custom is excluded and that is the entire
- * recursion guard: a custom View is the only kind holding a layout, so refusing
- * it means an embed can never reach another embed — no depth counter to get
- * wrong. Every other kind is listed explicitly, so adding a View kind does not
- * silently make it embeddable before anyone has made it render in a box.
+ * Every kind. It used to be `["script"]`, with custom excluded from the picker
+ * as the entire recursion guard — and the picker offered four kinds it then
+ * refused to draw, which read as broken rather than as unfinished.
  *
- * A function rather than a comment or a filter written out at each call site:
- * the guard test calls THIS, so it fails on the behaviour changing rather than
- * on a string moving inside a 2,500-line file.
+ * The guard now lives in embed-chain.ts, where it is a cycle check over the
+ * ancestor chain plus a depth cap, rather than a whole kind being unavailable.
+ *
+ * Listed rather than derived, so adding a View kind is a deliberate decision to
+ * make it embeddable and not something that happens by accident. The list is
+ * every member of ViewKind today; EmbeddedView's switch is exhaustive, so a new
+ * kind is a compile error there whether or not anyone remembers this list.
  */
-export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = ["script"];
+export const EMBEDDABLE_VIEW_KINDS: readonly ViewKind[] = [
+  "slots",
+  "dashboard",
+  "stage",
+  "transcription",
+  "custom",
+  "script",
+  "spl-rundown",
+  "calendar",
+];
 
 export function isEmbeddableViewKind(kind: ViewKind): boolean {
   return EMBEDDABLE_VIEW_KINDS.includes(kind);
 }
 
-/** Offered in the embed picker: everything except custom, so an operator can see
- *  a kind exists and read why it is not renderable yet, rather than wondering
- *  where it went. Custom never appears — see isEmbeddableViewKind. */
+/**
+ * Offered in the embed picker.
+ *
+ * A PERMANENT ALIAS for isEmbeddableViewKind, and deliberately kept as one.
+ * There was a period when the picker offered kinds the renderer could not draw
+ * and the two answers genuinely differed; every kind renders now, and there is
+ * no future in which "can this be drawn in a box" and "may this be offered as
+ * something to draw in a box" are allowed to disagree — offering a kind that
+ * cannot be drawn is the bug the two lists were merged to end.
+ *
+ * It stays a separate name only because the picker reads better calling it, and
+ * because a caller asking "is this offerable" should not have to know that the
+ * answer happens to be a renderability question. If the two ever need to
+ * diverge, that is a decision to make here, in the open, rather than by letting
+ * this body drift from the one above it.
+ */
 export function isOfferableInEmbedPicker(kind: ViewKind): boolean {
-  return kind !== "custom";
+  return isEmbeddableViewKind(kind);
 }
 
 // ── Derived views over the registry ───────────────────────────────────────────
@@ -823,6 +947,36 @@ export function findLayoutObjectSpec(t: LayoutObjectType): LayoutObjectSpec | nu
 /** True when this build can actually render/edit the type at all. */
 export function isKnownObjectType(t: LayoutObjectType): boolean {
   return findLayoutObjectSpec(t) !== null;
+}
+
+/**
+ * Does this type answer a widget search?
+ *
+ * Three fields, because an operator looking for a widget knows one of three
+ * things about it: what it is called ("SPL"), what it does ("how loud"), or the
+ * name the app uses for it ("spl-meter" — what a support answer or a config file
+ * spells it as). Matching the label alone means a search for "loud" finds
+ * nothing while the blurb underneath says "how loud the room is".
+ *
+ * ONE predicate for both palettes. Home's add-widget sheet and the layout
+ * editor's palette read the same registry and offer the same search box; two
+ * copies would be two rules that drift, and the same search would find different
+ * widgets depending on which sheet was open.
+ *
+ * The query is normalised here rather than by the caller: a caller that forgets
+ * to lowercase gets a search that silently matches nothing for a capital letter,
+ * which is exactly the sort of thing nobody notices until a service.
+ */
+export function widgetMatchesQuery(t: LayoutObjectType, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  const spec = findLayoutObjectSpec(t);
+  if (!spec) return t.toLowerCase().includes(needle);
+  return (
+    spec.label.toLowerCase().includes(needle) ||
+    t.toLowerCase().includes(needle) ||
+    spec.blurb.toLowerCase().includes(needle)
+  );
 }
 
 // Fallbacks are chosen so an unknown object is INERT rather than plausible: it

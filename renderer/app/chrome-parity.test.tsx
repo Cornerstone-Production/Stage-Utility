@@ -27,9 +27,11 @@ describe("shell chrome parity", () => {
     assert.deepEqual([...THEME_MODES], ["light", "system", "dark"]);
   });
 
-  test("every destination carries a description for its page header", () => {
-    // Settings shows a subtitle under each section title (SECTION_DESC). A
-    // destination with no description renders a bare heading and loses it.
+  test("every destination carries a description", () => {
+    // It used to print under the page title (SECTION_DESC before that); with the
+    // header band folded into the context bar it is the page name's tooltip.
+    // Either way a destination with no description has nothing to say for
+    // itself, and the merge is not an excuse to stop writing them.
     for (const d of DESTINATIONS) {
       assert.equal(typeof d.description, "string", `${d.label} has no description`);
       assert.ok(d.description.length > 0, `${d.label} has an empty description`);

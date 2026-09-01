@@ -35,6 +35,7 @@ const KIND_LABEL: Record<UnresolvableRef["kind"], string> = {
   spl: "an SPL meter",
   sensource: "a people counter zone",
   propresenter: "a ProPresenter instance",
+  output: "a screen",
 };
 
 function review(bundle: ViewBundle): Review {
@@ -250,7 +251,8 @@ function RebindList({ list, onOpen }: { list: UnresolvableRef[]; onOpen?: (u: Un
         </Group>
       ))}
       <p className="text-caption1 text-warn-11">
-        These keep their bindings and render as unconfigured. Nothing is cleared.
+        These keep their bindings. Most render as unconfigured; a screen tile
+        instead says the screen no longer exists. Nothing is cleared.
       </p>
     </>
   );

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { invoke, onNotification } from "../lib/api";
 import { applyDeviceTelemetry } from "../lib/apply-device-telemetry";
 import { applyAccentVar } from "../lib/apply-accent";
@@ -10,66 +10,189 @@ interface UseStageStateResult {
   error: string | null;
 }
 
+// ── The one StageState ────────────────────────────────────────────────────────
+//
+// WHY THIS IS MODULE-LEVEL, and what a per-consumer copy costs.
+//
+// Seventeen-odd components call this hook, and a custom layout can mount many
+// more: a nine-tile producer wall is nine of them on one page. Held per
+// consumer, each of those independently
+//
+//   - fetched the WHOLE StageState on mount, so one page load was nine hydrates
+//     of a ~36 KB document, on hardware that is often a Raspberry Pi;
+//   - kept its own copy and re-rendered on every `stage:state-changed` and every
+//     `slots:devices` push, merging the same telemetry nine times over to
+//     produce nine identical documents;
+//   - opened its own SSE subscription, so the channel report to the server
+//     churned once per mount and once per unmount.
+//
+// It also allowed TEARING: two consumers rendered in the same commit could hold
+// different StageStates, because each had its own `useState` fed by its own
+// fetch. `useSyncExternalStore` reads one snapshot, so every consumer in a
+// commit sees the same document or none of them do.
+//
+// The store is started by the first subscriber and then left running for the
+// life of the page. It is deliberately NOT torn down when the last consumer
+// unmounts: the live subscription is what keeps the cache true, so dropping it
+// would leave the next mount a choice between stale state and the refetch this
+// exists to remove.
+
+/** The single snapshot every consumer reads. Replaced, never mutated. */
+let snapshot: UseStageStateResult = { state: null, isLoading: true, error: null };
+const subscribers = new Set<() => void>();
+
+let started = false;
+let hydrating = false;
+/** Set once a broadcast has landed, so a slow hydrate cannot overwrite it. */
+let broadcastSinceHydrateStarted = false;
+let unsubscribers: (() => void)[] = [];
+
+function publish(next: UseStageStateResult): void {
+  snapshot = next;
+  for (const notify of [...subscribers]) notify();
+}
+
 /**
- * Hydrate the full StageState from the backend and keep it live.
+ * Take a full StageState — from the hydrate or from a broadcast — as the truth.
  *
- * Fetches once on mount via `stage:getState`, then subscribes to
- * `stage:state-changed` broadcasts for real-time updates. Shared by the kiosk
- * StageView and the display-picker landing page so both stay in sync.
+ * `setDisplayHourCycle` is called HERE, before the first render that could show
+ * a clock, because every surface (operator app and stage display alike) hydrates
+ * through this hook: there is exactly one place to keep in sync. With the shared
+ * store that is now literally one call per state rather than one per consumer,
+ * and it stays in step with the state that carries it — so a toggle in Advanced
+ * reaches every open surface on the same broadcast that re-renders them.
+ *
+ * `applyAccentVar` moved here from a per-consumer effect for the same reason,
+ * and the rule it was written for still holds: it is applied ONLY from a
+ * hydrated state. A null accent on a real state is the operator choosing no
+ * brand colour and must clear the override; a consumer that has not loaded yet
+ * must never clear it, which is what made opening a colour picker flash every
+ * accent-coloured thing on the page. Reaching it only from here makes that
+ * structural — there is no unhydrated state left to apply from.
  */
-export function useStageState(): UseStageStateResult {
-  const [state, setState] = useState<StageState | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function adoptState(next: StageState): void {
+  setDisplayHourCycle(next.hourCycle);
+  applyAccentVar(next.accentColor);
+  publish({ state: next, isLoading: false, error: null });
+}
 
-  // Hydrate on mount.
-  useEffect(() => {
-    let cancelled = false;
-    invoke<StageState>("stage:getState")
-      .then((s: StageState) => {
-        if (!cancelled) {
-          // Before the first render that could show a clock. Set HERE because
-          // every surface — operator app and stage display alike — hydrates
-          // through this hook, so there is exactly one place to keep in sync.
-          setDisplayHourCycle(s.hourCycle);
-          setState(s);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          console.error("[useStageState] hydrate error", err);
-          setError(String(err));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Subscribe to live updates.
-  useEffect(() => {
-    return onNotification("stage:state-changed", (payload: unknown) => {
-      const next = payload as StageState;
-      // Kept in step with the state that carries it, so a toggle in Advanced
-      // reaches every open surface on the same broadcast that re-renders them.
-      setDisplayHourCycle(next.hourCycle);
-      setState(next);
+function hydrate(): void {
+  if (hydrating) return;
+  hydrating = true;
+  broadcastSinceHydrateStarted = false;
+  invoke<StageState>("stage:getState")
+    .then((s: StageState) => {
+      hydrating = false;
+      // A broadcast that landed while this was in flight is NEWER than what the
+      // fetch is carrying. Keep it, and just retire the loading flag.
+      if (broadcastSinceHydrateStarted) {
+        if (snapshot.isLoading) publish({ ...snapshot, isLoading: false });
+        return;
+      }
+      adoptState(s);
+    })
+    .catch((err: unknown) => {
+      hydrating = false;
+      // Same rule as the success arm, and for a worse reason. api.ts replays the
+      // hello-burst frame of every hydrated channel to a late subscriber, so on a
+      // normal page load a GOOD `stage:state-changed` lands while this read is
+      // still in flight. If the read then rejects — apiFetch's 15s cap on a
+      // loaded Pi, a transient 5xx, a wifi blip — stamping `error` over live
+      // state blanks the surface: resolveScreen() checks `error` BEFORE `state`,
+      // so every routed screen draws "Could not load stage state" while holding
+      // the truth. And nothing clears it: the retry in `subscribe` is gated on
+      // there being no state, and the channel is change-driven, so in a quiet
+      // building the next frame is hours away. The broadcast is newer than what
+      // this read was carrying either way — keep it, and just retire `isLoading`.
+      //
+      // Still reported, never swallowed — the two outcomes just log differently,
+      // because they are different mornings: one is a wall that is fine and a
+      // read that is not, the other is a wall with nothing on it.
+      if (broadcastSinceHydrateStarted) {
+        console.warn("[useStageState] hydrate failed; keeping the newer broadcast", err);
+        if (snapshot.isLoading) publish({ ...snapshot, isLoading: false });
+        return;
+      }
+      // Handed to every consumer as `error`, and a consumer mounting later
+      // retries (see `subscribe`), so a server that was down at page load does
+      // not blank the wall for ever.
+      console.error("[useStageState] hydrate error", err);
+      publish({ state: snapshot.state, isLoading: false, error: String(err) });
     });
-  }, []);
+}
+
+function start(): void {
+  if (started) return;
+  started = true;
+
+  unsubscribers.push(
+    onNotification("stage:state-changed", (payload: unknown) => {
+      broadcastSinceHydrateStarted = true;
+      adoptState(payload as StageState);
+    }),
+  );
 
   // Volatile per-slot telemetry (RF, battery, audio level) arrives on its own
   // channel so a meter twitch does not re-send the whole state document. Merged
-  // back onto the slots here, where every component already looks for it.
-  useEffect(() => {
-    return onNotification("slots:devices", (payload: unknown) => {
-      setState((prev) =>
-        prev ? applyDeviceTelemetry(prev, payload as Record<string, SlotDevice>) : prev,
-      );
-    });
-  }, []);
+  // back onto the slots here, where every component already looks for it — once,
+  // rather than once per mounted consumer.
+  unsubscribers.push(
+    onNotification("slots:devices", (payload: unknown) => {
+      const prev = snapshot.state;
+      if (!prev) return;
+      const next = applyDeviceTelemetry(prev, payload as Record<string, SlotDevice>);
+      // applyDeviceTelemetry returns the same object when nothing moved, which
+      // is what keeps a no-op push from re-rendering every display.
+      if (next !== prev) publish({ ...snapshot, state: next });
+    }),
+  );
+
+  hydrate();
+}
+
+function subscribe(notify: () => void): () => void {
+  subscribers.add(notify);
+  start();
+  // A hydrate that failed left every consumer with an error and no state. A new
+  // consumer arriving is the cheapest honest moment to try again — at worst that
+  // is the old per-mount fetch, and only while the state is still missing.
+  if (!hydrating && snapshot.error && !snapshot.state) hydrate();
+  return () => {
+    subscribers.delete(notify);
+  };
+}
+
+const getSnapshot = (): UseStageStateResult => snapshot;
+
+/** Test seam — drops the shared cache so cases cannot contaminate each other. */
+export function __resetForTests(): void {
+  for (const off of unsubscribers) off();
+  unsubscribers = [];
+  subscribers.clear();
+  snapshot = { state: null, isLoading: true, error: null };
+  started = false;
+  hydrating = false;
+  broadcastSinceHydrateStarted = false;
+}
+
+/**
+ * Hydrate the full StageState from the backend and keep it live.
+ *
+ * Fetched once for the whole page via `stage:getState`, then kept current from
+ * `stage:state-changed` broadcasts. Shared by the kiosk StageView, the operator
+ * shell and the display-picker landing page so all of them stay in sync — and,
+ * because the cache is module-level, so that a page holding many of them pays
+ * for one state rather than one each.
+ *
+ * `isLoading` is true only until the FIRST answer arrives, and that is a fact
+ * about the page rather than about the consumer: a consumer mounting after the
+ * state is in hand reads it immediately with `isLoading` false, because there is
+ * nothing left to wait for. An error counts as an answer — a consumer mounting
+ * while `error` is set sees the error rather than a spinner, and its arrival
+ * quietly triggers one retry.
+ */
+export function useStageState(): UseStageStateResult {
+  const { state, isLoading, error } = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   // Auto-reload after an update — including for an installed Home-Screen PWA.
   // The server stamps the version the page was built at into the served HTML
@@ -79,6 +202,12 @@ export function useStageState(): UseStageStateResult {
   // manual refresh, no re-adding to the Home Screen. Re-checked on foreground so a
   // PWA opened after a deploy self-heals on relaunch. Falls back to detecting a
   // change while open for pre-stamp shells (which have no __APP_VERSION__).
+  //
+  // Left PER CONSUMER, unlike the state above, because it opens by reading
+  // `window.location.pathname` at mount: hoisting it into the module would
+  // freeze that answer at whichever surface on the page mounted first, and
+  // getting it wrong reloads the settings console out from under an operator
+  // mid-edit. The duplication costs a listener per consumer and nothing else.
   useEffect(() => {
     const path = window.location.pathname;
     // The settings console (+ its live-preview iframes) must not reload out from
@@ -117,11 +246,6 @@ export function useStageState(): UseStageStateResult {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
-
-  // Push the themeable brand accent into --brand-accent whenever it changes.
-  useEffect(() => {
-    applyAccentVar(state?.accentColor);
-  }, [state?.accentColor]);
 
   return { state, isLoading, error };
 }

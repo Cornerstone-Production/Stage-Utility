@@ -220,6 +220,22 @@ header/footer bands) and empty-image placeholders. Both are strictly R=G=B: a ne
 with any blue bias reads "blueish" beside the neutral app shell, so ad-hoc darks like
 `#14161c` or `#1a1a2e` must not come back — reach for the token.
 
+**Paint the kiosk ground only with the class.** An element that sets
+`background: var(--kiosk-bg)` and does *not* carry `.kiosk-surface` gets the near-black
+ground and the **app's** foregrounds: `--color-fg: var(--su-fg)` is declared on `:root`,
+so it resolves there and inherits down, and redefining `--su-fg` lower in the tree
+changes nothing. In light mode that is `#161b22` on `#0a0a0a` — 1.14:1, invisible. The
+class re-declares the `--color-*` family directly, which is the only way a nested
+preview gets stage foregrounds. This is why the layout editor's canvas, `LayoutRenderer`
+and `EmbeddedView` all carry it.
+
+Inside it, foregrounds come from the semantic tokens (`text-fg`, `text-fg-muted`,
+`text-fg-subtle`, `text-fg-faint`) — **never** a Radix palette step. `.kiosk-surface`
+re-declares those four and nothing else, so `text-gray-7` on a kiosk ground still
+follows the app theme: `#484848` in dark, 2.16:1. Status colours (`--red-*`,
+`--green-*`, `--amber-*`) are the exception and stay — a state that means something has
+to keep its hue on both grounds.
+
 Glass bars use `backdrop-filter: blur(20px)` **without** `saturate()`: over a coloured
 stage background the saturation boost amplifies exactly the hue cast the neutral rule
 exists to prevent.

@@ -92,14 +92,32 @@ export function forEachViewSourcedSlotsGrid(
   for (const v of views) if (v.kind === "custom" && v.layout) walk(v.layout.objects);
 }
 
+/**
+ * The name a View gets when the operator does not type one.
+ *
+ * A record rather than a switch with a `default`, because the default was
+ * answering for kinds it had never heard of: a new Script view and a new SPL
+ * Rundown view were both created called "Slots". Every kind now has to be named
+ * here, or the build fails.
+ */
+const DEFAULT_VIEW_NAMES: Record<ViewKind, string> = {
+  slots: "Slots",
+  dashboard: "Dashboard",
+  stage: "Stage",
+  transcription: "Transcription",
+  custom: "Custom",
+  script: "Script",
+  "spl-rundown": "SPL Rundown",
+  calendar: "Calendar",
+};
+
 export function defaultViewName(kind: ViewKind): string {
-  switch (kind) {
-    case "dashboard": return "Dashboard";
-    case "stage": return "Stage";
-    case "transcription": return "Transcription";
-    case "custom": return "Custom";
-    default: return "Slots";
-  }
+  // The lookup can still miss: `kind` reaches here from a request body and from
+  // views.json, either of which can carry a kind this build has never heard of.
+  // "View", NOT "Slots" — a fallback naming an unrecognised kind after a real
+  // one is the bug the record above replaced, and repeating it here would put it
+  // back one line down.
+  return DEFAULT_VIEW_NAMES[kind] ?? "View";
 }
 
 /** A sensible starting layout for a new custom View — proves the schema and

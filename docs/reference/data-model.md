@@ -18,7 +18,13 @@ View kinds:
 | **Captions** | full-screen auto-scrolling transcription |
 | **Script** | the full rundown with note columns, headers, lengths, live countdown |
 | **SPL Rundown** | a compact item-plus-level list for the live service |
+| **Calendar** | a month of [Planning Center Calendar](../integrations/planning-center.md#calendar) events, filtered by calendar and tag |
 | **Custom** | a layout you design in the visual editor |
+
+Every kind also renders inside a custom layout, through the **Embedded view**
+widget — **Calendar** among them. Dashboard, Stage and SPL Rundown are configured
+per display rather than per view, so those three are reached with **Embedded
+screen** instead.
 
 ## Surfaces: displays and consoles
 
@@ -42,6 +48,13 @@ screens, rather than silently unbinding them.
 
 Only **custom** views can be consoles: the built-in kinds have no editable layout,
 so there is nowhere to put a control.
+
+A console can also ask the app to get out of its way. See
+[Running a console without the app's chrome](../features/operator-app.md#running-a-console-without-the-apps-chrome).
+The flag is stored on the view, so it follows the console to every phone that
+opens it, and it is carried by a duplicate and by an exported view bundle. It is
+a different thing from a screen's **Hide top bar**, which is per screen and hides
+the *display's* bar in a different page altogether.
 
 ### Home
 
@@ -124,6 +137,65 @@ Nothing has to be done by hand. On first start, any view containing a button
 becomes a console and the screens showing it become panels, so a control surface that
 worked before still works. What moved is written to the log, so a stray control
 left on a wall display years ago can be spotted and set back deliberately.
+
+## What a display shows
+
+A routed view isn't the only thing a display can render. In order of precedence:
+
+- **Blackout** — a true black screen, commanded through
+  [Companion](../integrations/companion.md). It overrides everything else and
+  lifts instantly when turned off.
+- **Unrouted** — the display's output has no view assigned.
+- **View missing** — a live preview (`/preview-<id>`) whose view has since been
+  deleted. Distinct from unrouted: a view WAS assigned here, and it's the view
+  that's gone rather than the routing.
+- **Not configured** — a **Slots** view on an install with no Planning Center
+  credentials yet. Slots are the only kind whose content comes from Planning
+  Center, so this gates that kind alone: a dashboard or clock wall renders
+  without a PCO connection, and a custom view with nothing drawn on it resolves
+  to Empty first.
+- **Empty** — the routed view is a Slots view with no slots configured, or a
+  Custom layout with nothing drawn on it.
+- **Unknown kind** — the view is a kind this build has no way to draw. Not
+  hypothetical: the app ships a [beta/main track switch](../ops/distribution.md),
+  so a view created by a beta build can be read by a main build. The screen names
+  the kind rather than blanking, and rather than quietly drawing mic slots the
+  way it once did.
+
+### The top bar
+
+The strip across the top of a kiosk carries the brand, the plan context and the
+QR link back. Not every view kind draws one: a full-bleed kind gives its content
+the whole panel instead. `KIND_DRAWS_TOP_BAR` in `main/types/views.ts` is the
+single declaration of which do — today slots, custom and dashboard — and both
+the kiosk and the Screens card read it, so the two cannot disagree. The
+placeholder screens (loading, unrouted, empty, not configured, view missing)
+draw a bar whatever the routing says, because there is no content yet to fill
+the panel.
+
+A **locked** display (set on Screens) strips the escape hatches a kiosk
+otherwise shows. Its only effect is on the bar, so the Screens card offers it
+only where there is a bar to strip. A display with its **top bar hidden** (also
+set on Screens) draws no top bar at all — no brand, plan context or QR — and its
+content fills the strip instead; the two are independent, since a lock keeps the
+bar and only removes its links.
+
+A **preview** — the live thumbnail on a Screens card, at `/preview-<viewId>` —
+renders the previewed view directly, regardless of what is actually routed to
+that output, and answers the three per-screen settings differently:
+
+| Setting | In a preview | Why |
+| --- | --- | --- |
+| Blackout | Ignored | The Screens page would be a grid of black rectangles. |
+| Lock | Ignored | The preview lives inside the console, whose navigation must keep working. |
+| Hidden top bar | **Honoured** | Purely visual, and showing what the screen will look like is what the card is for. |
+
+The hidden top bar is honoured only when the preview knows which screen it
+stands in for. The route names a *view*, and two screens can show one view with
+the bar hidden on only one of them, so a Screens card appends the screen it
+belongs to — `/preview-<viewId>?output=<outputId>`. A preview opened without it
+(the View editor's own, and the "not on a screen" card) speaks for no screen and
+keeps its bar.
 
 ## Object capabilities
 

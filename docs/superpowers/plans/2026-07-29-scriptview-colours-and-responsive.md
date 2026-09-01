@@ -146,7 +146,7 @@ Find where `stage-controller.ts` builds the `ScriptViewRundownDTO` and add, alon
 Run: `npm run type-check`, then restart the dev server and
 
 ```bash
-curl -s "http://localhost:8788/api/scriptview/rundown?serviceTypeId=41227" \
+curl -s "http://localhost:8788/api/scriptview/rundown?serviceTypeId=SERVICE_TYPE_ID" \
   | python3 -c "import json,sys; print(json.load(sys.stdin).get('itemTypeColors'))"
 ```
 
@@ -343,7 +343,7 @@ Create `renderer/main/category-colour.test.ts`:
 
 ```ts
 // Category colours are stored once, app-wide, because note categories are fetched per
-// service type — "Audio" exists separately under Weekend, Youth and Salt Company. Keys
+// service type — "Audio" exists separately under Weekend, Midweek and Outreach. Keys
 // therefore normalise, so setting Audio once colours all of them.
 
 import assert from "node:assert/strict";
@@ -620,7 +620,7 @@ the common case needs no typing:
 
 ```tsx
 {/* One colour per category, app-wide: note categories are per service type, so
-    setting Audio here covers Weekend, Youth and Salt Company at once. */}
+    setting Audio here covers Weekend, Midweek and Outreach at once. */}
 <FieldSet title="Category colours">
   <div className="flex flex-col gap-1">
     {knownCategories.map((cat) => {
@@ -669,7 +669,7 @@ category falls back to its suggestion. PCO owns whether a category exists.
 - [ ] **Step 2: Verify**
 
 Set Audio to orange, confirm it applies on `/scriptview/weekend/audio` **and**
-`/scriptview/cornerstone-youth/audio` — the same colour under both service types is the
+`/scriptview/midweek/audio` — the same colour under both service types is the
 whole point. Then Reset and confirm it returns to `#0091ff`.
 
 - [ ] **Step 3: Commit**

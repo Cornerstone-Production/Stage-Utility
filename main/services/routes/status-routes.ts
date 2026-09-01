@@ -7,13 +7,17 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, json, readBody } from "./context.js";
+import { type RouteCtx, error, json, readBody } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { integrationManager } from "../integration-manager.js";
 import { obsService } from "../obs-service.js";
 import { resiService } from "../resi-service.js";
 import { youtubeService } from "../youtube-service.js";
+import { pvpService } from "../pvp-service.js";
 import { reaperService } from "../reaper-service.js";
+import { scoresService } from "../scores-service.js";
+import { scoresStore } from "../scores-store.js";
+import { leagueById, type ScoreFavourite } from "../../types/scores.js";
 import { oscManager } from "../osc-manager.js";
 import { sensourceService } from "../sensource-service.js";
 import { smaartService } from "../smaart-service.js";
@@ -49,6 +53,65 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       json(res, reaperService.getLatest());
       return;
     }
+    if (method === "GET" && pathname === "/api/pvp/status") {
+      json(res, pvpService.getLatest());
+      return;
+    }
+
+    // ── Live scores ────────────────────────────────────────────────────────
+    if (method === "GET" && pathname === "/api/scores/status") {
+      json(res, scoresService.getLatest());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/scores/favourites") {
+      await scoresStore.init();
+      json(res, scoresStore.get());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/scores/favourites") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      if (!Array.isArray(body.favourites)) {
+        error(res, "body.favourites (array) required");
+        return;
+      }
+      // Only entries naming a league this build knows and a team id survive. A
+      // favourite for a league that no longer exists would make every poll ask
+      // for a path ESPN does not serve.
+      const favourites = (body.favourites as ScoreFavourite[]).filter(
+        (f) => f && typeof f.teamId === "string" && f.teamId !== "" && leagueById(f.league),
+      );
+      // No explicit re-apply here. setFavourites announces on
+      // "scores:favourites-changed", and integration-manager answers that
+      // channel by re-applying and re-sending the states frame — see
+      // setupListRefreshers there, and setup-list-broadcasts.test.ts. The
+      // announcement was added to REPLACE this route's own call, which was
+      // never deleted, so every save applied the change twice.
+      //
+      // Through the manager either way, never scoresService.configure(): the
+      // applier is what honours the enabled flag, and configuring the service
+      // straight from here would start polling for an operator who switched
+      // scores off.
+      const saved = await scoresStore.setFavourites(favourites);
+      json(res, saved);
+      return;
+    }
+    if (method === "GET" && pathname === "/api/scores/teams") {
+      const league = c.url.searchParams.get("league") ?? "";
+      const meta = leagueById(league);
+      if (!meta) {
+        error(res, `Unknown league ${JSON.stringify(league)}`);
+        return;
+      }
+      try {
+        json(res, await scoresService.listTeams(meta.id));
+      } catch (err) {
+        // 502, not an empty list. An empty dropdown and a failed request look
+        // identical to the operator, and the panel is required to say which
+        // league could not be loaded.
+        error(res, errorMessage(err), 502);
+      }
+      return;
+    }
 
     if (method === "GET" && pathname === "/api/resi/status") {
       json(res, resiService.getLatest());
@@ -71,7 +134,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await integrationManager.getSensourceLocations());
       } catch (err) {
-        json(res, { error: errorMessage(err) }, 502);
+        error(res, errorMessage(err), 502);
       }
       return;
     }
@@ -79,7 +142,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await integrationManager.getSensourceZones());
       } catch (err) {
-        json(res, { error: errorMessage(err) }, 502);
+        error(res, errorMessage(err), 502);
       }
       return;
     }

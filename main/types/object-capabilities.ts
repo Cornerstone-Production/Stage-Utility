@@ -71,7 +71,24 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   "plan-attachment": ["readout"],
   "pp-timer": ["readout"],
   "reaper-status": ["readout"],
+  // Not "drilldown": a test asserts CAPABILITIES and the DRILLDOWN route table
+  // agree in both directions, so declaring one without the other fails.
+  "pvp-layers": ["readout"],
+  "home-pvp": ["readout"],
+  "pvp-now": ["readout"],
+  "home-pvp-now": ["readout"],
+  // Readout only. No drilldown: a DRILLDOWN capability without a matching route
+  // is asserted against in both directions, and there is no scores page to send
+  // an operator to -- the panel that shows more is the context-bar activity, and
+  // it opens from the bar, not from a wall tile.
+  scores: ["readout"],
+  "home-scores": ["readout"],
   "record-status": ["readout"],
+  // Readout only, deliberately. Expanding a tile to see a screen full size is a
+  // later phase of the producer multiview and is an overlay, not a route — so
+  // there is nowhere for `drilldown` to send anyone, and DRILLDOWN would refuse
+  // the entry anyway.
+  "screen-embed": ["readout"],
   "section-chip": ["readout"],
   "service-order": ["readout"],
   "service-pacing": ["readout"],

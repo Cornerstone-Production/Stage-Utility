@@ -27,17 +27,23 @@ import {
   RadioTowerIcon,
   MoveHorizontalIcon,
   SquareIcon,
+  TagIcon,
+  TrophyIcon,
   type LucideIcon,
 } from "lucide-react";
 
+import type { BarSet } from "./set-bar-items";
+
 export type BarItemId =
   | "clock"
+  | "service-type"
   | "plan"
   | "live-timer"
   | "current-item"
   | "integration-health"
   | "recording"
-  | "streaming";
+  | "streaming"
+  | "scores";
 
 /**
  * A flexible space, as a position in the saved order.
@@ -89,6 +95,31 @@ export interface BarItem {
   icon: LucideIcon;
   /** What it says about itself in the chooser, so the choice is informed. */
   hint: string;
+  /**
+   * THE EXCEPTION to "nothing appears or disappears". Set on `scores` alone.
+   *
+   * The rule the other seven keep is that an item with nothing to report says
+   * so, because a strip that rearranges itself is a strip an operator cannot
+   * learn the shape of. That rule is right for them: the clock, the plan, the
+   * timer, the health count, the recorders and the stream ALWAYS have something
+   * true to say, so their resting state is a reading, not an absence.
+   *
+   * Scores is not like them. For most of the year no followed team is playing,
+   * so a permanent "No games" is not a reading — it is a word that never
+   * changes, sitting on a strip where every other entry means something. The
+   * honest rendering of "nothing is on" is nothing.
+   *
+   * The reflow this re-admits is bounded in a way the old one was not: the
+   * capsule appears when a followed game goes live and leaves when it ends, a
+   * handful of times a season, rather than integration health arriving the
+   * moment something broke. context-bar.tsx drops the whole row when an item
+   * renders empty, so a vanishing item leaves no gap and no dangling separator.
+   *
+   * The guard in context-bar.test.tsx reads THIS FLAG: every item without it
+   * must still be proven never to vanish, and the set carrying it is asserted
+   * exactly, so a second item cannot quietly join the exception.
+   */
+  canBeEmpty?: true;
 }
 
 /**
@@ -105,11 +136,25 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
     icon: ClockIcon,
     hint: "The current time.",
   },
+  // TWO ITEMS, NOT ONE COMPOUND. They used to be a single "Service type and
+  // plan", which meant an operator who wanted only the service type — the
+  // reading that says WHICH Sunday morning this is — had to take the plan title
+  // with it, and the plan title is the longest thing on the strip.
+  //
+  // Their labels have to stay tellable apart in the palette. "Service type"
+  // beside "Service type and plan" would have been a trap: one reads as a
+  // shorter spelling of the other rather than as a different item.
+  "service-type": {
+    id: "service-type",
+    label: "Service type",
+    icon: TagIcon,
+    hint: "Which service this is — the same name most weeks.",
+  },
   plan: {
     id: "plan",
-    label: "Service type and plan",
+    label: "Service plan",
     icon: CalendarIcon,
-    hint: "Which service, and which plan is active.",
+    hint: "The title of the plan that is loaded.",
   },
   "live-timer": {
     id: "live-timer",
@@ -141,6 +186,15 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
     icon: CircleDotIcon,
     hint: "Whether OBS or REAPER is rolling — and whether one is connected but stopped.",
   },
+  scores: {
+    id: "scores",
+    label: "Live scores",
+    icon: TrophyIcon,
+    hint: "A followed team's score while the game is on. Click it for the full card. Shows nothing the rest of the time.",
+    // The one item allowed to render nothing. See canBeEmpty for why this is an
+    // amendment to the no-reflow rule rather than an escape from it.
+    canBeEmpty: true,
+  },
 };
 
 /**
@@ -169,8 +223,18 @@ export const BAR_SPACE_ITEM: Omit<BarItem, "id"> = {
  * The arrangement the bar shipped with: the plan on the left, service state on
  * the right. Integration health and recording are opt-in rather than added to
  * everyone's bar without asking.
+ *
+ * The service type and the plan title are two entries here because they used to
+ * be one item that drew both. The default has to go on drawing both, or an
+ * install that never configured its bar would lose a reading to a refactor.
  */
-export const DEFAULT_BAR_ORDER: BarRowId[] = ["plan", BAR_SPACER, "current-item", "live-timer"];
+export const DEFAULT_BAR_ORDER: BarRowId[] = [
+  "service-type",
+  "plan",
+  BAR_SPACER,
+  "current-item",
+  "live-timer",
+];
 
 /**
  * Where the spacer goes in a bar saved before spacers existed.
@@ -213,8 +277,19 @@ function collapseSpacers(rows: readonly BarRowId[]): BarRowId[] {
  * integration removed, can leave a saved order naming something this build does
  * not have, and a hole in the bar is worse than a shorter bar.
  *
- * An empty or entirely-unknown result falls back to the default, because a bar
- * that renders nothing reads as broken rather than as configured.
+ * A result with NOTHING RECOGNISED IN IT falls back to the default, because a
+ * bar that renders nothing reads as broken rather than as configured. That is
+ * `[]`, `undefined`, and the downgrade where every saved id names an item this
+ * build does not have.
+ *
+ * A saved order that is nothing but GAPS is not that case, and used to be
+ * treated as if it were. An operator who drags every item out of the strip
+ * commits `[]`, which `normalizeBarRows` saves as `["spacer"]` — so the very
+ * next read saw gaps only, called the bar empty and handed back the five
+ * defaults. The strip refilled itself while the editor two inches below still
+ * said "Drag something in.", and the removal the operator had just made was
+ * undone. An empty bar is a thing somebody can ask for; a bar nothing was ever
+ * saved for is not.
  *
  * A saved order with NO spacer predates them, and gets one where the old rule
  * cut. That inference is safe only because `normalizeBarRows` — which is what
@@ -228,8 +303,9 @@ export function visibleBarItems(saved: readonly string[] | undefined): BarRowId[
     if (id === BAR_SPACE) return [BAR_SPACE];
     return id in BAR_ITEMS ? [id as BarItemId] : [];
   });
-  // Gaps are not readings. A bar of nothing but spacing is an empty bar.
-  if (!rows.some((id) => !isBarGap(id))) return DEFAULT_BAR_ORDER;
+  // Nothing was recognised — see above. A strip the operator emptied on purpose
+  // reaches here as its gaps and is left alone.
+  if (rows.length === 0) return DEFAULT_BAR_ORDER;
   if (!rows.includes(BAR_SPACER)) return withLegacySpacer(rows);
   return collapseSpacers(rows);
 }
@@ -243,4 +319,89 @@ export function visibleBarItems(saved: readonly string[] | undefined): BarRowId[
 export function normalizeBarRows(rows: readonly BarRowId[]): BarRowId[] {
   const out = collapseSpacers(rows);
   return out.includes(BAR_SPACER) ? out : [...out, BAR_SPACER];
+}
+
+/**
+ * Has the phone been given a set of its own?
+ *
+ * An empty list means FOLLOW THE DESKTOP BAR — the same convention `barItems`
+ * already uses, where empty means "nobody has configured this". It cannot
+ * collide with a deliberately empty phone bar, because `normalizeBarRows`
+ * guarantees at least a spacer in anything the configurator writes, so a saved
+ * mobile set is never `[]`.
+ *
+ * This is also the whole of the upgrade story: every install that exists today
+ * has no `mobileItems`, reads as "follows desktop", and its bar does not move.
+ */
+export function hasMobileBar(saved: readonly string[] | undefined): boolean {
+  return (saved ?? []).length > 0;
+}
+
+/**
+ * Does the set being edited actually reach a phone?
+ *
+ * The configurator's 320px sentence is about what a narrow screen does to an
+ * arrangement, so it may only be said about an arrangement a narrow screen
+ * renders. The phone's own set always qualifies. The desktop set qualifies only
+ * while the phone is still following it: once the phone has been forked,
+ * `barRowsFor` never puts the desktop rows below 640px, and warning about them
+ * there is advice about a strip that cannot exist — directly under the line
+ * saying this set is "Shown from 640px wide up".
+ */
+export function phoneShowsEditedSet(
+  editing: BarSet,
+  mobile: readonly string[] | undefined,
+): boolean {
+  return editing === "mobile" || !hasMobileBar(mobile);
+}
+
+/**
+ * The rows to render, for a viewport.
+ *
+ * ONE function, used by the bar and by the configurator's preview, so what the
+ * operator arranges is what appears — a preview that resolved the set by its own
+ * rule would be a preview of a bar nobody has.
+ */
+export function barRowsFor(
+  desktop: readonly string[] | undefined,
+  mobile: readonly string[] | undefined,
+  isMobile: boolean,
+): BarRowId[] {
+  return visibleBarItems(isMobile && hasMobileBar(mobile) ? mobile : desktop);
+}
+
+/**
+ * Items whose reading is PROSE — a name somebody wrote, of no predictable
+ * length — and what to call the part of them that gets cut.
+ *
+ * They are the reason a strip cannot always fit: the service type and the plan
+ * title together measured 219px on a test plan, and a live plan item can be
+ * longer than either. Every other item on the bar is a number, a mark, or a word
+ * from a fixed vocabulary, and so has a width the ladder can reason about.
+ *
+ * THE SERVICE TYPE IS IN HERE NOW, and that is the other half of it becoming its
+ * own item. It used to be a qualifier the ladder clipped whole at level 1, so it
+ * never had to shrink. An item the operator placed on purpose may not be dropped
+ * at any rung — so if it is going to survive to the floor, the floor has to have
+ * somewhere to put it, and that is an ellipsis. Left out of this set it would
+ * instead be clipped by `overflow: hidden` on the strip, with nothing to tell
+ * the reader a word had gone: the one failure this bar must not have quietly.
+ *
+ * Named here rather than inside the fitter because the CONFIGURATOR is the one
+ * that has to act on it: on a phone these are what the operator curates out, and
+ * a set that keeps one is warned that a narrow phone will have to cut it.
+ *
+ * The value is a SECOND name, not the item's label, because a warning built from
+ * the labels reads about the wrong thing. "Service plan … will be cut short"
+ * names the item; what actually gets cut is the plan title inside it.
+ */
+export const BAR_PROSE_ITEMS = {
+  "service-type": "the service type",
+  plan: "the plan title",
+  "current-item": "the item name",
+} as const satisfies Partial<Record<BarItemId, string>>;
+
+/** Does this row show prose, and so give way at the floor? */
+export function isProseItem(id: BarRowId): id is keyof typeof BAR_PROSE_ITEMS {
+  return id in BAR_PROSE_ITEMS;
 }

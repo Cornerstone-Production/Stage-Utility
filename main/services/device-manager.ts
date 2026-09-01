@@ -81,7 +81,7 @@ export class DeviceManager {
         try {
           await entry.provider.disconnect();
         } catch (err) {
-          console.error(`[device-manager] disconnect error for ${id}:`, err);
+          console.error("[device-manager] disconnect error for:", id, err);
         }
         this.entries.delete(id);
       }
@@ -150,7 +150,7 @@ export class DeviceManager {
         console.log(`[device-manager] connected: ${connectionId} (${conn.name})`);
       } catch (err) {
         const msg = errorMessage(err);
-        console.error(`[device-manager] connect error for ${connectionId}:`, msg);
+        console.error("[device-manager] connect error for:", connectionId, msg);
         conn.connection = "error";
         conn.message = `Connection failed: ${msg}`;
       }
@@ -173,7 +173,7 @@ export class DeviceManager {
           });
         }
       } catch (err) {
-        console.error(`[device-manager] listChannels error for ${entry.connectionId}:`, err);
+        console.error("[device-manager] listChannels error for:", entry.connectionId, err);
       }
     }
     return results;
@@ -193,7 +193,7 @@ export class DeviceManager {
       try {
         await entry.provider.disconnect();
       } catch (err) {
-        console.error(`[device-manager] disconnect error for ${id}:`, err);
+        console.error("[device-manager] disconnect error for:", id, err);
       }
     }
     this.entries.clear();

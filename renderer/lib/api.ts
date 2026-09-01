@@ -167,6 +167,35 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "pco:getPlanItems":
       return apiFetch<T>("/api/pco/plan-items");
 
+    // The month grid, already bucketed into days in the app time zone. The
+    // browser is never given raw instants to bucket — see calendar-grid.ts.
+    case "calendar:getGrid": {
+      const viewId = typeof p.viewId === "string" ? p.viewId : null;
+      // `month` is YYYY-MM and is omitted for the current month, which is the
+      // only one the pushed channel carries.
+      const month = typeof p.month === "string" ? p.month : null;
+      const qs = new URLSearchParams();
+      if (viewId) qs.set("viewId", viewId);
+      if (month) qs.set("month", month);
+      const q = qs.toString();
+      return apiFetch<T>(`/api/pco/calendar${q ? `?${q}` : ""}`);
+    }
+    // The org's calendars and tags, for a calendar View's two pickers.
+    case "calendar:sources":
+      return apiFetch<T>("/api/pco/calendar-sources");
+
+    // The pre-service checklist, read from the plan's notes in Planning Center.
+    case "checklist:get":
+      return apiFetch<T>("/api/pco/checklist");
+    case "checklist:sources":
+      return apiFetch<T>("/api/pco/checklist-sources");
+    // Both writes answer with the whole list as it now stands, so the caller
+    // renders what the server says rather than applying its own optimism.
+    case "checklist:tick":
+      return post<T>("/api/pco/checklist/tick", p);
+    case "checklist:clear":
+      return post<T>("/api/pco/checklist/clear");
+
     case "propresenter:getStatus":
       return apiFetch<T>("/api/propresenter/status");
     case "propresenter:getInstances":
@@ -179,6 +208,18 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return apiFetch<T>("/api/obs/status");
     case "reaper:getStatus":
       return apiFetch<T>("/api/reaper/status");
+    case "pvp:getStatus":
+      return apiFetch<T>("/api/pvp/status");
+
+    case "scores:getStatus":
+      return apiFetch<T>("/api/scores/status");
+    case "scores:getFavourites":
+      return apiFetch<T>("/api/scores/favourites");
+    case "scores:setFavourites":
+      return post<T>("/api/scores/favourites", p);
+    case "scores:listTeams":
+      return apiFetch<T>(`/api/scores/teams?league=${encodeURIComponent(String(p.league))}`);
+
     case "resi:getStatus":
       return apiFetch<T>("/api/resi/status");
     case "youtube:getStatus":
@@ -324,6 +365,8 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       });
     case "settings:setTaperWindow":
       return post<T>("/api/taper-window", p);
+    case "settings:setChecklistSources":
+      return post<T>("/api/checklist-sources", p);
     case "settings:setTimezone":
       return post<T>("/api/timezone", p);
     case "settings:setHourCycle":
@@ -366,6 +409,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "displays:refresh":
       return post<T>("/api/displays/refresh", p);
+
+    // Which outputs have a browser attached right now. The "displays:presence"
+    // SSE channel broadcasts only on CHANGE, so a subscriber that mounts into a
+    // quiet building needs one read to know where it stands.
+    case "displays:getPresence":
+      return apiFetch<T>("/api/displays/presence");
 
     // ── Kiosk devices ─────────────────────────────────────────────────────
     case "stage:setKioskDiscovery":
@@ -463,6 +512,22 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { scriptViewLayoutId: p.scriptViewLayoutId });
     }
 
+    case "views:setHideChrome": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { hideChrome: p.hideChrome });
+    }
+
+    // Both lists, always together: the server refuses one without the other,
+    // because a request carrying half of them is a client that has lost state
+    // rather than a partial update.
+    case "views:setCalendarFilters": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, {
+        calendarSources: p.calendarSources,
+        calendarTags: p.calendarTags,
+      });
+    }
+
     case "views:setSlots": {
       const id = p.id as string;
       return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, { slots: p.slots });
@@ -552,6 +617,10 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "icons:setColor":
       return post<T>("/api/icon-color", { key: p.key, color: p.color });
 
+    // Icon glyph for the same key; "" restores the item's built-in icon.
+    case "icons:setIcon":
+      return post<T>("/api/icon-glyph", { key: p.key, glyph: p.glyph });
+
     case "outputs:setSlug": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { slug: p.slug });
@@ -565,6 +634,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "outputs:setLocked": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { locked: p.locked });
+    }
+
+    case "outputs:setHideTopBar": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { hideTopBar: p.hideTopBar });
     }
 
     case "history:editWindow":
@@ -752,7 +826,7 @@ const sseListeners: SseListener[] = [];
  *
  * That hydrate fires once, at connect — so a component that mounts later (any
  * settings tab, for instance) misses it and then only hears about *changes*. In a
- * steady state there are none, which is how the Displays tab could sit on
+ * steady state there are none, which is how the Screens page could sit on
  * "Offline" while the server knew the screen was connected.
  *
  * The last payload for each of these is kept and replayed to a late subscriber.
@@ -772,6 +846,19 @@ export { HYDRATED_CHANNELS };
 const hydratedSet = HYDRATED_SET;
 /** Last payload seen per hydrated channel, for replay to late subscribers. */
 const lastPayload = new Map<string, unknown>();
+
+/**
+ * Test seam — forget the replay cache, so a case can model a COLD page.
+ *
+ * The cache is module-level and a test file shares one module registry across
+ * every case in it, so a frame emitted by one case is replayed into the next
+ * one's first subscriber. That is right in a browser and wrong in a suite: a
+ * case whose premise is "the server was down at page load" would be handed a
+ * state frame from the case above it, and pass or fail on test ORDER.
+ */
+export function __resetReplayCacheForTests(): void {
+  lastPayload.clear();
+}
 
 // Stable per-context client id, sent on the SSE URL so the server can scope this
 // stream's channel filter to us. crypto.randomUUID is unavailable in an insecure
@@ -872,7 +959,7 @@ const WORKER_PING_MS = 15_000;
 const WORKER_PONG_TIMEOUT_MS = 5_000;
 let workerPingTimer: ReturnType<typeof setInterval> | null = null;
 let workerPongTimer: ReturnType<typeof setTimeout> | null = null;
-const workerHandlers = new Map<string, Set<(payload: unknown) => void>>();
+const workerHandlers = new Map<string, Set<(payload: unknown, replayed: boolean) => void>>();
 let sseWorker: SharedWorker | null = null;
 
 function ensureWorker(): boolean {
@@ -889,10 +976,13 @@ function ensureWorker(): boolean {
         if (msg.streamOpen === false) abandonWorker("its event stream is closed");
         return;
       }
-      const { channel, data } = msg as { channel: string; data: unknown };
+      // `replay` is the worker's word for "this is the cached snapshot, not
+      // something the server just sent" — the same distinction the direct path
+      // draws, so a subscriber cannot tell which transport it is on.
+      const { channel, data, replay } = msg as { channel: string; data: unknown; replay?: boolean };
       const set = workerHandlers.get(channel);
       if (set) for (const cb of set) {
-        try { cb(data); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
+        try { cb(data, replay === true); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
       }
     };
     sseWorker.port.start();
@@ -946,7 +1036,9 @@ function abandonWorker(why: string): void {
     for (const cb of callbacks) {
       const handler = (e: MessageEvent) => {
         try {
-          cb(JSON.parse(e.data));
+          // A frame off the wire, never a replay — this is the direct
+          // EventSource path standing in for the abandoned worker.
+          cb(JSON.parse(e.data), false);
         } catch (err) {
           console.error(`[api] SSE handler error for "${channel}":`, err);
         }
@@ -1129,10 +1221,26 @@ if (typeof document !== "undefined") {
 /**
  * Subscribe to a server-sent event channel.
  * Returns an unsubscribe function.
+ *
+ * The handler's second argument says whether the frame is a REPLAY of the cached
+ * snapshot rather than something the server just sent. The two are not
+ * interchangeable, and a subscriber that has also issued a one-shot read has to
+ * be able to tell them apart:
+ *
+ *   - a LIVE frame is newer than any read already in flight, so it wins;
+ *   - a REPLAYED frame is at best connect-time and can be far older. The server
+ *     filters a channel out for a client with nothing subscribed to it, so the
+ *     moment the last subscriber for a channel goes away the cache stops being
+ *     updated — a component that mounts, unmounts and mounts again is handed a
+ *     snapshot from whenever the previous one was listening. Correcting exactly
+ *     that is what the read is for, so it must not be dropped in its favour.
+ *
+ * Ignoring the argument is fine and is what most subscribers do — it changes
+ * nothing about which frames arrive or in what order.
  */
 export function onNotification(
   channel: string,
-  cb: (payload: unknown) => void,
+  cb: (payload: unknown, replayed: boolean) => void,
 ): () => void {
   // Shared-worker path: register the callback and let the worker deliver parsed
   // payloads. Falls through to the direct path if the worker can't be created.
@@ -1155,7 +1263,7 @@ export function onNotification(
     try {
       const payload = JSON.parse(e.data);
       if (hydratedSet.has(channel)) lastPayload.set(channel, payload);
-      cb(payload);
+      cb(payload, false);
     } catch (err) {
       console.error(`[api] SSE parse error for "${channel}":`, err);
     }
@@ -1168,7 +1276,7 @@ export function onNotification(
   // so a caller cannot receive it synchronously during its own render.
   if (hydratedSet.has(channel) && lastPayload.has(channel)) {
     const cached = lastPayload.get(channel);
-    queueMicrotask(() => cb(cached));
+    queueMicrotask(() => cb(cached, true));
   }
 
   const es = ensureEventSource();

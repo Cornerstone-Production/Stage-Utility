@@ -1,5 +1,7 @@
 // Types for the automation engine — "when X happens in Stage, do Y to a device".
 
+import type { PvpLayerDTO } from "./pvp.js";
+
 /** A typed parameter on a trigger, condition or action — renders a form field. */
 export interface ParamDef {
   key: string;
@@ -38,6 +40,21 @@ export interface TriggerDef {
 export interface ConditionDef {
   id: string;
   label: string;
+  /**
+   * The broadcast channel whose snapshot this reads, or null when it reads
+   * nothing a producer can throttle (the clock, the current service type).
+   *
+   * Conditions are PULLED at the moment a rule fires, so they never appear on
+   * the bus and the trigger-channel demand loop cannot see them — a rule that
+   * triggers on PCO and merely ASKS about a ProVideoPlayer layer would read a
+   * snapshot at the idle cadence. automation-engine.ts registers demand by
+   * iterating this registry, so the answer lives on the definition.
+   *
+   * Required, and nullable rather than optional, so a new condition cannot be
+   * written without deciding: a hand-maintained table beside the registry lost
+   * five entries with the whole suite green.
+   */
+  channel: string | null;
   params: ParamDef[];
   /** PURE. Does this qualifier hold right now? */
   holds(ctx: ConditionCtx, params: Record<string, unknown>, now: number): boolean;
@@ -57,6 +74,11 @@ export interface ConditionCtx {
   youtubeStreaming: boolean;
   /** Current baptism-timer phase, or null when the timer has never run. */
   baptismPhase: string | null;
+  /** ProVideoPlayer's layers as of the last poll, or null when the integration
+   *  is off or has never connected. Null and empty are DIFFERENT: null is "we do
+   *  not know", and every PVP condition declines to hold on it — an unreachable
+   *  machine must not make "the workspace has nothing on screen" true. */
+  pvpLayers: PvpLayerDTO[] | null;
 }
 
 export interface ActionResult {

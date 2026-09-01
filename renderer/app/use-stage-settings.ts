@@ -21,6 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
+import { viewSurface } from "@main/types/views";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
@@ -135,6 +136,18 @@ export function useStageSettings(pinnedViewId?: string) {
       return null;
     }
   }
+
+  /** The StageState as it stands right now, from the cache every write updates.
+   *
+   *  A FUNCTION rather than a value destructured in the hook body, because a
+   *  value would be the state as of the render that made the closure — stale by
+   *  the time a click arrives, which is how a handler comes to pick the wrong
+   *  side to move first.
+   *
+   *  It is NOT a re-read between the two writes. Both of the paired handlers
+   *  below decide everything from one read, before either write goes out; this
+   *  used to claim otherwise, and so did the test guarding it. */
+  const stateNow = () => queryClient.getQueryData<StageState>(["stage:getState"]);
 
   /** The same, for the writes that return a fresh StageState. */
   async function writeState(
@@ -344,6 +357,15 @@ export function useStageSettings(pinnedViewId?: string) {
 
   async function handleSetTaperWindow(partial: { preMin?: number; postMin?: number }) {
     await writeState("settings:setTaperWindow", partial, { fail: "Failed to update taper settings" });
+  }
+
+  /** Which plan notes feed the pre-service checklist. */
+  async function handleSetChecklistSources(categories: string[], teams: string[]) {
+    await writeState(
+      "settings:setChecklistSources",
+      { categories, teams },
+      { fail: "Failed to save which notes feed the checklist" },
+    );
   }
 
   async function handleSetTimezone(tz: string | null) {
@@ -690,6 +712,18 @@ export function useStageSettings(pinnedViewId?: string) {
     );
   }
 
+  /** Show or hide one display's kiosk top bar. Optimistic like the lock: the
+   *  server only refuses an id that does not exist, and the menu label has to
+   *  flip under the operator's finger. */
+  async function handleSetOutputHideTopBar(id: string, hideTopBar: boolean) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { hideTopBar }) }),
+      () => ipc<StageState>("outputs:setHideTopBar", { id, hideTopBar }),
+      "Failed to update the display's top bar",
+    );
+  }
+
   /**
    * Make a screen a read-only display or an interactive control surface.
    *
@@ -698,14 +732,66 @@ export function useStageSettings(pinnedViewId?: string) {
    * the change happening and then silently undo it. The refusal is the useful
    * part; it says what to do instead.
    */
+  /**
+   * A screen's mode and its view's surface move together, and the ORDER is not
+   * a detail.
+   *
+   * Two guards on the server refuse in opposite directions, each waiting for the
+   * other side to move first:
+   *
+   *   setOutputMode(display)   refuses while the view it shows is a console
+   *   setViewSurface(console)  refuses while a screen showing it is not a panel
+   *
+   * So there is one rule: whichever side is being made MORE permissive goes
+   * first. Becoming a control surface, the screen leads; becoming a wall screen,
+   * the view does. Doing it the other way round is a deadlock — "Use as a
+   * display" was refused outright, with the server correctly explaining that the
+   * screen was still showing a control surface, and no order of clicking could
+   * get out of it.
+   */
   async function handleSetOutputMode(id: string, mode: "display" | "panel") {
-    await writeState("outputs:setMode", { id, mode });
+    const shown = stateNow()?.outputs.find((o) => o.id === id)?.viewId ?? null;
+    const wantSurface = mode === "panel" ? "console" : "display";
+    const viewNeedsIt = (() => {
+      const v = stateNow()?.views.find((x) => x.id === shown);
+      return v ? viewSurface(v) !== wantSurface : false;
+    })();
+
+    if (mode === "display" && shown && viewNeedsIt) {
+      // The view first: the screen cannot become a display while it is on one.
+      if (!(await writeState("views:setSurface", { id: shown, surface: "display" }))) return;
+      await writeState("outputs:setMode", { id, mode });
+      return;
+    }
+
+    if (!(await writeState("outputs:setMode", { id, mode }))) return;
+    if (shown && viewNeedsIt) {
+      await writeState("views:setSurface", { id: shown, surface: wantSurface });
+    }
   }
 
-  /** Change what a View is for. Refused, with its reason, when screens would be
-   *  stranded — so the message reaches the operator rather than the console. */
+  /** Change what a View is for, and the screens showing it, in the order the
+   *  guards allow. See handleSetOutputMode. */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
-    await writeState("views:setSurface", { id, surface });
+    const wantMode = surface === "console" ? "panel" : "display";
+    const showing = (stateNow()?.outputs ?? []).filter(
+      (o) => o.viewId === id && (o.mode ?? "display") !== wantMode,
+    );
+
+    if (surface === "console") {
+      // The screens first: the view cannot become a console while a screen
+      // showing it is still a plain display.
+      for (const o of showing) {
+        if (!(await writeState("outputs:setMode", { id: o.id, mode: "panel" }))) return;
+      }
+      await writeState("views:setSurface", { id, surface });
+      return;
+    }
+
+    if (!(await writeState("views:setSurface", { id, surface }))) return;
+    for (const o of showing) {
+      await writeState("outputs:setMode", { id: o.id, mode: "display" });
+    }
   }
 
   async function handleRemoveOutput(id: string) {
@@ -743,6 +829,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetAutoUpdate,
     handleSetReconnectSchedule,
     handleSetTaperWindow,
+    handleSetChecklistSources,
     handleSetTimezone,
     handleSetHourCycle,
     handleSetAllowedServiceTypes,
@@ -775,6 +862,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,
+    handleSetOutputHideTopBar,
     handleSetOutputMode,
     handleSetViewSurface,
     handleRemoveOutput,

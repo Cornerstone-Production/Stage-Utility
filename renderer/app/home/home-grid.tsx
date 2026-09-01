@@ -8,76 +8,15 @@
 // what makes "add any widget to Home" a real sentence rather than a promise
 // about a second widget set.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { LayoutDTO, LayoutObject } from "@main/types/views";
+import { HOME_VIEW_ID } from "@main/services/home-view";
 
 import { ObjectContent, boxStyle, useLayoutData } from "../../main/layout-renderer";
 import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { COLUMNS, SIZES, sizeOf } from "./home-cards";
 import { boxesOf, rowsNeeded, type Box } from "./home-placement";
-
-/**
- * Slide every card that moved, from where it was to where it now is.
- *
- * Grid lines do not animate — a card that changes cells jumps. This is the
- * standard FLIP: measure before the paint, apply the inverse as a transform so
- * the card appears not to have moved, then release it on the next frame and let
- * a transition carry it across. Without it, "the other widgets move out of the
- * way" is a teleport, which reads as the page glitching rather than as the page
- * making room.
- */
-function useSlideOnMove(deps: unknown, enabled: boolean) {
-  const host = useRef<HTMLDivElement | null>(null);
-  const last = useRef(new Map<string, DOMRect>());
-
-  useLayoutEffect(() => {
-    const el = host.current;
-    if (!el) return;
-    const cards = [...el.querySelectorAll<HTMLElement>("[data-card-id]")];
-    const now = new Map<string, DOMRect>();
-    for (const card of cards) {
-      const id = card.dataset.cardId!;
-      const rect = card.getBoundingClientRect();
-      now.set(id, rect);
-      const before = last.current.get(id);
-      if (!enabled || !before) continue;
-      const dx = before.left - rect.left;
-      const dy = before.top - rect.top;
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
-      card.style.transition = "none";
-      card.style.transform = `translate(${dx}px, ${dy}px)`;
-      // Two frames: one to let the browser take the inverted position as the
-      // start, one to release it. A single frame is sometimes coalesced with the
-      // style write above, and the card jumps anyway.
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          card.style.transition = "transform 180ms cubic-bezier(0.2, 0, 0, 1)";
-          card.style.transform = "";
-        });
-      });
-    }
-    last.current = now;
-  }, [deps, enabled]);
-
-  // Nothing half-animated survives the end of a drag.
-  useEffect(() => {
-    if (enabled) return;
-    const el = host.current;
-    if (!el) return;
-    for (const card of el.querySelectorAll<HTMLElement>("[data-card-id]")) {
-      card.style.transition = "";
-      card.style.transform = "";
-    }
-  }, [enabled]);
-
-  // A setter rather than the ref itself: the grid also hands its element to the
-  // caller, and assigning to a hook's ref from outside it is exactly what the
-  // immutability rule is there to stop.
-  const setHost = useCallback((el: HTMLDivElement | null) => {
-    host.current = el;
-  }, []);
-  return setHost;
-}
+import { useSlideOnMove } from "../../lib/use-slide-on-move";
 
 /**
  * The widget's own styling MINUS everything Home supplies itself: the frame AND
@@ -101,6 +40,9 @@ function useSlideOnMove(deps: unknown, enabled: boolean) {
  * painted by Readout's filled variant, inside the card, not by this background.
  * Colour that is decoration does not survive onto Home — one grid of tiles that
  * reads in both themes beats per-widget tinting that only works in one.
+ *
+ * Subtracts, with ONE addition: `position: relative`, which is what makes
+ * "inside the card" true rather than aspirational. See the note on it below.
  */
 export function cardFrame(o: LayoutObject, H: number): CSSProperties {
   const {
@@ -109,7 +51,64 @@ export function cardFrame(o: LayoutObject, H: number): CSSProperties {
     background: _writtenForABlackWall,
     ...rest
   } = boxStyle(o, H);
-  return rest;
+  // POSITIONED, so that "inside the card" above is true rather than aspirational.
+  //
+  // Readout lays its whole composition out `position: absolute; inset: 0`, and
+  // paints the filled ground inset:0 inside THAT — so the pair reach whatever
+  // box the composition resolves against, which is the nearest POSITIONED
+  // ancestor. On a canvas that is the object's own wrapper, so the ground lands
+  // in the wrapper's PADDING box and the card's hairline stays drawn outside it.
+  //
+  // This frame was static, so on Home the composition resolved against the grid
+  // cell OUTSIDE it — the frame's BORDER box — and the ground covered the
+  // border on all four sides: a recording widget lost the edge its unfilled
+  // neighbour in the next tile still had. Measured in a browser: frame and
+  // ground both 437x120 at the same origin, against 435x118 after this.
+  //
+  // The frame's own `overflow: hidden` did not save it. An absolutely positioned
+  // element whose containing block is an ANCESTOR of the clipping box is not
+  // clipped by it.
+  //
+  // Every child of the frame moves, not only the filled ones — an unfilled
+  // composition was simply overlapping a 1px border invisibly.
+  //
+  // Home's OWN cards get this from a Tailwind class instead — see STAT_CARD in
+  // cards.tsx, whose comment says the same thing. It is an inline style here
+  // because that is the half a test can read: jsdom loads no stylesheet, so a
+  // `relative` in the className resolves to "static" and a containing-block
+  // guard over it would pass on the bug.
+  return { ...rest, position: "relative" };
+}
+
+/**
+ * The element a Home widget's card is drawn on, and the containing block for
+ * everything the widget draws inside it.
+ *
+ * A component rather than a div spelled out in the grid, so the guard in
+ * card-frame-containing-block.test.tsx renders the REAL frame. Written inline,
+ * the only thing tying `cardFrame` to the element that needs it was a spread
+ * somebody could drop with every test still green.
+ *
+ * boxStyle is what paints a widget's frame — background, hairline, radius. On a
+ * canvas the object wrapper applies it; rendering ObjectContent alone left every
+ * Home card transparent and edge-to-edge, which read as "the card look did not
+ * ship" rather than "Home forgot the box".
+ *
+ * The FRAME itself comes from Home, not from the object. Radius and border width
+ * on a canvas are fractions of canvas height, so a widget landed at 10.66px
+ * radius and a 0.08 hairline while Home's own cards used the app's 12px and
+ * 0.09 — measured, and visible as tiles whose edges do not agree. Colour still
+ * comes from the object, so a red-preset widget stays red.
+ */
+export function CardFrame({ o, children }: { o: LayoutObject; children: ReactNode }) {
+  return (
+    <div
+      className="rounded-xl border border-line bg-surface"
+      style={{ ...cardFrame(o, NOMINAL_H), width: "100%", height: "100%", overflow: "hidden" }}
+    >
+      {children}
+    </div>
+  );
 }
 
 /** One grid row, in pixels. Two of these plus a gap is a Large or an XL. */
@@ -153,7 +152,11 @@ const NOMINAL_H = ROW_PX * 6;
  * efficiency rule every other surface follows.
  */
 function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
-  const d = useLayoutData(layout);
+  // HOME_VIEW_ID, matching `embedChain` below: the gate walks embedded layouts
+  // under the same cycle/depth limiter the renderer uses, so seeding it with
+  // nothing would give the gate one more level of budget than the render and
+  // subscribe for a tile Home refuses to draw.
+  const d = useLayoutData(layout, HOME_VIEW_ID);
   // No state yet — the caller renders nothing rather than a grid of dashes.
   if (!d.state) return null;
   // Assembled exactly as LayoutRenderer assembles it — the three renamed fields
@@ -170,6 +173,9 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     spl: d.spl,
     obs: d.obs,
     reaper: d.reaper,
+    pvp: d.pvp,
+    pvpSkewMs: d.pvpSkewMs,
+    scores: d.scores,
     resi: d.resi,
     youtube: d.youtube,
     osc: d.osc,
@@ -183,6 +189,9 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     integrations: d.integrationsSnap.states,
     integrationLabels: d.integrationsSnap.labels,
     wireless: d.wireless,
+    // Real presence, from the heartbeat — Home's screens count and its readiness
+    // list are two of the three things in the app that draw it.
+    onlineOutputIds: d.onlineOutputIds,
     now: d.now,
     skewMs: d.skewMs,
     ndiSource: null,
@@ -192,6 +201,13 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     // And it IS Home — the flag the streaming cards read to know they are tiles
     // on a page of tiles rather than widgets on a wall.
     home: true,
+    // Home IS the outermost view, so it is ON the chain rather than absent from
+    // it: a card embedding Home would otherwise draw a second Home inside itself
+    // and only the depth cap would stop it.
+    embedChain: [HOME_VIEW_ID],
+    // Home is a page of tiles, not a tile inside somebody else's, so a card that
+    // embeds a view carries its own expand control.
+    insideEmbedTile: false,
     placed: undefined,
   };
 }
@@ -228,7 +244,7 @@ export function HomeGrid({
   // A signature rather than the array: the effect must run when a card MOVES,
   // and an array identity changes on every render.
   const signature = boxes.map((b) => `${b.id}:${b.col}:${b.row}`).join("|");
-  const setHost = useSlideOnMove(signature, animate);
+  const { setHost } = useSlideOnMove(signature, animate);
   if (!ctx) return null;
 
   return (
@@ -275,24 +291,9 @@ export function HomeGrid({
               data-card-id={o.id}
               onContextMenu={onCardContextMenu ? (e) => onCardContextMenu(o, e) : undefined}
             >
-              {/* boxStyle is what paints the widget's own frame — background,
-                  hairline, radius, padding. On a canvas the object wrapper
-                  applies it; rendering ObjectContent alone left every Home card
-                  transparent and edge-to-edge, which read as "the card look did
-                  not ship" rather than "Home forgot the box".
-
-                  The FRAME comes from Home, not from the object. Radius and
-                  border width on a canvas are fractions of canvas height, so a
-                  widget landed at 10.66px radius and a 0.08 hairline while
-                  Home's own cards used the app's 12px and 0.09 — measured, and
-                  visible as tiles whose edges do not agree. Colour still comes
-                  from the object, so a red-preset widget stays red. */}
-              <div
-                className="rounded-xl border border-line bg-surface"
-                style={{ ...cardFrame(o, NOMINAL_H), width: "100%", height: "100%", overflow: "hidden" }}
-              >
+              <CardFrame o={o}>
                 <ObjectContent o={o} ctx={ctx} />
-              </div>
+              </CardFrame>
               {chrome?.(o)}
             </div>
           );

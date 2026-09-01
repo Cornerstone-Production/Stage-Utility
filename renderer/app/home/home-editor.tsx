@@ -13,7 +13,7 @@ import { useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { XIcon, GripVerticalIcon } from "lucide-react";
 
-import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER } from "../../main/layout-objects";
+import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, widgetMatchesQuery } from "../../main/layout-objects";
 import type { HomeCardSize, HomeVisibility, LayoutObject } from "@main/types/views";
 import { DialogOverlay } from "../../components/ui/dialog";
 import type { PointerEvent as ReactPointerEvent } from "react";
@@ -138,7 +138,6 @@ export function AddWidgetSheet({
   onAdd: (type: string, size: HomeCardSize) => void;
 }) {
   const [q, setQ] = useState("");
-  const needle = q.trim().toLowerCase();
 
   const groups = PALETTE_GROUP_ORDER.map((g) => ({
     group: g,
@@ -149,9 +148,9 @@ export function AddWidgetSheet({
       // things sit", which on Home is the grid's job. Offering them here would
       // be offering a control that does nothing.
       .filter(([t]) => !CANVAS_ONLY.has(t))
-      .filter(([t, s]) =>
-        !needle || s.label.toLowerCase().includes(needle) || t.includes(needle) || s.blurb.toLowerCase().includes(needle),
-      ),
+      // Shared with the layout editor's palette, which offers the same search
+      // box: one predicate, so the same words find the same widgets on both.
+      .filter(([t]) => widgetMatchesQuery(t as LayoutObjectType, q)),
   })).filter((g) => g.items.length > 0);
 
   return (

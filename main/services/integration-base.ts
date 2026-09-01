@@ -14,7 +14,12 @@
 //                           freshly-loaded display via getLatest(), broadcast on
 //                           change, and fall back to an OFFLINE DTO on drop.
 
-import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import {
+  addChannelDemandSource,
+  broadcast,
+  channelHasSubscribers,
+  channelInDemand,
+} from "./broadcaster.js";
 import { serviceWindow } from "./service-window.js";
 
 /** Connection state as reported to the Integrations panel. */
@@ -102,36 +107,27 @@ export abstract class ConnectionLifecycle {
     this.reconnectAttempt = 0;
   }
 
-  /** Whether any client is watching this integration's channel. Polling
-   *  integrations use it to slow down when nobody is looking. */
-  protected get hasSubscribers(): boolean {
-    return channelHasSubscribers(this.channel);
-  }
-
-  /** In-process consumers that read this channel without an SSE subscription. */
-  private readonly demandSources: (() => boolean)[] = [];
+  // NOTE: there is deliberately no `hasSubscribers` here any more.
+  //
+  // It answered "is a BROWSER watching", every polling integration reached for it
+  // as if it meant "is anyone using this", and that is the whole bug: REAPER's
+  // cadence and ProPresenter's both ignored in-process consumers, as smaart's
+  // broadcast had before them. `inDemand` below is the question a subclass
+  // actually wants; a genuinely browser-only gate calls channelHasSubscribers
+  // directly, where reading it says so.
 
   /**
-   * Register a consumer that needs this channel broadcast even with no browser
-   * attached.
-   *
-   * An SSE subscriber check can only see browsers, and the automation engine is
-   * not one: it listens on the broadcast bus in-process, so gating a broadcast on
-   * `hasSubscribers` silently disabled every rule that reads it. An SPL threshold
-   * rule fired only while someone happened to have a meter open — which on an
-   * unattended appliance is never — and the operator saw an enabled rule that had
-   * simply never run, with no error anywhere.
-   *
-   * Same shape as sensourceService.addDemandSource, and a callback rather than an
-   * import because the consumer imports the service.
+   * Register a consumer that needs this channel produced even with no browser
+   * attached. Thin wrapper over the channel-keyed registry in broadcaster.ts —
+   * see `addChannelDemandSource` there for why this distinction exists at all.
    */
   addDemandSource(wantsBroadcast: () => boolean): void {
-    this.demandSources.push(wantsBroadcast);
+    addChannelDemandSource(this.channel, wantsBroadcast);
   }
 
   /** Is anything — a browser or an in-process consumer — actually using this? */
   protected get inDemand(): boolean {
-    return this.hasSubscribers || this.demandSources.some((wants) => wants());
+    return channelInDemand(this.channel);
   }
 
   /**
@@ -170,7 +166,7 @@ export abstract class ConnectionLifecycle {
 }
 
 /** An integration that publishes a status snapshot on its channel. */
-export abstract class StatusIntegration<T extends { connected: boolean }> extends ConnectionLifecycle {
+export abstract class StatusIntegration<T extends { connected: boolean; rev?: number }> extends ConnectionLifecycle {
   protected last: T;
 
   protected constructor(log: string, channel: string, protected readonly offline: T) {
@@ -178,10 +174,78 @@ export abstract class StatusIntegration<T extends { connected: boolean }> extend
     this.last = offline;
   }
 
+  /**
+   * Monotonic version of what this integration has published, bumped ONLY when a
+   * frame actually goes out on the channel.
+   *
+   * It exists to order the two ways a client learns the truth. A status hook
+   * hydrates with a one-shot read and subscribes to this channel; if a push lands
+   * before the read resolves, the older read overwrote the newer push — and
+   * because the channel broadcasts only on change, the wrong value then stuck
+   * until the next real change, which in a quiet building is hours.
+   *
+   * Both halves carry the same counter (`getLatest()` stamps it too, and every
+   * hydrate route answers from `getLatest()`), so the client can compare them and
+   * drop a read that is older than a push it already applied.
+   *
+   * "Only on a real change" is what makes the comparison meaningful: two frames
+   * with the same rev describe the same published value, whichever arrived first.
+   * A read may legitimately be FRESHER than the last push at the same rev —
+   * Smaart keeps `last` current between throttled broadcasts — which is why the
+   * client's rule is "apply unless strictly older" rather than "strictly newer".
+   *
+   * Deliberately NOT stored on `this.last`: emitIfChanged() compares every key of
+   * the DTO, so a rev living inside the snapshot would differ on every comparison
+   * and turn a change-driven channel into an unconditional one.
+   */
+  private rev = 0;
+
+  /** Copy of a snapshot stamped with the current published version. */
+  protected stamped(snapshot: T): T {
+    return { ...snapshot, rev: this.rev };
+  }
+
+  /** Advance to the next version. Call immediately before broadcasting a frame,
+   *  and only when the frame is a real change — see the note on `rev`. */
+  protected bumpRev(): void {
+    this.rev++;
+  }
+
   /** Latest snapshot — lets a freshly-loaded display hydrate immediately
-   *  instead of waiting for the next upstream event. */
+   *  instead of waiting for the next upstream event. Stamped, so the caller can
+   *  tell this read apart from a push it may already have applied. */
   getLatest(): T {
-    return this.last;
+    return this.stamped(this.last);
+  }
+
+  /**
+   * Is `next` worth a frame?
+   *
+   * THE ONLY THING A SUBCLASS OVERRIDES. The tail below — emit, or else keep
+   * `last` current silently — was copied verbatim into three of them, and the
+   * `else this.last = next` half is easy to read as dead code and drop: it is
+   * what lets a display connecting between changes hydrate with the truth
+   * instead of a stale snapshot, and nothing about the line says so where it is
+   * written out for the fourth time. A pure predicate has nowhere to put that
+   * mistake.
+   *
+   * Shallow, over every key of the DTO. Resi and YouTube each carried a
+   * hand-written copy comparing the same four fields by name, which is a list to
+   * forget to extend the next time a field is added to the DTO. It is also the
+   * wrong answer for any DTO holding an array — a fresh array is never `===` its
+   * predecessor — which is why PVP and scores override it.
+   *
+   * Three integrations override this today: REAPER ticks every poll while
+   * recording on purpose so a timecode display advances; PVP compares a
+   * signature that deliberately omits every time-varying field; scores compares
+   * the games rather than the fetch timestamp.
+   */
+  protected changed(prev: T, next: T): boolean {
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]) as Set<keyof T>;
+    for (const k of keys) {
+      if (prev[k] !== next[k]) return true;
+    }
+    return false;
   }
 
   /**
@@ -193,21 +257,10 @@ export abstract class StatusIntegration<T extends { connected: boolean }> extend
    * current is what lets a display that connects between changes hydrate with
    * the truth instead of a stale snapshot.
    *
-   * Shallow, over every key of the DTO. Resi and YouTube each carried a
-   * hand-written copy comparing the same four fields by name, which is a list to
-   * forget to extend the next time a field is added to the DTO.
-   *
-   * REAPER overrides this: while recording it ticks every poll on purpose, so a
-   * timecode display advances.
+   * Not overridden anywhere: subclasses override `changed`.
    */
   protected emitIfChanged(next: T): void {
-    const prev = this.last;
-    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]) as Set<keyof T>;
-    let changed = false;
-    for (const k of keys) {
-      if (prev[k] !== next[k]) { changed = true; break; }
-    }
-    if (changed) this.emit(next);
+    if (this.changed(this.last, next)) this.emit(next);
     else this.last = next;
   }
 
@@ -215,7 +268,8 @@ export abstract class StatusIntegration<T extends { connected: boolean }> extend
    *  meters arrive many times a second). */
   protected emit(snapshot: T): void {
     this.last = snapshot;
-    broadcast(this.channel, snapshot);
+    this.bumpRev();
+    broadcast(this.channel, this.stamped(snapshot));
   }
 
   /** Drop to OFFLINE, but only if we were connected — avoids re-broadcasting

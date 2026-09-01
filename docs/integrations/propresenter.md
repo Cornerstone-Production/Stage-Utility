@@ -32,8 +32,12 @@ reads.
 the **port** (default 1025). The machine must be on the same network as Stage.
 
 **In Stage:** Settings → Integrations → **ProPresenter** → enter a **Name**,
-**Host** (IP), **API Port**, and optional **Poll interval** (500ms feels instant),
-enable it, and **Test connection**. Add more auditoriums via extra instances.
+**Host** (IP), **API Port**, and optionally a **Poll interval**, enable it, and
+**Test connection**. Add more auditoriums via extra instances.
+
+Left blank, the poll runs at **1000 ms** while a display is watching. Set it
+lower — 500 ms feels instant — at the cost of twice the requests; anything under
+200 ms is ignored.
 
 **On a layout:** add slide objects — current/next slide text, current/next slide
 notes, current/next section, slide progress, slide thumbnail. Each can target a

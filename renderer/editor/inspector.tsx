@@ -48,6 +48,9 @@ import { useSplState } from "../main/use-spl-state";
 import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsState } from "../main/use-obs-state";
+import { hasContent, type PvpStatusDTO } from "@main/types/pvp";
+import { usePvpState } from "../main/use-pvp-state";
+import { useQuery } from "@tanstack/react-query";
 import { useReaperState } from "../main/use-reaper-state";
 import { useOscTargets } from "../main/use-osc-state";
 import { useStageState } from "../main/use-stage-state";
@@ -55,21 +58,21 @@ import { usePlanItems } from "../main/use-plan-items";
 import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { screensListViews } from "@main/services/home-view";
+import { gameOptions } from "../main/scores-object";
 import { formatClock } from "../lib/clock-format";
 import {
   isKnownObjectType,
   isOfferableInEmbedPicker,
   objectRetired,
-  defaultStyle,
   isStylingOnly,
   typeLabel,
   usesPropInstance,
 } from "../main/layout-objects";
-import { IDIOM_TYPES, DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
+import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
-  ImageConfig, NumberField, NumberInput, PixelField,
+  ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { cn } from "../lib/cn";
@@ -82,6 +85,21 @@ import {
 
 
 const RECORDED_LATEST = "__latest__";
+
+/**
+ * The live PVP reading the inspector prints above every PVP object.
+ *
+ * One function because it was written twice, once counting a precomputed
+ * `withContent` and once inlining the same filter — so the two lines could
+ * disagree about what "with content" means while both looked correct. The
+ * definition itself already lives once, in `hasContent`; this is the sentence
+ * built from it.
+ */
+function pvpSummary(pvp: PvpStatusDTO | null): string {
+  if (!pvp?.connected) return "Not connected";
+  const withContent = pvp.layers.filter(hasContent).length;
+  return `${pvp.layers.length} layers, ${withContent} with content`;
+}
 
 /** Inspector controls for the people-graph object: live vs. a recorded service,
  *  PCO markers, hover tooltip, and a kiosk-visible live/recorded toggle. */
@@ -140,8 +158,6 @@ function PeopleGraphInspector({ c, onConfig }: { c: Extract<LayoutObjectConfig, 
     </>
   );
 }
-
-const WEIGHTS = [300, 400, 500, 600, 700, 800];
 
 /**
  * Binding + framing controls for a plan-attachment object: a filename match (so it
@@ -322,6 +338,7 @@ export function Inspector({
   const { data: wirelessChannels = [] } = useWirelessChannels();
   const obs = useObsState();
   const reaper = useReaperState();
+  const pvp = usePvpState();
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
   // RossTalk targets + command catalogue for the rosstalk-button inspector. Loaded
@@ -340,14 +357,32 @@ export function Inspector({
       .then(setRosstalkCommands)
       .catch(() => {});
   }, []);
+  // The followed teams, for the scores object's team select. The SAME query key
+  // the settings panel writes through, so following a new team there populates
+  // this select without a reload.
+  //
+  // Gated for the reason home-route.tsx gates the identical query: unconditional,
+  // it fires an integration read on every Inspector mount, for every object type
+  // — selecting a text box asked the scores service who the operator follows.
+  // Only the two objects below have a team select to fill.
+  const { data: scoresConfig } = useQuery({
+    queryKey: ["scores:getFavourites"],
+    queryFn: () => invoke<ScoresConfig>("scores:getFavourites"),
+    enabled: c.type === "scores" || c.type === "home-scores",
+    retry: 1,
+  });
   const planItems = usePlanItems();
   const propInstances = usePropInstances();
   const integrationsSnap = useIntegrations();
-  const captionChannels = Object.keys(useStageState().state?.captionChannelColors ?? {});
+  // ONE read of the state, shared by everything below that needs it. The hook
+  // fetches and subscribes per call, so the two separate calls this replaced
+  // were two `stage:getState` requests and two state streams for one panel.
+  const stageState = useStageState().state;
+  const captionChannels = Object.keys(stageState?.captionChannelColors ?? {});
   // Home excluded: its stored geometry is meaningless (it is a card list, not a
   // canvas), so embedding it would draw four cards stacked at whatever filler
   // coordinates happen to be in the file.
-  const embedViews = screensListViews(useStageState().state?.views ?? []);
+  const embedViews = screensListViews(stageState?.views ?? []);
   const isText = !["shape", "container", "ndi-video", "slide-thumbnail", "image", "plan-attachment", "brand-logo", "slots-grid"].includes(c.type);
   // Style sizes are stored as fractions of canvas HEIGHT; show them as px (rounded
   // to 1 decimal so they read as whole numbers but still allow fine values).
@@ -525,17 +560,17 @@ export function Inspector({
       })()}
       {c.type === "view-embed" && (() => {
         // Both the picker and the renderer ask the same function — see
-        // isEmbeddableViewKind. Custom never appears, which IS the recursion
-        // guard; other kinds appear but say why they do not render yet.
+        // isEmbeddableViewKind. Every kind renders now; a view that would
+        // contain itself is refused at render time, per box, by embed-chain.ts.
         const embeddable = (embedViews ?? []).filter((v) => isOfferableInEmbedPicker(v.kind));
         return embeddable.length === 0 ? (
           <p className="text-caption2 text-fg-muted">
-            No embeddable views yet — make a Script view first, then point this at it.
+            No other views yet — make one, then point this at it.
           </p>
         ) : (
           <RowSelect
             label="View"
-            hint="Renders that view's content here, natively. Script views work today; other kinds are being converted."
+            hint="Renders that view's content here, natively. Dashboard, stage and SPL-rundown views are configured per screen, not per view — pick an Embedded screen for those instead. A view cannot contain itself, and nesting stops after three levels."
             value={c.viewId ?? ""}
             options={[{ value: "", label: "None" }, ...embeddable.map((v) => ({ value: v.id, label: `${v.name} (${v.kind})` }))]}
             onChange={(v) => onConfig({ ...c, viewId: v || null })}
@@ -555,6 +590,37 @@ export function Inspector({
           hint="Scrolls the rundown to keep Planning Center's live item on screen, so a service that runs past the bottom of the box does not need anyone to touch the display. Only ever scrolls this object, never the rest of the layout. Turn off for a box parked on the top of the plan."
           checked={c.autoScroll ?? true}
           onChange={(v) => onConfig({ ...c, autoScroll: v })}
+        />
+      )}
+      {c.type === "screen-embed" && (() => {
+        const outputs = stageState?.outputs ?? [];
+        return outputs.length === 0 ? (
+          <p className="text-caption2 text-fg-muted">
+            No screens yet — add one under Screens, then point this at it.
+          </p>
+        ) : (
+          <RowSelect
+            label="Screen"
+            hint="Shows whatever this screen is showing, and follows it when the routing changes."
+            value={c.outputId ?? ""}
+            options={[{ value: "", label: "None" }, ...outputs.map((out) => ({ value: out.id, label: out.name }))]}
+            onChange={(v) => onConfig({ ...c, outputId: v || null })}
+          />
+        );
+      })()}
+      {c.type === "screen-embed" && c.outputId && (
+        <RowSwitch
+          label="Show the screen's name"
+          checked={c.showLabel ?? true}
+          onChange={(v) => onConfig({ ...c, showLabel: v })}
+        />
+      )}
+      {c.type === "screen-embed" && c.outputId && c.showLabel !== false && (
+        <RowSwitch
+          label="Show a status dot"
+          hint="Lit while a browser is actually open on that screen — even if its routed view was since deleted, since this tracks presence, not content. Dark once nothing has reported in for about ninety seconds. Not the routing — the tile itself already says what the screen is or is not showing."
+          checked={c.showStatus ?? true}
+          onChange={(v) => onConfig({ ...c, showStatus: v })}
         />
       )}
       {c.type === "service-order" && (
@@ -685,7 +751,7 @@ export function Inspector({
       {c.type === "service-pacing" && (
         <>
           <div className="px-1 pb-1 text-xs text-fg-subtle">
-            Shows how far ahead or behind the whole schedule the service is running right now — carries over slippage from earlier items and grows live if the current item runs long. Needs a service-timeline recording.
+            Shows how far ahead or behind the whole schedule the service is running right now — carries over slippage from earlier items and grows live if the current item runs long. The drift needs a service-timeline recording; the projected end time below needs only a live item with a planned length.
           </div>
           <Row label="Ahead color">
             <div className="flex items-center gap-2">
@@ -699,6 +765,7 @@ export function Inspector({
               {c.behindColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, behindColor: null })}>Reset</button>}
             </div>
           </Row>
+          <RowSwitch label="Projected end time" hint="Lead with the wall-clock time the plan runs out — &quot;when do we get out of here&quot; — instead of the drift figure. The drift moves under it when the ahead/behind label is on. Needs a live item with a planned length; shows a dash when there is nothing to project from." checked={c.showProjectedEnd ?? false} onChange={(v) => onConfig({ ...c, showProjectedEnd: v })} />
           <RowSwitch label="Show ahead/behind label" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
           <RowSwitch label="Show dash when idle" checked={!(c.hideWhenIdle ?? false)} onChange={(v) => onConfig({ ...c, hideWhenIdle: !v })} />
         </>
@@ -918,6 +985,103 @@ export function Inspector({
             <RowSwitch label="Fill red when recording" checked={c.fillWhenRecording ?? FILL_WHEN_ACTIVE} onChange={(v) => onConfig({ ...c, fillWhenRecording: v })} />
             <RowSwitch label="Show position" checked={c.showPosition ?? false} onChange={(v) => onConfig({ ...c, showPosition: v })} />
             <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
+          </>
+        );
+      })()}
+      {c.type === "pvp-layers" && (
+          <>
+            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
+            <RowSelect
+              label="Show"
+              value={c.show ?? "with-content"}
+              options={[
+                { value: "with-content", label: "Layers with content" },
+                { value: "all", label: "All layers" },
+                { value: "one", label: "One layer" },
+              ]}
+              onChange={(v) => onConfig({ ...c, show: v as "with-content" | "all" | "one" })}
+            />
+            {(c.show ?? "with-content") === "one" && (
+              /* A free text field, not a select. A dropdown would be populated
+                 only while PVP is connected, so an operator building a layout on
+                 a laptop away from the machine would find it empty and have no
+                 way to type the name they already know. The live first layer name
+                 is the placeholder instead. */
+              <RowText
+                label="Layer name"
+                value={c.layerName ?? ""}
+                placeholder={pvp?.layers[0]?.name ?? "Layer name"}
+                onChange={(v) => onConfig({ ...c, layerName: v })}
+              />
+            )}
+            {/* The BAR, not the time. The time remaining is always drawn — it is
+                the reading this widget exists for — and hiding it behind this
+                switch is how a countdown that was never drawn read as one PVP
+                was not reporting. */}
+            <RowSwitch label="Progress bar" hint="A hairline rule under each rolling clip. The time remaining is always shown." checked={c.showProgress ?? false} onChange={(v) => onConfig({ ...c, showProgress: v })} />
+            <RowSwitch label="Hide when nothing is on screen" checked={c.hideWhenEmpty ?? false} onChange={(v) => onConfig({ ...c, hideWhenEmpty: v })} />
+          </>
+      )}
+      {c.type === "home-pvp" && (
+        <RowSwitch label="Progress bar" hint="A hairline rule under each rolling clip. The time remaining is always shown." checked={c.showProgress ?? false} onChange={(v) => onConfig({ ...c, showProgress: v })} />
+      )}
+      {(c.type === "pvp-now" || c.type === "home-pvp-now") && (
+          <>
+            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
+            {c.type === "pvp-now" && (
+              /* Free text, not a select, for the reason the layer list's field
+                 is: a dropdown is populated only while PVP is connected, so an
+                 operator building a layout on a laptop away from the machine
+                 would find it empty with no way to type the name they know. */
+              <RowText
+                label="Layer"
+                hint="Leave empty to follow whichever layer has something on it."
+                value={c.layerName ?? ""}
+                placeholder={pvp?.layers.find(hasContent)?.name ?? "Any layer with content"}
+                onChange={(v) => onConfig({ ...c, layerName: v })}
+              />
+            )}
+            <RowSwitch label="Progress bar" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
+            <RowSwitch
+              label="Next cue"
+              // The caveat, where the operator makes the decision. It is the
+              // reason this is a switch at all.
+              hint="The next entry in the playlist — what plays next only while the playlist keeps auto-advancing. A cue fired by hand makes it wrong until the next poll."
+              checked={c.showNextCue ?? true}
+              onChange={(v) => onConfig({ ...c, showNextCue: v })}
+            />
+          </>
+      )}
+      {/* Both scores widgets, because both carry `game` and it means the same
+          thing on each. The sport-detail switch below is the wall object's
+          alone — the Home card draws a list of rows, not a strip with a
+          sport-specific centre. */}
+      {(c.type === "scores" || c.type === "home-scores") && (() => {
+        const favourites = scoresConfig?.favourites ?? [];
+        return (
+          <>
+            {/* Options from gameOptions, shared with Home's card menu, so the two
+                pickers cannot write different keys for the same team. */}
+            <RowSelect
+              label="Game"
+              hint="Which followed game this shows. A pinned team hands over once their game is finished and another is on."
+              value={c.game ?? "auto"}
+              options={gameOptions(favourites)}
+              onChange={(v) => onConfig({ ...c, game: v })}
+            />
+            {favourites.length === 0 && (
+              <p className="text-caption2 text-fg-muted leading-snug">
+                No teams followed yet. Choose them in Settings, Integrations, Live scores.
+              </p>
+            )}
+            {c.type === "scores" && (
+              <RowSwitch
+                label="Show sport detail"
+                hint="Bases and count, down and distance, the game clock. Off leaves the score and the status line."
+                checked={c.detail ?? true}
+                onChange={(v) => onConfig({ ...c, detail: v })}
+              />
+            )}
           </>
         );
       })()}
@@ -1303,17 +1467,9 @@ export function Inspector({
       {isText && (
         <>
 
-          {/* Fall back to THIS type's own default, not a blanket 0.05. An object
-              whose default differs (an embedded view starts at 0.016) otherwise
-              reported a size it was not rendering at, so the first nudge of the
-              stepper jumped it to a number it had never been. */}
-          <Row label="Font size"><NumberField value={pxOf(s.fontSize, defaultStyle(c.type).fontSize ?? 0.05)} step={1} min={1} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ fontSize: px / canvas.height })} /></Row>
-          <Row label="Weight">
-            <Select value={String(s.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
-            </Select>
-          </Row>
+          {/* Size and weight — or, for a readout that fits itself to its box,
+              the reason there are none. See sizesTypeFromItsBox. */}
+          <TypeSizeRows type={c.type} style={s} canvasHeight={canvas.height} onStyle={onStyle} />
           {/* Text, so no opacity: a translucent word over a wall is not a
               softer word, it is a harder one to read. */}
           <Row label="Color"><ColorField label="Text colour" allowAlpha={false} value={s.color ?? "#ffffff"} onChange={(v) => onStyle({ color: v })} /></Row>
@@ -1324,7 +1480,7 @@ export function Inspector({
               first click would then appear to do nothing. */}
           <Row label="Align">
             <AlignPad
-              h={s.textAlign ?? (IDIOM_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
+              h={s.textAlign ?? (sizesTypeFromItsBox(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
               v={s.vAlign ?? "middle"}
               onChange={onStyle}
             />
@@ -1357,7 +1513,11 @@ export function Inspector({
           the thing that made small widgets clip, because the readout draws its
           own. Anything an object needs at a size is the composition's job, not
           five sliders'. */}
-      {isText && (
+      {/* Not for a readout: `upper` is decided per composition inside the idiom
+          and `style.uppercase` reaches nothing there, so this was the third dead
+          control in the block. Hiding the whole disclosure, not just its child —
+          a "More options" that opens onto nothing is worse than no disclosure. */}
+      {isText && !sizesTypeFromItsBox(c.type) && (
         <MoreControls>
           <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
         </MoreControls>

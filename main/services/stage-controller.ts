@@ -3,20 +3,35 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
+import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { migrateNeverChosenDefaults, countNeverChosen } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
 import { notesStore, type NotesContent } from "./notes-store.js";
+import { checklistTicksStore } from "./checklist-ticks-store.js";
+import {
+  planChecklistItems,
+  selectNotes,
+  type PlanChecklistDTO,
+} from "./plan-note-checklist.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
-import { scrub } from "./scrub.js";
-import { hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
+import { scrub, scrubError } from "./scrub.js";
+import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
+import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
+import { pcoCalendarService } from "./pco-calendar-service.js";
+import type {
+  CalendarGrid,
+  CalendarSelection,
+  CalendarSourceDTO,
+  CalendarTagDTO,
+} from "../types/calendar.js";
 
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
-import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
@@ -30,6 +45,7 @@ import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { updater } from "./updater.js";
 import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
+import { WriteQueue } from "./write-queue.js";
 import { scriptViewRolesStore, seedRoles } from "./scriptview-roles-store.js";
 import type { CategoryRole } from "../types/scriptview-roles.js";
 
@@ -89,7 +105,7 @@ export function retuneEmbedFontSize(views: View[]): { views: View[]; changed: nu
   });
   if (changed > 0) {
     console.log(
-      `[stage-controller] retuned ${changed} embedded view(s) from the old ${EMBED_FONT_OLD_DEFAULT} font size to ${EMBED_FONT_NEW_DEFAULT}`,
+      `[stage-controller] retuned ${scrub(changed)} embedded view(s) from the old ${scrub(EMBED_FONT_OLD_DEFAULT)} font size to ${scrub(EMBED_FONT_NEW_DEFAULT)}`,
     );
   }
   return { views: next, changed };
@@ -119,6 +135,25 @@ function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
 // ~1/sec per channel; we collapse bursts into one re-resolve+broadcast per window
 // so the event loop isn't saturated, while keeping the RF bars visually live.
 const DEVICE_STATUS_FLUSH_MS = 150;
+
+/**
+ * How often the roster is re-pulled while a service window is open.
+ *
+ * A roster change is a human editing a plan in Planning Center — a substitution
+ * typed in minutes before doors, at worst. One minute is under the granularity at
+ * which those edits actually happen, so it turns "up to two hours behind" into
+ * "about a minute behind" and there is nothing to gain from going tighter.
+ *
+ * The cost is one request per tick against an API that allows roughly 100 per 20
+ * seconds: about 240 requests across a default four-hour window, a few hundred a
+ * week, and none at all outside a window. Faster would buy no freshness a person
+ * could produce.
+ *
+ * Independent of the cache TTL in either direction: the tick invalidates the
+ * roster entry before reading (`fresh: true`), so this cadence is exactly this
+ * number and does not become an accident of whatever TTL a later release picks.
+ */
+export const ROSTER_WINDOW_INTERVAL_MS = 60_000;
 
 /** Deep-clone a layout, minting fresh object ids so copies stay independent. */
 /** Normalize a user-entered base URL: trim, default to http:// if no scheme,
@@ -153,6 +188,57 @@ export class LayoutConflictError extends Error {
   }
 }
 
+/**
+ * Write one operator-keyed entry into an icon map, safely.
+ *
+ * The key comes off an HTTP body, and `map[key] = value` with a key like
+ * `__proto__` writes the OBJECT PROTOTYPE rather than an entry — every object in
+ * the process then carries the property. CodeQL calls it js/remote-property-
+ * injection and it is right to: both icon setters had the same three lines, and
+ * both were reachable from an unauthenticated POST on the LAN.
+ *
+ * Three defences, because each alone is thinner than it looks. The key SHAPE is
+ * checked — real keys are display ids ("display-1"), tool paths ("/baptism") and
+ * view ids, none of which need anything outside this class. The map is rebuilt
+ * with a null prototype, so an assignment has no prototype to reach even if a
+ * future caller skips the check. And the map COMING IN is filtered too: a
+ * reserved name can already be sitting in one, because settings.json is
+ * JSON.parse'd and a restored config snapshot is a file somebody uploaded, and
+ * on a null-prototype target it lands as an ORDINARY own key that then rides the
+ * spread back out and gets written to disk again. It can never be a real icon
+ * key — the shape check refuses to create one — so it is dropped, loudly.
+ */
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export function writeIconEntry(
+  current: Record<string, string> | undefined,
+  key: string,
+  value: string,
+  label: string,
+): Record<string, string> {
+  if (!/^[A-Za-z0-9/_-]{1,64}$/.test(key) || FORBIDDEN_KEYS.has(key)) {
+    throw new Error(`${label} — key must be an id or a tool path`);
+  }
+  const next: Record<string, string> = Object.create(null);
+  for (const [k, v] of Object.entries(current ?? {})) {
+    if (FORBIDDEN_KEYS.has(k)) {
+      // Both interpolations scrubbed. `label` is our own literal today, but this
+      // file is request-facing and log-injection.test.ts holds every one of them
+      // to scrub() so nobody has to judge that case by case.
+      console.warn(
+        `[stage-controller] ${scrub(label)} — dropped a reserved key from the stored map: ${scrub(k)}`,
+      );
+      continue;
+    }
+    next[k] = v;
+  }
+  if (value === "") delete next[key];
+  else next[key] = value;
+  // Back to an ordinary object for JSON.stringify, which skips a null-prototype
+  // object's entries in some serialisers and is not worth the risk here.
+  return { ...next };
+}
+
 export class StageController {
   private state: StageState = {
     serviceTypeId: null,
@@ -166,6 +252,7 @@ export class StageController {
     outputs: [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", viewId: PRIMARY_DISPLAY_ID }],
     slotsByView: {},
     barItems: [],
+    barMobileItems: [],
     savedColors: [],
     notesByObject: {},
     slotsByLayoutObject: {},
@@ -177,7 +264,9 @@ export class StageController {
     lanUrl: null,
     showQr: true,
     kioskDiscovery: false,
-    allowedServiceTypeIds: ["41227", "61695", "75953", "249176"],
+    allowedServiceTypeIds: [],
+    checklistNoteCategories: [],
+    checklistNoteTeams: [],
     appName: "Stage Utility",
     accentColor: null,
     appLogo: null,
@@ -244,12 +333,52 @@ export class StageController {
   /** Remembered so pauseBackgroundWork can restart at the same cadence. */
   private autoRefreshIntervalMs = 60 * 60 * 1000;
   private isRefreshing = false;
+  /** Roster-only re-pull, and only while a service window is open. */
+  private rosterRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  /** A roster tick is in flight — a slow one must not overlap the next. */
+  private rosterRefreshing = false;
+
+  /**
+   * Serialises every rewrite of `state.outputs`.
+   *
+   * All five of them share one shape — read `this.state.outputs`, compute the
+   * next array, assign, persist the WHOLE array — and settingsStore.patch is
+   * "atomic only for the values it is handed" (its own words). An array computed
+   * from a read taken before a concurrent rewrite's write lands replaces the
+   * list and silently drops whatever that one added: add a screen while a screen
+   * is being renamed and settings.json keeps one of the two, with both calls
+   * reporting success and the screen gone at the next restart.
+   *
+   * Fixing it five times over would be five copies to drift; serialising the
+   * read-compute-assign-write instead makes each one indivisible, which is what
+   * they all already assumed they were. Nothing in here re-enters, so it cannot
+   * deadlock: the slug/view/mode setters validate and then call
+   * commitOutputPatch, they do not nest.
+   */
+  private outputWrites = new WriteQueue();
 
   // ── Init ─────────────────────────────────────────────────────────────
 
   async init(): Promise<void> {
     await notesStore.init();
-    await barConfigStore.init();
+    // Beside notesStore, because `get` is synchronous and reads the module cache
+    // directly: without this the first render after a restart answered from an
+    // empty Map and showed every completed job as not done. It self-healed on
+    // the next tick, which is why it never got reported.
+    await checklistTicksStore.init();
+    // Returns the failure rather than throwing it: the bar's saved order is
+    // rewritten on the first start after the service type became an item of its
+    // own, and a data directory that has filled up must not take the server down
+    // over that. The rewrite is live in memory either way; the next start retries
+    // the write. Logged so an operator whose bar keeps re-migrating has something
+    // to read.
+    const barMigration = await barConfigStore.init();
+    if (barMigration) {
+      console.error(
+        "[bar-config] could not save the migrated bar; retrying next start:",
+        scrub(barMigration.message),
+      );
+    }
     await savedColorsStore.init();
     console.log("[stage-controller] init");
     let settings = await settingsStore.load();
@@ -260,7 +389,11 @@ export class StageController {
     const { patch, converted } = await migrateInlineBrandingImages(settings);
     if (converted.length > 0) {
       settings = await settingsStore.patch(patch);
-      console.log(`[stage-controller] moved ${scrub(converted.length)} branding image(s) out of settings:`, converted.join(", "));
+      console.log(
+        "[stage-controller] moved branding image(s) out of settings:",
+        scrub(converted.length),
+        scrub(converted.join(", ")),
+      );
     }
 
     const showQr = settings.showQr ?? true;
@@ -268,16 +401,33 @@ export class StageController {
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
 
-    const allowedServiceTypeIds: string[] =
-      Array.isArray(settings.allowedServiceTypeIds) && settings.allowedServiceTypeIds.length > 0
-        ? settings.allowedServiceTypeIds
-        : ["41227", "61695", "75953", "249176"];
+    // Every install that predates id floors has ids and no floor, and a missing
+    // floor falls back to `max(existing) + 1` — the bug. Seeding here, from what
+    // was just loaded, is what stops the FIRST delete-then-create after an update
+    // reissuing the highest id. Only kinds with no floor recorded are touched.
+    await settingsStore.seedIdFloors({
+      view: views.map((v) => v.id),
+      output: outputs.map((o) => o.id),
+    });
+
+    // An EMPTY list means "all allowed" and is passed through as such.
+    //
+    // This used to substitute four hardcoded ids for an empty list, which made
+    // the documented "empty = all" unreachable at boot: the Plan tab normalises
+    // "everything on" to [], so turning every service type on and restarting
+    // silently re-restricted the install to those four. On any org but the one
+    // the ids came from, they match nothing — so a fresh install could not pick
+    // a service type at all, with an empty picker and nothing to explain it.
+    const allowedServiceTypeIds: string[] = Array.isArray(settings.allowedServiceTypeIds)
+      ? settings.allowedServiceTypeIds
+      : [];
 
     this.state = {
       ...this.state,
       // Loaded above; without this the field stays {} and every note reads empty
       // until the first edit — the content would look lost.
       barItems: barConfigStore.get().items,
+      barMobileItems: barConfigStore.get().mobileItems,
       savedColors: savedColorsStore.all(),
       notesByObject: notesStore.all(),
       serviceTypeId: settings.serviceTypeId,
@@ -292,6 +442,8 @@ export class StageController {
       showQr,
       kioskDiscovery,
       allowedServiceTypeIds,
+      checklistNoteCategories: settings.checklistNoteCategories ?? [],
+      checklistNoteTeams: settings.checklistNoteTeams ?? [],
       appName: settings.appName ?? "Stage Utility",
       accentColor: settings.accentColor ?? null,
       appLogo: settings.appLogo ?? null,
@@ -300,6 +452,12 @@ export class StageController {
       defaultAvatar: settings.defaultAvatar ?? null,
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
+      // Both of these are written to settings.json by their setters and were
+      // never read back here, so an icon colour survived until the next restart
+      // and then silently reverted to the theme accent. Verified against a real
+      // server: set, confirmed in state and on disk, restarted, gone.
+      iconColors: settings.iconColors ?? {},
+      iconGlyphs: settings.iconGlyphs ?? {},
       captionChannelColors: settings.captionChannelColors ?? {},
       autoUpdate: migrateAutoUpdate(settings.autoUpdate),
       reconnectSchedule: settings.reconnectSchedule ?? { ...DEFAULT_RECONNECT_SCHEDULE },
@@ -318,16 +476,22 @@ export class StageController {
     await this.loadAllViewRawSlots(settings.serviceTypeId);
     this.recomputeResolved();
 
-    console.log("[stage-controller] loaded settings", {
-      serviceTypeId: this.state.serviceTypeId,
-      planId: this.state.planId,
-      planMode: this.state.planMode,
-      showQr: this.state.showQr,
-      kioskDiscovery: this.state.kioskDiscovery,
-      views: views.length,
-      outputs: outputs.length,
-      allowedServiceTypeIds: this.state.allowedServiceTypeIds,
-    });
+    console.log(
+      "[stage-controller] loaded settings",
+      scrub(
+        {
+          serviceTypeId: this.state.serviceTypeId,
+          planId: this.state.planId,
+          planMode: this.state.planMode,
+          showQr: this.state.showQr,
+          kioskDiscovery: this.state.kioskDiscovery,
+          views: views.length,
+          outputs: outputs.length,
+          allowedServiceTypeIds: this.state.allowedServiceTypeIds,
+        },
+        600,
+      ),
+    );
   }
 
   /**
@@ -374,7 +538,7 @@ export class StageController {
     await viewsStore.save(views);
     await settingsStore.patch({ outputs });
     console.log(
-      `[stage-controller] migrated ${legacy.length} legacy display(s) → ${views.length} view(s) + ${outputs.length} output(s)`,
+      `[stage-controller] migrated ${scrub(legacy.length)} legacy display(s) → ${scrub(views.length)} view(s) + ${scrub(outputs.length)} output(s)`,
     );
     return this.applySurfaceMigration(views, outputs);
   }
@@ -414,19 +578,31 @@ export class StageController {
     if (!alreadyCleaned) await settingsStore.patch({ layoutDefaultsCleaned: true });
     if (cleanedCount > 0) {
       console.log(
-        `[layout-defaults] ${cleanedCount} object${cleanedCount === 1 ? "" : "s"} carried a card ground written by ` +
+        `[layout-defaults] ${scrub(cleanedCount)} object${scrub(cleanedCount === 1 ? "" : "s")} carried a card ground written by ` +
           "the object registry rather than chosen — a translucent one, which let the page read through the " +
           "widget, or the older #191919 card, which left one layout wearing two different cards. Replaced " +
           "with the current opaque card, once. Still editable per object in the layout editor.",
       );
     }
     const result = migrateSurfaces(cleaned, outputs);
+    // A stored slug is only ever checked on the way IN, so a path the app claims
+    // for itself later silently shadows the screen holding it. Re-checked here,
+    // on both load paths, for the same reason the surface migration is.
+    const slugs = migrateReservedSlugs(result.outputs);
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
-    const outputsChanged = result.outputs.some((o, i) => o !== outputs[i]);
+    const outputsChanged =
+      slugs.changed.length > 0 || result.outputs.some((o, i) => o !== outputs[i]);
     if (!viewsChanged && !outputsChanged) return { views, outputs };
 
     if (viewsChanged) await viewsStore.save(result.views);
-    if (outputsChanged) await settingsStore.patch({ outputs: result.outputs });
+    if (outputsChanged) await settingsStore.patch({ outputs: slugs.outputs });
+
+    // Logged in full, and this one is not optional: the operator's screen has a
+    // different URL than it did yesterday, and the only way they learn that is
+    // by being told.
+    for (const line of slugMigrationLog(slugs)) {
+      console.warn(`[slug-migration] ${scrub(line)}`);
+    }
 
     // Logged in full: a stray live-controls left on a wall display years ago
     // will pull that screen into panel mode, and the only way an operator learns
@@ -434,7 +610,7 @@ export class StageController {
     for (const line of migrationLog(result)) {
       console.log(`[surface-migration] ${scrub(line)}`);
     }
-    return { views: result.views, outputs: result.outputs };
+    return { views: result.views, outputs: slugs.outputs };
   }
 
   // ── PCO credentials ───────────────────────────────────────────────────
@@ -464,7 +640,7 @@ export class StageController {
   /** Set (or clear with null) the public base URL — persisted + broadcast. */
   /**
    * Tint one item's icon. `key` is a display id ("display-1") or a tool path
-   * ("/baptism"); one map so a color set on the Displays tab or Connect also
+   * ("/baptism"); one map so a color set on the Screens page or Connect also
    * shows on the picker at /. An empty color clears the entry back to the theme
    * default rather than storing a sentinel.
    */
@@ -475,12 +651,36 @@ export class StageController {
     if (c !== "" && !/^#[0-9a-f]{6}$/.test(c)) {
       throw new Error('icon-color — color must be "#rrggbb" or "" to clear');
     }
-    const next = { ...(this.state.iconColors ?? {}) };
-    if (c === "") delete next[k];
-    else next[k] = c;
+    const next = writeIconEntry(this.state.iconColors, k, c, "icon-color");
     console.log(`[stage-controller] setIconColor ${scrub(k)} → ${scrub(c || "(cleared)")}`);
     this.state = { ...this.state, iconColors: next };
     await settingsStore.patch({ iconColors: next });
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * The icon GLYPH for a display or tool, by the same key its colour uses.
+   *
+   * "" clears it, exactly as a colour does, and clearing means "fall back to the
+   * item's built-in icon" rather than "no icon". The NAME is stored, not a
+   * component: the renderer owns the set, so a name this build cannot resolve
+   * falls back rather than blanking — a curated set trimmed in a later release
+   * must not leave an operator staring at a hole where their icon was.
+   */
+  async setIconGlyph(key: string, glyph: string): Promise<StageState> {
+    const k = key.trim();
+    if (!k) throw new Error("icon-glyph — key required");
+    const g = glyph.trim();
+    // Name-shaped only. Anything else is a caller bug, and storing it would put
+    // a value in settings.json that nothing can ever render.
+    if (g !== "" && !/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(g)) {
+      throw new Error('icon-glyph — glyph must be an icon name or "" to clear');
+    }
+    const next = writeIconEntry(this.state.iconGlyphs, k, g, "icon-glyph");
+    console.log(`[stage-controller] setIconGlyph ${scrub(k)} → ${scrub(g || "(cleared)")}`);
+    this.state = { ...this.state, iconGlyphs: next };
+    await settingsStore.patch({ iconGlyphs: next });
     this.broadcast();
     return this.state;
   }
@@ -690,6 +890,238 @@ export class StageController {
     return { planId: this.state.planId, items, noteCategories: ordered };
   }
 
+  // ── Pre-service checklist, sourced from Planning Center plan notes ───────
+  //
+  // The checklist an operator ticks off here is the note their team lead already
+  // writes on the plan each week. Nothing is authored in this app, deliberately:
+  // a second copy would go stale the first week somebody edited one and not the
+  // other, and the PCO note is the one the rest of the team already reads.
+
+  /**
+   * The active plan's checklist: the chosen plan notes, flattened to rows, with
+   * this plan's ticks applied.
+   *
+   * Returns an empty, `unconfigured: false` result when PCO is not connected or
+   * no plan is selected — there is nothing to configure yet in either case, and
+   * telling somebody to pick a note category before they have connected PCO is
+   * advice they cannot act on.
+   */
+  async listPlanChecklist(): Promise<PlanChecklistDTO> {
+    const planId = this.state.planId;
+    const empty: PlanChecklistDTO = { planId, rows: [], unconfigured: false };
+    if (!this.pcoAppId || !this.pcoSecret) return empty;
+    if (!this.state.serviceTypeId || !planId) return empty;
+
+    const settings = await settingsStore.get();
+    const categories = settings.checklistNoteCategories ?? [];
+    const teams = settings.checklistNoteTeams ?? [];
+    if (categories.length === 0 && teams.length === 0) {
+      return { planId, rows: [], unconfigured: true };
+    }
+
+    const notes = await pcoService.listPlanNotes(
+      this.pcoAppId,
+      this.pcoSecret,
+      this.state.serviceTypeId,
+      planId,
+    );
+    const ticked = new Set(checklistTicksStore.get(planId));
+    const rows = planChecklistItems(selectNotes(notes, categories, teams)).map((item) => ({
+      ...item,
+      done: ticked.has(item.key),
+    }));
+    return { planId, rows, unconfigured: false };
+  }
+
+  /**
+   * Tick or untick one row, and hand back the whole list as it now stands.
+   *
+   * Returning the list rather than void is what stops the UI having to guess:
+   * the caller renders what the server says instead of applying its own optimism
+   * and hoping the two agree. The store's write is awaited, so a failed save
+   * reaches the operator instead of looking saved until the next restart.
+   */
+  async setChecklistTick(key: string, done: boolean): Promise<PlanChecklistDTO> {
+    const planId = this.state.planId;
+    if (!planId) throw new Error("No plan is selected, so there is nothing to tick");
+    await checklistTicksStore.set(planId, key, done);
+    return this.listPlanChecklist();
+  }
+
+  /** Clear every tick on the active plan — "start this week over". */
+  async clearChecklistTicks(): Promise<PlanChecklistDTO> {
+    const planId = this.state.planId;
+    if (!planId) throw new Error("No plan is selected, so there is nothing to clear");
+    await checklistTicksStore.clear(planId);
+    return this.listPlanChecklist();
+  }
+
+  /**
+   * Choose which plan notes feed the checklist.
+   *
+   * Stored as NAMES because that is what a note carries. A category renamed in
+   * PCO stops matching, which is the right behaviour: the operator renamed the
+   * thing they were pointing at, and silently following a rename would be a
+   * guess about intent this app is not entitled to make.
+   *
+   * Two independent lists, and each is optional — an omitted one is KEPT, the
+   * way setBarItems keeps the set it was not given. `[]` is a real value
+   * meaning "match nothing", so it must stay distinguishable from "not sent":
+   * this took both lists positionally and cleared whichever the caller could
+   * not name.
+   */
+  async setChecklistSources(next: { categories?: string[]; teams?: string[] }): Promise<StageState> {
+    const clean = (xs: string[]) => [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
+    // An OMITTED list is kept, not cleared: a body naming only one of the two
+    // used to wipe the other and answer 200. And each list is cleaned ONCE and
+    // reused for both the patch and the state — calling clean() per destination
+    // made what is saved and what is broadcast two independent computations of
+    // the same thing, which is only harmless while they agree.
+    const categories = next.categories === undefined
+      ? this.state.checklistNoteCategories
+      : clean(next.categories);
+    const teams = next.teams === undefined ? this.state.checklistNoteTeams : clean(next.teams);
+    await settingsStore.patch({
+      checklistNoteCategories: categories,
+      checklistNoteTeams: teams,
+    });
+    this.state = {
+      ...this.state,
+      checklistNoteCategories: categories,
+      checklistNoteTeams: teams,
+    };
+    console.log(
+      `[stage-controller] setChecklistSources categories=${scrub(categories.length)} teams=${scrub(teams.length)}`,
+    );
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
+   * The plan-note categories and team names this service type actually offers,
+   * for the settings picker.
+   *
+   * Read live rather than stored: a category renamed in PCO must show up under
+   * its new name, and a picker built from a stale copy is how somebody ends up
+   * choosing an option that matches nothing.
+   */
+  async listChecklistSources(): Promise<{ categories: string[]; teams: string[] }> {
+    const none = { categories: [], teams: [] };
+    if (!this.pcoAppId || !this.pcoSecret || !this.state.serviceTypeId) return none;
+    const [categories, teams] = await Promise.all([
+      pcoService.listPlanNoteCategories(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId),
+      pcoService.listTeamNames(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId),
+    ]);
+    return { categories, teams };
+  }
+
+  /**
+   * This month's Planning Center Calendar, already bucketed into squares.
+   *
+   * Built here, never in the browser. The squares are calendar DAYS, and which
+   * day an instant falls on is a question only the app time zone can answer —
+   * see calendar-grid.ts. The renderer gets days and a zone, not instants and a
+   * guess.
+   *
+   * `monthOffset` 0 — the default and the only value the broadcaster ever uses —
+   * is the CURRENT month in the app's zone, so the grid rolls over by itself with
+   * no state to go stale on a display nobody touches for a year. A non-zero
+   * offset is a one-shot answer to an operator paging back or forward; nothing
+   * subscribes to it, because a past month is not going to change under them.
+   *
+   * A failure to reach PCO PROPAGATES — the route answers 502 and the display
+   * says it could not read the calendar. An empty grid would be a lie, and a
+   * month that quietly empties itself is exactly the kind of absence nobody
+   * reports.
+   */
+  async getCalendarGrid(viewId: string | null, monthOffset = 0): Promise<CalendarGrid> {
+    const zone = appTimeZone();
+    // Throws on an offset outside the paging bound, which the route turns into a
+    // 400. A silent clamp would draw a different month than the one asked for and
+    // say nothing about it.
+    const anchorIso = monthAnchor(monthOffset, zone);
+    // Not configured is not an error: a display routed to a calendar before
+    // Planning Center is connected should draw an empty month, and the renderer
+    // reads pcoConfigured off the state it already has to say which it is.
+    if (!this.pcoAppId || !this.pcoSecret) return buildGrid([], anchorIso, zone);
+
+    // Empty is NOT an empty filter — it is no filter, and PCO is asked for
+    // everything. See View.calendarSources for why that is the opposite of the
+    // checklist's rule.
+    // No re-filtering of the ids: setViewCalendarFilters is the only writer and
+    // it trims, drops blanks and de-duplicates on the way in.
+    const view = viewId ? this.state.views.find((v) => v.id === viewId) ?? null : null;
+    const calendarIds = (view?.calendarSources ?? []).map((s) => s.id);
+    const tagIds = (view?.calendarTags ?? []).map((s) => s.id);
+
+    const { fromIso, toIso } = gridWindow(anchorIso, zone);
+    const events = await pcoCalendarService.listEventInstances(this.pcoAppId, this.pcoSecret, {
+      fromIso,
+      toIso,
+      calendarIds,
+      tagIds,
+    });
+    return buildGrid(events, anchorIso, zone);
+  }
+
+  /**
+   * The org's calendars and tags, for the two pickers.
+   *
+   * Read live rather than stored, for the reason listChecklistSources is: a tag
+   * renamed in Planning Center must appear under its new name, and a picker
+   * built from a remembered copy is how somebody chooses an option that matches
+   * nothing and cannot tell why their calendar is empty.
+   */
+  async listCalendarSources(): Promise<{ calendars: CalendarSourceDTO[]; tags: CalendarTagDTO[] }> {
+    if (!this.pcoAppId || !this.pcoSecret) return { calendars: [], tags: [] };
+    const [calendars, tags] = await Promise.all([
+      pcoCalendarService.listCalendars(this.pcoAppId, this.pcoSecret),
+      pcoCalendarService.listCalendarTags(this.pcoAppId, this.pcoSecret),
+    ]);
+    return { calendars, tags };
+  }
+
+  /**
+   * Which calendars and tags a calendar View draws.
+   *
+   * Both lists are stored WHOLE — an id with the name it read as when it was
+   * chosen. Unlike setViewScriptViewLayout, an id PCO no longer offers is NOT
+   * refused: a tag deleted in Planning Center would then either silently widen
+   * the filter or fail every save the operator makes afterwards. It is kept, and
+   * the picker shows it marked, so the choice is visible and theirs to remove.
+   */
+  async setViewCalendarFilters(
+    id: string,
+    calendarSources: CalendarSelection[],
+    calendarTags: CalendarSelection[],
+  ): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setCalendarFilters — view ${id} not found`);
+    }
+    const clean = (list: CalendarSelection[]): CalendarSelection[] => {
+      const seen = new Set<string>();
+      const out: CalendarSelection[] = [];
+      for (const s of list) {
+        const sid = typeof s?.id === "string" ? s.id.trim() : "";
+        if (!sid || seen.has(sid)) continue;
+        seen.add(sid);
+        out.push({ id: sid, name: typeof s.name === "string" ? s.name : "" });
+      }
+      return out;
+    };
+    const views = this.state.views.map((v) =>
+      v.id === id ? { ...v, calendarSources: clean(calendarSources), calendarTags: clean(calendarTags) } : v,
+    );
+    console.log(
+      `[stage-controller] setViewCalendarFilters id=${scrub(id)} calendars=${scrub(calendarSources.length)} tags=${scrub(calendarTags.length)}`,
+    );
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
   // ── ScriptView (in-app ScriptViewer replacement) ────────────────────────
 
   async listScriptViewLayouts(): Promise<ScriptViewLayout[]> {
@@ -715,7 +1147,7 @@ export class StageController {
     );
     if (orphaned.length > 0) {
       console.log(
-        `[stage-controller] ${orphaned.length} view(s) referenced a deleted ScriptView preset — ` +
+        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ScriptView preset — ` +
           `cleared to all columns: ${orphaned.map((v) => scrub(v.name)).join(", ")}`,
       );
       const views = this.state.views.map((v) =>
@@ -918,11 +1350,11 @@ export class StageController {
     if (Date.now() < end + StageController.ROLLOVER_GRACE_MS) return;
 
     console.log(
-      `[stage-controller] auto rollover — plan ${this.state.planId} ended >1h ago, selecting next`,
+      `[stage-controller] auto rollover — plan ${scrub(this.state.planId)} ended >1h ago, selecting next`,
     );
     this.autoAdvancedFromPlanId = this.state.planId;
     await this.selectGlobalNextPlan().catch((err) =>
-      console.error("[stage-controller] auto rollover error:", err),
+      console.error("[stage-controller] auto rollover error:", scrubError(err)),
     );
   }
 
@@ -995,7 +1427,7 @@ export class StageController {
         : allTypes.filter((t) => allowed.includes(t.id));
 
     console.log(
-      `[stage-controller] selectGlobalNextPlan — ${candidates.length} candidate types: ${candidates.map((c) => c.id).join(", ")}`,
+      `[stage-controller] selectGlobalNextPlan — ${scrub(candidates.length)} candidate types: ${scrub(candidates.map((c) => c.id).join(", "))}`,
     );
 
     // For each candidate, fetch its nearest upcoming plan.
@@ -1042,7 +1474,14 @@ export class StageController {
           best = { type, plan: nearest };
         }
       } catch (err) {
-        console.error(`[stage-controller] selectGlobalNextPlan — error fetching plans for type ${scrub(type.id)}:`, err);
+        // The type id stays OUT of the format string. It comes from PCO, and a
+        // `%s` in the first argument would eat the error standing beside it —
+        // the operator told that fetching failed and not told why.
+        console.error(
+          "[stage-controller] selectGlobalNextPlan — error fetching plans for type:",
+          scrub(type.id),
+          scrubError(err),
+        );
       }
     }
 
@@ -1064,8 +1503,12 @@ export class StageController {
       return this.state;
     }
 
+    // The service type's name and the plan's title are whatever somebody typed
+    // into Planning Center. A plan titled `Sunday AM\n[stage-controller] plan
+    // switched to 99999` used to become a second line on /log — which renders
+    // `white-space: pre-wrap` — with no attacker anywhere in the picture.
     console.log(
-      `[stage-controller] selectGlobalNextPlan → type=${best.type.id} (${best.type.name}) plan=${best.plan.id} (${best.plan.title}) sortDate=${best.plan.sortDate}`,
+      `[stage-controller] selectGlobalNextPlan → type=${scrub(best.type.id)} (${scrub(best.type.name)}) plan=${scrub(best.plan.id)} (${scrub(best.plan.title)}) sortDate=${scrub(best.plan.sortDate)}`,
     );
 
     // Switch service type if needed and reload display slots.
@@ -1129,7 +1572,7 @@ export class StageController {
       } catch (err) {
         // Never throws to a caller — there isn't one. A failed sweep leaves the
         // previous plan in place, which is the safe outcome mid-service.
-        console.error("[stage-controller] background plan re-selection failed:", err);
+        console.error("[stage-controller] background plan re-selection failed:", scrubError(err));
       } finally {
         this.reselectInFlight = null;
       }
@@ -1259,7 +1702,7 @@ export class StageController {
     next.hour = clamp(Math.round(next.hour), 0, 23);
     next.dayOfWeek =
       next.dayOfWeek == null ? null : clamp(Math.round(next.dayOfWeek), 0, 6);
-    console.log(`[stage-controller] setAutoUpdate →`, next);
+    console.log(`[stage-controller] setAutoUpdate →`, scrub(next));
     this.state = { ...this.state, autoUpdate: next };
     await settingsStore.patch({ autoUpdate: next });
     this.broadcast();
@@ -1360,7 +1803,7 @@ export class StageController {
       serviceWindow.setWindows(windows);
       console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
     } catch (err) {
-      console.warn("[stage-controller] refreshServiceWindows failed:", err instanceof Error ? err.message : err);
+      console.warn("[stage-controller] refreshServiceWindows failed:", scrubError(err));
     }
   }
 
@@ -1391,7 +1834,7 @@ export class StageController {
         await updater.applyUpdate({ deferRestart: this.state.autoUpdate.mode === "auto-install" });
       }
     } catch (err) {
-      console.error("[stage-controller] update check failed:", err);
+      console.error("[stage-controller] update check failed:", scrubError(err));
     }
   }
 
@@ -1459,13 +1902,17 @@ export class StageController {
       settingsNext.defaultAvatarCrop = null;
     }
 
-    console.log(`[stage-controller] setBranding`, {
-      name: stateNext.appName,
-      logo: partial.logo === undefined ? "(unchanged)" : partial.logo ? "(set)" : "(cleared)",
-      monochrome: stateNext.appLogoMonochrome,
-      emptyLogo: partial.emptyLogo === undefined ? "(unchanged)" : partial.emptyLogo ? "(set)" : "(cleared)",
-      avatar: partial.avatar === undefined ? "(unchanged)" : partial.avatar ? "(set)" : "(cleared)",
-    });
+    console.log(
+      `[stage-controller] setBranding`,
+      scrub({
+        name: stateNext.appName,
+        logo: partial.logo === undefined ? "(unchanged)" : partial.logo ? "(set)" : "(cleared)",
+        monochrome: stateNext.appLogoMonochrome,
+        emptyLogo:
+          partial.emptyLogo === undefined ? "(unchanged)" : partial.emptyLogo ? "(set)" : "(cleared)",
+        avatar: partial.avatar === undefined ? "(unchanged)" : partial.avatar ? "(set)" : "(cleared)",
+      }),
+    );
     this.state = { ...this.state, ...stateNext };
     await settingsStore.patch(settingsNext);
     this.broadcast();
@@ -1679,7 +2126,7 @@ export class StageController {
     kind: ViewKind = "slots",
     surface: ViewSurface = "display",
   ): Promise<StageState> {
-    const id = this.nextViewId();
+    const id = await this.allocateViewId();
     // Only a custom View has an editable layout, so only a custom View has
     // anywhere to put a control. Anything else asked for as a console would be
     // a console that cannot carry one - a promise the UI could not keep.
@@ -1831,6 +2278,26 @@ export class StageController {
   }
 
   /**
+   * Hide or show the operator app's chrome while this View is open as a console.
+   *
+   * Stored on any View rather than refused for a display: the flag is dormant
+   * there (a display has no shell), and refusing it would lose the setting every
+   * time a console was flipped to a display and back.
+   */
+  async setViewHideChrome(id: string, hideChrome: boolean): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setHideChrome — view ${id} not found`);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, hideChrome } : v));
+    console.log(`[stage-controller] setViewHideChrome id=${scrub(id)} → ${scrub(hideChrome ? "HIDDEN" : "shown")}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
    * Replace a custom View's layout (visual editor save).
    *
    * `expectedRev` is the revision the editor opened. When it no longer matches,
@@ -1870,7 +2337,7 @@ export class StageController {
   async duplicateView(id: string, name?: string): Promise<StageState> {
     const src = this.state.views.find((v) => v.id === id);
     if (!src) throw new Error(`views:duplicate — view ${id} not found`);
-    const newId = this.nextViewId();
+    const newId = await this.allocateViewId();
     // Deep-clone the layout, recording old→new object ids so inline mic-slots can
     // be carried over to the copy.
     const cloned = src.layout ? cloneLayoutWithMap(src.layout) : null;
@@ -1972,13 +2439,19 @@ export class StageController {
         this.state = { ...this.state, notesByObject: notesStore.all() };
       }
     }
-    // Unroute any outputs pointing at this view (render placeholder, never fail).
-    const outputs = this.state.outputs.map((o) =>
-      o.viewId === id ? { ...o, viewId: null } : o,
-    );
-    this.state = { ...this.state, views, outputs };
+    this.state = { ...this.state, views };
     await viewsStore.save(views);
-    await settingsStore.patch({ outputs });
+    // Unroute any outputs pointing at this view (render placeholder, never fail).
+    // views.json is still written first, so a crash between the two leaves an
+    // output pointing at a view that is gone — which renders a placeholder —
+    // rather than a view nothing routes to that comes back on the next boot.
+    await this.outputWrites.enqueue(async () => {
+      const outputs = this.state.outputs.map((o) =>
+        o.viewId === id ? { ...o, viewId: null } : o,
+      );
+      this.state = { ...this.state, outputs };
+      await settingsStore.patch({ outputs });
+    });
     await slotsStore.removeDisplay(id);
     this.rawSlotsByView.delete(id);
     this.recomputeResolved();
@@ -2025,17 +2498,38 @@ export class StageController {
     name?: string,
     viewId?: string | null,
   ): Promise<{ state: StageState; output: Output }> {
-    const id = this.nextOutputId();
-    const num = parseInt(id.replace("display-", ""), 10);
-    const output: Output = {
-      id,
-      name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
-      viewId: viewId ?? null,
-    };
-    console.log(`[stage-controller] addOutput id=${scrub(id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
-    const outputs = [...this.state.outputs, output];
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
+    // One write: the id, the floor that stops it ever coming back, and the
+    // outputs list that could not be built until the id existed. The whole
+    // read-allocate-write happens inside the settings write queue, so two
+    // concurrent adds cannot be handed the same id.
+    const output = await this.outputWrites.enqueue(async () => {
+      const allocated = await settingsStore.allocateIds(
+        "output",
+        (next): { output: Output; outputs: Output[] } => {
+          const id = next(this.state.outputs.map((o) => o.id));
+          const num = parseInt(id.replace("display-", ""), 10);
+          const created: Output = {
+            id,
+            name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
+            viewId: viewId ?? null,
+          };
+          const outputs = [...this.state.outputs, created];
+          // State FIRST, in the same synchronous turn as the read above and
+          // before the write — what createView, duplicateView and
+          // commitOutputPatch all do. Assigning it after the await instead let
+          // this line clobber, in memory, an edit that landed while the write
+          // was in flight. The queue above is what stops the disk half: that
+          // edit's patch used to land AFTER this write and replace the whole
+          // array, so settings.json lost the new display and the screen was
+          // gone at the next restart.
+          this.state = { ...this.state, outputs };
+          return { output: created, outputs };
+        },
+        (a) => ({ outputs: a.outputs }),
+      );
+      return allocated.output;
+    });
+    console.log(`[stage-controller] addOutput id=${scrub(output.id)} name="${scrub(output.name)}" viewId=${scrub(output.viewId ?? "(none)")}`);
     this.recomputeResolved();
     this.broadcast();
     return { state: this.state, output };
@@ -2047,10 +2541,45 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:rename — output ${id} not found`);
     }
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, name: trimmed } : o));
-    console.log(`[stage-controller] renameOutput id=${scrub(id)} name="${scrub(trimmed)}"`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
+    return this.commitOutputPatch(
+      id,
+      { name: trimmed },
+      `[stage-controller] renameOutput id=${scrub(id)} name="${scrub(trimmed)}"`,
+    );
+  }
+
+  /**
+   * Write fields onto one Output and push the result everywhere it has to go.
+   *
+   * The tail every single-field output mutator shared, verbatim, in SIX places:
+   * patch the array, persist, re-resolve so each kiosk's ResolvedOutput
+   * descriptor follows, broadcast, return. Extracted when "hide the top bar"
+   * would have made it a seventh — the duplication this repository pays for
+   * most, and the one whose copies drift. A caller that refuses some values
+   * (setOutputView, setOutputMode, setOutputSlug) validates first and then comes
+   * here.
+   *
+   * Deliberately NOT used by the three remaining `settingsStore.patch({ outputs })`
+   * calls: the legacy migration writes views alongside, removeView unroutes many
+   * outputs at once and touches slots, and removeOutput filters the array rather
+   * than patching one entry. Folding those in would mean a flag argument per
+   * caller, which is how a helper stops being simpler than what it replaced.
+   *
+   * `recomputeResolved` is not optional and not a caller's choice: an Output
+   * field the kiosk reads lives on ResolvedOutput too, so skipping it leaves
+   * every display rendering the previous value.
+   */
+  private async commitOutputPatch(
+    id: string,
+    patch: Partial<Output>,
+    logLine: string,
+  ): Promise<StageState> {
+    console.log(scrub(logLine, 400));
+    await this.outputWrites.enqueue(async () => {
+      const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, ...patch } : o));
+      this.state = { ...this.state, outputs };
+      await settingsStore.patch({ outputs });
+    });
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -2081,15 +2610,11 @@ export class StageController {
     const verdict = validateSlug(trimmed, taken);
     if (!verdict.ok) throw new Error(verdict.reason);
 
-    const outputs = this.state.outputs.map((o) =>
-      o.id === id ? { ...o, slug: trimmed === "" ? undefined : trimmed } : o,
+    return this.commitOutputPatch(
+      id,
+      { slug: trimmed === "" ? undefined : trimmed },
+      `[stage-controller] setOutputSlug id=${scrub(id)} slug="${scrub(trimmed)}"`,
     );
-    console.log(`[stage-controller] setOutputSlug id=${scrub(id)} slug="${scrub(trimmed)}"`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
   }
 
   /** Route an output to a View (or null to unroute). The recall operation. */
@@ -2124,13 +2649,11 @@ export class StageController {
         );
       }
     }
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, viewId } : o));
-    console.log(`[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitOutputPatch(
+      id,
+      { viewId },
+      `[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`,
+    );
   }
 
   /**
@@ -2154,13 +2677,11 @@ export class StageController {
       }
     }
 
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, mode } : o));
-    console.log(`[stage-controller] setOutputMode output=${scrub(id)} → ${scrub(mode)}`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitOutputPatch(
+      id,
+      { mode },
+      `[stage-controller] setOutputMode output=${scrub(id)} → ${scrub(mode)}`,
+    );
   }
 
   /**
@@ -2177,10 +2698,22 @@ export class StageController {
     return this.state;
   }
 
-  /** Set which context-bar items appear, and in what order. Global config. */
-  async setBarItems(items: string[]): Promise<StageState> {
-    const saved = await barConfigStore.set(items);
-    this.state = { ...this.state, barItems: saved.items };
+  /**
+   * Set which context-bar items appear, and in what order. Global config.
+   *
+   * Two independent sets: the bar above a desktop page and the one a phone
+   * shows. Each is optional and an omitted one is left alone — the configurator
+   * edits one at a time, so a save from a phone must not carry a stale copy of
+   * the desktop order back over somebody else's edit.
+   */
+  async setBarItems(next: { items?: string[]; mobileItems?: string[] }): Promise<StageState> {
+    const saved = await barConfigStore.set(next);
+    this.state = { ...this.state, barItems: saved.items, barMobileItems: saved.mobileItems };
+    console.log(
+      `[stage-controller] setBarItems desktop=${scrub(saved.items.length)} mobile=${scrub(
+        saved.mobileItems.length === 0 ? "(follows desktop)" : saved.mobileItems.length,
+      )}`,
+    );
     this.broadcast();
     return this.state;
   }
@@ -2198,13 +2731,11 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:setBlackout — output ${id} not found`);
     }
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, blackout } : o));
-    console.log(`[stage-controller] setOutputBlackout output=${scrub(id)} → ${scrub(blackout ? "ON" : "off")}`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitOutputPatch(
+      id,
+      { blackout },
+      `[stage-controller] setOutputBlackout output=${scrub(id)} → ${scrub(blackout ? "ON" : "off")}`,
+    );
   }
 
   /** Lock/unlock an output's kiosk chrome (hides the QR/settings + home logo links
@@ -2213,30 +2744,44 @@ export class StageController {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:setLocked — output ${id} not found`);
     }
-    const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, locked } : o));
-    console.log(`[stage-controller] setOutputLocked output=${scrub(id)} → ${scrub(locked ? "LOCKED" : "unlocked")}`);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitOutputPatch(
+      id,
+      { locked },
+      `[stage-controller] setOutputLocked output=${scrub(id)} → ${scrub(locked ? "LOCKED" : "unlocked")}`,
+    );
+  }
+
+  /** Show or hide an output's kiosk top bar (brand, plan context and QR). Per
+   *  display: a stage-facing wall wants the strip back, another screen wants the
+   *  context. Independent of the lock, which keeps the bar and strips its links. */
+  async setOutputHideTopBar(id: string, hideTopBar: boolean): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setHideTopBar — output ${id} not found`);
+    }
+    return this.commitOutputPatch(
+      id,
+      { hideTopBar },
+      `[stage-controller] setOutputHideTopBar output=${scrub(id)} → ${scrub(hideTopBar ? "HIDDEN" : "shown")}`,
+    );
   }
 
   /** Reorder outputs to match the given id order (drag-and-drop). */
   async reorderOutputs(orderedIds: string[]): Promise<StageState> {
-    const byId = new Map(this.state.outputs.map((o) => [o.id, o]));
-    const reordered: Output[] = [];
-    for (const id of orderedIds) {
-      const o = byId.get(id);
-      if (o) {
-        reordered.push(o);
-        byId.delete(id);
+    await this.outputWrites.enqueue(async () => {
+      const byId = new Map(this.state.outputs.map((o) => [o.id, o]));
+      const reordered: Output[] = [];
+      for (const id of orderedIds) {
+        const o = byId.get(id);
+        if (o) {
+          reordered.push(o);
+          byId.delete(id);
+        }
       }
-    }
-    for (const o of byId.values()) reordered.push(o);
-    console.log(`[stage-controller] reorderOutputs → ${scrub(reordered.map((o) => o.id).join(", "))}`);
-    this.state = { ...this.state, outputs: reordered };
-    await settingsStore.patch({ outputs: reordered });
+      for (const o of byId.values()) reordered.push(o);
+      console.log(`[stage-controller] reorderOutputs → ${scrub(reordered.map((o) => o.id).join(", "))}`);
+      this.state = { ...this.state, outputs: reordered };
+      await settingsStore.patch({ outputs: reordered });
+    });
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -2250,9 +2795,11 @@ export class StageController {
       throw new Error(`outputs:remove — output ${id} not found`);
     }
     console.log(`[stage-controller] removeOutput id=${scrub(id)}`);
-    const outputs = this.state.outputs.filter((o) => o.id !== id);
-    this.state = { ...this.state, outputs };
-    await settingsStore.patch({ outputs });
+    await this.outputWrites.enqueue(async () => {
+      const outputs = this.state.outputs.filter((o) => o.id !== id);
+      this.state = { ...this.state, outputs };
+      await settingsStore.patch({ outputs });
+    });
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -2342,6 +2889,19 @@ export class StageController {
     this.autoRefreshTimer = setInterval(() => {
       void this.autoRefreshTick();
     }, intervalMs);
+    // The roster timer ticks at a fixed cadence but only does work inside a
+    // service window, so it costs nothing the rest of the week (see
+    // rosterRefreshTick).
+    this.rosterRefreshTimer = setInterval(() => {
+      // The process boundary, where autoRefreshTick and updateCheckTick also
+      // report and continue. There is no caller to hand a failure back to, and an
+      // unhandled rejection out of a timer would take the server down mid-service.
+      // The roster read itself already reports its own failure and keeps the
+      // last-known names on screen rather than blanking them.
+      void this.rosterRefreshTick().catch((err) => {
+        console.error("[stage-controller] roster refresh failed:", scrubError(err));
+      });
+    }, ROSTER_WINDOW_INTERVAL_MS);
   }
 
   /**
@@ -2374,6 +2934,10 @@ export class StageController {
       clearInterval(this.autoRefreshTimer);
       this.autoRefreshTimer = null;
     }
+    if (this.rosterRefreshTimer) {
+      clearInterval(this.rosterRefreshTimer);
+      this.rosterRefreshTimer = null;
+    }
   }
 
   private async autoRefreshTick(): Promise<void> {
@@ -2384,9 +2948,61 @@ export class StageController {
       console.log("[stage-controller] auto-refresh tick");
       await this.refresh(false);
     } catch (err) {
-      console.error("[stage-controller] auto-refresh failed:", err);
+      console.error("[stage-controller] auto-refresh failed:", scrubError(err));
     } finally {
       this.isRefreshing = false;
+    }
+  }
+
+  /**
+   * Re-pull JUST the roster, and only while a service window is open.
+   *
+   * The roster was the stalest thing the app showed. It moved only on the plan
+   * refresh, which an operator may have set to two hours — so a last-minute
+   * substitution could take two hours to reach a stage display, and the display is
+   * the whole reason the name is there. Everything else the app reads from PCO is
+   * either cached in minutes or, for the live timer, not cached at all.
+   *
+   * Gated on `serviceWindow`, the app's ONE definition of "near a service": PCO
+   * plan times widened by the operator's configured lead and tail. Deliberately
+   * not a second definition. It compares instants against plan times, so there is
+   * no calendar-date or hour-of-day question and no host-vs-app-time-zone trap.
+   *
+   * It ignores `reconnectSchedule.enabled`, which governs integration reconnect
+   * back-off rather than how fresh PCO data is. Turning that switch off does not
+   * stale the roster back out; the lead and tail under it still shape the window.
+   *
+   * Outside a window this returns having made no request, so the cost away from a
+   * service is one no-op timer callback a minute and zero PCO traffic. That also
+   * means it fails CLOSED where the window set is unknown (no credentials, or a
+   * failed schedule fetch): the roster then moves on the operator's configured
+   * interval, exactly as it did before this existed.
+   */
+  private async rosterRefreshTick(): Promise<void> {
+    if (!serviceWindow.isActive()) return;
+    // A full refresh is already re-pulling the roster, and a previous tick may
+    // still be in flight — listTeamMembers paginates and backs off on a 429, so a
+    // slow window can outlast the 60s cadence. Either way, two writers racing over
+    // this.teamMembers is what we are avoiding.
+    if (this.isRefreshing || this.rosterRefreshing) return;
+    if (!this.state.pcoConfigured || !this.pcoAppId || !this.pcoSecret) return;
+    const { serviceTypeId, planId } = this.state;
+    if (!serviceTypeId || !planId) return;
+
+    this.rosterRefreshing = true;
+    try {
+      const before = JSON.stringify(this.teamMembers);
+      await this.fetchTeamMembers(serviceTypeId, planId, { fresh: true });
+      if (JSON.stringify(this.teamMembers) === before) return;
+      // broadcast() already drops an identical state, so the saving here is
+      // recomputeResolved(), which re-resolves every view, every inline slots grid
+      // and every view-sourced grid. That runs every minute for hours inside a
+      // window, and almost every one of those minutes the roster has not changed.
+      console.log("[stage-controller] roster changed mid-window — re-resolving");
+      this.recomputeResolved();
+      this.broadcast();
+    } finally {
+      this.rosterRefreshing = false;
     }
   }
 
@@ -2414,13 +3030,19 @@ export class StageController {
     if (this.deviceStatusFlushTimer !== null) return;
     this.deviceStatusFlushTimer = setTimeout(() => {
       this.deviceStatusFlushTimer = null;
-      // Skip the expensive re-resolve + full-state broadcast when no display is
-      // watching (idle). Mark dirty so the next connecting client gets fresh state
-      // via ensureResolvedFresh() before hydration.
+      // Skip the expensive re-resolve + full-state broadcast when nothing is
+      // consuming it (idle). Mark dirty so the next connecting client gets fresh
+      // state via ensureResolvedFresh() before hydration.
+      //
+      // channelInDemand, not channelHasSubscribers: "slots:devices" is the channel
+      // the wireless.battery-below and wireless.rf-below triggers read, and the
+      // automation engine reads it in-process where no SSE check can see it. Asking
+      // only about browsers meant those two rules could never fire on an unattended
+      // box — the state an appliance is in for most of the week.
       if (
-        channelHasSubscribers("stage:state-changed") ||
-        channelHasSubscribers("slots:devices") ||
-        channelHasSubscribers(WIRELESS_STATUS_CHANNEL)
+        channelInDemand("stage:state-changed") ||
+        channelInDemand("slots:devices") ||
+        channelInDemand(WIRELESS_STATUS_CHANNEL)
       ) {
         this.recomputeResolved();
         this.broadcastDevices();
@@ -2461,7 +3083,15 @@ export class StageController {
       .sort((a, b) => a.channelId.localeCompare(b.channelId));
   }
 
-  /** Push wireless telemetry, on change and only while something is watching. */
+  /**
+   * Push wireless telemetry, on change and only while a browser is watching.
+   *
+   * Deliberately `channelHasSubscribers` and not `channelInDemand`, unlike the
+   * gate in applyDeviceStatus that reaches this: nothing in-process reads
+   * "wireless:channels". Automation's wireless triggers read "slots:devices", so
+   * a rule keeps THAT flowing without also paying for a channel only the wireless
+   * widgets render.
+   */
   private broadcastWirelessChannels(): void {
     if (!channelHasSubscribers(WIRELESS_STATUS_CHANNEL)) return;
     const channels = this.wirelessChannelStatuses();
@@ -2527,23 +3157,20 @@ export class StageController {
     return target; // already a view id, or an id we do not know
   }
 
-  private nextViewId(): string {
-    const nums = this.state.views
-      .map((v) => parseInt(v.id.replace("view-", ""), 10))
-      .filter((n) => !Number.isNaN(n));
-    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-    return `view-${next}`;
-  }
-
-  private nextOutputId(): string {
-    const nums = this.state.outputs
-      .map((o) => parseInt(o.id.replace("display-", ""), 10))
-      .filter((n) => !Number.isNaN(n));
-    // display-1 is reserved as the primary/default output (PRIMARY_DISPLAY_ID), so
-    // dynamically-created outputs start at display-2 when none exist yet. (Views,
-    // which have no reserved id, start at view-1.)
-    const next = nums.length > 0 ? Math.max(...nums) + 1 : 2;
-    return `display-${next}`;
+  /**
+   * Allocate a view id, recording the floor BEFORE the view exists.
+   *
+   * The floor lives in settings.json and views live in views.json, so there is
+   * no save here to fold it into — it is its own write, and an AWAITED one. A
+   * fire-and-forget floor that never reached disk would hand the same id out
+   * again after a restart, which is the whole bug this exists to stop.
+   *
+   * Written first on purpose: if the floor write fails, nothing is created; if
+   * the view save afterwards fails, the only cost is a number nobody used. Ids
+   * are permanent, not contiguous.
+   */
+  private allocateViewId(): Promise<string> {
+    return settingsStore.allocateIds("view", (next) => next(this.state.views.map((v) => v.id)));
   }
 
   private assertPco(): void {
@@ -2576,15 +3203,38 @@ export class StageController {
     this.broadcast();
   }
 
-  private async fetchTeamMembers(serviceTypeId: string, planId: string): Promise<void> {
+  /**
+   * @param opts.fresh drop this plan's cached roster first, so the read is a real
+   * request. The in-window roster tick needs that: its cadence must be its own,
+   * not an accident of whatever the cache TTL happens to be that release.
+   */
+  private async fetchTeamMembers(
+    serviceTypeId: string,
+    planId: string,
+    opts: { fresh?: boolean } = {},
+  ): Promise<void> {
     const key = `${serviceTypeId}:${planId}`;
+    if (opts.fresh) pcoService.clearTeamMembersCache(this.pcoAppId!, serviceTypeId, planId);
     try {
-      this.teamMembers = await pcoService.listTeamMembers(
+      const fetched = await pcoService.listTeamMembers(
         this.pcoAppId!,
         this.pcoSecret!,
         serviceTypeId,
         planId,
       );
+      // The plan can move WHILE this request is in flight — auto plan-mode rolls
+      // from the 9am plan to the 11am one, and inside a service window the roster
+      // tick is firing every minute, so the two overlap by design. Writing a
+      // resolved-too-late roster here would put the previous service's names on
+      // every stage display until the next tick. A stale success is discarded,
+      // not applied.
+      if (this.state.serviceTypeId !== serviceTypeId || this.state.planId !== planId) {
+        console.log(
+          `[stage-controller] discarding a roster for a plan that is no longer selected (${scrub(key)})`,
+        );
+        return;
+      }
+      this.teamMembers = fetched;
       this.teamMembersKey = key;
       console.log(`[stage-controller] fetched ${scrub(this.teamMembers.length)} team members`);
     } catch (err) {
@@ -2596,12 +3246,13 @@ export class StageController {
       // plan; only a roster for some OTHER plan is worse than nothing.
       if (this.teamMembersKey === key && this.teamMembers.length > 0) {
         console.error(
-          `[stage-controller] fetchTeamMembers failed — keeping ${this.teamMembers.length} known member(s):`,
-          err,
+          "[stage-controller] fetchTeamMembers failed — keeping known member(s):",
+          scrub(this.teamMembers.length),
+          scrubError(err),
         );
         return;
       }
-      console.error("[stage-controller] fetchTeamMembers error:", err);
+      console.error("[stage-controller] fetchTeamMembers error:", scrubError(err));
       this.teamMembers = [];
       this.teamMembersKey = null;
     }
@@ -2690,6 +3341,7 @@ export class StageController {
         viewName: view?.name ?? null,
         blackout: output.blackout ?? false,
         locked: output.locked ?? false,
+        hideTopBar: output.hideTopBar ?? false,
       };
     }
     this.state = {

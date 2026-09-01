@@ -43,7 +43,7 @@ GET  /v1/ondemand/...         VOD only
 - `bitfocus/companion-module-resi-studio` confirms this: it persists
   `SCHEDULE_IDS` in its own config because it cannot discover them.
 
-Cornerstone's Resi goes live on **Resi's own schedule**, so the public API is
+The church's Resi goes live on **Resi's own schedule**, so the public API is
 useless here. Route rejected.
 
 ### Resi — the internal Web API can

@@ -139,13 +139,43 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // Which plan notes feed the pre-service checklist. Names, not ids — see
+    // stageController.setChecklistSources.
+    //
+    // Shaped like /api/bar-items: two optional string[] lists, an omitted one
+    // left as it stands, a present one still validated. This used to coerce
+    // both with a filter that turned anything non-array into [], so a body
+    // naming neither list — or naming one with the wrong type — wiped the
+    // operator's choices and answered 200.
+    if (method === "POST" && pathname === "/api/checklist-sources") {
+      const body = await readBody(req) as Record<string, unknown>;
+      const names = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
+      if (body.categories !== undefined && !names(body.categories)) {
+        error(res, "body.categories must be a string[]");
+        return;
+      }
+      if (body.teams !== undefined && !names(body.teams)) {
+        error(res, "body.teams must be a string[]");
+        return;
+      }
+      if (body.categories === undefined && body.teams === undefined) {
+        error(res, "body.categories or body.teams (string[]) required");
+        return;
+      }
+      json(res, await stageController.setChecklistSources({
+        categories: body.categories as string[] | undefined,
+        teams: body.teams as string[] | undefined,
+      }));
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/timezone") {
       const body = await readBody(req) as Record<string, unknown>;
       const tz = typeof body.timezone === "string" ? body.timezone : null;
       try {
         json(res, await stageController.setTimezone(tz));
       } catch (err) {
-        json(res, { error: errorMessage(err) }, 400);
+        error(res, errorMessage(err));
       }
       return;
     }
@@ -155,7 +185,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       try {
         json(res, await stageController.setHourCycle(body.hourCycle as "12h" | "24h"));
       } catch (err) {
-        json(res, { error: errorMessage(err) }, 400);
+        error(res, errorMessage(err));
       }
       return;
     }

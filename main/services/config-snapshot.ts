@@ -22,6 +22,8 @@ import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage } from "./image-files.js";
 import { configFilenames, storesOfClass } from "./stores.js";
+import { initialFloor, type IdKind } from "./id-allocator.js";
+import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
@@ -132,6 +134,131 @@ export function appVersion(): string {
   } catch {
     return "0.0.0";
   }
+}
+
+/** A settings blob, read far enough to reach its id floors and no further. */
+type FloorsOnly = { idFloors?: Record<string, unknown> };
+
+/** The `id` of every entry in a restored `View[]` / `Output[]`, ignoring anything
+ *  that is not shaped like one. A bundle's contents are whatever the file says. */
+function idsIn(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => (entry as { id?: unknown } | null)?.id)
+    .filter((id): id is string => typeof id === "string");
+}
+
+/** The live floors, or null when there are none that can be read. */
+async function liveIdFloors(dest: string): Promise<Record<string, unknown> | null> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(dest, "utf8");
+  } catch (err) {
+    // No live settings.json at all — a restore onto a fresh install. Not a
+    // failure: there are simply no spent ids to carry forward. Anything else is
+    // rethrown rather than treated as "nothing there".
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+  try {
+    return (JSON.parse(raw) as FloorsOnly).idFloors ?? {};
+  } catch {
+    // The file exists but does not parse. This restore is about to replace it
+    // anyway, and there is no floor to be read out of it — that IS the answer
+    // here, not a swallowed error. Said out loud because it means ids issued
+    // since the snapshot was taken could be handed out again.
+    console.warn(
+      "[config-snapshot] the existing settings.json does not parse, so its id floors could not be carried forward — ids created since this snapshot may be reissued",
+    );
+    return null;
+  }
+}
+
+/**
+ * Work out the id floors the restored settings.json should carry.
+ *
+ * Everything else in a restore is meant to go back to what the snapshot held —
+ * that is the point of a restore. Id floors are the exception: they are not a
+ * setting the operator chose, they are the record of which ids have been SPENT,
+ * and a floor below an id that exists hands that id out again. slots.json is
+ * keyed by output id, with Pis, bookmarks and QR codes pointing at `/<id>`.
+ *
+ * So the answer is the highest of three numbers, because each knows something
+ * the others do not:
+ *
+ *   THE LIVE FLOOR knows about ids this box spent and then DELETED. Nothing else
+ *   can see those — they are gone from every file.
+ *
+ *   THE SNAPSHOT'S FLOOR is the same knowledge from the box the snapshot came
+ *   from, which may be a different install entirely.
+ *
+ *   THE IDS IN THE SNAPSHOT are the only candidate a PRE-FEATURE snapshot has,
+ *   and they are why this cannot be left to the seeding pass at the next boot.
+ *   Such a snapshot carries no floors, so the live floor — a number belonging to
+ *   the box being restored ONTO, which knows nothing about what just arrived —
+ *   would win by being the only number available, and land below every id in the
+ *   bundle. Correcting it here makes the floor right the moment the restore
+ *   lands, with no boot required: kill the box in the seconds between apply()
+ *   and the restart it triggers, and the floor on disk is still correct.
+ */
+function mergeIdFloors(contents: object, live: Record<string, unknown> | null, files: Record<string, unknown>): unknown {
+  const incoming = (contents as FloorsOnly).idFloors ?? {};
+  // Views are their own file; outputs live in the settings.json being written.
+  const restoredIds: Record<IdKind, string[]> = {
+    view: idsIn(files["views.json"]),
+    output: idsIn((contents as { outputs?: unknown }).outputs),
+  };
+
+  /**
+   * A floor is a number or it is nothing.
+   *
+   * The value comes out of a snapshot file — hand-edited, corrupted or hostile —
+   * and validate() checks only `kind` and `files`. Anything else is dropped to 0
+   * and SAID SO below rather than coerced: falling back to the collision walk
+   * gives an id nothing else is using, where a coerced floor would hand out one
+   * that is.
+   */
+  const asNumber = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  // A Map, and Object.fromEntries at the end: the keys are snapshot-controlled,
+  // and this way nothing is ever written to a computed property name.
+  const merged = new Map<string, number>();
+  const ignored: string[] = [];
+  for (const kind of new Set([...Object.keys(live ?? {}), ...Object.keys(incoming), ...Object.keys(restoredIds)])) {
+    // Unknown kinds are carried through — a snapshot from a newer build knows
+    // about ids this one cannot allocate — but never these three. They are not
+    // id kinds, they are the names an attacker reaches for, and the same set is
+    // refused by notes-store and checklist-ticks-store for the same reason.
+    if (kind === "__proto__" || kind === "constructor" || kind === "prototype") {
+      ignored.push(kind);
+      continue;
+    }
+    // hasOwn rather than `in`: the key is untrusted, and "constructor" is `in`
+    // every object — which is not theoretical here. A snapshot holding
+    // `"idFloors": {"view": 3, "constructor": 1}` made this branch true, handed
+    // initialFloor Object.prototype.constructor, and threw
+    // "TypeError: function is not iterable" out of nextId's `new Set(...)`.
+    // writeSnapshot writes one file at a time, so views.json was already on disk
+    // when the loop died: a half-restored box, with views referencing output ids
+    // the un-restored settings.json does not have. routes/context.ts:60 carries
+    // the same note for the same reason.
+    const fromRestored = Object.hasOwn(restoredIds, kind)
+      ? initialFloor(kind as IdKind, restoredIds[kind as IdKind])
+      : 0;
+    if (Object.hasOwn(incoming, kind) && asNumber(incoming[kind]) === 0 && incoming[kind] !== 0) {
+      ignored.push(kind);
+    }
+    const best = Math.max(asNumber(live?.[kind]), asNumber(incoming[kind]), fromRestored);
+    if (best > 0) merged.set(kind, best);
+  }
+  if (ignored.length > 0) {
+    console.warn(
+      `[config-snapshot] ignored ${ignored.length} id floor(s) the snapshot could not supply — ` +
+        `not a number, or not a usable name: ${scrub(ignored.join(", "))}. ` +
+        "Ids for those kinds fall back to the collision walk.",
+    );
+  }
+  if (merged.size === 0) return contents;
+  return { ...(contents as Record<string, unknown>), idFloors: Object.fromEntries(merged) };
 }
 
 /**
@@ -261,11 +388,15 @@ class ConfigSnapshotService {
       if (!configFiles().includes(name)) continue; // allowlist only
       if (contents === undefined || contents === null) continue;
       const dest = path.join(getUserDataPath(), name);
+      const toWrite =
+        name === "settings.json" && typeof contents === "object" && !Array.isArray(contents)
+          ? mergeIdFloors(contents, await liveIdFloors(dest), bundle.files)
+          : contents;
       // Atomic, for the reason data-store.ts spells out: a plain writeFile
       // truncates in place, so a power cut here leaves a short settings.json that
       // the next boot cannot parse, quarantines, and replaces with defaults —
       // losing the settings the operator restored this bundle to recover.
-      await atomicWrite(dest, JSON.stringify(contents, null, 2));
+      await atomicWrite(dest, JSON.stringify(toWrite, null, 2));
       applied.push(name);
     }
     // Uploaded images, restored under their content-hashed names. The directory is

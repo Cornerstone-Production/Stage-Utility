@@ -18,7 +18,6 @@ import {
   SelectItem,
   SelectValue,
   Switch,
-  Status,
   Separator,
   NumberInput,
   InfoHint,
@@ -34,6 +33,9 @@ import {
   ChevronDownIcon,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
+import { ConnectionBadge } from "./connection-badge";
+import { IpListField } from "./ip-list-field";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -45,98 +47,6 @@ const MASKED_PASSWORD = "••••••••";
 
 function isPasswordMasked(value: string): boolean {
   return /^•+$/.test(value);
-}
-
-// ---- sub-components ---------------------------------------------------------
-
-interface IpListFieldProps {
-  value: string[];
-  onChange: (v: string[]) => void;
-  placeholder?: string;
-}
-
-function IpListField({ value, onChange, placeholder }: IpListFieldProps) {
-  function update(idx: number, v: string) {
-    const next = [...value];
-    next[idx] = v;
-    onChange(next);
-  }
-  function remove(idx: number) {
-    onChange(value.filter((_, i) => i !== idx));
-  }
-  function add() {
-    onChange([...value, ""]);
-  }
-
-  return (
-    <div className="flex flex-col gap-1 w-full">
-      {value.map((ip, idx) => (
-        <div key={idx} className="flex items-center gap-1">
-          <Input
-            value={ip}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => update(idx, e.target.value)}
-            placeholder={placeholder ?? "192.168.1.x"}
-            className="flex-1 min-w-0"
-          />
-          <Button
-            variant="transparent"
-            size="small"
-            iconOnly
-            onClick={() => remove(idx)}
-            aria-label="Remove"
-          >
-            <TrashIcon className="size-3.5 text-gray-9" />
-          </Button>
-        </div>
-      ))}
-      <Button variant="transparent" size="small" onClick={add} className="self-start">
-        <PlusIcon className="size-3.5 text-gray-9" />
-        Add IP
-      </Button>
-    </div>
-  );
-}
-
-// ---- connection badge -------------------------------------------------------
-
-function WirelessConnectionBadge({
-  connection,
-  message,
-}: {
-  connection: ConnectionState;
-  message: string | null;
-}) {
-  if (connection === "connected") {
-    return (
-      <span className="flex items-center gap-1">
-        <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />
-        <span className="text-caption1 text-green-10">Connected</span>
-      </span>
-    );
-  }
-  if (connection === "connecting") {
-    return (
-      <span className="flex items-center gap-1">
-        <Loader2Icon className="size-3.5 text-accent animate-spin shrink-0" />
-        <span className="text-caption1 text-accent">Connecting…</span>
-      </span>
-    );
-  }
-  if (connection === "error") {
-    return (
-      <span className="flex items-center gap-1">
-        <XCircleIcon className="size-3.5 text-red-10 shrink-0" />
-        <span className="text-caption1 text-red-10">{message ?? "Error"}</span>
-      </span>
-    );
-  }
-  // disconnected
-  return (
-    <span className="flex items-center gap-1">
-      <Status variant="warning" />
-      <span className="text-caption1 text-gray-9">Disconnected</span>
-    </span>
-  );
 }
 
 // ---- single connection card -------------------------------------------------
@@ -375,8 +285,13 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                 ) : field.type === "number" ? (
                   <NumberInput
                     value={typeof value === "number" ? value : Number(value) || 0}
-                    onChange={(n) => handleConfigChange(field.key, String(n))}
+                    // The number, not String(n): the next blur writes this
+                    // straight into the connection's config, and a stringified
+                    // port is not what the provider is typed to read.
+                    onChange={(n) => handleConfigChange(field.key, n)}
                     onCommit={() => handleConfigFieldBlur(field.key)}
+                    min={field.min}
+                    max={field.max}
                     className="w-44"
                     aria-label={field.label}
                   />
@@ -404,8 +319,12 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Header: collapse toggle + name input + provider select + enable + remove */}
-      <div className="flex items-center gap-2">
+      {/* Header: collapse toggle + name input + provider select + enable + remove.
+          Six controls totalling ~560px, so it wraps under sm rather than
+          overflowing: measured at 390px it was 12px too wide for the dialog body
+          and scrolled it sideways. The spacer below is hidden once wrapped, or
+          it takes a whole line to itself. */}
+      <div className="flex items-center gap-2 max-sm:flex-wrap">
         <Button
           variant="transparent"
           size="small"
@@ -441,9 +360,9 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
           </SelectContent>
         </Select>
 
-        <div className="flex-1 min-w-0" />
+        <div className="flex-1 min-w-0 max-sm:hidden" />
 
-        <WirelessConnectionBadge connection={conn.connection} message={conn.message} />
+        <ConnectionBadge connection={conn.connection} message={conn.message} />
         <Switch
           checked={conn.enabled}
           onCheckedChange={handleEnabledChange}
@@ -671,7 +590,11 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
   }
 
   return (
-    <div className={cn("flex flex-col gap-0", className)}>
+    // Name + provider + host + status + switch + delete is ~560px of row that
+    // cannot wrap, so this panel's dialog takes the wide variant. The marker is
+    // what integration-dialog-size.test.tsx reads off the rendered page, so the
+    // width and the panel cannot drift apart.
+    <div className={cn("flex flex-col gap-0", className)} {...{ [WIDE_PANEL_ATTR]: "" }}>
       {meterRateField}
       {body}
     </div>

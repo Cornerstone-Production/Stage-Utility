@@ -78,3 +78,22 @@ export function scrub(value: unknown, max = MAX): string {
 
   return escaped.length > max ? `${escaped.slice(0, max)}…` : escaped;
 }
+
+/** How much of a stack trace can reach a log line. */
+const MAX_ERROR = 2_000;
+
+/**
+ * An error rendered for a log line: its stack when it has one, otherwise
+ * whatever `scrub` makes of it.
+ *
+ * `console.error("[x] failed:", err)` hands log-buffer a raw Error, and
+ * log-buffer renders `err.stack` — every line of which becomes its own record
+ * on `/log`, with the provider's or the device's own text in the first one.
+ * `scrub(err)` closes that by returning only `err.message`, which throws the
+ * stack away; this keeps the stack and escapes it instead, so the one line that
+ * reaches `/log` still says where the failure came from.
+ */
+export function scrubError(value: unknown, max = MAX_ERROR): string {
+  if (value instanceof Error && typeof value.stack === "string") return scrub(value.stack, max);
+  return scrub(value, max);
+}

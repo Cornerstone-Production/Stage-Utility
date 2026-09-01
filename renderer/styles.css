@@ -381,6 +381,15 @@
       animation-duration: 1.4s !important;
       animation-iteration-count: infinite !important;
     }
+    /* The readout's progress rule takes NO exception, deliberately. A case can
+       be made that collapsing it swaps a smooth hairline for one that steps
+       once a second — but "reduce motion" is the viewer's machine asking for
+       less motion, and deciding on their behalf that ours is the good kind is
+       what makes the setting worthless. Collapsed, the rule behaves exactly as
+       it did before the smoothing landed, so nobody is worse off than today.
+       The two exceptions that remain are not motion for its own sake: the
+       spinner MEANS "still working", and .su-flash replaces its animation with
+       a static ring rather than keeping one. */
     .su-flash {
       animation: none;
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent);
@@ -452,6 +461,42 @@
   --color-fg-muted:       rgba(255, 255, 255, 0.70);
   --color-fg-subtle:      rgba(255, 255, 255, 0.45);
   --color-fg-faint:       rgba(255, 255, 255, 0.34);
+
+  /* Not only foregrounds. The nine above cover text and lines; a kiosk surface
+     also draws FILLS and a WARNING colour, and those resolved from :root too —
+     which for a light page means colours picked to sit on #f7f8fa, landing on
+     #0a0a0a. Measured on this ground:
+
+       --gray-a5 (#0000001f, the light --su-fill-active) → 1.01:1. Darker than
+       the backdrop, so the calendar's running-event pill was a font-weight
+       change and nothing else — the same outcome the pill already shipped with
+       once, when it was written against a token Tailwind emits nothing for.
+       The dark #ffffff22 reads as a lift at 1.39:1, which is what a fill is for.
+
+       --amber-11 (#ab6400) → 4.29:1, under the 4.5:1 floor for the 11px type
+       the calendar states a failure in. The dark #ffca16 is 12.93:1.
+
+     Literals, matching the .dark values of the same Radix steps, for the same
+     reason the nine above are literals: redefining --gray-a5 here would reach
+     everything else derived from it. */
+  --color-fill-active:    rgba(255, 255, 255, 0.13);
+  --color-warn-11:        #ffca16;
+}
+
+/* The accent, on a kiosk surface embedded in the LIGHT app only.
+ *
+ * Deliberately not in the block above: on the real kiosk (and in the dark app)
+ * --brand-accent is already the lighter #6aa6df, 7.67:1 on this ground, and
+ * lifting it there would leave accent-coloured chrome inside a kiosk surface a
+ * different blue from the same chrome outside one. It is the light default,
+ * #2e6691 at 3.23:1, that is thin — over the 3:1 non-text floor, but not by
+ * enough for the 1px ring the calendar marks "happening right now" with.
+ *
+ * DERIVED, never a literal: the accent is themeable per organisation, and a
+ * fixed hex here would quietly ignore the operator's choice. Lifted toward white
+ * exactly as .kiosk and .dark lift their own accent states. #2e6691 → 5.22:1. */
+:root:not(.dark) .kiosk-surface {
+  --color-accent: color-mix(in srgb, var(--brand-accent), white 22%);
 }
 
 
@@ -568,24 +613,172 @@ body {
   margin-left: 0;
 }
 
-/* A status strip that never collides.
-   The context bar is a flex row of independent readings. Letting its items
-   shrink squeezed them past their own content on a phone, so "3 disconnected"
-   and "REC stopped" printed on top of each other — the items overlapped rather
-   than overflowing, which reads as a broken layout rather than a full one.
-   Items keep their width now and the bar wraps on a phone; from sm up it is one
-   row again, and scrolls in the rare case that row still does not fit. Nothing
-   is ever dropped: every reading on it is one somebody put there on purpose. */
+/* ── The context bar's fit ladder ────────────────────────────────────────────
+   ONE ROW AT EVERY WIDTH, from 320px up. Never wraps, never scrolls. It used to
+   do both — wrap below 640px, scroll above — and each was a fix that traded the
+   problem for a worse one: the wrap spent a second band of the screen with the
+   least of it to spare, and the scroll put "6 disconnected" past the right edge,
+   where an alert is not an alert.
+
+   It gives up WORDS instead, in a fixed order, and it does that here. bar-fit.ts
+   measures the strip, walks the rungs, and writes the one that fits to
+   `data-fit`; everything below is what each rung means. Splitting it that way is
+   deliberate — the arithmetic is testable off a browser and the geometry is not,
+   so neither has to pretend to be the other.
+
+   The ladder may never remove a number, never remove a state colour, and never
+   drop an item. Every rule below takes a word, a qualifier or a decoration.
+
+   `overflow: hidden` is the backstop, not the mechanism: at the floor prose
+   ellipsises, so the strip always fits and nothing is ever actually clipped. It
+   is here so that a bug in the fitter reads as a truncated bar rather than as
+   items printed over the page beside them. */
 .context-strip {
-  scrollbar-width: none; /* Firefox */
+  column-gap: 12px;
+  padding-inline: 20px;
+  overflow: hidden;
 }
-@media (min-width: 640px) {
+
+@media (max-width: 639px) {
   .context-strip {
-    overflow-x: auto;
+    padding-inline: 12px;
   }
 }
-.context-strip::-webkit-scrollbar {
+
+/* The configurator's editing strip, and NOTHING else.
+   The bar never scrolls; this is not the bar. It is the surface the operator
+   drags rows on, and inside a dialog on a phone it is narrower than the bar it
+   speaks for — so an arrangement that fits the phone perfectly still runs past
+   the edge in here, and `overflow: hidden` would leave the last rows unreachable
+   and un-removable.
+   Horizontal only, and the row geometry is untouched: the drop maths reads the
+   rows' midpoints in viewport coordinates, so it survives a scroll but would not
+   survive a wrap. */
+.context-strip.bar-editor {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+}
+.context-strip.bar-editor::-webkit-scrollbar {
   display: none;
+}
+
+/* The page's name, at the head of the strip on a desktop. NOT an item: it is the
+   shell's own chrome, which is what lets it shorten without breaking "never drop
+   an item the operator chose". See page-title.tsx.
+
+   IT IS THE ONLY SHRINKABLE THING ON THE ROW above the floor — every `.bar-item`
+   is `shrink-0`, and prose items opt into shrinking at `data-fit="3"` and only
+   there. So flexbox takes this name's width first, before the fitter is ever
+   asked for a rung, and the ladder starts walking only once the name has reached
+   the floor it is given inline. That is "the title is the first thing to
+   shorten" expressed as geometry rather than as a fifth rung: no renumbering of
+   `data-fit`, and no rung whose meaning depends on which page you are on.
+
+   `min-width` is set INLINE, per name — `max-content` for a name at or under the
+   floor so it cannot shrink at all, `14ch` for one longer. It is not declared
+   here because it is not one value.
+
+   The extra 4px past the strip's 12px column gap is the whole separation between
+   the shell's name and the operator's first reading. It is deliberately small:
+   the size and weight step from 13px muted to 15px semibold is what tells them
+   apart, and a rule or a wider gap would spend width at exactly the sizes where
+   the row is short of it. */
+.bar-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-inline-end: 4px;
+}
+
+/* Level 1 — qualifiers. Context the operator already has: the clock's seconds,
+   the capsule's inning, the pre-service label beside a countdown that is plainly
+   a countdown. Never an item's ONLY reading — the service-type name was taken
+   here while it was printed inside the plan item, and stopped being eligible the
+   day it became an item somebody places on its own.
+
+   CLIPPED, NOT REMOVED. `display: none` would take the word out of the
+   accessibility tree with it, so a screen reader would lose a reading that a
+   sighted reader still has in the item beside it. This is the sr-only clip:
+   out of the layout, still in the document. */
+/* `:is()` takes the specificity of its most specific argument, and every
+   argument here is one attribute selector — so each of these reads exactly as
+   `.context-strip[data-fit="n"] …` did, (0,3,0), and nothing in the cascade
+   moves. The ladder is cumulative: level 3 does everything level 2 does. */
+.context-strip:is([data-fit="1"], [data-fit="2"], [data-fit="3"]) .bar-drop-1,
+.context-strip:is([data-fit="2"], [data-fit="3"]) .bar-drop-2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Level 2 — the compact bar. Every idle word becomes that item's own mark (the
+   `.bar-drop-2` rule above), gaps and edge padding tighten, and the capsule
+   gives up the space around its logos. Counts keep their digits: the plug
+   appears BESIDE the 6, never instead of it. */
+.context-strip:is([data-fit="2"], [data-fit="3"]) {
+  column-gap: 8px;
+  padding-inline: 8px;
+}
+.context-strip:is([data-fit="2"], [data-fit="3"]) .bar-glyph {
+  display: block;
+}
+.bar-glyph {
+  display: none;
+  flex-shrink: 0;
+}
+
+/* The capsule at level 2. Smaller marks and smaller figures, and a shorter
+   runway for the team colour to fade across — but every digit of both scores is
+   still there, at a size that is still the largest type on the strip. */
+.context-strip:is([data-fit="2"], [data-fit="3"]) .score-capsule {
+  & .score-side {
+    gap: 5px;
+    padding: 4px 7px;
+  }
+  & .score-side-away {
+    padding-right: 14px;
+  }
+  & .score-side-home {
+    padding-left: 14px;
+  }
+  & .score-logo {
+    width: 15px;
+    height: 15px;
+    font-size: 7px;
+  }
+  & .score-value {
+    font-size: 13px;
+  }
+}
+
+/* Level 3 — THE FLOOR, and the only rung that costs the reader anything they
+   cannot get back by looking somewhere else. Prose — a plan title, a live item's
+   title — gives up its width and ellipsises.
+
+   It is not meant to be reached. A phone has its own item set (see
+   bar-items.ts) so prose can be curated off it, and the configurator says which
+   arrangements land here while you are still arranging them. A bar carrying no
+   prose item cannot land here at all.
+
+   It exists because a strip that has run out of room has to do SOMETHING, and of
+   the four things available — ellipsise, wrap, scroll, or clip — only this one
+   keeps one row, keeps every number, and tells the reader a word was cut. */
+/* NOT collapsed into one `:is()` like the rules above. `:has(> .bar-prose)`
+   is a class inside a functional pseudo-class, so `:is(.bar-prose, .bar-item:has(> .bar-prose))`
+   would take the (0,2,0) of the second arm and hand it to the first — raising
+   `.bar-prose` from (0,3,0) to (0,4,0). The collapse above is safe because every
+   arm there is a bare attribute selector. */
+.context-strip[data-fit="3"] .bar-prose,
+.context-strip[data-fit="3"] .bar-item:has(> .bar-prose) {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 /* ── Mic slot photo ──────────────────────────────────────────────────────────
@@ -628,3 +821,928 @@ body {
    AvatarFit in slot-resolver.ts) -- and with a whole 3:4 headshot `cover` at
    28% fills the cell and keeps the entire face: measured on a 195x165 cell,
    source rows 82..590 visible of 800, with the face at 120..380. */
+
+/* ── Live scores ───────────────────────────────────────────────────────────
+   The team-colour feather, the strip, and the per-sport centre.
+
+   Written as CSS rather than Tailwind utilities for two reasons. The mask
+   cannot be expressed as a utility at all; and the rest is a set of precise,
+   interdependent measurements taken from one mockup, which are easier to keep
+   in step as a block than scattered through arbitrary-value classes in three
+   components that must agree pixel for pixel.
+
+   Every surface here is a neutral dark card. A team colour fills its OWN side
+   and never tints the surface, and there is no saturate() anywhere - see the
+   R=G=B rule. */
+:root {
+  /* A MASK, not a gradient in the background.
+
+     Fading a colour to `transparent` interpolates toward transparent BLACK,
+     which leaves a faint dark shoulder just before it disappears - visible as a
+     hard-ish edge at the very end however many stops you add. A mask
+     interpolates ALPHA only, so the hue never shifts and the tail actually
+     reaches nothing.
+
+     The stops approximate an ease-out: most of the fade happens early and the
+     last stretch is nearly flat, which is what removes the visible "start of the
+     fade". Solid across the first 42% - where the logo and the number sit - so
+     the ink score-ink.ts computes is against the real brand colour. */
+  --score-feather-r: linear-gradient(to right, #000 0%, #000 42%, rgba(0,0,0,.92) 55%, rgba(0,0,0,.74) 66%, rgba(0,0,0,.5) 76%, rgba(0,0,0,.28) 85%, rgba(0,0,0,.12) 92%, rgba(0,0,0,.04) 97%, transparent 100%);
+  --score-feather-l: linear-gradient(to left,  #000 0%, #000 42%, rgba(0,0,0,.92) 55%, rgba(0,0,0,.74) 66%, rgba(0,0,0,.5) 76%, rgba(0,0,0,.28) 85%, rgba(0,0,0,.12) 92%, rgba(0,0,0,.04) 97%, transparent 100%);
+  /* Restrained overshoot, only where the motion means "something just happened". */
+  --score-spring: cubic-bezier(.22, 1.06, .36, 1);
+  --score-ease: cubic-bezier(.2, .6, .2, 1);
+  /* The disc behind every team mark. Kept out of the .score-strip token block
+     below because the settings picker draws the same disc on the same logos and
+     is nowhere near a strip. Mirrors DISC in score-ink.ts, which is where the
+     reasoning is written down. */
+  --score-disc: #f2f2f2;
+  /* Here for the same reason: .score-object-empty is a standalone sibling of a
+     strip, not a descendant of one, so a token declared on .score-strip cannot
+     reach it — and it restated both of these as literals to compensate. One
+     source, so a change to the surface cannot land on three of four states.
+
+     The ground every score surface sits on is neutral dark whatever the app
+     theme, because a stage display is dark and the context bar is dark. Strictly
+     R=G=B. */
+  --score-surface: #161616;
+  /* THE QUIET INK, and there is exactly one of it.
+     There were two. --score-subtle was rgba(255,255,255,.38), which paints
+     #6f6f6f on this surface: 3.60:1, under WCAG AA's 4.5:1 floor for text of
+     any size, and every one of its four uses was 9.5px or smaller — the period,
+     the capsule's middle line, a card's venue/league/time row, and the empty
+     object's caption. This one paints #a6a6a6 at 7.43:1, which is what those
+     four were meant to read at. Both ratios measured through the app's own
+     contrastRatio; the guard in score-activity.test.tsx measures them again. */
+  --score-muted: rgba(255, 255, 255, .62);
+}
+
+/* The ink for that ground. Strictly R=G=B, like the surface it sits on.
+   --score-surface and --score-muted are on :root instead, with --score-disc:
+   the empty state is a standalone sibling and cannot inherit from here. */
+.score-strip,
+.score-card,
+.score-capsule {
+  --score-fg: rgba(255, 255, 255, .92);
+  --score-line: rgba(255, 255, 255, .10);
+  --score-dim: rgba(255, 255, 255, .15);
+  /* The one warm accent: bases, outs, possession, power play. It marks a state
+     ON a neutral surface and never tints the surface itself. */
+  --score-mark: #f5c451;
+}
+
+/* THE MASK GOES ON A BACKGROUND LAYER, NEVER ON THE ELEMENT.
+   Masking the element fades its CONTENT too, which is what made the scores near
+   the seam hard to read. The colour is a pseudo-element; the text rides above
+   it on z-index 1. */
+.score-side {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 16px;
+  color: var(--score-ink);
+  overflow: hidden;
+}
+.score-side::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--score-team);
+}
+.score-side > * {
+  position: relative;
+  z-index: 1;
+}
+.score-side-away::before {
+  -webkit-mask-image: var(--score-feather-r);
+  mask-image: var(--score-feather-r);
+}
+.score-side-home::before {
+  -webkit-mask-image: var(--score-feather-l);
+  mask-image: var(--score-feather-l);
+}
+/* The two sides mirror, so each team's mark sits at its own outer edge. */
+.score-side-home {
+  flex-direction: row-reverse;
+}
+
+/* The strip: away side, centre, home side.
+   min-height is set by the TALLEST centre any sport produces - baseball's four
+   rows - so the centre is never clamped. Clamping it is what clipped the count
+   and the bonus label in the mockup. */
+.score-strip {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  background: var(--score-surface);
+  min-height: 80px;
+  /* So the strip can answer "am I narrow" about ITSELF rather than about the
+     viewport. The same strip renders in a context-bar panel, in a stack card and
+     in a wall tile, and the viewport says nothing useful about any of them. */
+  container-type: inline-size;
+}
+
+/* THE DISC BEHIND EVERY TEAM MARK, and the one class that draws it: the strip,
+   the capsule and the settings picker all use this, so the disc cannot end up
+   meaning three different things.
+
+   It is the same light disc for every team, never the inverse of that team's
+   ink. Making it conditional put two clubs in one strip on opposite discs, and
+   still lost a dark mark whenever the club's brand colour was light but its logo
+   was not — the Yankees and the Packers. The reasoning, and why LIGHT is the
+   right constant for ESPN's `500/` logos, is on DISC in score-ink.ts.
+
+   `color` is only reached by a team with NO logo, where the abbreviation stands
+   in for the mark. score-ink.ts picks that per team, because a light brand
+   colour on a light disc is unreadable; the fallback is for the picker, which
+   handles its own no-logo case and never sets the variable. */
+.score-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--score-disc);
+  color: var(--score-disc-ink, #0a0a0a);
+}
+/* THE MARK IS INSCRIBED IN THE DISC, not stretched across it.
+   It used to be `width: 100%; height: 100%`, which sizes a SQUARE image box to
+   the disc's bounding square — and the disc is the circle inscribed in that
+   square. A mark that fills its own box then touches the circle at four points
+   and crosses it everywhere else, so `overflow: hidden` + `border-radius: 50%`
+   took the ends off it. Nothing was ever cropping the image: `object-fit` is
+   already `contain`. The box was simply bigger than the circle it sat in.
+   The factor is the only one that cannot clip ANY source: a square of side s
+   fits inside a circle of diameter d exactly when s <= d/sqrt(2), so
+   70.71% is the largest safe box. Anything above it clips a mark with ink in its
+   own corners, and ESPN's marks have no shared safe area to bet on — some are
+   tight to the edge (a letter mark), some already carry their own padding (a
+   round crest), and there is no per-logo measurement available at render time to
+   tell them apart. So the geometry decides rather than an eyeballed number.
+   As a PERCENTAGE, so it holds at all three sizes this chip is drawn at — 32px in
+   a card, 22px compact, 18px in the capsule — and at whatever the capsule becomes
+   next. The clip stays as the backstop it always was; the mark can no longer
+   reach it. Read by score-logo-fit.test.ts, which checks the arithmetic. */
+.score-logo img {
+  --score-logo-fit: 70.71%;
+  width: var(--score-logo-fit);
+  height: var(--score-logo-fit);
+  object-fit: contain;
+}
+
+/* The one part of a side that is allowed to give up width.
+   The logo and the score are fixed; when a narrow panel runs out of room it is
+   the name that truncates, because a shortened name still identifies the team
+   and a shortened SCORE is a different number. Without `flex: 1 1 auto` the
+   nowrap children below give this column a large min-content width, the side
+   overflows, and the score paints straight over the name. */
+.score-names {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Clips its own children. The name and the record are both nowrap, so a
+     column squeezed to zero does not stop them being laid out - they simply
+     spill, and on the home side (which is row-reverse and end-aligned) they
+     spill LEFT, straight over the score. Measured at 320px: a 0-wide column
+     with a 34px name inside it, painting across a score that ends 11px to its
+     left. */
+  overflow: hidden;
+}
+.score-side-home .score-names {
+  align-items: flex-end;
+}
+.score-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.score-record {
+  font-size: 9.5px;
+  letter-spacing: .03em;
+  opacity: .55;
+  font-variant-numeric: tabular-nums;
+  /* nowrap like the name above it. Without this a narrow panel breaks "70-64"
+     across two lines as "70-" / "64", which reads as a different number and
+     pushes the strip taller than the stack measured it at. Clipped rather than
+     wrapped, for the same reason the name is. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.score-value {
+  font-size: 29px;
+  font-weight: 600;
+  letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.score-side-away .score-value {
+  margin-left: auto;
+  padding-left: 10px;
+}
+.score-side-home .score-value {
+  margin-right: auto;
+  padding-right: 10px;
+}
+
+/* ── The centre, per sport ──
+   A bases diamond in a basketball game is nonsense and a down-and-distance line
+   means nothing in the ninth inning, so this is a switch over the sport rather
+   than one shape wearing different labels. */
+.score-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex-shrink: 0;
+  width: 100px;
+  padding: 10px 2px;
+  color: var(--score-muted);
+  z-index: 1;
+}
+.score-period {
+  font-size: 9.5px;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+.score-clock {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--score-fg);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+}
+.score-downdistance {
+  font-size: 10px;
+  color: var(--score-muted);
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+/* Which team has the ball. A dot beside the score would be lost against a brand
+   colour; in the neutral centre it reads at a glance. */
+.score-possession {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  letter-spacing: .06em;
+}
+.score-pip {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+.score-possession-away .score-pip {
+  border-right: 5px solid var(--score-mark);
+}
+.score-possession-home .score-pip {
+  border-left: 5px solid var(--score-mark);
+}
+.score-note {
+  font-size: 8.5px;
+  letter-spacing: .07em;
+  color: var(--score-mark);
+}
+
+.score-outs {
+  display: flex;
+  gap: 3px;
+}
+.score-out {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--score-dim);
+}
+.score-out-on {
+  background: var(--score-mark);
+}
+
+/* Below this the strip cannot hold a full name without eating the score.
+   Measured: a side needs the logo (32), the score (~28), two gaps (22) and its
+   padding (32) before a name gets a single pixel, so with the 100px centre in
+   the middle a full strip runs out of room at about 460. Rather than truncate a
+   name to nothing, the strip drops to marks and scores - which is exactly what
+   the compact size shows, and is still the two things anybody is reading. */
+@container (max-width: 460px) {
+  .score-names {
+    display: none;
+  }
+}
+
+/* A real diamond: 2nd at the TOP, 3rd on the LEFT, 1st on the RIGHT.
+   A 2x2 grid rotated 45deg puts top-left at the top and bottom-left at the left,
+   so the cells read 2nd, 1st, 3rd, home. A three-cell ROW rotated 45deg would
+   put third base on a diagonal, which is not a diamond. */
+.score-bases {
+  display: grid;
+  grid-template-columns: repeat(2, 7px);
+  grid-template-rows: repeat(2, 7px);
+  gap: 3px;
+  transform: rotate(45deg);
+}
+.score-base {
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: var(--score-dim);
+}
+.score-base-on {
+  background: var(--score-mark);
+}
+/* Home plate completes the grid's geometry but is never occupied by a runner. */
+.score-base-home {
+  visibility: hidden;
+}
+
+/* ── The context-bar capsule, and the activity it grows into ───────────────
+   Every number here is from the mockup this was built against.
+
+   Two rules are load-bearing and were each a real bug:
+
+   1. THE MASK IS ON A ::before LAYER, NEVER ON THE ELEMENT. That lives in
+      .score-side above and is reused verbatim; nothing here re-states it.
+   2. NOTHING ANIMATES INDEPENDENTLY INSIDE THE EXPANDING SHELL. Three earlier
+      passes gave the coloured sides their own transform, and every one read as
+      the box "clipping" open — an outline that had already landed with colour
+      still travelling inside it. The shell's own scale IS the expansion. The
+      cards get no transitions at all until `.is-settled` lands one shell-length
+      later, so a score that opens the panel AND moves the focus cannot animate
+      the focus change inside the opening shell. */
+
+/* The capsule: logos and numbers only. The abbreviation is redundant beside a
+   mark the operator already recognises, and dropping it buys back real width in
+   a bar that also carries the plan and the timer. */
+.score-capsule {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 11px;
+  background: var(--score-surface);
+  border: 1px solid var(--score-line);
+  font: inherit;
+  padding: 0;
+  transition: box-shadow 420ms var(--score-ease), border-color 160ms var(--score-ease);
+}
+button.score-capsule {
+  cursor: pointer;
+}
+button.score-capsule:hover {
+  border-color: rgba(255, 255, 255, .22);
+}
+button.score-capsule:focus-visible {
+  outline: 2px solid var(--su-focus);
+  outline-offset: 3px;
+}
+/* NARROWER THAN THE PANEL'S STRIP, and narrower than it used to be. At 180px the
+   capsule was 27% of a 676px bar for one reading, which is what made it read as a
+   banner rather than an item. 157px now, measured with "SD 0 · Bot 3rd · 0 CIN".
+
+   The width came off the FEATHER, not off the numbers. The mask below is a
+   percentage gradient, so its opaque region scales with the side — shrinking the
+   side alone drags the number into the fade, and every naive tightening measured
+   at 0.50-0.63 backing behind the score where the shipped capsule has 0.74. The
+   stops are shifted to match, so the number's backing comes out at 0.83: better
+   than what shipped, on a capsule 24px narrower. */
+.score-capsule {
+  --score-feather-r: linear-gradient(to right, #000 0%, #000 55%, rgba(0,0,0,.92) 66%, rgba(0,0,0,.74) 76%, rgba(0,0,0,.5) 84%, rgba(0,0,0,.28) 90%, rgba(0,0,0,.12) 95%, rgba(0,0,0,.04) 98%, transparent 100%);
+  --score-feather-l: linear-gradient(to left,  #000 0%, #000 55%, rgba(0,0,0,.92) 66%, rgba(0,0,0,.74) 76%, rgba(0,0,0,.5) 84%, rgba(0,0,0,.28) 90%, rgba(0,0,0,.12) 95%, rgba(0,0,0,.04) 98%, transparent 100%);
+}
+.score-capsule .score-side {
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 5px 8px;
+}
+/* The colour has to run past the seam before it can fade, or the feather starts
+   under the number. 16px, with the stops above shifted to suit; 22px with the
+   panel's stops was the same idea paid for in width. */
+.score-capsule .score-side-away {
+  padding-right: 16px;
+}
+.score-capsule .score-side-home {
+  padding-left: 16px;
+}
+.score-capsule .score-logo {
+  width: 16px;
+  height: 16px;
+  font-size: 7.5px;
+}
+.score-capsule .score-value {
+  font-size: 15px;
+  letter-spacing: -.02em;
+  padding: 0;
+  margin: 0;
+}
+.score-capsule-mid {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--score-muted);
+  letter-spacing: .05em;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+/* The half-inning's direction: up for the top, down for the bottom.
+
+   Drawn rather than typed — see the capsule's JSX. Sized in em so it tracks the
+   number beside it, and given the same muted ink, because it is a reading and
+   not a control. */
+.score-half {
+  width: .7em;
+  height: .55em;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+.score-half.is-bottom {
+  transform: rotate(180deg);
+}
+
+/* THE PANEL FLOATS. It used to be a flex item in the shell's content column, so
+   growing it pushed the page header and the whole scrolling pane down — open the
+   scores on Screens and every card slid down the screen. A panel that moves the
+   page is a panel you cannot open while reading the page.
+   The anchor is the piece that stays in flow, and it is zero pixels tall: it
+   marks where the panel starts without occupying anything.
+   A `min-height: 0` sat here for a while, with a comment claiming a flex item's
+   automatic minimum would otherwise make this as tall as the panel. That was
+   wrong twice over — the host is absolutely positioned, so there is no in-flow
+   content to be as tall as, and the automatic minimum is capped by a definite
+   `height` anyway. Measured both ways in a browser: the anchor is 0 with it and 0
+   with `min-height: auto` forced on. It is gone rather than kept as insurance,
+   because a line nobody can make fail is a line the next reader has to re-derive.
+   z-index over the sticky headers inside the scrolling pane (the tallest is
+   patch-section's `top-1 z-30`), which is what "above everything" means here.
+   Portalled dialogs and menus are `fixed z-50`/`z-[100]` on the body and still
+   win, which is right: a modal belongs over a panel. */
+.score-anchor {
+  position: relative;
+  height: 0;
+  z-index: 40;
+}
+
+/* The host clips; the shell scales. Height leads on the way in and trails on the
+   way out, so the panel is never clipped mid-flight in either direction.
+   OUT OF FLOW, in the anchor above — a change of containing block, not of
+   mechanism. The row still goes 0fr -> 1fr on the same element over the same
+   curve, and `inset-inline: 0` gives it the same width it had as a block in the
+   column, so the shell's cap and its `margin-inline: auto 0` still park it under
+   the capsule at the bar's right end and still centre it on a phone. */
+.score-host {
+  position: absolute;
+  /* ABOVE THE BAR'S BOTTOM EDGE, by --score-cast. The clip's top edge used to sit
+     exactly there, so the panel's shadow could never reach the bar — it stopped
+     dead at the boundary, which is what reads as a sliced shadow however much
+     room the other edges have. Starting the clip higher lets the shadow paint
+     ONTO the bar, the way a menu casts onto the strip it drops out of.
+
+     The panel does not move: the room this opens is added to the shell's top
+     margin below, so the cards sit exactly where they did and what fills the band
+     is shadow and nothing else. Collapsed the row is still 0fr, so there is
+     nothing there to see until it opens. */
+  top: calc(-1 * var(--score-cast));
+  inset-inline: 0;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 620ms var(--score-ease) 60ms;
+
+  /* AN OVERLAY MUST NOT SWALLOW THE PAGE. The clip is full-width, but the panel
+     drawn inside it is capped at 640px and pushed to one side, so most of that
+     width is empty air sitting over content the operator can still see. In flow
+     that air cost nothing; over the page it would eat every click that landed on
+     it. Only the shell — which is exactly the cards' box — takes pointer events.
+     This is also what keeps the document-level close handler honest: a press on
+     the empty air now reports the page element underneath as its target, so
+     `closest(".score-host")` is false and the panel closes, which is what
+     pressing away from a panel should do. */
+  pointer-events: none;
+
+  /* How far a card's drop shadow reaches OUTSIDE its own box, which is the room
+     the clip below has to leave it. The biggest is the focused card's
+     `0 18px 44px` (see .score-card.is-focused) and a CSS blur reaches half its
+     radius past the edge: 22px sideways, 22 − 18 = 4px up, 22 + 18 = 40px down.
+     Rounded up, so the clip's edge is never the last visible pixel of the
+     shadow. The extra at the bottom also covers layoutStack sizing the stack
+     from `offsetHeight`, which rounds to whole pixels and left the card's real
+     bottom up to 2.25px past the height the stack was given.
+     Measured on the shipped build at 320/360/390/430/768 in both themes: the
+     shadow escaped the clip by 22px on the left, 2px on the right, 4px above
+     and 28.25px below. */
+  --score-shadow-x: 24px;
+  /* 6px, and the upward shadow layer on .score-card is tuned to reach EXACTLY
+     this far: 10/2 + 1 = 6. Raising it instead of matching it was tried and made
+     the seam worse — the room is also the panel's offset from the bar, so more
+     room pushes the panel down and opens a wider strip of bare page above it. */
+  /* How far the shadow may climb past the bar's bottom edge and paint on the bar
+     itself. The clip starts this far above it so the shadow has somewhere to go,
+     and the same amount is added to the shell's top margin so the cards do not
+     move. */
+  --score-cast: 24px;
+  /* The room above the cards INSIDE the clip: the 6px the panel floats below the
+     bar, plus the band opened above it. The upward shadow layer on .score-card is
+     tuned to clear the 6px gap; the rest is headroom, so the corners are not cut
+     either — a shadow's corner is a rounded blob and reaches further diagonally
+     than it does on either axis. */
+  --score-shadow-t: calc(6px + var(--score-cast));
+  --score-shadow-b: 48px;
+}
+.score-host.is-open {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 560ms var(--score-spring);
+}
+
+/* THE CLIP AND THE SHADOW PULL AGAINST EACH OTHER, and both win here.
+   `overflow: hidden` is what makes the height reveal a reveal rather than a
+   card sliding over the page, so it cannot go — but it also sliced the cards'
+   shadows off on every side. The resolution is room: the clip is given more of
+   it than the shadow can reach, so the edge that clips is never an edge the
+   shadow arrives at. */
+.score-clip {
+  overflow: hidden;
+  /* Sideways room as PADDING, and deliberately not `padding-block` as well:
+     preflight makes every box border-box, and a border-box element cannot be
+     shorter than its own padding — so block padding here would give the
+     collapsed `0fr` row a permanent height and the panel could never close.
+     Top and bottom are held off by the shell's own margins instead. */
+  padding-inline: var(--score-shadow-x);
+}
+
+/* Origin is the top, so growth pushes downward from where the capsule sits.
+   Closing is the same sequence reversed — an exit that behaves differently from
+   the entrance reads as two unrelated animations. */
+.score-shell {
+  /* Capped and pushed to the capsule's side rather than run full-bleed. At a
+     console width the page is ~1180px, and a card that wide is two slabs of
+     brand colour with a thread of neutral between them — it reads as a banner
+     the page grew, not as the capsule opening. Held to a card's width, under the
+     end of the bar where the item lands, the capsule stays the thing that
+     opened. */
+  max-width: 640px;
+  /* The side gutter is the CLIP's padding, so it is EQUAL on both sides and the
+     panel is centred whenever it fills the space — which is every phone, since
+     the cap above is wider than the viewport. `margin-left: auto` only bites
+     once there is slack left over, which is the console case the cap exists for,
+     and there it still parks the panel under the capsule at the bar's right end.
+     This used to be `margin: 0 20px 14px auto` — a right margin with `auto` on
+     the left. `auto` resolves to ZERO when there is no slack, so on a phone the
+     panel sat hard against the left edge with a 20px gap on the right, which is
+     the off-centre panel that was reported. */
+  margin-block: var(--score-shadow-t) var(--score-shadow-b);
+  margin-inline: auto 0;
+  /* The one box in the floating panel that takes a press — see the host's
+     `pointer-events: none`. It is exactly the cards' own box: the stack inside is
+     `position: relative` with its height written from the same measurement that
+     places the cards, so this is the painted panel and nothing more.
+     WHILE OPEN ONLY. The two halves of a close run at different lengths on
+     purpose — the shell fades out in 260ms and the height trails it, finishing at
+     680ms — and `opacity: 0` does not stop hit testing. In flow that cost nothing,
+     because the shell's box never covered anything. Floating, it left a fully
+     transparent 640px box over the page for the 420ms in between, eating the
+     press an operator makes right after dismissing the panel. Which is the bug
+     this whole change was meant to remove, arriving from the other side. */
+  pointer-events: auto;
+  transform-origin: top center;
+  opacity: 0;
+  transform: translateY(-10px) scaleY(.68) scaleX(.86);
+  transition: opacity 260ms var(--score-ease), transform 300ms var(--score-ease);
+}
+.score-host.is-open .score-shell {
+  opacity: 1;
+  transform: none;
+  transition: opacity 300ms var(--score-ease), transform 620ms var(--score-spring);
+}
+/* Closed, closing, and every frame of both: the page underneath takes the press.
+   Nothing here is animated, so this cannot affect the motion. */
+.score-host:not(.is-open) .score-shell {
+  pointer-events: none;
+}
+
+/* The ONE exception to rule 2, and it is deliberately the neutral-grey centre:
+   staggering grey text reads as detail settling, not as the panel filling in.
+   The coloured sides never get one. */
+.score-host .score-center {
+  opacity: 0;
+  transition: opacity 150ms var(--score-ease);
+}
+.score-host.is-open .score-center {
+  opacity: 1;
+  transition-delay: 170ms;
+}
+
+/* Cards are absolutely placed and moved by TRANSFORM only, so focusing one
+   animates on the compositor rather than reflowing the page under it. Only the
+   container's height animates in layout, driven from the same measurement, so
+   the two cannot disagree. Both are set from JS — see layoutStack. */
+.score-stack {
+  position: relative;
+}
+.score-stack.is-settled {
+  transition: height 520ms var(--score-spring);
+}
+.score-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--score-line);
+  background: var(--score-surface);
+  cursor: pointer;
+  /* TWO LAYERS, and the small upward one is the point. `0 6px 20px` alone reaches
+     4px above the card, and the panel floats 6px below the context bar — so the
+     top 2px of that gap was bare page, a bright hairline running the full width
+     of the panel directly under the bar. It reads as the shadow having been
+     sliced off by the bar, which is what was reported, and no amount of clip room
+     fixes it: nothing was being clipped. Measured on the reporter's own machine —
+     24px of room on the left, 24 right, 6 top, 46 bottom, against reaches of 22,
+     22, 4 and 16. The gap needed filling, not widening. */
+  box-shadow:
+    0 -2px 24px rgba(0, 0, 0, .20),
+    0 6px 20px rgba(0, 0, 0, .42);
+  will-change: transform;
+}
+.score-stack.is-settled .score-card {
+  transition: transform 520ms var(--score-spring), box-shadow 320ms var(--score-ease);
+}
+.score-card.is-focused {
+  box-shadow:
+    0 -2px 24px rgba(0, 0, 0, .20),
+    0 18px 44px rgba(0, 0, 0, .55);
+}
+.score-card:focus-visible {
+  outline: 2px solid var(--su-focus);
+  outline-offset: 3px;
+}
+/* Clipped by HEIGHT rather than faded, so a peek strip is a real strip and not a
+   ghost of a taller card. The row is what animates; .score-more inside it keeps
+   its natural height, which is why THAT is the thing layoutStack measures. */
+.score-card-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.score-stack.is-settled .score-card-body {
+  transition: grid-template-rows 520ms var(--score-spring), opacity 200ms var(--score-ease);
+}
+.score-card.is-focused .score-card-body {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.score-stack.is-settled .score-card.is-focused .score-card-body {
+  transition-delay: 0ms, 140ms;
+}
+.score-card-body-in {
+  overflow: hidden;
+}
+.score-more {
+  background: var(--score-surface);
+  border-top: 1px solid var(--score-line);
+  padding: 11px 16px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.score-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  font-size: 9.5px;
+  letter-spacing: .05em;
+  color: var(--score-muted);
+}
+.score-stale {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--score-muted);
+  margin: 0;
+}
+
+/* A light sweeps across the side that just scored — one pass, not a pulse. It is
+   an overlay, NOT a transform of the side, so it is not the second moving object
+   rule 2 forbids. Added from JS only when reduced motion is off. */
+.score-side-scored::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, .42) 50%, transparent 65%);
+  transform: translateX(-120%);
+  opacity: 0;
+  animation: score-sweep 780ms var(--score-ease) 260ms 1;
+}
+@keyframes score-sweep {
+  0% { transform: translateX(-120%); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { transform: translateX(120%); opacity: 0; }
+}
+/* The number itself, because the number is the news.
+   A one-shot ANIMATION rather than a transition-and-a-timer: the class arrives
+   with the strip that React remounts on a new rev, so the browser owns both the
+   start and the end, and nothing has to remember to take it off again. */
+.score-value-bump {
+  animation: score-bump 700ms var(--score-spring) 1;
+}
+@keyframes score-bump {
+  0% { transform: scale(1); }
+  22% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+/* ── The "Live scores" layout object ───────────────────────────────────────
+   BARE by registry: the strip paints its own opaque ground edge to edge, so the
+   object adds a radius and clips to it rather than sitting on a card whose
+   corners and fill the strip would cover up. */
+/* The tile itself: the box the fit measures against, and the only thing that
+   clips. THE SCALED STRIP IS POSITIONED, NOT CENTRED BY A GRID: `place-items:
+   center` aligns an item LARGER than its track to the start, so a strip laid out
+   at a fixed 520 in a narrower tile was pushed right by (520 - tileWidth) / 2 and
+   this overflow ate it -- the home team at 296px, the whole widget at 166px. The
+   scaled box now originates at 0,0 and is sized to the tile, so there is nothing
+   to centre and nothing to fall outside. */
+.score-object {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+/* Width, height and transform are all set by ScoresFitted -- the layout size is
+   the tile divided by the zoom, so the scaled result is the tile exactly.
+   `top left`, not `center`, because the origin has to be the tile's own. */
+.score-object-scale {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+}
+/* Fills the box the fit sized, and keeps its own rounded ground -- the radius
+   scales with the strip, as it always has, rather than being a constant the zoom
+   would leave looking wrong at either end. */
+.score-object-strip {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+}
+/* Never an empty box. A wall widget that draws nothing is indistinguishable from
+   one that is broken, and the operator who placed it is not in the room.
+
+   It fills its tile already; what it did not do is SCALE. Every other state in
+   this object answers to the box, so a wall tile drew a large grey panel with an
+   ~11px caption in the middle of it. --score-fit-scale is the same zoom the
+   strip would have been given at this size; the bounds keep it readable in a
+   Home tile and stop it becoming a headline on a wall. */
+.score-object-empty {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  background: var(--score-surface);
+  color: var(--score-muted);
+  font-size: clamp(12px, calc(12px * var(--score-fit-scale, 1)), 44px);
+  letter-spacing: .05em;
+  text-align: center;
+  padding: calc(8px * clamp(1, var(--score-fit-scale, 1), 3));
+}
+
+/* ── Followed scores on Home ───────────────────────────────────────────────
+   Deliberately quiet. A Home tile sits beside a readiness list and a next-service
+   card; the wall strip's panel of brand colour would out-shout every one of them,
+   so the team colour survives as the CHIP and nothing else. */
+.home-scores {
+  /* Asks about ITSELF, not the viewport: the operator resizes this tile from
+     Medium to Large and back, and the viewport says nothing about either. */
+  container-type: size;
+  overflow: hidden;
+}
+/* NO min-height: 0 here, deliberately.
+
+   The list IS the card's content. Which matchups are in it is already decided,
+   by the container queries below, on the grounds that a row must be whole or
+   absent; letting the box that holds them shrink under them undoes that decision
+   after the fact. With min-height at its `auto` default the list is never
+   smaller than the rows it was given, so anything the card is ever short by
+   comes out of the venue line instead of a score.
+
+   It was min-height: 0, and a Medium tile was four pixels over budget, so flex
+   took the four from here: the list ended above its own last row, and the venue
+   rule -- which mt-auto pins to the bottom of the card -- came to rest flush
+   against the second chip, one pixel row after the circle's last arc pixel. That
+   is what read as a clipped chip. Nothing was truncated; a solid rule butted
+   against the bottom of a circle just looks like one, and the first chip sits
+   far enough above the rule that only the second ever showed it.
+
+   The card is over by nothing now -- 91px of the 94 a 120px tile leaves, which
+   the browser measures as five clear pixels between chip and rule. The budget is
+   held by home-scores-fit.test.ts; this line is what keeps it holdable. */
+.home-scores-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* A Medium tile is 120px, which holds ONE matchup under the heading. The second
+   and third appear only when there is genuinely room for them -- clipping a row
+   is how a card ends up showing half a score. */
+.home-scores-game:nth-child(n + 2) {
+  display: none;
+}
+@container (min-height: 200px) {
+  .home-scores-game:nth-child(2) { display: block; }
+}
+@container (min-height: 290px) {
+  .home-scores-game:nth-child(3) { display: block; }
+}
+.home-scores-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 2px 0;
+}
+/* The LOSER is dimmed rather than the leader emphasised: everything else on this
+   page is already at full strength, so lifting one row would make the card louder
+   than its neighbours. */
+.home-scores-row.is-trailing .home-scores-name,
+.home-scores-row.is-trailing .home-scores-value,
+.home-scores-row.is-trailing .home-scores-chip {
+  opacity: .5;
+}
+.home-scores-chip {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 8.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+.home-scores-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-fg-muted);
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.home-scores-value {
+  margin-left: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg);
+  letter-spacing: -.02em;
+  /* The CHIP is the row's height. This is 17px type on the page's inherited 1.5,
+     which made a 25.5px line box -- a pixel and a half taller than the 24px
+     circle beside it, twice per matchup, and three of the four pixels a 120px
+     tile was over budget by.
+
+     Leading only, never ink. The span does not clip, so the glyphs keep their
+     22px natural extent and simply overflow this 17px box by 2.5px each way --
+     still comfortably inside the 24px the row is, which is why nothing here is
+     cropped. Checked in a browser on every glyph a score can hold: a digit, a
+     three-digit basketball score, and the em dash a null score draws. */
+  line-height: 1;
+}
+.home-scores-foot {
+  border-top: 1px solid var(--color-line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A live game earns the same green dot every other live thing on this page uses. */
+.home-scores-live::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--live-9);
+  margin-right: 5px;
+  vertical-align: middle;
+}

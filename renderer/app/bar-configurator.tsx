@@ -41,7 +41,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { XIcon } from "lucide-react";
+import { MonitorIcon, SmartphoneIcon, XIcon } from "lucide-react";
 
 import {
   BAR_ITEMS,
@@ -50,20 +50,25 @@ import {
   BAR_SPACER,
   BAR_SPACER_ITEM,
   isBarGap,
+  hasMobileBar,
+  phoneShowsEditedSet,
+  visibleBarItems,
   DEFAULT_BAR_ORDER,
   normalizeBarRows,
   type BarItem,
   type BarItemId,
   type BarRowId,
 } from "./bar-items";
+import { useBarFit } from "./bar-fit";
 import {
   BAR_STRIP_CLASS,
+  BarStripRows,
   renderBarItem,
   useBarContext,
   type BarItemContext,
 } from "./context-bar";
 import { dropPoint, droppedOnBar, gapFromMidpoints } from "./bar-drop";
-import { setBarItems } from "./set-bar-items";
+import { setBarItems, type BarSet } from "./set-bar-items";
 import {
   Button,
   DialogRoot,
@@ -220,14 +225,19 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
       <span
         aria-hidden="true"
         className={cn(
-          "pointer-events-none absolute -inset-y-1 -inset-x-1 rounded-md bg-fill",
+          // 2px, not 4px. The strip in this dialog carries the bar's REAL 12px
+          // gap so the fit it shows is the fit you get; at 4px a side two pills
+          // left only 4px between them and a row of them read as one continuous
+          // block. Widening the gap instead — which is what this used to do —
+          // made every arrangement look roomier in here than it is on the page.
+          "pointer-events-none absolute -inset-y-1 -inset-x-0.5 rounded-md bg-fill",
           "opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100",
         )}
       />
       <span
         aria-hidden="true"
         className={cn(
-          "pointer-events-none absolute -inset-y-1 -inset-x-1 rounded-md ring-accent",
+          "pointer-events-none absolute -inset-y-1 -inset-x-0.5 rounded-md ring-accent",
           "group-focus-visible:ring-2",
         )}
       />
@@ -244,7 +254,20 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
             )}
           />
         ) : (
-          renderBarItem(row.id as BarItemId, ctx)
+          // `preview: true`. In here a row is a thing you drag, so an item that
+          // is a real control in the bar renders as a plain reading: a live
+          // score capsule would toggle the panel behind this dialog on the very
+          // press that was reaching for the row.
+          //
+          // NAME IT when it renders nothing. The score capsule is allowed to be
+          // invisible in the bar (see BarItem.canBeEmpty), and out of season it
+          // always is — but a row with no content is a chip with no width and no
+          // label, so the operator could neither see the item they placed nor
+          // get hold of it to move it. In here the fallback is the item's name,
+          // which is what you are dragging anyway.
+          (renderBarItem(row.id as BarItemId, { ...ctx, preview: true }) ?? (
+            <span className="text-footnote text-fg-subtle truncate">{label}</span>
+          ))
         )}
       </span>
 
@@ -267,15 +290,142 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
   );
 }
 
+/** The narrowest screen the bar promises to fit on. Anything smaller than this
+ *  is not a phone anybody is running an operator app on. */
+const NARROWEST = 320;
+
+/** What the phone tab holds its preview to: a common phone, not the narrowest
+ *  one. The narrowest is what the sentence under the strip reports on, measured
+ *  by NarrowProbe — showing the worst case as the preview would misrepresent
+ *  every arrangement to make one of them honest. */
+const PHONE_PREVIEW = 390;
+
+/** "the plan", "the plan and the current item". */
+function nameList(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The same arrangement, laid out off-screen at 320px, so the dialog can say what
+ * will happen on the narrowest phone rather than only what is happening in here.
+ *
+ * MEASURED, NOT PREDICTED. The alternative is a table of per-item widths kept in
+ * sync by hand with the type scale, the icon set and whatever the plan happens to
+ * be called this week — three things that move independently and one of which is
+ * the operator's own data. This lays the real items out with the real strings and
+ * reads the rung they land on.
+ *
+ * `aria-hidden` and inert to a screen reader: it is a ruler, not a second bar.
+ * The reading it produces is spoken by the sentence beside the preview instead.
+ */
+function NarrowProbe({
+  rows,
+  ctx,
+  onFit,
+}: {
+  rows: readonly BarRowId[];
+  ctx: BarItemContext;
+  onFit: (fit: { over: number; cut: string[] }) => void;
+}) {
+  const { ref, over } = useBarFit<HTMLDivElement>();
+
+  // WHICH PROSE IS ACTUALLY CUT, read off the elements — not deduced from the
+  // rung. Reaching the floor is not the same fact as losing a word: the floor
+  // lets prose give way, and prose gives way only as far as it has to, so an
+  // arrangement can land there and still show every title in full. Warning off
+  // the rung would have cried wolf on exactly the arrangements that are fine.
+  const last = useRef("");
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const cut = [...el.querySelectorAll<HTMLElement>("[data-prose]")]
+      .filter((n) => {
+        // The reading itself, not the item's box — the box is what shrank, and
+        // the reading is what got an ellipsis. A `plan` item with no plan loaded
+        // has no prose element at all and cannot be cut.
+        const reading = n.querySelector(".bar-prose");
+        return reading !== null && reading.scrollWidth > reading.clientWidth + 0.5;
+      })
+      .map((n) => n.dataset.prose ?? "");
+    const key = `${over}|${cut.join(",")}`;
+    if (key === last.current) return;
+    last.current = key;
+    onFit({ over, cut });
+    // No dependency list on purpose: a re-fit is exactly when this has to run
+    // again, and the widths it reads change with the rung AND with the content.
+    // The key comparison above is what keeps that from being a render loop.
+  });
+  return (
+    <div
+      aria-hidden="true"
+      // Off-screen rather than `visibility: hidden` or zero-height: the strip has
+      // to be laid out for scrollWidth to mean anything, and a display:none
+      // subtree has no layout at all.
+      className="pointer-events-none fixed -left-[9999px] top-0"
+      style={{ width: NARROWEST }}
+    >
+      <div ref={ref} className={BAR_STRIP_CLASS}>
+        <BarStripRows rows={rows} ctx={ctx} preview />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Which of the two sets is being edited.
+ *
+ * A segmented switch rather than two tabs or a side-by-side. Side-by-side does
+ * not survive the phone, and the phone is where the mobile set's effect is
+ * actually seen — an operator arranging it on a desktop is guessing. Two screens
+ * would make them two tools; this is one tool pointed at one of two things, which
+ * is what it is.
+ *
+ * The active segment is RAISED, not merely tinted. Which set you are editing is
+ * the one thing in this dialog you cannot afford to be unsure about — a save goes
+ * somewhere either way — so it is carried by fill and elevation rather than by a
+ * colour a glance can miss.
+ */
+function SetSwitch({ value, onChange }: { value: BarSet; onChange: (v: BarSet) => void }) {
+  const options: { id: BarSet; label: string; Icon: typeof MonitorIcon }[] = [
+    { id: "desktop", label: "Desktop", Icon: MonitorIcon },
+    { id: "mobile", label: "Phone", Icon: SmartphoneIcon },
+  ];
+  return (
+    <div role="group" aria-label="Which bar to edit" className="flex items-center gap-px rounded-lg bg-accent/12 p-0.5">
+      {options.map(({ id, label, Icon }) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => value !== id && onChange(id)}
+          aria-pressed={value === id}
+          className={cn(
+            "flex items-center gap-1.5 rounded-md px-3 py-1 text-caption1 transition-colors",
+            "outline-none focus-visible:ring-2 focus-visible:ring-focus",
+            value === id
+              ? "bg-bg font-semibold text-fg shadow-sm"
+              : "font-medium text-fg-subtle hover:text-fg",
+          )}
+        >
+          {/* THE ICON CARRIES THE STATE, not the fill alone. Focus draws a ring
+              the same shape and size as the raised chip, so on the first pass a
+              focused inactive segment read as the selected one — and which set
+              you are editing is the one thing in this dialog you cannot afford
+              to be unsure about. A colour the ring does not use settles it. */}
+          <Icon className={cn("size-3.5", value === id && "text-accent")} />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function BarConfigurator({
   open,
   onOpenChange,
-  rows: saved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The bar as it stands, already normalised by `visibleBarItems`. */
-  rows: readonly BarRowId[];
 }) {
   const queryClient = useQueryClient();
   const ctx = useBarContext();
@@ -283,6 +433,23 @@ export function BarConfigurator({
   const barRef = useRef<HTMLDivElement | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [dragging, setDragging] = useState<BarRowId | null>(null);
+  const [editing, setEditing] = useState<BarSet>("desktop");
+  const [narrow, setNarrow] = useState<{ over: number; cut: string[] }>({ over: 0, cut: [] });
+  const { ref: previewRef } = useBarFit<HTMLDivElement>();
+
+  const savedDesktop = ctx.state?.barItems;
+  const savedMobile = ctx.state?.barMobileItems;
+  // An unset phone set FOLLOWS the desktop one. So the phone tab opens showing
+  // the desktop arrangement — which is what the phone is showing — rather than an
+  // empty strip that would read as "you have no bar on a phone".
+  const inheriting = editing === "mobile" && !hasMobileBar(savedMobile);
+  const saved: readonly BarRowId[] = visibleBarItems(
+    editing === "mobile" && !inheriting ? savedMobile : savedDesktop,
+  );
+  // Whether the 320px sentence is about this set at all — see
+  // `phoneShowsEditedSet`. A desktop set the phone has stopped following is
+  // never rendered on a phone, so there is nothing true to say about it here.
+  const shownOnPhone = phoneShowsEditedSet(editing, savedMobile);
 
   // The rows staying put during this drag, measured once at drag start. Safe to
   // cache precisely because nothing shifts mid-drag.
@@ -296,12 +463,16 @@ export function BarConfigurator({
   // then the caret is already gone. Reset at the start of the next drag.
   const [wasPlaceable, setWasPlaceable] = useState(false);
 
-  // Seeded when the dialog opens, not on every change to `saved` — otherwise the
-  // save this dialog just made would flow back in and re-seed mid-edit.
+  // Seeded when the dialog opens and when the set being edited changes, NOT on
+  // every change to `saved` — otherwise the save this dialog just made would flow
+  // back in and re-seed mid-edit. That also means forking the phone off the
+  // desktop set does not disturb the arrangement being edited: the first change
+  // writes a mobile list, `inheriting` goes false, and `saved` changes under a
+  // component that is deliberately not listening to it.
   useEffect(() => {
     if (open) setRows(saved.map((id) => ({ key: nextKey.current(), id })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, editing]);
 
   const sensors = useSensors(
     // The same pair as every other draggable surface here. Never a lone
@@ -312,18 +483,70 @@ export function BarConfigurator({
   );
 
   const used = new Set(rows.map((r) => r.id));
+  const rowIds = rows.map((r) => r.id);
+
+  /**
+   * What this arrangement costs on the narrowest phone, in a sentence, or null
+   * if it costs nothing.
+   *
+   * Two different bad outcomes, and they want different advice. Either the strip
+   * has prose on it and the prose gets cut — which is fixable by taking the
+   * prose off, and is exactly what the phone's own set is for. Or it has none,
+   * has already given up every word it has, and is simply longer than the screen
+   * — which nothing but removing an item can fix, so it says the number and
+   * says so.
+   */
+  function narrowWarning(): string | null {
+    // Too long even with every word given up. Only reachable with no prose on
+    // the strip to give way — all numbers and marks — so there is nothing to
+    // take off but a whole item.
+    if (narrow.over > 0) {
+      return `On a ${NARROWEST}px phone this is ${narrow.over}px too long even with every word given up, so a reading at the end would be cut off. Take an item off the phone's bar.`;
+    }
+    if (narrow.cut.length === 0) return null;
+    return `On a ${NARROWEST}px phone this runs out of room, and ${nameList(narrow.cut)} will be cut short. Take ${narrow.cut.length > 1 ? "one of them" : "it"} off the phone's bar to keep every reading whole.`;
+  }
+  const warning = shownOnPhone ? narrowWarning() : null;
 
   /** Every change goes through here, so nothing reaches the server unnormalised
-   *  and the preview shows what was actually saved. */
-  function commit(next: Row[]) {
+   *  and the preview shows what was actually saved.
+   *
+   *  It writes to whichever set is being edited, and ONLY that one. A change made
+   *  on the phone tab while it was still following the desktop bar is what forks
+   *  it: there is no separate "give the phone its own set" step to forget, because
+   *  wanting a different arrangement IS the thing that step would ask about.
+   *
+   *  A REFUSED WRITE PUTS THE ROWS BACK, and this is the only place that can.
+   *  `setBarItems` is optimistic, but its optimism does not reach here: it writes
+   *  `["stage:getState"]` in React Query, and every bar surface — this preview
+   *  included — reads `useBarContext` -> `useDashboardState` -> `useStageState`,
+   *  the independent SSE module store, which live-wiring only ever pushes INTO
+   *  the cache. So the rollback the shared helper performs is invisible on this
+   *  screen, and without the re-seed below the editor went on drawing a rejected
+   *  arrangement under "The bar, as it will appear" while the real strip above
+   *  showed the old one. `saved` is this render's reading of the server's
+   *  arrangement, which is exactly what a refusal leaves in place. */
+  async function commit(next: Row[]) {
     setRows(next);
-    void setBarItems(queryClient, normalizeBarRows(next.map((r) => r.id)));
+    const ok = await setBarItems(queryClient, editing, normalizeBarRows(next.map((r) => r.id)));
+    if (!ok) setRows(saved.map((id) => ({ key: nextKey.current(), id })));
+  }
+
+  /** Hand the phone back to the desktop bar. The one way out of a fork, and the
+   *  reason forking on first edit is safe rather than a trap.
+   *
+   *  Rolls back for the same reason `commit` does: a refused write left the strip
+   *  showing the desktop arrangement it had just failed to adopt. */
+  async function followDesktop() {
+    const before = rows;
+    setRows(visibleBarItems(savedDesktop).map((id) => ({ key: nextKey.current(), id })));
+    if (!(await setBarItems(queryClient, "mobile", []))) setRows(before);
   }
 
   function add(id: BarRowId, at = rows.length) {
     const next = [...rows];
     next.splice(at, 0, { key: nextKey.current(), id });
-    commit(next);
+    void commit(next);
   }
 
   /** The gap this pointer position means, or null for "not a place".
@@ -370,7 +593,7 @@ export function BarConfigurator({
     const fromPalette = e.active.data.current?.from === "palette";
     if (g === null) {
       // Not a place. A row dragged out of the bar goes; a tile flies home.
-      if (!fromPalette) commit(rows.filter((r) => r.key !== e.active.id));
+      if (!fromPalette) void commit(rows.filter((r) => r.key !== e.active.id));
       return;
     }
 
@@ -384,18 +607,43 @@ export function BarConfigurator({
 
     const next = [...staying];
     next.splice(g, 0, moved);
-    commit(next);
+    void commit(next);
   }
 
   return (
     <DialogRoot open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
+      <DialogContent className="max-w-5xl max-sm:p-4">
         <DialogHeader>
           <DialogTitle>Configure the context bar</DialogTitle>
+          {/* NO CLAIM ABOUT WHO SEES WHAT. This used to end "Everyone sees the
+              same bar", which was true of one bar and is false of two: the
+              switch immediately below hands a phone a set of its own. The
+              switch and the line beside it already say which set is which, so
+              this says what the dialog is for and stops. */}
           <DialogDescription>
-            Drag items into the bar. Drag one out to remove it. Everyone sees the same bar.
+            Drag items into the bar, along it to reorder, and out of it to remove.
           </DialogDescription>
         </DialogHeader>
+
+        {/* The switch sits ABOVE the palette rather than beside the title,
+            because it governs everything below it and nothing above it. On a
+            phone it is also the first thing under the heading, which is where an
+            operator who opened this dialog on the device they are configuring
+            for will look. */}
+        {/* The switch, and nothing beside it. It used to carry a line saying which
+            pixel widths each set appears at, which is a fact about the CSS rather
+            than about the bar: "Desktop" and "Phone" already say who each set is
+            for, and an operator configuring one is looking at the device it is
+            for. The measurement that DOES earn its place is the warning below —
+            it only ever appears when something would be cut. */}
+        <SetSwitch value={editing} onChange={setEditing} />
+
+        {inheriting && (
+          <p className="mt-3 rounded-lg border border-line bg-surface px-3 py-2 text-caption1 text-fg-muted">
+            The phone is showing the desktop bar. Change anything here and it gets
+            a set of its own; until then the two stay together.
+          </p>
+        )}
 
         <DndContext
           sensors={sensors}
@@ -427,34 +675,84 @@ export function BarConfigurator({
           </div>
 
           <p className="mt-5 text-caption1 text-fg-subtle">The bar, as it will appear:</p>
+          {/* Held to a phone's width on the phone tab. The strip inside is the
+              REAL one — same class, same fit ladder — so an arrangement that has
+              to give up its words does it here too, in front of the person
+              choosing it, rather than for the first time on a phone. */}
           <div
-            ref={barRef}
-            className={cn(
-              "mt-1.5 rounded-xl border border-line-strong bg-bg",
-              BAR_STRIP_CLASS,
-              // gap-x-5, not the bar's own gap-x-3: the hover pills reach 4px
-              // past each row, so at 12px two of them touched and the strip
-              // read as one continuous block. Wider here ONLY — the real bar
-              // is unchanged.
-              "min-h-11 gap-x-5 sm:h-auto sm:min-h-11",
-              NO_SELECT,
-            )}
+            className="mt-1.5 w-full"
+            style={editing === "mobile" ? { maxWidth: PHONE_PREVIEW } : undefined}
           >
-            {rows.length === 0 && !dragging && (
-              <span className="text-footnote text-fg-subtle">Drag something in.</span>
-            )}
-            {rows.map((row) => (
-              <Fragment key={row.key}>
-                {caret === row.key && <Caret />}
-                <BarRow
-                  row={row}
-                  ctx={ctx}
-                  onRemove={() => commit(rows.filter((r) => r.key !== row.key))}
-                />
-              </Fragment>
-            ))}
-            {caret === "end" && <Caret />}
+            <div
+              ref={(n) => {
+                // TWO refs on one node, and they mean different things: the drag
+                // maths needs the strip's box, and the fitter needs to write
+                // `data-fit` on it. Assigned rather than composed because a
+                // callback that returned the node would be read by dnd-kit as a
+                // cleanup function.
+                barRef.current = n;
+                previewRef.current = n;
+              }}
+              // `bar-editor` is the ONE place the strip is allowed to scroll.
+              // Not a softening of "the bar never scrolls" — this is not the bar,
+              // it is the surface you drag on, and a row you cannot reach is a
+              // row you cannot take off. The rung shown is still the real one:
+              // scrolling changes what is reachable, not what fits. What the
+              // phone will actually do is the sentence underneath, measured at
+              // 320px, which is the number that matters and cannot be scrolled
+              // away from.
+              className={cn(
+                "bar-editor rounded-xl border border-line-strong bg-bg",
+                BAR_STRIP_CLASS,
+                NO_SELECT,
+              )}
+            >
+              {/* Gaps are not readings, so a strip carrying nothing else is still
+                  an empty bar and says so. Reachable on REOPEN now that an
+                  emptied bar stays empty: the arrangement that gets saved is
+                  ["spacer"], and without this the dialog opened on a blank strip
+                  with nothing to explain it. `[].every()` is true, so this still
+                  covers the strip you have just dragged the last item out of. */}
+              {rows.every((r) => isBarGap(r.id)) && !dragging && (
+                <span className="text-footnote text-fg-subtle">Drag something in.</span>
+              )}
+              {rows.map((row) => (
+                <Fragment key={row.key}>
+                  {caret === row.key && <Caret />}
+                  <BarRow
+                    row={row}
+                    ctx={ctx}
+                    onRemove={() => void commit(rows.filter((r) => r.key !== row.key))}
+                  />
+                </Fragment>
+              ))}
+              {caret === "end" && <Caret />}
+            </div>
           </div>
+
+          {/* WHAT HAPPENS AT THE NARROWEST WIDTH, measured rather than guessed —
+              see NarrowProbe. The strip above is this dialog's width, which on a
+              laptop is not a phone's; this sentence is the part that is about a
+              phone. It only ever has bad news about prose, because prose is the
+              only thing the ladder cannot fit without cutting — and being able to
+              take prose off is the whole reason the phone has a set of its own.
+
+              ONLY FOR A SET A PHONE ACTUALLY RENDERS. Both the probe and the
+              sentence used to be unconditional, so a desktop set the phone had
+              stopped following was measured at 320px and reported on — a width
+              `barRowsFor` will never hand it, one line under "Shown from 640px
+              wide up". */}
+          {shownOnPhone && (
+            <>
+              <NarrowProbe rows={rowIds} ctx={ctx} onFit={setNarrow} />
+              {/* Only the bad news. The reassurance that a set "fits on a 320px
+                  phone with nothing cut" was a line of prose under a bar the
+                  operator can already see fitting, and it named a width to
+                  explain itself. The warning stays: it is the one thing here an
+                  operator cannot work out by looking. */}
+              {warning && <p className="mt-2 text-caption1 text-warn-11">{warning}</p>}
+            </>
+          )}
 
           {/* Portalled to the body, NOT left inside the dialog.
               DragOverlay positions itself `fixed`, and the dialog is centred
@@ -484,14 +782,23 @@ export function BarConfigurator({
           )}
         </DndContext>
 
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <Button
-            variant="transparent"
-            size="small"
-            onClick={() => commit(DEFAULT_BAR_ORDER.map((id) => ({ key: nextKey.current(), id })))}
-          >
-            Use the default set
-          </Button>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1">
+            <Button
+              variant="transparent"
+              size="small"
+              onClick={() =>
+                void commit(DEFAULT_BAR_ORDER.map((id) => ({ key: nextKey.current(), id })))
+              }
+            >
+              Use the default set
+            </Button>
+            {editing === "mobile" && !inheriting && (
+              <Button variant="transparent" size="small" onClick={() => void followDesktop()}>
+                Follow the desktop bar
+              </Button>
+            )}
+          </div>
           <Button variant="accent" size="small" onClick={() => onOpenChange(false)}>
             Done
           </Button>

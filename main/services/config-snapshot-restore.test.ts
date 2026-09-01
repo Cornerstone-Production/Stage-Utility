@@ -104,3 +104,161 @@ describe("configSnapshot.apply — failure path", () => {
     assert.equal(controller.autoRefreshTimer, null);
   });
 });
+
+// Id floors are the one thing in a config snapshot that must NOT go back to what
+// the snapshot held.
+//
+// Everything else in a restore is the operator's setting, and putting it back is
+// the point. A floor is not a setting — it is the record of which ids have been
+// SPENT. A month-old snapshot carries a floor from before this month's views
+// existed, so restoring it verbatim hands those deleted ids straight back out to
+// the next thing created, and slots.json is keyed by output id with Pis,
+// bookmarks and QR codes pointing at `/<id>`.
+describe("a restore never lowers an id floor", () => {
+  const SETTINGS = path.join(TMP, "settings.json");
+
+  afterEach(async () => {
+    quiet();
+    await fs.rm(SETTINGS, { force: true });
+    await fs.rm(path.join(TMP, "views.json"), { force: true });
+  });
+
+  async function applyFloors(live: unknown, snapshot: unknown): Promise<unknown> {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", idFloors: live }), "utf8");
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", idFloors: snapshot } }));
+    return (JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { idFloors?: unknown }).idFloors;
+  }
+
+  it("KEEPS THE LIVE FLOOR when the snapshot's is lower", async () => {
+    // The whole finding: an old snapshot's floor would otherwise win, and the
+    // ids issued between then and now would be handed out a second time.
+    assert.deepEqual(
+      await applyFloors({ view: 40, output: 12 }, { view: 9, output: 3 }),
+      { view: 40, output: 12 },
+      "the restore moved a floor backwards — every id issued since the snapshot can now be reissued",
+    );
+  });
+
+  it("takes the snapshot's floor when it is higher", async () => {
+    // Monotonic in both directions: a snapshot from another install with higher
+    // floors is also a record of ids that were spent.
+    assert.deepEqual(await applyFloors({ view: 4 }, { view: 30, output: 8 }), { view: 30, output: 8 });
+  });
+
+  it("restores everything else verbatim", async () => {
+    // The exception is floors and only floors. A restore that quietly kept other
+    // live values would not be a restore.
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", idFloors: { view: 40 } }), "utf8");
+    await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", idFloors: { view: 9 } } }));
+    const written = JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { appName: string };
+    assert.equal(written.appName, "Restored");
+  });
+
+  it("works with no live settings.json at all", async () => {
+    // A restore onto a fresh install. Nothing to protect, and a missing file must
+    // not fail the restore. `output` appears at its reserved minimum because
+    // display-1 is the primary output and is never allocated.
+    await fs.rm(SETTINGS, { force: true });
+    await configSnapshot.apply(snapshotOf({ "settings.json": { idFloors: { view: 9 } } }));
+    const written = JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { idFloors?: unknown };
+    assert.deepEqual(written.idFloors, { view: 9, output: 2 });
+  });
+
+  // A pre-feature snapshot carries no floors at all, so the live floor — a number
+  // belonging to the box being restored ONTO — would win by being the only
+  // candidate, and land below every id in the bundle.
+  //
+  // Boot's seeding would repair that, but only at the NEXT boot, whenever that
+  // happens. Kill the box in the seconds between apply() and the restart it
+  // triggers and the low floor is what is on disk; a delete-then-create before
+  // the box comes back would still reissue. A restore is exactly when someone is
+  // most likely to be power-cycling a box, so the floor is made correct at the
+  // instant it is written instead.
+  it("RAISES THE FLOOR PAST THE IDS IT IS RESTORING, with no boot in between", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ idFloors: { view: 1, output: 2 } }), "utf8");
+    await configSnapshot.apply(
+      snapshotOf({
+        // No idFloors: this snapshot predates the feature. Its ids run to 3.
+        "settings.json": {
+          outputs: [1, 2, 3].map((n) => ({ id: `display-${n}`, name: `D${n}`, viewId: null })),
+        },
+        "views.json": [1, 2, 3].map((n) => ({ id: `view-${n}`, name: `V${n}`, kind: "slots" })),
+      }),
+    );
+    assert.deepEqual(
+      (JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { idFloors?: unknown }).idFloors,
+      { view: 4, output: 4 },
+      "the floor landed below the ids the restore just wrote — until the next boot, deleting the highest and creating would reissue it",
+    );
+  });
+
+  it("still lets a higher live floor win over the restored ids", async () => {
+    // The three candidates are a max, not a precedence order. A live floor of 40
+    // knows about ids this box spent and DELETED, which no file can show.
+    await fs.writeFile(SETTINGS, JSON.stringify({ idFloors: { view: 40 } }), "utf8");
+    await configSnapshot.apply(
+      snapshotOf({
+        "settings.json": {},
+        "views.json": [{ id: "view-3", name: "V3", kind: "slots" }],
+      }),
+    );
+    assert.deepEqual(
+      (JSON.parse(await fs.readFile(SETTINGS, "utf8")) as { idFloors?: { view?: number } }).idFloors?.view,
+      40,
+    );
+  });
+});
+
+// A snapshot's id floors are read with keys the snapshot itself chose, and a
+// restore that dies half-way is worse than one that never started: writeSnapshot
+// writes files one at a time, so views.json is already on disk when the loop
+// aborts — views referencing output ids the un-restored settings.json does not
+// have. validate() checks `kind` and `files` and nothing about idFloors.
+describe("a hand-edited id floor cannot abort a restore half-written", () => {
+  const SETTINGS = path.join(TMP, "settings.json");
+  const VIEWS = path.join(TMP, "views.json");
+
+  afterEach(async () => {
+    quiet();
+    await fs.rm(SETTINGS, { force: true });
+    await fs.rm(VIEWS, { force: true });
+  });
+
+  it("finishes the restore when a floor key is a prototype name", async () => {
+    await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", idFloors: { view: 5 } }), "utf8");
+
+    // `"constructor" in restoredIds` is TRUE on a plain object literal, so
+    // initialFloor was handed Object.prototype.constructor and nextId's
+    // `new Set(existingIds)` threw "function is not iterable". views.json is
+    // listed first so it is already written when that happens.
+    const applied = await configSnapshot.apply(
+      snapshotOf({
+        "views.json": [{ id: "view-2", name: "V2", kind: "slots" }],
+        "settings.json": { appName: "Restored", idFloors: { view: 3, constructor: 1 } },
+      }),
+    );
+
+    assert.deepEqual(
+      applied,
+      ["views.json", "settings.json"],
+      "the restore died between two files — views.json is on disk and settings.json is not",
+    );
+    const written = JSON.parse(await fs.readFile(SETTINGS, "utf8")) as {
+      appName: string;
+      idFloors?: Record<string, unknown>;
+    };
+    assert.equal(written.appName, "Restored");
+    // view: the live 5 beats the snapshot's 3. output: its reserved minimum,
+    // because display-1 is the primary output and is never allocated. Nothing
+    // named "constructor".
+    assert.deepEqual(
+      written.idFloors,
+      { view: 5, output: 2 },
+      "the live floor should still win, and nothing else be recorded",
+    );
+    assert.ok(
+      !Object.hasOwn(written.idFloors ?? {}, "constructor"),
+      "a prototype name was written into settings.json as an id kind",
+    );
+  });
+});

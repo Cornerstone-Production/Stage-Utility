@@ -22,6 +22,27 @@ function splColor(db: number | null): string {
  * section headers as dividers, the live item highlighted, and the current live
  * SPL in the header.
  */
+/**
+ * Sizes to h-full, never the viewport: this renders both on a display and inside
+ * an embed tile. The screen height and the safe-area insets belong to the kiosk
+ * route — see stage-view.tsx.
+ *
+ * THE HEIGHT ONLY. The TYPE below is still screen-relative: every size is a
+ * clamp on vmin, which is a fraction of the SCREEN and not of the box. In an
+ * embed tile that is wrong on purpose-in-name-only — a nine-up producer
+ * multiview draws these captions at the size a full-screen wall would, in a
+ * box a third the width, and the EmbedFontBox the tile wraps this in sets an
+ * inherited px size that a vmin clamp simply ignores.
+ *
+ * Left as it is deliberately, not overlooked. Moving 24 of these onto cqmin
+ * needs `container-type: size` on the surface root, which needs a definite
+ * height to resolve against and collapses the content to zero where it does not
+ * get one — a failure that shows up only in a browser. jsdom models no layout at
+ * all (offsetHeight is always 0), so nothing in this repo's suite can tell the
+ * working version from the collapsed one, and every stage display in a building
+ * is downstream of the answer. calendar-view.tsx has no vmin at all and its
+ * header says why: it is an office display read from a desk, at absolute sizes.
+ */
 export function SplRundownView({ displayId }: SplRundownViewProps) {
   const { state, isLoading, error, pcoLive } = useDashboardState();
   const plan = usePlanItems();
@@ -43,14 +64,14 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] kiosk-surface">
+      <div className="flex items-center justify-center h-full kiosk-surface">
         <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
       </div>
     );
   }
   if (error || !state) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] kiosk-surface text-fg-subtle">
+      <div className="flex items-center justify-center h-full kiosk-surface text-fg-subtle">
         Could not load rundown
       </div>
     );
@@ -65,7 +86,7 @@ export function SplRundownView({ displayId }: SplRundownViewProps) {
   const items = plan?.items ?? [];
 
   return (
-    <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overflow-hidden kiosk-surface">
       <div className="flex items-center gap-4 px-4 h-14 shrink-0 border-b border-line bg-black/40">
         <div className="flex items-center gap-2 min-w-0">
           {state.appLogo && <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-6 rounded" />}

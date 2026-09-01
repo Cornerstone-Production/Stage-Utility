@@ -10,8 +10,10 @@
 
 export * from "./views.js";
 export * from "./live.js";
+export * from "./pvp.js";
 export * from "./history.js";
 export * from "./baptism.js";
 export * from "./pco.js";
 export * from "./state.js";
 export * from "./patch.js";
+export * from "./scores.js";

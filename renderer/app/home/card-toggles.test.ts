@@ -14,7 +14,7 @@ import { describe, test } from "node:test";
 
 import type { LayoutObject } from "@main/types/views";
 
-import { togglesFor, withToggle } from "./card-toggles";
+import { pickedValue, togglesFor, withToggle } from "./card-toggles";
 
 const card = (config: Record<string, unknown>): LayoutObject =>
   ({ id: "c1", x: 0, y: 0, w: 1, h: 1, config }) as unknown as LayoutObject;
@@ -47,6 +47,22 @@ describe("what a widget offers", () => {
   test("obs-status offers the three it supports and no more", () => {
     const keys = togglesFor(card({ type: "obs-status" })).map((t) => t.key);
     assert.deepEqual(keys, ["showTimecode", "hideWhenIdle", "fillWhenRecording"]);
+  });
+
+  test("service-pacing offers the projected end time, off by default", () => {
+    // The setting an operator reaches for on their own front page — "when do we
+    // get out of here" — so it belongs in this short list rather than only in
+    // the layout editor. Off is what every pacing card already on a Home page
+    // does, and the fallback has to agree with the renderer or the tick lies.
+    const keys = togglesFor(card({ type: "service-pacing" })).map((t) => t.key);
+    assert.deepEqual(keys, ["showProjectedEnd", "hideWhenIdle"]);
+    const t = togglesFor(card({ type: "service-pacing" })).find((x) => x.key === "showProjectedEnd");
+    assert.equal(t?.checked, false);
+    assert.equal(t?.next, true);
+    assert.equal(
+      (withToggle(card({ type: "service-pacing" }), "showProjectedEnd", true).config as { showProjectedEnd?: boolean }).showProjectedEnd,
+      true,
+    );
   });
 });
 
@@ -127,5 +143,32 @@ describe("applying one", () => {
   test("turning a clock to 24-hour removes the AM/PM item", () => {
     const c = withToggle(card({ type: "clock", format: "12h" }), "format", "24h");
     assert.ok(!togglesFor(c).some((t) => t.key === "showMeridiem"));
+  });
+});
+
+describe("a setting whose options come from an integration", () => {
+  // `game` is not a flip, so it is not in SPECS and togglesFor never returns it.
+  // What this file can still hold it to is the pair the menu depends on: which
+  // widgets offer it, and that the value the menu writes is the value it then
+  // reads back and ticks.
+  test("both scores widgets offer a game, and a widget that has none says so", () => {
+    assert.equal(pickedValue(card({ type: "scores", game: "mlb:16" }), "game"), "mlb:16");
+    assert.equal(pickedValue(card({ type: "home-scores", game: "nfl:16" }), "game"), "nfl:16");
+    // Null, not "auto": the menu draws the submenu only when an answer comes
+    // back, so a widget without the setting has to be distinguishable from one
+    // sitting at its default.
+    assert.equal(pickedValue(card({ type: "clock" }), "game"), null);
+    assert.equal(pickedValue(card({ type: "not-a-widget" }), "game"), null);
+  });
+
+  test("an untouched scores card reads as the default rather than as unset", () => {
+    // Every home-scores card saved before the field existed comes through here.
+    assert.equal(pickedValue(card({ type: "home-scores" }), "game"), "auto");
+  });
+
+  test("round-trips: what the menu writes is what it then ticks", () => {
+    const c = withToggle(card({ type: "home-scores" }), "game", "mlb:16");
+    assert.equal(pickedValue(c, "game"), "mlb:16");
+    assert.equal(pickedValue(withToggle(c, "game", "auto"), "game"), "auto");
   });
 });

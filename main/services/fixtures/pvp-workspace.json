@@ -1,0 +1,50 @@
+{
+  "data": [
+    {
+      "transportState": {
+        "isPlaying": true,
+        "isScrubbing": false,
+        "playbackRate": 1,
+        "timeElapsed": 9.6,
+        "timeRemaining": 10.4,
+        "playingItem": { "name": "MAIN GRAPHIC", "uuid": "cue-0001" },
+        "playingMedia": { "name": "loop_a.mp4", "uuid": "media-0001" },
+        "layer": { "name": "Graphics", "uuid": "layer-0001", "isHidden": false, "isMuted": false, "opacity": 1 }
+      }
+    },
+    {
+      "transportState": {
+        "isPlaying": true,
+        "isScrubbing": false,
+        "playbackRate": 0,
+        "timeElapsed": 0,
+        "timeRemaining": 0,
+        "playingItem": { "name": "LOWER THIRD", "uuid": "cue-0002" },
+        "playingMedia": { "name": "still_b.png", "uuid": "media-0002" },
+        "layer": { "name": "Lower third", "uuid": "layer-0002", "isHidden": false, "isMuted": false, "opacity": 1 }
+      }
+    },
+    {
+      "transportState": {
+        "isPlaying": false,
+        "isScrubbing": false,
+        "playbackRate": 0,
+        "timeElapsed": 0,
+        "timeRemaining": 0,
+        "playingItem": { "name": "MAIN GRAPHIC", "uuid": "cue-0001" },
+        "layer": { "name": "Exit screen", "uuid": "layer-0003", "isHidden": false, "isMuted": false, "opacity": 1 }
+      }
+    },
+    {
+      "transportState": {
+        "isPlaying": false,
+        "isScrubbing": false,
+        "playbackRate": 0,
+        "timeElapsed": 0,
+        "timeRemaining": 0,
+        "playingItem": { "name": "MAIN GRAPHIC", "uuid": "cue-0001" },
+        "layer": { "name": "Hidden layer", "uuid": "layer-0004", "isHidden": true, "isMuted": true, "opacity": 0.5 }
+      }
+    }
+  ]
+}

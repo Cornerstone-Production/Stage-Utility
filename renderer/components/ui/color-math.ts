@@ -142,3 +142,37 @@ export function parseTypedColor(text: string): Rgba | null {
 export function isDark({ r, g, b }: Rgba): boolean {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.55;
 }
+
+/**
+ * WCAG relative luminance.
+ *
+ * Not the weighted average {@link isDark} uses. That one answers "should text on
+ * this be light or dark", where being roughly right is enough; this one is the
+ * gamma-corrected value the contrast formula is defined against, and the two
+ * disagree by enough to matter at the ends of the range. Alpha is ignored —
+ * contrast is a property of what is finally painted, and a translucent colour
+ * has no luminance until you know what is behind it.
+ */
+export function relativeLuminance({ r, g, b }: Rgba): number {
+  const channel = (v: number) => {
+    const s = clamp(v, 0, 255) / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+/**
+ * WCAG contrast between two colours, 1 (identical) to 21 (black on white).
+ *
+ * Anything this cannot parse contributes nothing and the answer is 1 — the
+ * "cannot be read" end — because a caller raising a colour to a floor should
+ * treat an unparseable one as failing it, not as passing.
+ */
+export function contrastRatio(a: string | null | undefined, b: string | null | undefined): number {
+  const ca = parseColor(a);
+  const cb = parseColor(b);
+  if (!ca || !cb) return 1;
+  const la = relativeLuminance(ca);
+  const lb = relativeLuminance(cb);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}

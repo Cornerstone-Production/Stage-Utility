@@ -329,6 +329,10 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "rosstalk-button", label: "RossTalk button", group: "Control", after: "osc-button" },
   { type: "record-status", label: "Record status", group: "Status", after: null },
   { type: "view-embed", label: "Embedded view", group: "PCO / service", after: "next-service-item" },
+  // The producer primitive: a tile bound to a SCREEN rather than to one view, so
+  // it follows a routing change. Sits directly after the embedded view it is the
+  // sibling of, which moved `home-readiness` one place down on purpose.
+  { type: "screen-embed", label: "Embedded screen", group: "PCO / service", after: "view-embed" },
   // The general form of the two buttons above: bound to any entry in the
   // automation action registry rather than one integration.
   { type: "action-button", label: "Action button", group: "Control", after: "rosstalk-button" },
@@ -337,7 +341,7 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "checklist", label: "Checklist", group: "Control", after: "notes" },
   // Home's own cards, so Home is built from the same widget set as every other
   // surface rather than being a bespoke page (Phase 6, carrying a Phase 4 debt).
-  { type: "home-readiness", label: "Readiness", group: "PCO / service", after: "view-embed" },
+  { type: "home-readiness", label: "Readiness", group: "PCO / service", after: "screen-embed" },
   { type: "home-next-service", label: "Next service", group: "PCO / service", after: "home-readiness" },
   // The other two things Home draws. They existed as bespoke panels; making them
   // objects is what lets the Home tab's own editor govern the whole page with
@@ -366,6 +370,19 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // `after: null` — each leads its own group, because each platform gets one.
   { type: "home-streaming-resi", label: "Resi status", group: "Resi", after: null },
   { type: "home-streaming-youtube", label: "YouTube status", group: "YouTube", after: null },
+  // ProVideoPlayer. `after: null` — it leads its own new group.
+  { type: "pvp-layers", label: "ProVideoPlayer layers", group: "ProVideoPlayer", after: null },
+  { type: "home-pvp", label: "ProVideoPlayer", group: "ProVideoPlayer", after: "pvp-layers" },
+  // The second PVP pair: one reading rather than a list of layers. Its own
+  // labels, because two entries in one palette group called "ProVideoPlayer" is
+  // a choice an operator cannot make.
+  { type: "pvp-now", label: "ProVideoPlayer now", group: "ProVideoPlayer", after: "home-pvp" },
+  { type: "home-pvp-now", label: "On screen now", group: "ProVideoPlayer", after: "pvp-now" },
+  // Live scores, from ESPN's public scoreboard. In "Status" rather than a league
+  // group of its own: it is one widget reading one integration, and a group
+  // holding a single entry is a heading with nothing under it.
+  { type: "scores", label: "Live scores", group: "Status", after: "stream-status" },
+  { type: "home-scores", label: "Scores", group: "Status", after: "scores" },
 ];
 
 /**

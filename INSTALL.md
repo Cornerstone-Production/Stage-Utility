@@ -366,10 +366,10 @@ Then work through the sidebar:
    password, SenSource Vea client ID + secret (people counting), Ross MultiViewer
    TSL port (pushes people counts). OSC targets are set per **OSC button** in the
    custom-layout editor.
-4. **Plan**, **Views**, **Displays** — pick a plan (or Auto) and toggle which
+4. **Plan**, **Screens** — pick a plan (or Auto) and toggle which
    **Active Service Types** auto-selection considers, build views (slots, dashboard,
    stage, captions, script, SPL rundown, or a custom visual layout), and route each
-   display to a view.
+   screen to a view.
 5. **ScriptView** *(optional)* — choose which service types appear on the `/scriptview`
    landing page and define global column layouts (Audio/Video/Lighting/…). **History**
    (SPL + attendance + item timing) and **Baptisms** appear once there's data.
@@ -400,20 +400,28 @@ exits after rebuilding:
 - **macOS / Windows:** the `launchd` `KeepAlive` and NSSM `AppExit … Restart`
   settings in this guide already restart on exit — no change needed.
 
-In-app updates require a **git checkout** (the normal install). A tarball/non-git
-copy shows "update from the command line" instead — use the per-platform Update
-steps above.
+In-app updates work however the server was installed. A git checkout fetches and
+rebuilds; a packaged install re-runs its own installer, which downloads the next
+release, verifies it and moves the `current` pointer; Homebrew delegates to
+`brew`. Only a copy whose install method cannot be worked out refuses, and it
+says so rather than starting something it cannot finish. See
+[Releases and distribution](docs/ops/distribution.md#how-a-server-updates-itself).
 
 ## Backups
 
 Back up the **data directory** — it holds all configuration, the **encrypted
 secrets**, and `encryption.key`:
 
-| Platform | Default data directory |
+| Install | Default data directory |
 |----------|------------------------|
-| Linux    | `/var/lib/stage-utility` |
-| macOS    | `~/.stage-utility` (or whatever `STAGE_UTILITY_DATA` is set to) |
-| Windows  | `C:\ProgramData\stage-utility` (per the service config above) |
+| Linux, one-line installer | `/var/lib/stage-utility` |
+| macOS, one-line installer | `/usr/local/var/stage-utility` |
+| Windows | `C:\ProgramData\stage-utility` |
+| Homebrew | `$(brew --prefix)/var/stage-utility` |
+| A checkout, or no installer | `~/.stage-utility` |
+
+`STAGE_UTILITY_DATA` overrides all of them, and the running server prints the
+path it is actually using in **Settings → Advanced**.
 
 If you lose `encryption.key`, the encrypted secrets are unrecoverable and you'll
 have to re-enter every credential. (Across older releases named `stage-monitor` /
@@ -423,7 +431,7 @@ start — look for a `recovered config` line in the logs.)
 ## Uninstall
 
 - **Linux:** `sudo ./scripts/uninstall.sh` (stops + removes the service).
-- **macOS:** `sudo launchctl bootout system/com.stage-utility.app`, then delete the plist.
+- **macOS:** `sudo launchctl bootout system/com.cornerstone.stage-utility`, then delete `/Library/LaunchDaemons/com.cornerstone.stage-utility.plist`.
 - **Windows:** `nssm remove StageUtility confirm` (or delete the scheduled task).
 
 The data directory is never removed automatically — back it up or delete it deliberately.

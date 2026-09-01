@@ -1,6 +1,6 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
-import { HomeCard, isHomeCard, onlineFromState } from "../app/home/cards";
+import { HomeCard, isHomeCard } from "../app/home/cards";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
@@ -15,25 +15,33 @@ import { IDIOM_TYPES } from "@main/types/readout-types";
 import { SlotsColumns } from "../components/slots-columns";
 import { useDashboardState, usePropInstances } from "./use-dashboard-state";
 import { useSplState, resolveSplValue } from "./use-spl-state";
+import { useDisplayPresence } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
 import { streamers, streamIndicator } from "../app/recording-status";
+import { usePvpState, usePvpSkewMs } from "./use-pvp-state";
 import { useReaperState } from "./use-reaper-state";
+import { useScoresState } from "./use-scores-state";
+import { ScoresObject } from "./scores-object";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
 import { useBaptismState, summarizeBaptism, fmtClock } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
+import { PvpObject } from "./pvp-object";
+import { PvpNowObject } from "./pvp-now";
 import { ActionButton } from "./action-button";
 import { NotesObject, ChecklistObject } from "./notes-objects";
 import { RossTalkButton } from "./rosstalk-button";
 import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
-import { computePcoTimer, fmtDuration } from "./pco-timer";
-import { EMBED_FONT_FRACTION, isEmbeddableViewKind } from "./layout-objects";
-import { ScriptView } from "./script-view";
+import { computePcoTimer, fmtDuration, projectedServiceEndMs } from "./pco-timer";
+import { EmbeddedView, EmbedFontBox, EmbedNotice } from "./embedded-view";
+import { useEmbedBoxHeight } from "./embed-box";
+import { childChain, embedRefusal } from "./embed-chain";
+import { useExpand } from "./expand-overlay";
 import { channelLabel, lineColor } from "./channel-color";
 import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
@@ -54,6 +62,11 @@ export interface LayoutRenderCtx {
   spl: SplMetricsDTO | null;
   obs: ObsStatusDTO | null;
   reaper: ReaperStatusDTO | null;
+  /** Live ProVideoPlayer layer state — for the pvp-layers object. null until loaded. */
+  pvp: PvpStatusDTO | null;
+  /** Clock offset measured from PVP's own frames, not from PCO's. */
+  pvpSkewMs: number;
+  scores: ScoresStatusDTO | null;
   resi: StreamStatusDTO | null;
   youtube: StreamStatusDTO | null;
   osc: OscFeedbackDTO | null;
@@ -102,6 +115,84 @@ export interface LayoutRenderCtx {
    * OBS status and REAPER status are.
    */
   home: boolean;
+
+  /**
+   * The views being drawn ABOVE this one, outermost first. Empty at the top.
+   *
+   * Required rather than optional, exactly like `home` above it and for the same
+   * reason: every surface that builds a context has to say which it is. An
+   * optional field defaulting to [] would let a surface forget, and a forgotten
+   * chain reads as "nothing above me" — which is the one answer that makes a
+   * cycle undetectable.
+   */
+  embedChain: readonly string[];
+
+  /**
+   * This layout is drawn inside another embed's TILE — as its content, not as a
+   * surface of its own.
+   *
+   * What reads it is the expand control. The tile further out already carries
+   * one for everything painted in it, so an embed nested inside it must not draw
+   * a second: two 44px buttons landed in the same corner, eleven pixels apart,
+   * over one picture the operator reads as a single tile.
+   *
+   * False again inside an EXPANDED panel, which is the whole reason this is a
+   * flag and not a depth count off `embedChain`. Nesting depth is identical in
+   * the two cases; what differs is that the panel fills the screen, so the tile
+   * in it is a tile in its own right and gets its control back. A producer wall
+   * inside a producer wall is only usable that way.
+   *
+   * Required rather than optional, exactly like `home` and `embedChain` above:
+   * an optional field defaulting to false would let a surface forget, and a
+   * forgotten one reads as "nothing is offering a control above me" — the
+   * answer that puts the second button back.
+   */
+  insideEmbedTile: boolean;
+
+  /**
+   * Screens with a browser actually attached, from the `displays:presence`
+   * heartbeat — not screens that merely have a view routed.
+   *
+   * Required, like `embedChain` and `home`, so a surface cannot quietly report
+   * an empty set. Empty is a legitimate answer (nothing is on); "I forgot to
+   * pass it" must not be indistinguishable from it.
+   */
+  onlineOutputIds: readonly string[];
+}
+
+/**
+ * Which copy of an embed's body is being drawn: the one in the tile, or the one
+ * filling the screen after the operator expanded it.
+ *
+ * A boolean would have read `body(h, h, false)` at four call sites, and "false
+ * what?" is the question a reader has to leave the file to answer.
+ */
+type EmbedCopy = "tile" | "panel";
+
+/**
+ * The expanded copy of an embed tile's body, at the panel's height.
+ *
+ * BOTH heights are the panel's, which is the difference from the tile: on a tile
+ * the object's font is a fraction of the parent canvas while the child view's
+ * canvas is the measured box, and expanded there is no parent canvas left to be
+ * a fraction of — the panel IS the screen. See EmbedFontBox.
+ *
+ * `panelH || fallback` for the frame before the panel has measured itself, where
+ * the canvas height is the only number available. That fallback was written out
+ * four times, twice in each of the two embed objects, which is two places for
+ * one decision about what an unmeasured panel is worth.
+ *
+ * Only this much is shared, not a whole EmbedTile wrapper: the two objects
+ * differ in the parts a wrapper would have to take as parameters anyway — one
+ * carries a label bar with a presence dot, one early-returns its notices while
+ * the other resolves them per copy, and their expand gates are different
+ * expressions. The fallback is the piece that actually has to agree.
+ */
+function panelBody(
+  body: (canvasH: number, childH: number, where: EmbedCopy) => ReactNode,
+  fallbackH: number,
+): (panelH: number) => ReactNode {
+  return (panelH) => body(panelH || fallbackH, panelH || fallbackH, "panel");
 }
 
 function pad(n: number): string {
@@ -452,19 +543,6 @@ export function ObjectContent({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCt
 }
 
 /**
- * Home cards that have a WALL twin, and which platform each asks about.
- *
- * These three are listed in the palette as "Resi status" and "YouTube status"
- * under their own groups, so they are what an operator picks for a console as
- * well as for Home — and on a console they sit beside OBS status and REAPER
- * status, which are wall widgets. Same object, two presentations, chosen by the
- * surface rather than by which of two near-identical types got picked.
- *
- * `null` means "every platform at once", which is what the caption "Streaming"
- * says. An explicit record rather than a prefix test: the prefix would also
- * catch a future home-streaming-* card that has no wall twin.
- */
-/**
  * Whether a status widget paints its whole box while the thing it watches is
  * ACTIVE — recording, or live.
  *
@@ -515,6 +593,19 @@ export function obsModeText(mode: string): { active: string; idle: string } {
     : STATUS_TEXT.obs.recording;
 }
 
+/**
+ * Home cards that have a WALL twin, and which platform each asks about.
+ *
+ * These three are listed in the palette as "Resi status" and "YouTube status"
+ * under their own groups, so they are what an operator picks for a console as
+ * well as for Home — and on a console they sit beside OBS status and REAPER
+ * status, which are wall widgets. Same object, two presentations, chosen by the
+ * surface rather than by which of two near-identical types got picked.
+ *
+ * `null` means "every platform at once", which is what the caption "Streaming"
+ * says. An explicit record rather than a prefix test: the prefix would also
+ * catch a future home-streaming-* card that has no wall twin.
+ */
 const WALL_TWIN = {
   "home-streaming": null,
   "home-streaming-resi": "Resi",
@@ -559,20 +650,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   );
 
   /**
-   * The WALL composition for a streaming widget: caption, the state as a word,
-   * and the ticking number underneath.
-   *
-   * Deliberately the same one obs-status and reaper-status use. They answer the
-   * same kind of question on the same wall, and reading differently made the
-   * streaming ones look like a different app — a duration where its neighbour
-   * had a word.
-   *
-   * A function because TWO things need it: the `stream-status` object, and the
-   * three home-streaming cards when they are placed on something that is not
-   * Home. Those went to Home's card composition on every surface for a release,
-   * which put a small three-line mono tile in a row of large ALL-CAPS ones.
-   */
-  /**
    * A recorder's state as a readout: OBS, REAPER, and the generic recorder.
    *
    * The three of them ended in the same pair of Readouts -- active with the red
@@ -611,6 +688,20 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     />
   );
 
+  /**
+   * The WALL composition for a streaming widget: caption, the state as a word,
+   * and the ticking number underneath.
+   *
+   * Deliberately the same one obs-status and reaper-status use. They answer the
+   * same kind of question on the same wall, and reading differently made the
+   * streaming ones look like a different app — a duration where its neighbour
+   * had a word.
+   *
+   * A function because TWO things need it: the `stream-status` object, and the
+   * three home-streaming cards when they are placed on something that is not
+   * Home. Those went to Home's card composition on every surface for a release,
+   * which put a small three-line mono tile in a row of large ALL-CAPS ones.
+   */
   const streamingReadout = (
     only: string | null,
     opts: { showElapsed?: boolean; hideWhenIdle?: boolean; fillWhenLive?: boolean },
@@ -633,21 +724,27 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // the colour differs, which is the distinction that was meant to be visible.
     const filled = opts.fillWhenLive ?? FILL_WHEN_ACTIVE;
 
-    // GREEN for live, grey for off air. Not the red a recorder uses: red is
-    // what OBS and REAPER mean by "rolling", and a wall carrying both wants
-    // one red. Off air takes the muted grey its neighbours wear rather than
-    // full-strength white — it is the resting state, not an announcement —
-    // while unreachable stays dimmed outright, so the two are still told apart
-    // by more than their word.
+    // GREEN for live, grey for anything else. Not the red a recorder uses: red
+    // is what OBS and REAPER mean by "rolling", and a wall carrying both wants
+    // one red.
     return readout(ind.value, {
       caption: only ?? "Streaming",
       // Only where there is a number to put underneath. On a wall the quiet
       // states are one word; Home shows the connection line instead.
       sub: ind.state === "live" ? ind.sub : null,
       upper: true,
-      dim: ind.state === "offline",
+      // QUIET IS ONE THING. Off air and unreachable both read at the same
+      // strength, because both mean "nothing is going out" and the WORD already
+      // says which.
+      //
+      // Off air used to be `--color-fg-muted`, a third level at 70% between a
+      // dimmed 45% and full white. On a wall beside REAPER and OBS -- which dim
+      // when they cannot be reached -- it was the brightest quiet thing in the
+      // row and read as the one still doing something. Reported twice as the
+      // streaming widgets not matching the grey their neighbours wear.
+      dim: !live,
       fill: live && filled ? "var(--green-9)" : null,
-      valueColor: live && !filled ? "var(--green-10)" : ind.state === "idle" ? "var(--color-fg-muted)" : null,
+      valueColor: live && !filled ? "var(--green-10)" : null,
     });
   };
 
@@ -659,19 +756,27 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   // composition: two ALL-CAPS lines in a row of three-line cards. isHomeCard is
   // exhaustive by type, so no case can shadow one of these again.
   //
-  // pointer-events-none, ALWAYS — not gated on ctx.interactive like
-  // live-controls is.
+  // Clicks reach these cards on HOME and nowhere else.
   //
-  // Some of these cards contain in-app links (/screens, /history) put there for
-  // Home, which runs in the operator shell. Every OTHER surface that renders
-  // them — a wall display, a panel, the editor preview — is on the kiosk
-  // router, whose whole route table is "/". A touch on the SPL stat took a
-  // display to a "Route not found" page and left it there until somebody walked
-  // over and reloaded it.
+  // Some of them contain in-app links (/screens, /history) put there for Home,
+  // which runs in the operator shell. Every OTHER surface that renders them — a
+  // wall display, a panel — is on the kiosk router, whose whole route table is
+  // "/". A touch on the SPL stat took a display to a "Route not found" page and
+  // left it there until somebody walked over and reloaded it.
   //
-  // Their capability is ["readout"], with no drill-down, so a link that does
-  // nothing off the shell is what the model already says they are. Home renders
-  // them directly, not through here, and keeps its links.
+  // This used to be pointer-events-none ALWAYS, on the reasoning that "Home
+  // renders them directly, not through here". That stopped being true when Home
+  // became a grid: HomeGrid draws every card through ObjectContent, so the
+  // blanket rule made the operator's own front page inert. Its readiness card's
+  // chevrons went nowhere, its drill-downs did nothing, and its checklist could
+  // not be ticked — reported as "I am not able to interact with the widget at
+  // all", which was exactly right and was true of every card on the page.
+  //
+  // `home` alone is not enough: the layout EDITOR sets home:true when the Home
+  // view is open, and a link that navigates out of the editor mid-edit is the
+  // same bug wearing different clothes. `interactive` is false there and on
+  // every wall surface, so the pair is the honest test — this is the operator's
+  // own screen, and it is live.
   if (isHomeCard(c)) {
     // OFF HOME, the three streaming cards wear the wall composition instead.
     //
@@ -680,18 +785,27 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // an operator picks for a console, where they sit beside OBS status and
     // REAPER status. One object, two presentations, chosen by the surface it is
     // drawn on rather than by which of two near-identical types got picked.
-    const platform = WALL_TWIN[c.type as keyof typeof WALL_TWIN];
-    if (!ctx.home && platform !== undefined) return streamingReadout(platform, {});
+    // A type guard rather than an index-and-compare, so that the config reaches
+    // streamingReadout NARROWED — carrying the three settings — instead of as
+    // the whole home-card union.
+    const hasWallTwin = (x: typeof c): x is Extract<typeof c, { type: keyof typeof WALL_TWIN }> =>
+      x.type in WALL_TWIN;
+    // `c`, not `{}`. The three settings Home's right-click menu writes onto a
+    // streaming card — elapsed time, hide when idle, fill when live — are the
+    // three `streamingReadout` takes, and passing an empty object dropped every
+    // one of them on the surface they are loudest on. The menu wrote them, the
+    // object stored them, the wall ignored them.
+    if (!ctx.home && hasWallTwin(c)) return streamingReadout(WALL_TWIN[c.type], c);
+    const live = ctx.home && ctx.interactive;
     return (
-      <div className="w-full h-full pointer-events-none">
+      <div className={live ? "w-full h-full" : "w-full h-full pointer-events-none"}>
         <HomeCard
-          type={c.type}
+          config={c}
           state={ctx.state}
           pcoLive={ctx.pcoLive}
           now={ctx.now}
           skewMs={ctx.skewMs}
-          // From the state snapshot, not a presence hook — see onlineFromState.
-          onlineOutputIds={onlineFromState(ctx.state)}
+          onlineOutputIds={ctx.onlineOutputIds}
           secondsToStart={homeSecondsToStart(ctx)}
         />
       </div>
@@ -753,10 +867,48 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           deltaSec = (serverNow - startMs) / 1000 - plannedElapsed;
         }
       }
-      if (deltaSec == null) return (c.hideWhenIdle ?? false) ? null : readout("—");
-      const behind = deltaSec > tol;
-      const ahead = deltaSec < -tol;
+      // Ahead/behind is derived from the drift where there IS one. In projected-
+      // end mode the drift is optional — the timeline recorder may not be
+      // running — so these stay false and the clock reads in the neutral colour.
+      const behind = deltaSec != null && deltaSec > tol;
+      const ahead = deltaSec != null && deltaSec < -tol;
       const color = behind ? c.behindColor ?? "var(--red-10)" : ahead ? c.aheadColor ?? "var(--green-10)" : null;
+      // Nothing to report. The two branches below reach it on different
+      // conditions — one has no drift, the other no projection — and each
+      // answers the operator's "hide when idle" the same way.
+      const nothingToSay = () => ((c.hideWhenIdle ?? false) ? null : readout("—"));
+
+      if (c.showProjectedEnd ?? false) {
+        // The wall-clock time the plan runs out. Its own idle test: the
+        // projection comes from PCO Live + the plan rundown, so it can answer
+        // while the drift cannot (nothing recording), and it can decline while
+        // the drift can (plan lengths unset). Either way a null is a dash, never
+        // a made-up time.
+        const endMs = projectedServiceEndMs(ctx.pcoLive, ctx.planItems, serverNow);
+        if (endMs == null) return nothingToSay();
+        // The zone the app REASONS in when the operator has set one — a display
+        // driven from a UTC box must read the venue's clock, not the box's. Unset
+        // falls back to the viewer's own zone rather than the server's host zone,
+        // which is what fmtClock does for ScriptView's projected times: an
+        // unconfigured UTC server would otherwise put every screen an hour(s) out.
+        // hourCycle is deliberately not passed — formatClock reads the app-wide
+        // 12h/24h setting, the same as every other clock in the app.
+        const drift =
+          deltaSec == null
+            ? null
+            : behind || ahead
+              ? `${fmtDuration(Math.abs(deltaSec))} ${behind ? "behind" : "ahead"}`
+              : "on plan";
+        return readout(formatClock(endMs, { timeZone: ctx.state.timezone }), {
+          valueColor: color,
+          // `showLabel` keeps one meaning across both modes — "say ahead or
+          // behind" — and here the figure comes with it, because the figure is
+          // no longer the value.
+          sub: (c.showLabel ?? false) ? drift : null,
+        });
+      }
+
+      if (deltaSec == null) return nothingToSay();
       const text = !behind && !ahead ? "0:00" : fmtSignedDuration(deltaSec);
       // "behind" / "ahead" moves to the sub-line. It was an inline 0.6em span
       // riding on the number, which is the composition the idiom replaces: a
@@ -789,6 +941,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return <ServiceOrderObject o={o} config={c} ctx={ctx} />;
     case "view-embed":
       return <ViewEmbedObject o={o} config={c} ctx={ctx} />;
+    case "screen-embed":
+      return <ScreenEmbedObject o={o} config={c} ctx={ctx} />;
     case "current-slide-notes": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       return span(pro?.currentNotes ?? "");
@@ -1101,6 +1255,26 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         sub: pos,
       });
     }
+    case "pvp-layers":
+      return <PvpObject config={c} status={ctx.pvp} now={ctx.now} skewMs={ctx.pvpSkewMs} H={ctx.H} />;
+
+    // `home-pvp-now` is NOT here: isHomeCard catches it above and draws it
+    // through PvpNowCard, which renders this same component inside Home's card.
+    // The two types differ only in whether a layer can be named — a Home card's
+    // settings are a short menu of switches, and a text field there would be a
+    // control the card can never reach.
+    case "pvp-now":
+      return (
+        <PvpNowObject
+          config={c}
+          status={ctx.pvp}
+          now={ctx.now}
+          skewMs={ctx.pvpSkewMs}
+          align={o.style?.textAlign}
+          uniform={ctx.home}
+        />
+      );
+
     case "rosstalk-button":
       return (
         <RossTalkButton
@@ -1248,6 +1422,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     }
+    case "scores":
+      return <ScoresObject config={c} scores={ctx.scores} />;
+
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
       // a type to the registry without a renderer here and this assignment stops
@@ -2145,14 +2322,9 @@ function PlanAttachment({
  * loop — while ignoring the object's style and scaling a full-screen design down
  * instead of reflowing into the box.
  *
- * CUSTOM Views are deliberately not embeddable, and that is the entire recursion
- * guard: a custom View is the only kind that holds a layout, so refusing it means
- * an embed can never reach another embed. No depth counter, nothing to get wrong
- * later. Containers already cover composing objects within one layout.
- *
- * Kinds are added as they stop assuming they own the screen — every View renderer
- * currently hardcodes a viewport height, which is right on a display and wrong in
- * a box. `script` is converted; the rest say so rather than rendering broken.
+ * WHICH kinds draw, and what stops the recursion, are no longer this object's
+ * business. EmbeddedView answers both, and the `screen-embed` object asks it the
+ * same question — so a kind that draws in one tile draws in every tile.
  */
 function ViewEmbedObject({
   o,
@@ -2165,42 +2337,205 @@ function ViewEmbedObject({
 }) {
   const view = config.viewId ? ctx.state.views?.find((v) => v.id === config.viewId) ?? null : null;
 
-  const notice = (text: string) => (
-    <div className="flex items-center justify-center h-full text-fg-subtle text-caption1 text-center px-3">{text}</div>
-  );
+  // The embedded view's canvas is the BOX, not the screen. A custom view is
+  // drawn by the same RenderObject a display uses, and everything that sizes
+  // itself there — fonts, spacing — is a fraction of ctx.H. Left as the parent's
+  // H, a quarter-height tile drew its child four times too large: correct-looking
+  // markup, unreadable output. See useEmbedBoxHeight for why it is measured.
+  const { ref: boxRef, height: boxH } = useEmbedBoxHeight(view?.id ?? null);
+
+  // Before the early returns: a hook cannot be called conditionally. And gated
+  // on `view`, not just on `interactive` — the SAME reason screen-embed passes
+  // its `expandable` in rather than wrapping the hook's output. Gated only on
+  // the way out, deleting a view while its tile was expanded left an invisible
+  // "expanded": the panel gone, no control to reopen it, a document keydown
+  // listener still attached, and the panel springing back by itself if the view
+  // came back. Two call sites, one shape, gated the same way at both.
+  //
+  // `insideEmbedTile` is the third term at both: a tile drawn as another tile's
+  // content is content, and the box the operator can actually expand is the one
+  // further out.
+  const { tileRef, control, overlay } = useExpand(ctx.interactive && !ctx.insideEmbedTile && !!view);
+
+  const notice = (text: string) => <EmbedNotice text={text} />;
 
   if (!config.viewId) return notice("Pick a view to embed");
   if (!view) return notice("That view no longer exists");
 
-  if (isEmbeddableViewKind(view.kind)) {
-    // w-full h-full, not the object's alignment: boxStyle turns every object into
-    // a flex column aligned by textAlign, which shrink-wraps a child that has no
-    // width of its own — a left-aligned box rendered the rundown at about half
-    // the width it was given. An embed always fills its box; alignment is a text
-    // idea and does not apply.
-    // The font size is set HERE, on the wrapper, and inherited by the whole
-    // rundown. Every other object applies it per text node through textStyle,
-    // which an embedded component never passes through — so without this the
-    // table fell back to the browser default 16px however large the object was,
-    // with no control that did anything.
-    return (
-      <div className="w-full h-full" style={{ fontSize: `${(o.style?.fontSize ?? EMBED_FONT_FRACTION) * ctx.H}px` }}>
-        {/* textSizeClass="" drops the page's viewport-relative clamp so the rows
-            inherit the object's own font-size, which boxStyle sets from the
-            object's style. Without it the table capped at ~17px however large the
-            object was — unreadable on a 4K stage panel, with the font-size field
-            hidden as well, so there was no way to fix it. */}
-        <ScriptView
-          scriptViewLayoutId={view.scriptViewLayoutId ?? null}
-          showHeader={config.showHeader ?? false}
-          textSizeClass=""
-          autoScroll={config.autoScroll ?? true}
-        />
-      </div>
-    );
-  }
+  // ONE body, drawn at whichever pair of heights is asking. Two copies of this
+  // JSX would have been two answers to "what does this embed show", and the
+  // expanded one is the copy nobody looks at while editing.
+  //
+  // The two are DIFFERENT numbers on the tile and the same number expanded, so
+  // they stay separate parameters: see the note below for why the object's own
+  // font size is the parent canvas here, and EmbedFontBox for why an expanded
+  // copy has no parent canvas to be a fraction of.
+  //
+  // `where` says which of the two is drawing. On the tile, everything inside is
+  // this tile's content and must not offer an expand control of its own; in the
+  // panel it is full size, so a nested tile is a tile again. See
+  // `insideEmbedTile` on LayoutRenderCtx.
+  const body = (canvasH: number, childH: number, where: EmbedCopy) => (
+    <EmbedFontBox o={o} canvasH={canvasH}>
+      <EmbeddedView
+        view={view}
+        ctx={{ ...ctx, H: childH, insideEmbedTile: where === "tile" }}
+        showHeader={config.showHeader ?? false}
+        autoScroll={config.autoScroll ?? true}
+      />
+    </EmbedFontBox>
+  );
 
-  return notice(`"${view.name}" is a ${view.kind} view — not embeddable yet`);
+  // w-full h-full, not the object's alignment: boxStyle turns every object into
+  // a flex column aligned by textAlign, which shrink-wraps a child that has no
+  // width of its own — a left-aligned box rendered the rundown at about half the
+  // width it was given. An embed always fills its box; alignment is a text idea
+  // and does not apply.
+  //
+  // The font size is set HERE, on the wrapper, and inherited by the whole
+  // embedded view. Every other object applies it per text node through textStyle,
+  // which an embedded component never passes through — so without this the
+  // rundown fell back to the browser default 16px however large the object was,
+  // with no control that did anything.
+  // The wrapper's own font size stays a fraction of ctx.H: it is the OBJECT's
+  // style, sized against the canvas exactly as every other object's font size
+  // is, and it is the operator's control over the embed. Only the child view's
+  // canvas is the box.
+  //
+  // `relative`, so the expand control can sit in the corner without being an
+  // ancestor of anything the view draws. It is absolutely positioned and adds no
+  // height, so the box measurement below is untouched.
+  return (
+    <div ref={tileRef} className="relative w-full h-full">
+      <div ref={boxRef} className="w-full h-full">{body(ctx.H, boxH || ctx.H, "tile")}</div>
+      {/* Each object gates on the states IT resolves — a missing view here, an
+          unrouted or blacked-out screen there. The notices EmbeddedView emits
+          for itself (a per-display kind, a recursion refusal, an empty view) are
+          gated by neither, deliberately: the alternative is a second copy of its
+          kind switch, which is the duplication this file keeps paying for.
+          Expanding one of those enlarges the same sentence, which is harmless;
+          a screen tile's states are gated because they change mid-service. */}
+      {control(view.name)}
+      {overlay(panelBody(body, ctx.H), view.name)}
+    </div>
+  );
+}
+
+/**
+ * What another screen is showing, right now.
+ *
+ * Resolves output -> its routed view -> EmbeddedView, so it follows a routing
+ * change without anyone touching this layout. That is the whole difference from
+ * view-embed, and it is why this is the object a producer wall is built from.
+ * It is also the only way the per-display kinds — dashboard, stage, SPL rundown
+ * — can be embedded at all, because each is configured against a display id and
+ * a view-embed has none to give.
+ *
+ * Each not-showing state is NAMED. A tile that draws an empty box for "unrouted"
+ * and an empty box for "deleted" and an empty box for "blacked out" is three
+ * different problems wearing one face, at the moment somebody is trying to work
+ * out what is wrong with a screen.
+ */
+function ScreenEmbedObject({
+  o,
+  config,
+  ctx,
+}: {
+  o: LayoutObject;
+  config: Extract<LayoutObjectConfig, { type: "screen-embed" }>;
+  ctx: LayoutRenderCtx;
+}) {
+  // From `outputs`, which is what the server derives resolvedByOutput from — the
+  // routing, the blackout flag and the screen's NAME all come off the one record
+  // rather than being joined back together from two.
+  const output = config.outputId ? ctx.state.outputs?.find((x) => x.id === config.outputId) ?? null : null;
+  const view = output?.viewId ? ctx.state.views?.find((v) => v.id === output.viewId) ?? null : null;
+  const showing = Boolean(view) && !output?.blackout;
+  // Deliberately not folded into `showing`: a screen can be connected and
+  // blacked out, or routed and unplugged, and the tile has to be able to say so.
+  const connected = output !== null && ctx.onlineOutputIds.includes(output.id);
+
+  // Measured on the BODY, not the tile: the label bar takes real height, and a
+  // child sized against the whole tile overflows by exactly that much.
+  const { ref: boxRef, height: boxH } = useEmbedBoxHeight(view?.id ?? null);
+  const notice = (text: string) => <EmbedNotice text={text} />;
+
+  // Guard clauses, in the order the screen itself resolves. Blackout comes BEFORE
+  // the routing check because a blacked-out screen shows black whatever it is
+  // routed to — read as an order, not counted out of nested ternary indentation.
+  const content = (childH: number, where: EmbedCopy) => {
+    if (!config.outputId) return notice("Pick a screen to show");
+    if (!output) return notice("That screen no longer exists");
+    if (output.blackout) return notice("Blackout");
+    if (!view) return notice(`"${output.name}" is not showing anything`);
+    return (
+      <EmbeddedView
+        view={view}
+        ctx={{ ...ctx, H: childH, insideEmbedTile: where === "tile" }}
+        displayId={output.id}
+      />
+    );
+  };
+
+  // The font box wraps the body rather than the whole tile: the overlay is a
+  // portal to document.body and inherits nothing from this tile's wrapper,
+  // however the React tree reads. Same two heights, and the same `where`,
+  // view-embed takes.
+  const body = (canvasH: number, childH: number, where: EmbedCopy) => (
+    <EmbedFontBox o={o} canvasH={canvasH}>{content(childH, where)}</EmbedFontBox>
+  );
+
+  // Only when there is something to enlarge. A blacked-out, unrouted or deleted
+  // screen's whole content is one sentence, and full-screening a sentence is a
+  // control that does nothing. `showing` already implies `output`; the ternary
+  // is what tells the type checker so.
+  //
+  // The gate goes INTO the hook rather than around its output. Gated only on the
+  // way out, an operator who expanded a tile and then blacked that screen out
+  // kept an invisible "expanded": no control to reopen it, a document key
+  // listener still attached, and the panel springing back to full screen by
+  // itself the moment the blackout cleared.
+  const expandable = showing ? output : null;
+  const { tileRef, control, overlay } = useExpand(
+    ctx.interactive && !ctx.insideEmbedTile && expandable !== null,
+  );
+
+  return (
+    <div
+      ref={tileRef}
+      // `relative`, so the expand control sits in the corner as a SIBLING of the
+      // body rather than an ancestor of it. Absolutely positioned, so it adds no
+      // height and the body measurement is untouched.
+      className="relative flex h-full w-full flex-col overflow-hidden"
+    >
+      {config.showLabel !== false && output && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-1">
+          {config.showStatus !== false && (
+            // A browser is attached — the heartbeat, not the routing.
+            //
+            // This dot used to mean "routed and not blacked out", on the
+            // reasoning that nothing in the app knew whether a screen was
+            // actually up. display-presence.ts always did, and so the dot spent
+            // its life reassuring a producer about screens that were switched
+            // off. Routed and connected are independent facts and the tile keeps
+            // them apart: the BODY names what the screen is or is not showing
+            // ("Blackout", "…is not showing anything"), and the dot answers the
+            // one question the body cannot — is anybody there.
+            <span
+              className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-live-9" : "bg-fg-faint"}`}
+              aria-label={connected ? "Connected" : "Not connected"}
+            />
+          )}
+          <span className="truncate text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
+            {output.name}
+          </span>
+        </div>
+      )}
+      <div ref={boxRef} className="min-h-0 flex-1">{body(ctx.H, boxH || ctx.H, "tile")}</div>
+      {expandable && control(expandable.name)}
+      {expandable && overlay(panelBody(body, ctx.H), expandable.name)}
+    </div>
+  );
 }
 
 /** The PCO service order as a scrolling list — highlights the live item and shows
@@ -2360,14 +2695,93 @@ function ServiceOrderObject({
   );
 }
 
-/** Collect the set of object `config.type`s present in a layout (recursing into
- *  container children) so live-data hooks can be gated to only the channels the
- *  layout actually renders. */
-function collectLayoutTypes(objects: LayoutObject[] | undefined, into: Set<string>): void {
+/** Collect the set of object `config.type`s present in a layout so live-data
+ *  hooks can be gated to only the channels the layout actually renders.
+ *
+ *  Recurses into container children AND through both embed objects into the
+ *  layouts they draw, because a widget in a tile is every bit as on-screen as
+ *  one on the canvas. Without the descent, an OBS badge inside a producer
+ *  multiview asked for a channel nobody subscribed to and sat dead for ever.
+ *
+ *  The cheap alternative — naming `view-embed`/`screen-embed` in every gate —
+ *  makes any layout containing one tile subscribe to everything, which is the
+ *  efficiency these gates exist to buy.
+ *
+ *  @param views   every View, so an embed's target can be resolved. Passed in
+ *    rather than read from a module-level store: this is a pure function, and
+ *    the caller (useLayoutData) already holds the state.
+ *  @param outputs every Output, so a screen-embed can be resolved the way the
+ *    tile itself resolves it — output -> its routed view.
+ *  @param chain   the views already being drawn above this layout, outermost
+ *    first — the SAME chain the renderer carries in `ctx.embedChain`.
+ */
+function collectLayoutTypes(
+  objects: LayoutObject[] | undefined,
+  into: Set<string>,
+  views: readonly View[],
+  outputs: readonly Output[],
+  chain: readonly string[],
+): void {
+  /** One level in, guarded by embed-chain — the renderer's own limiter, not a
+   *  second one. A view that would be REFUSED on screen draws nothing, so it
+   *  needs no channels; and cycles terminate here for the same reason they
+   *  terminate there. Two limiters that disagree would be worse than one: the
+   *  gate would either starve a tile that draws or subscribe for one that does
+   *  not. */
+  const descend = (viewId: string | null | undefined) => {
+    if (!viewId || embedRefusal(viewId, chain)) return;
+    const view = views.find((v) => v.id === viewId);
+    // Only a CUSTOM view draws objects. Every other kind is a whole component
+    // with its own hooks, and a view that used to be custom can still be
+    // carrying the layout it had then — collecting that would gate channels on
+    // objects nobody can see.
+    const layout = view?.kind === "custom" ? view.layout : undefined;
+    if (!layout) return;
+    collectLayoutTypes(layout.objects, into, views, outputs, childChain(viewId, chain));
+  };
+
   for (const o of objects ?? []) {
-    if (o.config?.type) into.add(o.config.type);
-    if (o.children?.length) collectLayoutTypes(o.children, into);
+    const config = o.config;
+    if (config?.type) into.add(config.type);
+    if (o.children?.length) collectLayoutTypes(o.children, into, views, outputs, chain);
+    if (config?.type === "view-embed") descend(config.viewId);
+    // Resolved through the OUTPUT, exactly as the tile does, so a routing change
+    // moves the gates with it rather than leaving the new view's widgets dark.
+    else if (config?.type === "screen-embed") descend(outputs.find((x) => x.id === config.outputId)?.viewId);
   }
+}
+
+/**
+ * Which object types a layout actually puts on screen, embedded views included.
+ *
+ * Deliberately WIDER than the render, in two places, and neither is a bug to be
+ * tidied up later:
+ *
+ *   HIDDEN objects count. Every renderer filters `o.hidden` on the way out; this
+ *   does not, so a hidden meter still holds its channel open. Unhiding is one
+ *   click, mid-service, and a widget that appears and then sits blank until a
+ *   subscription catches up is worse than a channel nobody is reading.
+ *
+ *   A BLACKED-OUT screen tile counts. It draws the word "Blackout" and nothing
+ *   else, but blackout is a momentary command from Companion and un-blacking has
+ *   to restore the picture instantly, not start subscribing.
+ *
+ * Exported for the guard suite: the gates below are a set membership test, so
+ * this set IS the behaviour worth testing, and testing it needs no React.
+ *
+ * @param viewId the View this layout belongs to — it seeds the embed chain, the
+ *   same way LayoutRenderer seeds `ctx.embedChain`. Absent (Home, the editor)
+ *   means nothing is above this layout.
+ */
+export function layoutChannelTypes(
+  layout: LayoutDTO,
+  views: readonly View[],
+  outputs: readonly Output[],
+  viewId?: string | null,
+): Set<string> {
+  const into = new Set<string>();
+  collectLayoutTypes(layout.objects, into, views, outputs, viewId ? [viewId] : []);
+  return into;
 }
 
 /** Live data + tickers shared by the kiosk renderer and the settings editor.
@@ -2375,24 +2789,63 @@ function collectLayoutTypes(objects: LayoutObject[] | undefined, into: Set<strin
  *  hooks are gated to the object types the layout contains — so a clock-only
  *  display doesn't subscribe to (or re-render on) SPL/transcript/wireless/etc.
  *  Called with no arg (editor) → every hook is enabled so previews always show data. */
-export function useLayoutData(layout?: LayoutDTO) {
+export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
+  // The state comes FIRST, before the gates that used to be computed above it:
+  // an embedded view's objects live in `state.views`, and a gate that cannot see
+  // them leaves every widget inside a tile without a channel.
+  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
+  const views = state?.views;
+  const outputs = state?.outputs;
+  // `views`/`outputs` are fresh array identities on every state broadcast, so
+  // this walk runs per broadcast rather than per layout change. Left that way
+  // deliberately, and measured: a deliberately heavy shape — thirty views of
+  // forty objects, four embeds per level fanning out to the depth cap — walks in
+  // 0.054 ms, and broadcasts are change-driven rather than a poll. Narrowing the
+  // dependency would mean deriving a signature from the same fields the walk
+  // reads, which is the same walk wearing a hat. The result feeds only the
+  // `want()` booleans, so an identical set re-derived changes nothing downstream
+  // and no subscription is torn down.
   const types = useMemo(() => {
     if (!layout) return null; // editor / unknown → enable everything
-    const s = new Set<string>();
-    collectLayoutTypes(layout.objects, s);
-    return s;
-  }, [layout]);
+    return layoutChannelTypes(layout, views ?? [], outputs ?? [], viewId);
+  }, [layout, views, outputs, viewId]);
   const want = (kinds: string[]) => types === null || kinds.some((k) => types.has(k));
   const peopleWanted = want(["people-counter", "people-graph", "people-panel"]);
 
-  const { state, isLoading, error, pcoLive, propresenter } = useDashboardState();
   const transcript = useTranscript(want(["transcript-strip"]));
   const spl = useSplState(want(["spl-meter"]));
-  const obs = useObsState(want(["obs-status"]));
-  const reaper = useReaperState(want(["reaper-status"]));
-  // Both gated on the streaming objects: a clock-only wall screen must not hold
-  // a poll open against two cloud APIs, one of which has a daily quota.
+  // Declared ABOVE the recorder gates because OBS is one of the three streamers
+  // `streamingReadout` reads: a wall showing only `stream-status` — or one of the
+  // three Home streaming cards wearing its wall twin — has to open the OBS
+  // channel as well, or the "OBS" row of that widget reports a platform that is
+  // simply not subscribed.
   const streamWanted = want(["stream-status", "home-streaming", "home-streaming-resi", "home-streaming-youtube"]);
+  // `record-status` is in BOTH. It is the any-recorder widget — the one an
+  // operator picks INSTEAD of the gated pair, so that a layout survives a switch
+  // from OBS to REAPER unchanged — and it reads ctx.obs and ctx.reaper directly.
+  // Named in neither gate, a layout whose only recorder widget was that one
+  // subscribed to nothing and said NO RECORDER through the whole service.
+  // gate-render-parity.test.ts is what now holds every arm to its channels.
+  const obs = useObsState(want(["obs-status", "record-status"]) || streamWanted);
+  const reaper = useReaperState(want(["reaper-status", "record-status"]));
+  // Gated harder than most: the channel's DEMAND is what decides the poll cadence
+  // at the server, so an ungated hook would hold PVP at 1 Hz for a wall screen
+  // showing a clock.
+  // The two WALL types only. The Home cards subscribe for themselves inside
+  // PvpCard and PvpNowCard, so naming them here would open a second subscription
+  // on the channel whose demand sets the server's poll rate — the exact thing
+  // the note above is about.
+  const pvp = usePvpState(want(["pvp-layers", "pvp-now"]));
+  // PVP's own clock offset. The shared skewMs below is PCO-derived and is 0
+  // whenever PCO is off, which would leave every PVP bar comparing a server
+  // timestamp against the browser's clock.
+  const pvpSkewMs = usePvpSkewMs(pvp);
+  // Gated like every other integration hook: a clock-only wall screen must not
+  // hold a poll open against ESPN.
+  const scores = useScoresState(want(["scores", "home-scores"]));
+  // Both gated on the streaming objects (`streamWanted`, declared above the
+  // recorder gates): a clock-only wall screen must not hold a poll open against
+  // two cloud APIs, one of which has a daily quota.
   const resi = useResiState(streamWanted);
   const youtube = useYouTubeState(streamWanted);
   const osc = useOscState(want(["osc-button"]));
@@ -2401,6 +2854,16 @@ export function useLayoutData(layout?: LayoutDTO) {
   const serviceAttendance = useLiveServiceAttendance(peopleWanted);
   const servicePeaks = useLiveServicePeaks(peopleWanted);
   const wireless = useWirelessTelemetry(want(["wireless-summary", "wireless-channel"]));
+  // The screen tile's status dot, Home's screens count and Home's readiness list
+  // are the only things that draw presence — so a wall of clocks subscribes to
+  // nothing, which was the whole objection to wiring this up at all.
+  //
+  // "view-embed" was in this list too, as a stand-in for the descent that did
+  // not exist: a screen tile nested inside an embedded view was invisible to the
+  // gate and its dot never lit. collectLayoutTypes now walks into embedded
+  // layouts, so that tile reports "screen-embed" on its own and the stand-in is
+  // gone — a view-embed of a clock no longer opens the presence channel.
+  const onlineOutputIds = useDisplayPresence(want(["screen-embed", "home-screens", "home-readiness"]));
   const propInstances = usePropInstances();
   const baptism = useBaptismState();
   const planItems = usePlanItems();
@@ -2417,7 +2880,7 @@ export function useLayoutData(layout?: LayoutDTO) {
     if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
   });
 
-  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs };
+  return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs };
 }
 
 /**
@@ -2429,6 +2892,7 @@ export function LayoutRenderer({
   ndiSource,
   interactive = false,
   surface,
+  viewId,
 }: {
   layout: LayoutDTO;
   ndiSource: string | null;
@@ -2436,8 +2900,21 @@ export function LayoutRenderer({
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
+  /**
+   * Which View this layout belongs to — it SEEDS the embed chain.
+   *
+   * Required rather than optional, exactly like `embedChain` above and for the
+   * same reason: an optional field defaulting a caller to `embedChain: []`
+   * lets a surface forget it, and a forgotten seed is indistinguishable from
+   * "nothing above me" — the one answer that makes a tile pointing back at the
+   * view it lives on undetectable as a cycle. It then draws a second copy of
+   * the whole layout inside itself and only the depth cap stops it. Verified
+   * in a browser, which is the only place it shows — every unit test builds
+   * the chain by hand and so agrees with whatever the component does.
+   */
+  viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, now, skewMs } = useLayoutData(layout);
+  const { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -2463,13 +2940,17 @@ export function LayoutRenderer({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full kiosk-surface">
-        <Loader2Icon className="size-8 text-gray-7 animate-spin" />
+        {/* fg-subtle, not a --gray-N palette step. .kiosk-surface re-declares the
+            --color-fg-* family and nothing else, so a palette token on a kiosk
+            ground still follows the APP's theme: --gray-7 in dark mode is #484848,
+            which is 2.16:1 on the kiosk's #0a0a0a against fg-subtle's 4.24:1. */}
+        <Loader2Icon className="size-8 text-fg-subtle animate-spin" />
       </div>
     );
   }
   if (error || !state) {
     return (
-      <div className="flex items-center justify-center h-full kiosk-surface text-gray-7">
+      <div className="flex items-center justify-center h-full kiosk-surface text-fg-subtle">
         Could not load layout
       </div>
     );
@@ -2506,7 +2987,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, resi, youtube, osc, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, now, skewMs, ndiSource, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter, propInstances, pcoLive, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, wireless, onlineOutputIds, now, skewMs, ndiSource, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

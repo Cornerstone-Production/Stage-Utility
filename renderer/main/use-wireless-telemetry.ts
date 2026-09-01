@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { invoke, onNotification } from "../lib/api";
+import { useStatusChannel } from "./use-status-channel";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "@main/types/devices";
+
+/** Stable identity, so a hook with nothing yet does not hand a new array out per render. */
+const NO_CHANNELS: DeviceStatus[] = [];
 
 /**
  * Live telemetry for every wireless RF channel — RF bars, battery, runtime,
@@ -21,40 +25,28 @@ import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "@main/types/devices"
  *
  * Chargers are not here; `charger-battery` is their widget. See
  * `wirelessChannelStatuses` for why mixing them poisons both figures.
+ *
+ * Ordering between the read and the first push is useStatusChannel's job — see
+ * the note there. Telemetry is coalesced and broadcast only on change, so a read
+ * landing after a frame leaves a pack showing yesterday's battery until it next
+ * moves a bar.
  */
 export function useWirelessTelemetry(enabled = true): DeviceStatus[] {
-  const [channels, setChannels] = useState<DeviceStatus[]>([]);
-
-  const load = useCallback(() => {
-    invoke<DeviceStatus[]>("wireless:channelStatuses")
-      .then((c) => setChannels(c ?? []))
-      .catch(() => {
-        /* not configured yet */
-      });
-  }, []);
-
-  useEffect(() => {
-    if (!enabled) return;
-    load();
-  }, [load, enabled]);
-
-  // The live path. Telemetry arrives coalesced and only on change, so this is
-  // cheap on a quiet week and current during a service; the fetch above is only
-  // the first paint before the first broadcast lands.
-  useEffect(() => {
-    if (!enabled) return;
-    return onNotification(WIRELESS_STATUS_CHANNEL, (p) => {
-      if (Array.isArray(p)) setChannels(p as DeviceStatus[]);
-    });
-  }, [enabled]);
-
   // Adding or removing a connection changes which channels exist at all, which
   // no telemetry broadcast will report — a removed receiver simply stops
-  // sending.
+  // sending. Bumping this re-identifies `read`, which is what useStatusChannel
+  // treats as a fresh window: it re-subscribes and re-reads, ordering intact.
+  const [connectionsRev, setConnectionsRev] = useState(0);
   useEffect(() => {
     if (!enabled) return;
-    return onNotification("wireless:connections-changed", () => load());
-  }, [load, enabled]);
+    return onNotification("wireless:connections-changed", () => setConnectionsRev((n) => n + 1));
+  }, [enabled]);
 
-  return channels;
+  const read = useCallback(() => {
+    void connectionsRev;
+    return invoke<DeviceStatus[]>("wireless:channelStatuses");
+  }, [connectionsRev]);
+
+  const channels = useStatusChannel<DeviceStatus[]>(read, WIRELESS_STATUS_CHANNEL, enabled);
+  return Array.isArray(channels) ? channels : NO_CHANNELS;
 }

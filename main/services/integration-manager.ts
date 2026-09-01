@@ -4,21 +4,29 @@
 
 import { errorMessage } from "./errors.js";
 import type { IntegrationDescriptor, IntegrationState } from "../types/integrations.js";
-import { scrub } from "./scrub.js";
+import { scrub, scrubError } from "./scrub.js";
 import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService, configComplete, type YouTubeConfig } from "./youtube-service.js";
+import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
+import { scoresService } from "./scores-service.js";
+import { scoresStore } from "./scores-store.js";
 import { oscManager } from "./osc-manager.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
 import { prodcomService } from "./prodcom-service.js";
 import { propresenterService, propresenterManager, type PropInstanceConfig } from "./propresenter-service.js";
 import { secretsStore } from "./secrets.js";
-import { type SenSourceConfig, sensourceService } from "./sensource-service.js";
+import {
+  DEFAULT_POLL_SECONDS as SENSOURCE_DEFAULT_POLL_SECONDS,
+  MIN_POLL_SECONDS as SENSOURCE_MIN_POLL_SECONDS,
+  type SenSourceConfig,
+  sensourceService,
+} from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
-import type { ConnectionManagedId } from "./integration-ids.js";
+import type { ConnectionManagedId, IntegrationId } from "./integration-ids.js";
 import type { ConnState } from "./integration-base.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
@@ -31,7 +39,8 @@ const PCO_DESCRIPTOR: IntegrationDescriptor = {
   kind: "lineup",
   label: "Planning Center",
   description:
-    "Pulls your Planning Center service plans into Stage — the live rundown, item order, and pre-service countdown. Connects to Planning Center Online over the internet with a Personal Access Token (App ID + Secret). Create the token at api.planningcenteronline.com and paste both halves below.",
+    "Pulls your Planning Center service plans into Stage — the live rundown, item order and pre-service countdown.",
+  docs: "planning-center",
   configSchema: [
     {
       key: "appId",
@@ -82,7 +91,8 @@ const WIRELESS_DESCRIPTOR: IntegrationDescriptor = {
   kind: "wireless",
   label: "Wireless Gear",
   description:
-    "Monitors your wireless mics — RF, audio, and battery/charger status — on stage displays. Connects to receivers over your LAN (Shure and Sennheiser supported). Add one connection per receiver below; each channel can then be placed on a layout.",
+    "Puts your wireless mics' RF, audio and battery on a stage display, one channel per slot. Shure and Sennheiser receivers.",
+  docs: "wireless",
   configSchema: [],
 };
 
@@ -95,7 +105,8 @@ const COMPANION_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "Bitfocus Companion",
   description:
-    "Lets a Bitfocus Companion (Stream Deck) surface control and read Stage. The Companion module connects to this app, so there's nothing to configure here — and nothing to switch on: just point the module at this server's IP and port, shown below. This row reflects how many Companion clients are connected.",
+    "Lets a Bitfocus Companion surface — a Stream Deck — control Stage and read its state. Nothing to set up here: the module dials in, and this row counts the clients attached.",
+  docs: "companion",
   inbound: true,
   configSchema: [],
 };
@@ -107,7 +118,8 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "ProPresenter",
   description:
-    "Shows the current and next slide, section, and slide thumbnails from ProPresenter. Connects to ProPresenter's local network API over your LAN (7.9+). Enable the API under ProPresenter → Preferences → Network, then add each instance below.",
+    "Shows ProPresenter's current and next slide, its section, and slide thumbnails.",
+  docs: "propresenter",
   configSchema: [
     {
       key: "name",
@@ -168,7 +180,8 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
   kind: "lineup",
   label: "ProdCom",
   description:
-    "Streams live production transcription (captions) onto a stage display. Connects to ProdCom's Application API over your LAN. Enter the host and port below; an API key is optional depending on your ProdCom setup.",
+    "Puts live production transcription — captions — on a stage display.",
+  docs: "prodcom",
   configSchema: [
     {
       key: "host",
@@ -198,7 +211,8 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "Smaart (SPL)",
   description:
-    "Brings FOH sound-level (SPL) readings from Rational Acoustics Smaart onto stage displays. Connects to Smaart v8's API over your LAN (8.3+, JSON over WebSocket). Turn the API on in Smaart, then enter its host, port, and password below.",
+    "Puts FOH sound-level (SPL) readings from Smaart on a stage display.",
+  docs: "smaart",
   configSchema: [
     {
       key: "host",
@@ -229,7 +243,8 @@ const OBS_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "OBS Studio",
   description:
-    "Shows whether OBS is recording, streaming, or running its virtual camera, on a stage display. Connects to OBS's built-in obs-websocket server over your LAN. Enable it under OBS → Tools → WebSocket Server Settings, then enter the host, port, and password below.",
+    "Shows whether OBS is recording, streaming, or running its virtual camera.",
+  docs: "obs",
   configSchema: [
     {
       key: "host",
@@ -261,7 +276,8 @@ const REAPER_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "REAPER",
   description:
-    "Shows whether REAPER is recording, on a stage display. Polls REAPER's built-in Web Interface over your LAN. Turn it on under REAPER → Preferences → Control/OSC/web (Web browser interface), leaving that page's Username:password field blank, then enter the host and port below.",
+    "Shows whether REAPER is recording.",
+  docs: "reaper",
   configSchema: [
     {
       key: "host",
@@ -275,6 +291,51 @@ const REAPER_DESCRIPTOR: IntegrationDescriptor = {
       type: "number",
       placeholder: "8080",
     },
+  ],
+};
+
+// ProVideoPlayer — polls PVP's Network API (Preferences → Network → Network API)
+// for the transport state of every layer, shown by the custom-layout
+// "ProVideoPlayer layers" object and drivable from automation rules.
+//
+// PVP has no thumbnail, preview or frame endpoint of any kind, so nothing here
+// can ever show a picture of what is on screen — only its name, its state and how
+// much of it is left. The description says so, because an operator setting this
+// up is entitled to know that before they go looking for a preview.
+const PVP_DESCRIPTOR: IntegrationDescriptor = {
+  id: "pvp",
+  kind: "control",
+  label: "ProVideoPlayer",
+  description:
+    "Shows what ProVideoPlayer has on each layer, and lets automation rules fire cues and clear, hide, mute and fade layers. Names, states and times — PVP offers no preview image of any kind.",
+  docs: "provideoplayer",
+  configSchema: [
+    { key: "host", label: "ProVideoPlayer Host", type: "text", placeholder: "192.168.1.50" },
+    {
+      key: "port",
+      label: "Network API Port",
+      type: "number",
+      // What a real PVP install shows under Preferences → Network → Network API.
+      // A prefill, not an assumption: initialConfig only uses it when nothing is
+      // saved, so an install whose port differs keeps its own. The help stays,
+      // because a default that silently disagreed with it would be worse than
+      // none — the number below is the Network API port, not the documentation
+      // port PVP also advertises.
+      default: 50742,
+      help: "From Preferences → Network → Network API. Not the documentation port.",
+    },
+    {
+      key: "https",
+      label: "Use HTTPS",
+      type: "select",
+      options: [
+        { value: "off", label: "Off" },
+        { value: "on", label: "On" },
+      ],
+      default: "off",
+      help: "Match PVP's own 'Use HTTPS Connection' setting. PVP normally uses a self-signed certificate, which this app will not accept.",
+    },
+    { key: "token", label: "API Token", type: "password", help: "Only if Require Authentication is on in PVP." },
   ],
 };
 
@@ -292,7 +353,8 @@ const RESI_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "Resi",
   description:
-    "Shows whether Resi is streaming, wherever the recording widgets appear. Uses your Resi account sign-in, because Resi's published API can only report on streams it started itself — it cannot see one that began on a Resi schedule. That means this rides an endpoint Resi does not document and could change without notice; if it stops working, nothing else is affected.",
+    "Shows whether Resi is streaming, wherever the recording widgets appear. Signs in with your Resi account, because Resi's own API cannot see a stream that started on a schedule.",
+  docs: "resi",
   configSchema: [
     { key: "username", label: "Resi Email", type: "text", placeholder: "you@church.org" },
     { key: "password", label: "Resi Password", type: "password" },
@@ -319,7 +381,8 @@ const YOUTUBE_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "YouTube",
   description:
-    "Shows whether you are live on YouTube and for how long, with the real start time YouTube reports. Public channel is the easy setup: make a project at console.cloud.google.com, enable the YouTube Data API v3, create an API key, and paste it below with your channel. Private broadcasts need OAuth instead — the same project, but an OAuth client (Desktop app) authorised once for the youtube.readonly scope, and its refresh token pasted here. If Resi restreams to YouTube, this reports that same broadcast.",
+    "Shows whether you are live on YouTube and for how long, with the start time YouTube itself reports.",
+  docs: "youtube",
   configSchema: [
     {
       key: "mode",
@@ -343,7 +406,7 @@ const YOUTUBE_DESCRIPTOR: IntegrationDescriptor = {
       key: "channel",
       label: "Channel",
       type: "text",
-      placeholder: "@yourchurch or UC…",
+      placeholder: "@yourchurch or a channel id",
       showIf: { key: "mode", equals: "key" },
       help: "The channel handle or id. Found in your channel's URL.",
     },
@@ -361,7 +424,8 @@ const OSC_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "OSC",
   description:
-    "Adds layout buttons that send OSC commands to LAN gear (consoles, media servers) and reflect device state back. There's nothing to enter here — manage OSC targets in the list below, then add an OSC button object to a layout.",
+    "Adds layout buttons that send OSC to gear on your LAN — consoles, media servers — and reflect that gear's state back.",
+  docs: "osc",
   configSchema: [],
 };
 
@@ -372,9 +436,16 @@ const ROSSTALK_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "RossTalk (Carbonite / Ultrix)",
   description:
-    "Sends RossTalk commands to Ross gear — custom controls and switching on a Carbonite, routing and salvos on an Ultrix. Connects over your LAN on TCP 7788. Add one target per device below, then place a RossTalk button on a layout or drive it from an automation rule. Simulate mode logs commands without sending them.",
+    "Sends RossTalk commands to Ross gear: custom controls and switching on a Carbonite, routing and salvos on an Ultrix.",
+  docs: "rosstalk",
   configSchema: [],
 };
+
+// Upper bound on the poll-interval FORM FIELD only. The poller deliberately has
+// no ceiling — an operator throttling to stay inside an API quota is allowed any
+// interval — so this lives here with the descriptor rather than being exported
+// from the service as an invariant the service does not enforce.
+const SENSOURCE_MAX_POLL_SECONDS = 3600;
 
 // SenSource Vea people-counter integration — polls the Vea API for live people
 // counts (attendance / occupancy), shown by the custom-layout "People counter"
@@ -386,7 +457,8 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "SenSource Vea",
   description:
-    "Brings live people counts — attendance and room occupancy — from SenSource Vea onto displays and graphs. Connects to the Vea cloud API with an API client ID + secret (created in Vea → API clients). Vea's counts lag a few minutes server-side, so polling faster than the default adds requests without fresher numbers. Pick which zones to count below.",
+    "Brings live attendance and room occupancy from SenSource Vea onto displays and graphs.",
+  docs: "sensource",
   configSchema: [
     {
       key: "clientId",
@@ -413,8 +485,11 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       key: "pollSeconds",
       label: "Poll interval (s)",
       type: "number",
-      placeholder: "45",
-      default: 45,
+      placeholder: String(SENSOURCE_DEFAULT_POLL_SECONDS),
+      default: SENSOURCE_DEFAULT_POLL_SECONDS,
+      min: SENSOURCE_MIN_POLL_SECONDS,
+      max: SENSOURCE_MAX_POLL_SECONDS,
+      help: "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls.",
     },
   ],
 };
@@ -428,7 +503,8 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
   kind: "control",
   label: "Ross MultiViewer (TSL UMD)",
   description:
-    "Pushes a people count onto a Ross multiviewer tile as on-tile text, over your LAN using TSL UMD. Enter the switcher host and TSL port below, then map a count to a tile's TSL address in the feeds panel.",
+    "Puts a people count onto a Ross multiviewer tile as on-tile text, over TSL UMD.",
+  docs: "ross-tsl",
   configSchema: [
     {
       key: "host",
@@ -445,6 +521,22 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+// Live scores — follows chosen teams on ESPN's public scoreboard API. No account
+// and no key: the endpoints are public and unauthenticated, which is also why
+// there is no contract and why the poll runs on a schedule rather than a fixed
+// interval. `configSchema` is empty because the only setting is WHICH TEAMS, and
+// a searchable multi-league team picker is not expressible as a ConfigField —
+// ScoresTeamsPanel renders it instead (see integrations-panel.tsx).
+const SCORES_DESCRIPTOR: IntegrationDescriptor = {
+  id: "scores",
+  kind: "control",
+  label: "Live scores",
+  description:
+    "Follows your teams' live scores from ESPN and shows them in the context bar, on Home, and on a stage display.",
+  docs: "scores",
+  configSchema: [],
+};
+
 const DESCRIPTORS: IntegrationDescriptor[] = [
   PCO_DESCRIPTOR,
   WIRELESS_DESCRIPTOR,
@@ -454,12 +546,14 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   SMAART_DESCRIPTOR,
   OBS_DESCRIPTOR,
   REAPER_DESCRIPTOR,
+  PVP_DESCRIPTOR,
   RESI_DESCRIPTOR,
   YOUTUBE_DESCRIPTOR,
   OSC_DESCRIPTOR,
   ROSSTALK_DESCRIPTOR,
   SENSOURCE_DESCRIPTOR,
   ROSS_TSL_DESCRIPTOR,
+  SCORES_DESCRIPTOR,
 ];
 
 /** Derived from the descriptors rather than listed again, so an integration
@@ -489,8 +583,170 @@ export function enabledFor(
 /** The registered descriptors, for a guard that needs the real ones. */
 export const INTEGRATION_DESCRIPTORS: readonly IntegrationDescriptor[] = DESCRIPTORS;
 
+/** How many things the operator has set up outside `state.config`, for the
+ *  integrations whose setup does not live there. Gathered by the manager (which
+ *  has the stores) and passed in, so the decision itself stays pure. */
+export interface OutOfBandSetup {
+  wirelessConnections: number;
+  oscTargets: number;
+  rossTalkTargets: number;
+  followedTeams: number;
+}
+
+/**
+ * Integrations that keep their setup somewhere OTHER than `state.config`, and
+ * what "set up" means for each.
+ *
+ * These declare `configSchema: []`, so `state.config` is `{}` — and
+ * `Object.values({}).some(…)`, the fallback every other integration uses, is
+ * false forever. Without an entry here an integration is therefore NEVER
+ * configured: its card reopens itself on every visit to the page and it never
+ * leaves "Not set up". Live scores shipped exactly that way.
+ *
+ * Each answer is the operator's own list, which is also what the applier already
+ * treats as "ready to start" — an OSC row with no targets and a scores row with
+ * no teams are equally not set up, and saying so keeps the card open on the
+ * panel that would let them finish. `empty-schema-configured.test.ts` fails if a
+ * schema-less integration is added without an entry.
+ */
+// Keyed by IntegrationId, not by string. A typo'd key on a `Record<string, …>`
+// is a valid entry that nothing ever looks up, so the integration it was meant
+// for stays permanently "Not set up" — the exact failure this table was added to
+// fix, arriving back through the table itself. Partial because most
+// integrations answer from their config and belong nowhere near here.
+const OUT_OF_BAND_CONFIGURED: Partial<Record<
+  IntegrationId,
+  (setup: OutOfBandSetup) => boolean
+>> = {
+  wireless: (s) => s.wirelessConnections > 0,
+  osc: (s) => s.oscTargets > 0,
+  rosstalk: (s) => s.rossTalkTargets > 0,
+  scores: (s) => s.followedTeams > 0,
+};
+
+/** Ids that answer "configured" from their own list rather than from config. */
+export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = Object.keys(OUT_OF_BAND_CONFIGURED);
+
+/**
+ * Fold a request body into the config to persist and the secrets to store.
+ *
+ * EXPORTED, and the only copy. This lived inline in `setConfig`, and the test
+ * guarding it reimplemented the loop — so deleting the guard left the suite
+ * green, which was demonstrated before the extraction. `setConfig` cannot be
+ * driven from a unit test (it needs `init()`, which starts the reconnect timers
+ * and never lets the process exit, and it ends by dialling the integration), so
+ * the choice was a copy in the test or one function both use. This is the latter.
+ *
+ * The key comes off an HTTP body, and `out[key] = value` is a property write
+ * with a caller-chosen name. `JSON.parse` keeps "__proto__" as an own
+ * enumerable key, `Object.entries` yields it, and plain assignment then sets the
+ * object's PROTOTYPE rather than a field on it. CodeQL calls this
+ * js/remote-property-injection and rates it high.
+ *
+ * A key is now ACCEPTED rather than screened — it must match
+ * {@link CONFIG_KEY} and must not be one of the two reserved names that pattern
+ * still admits. A positive rule cannot be outflanked by a name nobody thought
+ * of, which a skip-list can.
+ *
+ * The pattern was chosen against the data, not guessed: all 23 config keys the
+ * 16 integrations use match it, INCLUDING the two that no `configSchema`
+ * declares — sensource's `zoneIds` and `locationId`, which carry the operator's
+ * zone selection. An allowlist built from the schemas, which is what the CodeQL
+ * rule nudges toward, would silently delete that selection on the next save.
+ *
+ * And the targets have NULL prototypes, so even a write that reached one could
+ * only make an ordinary own key. Belt and braces: the pattern does not depend on
+ * the reserved list, and the null prototype does not depend on either.
+ *
+ * Skipped rather than rejected: an integration has a fixed set of fields and
+ * none is called this, so a body carrying one is junk or an attempt, and neither
+ * deserves a 500.
+ */
+/** The shape of every config key the app actually uses. Anchored, no `_`, so
+ *  "__proto__" cannot match however it is spelled. */
+const CONFIG_KEY = /^[A-Za-z][A-Za-z0-9]*$/;
+
+/** The two names {@link CONFIG_KEY} admits that must still never be written. */
+const RESERVED_KEYS: ReadonlySet<string> = new Set(["constructor", "prototype"]);
+
+export function foldConfigEntries(
+  entries: Record<string, unknown>,
+  secretKeys: readonly string[],
+  id = "?",
+): { config: Record<string, unknown>; secrets: Record<string, string> } {
+  const config: Record<string, unknown> = Object.create(null);
+  const secrets: Record<string, string> = Object.create(null);
+  for (const [rawKey, value] of Object.entries(entries)) {
+    if (!CONFIG_KEY.test(rawKey) || RESERVED_KEYS.has(rawKey)) {
+      // `rawKey` is a key straight off an HTTP body: POST /api/integrations/:id/config
+      // checks only that `config` is an object, so a key carrying a newline used to
+      // become a second record on /log, which renders `white-space: pre-wrap`.
+      console.warn(
+        `[integration-manager] ignoring unusable config key on ${scrub(id)}: ${scrub(rawKey)}`,
+      );
+      continue;
+    }
+    // `rawKey` itself, and it is safe to write. CONFIG_KEY is fully anchored and
+    // carries no flags, so `exec(rawKey)![0]` was always exactly `rawKey` — a
+    // no-op dressed as a narrowing step, which reads as a guard that is not one.
+    // What makes the write safe is the anchored test above plus the reserved
+    // list, both already done, on a null-prototype object.
+    const key = rawKey;
+    if (secretKeys.includes(key)) {
+      // Only update the secret if the caller provided a real value (not the mask).
+      if (value !== "••••" && value !== "") secrets[key] = String(value);
+    } else {
+      config[key] = value;
+    }
+  }
+  return { config, secrets };
+}
+
+/**
+ * Has the operator set this integration up? Independent of the live connection,
+ * so the UI can tell "not set up" apart from "set up but currently down".
+ *
+ * Exported for the guard, which is the only way to state this without booting
+ * the whole manager.
+ */
+export function configuredFor(
+  state: Pick<IntegrationState, "id" | "config">,
+  setup: OutOfBandSetup,
+  inbound: boolean,
+): boolean {
+  if (inbound) return true; // the other end dials us — nothing to set up
+  // Cast at the READ, deliberately: the ids reaching here come off HTTP bodies
+  // and descriptors as plain strings, while the table is keyed by IntegrationId
+  // so a typo in the table itself is a compile error. An unknown id here is a
+  // miss, which is the same answer a string-keyed table would have given.
+  const outOfBand = OUT_OF_BAND_CONFIGURED[state.id as IntegrationId];
+  if (outOfBand) return outOfBand(setup);
+  // YouTube asks for one of two sets of fields depending on how it is set to
+  // check, so "any value present" would call it configured the moment the mode
+  // select alone was saved — and the page would stop listing the one thing
+  // still needed. The masked secrets read as present here, which is right:
+  // a mask means a secret is stored.
+  if (state.id === "youtube") {
+    const c = state.config;
+    return configComplete({
+      mode: c.mode === "oauth" ? "oauth" : "key",
+      apiKey: String(c.apiKey ?? ""),
+      channel: String(c.channel ?? ""),
+      clientId: String(c.clientId ?? ""),
+      clientSecret: String(c.clientSecret ?? ""),
+      refreshToken: String(c.refreshToken ?? ""),
+    });
+  }
+  return Object.values(state.config).some((v) => v !== "" && v != null);
+}
+
 // Keys that are secrets for each integration id.
-const SECRET_KEYS: Record<string, string[]> = {
+//
+// Keyed by IntegrationId for the same reason as OUT_OF_BAND_CONFIGURED above,
+// and the cost of a typo here is worse: an id that does not match falls back to
+// `[]`, so every field of that integration — passwords and tokens included — is
+// written to settings.json as ordinary config instead of to secrets.bin.
+const SECRET_KEYS: Partial<Record<IntegrationId, string[]>> = {
   "planning-center": ["secret"],
   wireless: [],
   companion: [],
@@ -498,12 +754,22 @@ const SECRET_KEYS: Record<string, string[]> = {
   prodcom: ["apiKey"],
   smaart: ["password"],
   obs: ["password"],
+  pvp: ["token"],
   reaper: [],
+  // No account, no key. ESPN's scoreboard endpoints are public and unauthenticated.
+  scores: [],
   resi: ["password"],
   youtube: ["apiKey", "clientSecret", "refreshToken"],
   sensource: ["clientSecret", "apiToken"],
   "ross-tsl": [],
 };
+
+/** The secret field names for an integration id, or none. A helper rather than a
+ *  bare index because SECRET_KEYS is keyed by IntegrationId — so a typo in the
+ *  TABLE is a compile error — while every call site carries a plain string. */
+function secretKeysFor(id: string): readonly string[] {
+  return SECRET_KEYS[id as IntegrationId] ?? [];
+}
 
 class IntegrationManager {
   private states = new Map<string, IntegrationState>();
@@ -526,7 +792,7 @@ class IntegrationManager {
 
       // Merge saved non-secret config with any secret keys (masked).
       const maskedConfig: Record<string, unknown> = { ...savedConfig };
-      for (const key of SECRET_KEYS[descriptor.id] ?? []) {
+      for (const key of secretKeysFor(descriptor.id)) {
         maskedConfig[key] = secrets[key] ? "••••" : "";
       }
 
@@ -565,6 +831,10 @@ class IntegrationManager {
     await this.applyObs();
     // Start the REAPER web-interface poller if enabled + configured.
     await this.applyReaper();
+    // Start the ProVideoPlayer poller if enabled + configured.
+    await this.applyPvp();
+    // Start the ESPN scores poller if enabled + at least one team is followed.
+    await this.applyScores();
     await this.applyResi();
     await this.applyYouTube();
     // Start the OSC manager (UDP send + feedback listener; per-target enable).
@@ -579,8 +849,14 @@ class IntegrationManager {
     // disconnected), then start it if enabled + configured.
     addBroadcastListener((channel, payload) => {
       if (channel === "people:count") tslService.onPeopleCount(payload as PeopleCountDTO);
-      // Keep the master RossTalk row in step with its targets (and simulate mode).
-      if (channel === "rosstalk:targets-changed") this.refreshRossTalkSummary();
+      // Keep each master row in step with the list that IS its setup. Both halves
+      // matter: the summary is the badge ("2 of 3 target(s)"), which only init
+      // and the master toggle used to refresh, and the broadcast is what carries
+      // `configured` — which now follows the list length, so adding the first
+      // receiver or target has to reach the page that is showing "Not set up".
+      // Unconditional rather than change-gated: adding a target that is switched
+      // off moves `configured` without moving the badge at all.
+      this.onSetupListChanged(channel);
     });
     await this.applyRossTsl();
 
@@ -589,9 +865,7 @@ class IntegrationManager {
     const { automationEngine } = await import("./automation-engine.js");
     await automationEngine.init();
 
-    console.log("[integration-manager] init complete", {
-      integrations: Array.from(this.states.keys()),
-    });
+    console.log("[integration-manager] init complete", scrub(Array.from(this.states.keys()).join(", ")));
   }
 
   // ── Public API ─────────────────────────────────────────────────────────
@@ -601,38 +875,26 @@ class IntegrationManager {
   }
 
   getStates(): IntegrationState[] {
+    // Read the out-of-band lists ONCE, not per integration: each read copies its
+    // whole list, and this runs on every broadcast.
+    const setup = this.outOfBandSetup();
     return Array.from(this.states.values()).map((s) => ({
       ...s,
-      configured: this.isConfigured(s),
+      configured: configuredFor(s, setup, inboundIds.has(s.id)),
       ...(inboundIds.has(s.id) ? { inbound: true as const } : null),
     }));
   }
 
-  /** Whether the operator has set an integration up — independent of the live
-   *  connection, so the UI can tell "not configured" apart from "configured but
-   *  currently disconnected". Cred-based integrations are configured once any
-   *  config/secret value is saved; wireless/OSC (no config schema, set up via
-   *  their own connection/target lists) use the master enable toggle. */
-  private isConfigured(state: IntegrationState): boolean {
-    if (inboundIds.has(state.id)) return true; // the other end dials us — nothing to set up
-    if (state.id === "wireless" || state.id === "osc") return state.enabled;
-    // YouTube asks for one of two sets of fields depending on how it is set to
-    // check, so "any value present" would call it configured the moment the mode
-    // select alone was saved — and the page would stop listing the one thing
-    // still needed. The masked secrets read as present here, which is right:
-    // a mask means a secret is stored.
-    if (state.id === "youtube") {
-      const c = state.config;
-      return configComplete({
-        mode: c.mode === "oauth" ? "oauth" : "key",
-        apiKey: String(c.apiKey ?? ""),
-        channel: String(c.channel ?? ""),
-        clientId: String(c.clientId ?? ""),
-        clientSecret: String(c.clientSecret ?? ""),
-        refreshToken: String(c.refreshToken ?? ""),
-      });
-    }
-    return Object.values(state.config).some((v) => v !== "" && v != null);
+  /** The sizes of the operator's own lists, for the integrations whose setup does
+   *  not live in `state.config`. All four are in-memory caches loaded at init, so
+   *  no I/O happens here. */
+  private outOfBandSetup(): OutOfBandSetup {
+    return {
+      wirelessConnections: wirelessManager.listConnections().length,
+      oscTargets: oscManager.listTargets().length,
+      rossTalkTargets: rosstalkManager.listTargets().length,
+      followedTeams: scoresStore.get().favourites.length,
+    };
   }
 
   /** Live count of connected Companion-module clients (pushed from remote-server
@@ -653,7 +915,7 @@ class IntegrationManager {
    * changed.
    *
    * A map rather than a ladder because there were TWO ladders -- one in
-   * setConfig, one in setEnabled -- listing the same nine integrations in the
+   * setConfig, one in setEnabled -- listing the same integrations in the
    * same order. Adding Resi and YouTube meant remembering both, and an
    * integration added to only one would save its config and never reconnect, or
    * reconnect on a toggle and not on a save. Neither failure says which half was
@@ -712,7 +974,9 @@ class IntegrationManager {
       prodcom: () => this.applyProdcom(),
       smaart: () => this.applySmaart(),
       obs: () => this.applyObs(),
+      pvp: () => this.applyPvp(),
       reaper: () => this.applyReaper(),
+      scores: () => this.applyScores(),
       resi: () => this.applyResi(),
       youtube: () => this.applyYouTube(),
       sensource: () => this.applySensource(),
@@ -725,33 +989,31 @@ class IntegrationManager {
     id: string,
     config: Record<string, unknown>,
   ): Promise<IntegrationState> {
-    console.log(`[integration-manager] setConfig ${id}`, Object.keys(config));
+    // `id` is a path segment and is not checked against the known set until the
+    // line below, so it stays out of the format-string position.
+    console.log(
+      "[integration-manager] setConfig",
+      scrub(id),
+      scrub(Object.keys(config).join(", ")),
+    );
     const state = this.states.get(id);
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
-    const secretKeys = SECRET_KEYS[id] ?? [];
-    const nonSecretConfig: Record<string, unknown> = {};
-    const newSecrets: Record<string, string> = {};
-
-    for (const [key, value] of Object.entries(config)) {
-      if (secretKeys.includes(key)) {
-        // Only update the secret if the caller provided a real value (not the mask).
-        if (value !== "••••" && value !== "") {
-          newSecrets[key] = String(value);
-        }
-      } else {
-        nonSecretConfig[key] = value;
-      }
-    }
+    const secretKeys = secretKeysFor(id);
+    const { config: nonSecretConfig, secrets: newSecrets } = foldConfigEntries(config, secretKeys, id);
 
     // Persist non-secret config.
-    const settings = await settingsStore.load();
-    settings.integrationConfigs ??= {};
-    settings.integrationConfigs[id] = {
-      ...(settings.integrationConfigs?.[id] ?? {}),
-      ...nonSecretConfig,
-    };
-    await settingsStore.save(settings);
+    //
+    // patchIntegrationConfig, not load-then-patch. `patch` is atomic for the
+    // values handed to it, and this hands it a whole `integrationConfigs` map
+    // built from a load() taken OUTSIDE the write queue — so two integrations
+    // saved at once both read the map before either write lands, and the second
+    // writes one that never heard of the first. Merging inside store.update is
+    // what makes the read and the write indivisible.
+    //
+    // It returns the merged config because the mask below needs it. Reading it
+    // back off a second load() is the other half of the same race.
+    const merged = await settingsStore.patchIntegrationConfig(id, nonSecretConfig);
 
     // Persist secrets (merge with existing so unchanged ones survive).
     if (Object.keys(newSecrets).length > 0) {
@@ -761,9 +1023,7 @@ class IntegrationManager {
 
     // Rebuild masked config for state.
     const allSecrets = await secretsStore.getSecrets(id);
-    const maskedConfig: Record<string, unknown> = {
-      ...(settings.integrationConfigs?.[id] ?? {}),
-    };
+    const maskedConfig: Record<string, unknown> = { ...merged };
     for (const key of secretKeys) {
       maskedConfig[key] = allSecrets[key] ? "••••" : "";
     }
@@ -792,7 +1052,7 @@ class IntegrationManager {
       void this.verifyPcoCredentials()
         .then((ok) => (ok ? stageController.refresh() : undefined))
         .catch((err) => {
-          console.error("[integration-manager] post-save PCO refresh failed", err);
+          console.error("[integration-manager] post-save PCO refresh failed", scrubError(err));
         });
     }
 
@@ -809,10 +1069,10 @@ class IntegrationManager {
 
     this.states.set(id, { ...state, enabled });
 
-    const settings = await settingsStore.load();
-    settings.integrationEnabled ??= {};
-    settings.integrationEnabled[id] = enabled;
-    await settingsStore.save(settings);
+    // Merged inside the write queue, for the reason spelled out in the config
+    // save above: a nested spread built from a load() outside the queue is a
+    // read-modify-write, and two integrations toggled at once lose one of them.
+    await settingsStore.patchIntegrationEnabled(id, enabled);
 
     if (id === "wireless") {
       // Master toggle: re-apply connections without reloading from disk.
@@ -832,7 +1092,7 @@ class IntegrationManager {
   }
 
   async test(id: string): Promise<{ ok: boolean; message?: string }> {
-    console.log(`[integration-manager] test ${id}`);
+    console.log(`[integration-manager] test ${scrub(id)}`);
     const state = this.states.get(id);
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
@@ -932,6 +1192,28 @@ class IntegrationManager {
         }
         const result = await reaperService.test(host, port);
         this.setConnectionState("reaper", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "pvp") {
+        const { host, port, https } = this.getPvpTarget();
+        if (!host || !port) {
+          return {
+            ok: false,
+            message: "Host and Port are required. The port is the one in PVP's Preferences → Network → Network API.",
+          };
+        }
+        const secrets = await secretsStore.getSecrets("pvp");
+        const result = await pvpService.test(host, port, https, secrets.token ?? null);
+        this.setConnectionState("pvp", result.ok ? "connected" : "error", result.message ?? null);
+        this.broadcastStates();
+        return result;
+      }
+
+      if (id === "scores") {
+        const result = await scoresService.test();
+        this.setConnectionState("scores", result.ok ? "connected" : "error", result.message ?? null);
         this.broadcastStates();
         return result;
       }
@@ -1130,7 +1412,7 @@ class IntegrationManager {
    */
   private hostPort(
     id: ConnectionManagedId,
-    defaultPort: number,
+    defaultPort: number | null,
   ): { host: string | null; port: number | null } {
     const cfg = this.states.get(id)?.config ?? {};
     const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
@@ -1141,9 +1423,14 @@ class IntegrationManager {
         : typeof rawPort === "string" && rawPort.trim()
           ? parseInt(rawPort, 10)
           : NaN;
-    // Only default the port when a host was given: no host is "not configured",
-    // and returning a port for it would read as configured.
-    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? defaultPort : null };
+    // Only default the port when a host was given AND there is a default worth
+    // giving: no host is "not configured", and an integration whose port has no
+    // conventional value (PVP's is whatever its Preferences pane shows) must not
+    // be reported as configured on the strength of a guess.
+    return {
+      host,
+      port: Number.isFinite(port) && port > 0 ? port : host && defaultPort != null ? defaultPort : null,
+    };
   }
 
   /** obs-websocket's standard port. */
@@ -1156,12 +1443,126 @@ class IntegrationManager {
     return this.hostPort("reaper", 8080);
   }
 
+  /** PVP's Network API port is whatever its Preferences pane shows. The setup
+   *  form PREFILLS 50742 (the descriptor's `default`), which is what a real
+   *  install shows — but a prefill is a suggestion the operator saves, and this
+   *  is the dialling path. Assuming a port here would let "configured" point at
+   *  one nothing is listening on, so a stored value is still required. */
+  private getPvpTarget() {
+    const { host, port } = this.hostPort("pvp", null);
+    return { host, port, https: this.states.get("pvp")?.config.https === "on" };
+  }
+
+  /** Start/stop the ProVideoPlayer poll to match enabled + configured state. */
+  private async applyPvp(): Promise<void> {
+    await this.applyService("pvp", pvpService, async () => {
+      const { host, port, https } = this.getPvpTarget();
+      if (!host || !port) return null;
+      // The state map holds secrets MASKED, so anything that dials has to read
+      // the real value back out of the secrets store.
+      const secrets = await secretsStore.getSecrets("pvp");
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => pvpService.configure(host, port, https, secrets.token ?? null),
+      };
+    });
+  }
+
   /** Start/stop the REAPER web-interface poll to match enabled + configured state. */
   private async applyReaper(): Promise<void> {
     await this.applyService("reaper", reaperService, () => {
       const { host, port } = this.getReaperTarget();
       return host && port
         ? { connecting: `Connecting ${host}:${port}`, start: () => reaperService.configure(host, port) }
+        : null;
+    });
+  }
+
+  /**
+   * Re-apply the scores poll after the followed teams changed.
+   *
+   * Public because the favourites live in their own store rather than in
+   * `integrationConfigs`, so saving them does not go through setConfig. It must
+   * still go through the applier and not straight to `configure()`: the applier
+   * is what honours the integration's ENABLED flag, and calling configure()
+   * directly would start polling ESPN for an operator who had deliberately
+   * switched the integration off.
+   */
+  /**
+   * Channels announcing a change to a list that IS an integration's setup, and
+   * what each one has to re-derive.
+   *
+   * A table rather than four identical `if` clauses, and it is not only tidying:
+   * scores was the ONE out-of-band integration wired by an explicit call from
+   * its route instead of by this broadcast, so a second writer of setFavourites
+   * that forgot `refreshScores()` would leave the poller stopped with the panel
+   * saying it was following teams. The store now announces the change like the
+   * other three, and this is where all four are answered.
+   */
+  private get setupListRefreshers(): Record<string, () => void | Promise<void>> {
+    return {
+      "wireless:connections-changed": () => this.refreshWirelessSummary(),
+      "osc:targets-changed": () => this.refreshOscSummary(),
+      "rosstalk:targets-changed": () => this.refreshRossTalkSummary(),
+      "scores:favourites-changed": () => this.applyScores(),
+    };
+  }
+
+  /**
+   * One of those lists changed: re-derive, then send the states frame.
+   *
+   * Both halves matter. The summary is the badge ("2 of 3 target(s)"), which
+   * only init and the master toggle used to refresh; the broadcast is what
+   * carries `configured`, which follows the list length, so adding the first
+   * receiver or target has to reach the page that is showing "Not set up".
+   * Unconditional rather than change-gated: adding a target that is switched off
+   * moves `configured` without moving the badge at all.
+   *
+   * The frame goes out AFTER the refresh, including for the async one, so the
+   * badge and `configured` in it agree. The catch is the top of this chain —
+   * a broadcast listener has no caller to hand a failure back to — so it says so
+   * on the tagged line, and the frame still goes out.
+   */
+  private onSetupListChanged(channel: string): void {
+    const refresh = this.setupListRefreshers[channel];
+    if (!refresh) return;
+    void (async () => {
+      try {
+        await refresh();
+      } catch (err) {
+        console.warn(
+          `[integration-manager] ${scrub(channel)} refresh failed: ${scrub(errorMessage(err))}`,
+        );
+      }
+      this.broadcastStates();
+    })();
+  }
+
+  async refreshScores(): Promise<void> {
+    await this.applyScores();
+    // The followed-teams list IS scores' setup, so `configured` just changed and
+    // the panel is holding a cached copy. applyService only broadcasts when the
+    // service's own connection listener fires, which it does not when scores is
+    // switched off — the case where the card is sitting in "Not set up".
+    this.broadcastStates();
+  }
+
+  /**
+   * Start/stop the ESPN scores poll to match enabled + configured state.
+   *
+   * "Configured" here means at least one followed team, so the store is loaded
+   * first — an empty favourites list must read as not-configured rather than as
+   * a poller with nothing to ask about.
+   */
+  private async applyScores(): Promise<void> {
+    await scoresStore.init();
+    await this.applyService("scores", scoresService, () => {
+      const favourites = scoresStore.get().favourites;
+      return favourites.length > 0
+        ? {
+            connecting: `Following ${favourites.length} team(s)`,
+            start: () => scoresService.configure(favourites),
+          }
         : null;
     });
   }
@@ -1250,7 +1651,7 @@ class IntegrationManager {
       clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
       clientSecret: secrets.clientSecret || null,
       apiToken: secrets.apiToken || null,
-      pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : 45,
+      pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS,
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],
@@ -1384,11 +1785,13 @@ class IntegrationManager {
       // Idempotent: start() is a no-op when it is already running.
       void import("./live-poller.js")
         .then((m) => m.livePoller.start())
-        .catch((err) => console.error("[integration-manager] could not restart the live poller:", err));
+        .catch((err) =>
+          console.error("[integration-manager] could not restart the live poller:", scrubError(err)),
+        );
       return true;
     } catch (err) {
       const msg = errorMessage(err);
-      console.warn(`[integration-manager] PCO credential check failed: ${msg}`);
+      console.warn(`[integration-manager] PCO credential check failed: ${scrub(msg)}`);
       this.setConnectionState("planning-center", "error", msg);
       this.broadcastStates();
       return false;

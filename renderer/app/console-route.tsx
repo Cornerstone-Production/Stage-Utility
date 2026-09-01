@@ -94,6 +94,12 @@ export function ConsoleRoute() {
     // themed page, which is what made it read as an embedded viewer rather than
     // a page of the app. The negative margins cancel that gutter so the console
     // simply IS the content area.
+    //
+    // The TOP of that gutter is not cancelled here. It was, with `sm:-mt-4`, and
+    // that was wrong: a negative margin moves the box without giving it the
+    // height back, so `h-full` still measured the padded area and the console
+    // ended 16px short — the white band simply moved from above the console to
+    // below it. The shell does not apply the padding to a console at all now.
     <div
       className="relative flex h-full min-h-0 flex-col -mx-5 max-sm:-mx-3"
       // Proximity, not a hover region. A region big enough to aim at is also a
@@ -115,6 +121,7 @@ export function ConsoleRoute() {
         {view.layout ? (
           <LayoutRenderer
             layout={view.layout}
+            viewId={view.id}
             ndiSource={view.ndiSource ?? null}
             interactive={capabilityLive("shell", "control")}
             surface="console"

@@ -183,7 +183,14 @@ async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
       }
       return buf;
     } catch (err) {
-      console.error(`[photo-cache] fetch attempt ${attempt + 1} failed for ${photoUrl}:`, err instanceof Error ? err.message : err);
+      // photoUrl comes out of a PCO response, so it stays out of the format
+      // string — a `%s` in it would eat the error and report only the attempt.
+      console.error(
+        "[photo-cache] fetch attempt failed:",
+        attempt + 1,
+        photoUrl,
+        err instanceof Error ? err.message : err,
+      );
     }
   }
   return null;

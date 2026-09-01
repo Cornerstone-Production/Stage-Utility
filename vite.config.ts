@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { isOperatorPath } from "./main/services/routes/operator-paths";
+import { serverPort } from "./main/services/server-port";
 
 // Dev-only: map clean URLs to their entry HTML so the dev server matches what
 // the production Node server serves (see remote-server.ts tryServeStatic).
@@ -43,6 +44,10 @@ function tsconfigAliases(): Record<string, string> {
   return out;
 }
 
+/** Where the dev server forwards API traffic. Announced on start, because a
+ *  proxy pointing at somebody else's server is invisible until it is not. */
+const API_TARGET = `http://localhost:${serverPort()}`;
+
 export default defineConfig({
   plugins: [
     cleanUrls(),
@@ -74,16 +79,24 @@ export default defineConfig({
     emptyOutDir: true,
   },
 
-  // Dev server proxies /api/* and /photos to the standalone Node server
+  // Dev server proxies /api/* and /photos to the standalone Node server.
+  //
+  // The target FOLLOWS STAGE_UTILITY_PORT, through the same serverPort() the
+  // server binds with, so `STAGE_UTILITY_PORT=8799 npm run server` and
+  // `STAGE_UTILITY_PORT=8799 npm run dev` move together. Hard-coding 8788 here
+  // meant the two halves could not: move the server off the default — the
+  // obvious thing to do when something else already holds it — and the dev UI
+  // went on talking to whatever answered on 8788, editing it, with nothing on
+  // screen saying so.
   server: {
     port: 3000,
     proxy: {
       "/api": {
-        target: "http://localhost:8788",
+        target: API_TARGET,
         changeOrigin: true,
       },
       "/photos": {
-        target: "http://localhost:8788",
+        target: API_TARGET,
         changeOrigin: true,
       },
       // Uploaded images live in the data dir and are served by the Node server.
@@ -91,11 +104,11 @@ export default defineConfig({
       // not a 404 — so every logo and layout image silently renders blank in dev
       // while working perfectly in production.
       "/branding-images": {
-        target: "http://localhost:8788",
+        target: API_TARGET,
         changeOrigin: true,
       },
       "/layout-images": {
-        target: "http://localhost:8788",
+        target: API_TARGET,
         changeOrigin: true,
       },
     },

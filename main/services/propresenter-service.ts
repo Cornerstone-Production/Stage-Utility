@@ -316,8 +316,11 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
       this.report("connected", `Connected to ${host}:${port}`);
       this.resetBackoff(); // reconnected
-      // Fast poll only while a display/panel renders this instance; else keepalive.
-      this.scheduleIn(this.hasSubscribers ? this.pollMs : IDLE_INTERVAL_MS);
+      // Fast poll only while something consumes this instance; else keepalive.
+      // `inDemand` and not an SSE-subscriber check: nothing in-process reads this
+      // payload today, so the two are identical — but the moment one does, a
+      // browser-only check would quietly hand it five-second-old slides instead.
+      this.scheduleIn(this.inDemand ? this.pollMs : IDLE_INTERVAL_MS);
     } catch (err) {
       const msg = errorMessage(err);
       // Log only the first failure of an outage, then stay quiet until it recovers —
@@ -489,7 +492,14 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     const json = JSON.stringify(status);
     if (json === this.lastJson) return;
     this.lastJson = json;
-    broadcast(this.channel, status);
+    // Stamped, and bumped only here — past the unchanged-frame return above, so
+    // the version advances exactly when a real change is published. The hydrate
+    // read answers from getLatest(), which carries the same counter, letting a
+    // dashboard drop a read that is older than a push it already applied.
+    // `lastJson` is taken from the UNSTAMPED status so the change test is
+    // unaffected by the counter.
+    this.bumpRev();
+    broadcast(this.channel, this.stamped(status));
     this.onEmitCb?.();
   }
 }

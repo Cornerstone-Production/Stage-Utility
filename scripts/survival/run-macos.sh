@@ -14,6 +14,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 NODE="$(command -v node)"
 LABEL="com.cornerstone.stage-survival-test"
+
+# wait_for_spawn / report_no_spawn — shared with run-linux.sh.
+# shellcheck source=scripts/survival/lib.sh
+. "$HERE/lib.sh"
 PLIST="$(mktemp -t survival).plist"
 LOG="$(mktemp)"
 
@@ -41,7 +45,10 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 # bootstrap does not reliably honour RunAtLoad, so start it explicitly.
 launchctl kickstart "gui/$(id -u)/$LABEL"
 
-sleep 4
+if ! wait_for_spawn "$LOG"; then
+  report_no_spawn macos "launchd job" "$LOG"
+  exit 1
+fi
 launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
 sleep 14
 

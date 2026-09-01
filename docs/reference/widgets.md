@@ -42,12 +42,13 @@ switches.
 | **Next item** | What comes after it | Planning Center Live |
 | **PCO Prev/Next** | Buttons that move the service on | Planning Center Live (writes) |
 | **Service timer** | The running item's clock, and what is next | Planning Center Live |
-| **Service pacing** | How far ahead or behind the whole plan the service is | Recorded service timeline |
+| **Service pacing** | How far ahead or behind the whole plan the service is, or when it is projected to end | Recorded service timeline · Planning Center Live |
 | **Next service** | The next plan, its series and when it starts | Planning Center |
-| **Readiness** | What still needs doing before the next service | Planning Center + integration states |
+| **Readiness** | What still needs doing before the next service, including the plan's own checklist ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center + integration states |
 | **Recent services** | Attendance, length and start time, recently averaged | Recorded history |
 | **Plan file** | A page from a file attached to the plan | Planning Center attachments |
 | **Embedded view** | Another view, drawn inside this one | This app |
+| **Embedded screen** | What another screen is showing, following its routing | This app |
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
 **Service pacing** carries slippage forward from earlier items and keeps growing
@@ -55,9 +56,51 @@ while the current item runs long, so it answers "are we going to finish on time"
 not "was that item long". It needs a recorded service timeline; without one it
 shows nothing.
 
+Turn on **Projected end time** and the same widget leads with the wall-clock time
+the plan runs out instead of the drift figure. The drift moves under it when
+**Show ahead/behind label** is on. The projection needs a live item with a planned
+length, so it works with no recording running — but where it cannot answer it
+shows a dash rather than a time: no service live, the service already past its
+SERVICE END marker, or a plan whose lengths are not filled in. Items Planning
+Center marks as post-service are left out. The time renders in the app's time zone
+and 12/24-hour setting ([Settings → Advanced](../ops/install-and-config.md#time-zone)),
+so a screen driven from a UTC server still reads the venue's clock.
+
+**Embedded view** and **Embedded screen** can be expanded: on an operator
+surface each tile carries a control in its bottom-right corner that grows it to
+fill the window, and Escape or the panel's close button brings it back. Nothing
+navigates, so there is no page to return from. A screen showing the same layout
+gets no such control — an overlay opened by a passer-by would stay open until
+somebody walked over to it.
+
+A tile whose view holds embeds of its own carries **one** control, the outer
+one: what is drawn inside it is that tile's content, not a tile in its own
+right. Expand it and the tiles inside the panel get their own controls back, so
+a multiview inside a multiview still drills down one level at a time; Escape
+closes one level per press.
+
 **Service order** is superseded by ScriptView — see
 [ScriptView and Baptisms](../features/scriptview-and-baptisms.md). It is kept so
 existing screens do not break.
+
+**Embedded view** offers every view kind and draws every one of them, **Calendar**
+included. Dashboard, Stage and SPL Rundown are configured per display rather than
+per view, so an Embedded view pointed at one says so and Embedded screen is the
+way to bring it into a tile — see
+[Multiviews](layout-editor.md#multiviews).
+
+A **Calendar** view draws the current month as six weeks, marks today, and
+highlights the one timed event running right now. A day that will not fit shows
+the first few events and then a `+N more` count. On a console — anywhere controls
+are live — the header carries chevrons to page up to three years either way, and
+a Today button back. A wall display has no chevrons and always shows the current
+month; a console that was paged away returns to it after ten minutes. Which calendars and tags it
+draws are set on the view, not globally, so two screens can show two departments
+— see [Planning Center Calendar](../integrations/planning-center.md#calendar).
+There is no booking-versus-event setting, because Planning Center does not model
+the difference. Today and the running event are decided on the server's clock, in
+the app time zone, rather than on the screen's own clock — so a display whose
+clock has drifted still marks the right day.
 
 ## Status
 
@@ -69,9 +112,26 @@ existing screens do not break.
 | **Screens online** | How many displays are connected, of how many | Live display presence |
 | **Recording** *(Home)* | Is anything rolling — every recorder at once | OBS + REAPER |
 | **Streaming** *(Home)* | Live or off air, across every platform | Resi + YouTube + OBS |
+| **Live scores** | Live score for a team you follow | ESPN public scoreboard |
+| **Scores** *(Home)* | Followed teams' scores, on your own page | ESPN public scoreboard |
 
 **Streaming status** can be pinned to one platform, or left on **any**, where it
 answers for whichever is live.
+
+**Live scores** shows one game: a team you follow, or **any followed team**, which
+picks whichever of them is playing and prefers the one that scored most recently.
+Nobody is standing at a wall display to choose, so that is the default. **Show
+sport detail** draws the bases and count, the down and distance, or the game
+clock; turning it off leaves the score and the status line. The teams themselves
+are chosen in Settings, Integrations, Live scores — see
+[Live scores](../integrations/scores.md).
+
+The Home card is a quieter reading of the same thing: a chip in the team's colour,
+the name, the score, and the trailing side dimmed. It shows one matchup on a
+Medium tile and up to three as you make the tile taller. It stays on the page
+during a service by default — Sunday afternoon football overlaps the second
+service in most churches, which is the day the card exists for — and its own
+settings can hide it while a plan item is live.
 
 ### The four "is it happening" widgets behave alike
 
@@ -86,6 +146,14 @@ Per widget you can turn that off (**Fill green when live** / **Fill when
 recording**, which colours just the word instead), hide the number, or make it a
 tally light with **Hide when idle** — nothing drawn at all until something is
 going out.
+
+The Home streaming tiles — **Streaming**, **Resi** and **YouTube** — are the same
+object in two presentations. On Home they are a card in a row of cards; put one on
+a screen and it wears the composition above, beside OBS status and REAPER status.
+So all three of their settings are offered on Home, and two of them describe what
+the tile does on a screen: **Elapsed time** applies on both surfaces, while **Fill
+the card when live** and **Hide when idle** shape the screen presentation, which
+is the only one that fills or hides.
 
 ## OBS
 
@@ -126,6 +194,63 @@ it looked shows **Live** with no number — see [Resi](../integrations/resi.md).
 
 YouTube reports a real broadcast start, so its elapsed time is exact. See
 [YouTube](../integrations/youtube.md).
+
+## ProVideoPlayer
+
+| Widget | What it shows | Source |
+|---|---|---|
+| **ProVideoPlayer layers** | What ProVideoPlayer has on each layer, and how long is left | PVP Network API |
+| **ProVideoPlayer** *(Home)* | Every layer holding something, and how long is left | PVP Network API |
+| **ProVideoPlayer now** | What is on screen right now, and how long is left | PVP Network API |
+| **On screen now** *(Home)* | The one thing ProVideoPlayer has up, and how long is left | PVP Network API |
+
+There is no preview image on any of them: ProVideoPlayer's network API offers no
+thumbnail or frame of any kind, so these report names, states and times only.
+
+### The layer list
+
+One row per layer: the layer's name on the left, then the file it is holding and
+how much of it is left. A layer with nothing on it reads **empty**.
+
+The word after the time says what is unusual — **still** for a graphic, which has
+no duration to count and so shows no time at all; **paused** for a clip that has
+stopped where it was; **hidden** or **muted** for live content nobody can see or
+hear; and a percentage for a layer that has been faded.
+
+**Show** chooses between every layer, only the layers holding something (the
+default), and one layer by name. **Progress bar** adds a hairline rule under each
+rolling clip; it is off by default, because the time remaining is always shown
+and four rules stacked in one tile is a lot of chrome for a glance.
+
+A layer list longer than its widget is clipped — a screen cannot scroll — so the
+widget says **+N more** in the corner rather than dropping the tail silently. The
+Home card shows up to three layers and does the same.
+
+### ProVideoPlayer now
+
+The same data as one reading rather than a list: the file that is up, how long is
+left, and a state word — playing, paused, still or empty — beside the caption.
+**Layer** picks which layer it reads; left empty it follows whichever layer has
+something on it. A layer with nothing on it says so rather than counting down to
+nothing.
+
+**Progress bar** draws a hairline rule under the time. It advances smoothly
+rather than a step a second, and snaps instead of sliding whenever the change is
+not a tick — a cue change, a scrub, or a display waking up. A paused clip holds
+its bar where it stopped.
+
+**Next cue** names the entry after the current one in its playlist. Read the
+caveat before you rely on it: **that is the next playlist entry, which is what
+plays next only while the playlist keeps auto-advancing.** Fire a cue by hand and
+this line is wrong until the next poll. It is the quietest line on the widget for
+that reason, it is never drawn without a current cue to anchor it, and it can be
+switched off.
+
+The **last cue** a layer played is deliberately not shown on any of these. PVP
+reports it and it never clears, so four idle layers were observed all naming the
+same cue while showing nothing — and it disagrees with the file that is actually
+up even on a layer that is playing. See
+[ProVideoPlayer](../integrations/provideoplayer.md).
 
 ## ProPresenter
 
@@ -225,7 +350,7 @@ nothing.
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
 | **Action button** | Runs one of the app's own actions | This app |
 | **Notes** | A shared note anyone can type into | This app |
-| **Checklist** | A list of things to tick off | This app |
+| **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
 
 **Notes** and **Checklist** are shared, not per-screen: two people looking at them
 see the same text. See [OSC](../integrations/osc.md) and

@@ -5,14 +5,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // KIND_LABELS is Record<ViewKind, string>, so the type checker already refuses a
-// missing label. KIND_ORDER is a plain array and gets no such help - and it is
-// the list the dialog actually renders. Retyping this list from memory while
-// extracting the dialog silently dropped "stage" and "spl-rundown": both kinds
-// became uncreatable and nothing failed.
+// missing label. KIND_ORDER used to be a plain array and got no such help - and
+// it is the list the dialog actually renders. Retyping this list from memory
+// while extracting the dialog silently dropped "stage" and "spl-rundown": both
+// kinds became uncreatable and nothing failed.
 //
-// So: assert the rendered order covers exactly the labelled set. Read as source
-// text rather than imported, because importing the .tsx pulls in the whole UI
-// tree for a check about two literal lists.
+// KIND_ORDER now goes through everyViewKind(), so the compiler names a kind left
+// out of it. This file stays as a SECOND, independent net: it checks the two
+// lists against each other rather than each against ViewKind, so it still catches
+// a label with no slot in the order, and it survives everyViewKind itself being
+// weakened. Read as source text rather than imported, because importing the .tsx
+// pulls in the whole UI tree for a check about two literal lists.
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = readFileSync(path.join(HERE, "new-view-dialog.tsx"), "utf8");
@@ -24,7 +27,7 @@ function labelledKinds(src: string): string[] {
 }
 
 function orderedKinds(src: string): string[] {
-  const line = /const KIND_ORDER: ViewKind\[\] = \[([^\]]*)\];/.exec(src);
+  const line = /const KIND_ORDER = everyViewKind\(\[([^\]]*)\]\);/.exec(src);
   assert.ok(line, "could not find KIND_ORDER — this scan is broken, not passing");
   return [...line[1].matchAll(/"([\w-]+)"/g)].map((m) => m[1]);
 }
@@ -47,7 +50,7 @@ describe("the new-view dialog offers every view kind", () => {
     // Named explicitly: these are the ones that actually went missing, and a
     // set-equality check alone would stay green if BOTH lists lost them.
     const order = orderedKinds(SRC);
-    for (const kind of ["stage", "spl-rundown", "slots", "dashboard", "transcription", "script", "custom"]) {
+    for (const kind of ["stage", "spl-rundown", "slots", "dashboard", "transcription", "script", "calendar", "custom"]) {
       assert.ok(order.includes(kind), `"${kind}" is not offered by the new-view dialog`);
     }
   });

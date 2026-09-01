@@ -13,7 +13,7 @@ screens, the settings UI and a phone remote from one port.
 
 ## Contents
 
-**In this file** — [How it works](#how-it-works) · [Get the code](#get-the-code) ·
+**In this file** — [How it works](#how-it-works) · [Install it](#install-it) ·
 [What it connects to](#what-it-connects-to) · [Branches and releases](#branches-and-releases)
 
 **Documentation**
@@ -22,10 +22,12 @@ screens, the settings UI and a phone remote from one port.
 |---|---|
 | [Install, deploy and configure](docs/ops/install-and-config.md) | putting it on a machine, running it in development |
 | [Integrations](docs/integrations/README.md) | every device and service it talks to |
+| [The operator app](docs/features/operator-app.md) | Home, the sidebar and consoles — where an operator works |
 | [Data model](docs/reference/data-model.md) | Views, Outputs and Slots — the nouns |
 | [Layout editor](docs/reference/layout-editor.md) | placing objects, other window shapes, motion |
 | [Widget reference](docs/reference/widgets.md) | every widget, what it shows and where the data comes from |
 | [Display URLs](docs/display-urls.md) | addressing screens |
+| [Kiosk devices](docs/kiosk-devices.md) | the agent a screen runs, and claiming it |
 | [The context bar](docs/features/context-bar.md) | the live strip above every operator page |
 | [Slots](docs/slots.md) | matching people and devices to positions |
 | [Moving a view](docs/moving-a-view.md) | taking one layout to another install |
@@ -41,7 +43,7 @@ screens, the settings UI and a phone remote from one port.
 | [API reference](docs/reference/api.md) | the HTTP surface |
 | [Contributing](docs/contributing.md) | commit convention, branching, releases |
 | [Project structure](docs/contributing-appendix.md) | orientation in the codebase |
-| [App shell redesign](docs/design/app-shell-redesign.md) | design for the operator shell, consoles and in-place editing (not yet built) |
+| [App shell redesign](docs/design/app-shell-redesign.md) | why the operator shell, consoles and in-place editing are shaped the way they are |
 
 ---
 
@@ -123,9 +125,9 @@ Both routes, and every option, are in
 people, their photos and the live service countdown.
 
 Everything else is optional and independently enabled: Shure and Sennheiser
-wireless, ProPresenter, Smaart (SPL), SenSource (people counting), OBS, REAPER,
-Resi, YouTube, OSC, RossTalk, Ross TSL, ProdCom transcription, and Bitfocus
-Companion.
+wireless, ProPresenter, ProVideoPlayer, Smaart (SPL), SenSource (people
+counting), OBS, REAPER, Resi, YouTube, OSC, RossTalk, Ross TSL, ProdCom
+transcription, and Bitfocus Companion.
 
 Setup and behaviour for each is in [integrations](docs/integrations/README.md).
 

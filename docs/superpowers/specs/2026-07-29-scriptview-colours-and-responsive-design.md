@@ -77,7 +77,7 @@ colour comes from.
 ### Why the colours are global, not per layout
 
 Note categories are fetched per service type (`listScriptViewNoteCategories(serviceTypeId)`),
-so "Audio" exists independently under Weekend, Cornerstone Youth, The Salt Company and
+so "Audio" exists independently under Weekend, Midweek, Outreach and
 Events. Storing colours on the layout would mean setting Audio's colour once per layout
 *per service type* — and they would drift apart the first time one was missed.
 
@@ -138,7 +138,7 @@ page-level cap is what creates the dead-margin problem.
 ## What already colours a row today
 
 Worth stating, because a reference screenshot of **ScriptViewer** (the separate product
-at `cornerstonelife.scriptviewer.io`) shows richer colouring that is easy to mistake for
+on its own hosted domain) shows richer colouring that is easy to mistake for
 PCO data. It is not — it is that product's own styling. Ours currently has:
 
 | Element | Treatment | Source |

@@ -1,5 +1,9 @@
 # Dependencies
-node_modules/
+# No trailing slash, deliberately. `node_modules/` matches a DIRECTORY only, so a
+# symlink named node_modules slips straight past it -- which is how one pointing
+# at an absolute path on a developer's machine was committed to beta by a
+# `git add -A`. Without the slash this matches both.
+node_modules
 
 # Build output
 build/
@@ -48,9 +52,26 @@ docs/design-overhaul/
 DESIGN_TOKENS_PROPOSAL.md
 scripts/survival/.survival-*.log
 
-# Playwright screenshots taken while driving the app during development.
+# .superpowers/ is an agent's own working ledger — which task it is on, which
+# commit each finished at. Unlike docs/superpowers/, it records the WORKING, not
+# the decision, and nothing in a PR review is better for having it.
+.superpowers/
+
+# Screenshots taken while driving the app during development.
+#
+# The `*.playwright.png` rule was too narrow: a screenshot saved under any other
+# name was committable, and one was — a mic-slots display carrying ten real
+# faces and names, including children, into this PUBLIC repo, where it rode 38
+# release tags. Root-level raster files are always debris here, so ignore them
+# by location rather than by filename. Images that belong in the product live
+# under public/ or docs/ and are unaffected.
 *.playwright.png
 .playwright-mcp/
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
 
 # Probe captures. These are live pulls off a real account -- encoder and
 # schedule uuids, service names, the church's own name. One reached beta in

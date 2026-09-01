@@ -1,36 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { invoke, onNotification } from "../lib/api";
+import { useStatusChannel } from "./use-status-channel";
 
 /**
  * Live SenSource Vea people counts, pushed on the "people:count" channel.
  * Hydrates once on mount (the channel only broadcasts on poll) then stays live.
  * Shared by the custom-layout "People counter" object and its editor inspector.
+ *
+ * Ordering between the hydrate and the first push is useStatusChannel's job —
+ * see the note there for the staleness this used to have.
  */
 export function usePeopleCountState(enabled = true): PeopleCountDTO | null {
-  const [people, setPeople] = useState<PeopleCountDTO | null>(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    invoke<PeopleCountDTO>("people:getCount")
-      .then((s) => {
-        if (!cancelled && s) setPeople(s);
-      })
-      .catch(() => {
-        /* not configured yet — ignore */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    return onNotification("people:count", (p) => setPeople(p as PeopleCountDTO));
-  }, [enabled]);
-
-  return people;
+  const read = useCallback(() => invoke<PeopleCountDTO>("people:getCount"), []);
+  return useStatusChannel<PeopleCountDTO>(read, "people:count", enabled);
 }
 
 /** Mean peak in-room across finished recorded services (the "average service"),

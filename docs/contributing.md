@@ -80,6 +80,32 @@ Claude-Session: https://claude.ai/code/session_…
 
 These are informational and do not affect the release level.
 
+#### `Beta-only: true`
+
+Put this on a `fix:` or `perf:` commit whose bug **never reached a stable
+release** — a regression introduced and repaired inside the same release cycle.
+
+```
+fix(integrations): the Setup guide links to this build's branch
+
+Beta-only: true
+```
+
+The release-notes generator drops such a commit from a stable release's
+**Fixed** list, and counts it into the "N further fixes … were never in a
+released version" line, so the omission is stated rather than silent. A
+prerelease keeps it: somebody on the beta track has been running the broken
+version, and for them the fix is the news.
+
+The generator already suppresses a fix whose whole **scope** is new this release.
+That rule cannot see a new feature built under an existing scope — in 1.13.0,
+thirteen scopes carried both a `feat` and 42 fixes, and `integrations` is years
+old even though the setup-guide link it fixes shipped in the same release. Only
+the author knows whether the bug ever shipped, so only the author can say.
+
+Rule of thumb: if somebody upgrading from the last stable release could not have
+hit the bug, mark it.
+
 ## Releases
 
 Automated from the commit types above, by `.github/workflows/release.yml`. Your
@@ -122,6 +148,25 @@ the body.
   one-line fix — goes through a pull request off `beta`. Release automation is the
   exception: it commits the version bump and tag to those branches by design.
 
+## Running it locally
+
+```bash
+npm run server   # the Node server, port 8788
+npm run dev      # the UI on 3000, proxying /api to that server
+```
+
+Both halves read `STAGE_UTILITY_PORT`, so they move together:
+
+```bash
+STAGE_UTILITY_PORT=8799 npm run server
+STAGE_UTILITY_PORT=8799 npm run dev
+```
+
+Set it on one and not the other and the UI talks to whatever is on 8788 —
+which, on a machine that already runs a Stage Utility, is somebody's live
+instance. The dev server prints its target on start; read it before you edit
+anything.
+
 ## Before you open a PR
 
 ```bash
@@ -133,6 +178,18 @@ CI runs the same four. There is one long-standing lint warning
 
 Chain them with `&&`, not `;`. With `;` a failure scrolls past and the commit
 lands anyway — that is how a type error once reached `beta`.
+
+Green is not finished. Two more questions, answered in the PR body:
+
+- **Do the docs still describe this correctly?** A new integration, layout
+  object, route, setting or changed default lands in the same commit as its
+  entry in `docs/`. A capability documented nowhere gets used by nobody.
+- **Does it log anything?** If it can fail, retry, reconnect or silently skip
+  work, it says so on a tagged line the `/log` page surfaces. Log the decisions
+  and the failures, not every success.
+
+"No docs needed" and "nothing worth logging" are fine answers — say which, so
+it reads as a decision rather than an omission.
 
 ## React state
 

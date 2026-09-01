@@ -1,65 +1,77 @@
-// Rail + context bar + page header + content. The one layout every operator
-// surface renders inside, which is what makes the app feel like one program
-// rather than a set of pages that happen to share a server.
+// Rail + context bar + content. The one layout every operator surface renders
+// inside, which is what makes the app feel like one program rather than a set of
+// pages that happen to share a server.
+//
+// THERE IS NO PAGE HEADER BAND ANY MORE. On a desktop the page's name and its
+// actions render inside the context bar; on a phone the top bar carries them, as
+// it always has. Either way one band of chrome sits above the content instead of
+// two. See page-title.tsx.
 //
 // The responsive layout is SplitView's job, not this file's — inline sidebar on
 // desktop, icon rail when collapsed, and a hamburger-opened drawer on mobile.
 // A first pass rendered the rail directly and had no mobile drawer at all: the
 // sidebar sat expanded on a phone with no way to dismiss it.
 
+import { useMemo } from "react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { SplitView } from "../components/ui/split-view";
-import { useRouteResetKey } from "./route-reset";
+import { PAGE_SCROLLER_ID, useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
-import { PageActionsProvider, PageActionsSlot, usePageActionsSlot } from "./page-actions";
+import { PageActionsProvider, PageActionsSlot } from "./page-actions";
 import { ContextBar } from "./context-bar";
-import { ALL_DESTINATIONS } from "./destinations";
+import { consoleHidesChrome, consolePages, isConsolePath, resolvePage } from "./active-page";
+import { useStageState } from "../main/use-stage-state";
 import { useStageLiveWiring } from "./live-wiring";
 import { UpdateNotices } from "./update-notices";
 import { useStageStateQuery } from "./queries";
 import { useSidebarCollapsed } from "../lib/use-sidebar-collapsed";
 import { useSidebarWidth, RAIL_WIDTH } from "../lib/use-sidebar-width";
-
-/**
- * Title + description for the active destination, matching the per-section
- * header the settings panel shows. Nested routes (a ScriptView plan) render
- * their own heading, so nothing is shown for them rather than a wrong one.
- */
-function PageHeader() {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const active = ALL_DESTINATIONS.find((d) => d.path === pathname);
-  const actions = usePageActionsSlot();
-  if (!active) return null;
-  return (
-    // The title and the route's own controls share ONE row. Home used to put its
-    // Edit control on a second row below this one, which cost a whole band of
-    // vertical space on the page that most wants it for content.
-    // HIDDEN ON MOBILE. The top bar already shows the destination's name, so
-    // this repeated it — "Home" twice, plus a description, plus its own padding,
-    // for about 85px of a 844px phone screen spent saying what the bar above it
-    // just said. The actions move to that bar instead; the description is a
-    // desktop luxury.
-    <header className="max-sm:hidden px-5 pt-5 shrink-0 flex items-start gap-3">
-      <div className="min-w-0 flex-1">
-        <h1 className="text-title2 font-semibold text-fg leading-tight">{active.label}</h1>
-        <p className="text-footnote text-fg-muted mt-1 max-w-[68ch]">{active.description}</p>
-      </div>
-      {actions && <div className="flex items-center gap-1.5 shrink-0">{actions}</div>}
-    </header>
-  );
-}
+import { cn } from "../lib/cn";
 
 export function Shell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  // Longest match first: /settings/branding must beat /settings.
-  const active = [...ALL_DESTINATIONS]
-    .sort((a, b) => b.path.length - a.path.length)
-    .find((d) => pathname === d.path || pathname.startsWith(`${d.path}/`));
+  // The LIVE state, the same source the rail reads. A console's name is the
+  // operator's to change, and the rail entry and the page title must not be able
+  // to disagree about what it is.
+  const { state: liveState } = useStageState();
+  const consoles = useMemo(() => consolePages(liveState?.views), [liveState?.views]);
+  const active = useMemo(() => resolvePage(pathname, consoles), [pathname, consoles]);
+  // A console fills its area edge to edge and has no page to give air to, so it
+  // is the one route that does not get the gutter under the strip.
+  const onConsole = useMemo(() => isConsolePath(pathname, liveState?.views), [pathname, liveState?.views]);
+  // A console the operator has asked to run without the app's chrome. BOTH bands
+  // go — the phone's top bar (SplitView's, hidden through `chromeless`) and the
+  // context bar below — because 89px of an 844px phone is the number that makes
+  // this worth doing, and half of it is the merge the header study already
+  // rejected. On a desktop only the context bar exists to hide; the rail stays,
+  // and the rail is the way back.
+  //
+  // Read from the LIVE state, the same source the rail reads, so turning it on
+  // takes effect on the console you are standing at rather than on the next
+  // reload.
+  //
+  // UNKNOWN IS NOT "SHOW THE BARS". `liveState` is null from first paint until
+  // the hydrate lands — a real interval on a Pi — and answering `false` there
+  // drew both bands and then tore them off again on every cold load of a
+  // chrome-free console, re-laying-out the console under them. So on a console
+  // route the bands wait until the answer is actually known. Nothing is lost by
+  // waiting: ConsoleRoute itself renders null without `stageState`, so the
+  // content area is empty for exactly that window either way.
+  const views = liveState?.views;
+  const chromeless = useMemo(
+    () => (views ? consoleHidesChrome(pathname, views) : pathname.startsWith("/consoles/")),
+    [pathname, views],
+  );
   const { collapsed, toggle } = useSidebarCollapsed();
   const resetKey = useRouteResetKey();
   // Mounted HERE, not on a route: these subscriptions must outlive any single
   // page. On a route they would unsubscribe the moment you navigated away, and
   // the app would stop seeing live changes until you happened to come back.
+  // THE QUERY MIRROR, not a second source of truth. `liveState` above is the SSE
+  // module store and is what everything on this page reads; this is the React
+  // Query copy, which only moves when live-wiring pushes SSE into it. It is here
+  // for accentColor and for nothing else — read `views` off it and you get a
+  // list that lags the rail's.
   const { data: stageState } = useStageStateQuery();
   useStageLiveWiring(stageState?.accentColor);
   const { width, dragging, startResize, reset: resetWidth } = useSidebarWidth();
@@ -82,9 +94,16 @@ export function Shell() {
         expandedWidth={width}
         railWidth={RAIL_WIDTH}
         resizing={dragging}
-        mobileTitle={active?.label}
-        // On a phone the top bar IS the page header — see PageHeader.
+        mobileTitle={active?.page.label}
+        // On a phone the top bar IS the page header — see page-title.tsx.
+        //
+        // SplitView renders this subtree only below 640px, and PageActionsEnd is
+        // `display: none` there, so exactly one copy of the route's controls is
+        // ever visible — and `display: none` keeps the other out of the
+        // accessibility tree rather than merely off the screen. That is the
+        // arrangement the page header already had; the merge did not change it.
         mobileActions={<PageActionsSlot />}
+        chromeless={chromeless}
         sidebar={
           <Rail
             onToggleCollapsed={toggle}
@@ -95,12 +114,39 @@ export function Shell() {
         }
       >
         <div className="flex flex-col h-full min-w-0">
-          <ContextBar />
-          <PageHeader />
+          {!chromeless && <ContextBar active={active} />}
           {/* Page gutter, applied ONCE here rather than by each route. Routes were
                 padding themselves individually and the ones added recently did not,
                 so the editor and Screens sat flush against the right edge. */}
-          <main className="flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3">
+          {/* The app's ONE scroller, and the only one the router knows by name —
+              see PAGE_SCROLLER_ID. Without the id, TanStack identifies it by an
+              `nth-child` path, which changes when the scores panel adds a
+              sibling above. */}
+          {/* `sm:pt-4` REPLACES THE HEADER'S OWN TOP PADDING, and only on the
+              surface that had one. The header band supplied the 20px of air
+              between the strip and the page; without it a desktop page starts
+              flush against the bar and reads as part of it. A phone never had a
+              header and gets no padding here, so nothing below 640px moves. */}
+          <main
+            data-scroll-restoration-id={PAGE_SCROLLER_ID}
+            className={cn(
+              "flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3",
+              // `sm:pt-4` is the air between the band and the page. With no band
+              // there is nothing for it to separate, and it would hand 16px of
+              // the reclaimed height straight back as padding. The HORIZONTAL
+              // gutter stays: a console cancels it with its own negative margins,
+              // so dropping it here would push the console off the left edge.
+              //
+              // A CONSOLE NEVER GETS IT, band or no band. It fills its area edge
+              // to edge, so the padding is a white band between the strip and the
+              // stage-black rather than air under a page. Dropped HERE rather
+              // than cancelled by the console with a negative margin: the console
+              // is `h-full`, and a negative margin moves the box without giving
+              // it the height back, so cancelling it that way just moved the
+              // white band to the bottom.
+              !chromeless && !onConsole && "sm:pt-4",
+            )}
+          >
             {/* Keyed so re-selecting the active rail item remounts the route,
                 returning it to its top view. */}
             <div key={resetKey} className="contents">

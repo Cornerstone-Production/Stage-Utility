@@ -25,13 +25,17 @@ const BARE = [
   "current-slide-text", "next-slide-text", "current-slide-notes", "transcript-strip",
   // Draws its own grid of tiles; a card around a grid of cards is noise.
   "slots-grid",
+  // The score strip paints its own opaque ground edge to edge, so a card behind
+  // it is a hairline and a radius the strip covers up.
+  "scores",
   // Home's cards. They used to draw their own frame — hence bare — and now draw
   // none at all, because Home's GRID draws one tile frame for everything on it.
   // A card here would be a second box inside that tile, and its padding would
   // inset a newly added widget further than one added before the change.
   "home-readiness", "home-next-service", "home-live-status", "home-recent-services",
   "home-recording", "home-recording-obs", "home-recording-reaper", "home-spl", "home-screens",
-  "home-streaming", "home-streaming-resi", "home-streaming-youtube",
+  "home-streaming", "home-streaming-resi", "home-streaming-youtube", "home-pvp", "home-pvp-now",
+  "home-scores",
   // Retired, and left exactly as it shipped.
   "service-order",
 ] as const;
@@ -57,8 +61,11 @@ describe("a widget you just added", () => {
     // and add it here or to BARE — do not bump the number.
 
     const all = Object.keys(LAYOUT_OBJECTS);
-    assert.equal(all.length, 54);
-    assert.equal(all.filter(hasCard).length, 29);
+    // 59/31 before the two ProVideoPlayer "what is on now" widgets: `pvp-now`
+    // is carded like every other wall readout, `home-pvp-now` is bare because
+    // Home's grid frames it.
+    assert.equal(all.length, 61);
+    assert.equal(all.filter(hasCard).length, 32);
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });
 
@@ -244,7 +251,21 @@ describe("the editor's add paths", () => {
       .map((m) => m[0].replace(/\s+/g, " "))
       // the declaration itself is `function makeObject(`, not a call
       .filter((c) => !/^makeObject\(\s*type: /.test(c));
-    assert.ok(calls.length >= 4, `expected every add path, found ${calls.length}`);
+
+    // TWO counts, because one cannot be trusted on its own. The argument scan
+    // above stops at the first `;`, so a call carrying one — an inline object
+    // literal is enough — silently drops out of `calls` and is never checked.
+    // A floor let that happen with the suite green; an exact count on `calls`
+    // alone would too, since the number it is compared against is the number of
+    // matches rather than the number of call sites. So the sites are counted a
+    // second way, by the name alone, and the two must agree.
+    //
+    // A bare `makeObject(` written in a COMMENT inflates `sites` and turns this
+    // red, which is the safe direction: this scan cannot be satisfied by prose,
+    // only broken by it.
+    const sites = [...src.matchAll(/\bmakeObject\(/g)].length - 1; // -1: the declaration
+    assert.equal(calls.length, sites, `the argument scan missed a makeObject call: ${calls.length} of ${sites}`);
+    assert.equal(sites, 4, `an add path was added or removed — decide its destination, do not bump this number`);
     for (const c of calls) {
       assert.match(c, /HOME_VIEW_ID/, `a makeObject call decides the frame by default: ${c}`);
     }

@@ -30,6 +30,9 @@ export interface StageState {
   slotsByView: Record<string, Slot[]>;
   /** Context-bar item ids in display order. Empty = the renderer's default. */
   barItems: string[];
+  /** The phone's own context-bar set. Empty = follow `barItems`. See
+   *  bar-config-store.ts for why empty means inherit rather than "show nothing". */
+  barMobileItems: string[];
   /** Colours the operator has kept, newest first. Global, like the bar: the same
    *  person mixes a colour on a laptop and reaches for it on a tablet. */
   savedColors: string[];
@@ -56,6 +59,9 @@ export interface StageState {
   kioskDiscovery: boolean;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];
+  /** Plan-note categories/teams feeding the pre-service checklist (names). */
+  checklistNoteCategories: string[];
+  checklistNoteTeams: string[];
   /** Customizable brand name shown in the sidebar header and on the kiosk. */
   appName: string;
   /** Themeable brand accent (#rrggbb), or null to use the built-in default. */
@@ -74,9 +80,15 @@ export interface StageState {
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */
   publicUrl: string | null;
   /** Icon tint per display id or tool path (e.g. "display-1", "/baptism"), as
-   *  "#rrggbb". One map covers the Displays cards, the Connect tool cards and the
+   *  "#rrggbb". One map covers the screen cards, the Connect tool cards and the
    *  picker tiles, so a color set anywhere shows everywhere that item appears. */
   iconColors?: Record<string, string>;
+  /** Icon GLYPH per display id or tool path, as a name from the curated set in
+   *  `renderer/components/icon-set.ts`. Same keys as `iconColors`, for the same
+   *  reason: the icon belongs to the thing, not to the screen it is drawn on.
+   *  Absent, or a name this build does not know, falls back to the built-in icon
+   *  for that item — a set trimmed in a later release must not blank an icon. */
+  iconGlyphs?: Record<string, string>;
   /** User-assigned caption colors, keyed by ProdCom channel label. */
   captionChannelColors: Record<string, string>;
   /** Live battery bays from any Shure SBC charger connections. */

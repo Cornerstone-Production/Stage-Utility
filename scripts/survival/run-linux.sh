@@ -21,6 +21,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 NODE="$(command -v node)"
 UNIT="stage-survival-test"
 
+# wait_for_spawn / report_no_spawn — shared with run-macos.sh.
+# shellcheck source=scripts/survival/lib.sh
+. "$HERE/lib.sh"
+
 stop_unit() { sudo systemctl stop "$UNIT" >/dev/null 2>&1 || true; }
 # Logs are removed only on the way out, never between cases - a case creates its
 # log and then stops any stale unit, so clearing logs in that step would delete
@@ -43,7 +47,10 @@ run_case() { # $1 = swap|stopfirst   $2 = expected yes|no
   sudo systemd-run --unit="$UNIT" --setenv=SURVIVAL_LOG="$log" \
     "$NODE" "$HERE/parent.mjs" >/dev/null
 
-  sleep 4
+  if ! wait_for_spawn "$log"; then
+    report_no_spawn linux "systemd unit" "$log"
+    exit 1
+  fi
   if [ "$mode" = stopfirst ]; then
     sudo systemctl stop "$UNIT" >/dev/null 2>&1 || true
   fi

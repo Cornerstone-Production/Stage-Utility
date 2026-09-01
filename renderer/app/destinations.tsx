@@ -231,9 +231,32 @@ function ServiceHistoryShared() {
   return <ServiceHistorySection readOnly />;
 }
 
-export const NESTED_ROUTES: readonly { path: string; Component: FunctionComponent }[] = [
+export interface NestedRoute {
+  path: string;
+  Component: FunctionComponent;
+  /**
+   * Name for the shell's header and the mobile top bar.
+   *
+   * Omitted where the page draws its own heading — the layout editor puts the
+   * view's name in an editable field, a ScriptView plan draws ScriptViewHeader —
+   * in which case the chrome falls back to the parent destination's name rather
+   * than stacking a second title above the page's own.
+   */
+  label?: string;
+  /** Subtitle under the desktop title. Only meaningful alongside a label. */
+  description?: string;
+}
+
+export const NESTED_ROUTES: readonly NestedRoute[] = [
   // The shared read-only history. /history/manage is the operator's, in the rail.
-  { path: "/history", Component: ServiceHistoryShared },
+  // Titled here because it is NOT under any rail destination: /history/manage
+  // does not prefix-match /history, so this page had no name on either surface.
+  {
+    path: "/history",
+    Component: ServiceHistoryShared,
+    label: "History",
+    description: "Every service that has been run — timing and attendance.",
+  },
   { path: "/scriptview/$serviceType/$layout", Component: ScriptViewPlanRoute },
   { path: "/scriptview/presets", Component: ScriptViewSection },
   { path: "/patch/edit", Component: PatchSection },

@@ -56,7 +56,7 @@ export const SUB_LEADING = 1.2;
 
 /** Below this share of the box the value stops shrinking, however little budget
  *  the caption and sub-line have left it. */
-const VALUE_FLOOR_SCALE = 0.18;
+export const VALUE_FLOOR_SCALE = 0.18;
 
 /**
  * What the whole composition may occupy, as a share of the box.
@@ -102,6 +102,47 @@ export function valueSizeFor(boxH: number, captionPx: number, subPx: number): nu
 }
 
 /**
+ * The two OPTIONAL pieces below the sub-line, and what they cost.
+ *
+ * Additive, and off by default, so every existing caller gets exactly the
+ * composition it got before — asserted in readout.test.ts rather than assumed.
+ * They exist because ProVideoPlayer's "what is on now" widget needs a progress
+ * rule and a quiet next-cue line, and the alternative was a SECOND copy of this
+ * composition living in a PVP file. One idiom, one implementation, is the whole
+ * reason this module exists.
+ */
+export interface ReadoutExtras {
+  /** A hairline progress rule under the sub-line. */
+  meter?: boolean;
+  /** The quietest line, under everything — a qualified or secondary answer. */
+  footer?: boolean;
+}
+
+/** The rule's own height, box-relative with a pixel floor so it stays a hairline
+ *  on a wall and stays visible in a small tile. */
+export const METER_SCALE = 0.014;
+export const METER_MIN_PX = 2;
+
+/**
+ * How much bigger than its sub-line the value stays once the extras are drawn.
+ *
+ * The extras take their room FROM THE VALUE — there is nowhere else for it to
+ * come from, because `CONTENT_SCALE` was derived for the three-line composition
+ * and `avail` leaves 0.15 of the box spare while the footer alone wants 0.17.
+ * So a version that refused to touch the value could never draw a footer at any
+ * size, and did not: measured across every box height from 1 to 2000 px, the
+ * footer rendered at exactly none of them, while the inspector switch and the
+ * Home card toggle both wrote a setting for it.
+ *
+ * The floor is what stops the correction going the other way. Charging the
+ * extras to the value with no floor at all put the value BELOW its own sub-line
+ * — 0.098 of the box against 0.115 — which is a composition with its emphasis
+ * upside down. 1.4 keeps roughly the ratio the approved mockup drew (20px value
+ * over a 12.5px sub-line) once both extras are on.
+ */
+export const VALUE_OVER_SUB = 1.4;
+
+/**
  * The whole composition, guaranteed to fit the box it is painted in.
  *
  * `valueSizeFor` shares out a BUDGET, and a budget is a proportion — which stops
@@ -117,8 +158,6 @@ export function valueSizeFor(boxH: number, captionPx: number, subPx: number): nu
  *
  * @param boxH the height the composition actually has, in layout pixels — the
  *   content box, not the object's outer height.
- */
-/**
  * @param uniform size the VALUE as though the composition had all three lines,
  *   whatever this tile actually carries.
  *
@@ -133,43 +172,78 @@ export function fitComposition(
   hasCaption: boolean,
   hasSub: boolean,
   uniform = false,
-): { captionPx: number; valuePx: number; subPx: number } {
+  extras: ReadoutExtras = {},
+): { captionPx: number; valuePx: number; subPx: number; meterPx: number; footerPx: number } {
   const avail = Math.max(0, boxH - 2 * boxH * PAD_SCALE);
   const gap = boxH * GAP_SCALE;
 
   const fullCaptionPx = Math.max(CAPTION_MIN_PX, boxH * CAPTION_SCALE);
   const fullSubPx = Math.max(SUB_MIN_PX, boxH * SUB_SCALE);
+  const fullMeterPx = Math.max(METER_MIN_PX, boxH * METER_SCALE);
 
-  const attempt = (caption: boolean, sub: boolean) => {
+  const attempt = (caption: boolean, sub: boolean, meter: boolean, footer: boolean) => {
     const captionPx = caption ? fullCaptionPx : 0;
     const subPx = sub ? fullSubPx : 0;
+    const meterPx = meter ? fullMeterPx : 0;
+    // The footer is a sub-line in every respect but importance, so it is sized
+    // as one. A third type size here would be a third thing to tune.
+    const footerPx = footer ? fullSubPx : 0;
     // `used` below still counts the lines actually rendered, so the drop-a-line
     // loop is unaffected — and a uniform value is never LARGER than the value
     // the same box would otherwise get, so it cannot start overflowing.
-    const valuePx = uniform
-      ? valueSizeFor(boxH, fullCaptionPx, fullSubPx)
-      : valueSizeFor(boxH, captionPx, subPx);
+    const spentCaptionPx = uniform ? fullCaptionPx : captionPx;
+    const spentSubPx = uniform ? fullSubPx : subPx;
+    // The extras take their room from the VALUE, and are charged to `used` once.
+    //
+    // Both halves of that matter, and each was wrong on its own first. Charging
+    // them to `used` only meant the budget could never accommodate them and the
+    // footer drew at literally no box height between 1 and 2000 px. Subtracting
+    // them from the value AND adding them to `used` cancelled exactly, so `used`
+    // came out invariant to them, the drop-a-line loop never fired, and the
+    // value silently absorbed the whole cost — falling below its own sub-line,
+    // and to font-size 0 around a 60px box.
+    //
+    // So: subtract once, floored, and count the real cost in `used`.
+    const extrasPx =
+      (meterPx > 0 ? meterPx + gap : 0) + (footerPx > 0 ? footerPx * SUB_LEADING + gap : 0);
+    const rawValuePx = valueSizeFor(boxH, spentCaptionPx, spentSubPx);
+    const valuePx =
+      extrasPx > 0
+        ? Math.max(fullSubPx * VALUE_OVER_SUB, rawValuePx - extrasPx / VALUE_LEADING)
+        : rawValuePx;
     const used =
       valuePx * VALUE_LEADING +
       (captionPx > 0 ? captionPx * CAPTION_LEADING + gap : 0) +
-      (subPx > 0 ? subPx * SUB_LEADING + gap : 0);
-    return { captionPx, valuePx, subPx, used };
+      (subPx > 0 ? subPx * SUB_LEADING + gap : 0) +
+      extrasPx;
+    return { captionPx, valuePx, subPx, meterPx, footerPx, used };
   };
+
+  const wantMeter = extras.meter ?? false;
+  const wantFooter = extras.footer ?? false;
 
   // An unmeasured box is UNKNOWN, not tiny. Before the first measurement — and
   // anywhere without layout at all — the composition is drawn whole and the
   // measurement corrects it, rather than every widget flashing up as a bare
   // value and growing its caption a frame later.
-  if (boxH <= 0) return attempt(hasCaption, hasSub);
+  if (boxH <= 0) return attempt(hasCaption, hasSub, wantMeter, wantFooter);
 
-  // In order of what may be given up: the sub-line qualifies the value, the
-  // caption names it, and the value IS it.
-  for (const [caption, sub] of [[hasCaption, hasSub], [hasCaption, false], [false, false]] as const) {
-    const tried = attempt(caption, sub);
+  // In order of what may be given up. The footer is a QUALIFIED answer and goes
+  // first; the rule restates a number that is already written out; the sub-line
+  // qualifies the value; the caption names it; and the value IS it.
+  const order = [
+    [hasCaption, hasSub, wantMeter, wantFooter],
+    [hasCaption, hasSub, wantMeter, false],
+    [hasCaption, hasSub, false, false],
+    [hasCaption, false, false, false],
+    [false, false, false, false],
+  ] as const;
+  for (const [caption, sub, meter, footer] of order) {
+    const tried = attempt(caption, sub, meter, footer);
     if (tried.used <= avail) return tried;
   }
   // Even the value alone is taller than the box. Give it exactly what there is,
   // so a widget shrunk to a sliver draws a sliver rather than spilling over the
   // object next to it.
-  return { captionPx: 0, valuePx: Math.max(1, avail / VALUE_LEADING), subPx: 0 };
+  return { captionPx: 0, valuePx: Math.max(1, avail / VALUE_LEADING), subPx: 0, meterPx: 0, footerPx: 0 };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 // Point at the control that actually does the job, after arriving at its page.
 //
@@ -35,8 +35,9 @@ const FLASH_MS = 2000;
 const FIND_TIMEOUT_MS = 1200;
 
 /**
- * Fired before the search begins. Anything that can hide a flash target listens
- * and reveals it — see the "Not set up" group in integrations-panel.tsx.
+ * Fired before the search begins, so a surface that can act on a named target
+ * gets a chance to before the highlight goes looking — the Integrations page
+ * opens that integration's settings dialog.
  */
 export const REVEAL_EVENT = "stage:reveal-flash-target";
 
@@ -113,39 +114,39 @@ export function flashTarget(flashId: string): void {
 }
 
 /**
- * A counter that ticks whenever a flash target THIS surface can reveal is
- * requested.
+ * Run `onReveal` when a flash target this surface can act on is requested.
  *
- * Use it as a `key` to remount a collapsed thing with `defaultOpen`, which is
- * why it is a nonce rather than a boolean: remounting lets the operator close
- * the thing again afterwards, and it avoids a setState inside an effect.
+ * Replaces `useRevealNonce`, which returned a counter for re-keying a collapsed
+ * section open with `defaultOpen`. Nothing on the Integrations page collapses
+ * any more — every card is mounted on the first frame — so the counter had no
+ * job left. What a caller actually wants is the id, so it can open that
+ * integration's dialog.
  *
  * Seeded from the pending target because `flashTarget` runs on the page being
  * LEFT — its event fires before the destination has mounted. The listener covers
  * the other order, when the surface is already on screen.
- *
- * Extracted from IntegrationsPanel, which had the only copy, when the
- * integration ROWS needed exactly the same behaviour: a configured integration
- * is collapsed, so the card a highlight is aimed at is not in the DOM at all.
  */
-export function useRevealNonce(matches: (flashId: string) => boolean): number {
+export function useRevealTarget(onReveal: (flashId: string) => void): void {
   // Held in a ref so the listener is subscribed once and still sees the newest
-  // predicate — `matches` is a fresh closure on every render.
-  const matchRef = useRef(matches);
+  // callback — it is a fresh closure on every render.
+  const cbRef = useRef(onReveal);
   useEffect(() => {
-    matchRef.current = matches;
+    cbRef.current = onReveal;
   });
-  const [nonce, setNonce] = useState(() => {
+
+  // The pending target is delivered in an effect, not during render: a caller
+  // that sets state from it would otherwise be setting state while rendering.
+  useEffect(() => {
     const pending = pendingFlashTarget();
-    return pending && matches(pending) ? 1 : 0;
-  });
-  useEffect(() => {
-    const onReveal = (e: Event) => {
-      const flashId = (e as CustomEvent<RevealDetail>).detail?.flashId;
-      if (flashId && matchRef.current(flashId)) setNonce((n) => n + 1);
-    };
-    window.addEventListener(REVEAL_EVENT, onReveal);
-    return () => window.removeEventListener(REVEAL_EVENT, onReveal);
+    if (pending) cbRef.current(pending);
   }, []);
-  return nonce;
+
+  useEffect(() => {
+    const handle = (e: Event) => {
+      const flashId = (e as CustomEvent<RevealDetail>).detail?.flashId;
+      if (flashId) cbRef.current(flashId);
+    };
+    window.addEventListener(REVEAL_EVENT, handle);
+    return () => window.removeEventListener(REVEAL_EVENT, handle);
+  }, []);
 }

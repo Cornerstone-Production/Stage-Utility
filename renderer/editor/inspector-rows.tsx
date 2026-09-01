@@ -25,6 +25,8 @@ import {
 import { ChevronRightIcon } from "lucide-react";
 import { invoke } from "../lib/api";
 import { cn } from "../lib/cn";
+import { defaultStyle } from "../main/layout-objects";
+import { IDIOM_TYPES } from "@main/types/readout-types";
 
 /**
  * A group heading in the inspector.
@@ -310,6 +312,94 @@ export function PixelField({ label, value, dim, onChange }: { label: string; val
         onChange={(v) => onChange(v / dim)}
       />
     </label>
+  );
+}
+
+const WEIGHTS = [300, 400, 500, 600, 700, 800];
+
+/**
+ * Does this type set its own type size, or does the operator?
+ *
+ * Every type in IDIOM_TYPES renders through `Readout`, which works out its
+ * caption, value and sub-line sizes from the BOX HEIGHT (`fitComposition`) and
+ * hard-codes their weights. It never reads `style.fontSize` or
+ * `style.fontWeight`, and `style.uppercase` reaches nothing either — the idiom
+ * decides per composition whether a value is set in caps.
+ *
+ * The inspector wrote all three anyway, so an operator could change the number
+ * on an attendance or SPL widget and watch nothing move. That is exactly the
+ * control-that-does-nothing this repo refuses to ship, and it was reported as
+ * one.
+ *
+ * HIDDEN rather than made to work. The auto-fit is the better behaviour and the
+ * one being asked for elsewhere — a widget should fill its box — so the honest
+ * fix is to stop offering a size for the widgets that already have the right
+ * answer, and say why. Making `fontSize` a multiplier on the fit would have to
+ * reach inside `fitComposition`, which also decides which LINES survive at a
+ * given height: a multiplier below one would silently drop the caption, which is
+ * a worse control than none.
+ *
+ * A predicate rather than an inline `IDIOM_TYPES.has(...)` because three places
+ * ask the same question, and this file is where the rows that depend on it live.
+ */
+export function sizesTypeFromItsBox(t: LayoutObjectType): boolean {
+  return IDIOM_TYPES.has(t);
+}
+
+/**
+ * Font size and weight — or, for a widget that sizes itself, the reason there
+ * are none.
+ *
+ * Its own component so the decision has ONE home and can be rendered on its own
+ * in a test. The inspector proper needs a stack of live integration hooks to
+ * mount at all, so a guard on "is the Font size row offered for an SPL meter"
+ * would otherwise have had to read the source, and a guard that reads source is
+ * how this repo has shipped thirteen vacuous ones.
+ */
+export function TypeSizeRows({
+  type,
+  style,
+  canvasHeight,
+  onStyle,
+}: {
+  type: LayoutObjectType;
+  style: LayoutStyle;
+  /** Design-px height of the canvas — font sizes are stored as a fraction of it. */
+  canvasHeight: number;
+  onStyle: (patch: Partial<LayoutStyle>) => void;
+}) {
+  if (sizesTypeFromItsBox(type)) {
+    return (
+      <p className="text-caption2 text-fg-muted leading-snug">
+        This widget sets its own type: it fits its caption, value and sub-line to the box, so make the object bigger
+        to make the reading bigger. Colour and alignment below still apply.
+      </p>
+    );
+  }
+  // Fall back to THIS type's own default, not a blanket 0.05. An object whose
+  // default differs (an embedded view starts at 0.016) otherwise reported a size
+  // it was not rendering at, so the first nudge of the stepper jumped it to a
+  // number it had never been.
+  const px = Math.round((style.fontSize ?? defaultStyle(type).fontSize ?? 0.05) * canvasHeight * 10) / 10;
+  return (
+    <>
+      <Row label="Font size">
+        <NumberField
+          value={px}
+          step={1}
+          min={1}
+          max={Math.round(0.5 * canvasHeight)}
+          suffix="px"
+          onChange={(v) => onStyle({ fontSize: v / canvasHeight })}
+        />
+      </Row>
+      <Row label="Weight">
+        <Select value={String(style.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
+        </Select>
+      </Row>
+    </>
   );
 }
 

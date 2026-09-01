@@ -14,7 +14,7 @@
 import * as http from "http";
 
 import type { TranscriptLineDTO } from "../types/stage.js";
-import { broadcast, channelHasSubscribers } from "./broadcaster.js";
+import { broadcast, channelInDemand } from "./broadcaster.js";
 import { scrub } from "./scrub.js";
 import { ConnectionLifecycle } from "./integration-base.js";
 
@@ -405,8 +405,13 @@ export class ProdComService extends ConnectionLifecycle {
       this.transcriptTimer = null;
     }
     this.transcriptDirty = false;
-    // Skip the full-buffer spread + push when no transcription display is watching.
-    if (channelHasSubscribers("prodcom:transcript")) broadcast("prodcom:transcript", this.getBuffer());
+    // Skip the full-buffer spread + push when nothing consumes the transcript.
+    //
+    // channelInDemand, not channelHasSubscribers: the prodcom.phrase-said trigger
+    // reads this channel from inside the process, so a browser-only check meant a
+    // phrase rule never fired unless somebody happened to have a transcription
+    // display open — which on an unattended box is never.
+    if (channelInDemand("prodcom:transcript")) broadcast("prodcom:transcript", this.getBuffer());
   }
 
   private scheduleTranscript(): void {

@@ -1,33 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 
-import { invoke, onNotification } from "../lib/api";
+import { invoke } from "../lib/api";
+import { useStatusChannel } from "./use-status-channel";
 
 /**
  * The in-progress service timeline (planned vs. actual per-item timing), pushed on
  * the "service-timeline:history" channel each time an item changes. Hydrates once
  * from the current record, then stays live. Backs the "Service pacing" layout
  * object's whole-service scope. Returns null when nothing is recording yet.
+ *
+ * Ordering between the hydrate and the first push is useStatusChannel's job — see
+ * the note there. The channel fires on item changes, so a read landing after one
+ * puts the previous item back on the pacing widget until the next change.
  */
 export function useServiceTimeline(): ServiceTimeline | null {
-  const [timeline, setTimeline] = useState<ServiceTimeline | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    invoke<ServiceTimeline | null>("serviceTimeline:getCurrent")
-      .then((t) => {
-        if (!cancelled) setTimeline(t ?? null);
-      })
-      .catch(() => {
-        /* not recording yet — ignore */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    return onNotification("service-timeline:history", (p) => setTimeline((p as ServiceTimeline | null) ?? null));
-  }, []);
-
-  return timeline;
+  const read = useCallback(() => invoke<ServiceTimeline | null>("serviceTimeline:getCurrent"), []);
+  return useStatusChannel<ServiceTimeline>(read, "service-timeline:history");
 }

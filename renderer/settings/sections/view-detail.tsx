@@ -7,7 +7,7 @@
 // being deleted with its old shell.
 
 import { useEffect, useState, type ChangeEvent } from "react";
-import { TrashIcon, CopyIcon } from "lucide-react";
+import { TrashIcon, CopyIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
   Button,
@@ -27,6 +27,7 @@ import { SlotEditor } from "./slots-section";
 import { LayoutEditor } from "../../editor/layout-editor";
 import { ViewPreview } from "./view-preview";
 import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
+import { CalendarSources } from "./calendar-sources";
 import { viewSurface } from "@main/types/views";
 
 const PREVIEW_ASPECTS = [
@@ -152,6 +153,35 @@ export function ViewDetail({
               <SelectItem value="console">Control surface</SelectItem>
             </SelectContent>
           </Select>
+        )}
+        {/* HERE, next to the control that makes it mean anything. A console is
+            the only surface with chrome to hide — a wall screen is served by a
+            different document that never had any — so this appears exactly where
+            a view is declared to be one, and nowhere else.
+
+            An icon toggle rather than a fourth select: the row above already
+            carries a name, two pickers and two buttons, and it wraps. This is the
+            same shape and the same two icons #368 uses for the same idea on an
+            Output, deliberately, so the vocabulary is one vocabulary — but it is
+            a SEPARATE field, because that one is per physical screen and hides
+            the kiosk's bar in another document entirely. */}
+        {viewSurface(view) === "console" && (
+          <Button
+            variant="transparent"
+            size="small"
+            iconOnly
+            aria-label={view.hideChrome ? "Show the app's bars on this console" : "Hide the app's bars on this console"}
+            tooltip={
+              view.hideChrome
+                ? "Showing the app's bars. Hiding them gives a phone back 89px."
+                : "Hide the app's bars on this console — the top bar and the context bar, at every width. A floating menu button stays."
+            }
+            onClick={() => void invoke("views:setHideChrome", { id: view.id, hideChrome: !view.hideChrome })}
+          >
+            {view.hideChrome
+              ? <PanelTopDashedIcon className="size-3.5 text-accent" />
+              : <PanelTopIcon className="size-3.5 text-fg-muted" />}
+          </Button>
         )}
         <Button variant="filled" size="small" onClick={() => handlers.handleDuplicateView(view.id)}>
           <CopyIcon className="size-3.5 text-fg-muted" />
@@ -300,6 +330,17 @@ export function ViewDetail({
             The Script view renders the active plan's rundown — the same table as the ScriptView
             pages, following whichever plan the app is set to. Max SPL per item lives on the
             SPL rundown view.
+          </p>
+        </>
+      ) : view.kind === "calendar" ? (
+        <>
+          <Separator />
+          <CalendarSources view={view} pcoConfigured={stageState.pcoConfigured ?? false} />
+          <p className="text-caption2 text-fg-muted">
+            The calendar view draws this month from Planning Center Calendar, six weeks at a time,
+            and marks whatever is running now. There is no booking-versus-event distinction because
+            Planning Center does not model one — a room or a van reserved for a meeting carries the
+            tag of whoever reserved it, so no rule separates them.
           </p>
         </>
       ) : (

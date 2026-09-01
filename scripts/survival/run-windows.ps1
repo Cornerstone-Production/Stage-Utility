@@ -36,23 +36,50 @@ try {
   Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
   Start-ScheduledTask -TaskName $taskName
 
-  # Wait for the parent to actually BE running before stopping the task. A blind
-  # sleep here raced a cold PowerShell + Node start on a slow runner: the task
-  # had not written PARENT-START yet, so stopping it tore down nothing, the log
-  # came back empty, and the run failed as though the child had been killed.
-  # That is a false alarm indistinguishable from a real survival failure, which
-  # is the one thing this test must never produce.
+  # Wait for the CHILD TO EXIST before stopping the task.
+  #
+  # This waited on PARENT-START, which is one step too early: the parent writes
+  # that line and only THEN spawns. Stopping in the gap tore down a parent that
+  # had no child yet, so nothing could survive and the log came back holding
+  # PARENT-START and nothing else -- which is exactly what a real survival
+  # failure looks like. Seen twice in a row on a runner, on a change that
+  # touched only renderer files.
+  #
+  # PARENT-SPAWNED is the precondition the test actually needs: it means there
+  # IS a detached child, so tearing down now asks the question this file exists
+  # to ask. Same false-alarm reasoning as the earlier PARENT-START wait, one
+  # step further along.
+  #
+  # PARENT-SPAWN-FAILED (parent.mjs:40) ends the wait immediately: the child is
+  # never coming, and burning the full deadline on a question already answered
+  # just delays the diagnosis by a minute.
+  #
+  # The deadline and poll are also in scripts/survival/lib.sh, which the two
+  # shell runners source. PowerShell cannot source a bash file, so these two
+  # have to be changed together.
   $deadline = (Get-Date).AddSeconds(60)
   do {
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 250
     $started = Get-Content $log -Raw -ErrorAction SilentlyContinue
-  } while (-not ($started -match "PARENT-START") -and (Get-Date) -lt $deadline)
+  } while (-not ($started -match "PARENT-SPAWNED") -and -not ($started -match "PARENT-SPAWN-FAILED") `
+           -and (Get-Date) -lt $deadline)
 
-  if (-not ($started -match "PARENT-START")) {
+  if (-not ($started -match "PARENT-SPAWNED")) {
     # Deliberately a DIFFERENT message: nothing was ever torn down, so this says
     # nothing about whether a child survives. Reported as a failure because the
     # test did not run, not because the behaviour is wrong.
-    Write-Host "  windows survival: INCONCLUSIVE - the scheduled task never started within 60s"
+    # Says WHICH of the three it was, because they need different fixes: a task
+    # that never ran at all, a parent that ran and never got to its spawn, and a
+    # spawn that threw. Mirrored in lib.sh's spawn_diagnosis.
+    $how =
+      if ($started -match "PARENT-SPAWN-FAILED (?<msg>.*)") {
+        "started but could not spawn its child: $($Matches.msg.Trim())"
+      } elseif ($started -match "PARENT-START") {
+        "started but never spawned its child within 60s"
+      } else {
+        "never started, within 60s"
+      }
+    Write-Host "  windows survival: INCONCLUSIVE - the scheduled task $how"
     Write-Host "  Nothing was torn down, so this does not indicate a survival failure."
     exit 1
   }

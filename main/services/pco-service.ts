@@ -3,8 +3,10 @@
 
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import { scheduleItems } from "./automation-item-schedule.js";
+import type { PlanNoteDTO } from "./plan-note-checklist.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
 import { pickServiceTime } from "./pick-service-time.js";
+import { serviceWindow } from "./service-window.js";
 
 /**
  * PCO rejected the credentials (401).
@@ -23,6 +25,33 @@ export class PcoAuthError extends Error {
 import { scrub } from "./scrub.js";
 
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
+
+/**
+ * The Services API version this client is written against.
+ *
+ * PCO versions each product by DATE, selected with an `X-PCO-API-Version:
+ * YYYY-MM-DD` request header and resolved by an equal-or-earlier match. Send no
+ * header at all — which this client did until now — and the version is whatever
+ * is configured as the app's default in PCO's developer console: a setting that
+ * lives outside this repository, differs between installs, and is older than
+ * whatever the code was written against. Pinning here makes the contract a
+ * property of the code rather than of one org's console.
+ *
+ * Deliberately an exact date, never a "give me the newest" sentinel. A floating
+ * request would let a PCO release change field names, defaults or pagination
+ * under a running install with no change in this repository.
+ *
+ * Chosen 2026-08-29. Services publishes exactly two versions — 2018-08-01,
+ * withdrawn 2 April 2024, and 2018-11-01 — so this is both the newest and the
+ * only one still served. The one documented difference between them is that
+ * 2018-11-01 makes the `/people` endpoint respect the "Can view people not on My
+ * Teams" permission; this client calls no `/people` endpoint.
+ *
+ * To bump: open https://api.planningcenteronline.com/docs/apps/services, take the
+ * newest date from the version selector, read its changelog entry for field or
+ * pagination changes, then change this string.
+ */
+export const PCO_API_VERSION = "2018-11-01";
 
 /**
  * Is `candidate` an absolute URL on the same origin as `base`?
@@ -83,6 +112,69 @@ export function withOffset(url: string, offset: number): string {
   return u.toString();
 }
 
+/** A PCO collection response, carrying the pagination link PCO puts beside it. */
+export type PcoPage<T extends PcoNode = PcoNode> = PcoResponse<T> & { links?: { next?: string } };
+
+/**
+ * Walk every page of a PCO collection, handing each page to `onPage`.
+ *
+ * ONE loop, for every paginated reader in this app. It was three verbatim
+ * copies — two here and a third in pco-calendar-service.ts — and pagination
+ * that is right in one place and subtly wrong in the other two is this
+ * repository's most expensive recurring mistake. The rules below are exactly the
+ * kind that drift:
+ *
+ *  - An OFFSET, not a URL. `links.next` arrives in a response BODY and the
+ *    request it would feed carries the operator's App ID and secret; it used to
+ *    be handed straight back to request(), so a redirected or spoofed response
+ *    could walk those credentials to another host. An integer cannot carry a
+ *    host, a path or a scheme, so no string from a PCO response body reaches
+ *    fetch() at all — the rest of the URL is the one we built.
+ *  - STRICTLY FORWARD. A next-link that repeats or rewinds the offset would
+ *    otherwise fetch the same page for ever. PCO does not do that, which is
+ *    exactly why nothing would catch it if it started.
+ *  - BOUNDED, and reaching the bound is LOGGED. A bound is the right defence
+ *    against a runaway loop, but exiting on it is otherwise indistinguishable
+ *    from having read everything, and a caller cannot tell a whole month from
+ *    the first `maxPages × per_page` of it. Two of the three copies truncated in
+ *    total silence; absence with no signal is the failure this guards against.
+ *
+ * `label` is the log tag the truncation warning carries, so an operator reading
+ * /log can tell which collection came back short.
+ */
+export async function readPcoPages<T extends PcoNode = PcoNode>(
+  firstUrl: string,
+  maxPages: number,
+  label: string,
+  request: (url: string) => Promise<PcoPage<T>>,
+  onPage: (page: PcoPage<T>) => void,
+): Promise<void> {
+  // Highest offset already asked for, so a next-link that does not move forward
+  // ends the loop instead of fetching one page for ever.
+  let seenOffset = -1;
+  let url: string | null = firstUrl;
+  let rows = 0;
+
+  for (let page = 0; url && page < maxPages; page++) {
+    const json: PcoPage<T> = await request(url);
+    rows += Array.isArray(json.data) ? json.data.length : 1;
+    onPage(json);
+    const offset = nextOffset(json.links?.next);
+    url = offset === null || offset <= seenOffset ? null : withOffset(url, offset);
+    seenOffset = offset ?? seenOffset;
+  }
+
+  // `url` still set means the bound stopped us, not PCO. `label` is a caller's
+  // constant today, but the house rule for this file is that EVERY value
+  // interpolated into a log line goes through scrub — a rule with one exception
+  // is a rule the next tag gets added to as a second exception.
+  if (url) {
+    console.warn(
+      `[${scrub(label)}] page limit reached after ${scrub(rows)} row(s); the rest of this collection was not read`,
+    );
+  }
+}
+
 /**
  * A URL that arrived in a PCO response body, REBUILT on our own origin.
  *
@@ -97,6 +189,23 @@ export function withOffset(url: string, offset: number): string {
  * that sends the credentials somewhere else, including through a redirect chain
  * or a URL parser disagreement.
  *
+ * That sentence was FALSE for two years, and the guard written to prove it did
+ * not notice. The path and query used to be spliced back together as a STRING
+ * and handed to `new URL(path, origin)` -- and a path beginning `//` is not a
+ * path to that constructor, it is a PROTOCOL-RELATIVE URL. So
+ * `https://api.planningcenteronline.com//attacker.test/x` passed sameOrigin
+ * honestly (the origin really does match), produced the pathname
+ * `//attacker.test/x`, and re-resolved to `https://attacker.test/x` -- with the
+ * operator's App ID and secret attached. `\\attacker.test` reached the same
+ * place, because WHATWG folds a backslash to a slash for a special scheme, so no
+ * check on the RAW string would have caught it either.
+ *
+ * The fix is to stop round-tripping through a string. Assigning `.pathname` on a
+ * URL object sets a component; it cannot reach the origin, where the two-argument
+ * constructor can. Latent rather than live when found -- nothing was passing a
+ * response-body string in -- but the boundary is the entire justification for
+ * `requestProduct` being public, so it has to be true rather than nearly true.
+ *
  * It also gives static analysis something it can see. CodeQL reads a
  * user-defined type predicate as an ordinary boolean, so the guarded string
  * stayed tainted and js/request-forgery fired at critical on the release PR;
@@ -106,27 +215,117 @@ export function withOffset(url: string, offset: number): string {
  */
 export function pcoUrlFrom(candidate: unknown, base: string): string | null {
   if (!sameOrigin(candidate, base)) return null;
-  let path: string;
   try {
-    const parsed = new URL(candidate);
-    path = `${parsed.pathname}${parsed.search}`;
+    return rebuildOn(base, new URL(candidate));
   } catch {
     return null;
   }
-  // The origin is the CONSTANT's, never the candidate's.
-  return new URL(path, new URL(base).origin).toString();
 }
+
+/**
+ * `base`'s origin, `parsed`'s path and query. The one rebuild, for both callers.
+ *
+ * Built by ASSIGNMENT, never by `new URL(path, origin)`.
+ *
+ * The two-argument constructor RE-PARSES its first argument, and a pathname
+ * beginning with `//` is read as a protocol-relative AUTHORITY, not a path. So a
+ * candidate of
+ *     https://api.planningcenteronline.com//attacker.example/steal
+ * passes sameOrigin (its origin really is PCO's), yields a pathname of
+ * `//attacker.example/steal`, and rebuilds as https://attacker.example/steal --
+ * off-origin, with pcoFetch about to attach the app id and secret to it.
+ * `\\attacker.example` reaches the same place, because WHATWG folds a backslash
+ * to a slash for a special scheme.
+ *
+ * The setters write one component each and cannot touch the origin. This is the
+ * whole of the fix for that bug, and it is written once: pcoUrlFrom and
+ * pinnedToPco each had a copy, differing only in whether a bad candidate is
+ * rejected or forced, which is not the part that is easy to get wrong.
+ */
+function rebuildOn(base: string, parsed: URL): string {
+  const rebuilt = new URL(base);
+  rebuilt.pathname = parsed.pathname;
+  rebuilt.search = parsed.search;
+  return rebuilt.toString();
+}
+/**
+ * The one URL that reaches `fetch`, forced onto PCO's own origin.
+ *
+ * Defence in depth rather than a second opinion: every caller already builds on
+ * PCO_BASE, so for correct callers this returns the same string it was given.
+ * It exists so that "the host cannot be moved" is enforced at the point the
+ * credentials are attached, instead of being a property every call site has to
+ * remember. A caller that hands over something off-origin gets PCO's host and
+ * that caller's path, never the other host.
+ *
+ * Throwing is deliberate: an unparseable URL here means a caller built one
+ * wrong, and a request that quietly went somewhere else with the operator's app
+ * id and secret on it is not a failure to swallow.
+ */
+export function pinnedToPco(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`pcoFetch was handed a URL it cannot parse: ${scrub(url)}`);
+  }
+  // The same rebuild pcoUrlFrom uses. The two differ only in what they do with a
+  // candidate that is not PCO's — reject, or force — never in how the URL is put
+  // back together, which is where the protocol-relative bug lived.
+  return rebuildOn(PCO_BASE, parsed);
+}
+
 // Tiered cache TTLs. Slow-changing metadata used to share a single 30s TTL with
 // everything, which re-pulled it constantly (the live timer polls every 1–4s and
 // the auto-advance check reads plan times every tick). Split by volatility:
 //   LONG   — effectively static within a service day (service types, note
 //            categories, team positions, plan service times).
 //   MEDIUM — plan content that can still be edited up to service time (plan list,
-//            plan items, team members, attachments).
+//            plan items, team members, attachments). Context-dependent: shorter
+//            inside a service window, see mediumTtlMs.
 //   getLive() stays UNCACHED — it's the live timer and must be real-time.
 const CACHE_TTL_MS = 30_000; // default / fallback
 const TTL_LONG_MS = 15 * 60_000;
 const TTL_MEDIUM_MS = 3 * 60_000;
+/**
+ * The MEDIUM tier while a service window is open.
+ *
+ * Three minutes is right for the 95% of the week that is not a service: plan
+ * content barely moves and every re-pull is a request against a rate-limited
+ * cloud API. It is wrong for the hours either side of a service, which is
+ * precisely when someone is editing the plan and a stage display is showing the
+ * result. 45s is short enough that an edit lands before the next thing happens on
+ * stage and long enough that the live timer's ~1 Hz reads still coalesce onto one
+ * request.
+ */
+const TTL_MEDIUM_WINDOW_MS = 45_000;
+
+/**
+ * The MEDIUM TTL for right now — read when an entry is READ, not when it is
+ * written (see `cacheGet`).
+ *
+ * Evaluating at write time would stamp an absolute expiry onto the entry and
+ * freeze the decision: an entry written three minutes before a window opens would
+ * live out its full three minutes inside the window, and the tightening would not
+ * take effect until the entry it was meant to shorten had already expired on its
+ * own. Read-time evaluation means an entry that is READ inside a window is judged
+ * by the window's TTL however long ago it was written. (An entry written inside a
+ * window and not read until after it closed gets the full three minutes — correct,
+ * and asserted in pco-window-ttl.test.ts.)
+ *
+ * "In a window" is `serviceWindow`'s definition — PCO plan times plus the
+ * operator's configured lead and tail — and not a second one. It compares instants
+ * against plan times, so there is no calendar-date or hour-of-day question here
+ * and nothing that could disagree with the app time zone.
+ *
+ * Note this ignores `reconnectSchedule.enabled`, which switches the integration
+ * reconnect back-off, not the freshness of PCO data. See the roster tick, which
+ * reads the window the same way.
+ */
+function mediumTtlMs(): number {
+  return serviceWindow.isActive() ? TTL_MEDIUM_WINDOW_MS : TTL_MEDIUM_MS;
+}
+
 // A request that FAILED is cached for this long, and no longer. Not caching a
 // failure at all was the other half of the mistake: getLive() calls getPlanTimes
 // on every live tick (~1/s during a service), and its only rate limiter is this
@@ -138,6 +337,12 @@ const TTL_FAILED_MS = 30_000;
 /** Short-lived cache for attachment `open` signed URLs (PCO issues ~1h links). */
 const ATTACH_OPEN_TTL_MS = 10 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
+/** Pagination ceiling for /services/v2 collections. 100 × 6 is far past the
+ *  longest plan or attachment list this has to draw, and a bound is what stops a
+ *  malformed next-link becoming an infinite loop. Reaching it warns; see
+ *  readPcoPages. */
+const MAX_PAGES = 6;
+
 const MAX_RETRIES = 3;
 /** Concurrent in-flight PCO requests. PCO allows roughly 100 per 20s per app, so
  *  the ceiling is well under that even when every slot is retrying. */
@@ -145,6 +350,11 @@ const MAX_CONCURRENT = 4;
 // Per-request PCO logging (~2 lines per uncached /live, ~1 Hz during a service) is
 // off unless STAGE_UTILITY_DEBUG=1 — keeps an unrotated stdout log from ballooning.
 const DEBUG_PCO = process.env.STAGE_UTILITY_DEBUG === "1";
+
+/** One place, so the roster reader and the targeted invalidator cannot drift. */
+function teamMembersCacheKey(appId: string, serviceTypeId: string, planId: string): string {
+  return `team:${appId}:${serviceTypeId}:${planId}`;
+}
 
 /** True for PCO's auto-generated "initials" placeholder avatar (served at
  *  …/uploads/initials/AB.png when a person has no uploaded photo). Real photos
@@ -181,9 +391,18 @@ function toPlanDTO(item: PcoNode): PlanDTO {
   };
 }
 
+/**
+ * A cached value and how long it lives.
+ *
+ * `ttl` may be a function, which is resolved on every READ rather than stamped
+ * into an absolute expiry at write time. That is what lets the MEDIUM tier
+ * shorten the moment a service window opens, including for entries already
+ * sitting in the cache.
+ */
 interface CacheEntry<T> {
   value: T;
-  expiresAt: number;
+  writtenAt: number;
+  ttl: number | (() => number);
 }
 
 /** A plan's "service" plan_time — one per service occurrence (e.g. 9am, 11am). */
@@ -224,15 +443,17 @@ export function resolvePlanCurrentNext(
   return { currentItemTitle: current?.title ?? null, nextItemTitle: next?.title ?? null };
 }
 
-// Generic JSON:API node from PCO
-interface PcoNode {
+// Generic JSON:API node from PCO. Exported because every PCO product speaks the
+// same JSON:API dialect, so a client for another one (Calendar) parses the same
+// shape rather than declaring its own copy of it.
+export interface PcoNode {
   id: string;
   type?: string;
   attributes: Record<string, unknown>;
   relationships?: Record<string, { data: { id: string; type: string } | null | { id: string; type: string }[] }>;
 }
 
-interface PcoResponse<T extends PcoNode = PcoNode> {
+export interface PcoResponse<T extends PcoNode = PcoNode> {
   data: T | T[];
   included?: PcoNode[];
 }
@@ -262,20 +483,24 @@ class PcoService {
   private cacheGet<T>(key: string): T | null {
     const entry = this.cache.get(key);
     if (!entry) return null;
-    if (Date.now() > entry.expiresAt) {
+    // Resolved HERE, not at write time, so a tier whose TTL depends on context
+    // (MEDIUM, which tightens inside a service window) applies to entries that
+    // were already in the cache when the context changed.
+    const ttlMs = typeof entry.ttl === "function" ? entry.ttl() : entry.ttl;
+    if (Date.now() - entry.writtenAt > ttlMs) {
       this.cache.delete(key);
       return null;
     }
     return entry.value as T;
   }
 
-  private cacheSet<T>(key: string, value: T, ttlMs: number = CACHE_TTL_MS): void {
+  private cacheSet<T>(key: string, value: T, ttl: number | (() => number) = CACHE_TTL_MS): void {
     // Bound cache to 200 entries to avoid unbounded growth.
     if (this.cache.size >= 200) {
       const firstKey = this.cache.keys().next().value;
       if (firstKey !== undefined) this.cache.delete(firstKey);
     }
-    this.cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    this.cache.set(key, { value, writtenAt: Date.now(), ttl });
   }
 
   /** Invalidate every cache entry scoped to one plan (its items, team, service
@@ -286,13 +511,73 @@ class PcoService {
     }
   }
 
+  /**
+   * Drop just one plan's ROSTER, so the next read is a real request.
+   *
+   * Narrower than clearPlanCache on purpose. The in-window roster tick runs every
+   * minute for hours, and clearing the plan's items, notes, attachments and times
+   * alongside it would turn one request a minute into a handful.
+   *
+   * Must build the same key `listTeamMembers` writes.
+   */
+  clearTeamMembersCache(appId: string, serviceTypeId: string, planId: string): void {
+    this.cache.delete(teamMembersCacheKey(appId, serviceTypeId, planId));
+  }
+
   clearCache(): void {
     this.cache.clear();
   }
 
-  private makeAuthHeader(appId: string, secret: string): string {
+  /**
+   * Every header a PCO request carries.
+   *
+   * One builder rather than three copies of the same object literal: the GET, the
+   * Live control POST and the attachment-open POST had drifted into three
+   * hand-written copies of the auth header, and a version pin is only a pin if it
+   * is on all of them.
+   */
+  private pcoHeaders(appId: string, secret: string, apiVersion: string = PCO_API_VERSION): Record<string, string> {
     const creds = Buffer.from(`${appId}:${secret}`).toString("base64");
-    return `Basic ${creds}`;
+    return {
+      Authorization: `Basic ${creds}`,
+      "Content-Type": "application/json",
+      // Defaulted, never optional. Services is the overwhelming majority of the
+      // traffic and pins to PCO_API_VERSION; a caller reaching ANOTHER PCO
+      // product states its own version, because PCO versions each product on its
+      // own date line and the Services date means nothing to Calendar. Sending
+      // no header at all is what this pin exists to stop, so the parameter
+      // cannot express it.
+      "X-PCO-API-Version": apiVersion,
+    };
+  }
+
+  /**
+   * THE call to `fetch` for the PCO API. There should never be a second one.
+   *
+   * Three hand-written header literals is how the version pin could have been
+   * added to one site and missed on two, which is this repository's most expensive
+   * recurring mistake. Rather than fix it in three places and test all three, the
+   * headers are now unskippable: a new endpoint gets them by construction, because
+   * there is no other way to reach the network from here.
+   *
+   * `url` is always one this client BUILT (see pcoUrlFrom / withOffset) — no string
+   * from a PCO response body reaches here. This function no longer TRUSTS that:
+   * it re-pins the origin itself, so the promise holds even if a future caller
+   * forgets it. The credentials go out as headers on this request; anything that
+   * moved the host would take them along.
+   *
+   * Written as an assignment onto the constant's URL, never `new URL(path, base)`
+   * — that constructor re-parses its first argument and reads a leading `//` as
+   * an authority, which is the exact bug fixed one commit ago.
+   */
+  private pcoFetch(
+    url: string,
+    appId: string,
+    secret: string,
+    init: RequestInit = {},
+    apiVersion?: string,
+  ): Promise<Response> {
+    return fetch(pinnedToPco(url), { ...init, headers: this.pcoHeaders(appId, secret, apiVersion) });
   }
 
   private sleep(ms: number): Promise<void> {
@@ -311,6 +596,7 @@ class PcoService {
     url: string,
     appId: string,
     secret: string,
+    apiVersion?: string,
   ): Promise<PcoResponse<T>> {
     // Every PCO call queues here. Retrying a 429 does not help if the burst that
     // caused it is still in flight, so the cap is what actually prevents one —
@@ -318,10 +604,53 @@ class PcoService {
     // be small.
     const release = await this.acquireSlot();
     try {
-      return await this.requestInner<T>(url, appId, secret);
+      return await this.requestInner<T>(url, appId, secret, apiVersion);
     } finally {
       release();
     }
+  }
+
+  /**
+   * A GET against ANOTHER Planning Center product's API — Calendar, today —
+   * carried by this client's transport.
+   *
+   * PCO's rate limit is per APP, not per product, so a second client with its own
+   * concurrency gate would not be a second budget: it would be the same budget
+   * spent twice as fast, and the cap that exists to prevent a 429 would stop
+   * capping anything. Sharing the transport is the only way the ceiling stays a
+   * ceiling. The retry budget, the backoff, the auth header and the scrubbed
+   * logging come along for the same reason — none of them is worth a second copy.
+   *
+   * `apiVersion` is REQUIRED here, unlike on the internal `request`. PCO versions
+   * each product by date and resolves the header to the newest published version
+   * at or before it; send nothing and you get whatever is configured as the app's
+   * default in a developer console outside this repository. A caller reaching a
+   * new product must therefore state which contract it was written against.
+   *
+   * `url` is REBUILT on the constant's origin before it is used, exactly as
+   * pcoUrlFrom does for a link out of a response body. Every request from here
+   * carries the operator's App ID and secret, and this is the first PUBLIC way
+   * into the credentialed fetch — until now the invariant "no outside string
+   * reaches it" held because `request` was private and every URL was built in
+   * this file. A docstring asking callers to behave would have traded that for a
+   * rule someone has to remember; rebuilding the host from the constant keeps it
+   * a property of the code, and is the documented remediation for the
+   * js/request-forgery alerts this file has already collected once.
+   *
+   * @throws when `url` is not on PCO's origin, rather than sending credentials.
+   */
+  async requestProduct<T extends PcoNode = PcoNode>(
+    url: string,
+    appId: string,
+    secret: string,
+    apiVersion: string,
+  ): Promise<PcoResponse<T>> {
+    // The origin is the CONSTANT's; only the path and query come from the
+    // caller. There is no string it can pass that sends the credentials
+    // elsewhere, including through a parser disagreement.
+    const safe = pcoUrlFrom(url, PCO_BASE);
+    if (!safe) throw new Error(`[pco] refusing to send credentials to ${scrub(url)}`);
+    return this.request<T>(safe, appId, secret, apiVersion);
   }
 
   /** Wait for a free request slot; resolves with the function that frees it. */
@@ -346,6 +675,7 @@ class PcoService {
     url: string,
     appId: string,
     secret: string,
+    apiVersion?: string,
   ): Promise<PcoResponse<T>> {
     if (DEBUG_PCO) console.log(`[pco] GET ${scrub(url)}`);
     // Retry transient failures (429 rate-limit, 5xx, network) with backoff. PCO
@@ -354,12 +684,7 @@ class PcoService {
     for (let attempt = 0; ; attempt++) {
       let response: Response;
       try {
-        response = await fetch(url, {
-          headers: {
-            Authorization: this.makeAuthHeader(appId, secret),
-            "Content-Type": "application/json",
-          },
-        });
+        response = await this.pcoFetch(url, appId, secret, {}, apiVersion);
       } catch (err) {
         if (attempt >= MAX_RETRIES) throw err;
         await this.sleep(this.backoffMs(attempt, null));
@@ -390,13 +715,7 @@ class PcoService {
   // live object or 204). Surfaces PCO's error text so the UI can toast it.
   private async postAction(url: string, appId: string, secret: string): Promise<void> {
     console.log(`[pco] POST ${scrub(url)}`);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: this.makeAuthHeader(appId, secret),
-        "Content-Type": "application/json",
-      },
-    });
+    const response = await this.pcoFetch(url, appId, secret, { method: "POST" });
     if (response.status === 401) {
       throw new PcoAuthError();
     }
@@ -477,13 +796,7 @@ class PcoService {
     secret: string,
   ): Promise<PcoResponse<T>> {
     console.log(`[pco] POST ${scrub(url)}`);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: this.makeAuthHeader(appId, secret),
-        "Content-Type": "application/json",
-      },
-    });
+    const response = await this.pcoFetch(url, appId, secret, { method: "POST" });
     if (response.status === 401) {
       throw new PcoAuthError();
     }
@@ -547,35 +860,25 @@ class PcoService {
 
     const out: PcoAttachmentDTO[] = [];
     const seen = new Set<string>();
-    // Highest offset already requested, so a next-link that does not move forward
-    // ends the loop instead of repeating a page for ever.
-    let seenOffset = -1;
-    let url: string | null =
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments?per_page=100`;
 
-    // Follow pagination (bounded) so big plans don't truncate, without runaway loops.
-    for (let page = 0; url && page < 6; page++) {
-      const json: PcoResponse & { links?: { next?: string } } = await this.request(url, appId, secret);
-      for (const n of Array.isArray(json.data) ? json.data : [json.data]) {
-        if (!seen.has(n.id)) {
-          seen.add(n.id);
-          out.push(this.mapAttachment(n));
+    // Follow pagination (bounded) so big plans don't truncate, without runaway
+    // loops. The offset rules live in readPcoPages, once, for all three readers.
+    await readPcoPages(
+      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/all_attachments?per_page=100`,
+      MAX_PAGES,
+      "pco",
+      (url) => this.request(url, appId, secret),
+      (json) => {
+        for (const n of Array.isArray(json.data) ? json.data : [json.data]) {
+          if (!seen.has(n.id)) {
+            seen.add(n.id);
+            out.push(this.mapAttachment(n));
+          }
         }
-      }
-      // An OFFSET, not a URL. `links.next` arrives in a response BODY and used to
-      // be handed straight back to request(), which attaches the operator's PCO
-      // credentials -- so a redirected or spoofed response could walk them to
-      // another host. Taking only the integer means no string from the body
-      // reaches fetch() at all; the rest of the URL is the one we built.
-      // Strictly forward. A next-link that repeats or rewinds the offset would
-      // otherwise fetch the same page for ever; PCO does not do that, which is
-      // exactly why nothing would catch it if it started.
-      const offset = nextOffset(json.links?.next);
-      url = offset === null || offset <= seenOffset ? null : withOffset(url, offset);
-      seenOffset = offset ?? seenOffset;
-    }
+      },
+    );
 
-    this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, out, mediumTtlMs);
     return out;
   }
 
@@ -653,7 +956,7 @@ class PcoService {
 
     const result: PlanDTO[] = items.map(toPlanDTO);
 
-    this.cacheSet(cacheKey, result, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, result, mediumTtlMs);
     return result;
   }
 
@@ -688,7 +991,7 @@ class PcoService {
         return Number.isFinite(t) && t >= cutoff;
       });
 
-    this.cacheSet(cacheKey, result, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, result, mediumTtlMs);
     return result;
   }
 
@@ -698,11 +1001,29 @@ class PcoService {
     secret: string,
     serviceTypeId: string,
   ): Promise<string[]> {
-    const cacheKey = `note-categories:${appId}:${serviceTypeId}`;
+    return this.noteCategoryNames(appId, secret, serviceTypeId, "item_note_categories");
+  }
+
+  /**
+   * Ordered names from a `*_note_categories` collection on a service type.
+   *
+   * Shared by the item-note columns and the plan-note categories, which are two
+   * different endpoints returning the same shape. Written once because this
+   * repository's most expensive recurring mistake is fixing one copy of a thing
+   * that exists in several — the pagination, the sequence sort and the
+   * do-not-cache-a-failure rule would all have had to be got right twice.
+   */
+  private async noteCategoryNames(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    collection: "item_note_categories" | "plan_note_categories",
+  ): Promise<string[]> {
+    const cacheKey = `${collection}:${appId}:${serviceTypeId}`;
     const cached = this.cacheGet<string[]>(cacheKey);
     if (cached) return cached;
 
-    const url = `${PCO_BASE}/service_types/${serviceTypeId}/item_note_categories?per_page=100`;
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/${collection}?per_page=100`;
     const json = await this.request(url, appId, secret).catch(() => null);
     const items = json && Array.isArray(json.data) ? json.data : [];
     const result = items
@@ -714,11 +1035,105 @@ class PcoService {
       .sort((a, b) => a.sequence - b.sequence)
       .map((c) => c.name);
 
-    // Only cache a real answer. The request above yields null on failure and the
-    // parse below turns that into an empty list; caching it would store a FAILURE
-    // as data, with a success's TTL.
+    // Only cache a real answer. A failed request parses to an empty list, and
+    // caching that would store a FAILURE as data, with a success's TTL.
     this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
     return result;
+  }
+
+  /** The plan-note categories a service type offers, for the checklist picker. */
+  async listPlanNoteCategories(appId: string, secret: string, serviceTypeId: string): Promise<string[]> {
+    return this.noteCategoryNames(appId, secret, serviceTypeId, "plan_note_categories");
+  }
+
+  /**
+   * Every team name on a service type, for the checklist picker.
+   *
+   * Its own request rather than deriving from listTeamPositions, which already
+   * has the teams cached: a team with no positions defined does not appear
+   * there, and a picker that silently omits an option somebody uses is worse
+   * than one extra request every fifteen minutes.
+   */
+  async listTeamNames(appId: string, secret: string, serviceTypeId: string): Promise<string[]> {
+    const cacheKey = `team-names:${appId}:${serviceTypeId}`;
+    const cached = this.cacheGet<string[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/teams?per_page=100`;
+    const json = await this.request(url, appId, secret).catch(() => null);
+    const items = json && Array.isArray(json.data) ? json.data : [];
+    const result = [
+      ...new Set(
+        items
+          .map((n) => (typeof n.attributes.name === "string" ? n.attributes.name : ""))
+          .filter(Boolean),
+      ),
+    ].sort((a, b) => a.localeCompare(b));
+
+    this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
+    return result;
+  }
+
+  /**
+   * A plan's NOTES — the ones written at the top of the plan for a team, not the
+   * per-item notes that fill the rundown columns above.
+   *
+   * These are what a production lead already writes each week ("Assigned Teams"
+   * in PCO), so pulling them is what lets one checklist live in one place
+   * instead of being copied into this app and going stale.
+   *
+   * `category_name` rides on the note's own attributes, so grouping by category
+   * costs no second request. Team names do need `include=teams`.
+   */
+  async listPlanNotes(
+    appId: string,
+    secret: string,
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<PlanNoteDTO[]> {
+    const cacheKey = `plan-notes:${appId}:${planId}`;
+    const cached = this.cacheGet<PlanNoteDTO[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/notes?include=teams&per_page=100`;
+    const json = await this.request(url, appId, secret);
+    const nodes = Array.isArray(json.data) ? json.data : [json.data];
+
+    const teamById = new Map<string, string>();
+    for (const n of json.included ?? []) {
+      if (n.type === "Team" && typeof n.attributes.name === "string" && n.attributes.name) {
+        teamById.set(n.id, n.attributes.name);
+      }
+    }
+
+    const out: PlanNoteDTO[] = [];
+    for (const node of nodes) {
+      if (!node) continue;
+      const content = typeof node.attributes.content === "string" ? node.attributes.content : "";
+      if (!content.trim()) continue; // an empty note is not a note
+      // PCO documents `teams` as to_one, but the plan editor lets a note be
+      // assigned to SEVERAL teams and then sends an array. Reading only one
+      // shape would drop every team on a multi-team note — silently, and only
+      // for the churches that use the feature the most.
+      const rel = node.relationships?.teams?.data;
+      const refs = Array.isArray(rel) ? rel : rel ? [rel] : [];
+      out.push({
+        id: node.id,
+        categoryName: typeof node.attributes.category_name === "string" ? node.attributes.category_name : "",
+        content,
+        teamNames: refs.map((r) => teamById.get(r.id)).filter((n): n is string => !!n),
+      });
+    }
+
+    // One page only, on purpose: a plan carries a handful of notes, not
+    // hundreds. Said out loud rather than truncated in silence, so a church that
+    // somehow passes 100 leaves a trace instead of losing rows off the bottom.
+    if (nodes.length >= 100) {
+      console.warn(`[pco] plan ${scrub(planId)} returned a full page of notes; any beyond 100 are not shown`);
+    }
+
+    this.cacheSet(cacheKey, out, mediumTtlMs);
+    return out;
   }
 
   /**
@@ -737,75 +1152,63 @@ class PcoService {
     if (cached) return cached;
 
     const out: PlanItemDTO[] = [];
-    // Highest offset already requested, so a next-link that does not move forward
-    // ends the loop instead of repeating a page for ever.
-    let seenOffset = -1;
-    let url: string | null =
-      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes,arrangement&per_page=100`;
 
-    for (let page = 0; url && page < 6; page++) {
-      const json: PcoResponse & { links?: { next?: string } } = await this.request(url, appId, secret);
-      const items = Array.isArray(json.data) ? json.data : [json.data];
+    await readPcoPages(
+      `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}/items?include=item_notes,arrangement&per_page=100`,
+      MAX_PAGES,
+      "pco",
+      (url) => this.request(url, appId, secret),
+      (json) => {
+        const items = Array.isArray(json.data) ? json.data : [json.data];
 
-      // Index included ItemNote nodes by id (carry content + category_name).
-      const notesById = new Map<string, { category: string; content: string }>();
-      // Index included Arrangement nodes by id (carry bpm + arrangement name).
-      const arrById = new Map<string, { bpm: number | null; name: string | null }>();
-      for (const n of json.included ?? []) {
-        if (n.type === "ItemNote") {
-          const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
-          const content = typeof n.attributes.content === "string" ? n.attributes.content : "";
-          if (category && content) notesById.set(n.id, { category, content });
-        } else if (n.type === "Arrangement") {
-          arrById.set(n.id, {
-            bpm: typeof n.attributes.bpm === "number" ? n.attributes.bpm : null,
-            name: typeof n.attributes.name === "string" && n.attributes.name ? n.attributes.name : null,
-          });
-        }
-      }
-
-      for (const item of items) {
-        const a = item.attributes;
-        const noteRefs = item.relationships?.item_notes?.data;
-        const notesByCategory: Record<string, string> = {};
-        if (Array.isArray(noteRefs)) {
-          for (const ref of noteRefs) {
-            const note = notesById.get(ref.id);
-            if (note) notesByCategory[note.category] = note.content;
+        // Index included ItemNote nodes by id (carry content + category_name).
+        const notesById = new Map<string, { category: string; content: string }>();
+        // Index included Arrangement nodes by id (carry bpm + arrangement name).
+        const arrById = new Map<string, { bpm: number | null; name: string | null }>();
+        for (const n of json.included ?? []) {
+          if (n.type === "ItemNote") {
+            const category = typeof n.attributes.category_name === "string" ? n.attributes.category_name : "";
+            const content = typeof n.attributes.content === "string" ? n.attributes.content : "";
+            if (category && content) notesById.set(n.id, { category, content });
+          } else if (n.type === "Arrangement") {
+            arrById.set(n.id, {
+              bpm: typeof n.attributes.bpm === "number" ? n.attributes.bpm : null,
+              name: typeof n.attributes.name === "string" && n.attributes.name ? n.attributes.name : null,
+            });
           }
         }
-        const arrRef = item.relationships?.arrangement?.data;
-        const arr = arrRef && !Array.isArray(arrRef) ? arrById.get(arrRef.id) : undefined;
-        out.push({
-          id: item.id,
-          title: String(a.title ?? a.description ?? "Untitled"),
-          itemType: typeof a.item_type === "string" ? a.item_type : "item",
-          lengthSec: typeof a.length === "number" ? a.length : 0,
-          sequence: typeof a.sequence === "number" ? a.sequence : out.length,
-          notesByCategory,
-          description: typeof a.description === "string" && a.description ? a.description : null,
-          songKey: typeof a.key_name === "string" && a.key_name ? a.key_name : null,
-          bpm: arr?.bpm ?? null,
-          arrangementName: arr?.name ?? null,
-          servicePosition: typeof a.service_position === "string" ? a.service_position : null,
-        });
-      }
 
-      // An OFFSET, not a URL. `links.next` arrives in a response BODY and used to
-      // be handed straight back to request(), which attaches the operator's PCO
-      // credentials -- so a redirected or spoofed response could walk them to
-      // another host. Taking only the integer means no string from the body
-      // reaches fetch() at all; the rest of the URL is the one we built.
-      // Strictly forward. A next-link that repeats or rewinds the offset would
-      // otherwise fetch the same page for ever; PCO does not do that, which is
-      // exactly why nothing would catch it if it started.
-      const offset = nextOffset(json.links?.next);
-      url = offset === null || offset <= seenOffset ? null : withOffset(url, offset);
-      seenOffset = offset ?? seenOffset;
-    }
+        for (const item of items) {
+          const a = item.attributes;
+          const noteRefs = item.relationships?.item_notes?.data;
+          const notesByCategory: Record<string, string> = {};
+          if (Array.isArray(noteRefs)) {
+            for (const ref of noteRefs) {
+              const note = notesById.get(ref.id);
+              if (note) notesByCategory[note.category] = note.content;
+            }
+          }
+          const arrRef = item.relationships?.arrangement?.data;
+          const arr = arrRef && !Array.isArray(arrRef) ? arrById.get(arrRef.id) : undefined;
+          out.push({
+            id: item.id,
+            title: String(a.title ?? a.description ?? "Untitled"),
+            itemType: typeof a.item_type === "string" ? a.item_type : "item",
+            lengthSec: typeof a.length === "number" ? a.length : 0,
+            sequence: typeof a.sequence === "number" ? a.sequence : out.length,
+            notesByCategory,
+            description: typeof a.description === "string" && a.description ? a.description : null,
+            songKey: typeof a.key_name === "string" && a.key_name ? a.key_name : null,
+            bpm: arr?.bpm ?? null,
+            arrangementName: arr?.name ?? null,
+            servicePosition: typeof a.service_position === "string" ? a.service_position : null,
+          });
+        }
+      },
+    );
 
     out.sort((a, b) => a.sequence - b.sequence);
-    this.cacheSet(cacheKey, out, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, out, mediumTtlMs);
     return out;
   }
 
@@ -858,7 +1261,7 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
   ): Promise<TeamMemberDTO[]> {
-    const cacheKey = `team:${appId}:${serviceTypeId}:${planId}`;
+    const cacheKey = teamMembersCacheKey(appId, serviceTypeId, planId);
     const cached = this.cacheGet<TeamMemberDTO[]>(cacheKey);
     if (cached) return cached;
 
@@ -948,7 +1351,7 @@ class PcoService {
       return s !== "D" && s !== "DECLINED";
     });
 
-    this.cacheSet(cacheKey, attending, TTL_MEDIUM_MS);
+    this.cacheSet(cacheKey, attending, mediumTtlMs);
     return attending;
   }
 

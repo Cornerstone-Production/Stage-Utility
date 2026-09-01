@@ -8,6 +8,8 @@
 // re-exported from stage.ts, so no import anywhere had to change.
 
 
+import type { CalendarSelection } from "./calendar.js";
+
 export type ViewKind =
   | "slots"
   | "dashboard"
@@ -15,7 +17,64 @@ export type ViewKind =
   | "transcription"
   | "custom"
   | "script"
-  | "spl-rundown";
+  | "spl-rundown"
+  | "calendar";
+
+/** Empty only when `T` names every ViewKind; otherwise `never`, which nothing
+ *  can be assigned to. */
+type Exhaustive<T extends readonly ViewKind[]> = Exclude<ViewKind, T[number]> extends never ? T : never;
+
+/**
+ * Identity over a list of kinds, but it will not compile unless the list names
+ * EVERY ViewKind.
+ *
+ * A `ViewKind[]` annotation refuses a kind that does not exist and says nothing
+ * about one left out — and one left out is the failure that has actually
+ * happened here: the new-view dialog's order list was retyped from memory, lost
+ * "stage" and "spl-rundown", and two kinds became uncreatable with nothing
+ * failing to say so. Wrap the list in this and the build names the kind that was
+ * forgotten.
+ *
+ * Adding a kind to {@link ViewKind} should break every call site. That is the
+ * point: each one is a place a kind has to be handled.
+ */
+export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Exhaustive<T>): T {
+  return kinds;
+}
+
+/**
+ * Whether a display ROUTED to a view of this kind draws the kiosk top bar.
+ *
+ * The bar carries the brand, the plan context and the QR link home — it is the
+ * operator's way off a wall screen. The full-bleed kinds suppress it so their
+ * content owns the whole panel; only `slots` and `custom` keep it.
+ *
+ * This is deliberately a `Record` over every kind rather than a list of the
+ * true ones: a list says nothing about a kind left out, and a new ViewKind that
+ * silently defaults to `false` is a display that quietly loses its way home.
+ * As a Record the build refuses a kind that has not decided.
+ *
+ * The PLACEHOLDER screens are not in here and must not be: loading, unrouted,
+ * empty, not-configured and view-missing draw a bar whatever kind the routing
+ * points at, because there is no content yet to bleed. `hideTopBar` overrides
+ * all of it — this map is only about the default.
+ *
+ * Two readers, one fact: `stage-view.tsx` decides structurally which arms
+ * render `ScreenTopBar`, and `outputs-section.tsx` decides whether the "Hide
+ * top bar" and "Lock display" menu items would do anything on this screen.
+ * `stage-view-paths.test.tsx` renders every kind and asserts the real DOM
+ * against this map, so the two cannot drift apart.
+ */
+export const KIND_DRAWS_TOP_BAR: Record<ViewKind, boolean> = {
+  slots: true,
+  custom: true,
+  dashboard: true,
+  stage: false,
+  transcription: false,
+  script: false,
+  "spl-rundown": false,
+  calendar: false,
+};
 
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
@@ -102,6 +161,32 @@ export interface View {
    */
   slotsLayout?: SlotsLayout | null;
   /**
+   * Hide the operator app's chrome — BOTH bands — while this View is open as a
+   * console at /consoles/<id>. Absent/false = the normal shell.
+   *
+   * On a phone that is the 45px top bar and the 44px context bar, 89px of an
+   * 844px screen returned to the console. On a desktop it is the context bar,
+   * which is also where the page's name lives; the rail stays, because the rail
+   * is not a band and is the way back. Honoured at every width, deliberately:
+   * a setting that does nothing on the device you set it on is worse than one
+   * that is occasionally unnecessary.
+   *
+   * NOT the same mechanism as {@link Output.hideTopBar}, and it must not be
+   * merged with it. That one is per OUTPUT — a physical screen — and hides the
+   * KIOSK top bar in a different document. A console has no Output row at all.
+   * Same idea, second surface.
+   *
+   * ONE flag, not two. An operator who wants some live context back on a phone
+   * already has a better tool: the phone's own context-bar item set, which can
+   * be trimmed to two items without hiding the bar.
+   *
+   * DORMANT on a display View, the way `slotsLayout` is dormant on a non-slots
+   * one: a display is served by a different document with no shell in it, so
+   * there is no chrome for this to hide. It is stored rather than refused so
+   * flipping a console to a display and back does not lose the setting.
+   */
+  hideChrome?: boolean;
+  /**
    * @deprecated No longer read or written — the PCO Live Prev/Next controls were
    * removed from the script display. Kept only so an existing `views.json` still
    * parses; nothing sets it, and nothing renders from it. Drop it once no
@@ -115,6 +200,26 @@ export interface View {
    * about it.
    */
   scriptViewLayoutId?: string | null;
+  /**
+   * Which of the org's calendars a "calendar" View draws. ABSENT OR EMPTY MEANS
+   * EVERY CALENDAR.
+   *
+   * On the VIEW rather than in settings, so two calendar views on two screens
+   * can show two departments. That is the whole point of the filter: the busiest
+   * observed day held thirteen events unfiltered and three under one department's
+   * tag.
+   *
+   * Empty meaning "everything" is the OPPOSITE of the checklist's rule, where
+   * nothing chosen means the feature is off. The difference is deliberate: a
+   * checklist that fills itself with every note on the plan is noise, while a
+   * calendar view showing nothing is simply broken, and a View is created before
+   * anyone has opened its settings.
+   */
+  calendarSources?: CalendarSelection[] | null;
+  /** Which tags a "calendar" View draws. Absent or empty means every tag, for
+   *  the reason above. PCO composes several tags as OR within a tag group and
+   *  AND across groups, which is why the picker groups them. */
+  calendarTags?: CalendarSelection[] | null;
   /**
    * Bumped on every layout save. An editor sends back the revision it opened, so
    * a save built on a layout someone else has since replaced can be detected
@@ -224,6 +329,25 @@ export type LayoutObjectConfig =
       aheadColor?: string | null;
       behindColor?: string | null;
       caption?: string | null;
+      /**
+       * Lead with the wall-clock time the service is PROJECTED TO END instead of
+       * the drift figure.
+       *
+       * The same question the drift answers, asked the way an operator asks it:
+       * "when do we get out of here". The drift moves to the sub-line under
+       * `showLabel`, so the two settings stay orthogonal —
+       *
+       * As value over sub-line, for each combination of the two:
+       *
+       *   off / off   3:20                    (what every existing object does)
+       *   off / on    3:20    over "behind"
+       *   on  / off   11:32
+       *   on  / on    11:32   over "3:20 behind"
+       *
+       * ABSENT means off, so nothing anybody has already placed changes. See
+       * projectedServiceEndMs for what the time is and when there isn't one.
+       */
+      showProjectedEnd?: boolean;
     }
   // ProPresenter-fed objects. `propresenterInstanceId` picks which configured
   // instance to read (omitted / "default" = the primary) — lets separate custom
@@ -298,7 +422,11 @@ export type LayoutObjectConfig =
   // "config" store, so it rides along in every backup). `placeholder` is the
   // prompt shown while empty; the content itself is never in the layout.
   | { type: "notes"; placeholder?: string }
-  | { type: "checklist"; title?: string; resetDaily?: boolean }
+  // No `resetDaily`: it was declared here and read by nothing, for its whole
+  // life. The rows come from the plan's notes now, and their ticks are stored
+  // per plan — so the reset happens because a new plan is a new set of keys,
+  // not because a flag asked for it.
+  | { type: "checklist"; title?: string }
   // A button bound to an entry in the automation action registry. The general
   // form of osc-button/rosstalk-button, which stay as they are so existing
   // layouts keep working — this is for everything else the registry can already
@@ -402,6 +530,145 @@ export type LayoutObjectConfig =
       showPosition?: boolean;
       hideWhenIdle?: boolean;
       fillWhenRecording?: boolean;
+    }
+  // ProVideoPlayer layer state (from the PVP integration, `pvp:status` channel).
+  //
+  // A LIST, not a status slab: PVP is up to eleven layers and the useful question
+  // is which of them are showing something. `show` filters, because eleven rows
+  // do not fit a wall tile at wall-legible type and two of eleven was the
+  // observed steady state.
+  //
+  // There is no picture option because PVP has no preview, thumbnail or frame
+  // endpoint of any kind. Every reading here is a name, a state or a time.
+  //
+  // The keys are `hideWhenEmpty` and `showProgress` rather than the recorders'
+  // `hideWhenIdle` / `showPosition` deliberately: card-toggles.ts declares an
+  // exhaustive record over every type carrying those keys, and reusing one to
+  // inherit a free Home toggle would put two different meanings behind one word.
+  // PVP's "nothing on this layer" is not a recorder's "nothing is going out".
+  //
+  // ONE ROW PER LAYER, in the shape charger-battery uses: the label truncates
+  // and flexes left, the values sit right in tabular figures, and an absent row
+  // is the word `empty` at low opacity. The two-line row this drew before was
+  // neither of the two conventions the app already had.
+  //
+  // "Last cue" is NOT here any more. `playingItem` is residual — four idle
+  // layers were observed naming the same cue while showing nothing, and it
+  // disagrees on live layers too — so it cannot be the loudest text on a tile.
+  // It survives on the DTO, where actions verify against it, and on `pvp-now`
+  // as the anchor for the next-cue lookup.
+  | {
+      type: "pvp-layers";
+      /** "with-content" is the default: it turns an eleven-row list into a
+       *  two-row one and is the question an operator glancing at a wall is
+       *  actually asking. "one" needs `layerName`. */
+      show?: "with-content" | "all" | "one";
+      /** For `show: "one"`. Matched on the layer's NAME, not its uuid: a uuid is
+       *  opaque in an inspector, and a workspace rebuilt from a template has new
+       *  uuids for the same layers. */
+      layerName?: string | null;
+      /**
+       * Draw the hairline progress rule under a rolling clip.
+       *
+       * The TIME is not behind this and never was — it is the reading the widget
+       * exists for. This is the bar alone, and it defaults OFF on a list: four
+       * hairlines stacked in a wall tile is a texture rather than four readings.
+       */
+      showProgress?: boolean;
+      /** Render nothing at all when no layer matches — a tally light rather than
+       *  an empty box. */
+      hideWhenEmpty?: boolean;
+    }
+  // ProVideoPlayer, on the operator's own page: what is on screen and how long
+  // is left. Always "layers with content" — a Home tile has room for the answer,
+  // not for eleven rows of mostly nothing.
+  //
+  // It CARRIES A CAPTION now, which is the operator's actual complaint about it:
+  // three rows of bare text could belong to any integration in the building,
+  // while every card beside it says ProPresenter or Recording or People.
+  | {
+      type: "home-pvp";
+      /** The hairline rule under a rolling clip. Same key and same meaning as
+       *  the wall object's, so an operator learns it once. */
+      showProgress?: boolean;
+    }
+  // ProVideoPlayer, as ONE reading rather than a list: what is on now, and how
+  // long is left.
+  //
+  // The list above answers "what is every layer doing", which is a question an
+  // operator asks while setting up. This answers "what is on right now", which
+  // is the question during a service — so it uses the app's OTHER convention,
+  // the caption / value / sub readout fifteen types already share, rather than a
+  // shrunken copy of the list.
+  | {
+      type: "pvp-now";
+      /** Which layer this reads, by NAME. Empty follows whichever layer holds
+       *  content, preferring the topmost — which is what a wall wants, since
+       *  nobody is there to pick. */
+      layerName?: string | null;
+      /** The hairline rule under the time. Defaults ON here: there is exactly
+       *  one of them, and it is part of the composition that was approved. */
+      showProgress?: boolean;
+      /**
+       * The next playlist entry, under everything.
+       *
+       * Switchable because it is a QUALIFIED answer: "next" is the next entry in
+       * the playlist, which is what plays next only while the playlist keeps
+       * auto-advancing. A hand-fired cue makes it wrong until the next poll.
+       */
+      showNextCue?: boolean;
+    }
+  // The same reading on the operator's own page. No `layerName`: Home's card
+  // settings are a short menu of switches, so a text field there would be a
+  // control the card can never reach — and a Home tile wants the answer, not a
+  // set-up step before it says anything.
+  | {
+      type: "home-pvp-now";
+      showProgress?: boolean;
+      showNextCue?: boolean;
+    }
+  // Followed scores on the operator's own Home page. A quiet composition, NOT
+  // the wall strip: a Home tile sits beside a readiness list and a next-service
+  // card, and a panel of brand colour would out-shout every one of them. The
+  // team colour survives as the chip.
+  // No size/when here, unlike the plan's snippet: Home's size and visibility live
+  // on LayoutObject.home (HomePlacement), which is where the editor writes them
+  // and the grid reads them. Every sibling home-* member omits them for the same
+  // reason, and a config field nothing ever fills is a branch never exercised.
+  | {
+      type: "home-scores";
+      /** Which followed game this card leads with — the same field, and the same
+       *  values, as the wall object above, because "which game" is one idea and
+       *  an operator should not learn it twice. `"auto"` follows whichever
+       *  followed game is live, preferring the one that scored most recently.
+       *  Otherwise an ESPN TEAM id (`league:teamId` — see teamPin). Never an
+       *  event id, which is a per-day value that means nothing next week.
+       *
+       *  Optional here, unlike the wall object's, because every home-scores card
+       *  saved before this has no value to read and `"auto"` is what it was
+       *  already doing. */
+      game?: "auto" | string;
+    }
+  // A followed team's live score, from the ESPN scores integration
+  // (`scores:status` channel). Renders ScoreStrip at wall size, scaled to fill
+  // its tile.
+  //
+  // It is the only surface that draws the whole strip. The context-bar capsule
+  // composes two ScoreSides directly, and the Home card deliberately draws
+  // neither -- see ScoresCard, which explains why a tile of brand colour would
+  // out-shout the quiet cards beside it. What all three DO share is score-ink,
+  // so they cannot disagree about whether a team's colour takes white text.
+  | {
+      type: "scores";
+      /** Which followed game this object shows. `"auto"` follows whichever
+       *  followed game is live, preferring the one that scored most recently --
+       *  which is what a wall display wants, since nobody is there to pick.
+       *  Otherwise an ESPN TEAM id: the object resolves that team's game of the
+       *  day. Never an event id, which is a per-day value that means nothing next
+       *  week. */
+      game: "auto" | string;
+      /** Show the sport-specific centre, or just the score and the status. */
+      detail?: boolean;
     }
   // A RossTalk control button. Tapping it (on a real display / operator surface,
   // never in the editor) fires `commandId` with `params` at `targetId`, or `raw`
@@ -560,6 +827,27 @@ export type LayoutObjectConfig =
        * jumping to the middle of the plan is the wrong answer.
        */
       autoScroll?: boolean;
+    }
+  | {
+      /**
+       * A SCREEN, not a view: shows whatever that display is currently routed
+       * to, and follows it when somebody changes the routing mid-service.
+       *
+       * The producer primitive. A view-embed pins one view for ever, which is
+       * right for a fixed reference panel and wrong for "what is on that screen
+       * right now". It is also the only way dashboard, stage and SPL-rundown
+       * kinds can be embedded at all, because all three are configured per
+       * display.
+       *
+       * `outputId` null = nothing chosen yet.
+       */
+      type: "screen-embed";
+      outputId: string | null;
+      /** The screen's name across the top of the tile. Absent = on. */
+      showLabel?: boolean;
+      /** A dot beside that name: lit while the screen is showing its view, dark
+       *  while it is unrouted or blacked out. Absent = on. */
+      showStatus?: boolean;
     }
   | { type: "container" };
 
@@ -730,6 +1018,11 @@ export interface Output {
   /** When true, this display's top bar hides its nav escape hatches (QR/settings +
    *  home logo) so a handed-out link can't navigate away from the display. */
   locked?: boolean;
+  /** When true, this display draws no top bar at all — no brand, plan context or
+   *  QR — and its content fills the strip the bar would have taken. Absent means
+   *  the bar shows, which is what every screen did before this existed.
+   *  Independent of `locked`, which KEEPS the bar and only strips its links. */
+  hideTopBar?: boolean;
   /** How this screen renders. Absent = "display" — read through {@link outputMode}.
    *  Only a "panel" may be bound to a console View, enforced server-side in
    *  stage-controller's setOutputView. */
@@ -744,6 +1037,10 @@ export interface ResolvedOutput {
   viewName: string | null;
   blackout: boolean;
   locked: boolean;
+  /** Resolved {@link Output.hideTopBar}. It rides here as well as on the Output
+   *  because this descriptor is what the kiosk reads — leaving it off would make
+   *  every display do the outputs lookup this type exists to prevent. */
+  hideTopBar: boolean;
 }
 
 /**

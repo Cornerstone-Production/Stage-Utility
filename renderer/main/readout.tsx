@@ -24,6 +24,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode }
 import {
   GAP_SCALE, CAPTION_LEADING, VALUE_LEADING, SUB_LEADING, PAD_SCALE, fitComposition,
 } from "./readout-size";
+import { MeterFill } from "./readout-meter";
 import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import type { LayoutHAlign } from "@main/types/views";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
@@ -112,6 +113,24 @@ function useShrinkToWidth(deps: unknown[]): {
   return { wrapRef, elRef, scale };
 }
 
+/**
+ * The three pieces of a line that carries an end slot.
+ *
+ * Written once rather than inline twice: the caption row and the sub-line row
+ * are the same shape, and the first version of them had drifted apart before it
+ * was even reviewed.
+ */
+const ROW: CSSProperties = { display: "flex", alignItems: "baseline", gap: "0.6em" };
+const ELLIPSIS: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" };
+const END_SLOT: CSSProperties = {
+  marginLeft: "auto",
+  flexShrink: 0,
+  // Its own case and spacing: a state word set in the caption's caps and
+  // letterspacing reads as a second caption rather than as a reading.
+  textTransform: "none",
+  letterSpacing: "0.02em",
+};
+
 export interface ReadoutProps {
   /** What this is — "SERVICE STARTS IN", "OBS". Absent on objects that predate
    *  captions, in which case the composition is value + sub. */
@@ -174,6 +193,41 @@ export interface ReadoutProps {
    * device that is merely unplugged.
    */
   dim?: boolean;
+  /**
+   * The right end of the CAPTION row — a short state word, as Home's Readiness
+   * header already uses for "2 to sort out".
+   *
+   * Costs no height: the caption line exists either way and this rides in it, so
+   * it is not in `fitComposition`'s budget. Drawn only when the caption is, so it
+   * cannot float alone over a value in a box too short for a caption.
+   *
+   * A ReactNode rather than a `{ text, color }` shape: this is a slot, and what
+   * a state word should look like belongs to the widget that knows what state it
+   * is reporting, not to the composition.
+   */
+  captionEnd?: ReactNode;
+  /** The right end of the SUB-LINE — the number the sub-line names. Rides in the
+   *  sub-line, so it also costs no height. */
+  subEnd?: ReactNode;
+  /** 0..1. A hairline progress rule under the sub-line. Null draws nothing.
+   *  Unlike the two slots above this DOES take height, so it is budgeted. */
+  meter?: number | null;
+  /**
+   * Identity of the thing `meter` is measuring — a clip, a cue, an item.
+   *
+   * The rule glides between values rather than stepping between them, and a
+   * glide is only true of consecutive readings of the SAME thing. When this
+   * changes the fill snaps, because the two fractions either side of the change
+   * measure different clips and a bar sliding between them would draw a passage
+   * of time that did not happen.
+   *
+   * Optional, and null is honest: a rule with no identity still snaps on the two
+   * discontinuities the fractions themselves reveal — see readout-meter.ts.
+   */
+  meterKey?: string | null;
+  /** The quietest line, under everything: a secondary or qualified answer that
+   *  must never compete with the value. First to be dropped in a short box. */
+  footer?: ReactNode;
 }
 
 /**
@@ -197,6 +251,11 @@ export function Readout({
   dim = false,
   align,
   uniform = false,
+  captionEnd,
+  subEnd,
+  meter = null,
+  meterKey = null,
+  footer = null,
 }: ReadoutProps) {
   const side = align ?? DEFAULT_READOUT_ALIGN;
   // One value drives BOTH the flex cross-axis and text-align. The lines are
@@ -206,7 +265,13 @@ export function Readout({
   const [ref, boxH, boxW] = useBoxSize();
   // Lines are dropped rather than clipped when the box cannot hold them — see
   // fitComposition. A caption cut in half is not a caption.
-  const { captionPx, valuePx, subPx } = fitComposition(boxH, !!caption, !!sub, uniform);
+  const { captionPx, valuePx, subPx, meterPx, footerPx } = fitComposition(
+    boxH,
+    !!caption,
+    !!sub,
+    uniform,
+    { meter: meter != null, footer: !!footer },
+  );
   const { wrapRef, elRef, scale } = useShrinkToWidth([value, valuePx, mono]);
 
   const filled = !!fill;
@@ -251,6 +316,13 @@ export function Readout({
         // The WHOLE object box, over the object's own padding — see PAD_SCALE.
         // Absolute against the object wrapper, which is the nearest positioned
         // ancestor at every nesting depth.
+        //
+        // THAT IS A REQUIREMENT ON THE HOST, not something this box can check.
+        // Three of them draw an object: the canvas wrapper and the editor's are
+        // `position: absolute`, and Home's card frame is `relative` — see
+        // cardFrame in app/home/home-grid.tsx, which was static, so on Home this
+        // box resolved against the grid CELL and every filled ground painted
+        // over the card's own border. A fourth host has to position its box too.
         position: "absolute",
         inset: 0,
         padding: `${boxH * PAD_SCALE}px ${Math.min(boxH, boxW) * PAD_SCALE}px`,
@@ -265,26 +337,79 @@ export function Readout({
         gap: `${boxH * GAP_SCALE}px`,
         overflow: "hidden",
         minHeight: 0,
-        opacity: dim ? 0.45 : 1,
-        // Inherited so the fill below can inherit it in turn — the ground has to
-        // be the same shape as the object or its corners sit proud of them.
+        // NOT `opacity` here. Dimming the whole composition took the CAPTION
+        // with it, so a row of widgets had two caption strengths: the dimmed
+        // ones at 45% of the muted token, and the ones in an active state — an
+        // ERROR, a recording — at full. "REAPER" beside "REAPER" in two
+        // different greys, which is what was reported.
+        //
+        // A caption NAMES the box; it does not report anything, so it reads the
+        // same whatever the box is doing. Dim belongs to the reading, and moves
+        // to the value and its sub-line below.
         borderRadius: "inherit",
       }}
     >
       {/* The filled ground.
-          ABSOLUTE against the OBJECT's box, not sized to this one: the nearest
-          positioned ancestor is the object wrapper, so inset:0 covers the
-          object's padding too. A ground that stops at the content box leaves the
-          object's own background drawing a ring around it — the exact bug the
-          recording fill was rewritten to avoid. */}
+          Absolute against THIS box, whose own padding it therefore covers —
+          which is the point: the composition above is itself inset:0 against the
+          object wrapper, so the two together reach the object's edge. A ground
+          that stops at the content box leaves the object's own background
+          drawing a ring around it — the exact bug the recording fill was
+          rewritten to avoid. */}
       {filled ? (
         <span
           aria-hidden="true"
           style={{ position: "absolute", inset: 0, background: fill!, borderRadius: "inherit" }}
         />
       ) : null}
-      {caption && captionPx > 0 ? <span style={{ ...captionStyle, position: "relative" }}>{caption}</span> : null}
-      <div ref={wrapRef} style={{ width: "100%", minHeight: 0, overflow: "hidden", position: "relative", textAlign: side }}>
+      {caption && captionPx > 0 ? (
+        /* One row, two ends. `width: 100%` is already on captionStyle, so the row
+           spans the box and the end slot sits against the far edge whatever the
+           caption's own alignment is — the caption names the box, the end slot
+           reports it, and they belong at opposite ends. */
+        <span style={{ ...captionStyle, position: "relative", ...(captionEnd != null ? ROW : null) }}>
+          <span style={ELLIPSIS}>{caption}</span>
+          {captionEnd != null ? <span style={END_SLOT}>{captionEnd}</span> : null}
+        </span>
+      ) : null}
+      <div
+        ref={wrapRef}
+        data-readout-value
+        style={{
+          width: "100%",
+          minHeight: 0,
+          overflow: "hidden",
+          position: "relative",
+          textAlign: side,
+          // THE WRAPPER'S OWN LINE BOX, not the page's — and it must not shrink.
+          //
+          // Without these two the wrapper inherited the app's leading (24px at
+          // the 16px root), so a composition `fitComposition` had budgeted
+          // `valuePx * VALUE_LEADING` for actually demanded 24px of strut. Every
+          // other line carries `flexShrink: 0`, so this wrapper was the only
+          // child flexbox could take the overrun out of — and it took ALL of it
+          // from the one line the widget exists for.
+          //
+          // Measured on a real display at a 42px box: the wrapper was squeezed
+          // to 8.8px around a 24px line box whose text sat at y=12, and
+          // `overflow: hidden` clipped the value away ENTIRELY while the
+          // caption, the sub-line, the rule and the footer all survived. A
+          // ProVideoPlayer widget reading "remaining" with nothing above it.
+          //
+          // Matching the strut to the budget removes the overrun; `flexShrink: 0`
+          // means that if anything ever overruns again the box clips its ENDS —
+          // the caption and the footer — instead of blanking the middle.
+          //
+          // The one thing that can still overrun is a `value` ReactNode carrying
+          // a line box of its own — an icon or a nested element with a pixel
+          // height. Every caller passes a string or a span that inherits from
+          // here, and one that did not would clip the caption and the footer
+          // rather than itself, which is the trade this file wants.
+          fontSize: `${valuePx * scale}px`,
+          lineHeight: VALUE_LEADING,
+          flexShrink: 0,
+        }}
+      >
         <span
           ref={elRef}
           style={{
@@ -297,6 +422,9 @@ export function Readout({
             // boxStyle), and falls back to the token where it did not, so this
             // stays explicit either way.
             color: filled ? "#ffffff" : valueColor ?? "var(--readout-value-color, var(--color-fg))",
+            // The dim lives here now: it is the READING that is stale or
+            // unreachable, not the label naming the box.
+            opacity: dim ? 0.45 : 1,
             lineHeight: VALUE_LEADING,
             whiteSpace: "nowrap",
             ...(upper ? { textTransform: "uppercase" as const } : null),
@@ -307,8 +435,79 @@ export function Readout({
         </span>
       </div>
       {sub && subPx > 0 ? (
-        <span style={{ ...subStyle, position: "relative" }} title={sub}>
-          {sub}
+        <span
+          style={{ ...subStyle, position: "relative", opacity: dim ? 0.45 : 1, ...(subEnd != null ? ROW : null) }}
+          title={sub}
+        >
+          <span style={ELLIPSIS}>{sub}</span>
+          {subEnd != null ? (
+            /* The number the sub-line names. Mono and tabular whatever the value
+               is set in: it ticks once a second, and proportional digits are
+               different widths, so the text would physically move every tick —
+               the one thing a wall readout must not do. */
+            <span
+              style={{
+                ...END_SLOT,
+                fontFamily: "var(--font-mono)",
+                fontVariantNumeric: "tabular-nums",
+                fontWeight: 600,
+                color: filled ? "#ffffff" : "var(--readout-value-color, var(--color-fg))",
+              }}
+            >
+              {subEnd}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+      {meter != null && meterPx > 0 ? (
+        <span
+          data-readout-meter
+          aria-hidden="true"
+          style={{
+            position: "relative",
+            width: "100%",
+            height: `${meterPx}px`,
+            borderRadius: `${meterPx}px`,
+            overflow: "hidden",
+            flexShrink: 0,
+            // The TRACK is derived from the same ink as the bar, not from a
+            // neutral token. A widget on a stage canvas sets its own colour and
+            // is not inside .kiosk-surface, so --color-fg-faint resolved to the
+            // LIGHT theme's #b8bec6 there — a pale grey track under a white bar
+            // on a black card, measured in the editor. color-mix keeps the two
+            // in the same family whatever ink the object is using.
+            background: filled
+              ? "rgba(255,255,255,0.25)"
+              : "color-mix(in srgb, var(--readout-value-color, var(--color-fg)) 22%, transparent)",
+            opacity: dim ? 0.45 : 1,
+          }}
+        >
+          <MeterFill
+            // Raw. A fraction outside 0..1 — a stale anchor on a display that
+            // was asleep — is clamped inside, in the one place both rules go
+            // through, rather than at each call site where one of them can be
+            // forgotten.
+            fraction={meter}
+            seriesKey={meterKey}
+            fill={filled ? "#ffffff" : "var(--readout-value-color, var(--color-fg))"}
+          />
+        </span>
+      ) : null}
+      {footer && footerPx > 0 ? (
+        <span
+          style={{
+            ...subStyle,
+            fontSize: `${footerPx}px`,
+            position: "relative",
+            // Quieter than the sub-line, deliberately. This line is a QUALIFIED
+            // answer — the next playlist entry is only what plays next while the
+            // playlist keeps auto-advancing — and it must never read as
+            // confidently as the value above it.
+            opacity: dim ? 0.35 : 0.7,
+          }}
+          title={typeof footer === "string" ? footer : undefined}
+        >
+          {footer}
         </span>
       ) : null}
     </div>
