@@ -65,6 +65,43 @@ export const IDIOM_TYPES = new Set<LayoutObjectType>([
  * can centre a particular widget. Task 9 first hard-coded left into the
  * composition, which quietly broke that control everywhere.
  */
+/**
+ * Every type that draws through `Readout`, and therefore defaults to LEFT when
+ * nothing is stored.
+ *
+ * NOT the same set as IDIOM_TYPES, and that is the whole point of it existing.
+ * IDIOM_TYPES does two other jobs — it decides whether an object owns its own
+ * caption (`ObjectContent`) and whether `defaultStyle` strips the registry's
+ * `textAlign` — so adding a type to it to fix the Align pad would change both.
+ *
+ * The inspector's Align pad used IDIOM_TYPES as a stand-in for this and showed
+ * "centre" for five types that render left:
+ *
+ *   home-streaming, home-streaming-resi, home-streaming-youtube
+ *       live, and reachable: off Home they divert to `streamingReadout` (see
+ *       layout-renderer's `hasWallTwin` branch), which reaches `Readout` with no
+ *       align. Their registry style is BARE, so nothing is stored to fall back
+ *       from. On Home they draw through HomeCard, which takes no style at all —
+ *       but Home has no inspector, so the editor's pad is always speaking about
+ *       the off-Home render.
+ *   stream-status, pvp-now
+ *       latent: their registry writes `textAlign: "center"` today, so a fresh
+ *       object never reaches the fallback. A hand-authored, imported or older
+ *       object does.
+ *
+ * Traced through the render path for all 61 types rather than inferred from
+ * names; the two adjacent defects that trace turned up — the wireless empty
+ * states dropping `align`, and PvpNowCard dropping it — are fixed alongside.
+ */
+export const READOUT_ALIGNED_TYPES: ReadonlySet<LayoutObjectType> = new Set<LayoutObjectType>([
+  ...IDIOM_TYPES,
+  "stream-status",
+  "pvp-now",
+  "home-streaming",
+  "home-streaming-resi",
+  "home-streaming-youtube",
+]);
+
 export const DEFAULT_READOUT_ALIGN: LayoutHAlign = "left";
 
 /*

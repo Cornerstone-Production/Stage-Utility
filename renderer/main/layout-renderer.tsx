@@ -1345,7 +1345,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "wireless-summary": {
       const ch = ctx.wireless;
-      if (ch.length === 0) return <Readout value="—" dim />;
+      // `align` here too. The populated state honours the operator's alignment
+      // and this one did not, so a right-aligned wireless tile jumped to the
+      // left the moment the fleet went dark — which is the moment it is being
+      // looked at.
+      if (ch.length === 0) return <Readout value="—" dim align={o.style?.textAlign} />;
       const online = ch.filter((d) => d.online).length;
       const live = ch.filter((d) => d.online);
       const batteries = live.filter((d) => d.battery != null).map((d) => d.battery as number);
@@ -1386,7 +1390,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "wireless-channel": {
       const d = c.channelId ? ctx.wireless.find((x) => x.channelId === c.channelId) : ctx.wireless[0];
-      if (!d) return <Readout value="—" dim />;
+      // Same jump as wireless-summary above: the populated channel honours the
+      // stored alignment, so its empty state must too.
+      if (!d) return <Readout value="—" dim align={o.style?.textAlign} />;
       const show = c.show ?? { rf: true, battery: true, frequency: true };
       // The channel already had this composition — a small dim name over a row of
       // figures — hand-rolled at 0.55em. It is the idiom, so it uses the idiom:
