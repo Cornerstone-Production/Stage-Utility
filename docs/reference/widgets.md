@@ -311,6 +311,11 @@ See [Wireless Gear](../integrations/wireless.md) and [Mic slots](../slots.md).
 **SPL meter** picks its meter and which metric to read, and can colour itself past
 thresholds you set. See [Smaart](../integrations/smaart.md).
 
+**Sound level** reads whichever meter is loudest. To watch one instead, right-click
+the tile and pick it under **Meter**. A pinned meter that stops reporting says so
+rather than falling back to another one, so the number on the tile is always the
+channel it names.
+
 ## People
 
 | Widget | What it shows | Source |

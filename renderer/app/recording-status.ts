@@ -228,19 +228,87 @@ export function streamIndicator(
  *  anyone glancing at Home actually wants. Prefers Smaart's A-weighted slow
  *  metric and falls back to whatever the meter reports, since the metric names
  *  come from Smaart verbatim and vary by configuration. */
-export function loudestSpl(spl: { connected: boolean; meters: Record<string, { metrics: Record<string, number> }> } | null): { value: string; sub: string } {
-  if (!spl?.connected) return { value: "—", sub: "Smaart offline" };
+/**
+ * The `meterId` value meaning "whichever meter is loudest right now".
+ *
+ * A named sentinel rather than null, so the menu can tick it like any other
+ * choice and a saved card says out loud which behaviour it wants. Absent still
+ * means the same thing — every card saved before the setting existed.
+ */
+export const LOUDEST_METER = "loudest";
+
+type SplMeters = { connected: boolean; meters: Record<string, { metrics: Record<string, number> }> } | null;
+
+/**
+ * The number this card reads off ONE meter: A-weighted when the meter reports
+ * one, else whatever it reports first.
+ *
+ * Shared by the loudest-meter and pinned-meter paths so the two can never
+ * disagree about which metric they are showing — pinning a meter should change
+ * WHICH meter you read, not what "SPL" means.
+ */
+function splReading(meter: { metrics: Record<string, number> }): number | null {
+  const entries = Object.entries(meter.metrics ?? {});
+  if (!entries.length) return null;
+  return (entries.find(([k]) => /SPL\s*A/i.test(k)) ?? entries[0])[1];
+}
+
+/** A meter key ("device::channel") as the card labels it. */
+function meterName(key: string): string {
+  return key.split("::").pop() ?? key;
+}
+
+export function loudestSpl(spl: SplMeters): { value: string; sub: string } {
+  if (!spl?.connected) return { value: "\u2014", sub: "Smaart offline" };
   let best: number | null = null;
   let bestName = "";
   for (const [key, meter] of Object.entries(spl.meters ?? {})) {
-    const entries = Object.entries(meter.metrics ?? {});
-    if (!entries.length) continue;
-    const preferred = entries.find(([k]) => /SPL\s*A/i.test(k)) ?? entries[0];
-    if (best == null || preferred[1] > best) {
-      best = preferred[1];
-      bestName = key.split("::").pop() ?? key;
+    const reading = splReading(meter);
+    if (reading == null) continue;
+    if (best == null || reading > best) {
+      best = reading;
+      bestName = meterName(key);
     }
   }
-  if (best == null) return { value: "—", sub: "no readings yet" };
+  if (best == null) return { value: "\u2014", sub: "no readings yet" };
   return { value: `${Math.round(best)} dB`, sub: bestName };
+}
+
+/**
+ * The "Meter" submenu's options: the default, then every meter Smaart reports.
+ *
+ * `pinned` is passed so a meter that has GONE AWAY still appears, labelled as
+ * not reporting. Dropping it would leave the submenu with nothing ticked and no
+ * way to tell what the card is pinned to — the operator would see a menu that
+ * looks unset while the card reads "not reporting", and have to guess.
+ */
+export function meterOptions(
+  spl: { meters: Record<string, { deviceName: string; channelName: string }> } | null,
+  pinned: string,
+): { value: string; label: string }[] {
+  const out = [{ value: LOUDEST_METER, label: "Loudest meter" }];
+  for (const [id, m] of Object.entries(spl?.meters ?? {})) {
+    out.push({ value: id, label: m.channelName || m.deviceName || id });
+  }
+  if (pinned !== LOUDEST_METER && !out.some((o) => o.value === pinned)) {
+    out.push({ value: pinned, label: `${meterName(pinned)} (not reporting)` });
+  }
+  return out;
+}
+
+/**
+ * One named meter, in the same shape `loudestSpl` returns.
+ *
+ * A pinned meter that has gone missing says so rather than falling back to the
+ * loudest. The operator asked for THAT channel; quietly showing a different one
+ * would read as the channel being fine, which is the opposite of the truth when
+ * Smaart has restarted and dropped it.
+ */
+export function pinnedSpl(spl: SplMeters, meterId: string): { value: string; sub: string } {
+  if (!spl?.connected) return { value: "\u2014", sub: "Smaart offline" };
+  const meter = spl.meters?.[meterId];
+  if (!meter) return { value: "\u2014", sub: `${meterName(meterId)} not reporting` };
+  const reading = splReading(meter);
+  if (reading == null) return { value: "\u2014", sub: "no readings yet" };
+  return { value: `${Math.round(reading)} dB`, sub: meterName(meterId) };
 }

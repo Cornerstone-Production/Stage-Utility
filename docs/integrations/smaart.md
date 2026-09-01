@@ -36,3 +36,7 @@ stored encrypted on this machine.
 **On a layout:** add object → **Smaart SPL → SPL meter** → pick the meter
 (`deviceName::channelName`) and metric key; optional peak-hold shows the highest
 value seen for that meter/metric.
+
+**On Home:** add widget → **Sound level**. It reads whichever meter is loudest;
+right-click the tile and use **Meter** to pin one instead. Pinning changes which
+meter is read, not which metric — both paths prefer the A-weighted reading.

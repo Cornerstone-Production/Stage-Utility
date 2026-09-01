@@ -21,6 +21,8 @@
 
 import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 
+import { LOUDEST_METER } from "../recording-status";
+
 /** The members of the config union that declare `K`, by their `type`. */
 type TypesWith<K extends PropertyKey, T = LayoutObjectConfig> = T extends { type: infer N }
   ? K extends keyof T
@@ -93,9 +95,30 @@ const APPLIES = {
  */
 const PICKS = {
   game: { scores: true, "home-scores": true },
+  // Which Smaart meter the SPL card reads. `spl-meter` is listed because it
+  // carries the key and the record is exhaustive — the compiler requires it —
+  // not because a wall object is expected on Home. If one ever is, offering the
+  // same choice there is the honest thing anyway.
+  meterId: { "home-spl": true, "spl-meter": true },
 } satisfies { [K in PickKey]: Record<TypesWith<K>, true> };
 
-type PickKey = "game";
+type PickKey = "game" | "meterId";
+
+/**
+ * What a card is doing when it has never been given a value for a pick.
+ *
+ * Per-key, not one shared string: "auto" is what an untouched scores card does,
+ * and the loudest meter is what an untouched SPL card does. A single fallback
+ * would tick the wrong row on one of them, and the only job of this table is
+ * that the menu agrees with the renderer.
+ */
+const PICK_FALLBACK: Record<PickKey, string> = { game: "auto", meterId: LOUDEST_METER };
+
+/** Every (widget type, pick) pair the menu can write, flattened — the picks'
+ *  half of TOGGLE_PAIRS, and walked by the same guard. */
+export const PICK_PAIRS: readonly { type: string; key: PickKey }[] = Object.entries(
+  PICKS as Record<string, Record<string, true>>,
+).flatMap(([key, types]) => Object.keys(types).map((type) => ({ type, key: key as PickKey })));
 
 /**
  * Every (widget type, setting) pair the menu can write, flattened.
@@ -122,9 +145,9 @@ export function pickedValue(card: LayoutObject, key: PickKey): string | null {
   const config = card.config as Config;
   if (!((config.type as string) in PICKS[key])) return null;
   const value = config[key];
-  // "auto" is the fallback for `game` on both widgets, and it is what a card
-  // saved before the field existed was already doing.
-  return typeof value === "string" ? value : "auto";
+  // A card saved before the field existed has no value, and neither has one
+  // explicitly set to null — both are doing whatever PICK_FALLBACK names.
+  return typeof value === "string" ? value : PICK_FALLBACK[key];
 }
 
 type ToggleKey =
