@@ -96,6 +96,28 @@ export function isConsolePath(pathname: string, views: readonly View[] | undefin
 }
 
 /**
+ * A route that draws its OWN full-bleed surface, edge to edge.
+ *
+ * The shell gutters its content — 20px each side, 16px under the strip — which is
+ * air between the strip and a page. A route that paints its own ground to the
+ * edges has no page for that air to sit around: it renders as a light frame
+ * drawn around a dark slab, which is what was reported on ScriptView.
+ *
+ * A console was the first of these and cancelled the horizontal half itself with
+ * negative margins. The TOP half cannot be cancelled that way — the box is
+ * `h-full`, and a negative margin moves it without giving it the height back, so
+ * the band just moves to the bottom. The shell withholds it instead, and this is
+ * what it asks.
+ */
+export function isFullBleedPath(pathname: string, views: readonly View[] | undefined): boolean {
+  // `/scriptview/<service type>/<layout>` — the rundown itself, which paints a
+  // kiosk surface. NOT `/scriptview` or `/scriptview/presets`, which are ordinary
+  // pages and want the gutter.
+  if (/^\/scriptview\/[^/]+\/[^/]+$/.test(pathname)) return true;
+  return isConsolePath(pathname, views);
+}
+
+/**
  * Does the console at this pathname want the shell's chrome hidden?
  *
  * EXACT match on `/consoles/<id>`, never a prefix. A prefix would carry the
