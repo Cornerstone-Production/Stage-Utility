@@ -103,6 +103,7 @@ import {
 } from "./inspector-rows";
 export { dashboardTemplate, confidenceMonitorTemplate };
 import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
+import { UnsavedWorkProvider, useUnsavedWork } from "../components/unsaved-work";
 import { canvasRowFlexClass } from "./canvas-row-fit";
 
 // ── object metadata ──────────────────────────────────────────────────────────
@@ -952,6 +953,16 @@ export function LayoutEditor({
   const [dragLayerOver, setDragLayerOver] = useState<{ id: string; edge: "above" | "below" } | null>(null);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [dirty, setDirty] = useState(false);
+  /**
+   * Unsaved work held by something INSIDE the editor that the layout comparison
+   * cannot see — today the inline mic-slots editor, whose slots live on the
+   * server per service type rather than in the layout. Arranging mics and
+   * pressing the editor's Save saved the layout and left the arrangement behind.
+   *
+   * Same registry the integration dialog's sub-panels report into, rather than a
+   * second mechanism for the same job.
+   */
+  const panels = useUnsavedWork();
   // The effective fit, not just the stored one: a console with nothing set is
   // responsive, and a toolbar showing "Letterbox" selected would tell the
   // operator the opposite of what they see.
@@ -1010,8 +1021,8 @@ export function LayoutEditor({
   // enableBeforeUnload covers closing the tab as well, which no in-app dialog
   // can: the browser's own prompt is the only thing that fires there.
   const leaveBlocker = useBlocker({
-    shouldBlockFn: () => dirty,
-    enableBeforeUnload: () => dirty,
+    shouldBlockFn: () => dirty || panels.dirty,
+    enableBeforeUnload: () => dirty || panels.dirty,
     withResolver: true,
   });
   // Reusable object/container groups (loaded from the global library).
@@ -1154,7 +1165,7 @@ export function LayoutEditor({
 
   // Leaving edit mode: confirm if there are unsaved changes, else just exit.
   function leaveEditMode() {
-    if (dirty) setConfirmLeave(true);
+    if (dirty || panels.dirty) setConfirmLeave(true);
     else exitEditing();
   }
   function loadTemplate(t: LayoutTemplate) {
@@ -1573,9 +1584,15 @@ export function LayoutEditor({
   async function save() {
     setSaving(true);
     try {
+      // The panels FIRST. A layout save that succeeded while a panel's save
+      // failed would clear the pill and leave that work stranded with nothing
+      // left on screen to say so — and saveThen closes the editor on a resolved
+      // save, so the throw has to reach it.
+      const panelsOk = await panels.saveAll();
       await onSave({ version: 1, canvas, objects });
       setDirty(false);
       setHistory([]);
+      if (!panelsOk) throw new Error("Some changes could not be saved");
     } finally {
       setSaving(false);
     }
@@ -1610,7 +1627,7 @@ export function LayoutEditor({
           STICKY anchor: it stays pinned to the top as the editor scrolls (always
           visible) yet reserves no layout space, so it never shifts content down.
           pointer-events pass through the empty anchor; only the pill is clickable. */}
-      {dirty && (
+      {(dirty || panels.dirty) && (
         <div className="sticky top-1 z-30 h-0 flex justify-end pr-1 pointer-events-none">
           <div className="pointer-events-auto">
             <UnsavedBanner
@@ -2188,12 +2205,15 @@ export function LayoutEditor({
         <div className="pb-[40vh]">
           <Separator />
           <div className="pt-3">
+            {/* The provider wraps only the panel that reports into it. */}
+            <UnsavedWorkProvider registry={panels.registry}>
             <InlineSlotsEditor
               key={inlineGrid.id}
               objectId={inlineGrid.id}
               slotsLayout={inlineGrid.config.slotsLayout ?? null}
               onSetLayout={(next) => { pushHistory(); updateConfig(inlineGrid.id, { ...inlineGrid.config, slotsLayout: next }); }}
             />
+            </UnsavedWorkProvider>
           </div>
         </div>
       )}
