@@ -47,7 +47,7 @@ import { visibleLayers } from "../../main/pvp-object";
 import { PvpNowObject } from "../../main/pvp-now";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
-import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl, pinnedSpl, LOUDEST_METER } from "../recording-status";
+import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl, pinnedSpl, LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
 import { useResiState, useYouTubeState } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
 import { useScoresState } from "../../main/use-scores-state";
@@ -549,7 +549,16 @@ export function LiveStatusCard({
  * only OBS would read as reassurance while REAPER sat stopped. A new recording
  * integration joins by being added to `recorders()`; nothing here changes.
  */
-export function RecordingCard({ recorder = "any" }: { recorder?: string }) {
+export function RecordingCard({
+  recorder = "any",
+  showElapsed = true,
+}: {
+  recorder?: string;
+  /** Home's "Elapsed time" switch. Off, the card drops the running timecode and
+   *  keeps the state — the same thing the same switch does to the streaming card
+   *  beside it, which is why it carries the same name. */
+  showElapsed?: boolean;
+}) {
   const list = recorders(useObsState(), useReaperState());
   const chosen = recorder === "any" ? list : list.filter((r) => r.name === recorder);
   const ind = recordIndicator(chosen);
@@ -560,7 +569,7 @@ export function RecordingCard({ recorder = "any" }: { recorder?: string }) {
     <Stat
       label={recorder === "any" ? "Recording" : recorder}
       value={ind.value}
-      sub={ind.sub ?? undefined}
+      sub={showElapsed ? (ind.sub ?? undefined) : undefined}
       tone={ind.state === "live" ? "live" : undefined}
     />
   );
@@ -916,13 +925,19 @@ export function HomeCard({
     case "home-live-status":
       return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
     case "home-recording":
-      return <RecordingCard />;
+      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} showElapsed={c.showElapsed ?? true} />;
     case "home-recording-obs":
       return <RecordingCard recorder="OBS" />;
     case "home-recording-reaper":
       return <RecordingCard recorder="REAPER" />;
     case "home-streaming":
-      return <StreamingCard now={now} showElapsed={c.showElapsed ?? true} />;
+      return (
+        <StreamingCard
+          platform={STREAMER_FOR[c.platform ?? "any"] ?? "any"}
+          now={now}
+          showElapsed={c.showElapsed ?? true}
+        />
+      );
     case "home-scores":
       return <ScoresCard game={c.game ?? "auto"} />;
     case "home-streaming-resi":

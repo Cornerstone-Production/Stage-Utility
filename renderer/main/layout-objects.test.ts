@@ -395,7 +395,19 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
  */
 const RETIRED: { type: string; label: string; replacedBy: string }[] = [
   { type: "service-order", label: "Service order (legacy)", replacedBy: "view-embed" },
+  // The per-source Home cards. Each was one component with one prop fixed —
+  // `<RecordingCard recorder="OBS" />`, `<StreamingCard platform="Resi" />` — so
+  // the prop became a right-click choice on the general card and these four stop
+  // needing to exist. Saved ones still draw exactly what they always drew.
+  { type: "home-recording-obs", label: "OBS recording", replacedBy: "home-recording" },
+  { type: "home-recording-reaper", label: "REAPER recording", replacedBy: "home-recording" },
+  { type: "home-streaming-resi", label: "Resi status", replacedBy: "home-streaming" },
+  { type: "home-streaming-youtube", label: "YouTube status", replacedBy: "home-streaming" },
 ];
+
+/** Retirements, by type — the two assertions over ADDED_SINCE that only hold
+ *  while a type is still ON the palette skip these. Its label is still pinned. */
+const IS_RETIRED = new Set(RETIRED.map((r) => r.type));
 
 // ── Assertions ────────────────────────────────────────────────────────────────
 
@@ -409,7 +421,11 @@ describe("layout-object registry vs. the structures it replaced", () => {
 
   test("deliberate additions carry the label and group they claim", () => {
     for (const a of ADDED_SINCE) {
+      // The LABEL is pinned whether or not the type is still offered; the GROUP
+      // only while it is. A retired type's group is null by definition, which
+      // `retired types leave the palette but stay renderable` asserts instead.
       assert.equal(typeLabel(a.type as never), a.label);
+      if (IS_RETIRED.has(a.type)) continue;
       assert.equal(LAYOUT_OBJECTS[a.type as LayoutObjectType].group, a.group);
     }
   });
@@ -452,6 +468,7 @@ describe("layout-object registry vs. the structures it replaced", () => {
     // Pins placement too, so a new object cannot silently reorder the palette.
     // `after: null` means it leads its group.
     for (const a of ADDED_SINCE) {
+      if (IS_RETIRED.has(a.type)) continue;
       if (a.after === null) {
         const g = PALETTE_GROUPS.find((x) => (x.types as string[]).includes(a.type));
         assert.ok(g, `${a.type} is not in the palette`);

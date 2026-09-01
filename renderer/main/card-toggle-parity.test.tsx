@@ -299,6 +299,11 @@ const PICK_VALUES: Record<string, [unknown, unknown]> = {
   meterId: ["loudest", "Console::Balcony"],
   // "auto" takes the first followed game; the pin names the second.
   game: ["auto", "mlb:t-200"],
+  // Every recorder at once vs one of them. REAPER is idle in the LIVE fixture
+  // while OBS is rolling, so "any" and "reaper" cannot draw the same thing.
+  recorder: ["any", "reaper"],
+  // Same idea: "any" answers for all three streamers, "youtube" for one.
+  platform: ["any", "youtube"],
 };
 
 describe("every CHOICE Home's card menu offers changes what the widget draws", () => {
@@ -331,5 +336,67 @@ describe("every CHOICE Home's card menu offers changes what the widget draws", (
           `into the object and persists it, and nothing reads it`,
       );
     });
+  }
+});
+
+describe("a pick that both surfaces read is read on BOTH", () => {
+  // The four-cell rule above is right in general: a setting may legitimately
+  // belong to one surface, and demanding a difference on both would fail on a
+  // design decision instead of a bug.
+  //
+  // `platform` is not one of those. It decides which platform the HOME card
+  // filters to and names itself after, AND which twin the wall draws — and the
+  // two read it through different code (`STREAMER_FOR` at the card, the wall-twin
+  // lookup at the renderer). So a Home card that ignored the setting completely
+  // still differs on the wall, and the pair test above passes on the wall cell
+  // alone. Caught exactly that way: hardcoding the card to "any" left it green.
+  test("home-streaming reads platform on Home, not only on its wall twin", async () => {
+    const any = await draw("home-streaming", "platform", "any", true, true);
+    const one = await draw("home-streaming", "platform", "youtube", true, true);
+    assert.notEqual(any, one,
+      "the Home card draws the same thing for every platform and for one — it is ignoring the setting " +
+        "and only its wall twin reads it");
+  });
+});
+
+describe("a retired per-source card draws exactly what its replacement draws", () => {
+  // The whole promise of the retirement: the four cards left the palette, and
+  // NOTHING about what they draw changed. Each was the general card with one prop
+  // fixed, so the general card carrying the equivalent choice has to be
+  // indistinguishable from it — same markup, on both surfaces, live and idle.
+  //
+  // Anything less and an operator with one of these already on a page sees their
+  // page change under them, which is the one outcome the retirement was supposed
+  // to avoid. A saved card is not migrated, so both code paths stay live and both
+  // have to agree.
+  //
+  // WHAT IT CANNOT SEE: the two arms hand the SAME component different props, so a
+  // change inside that component moves both sides together and this stays green.
+  // Found the honest way — relabelling `RecordingCard` to prove this red did
+  // nothing, because it relabelled the retired card too. What it pins is that the
+  // two DISPATCHES agree, which is where a retirement actually goes wrong; the
+  // component's own drawing is the pair tests' job above.
+  const PAIRS: { retired: string; replacement: string; key: string; value: string }[] = [
+    { retired: "home-recording-obs", replacement: "home-recording", key: "recorder", value: "obs" },
+    { retired: "home-recording-reaper", replacement: "home-recording", key: "recorder", value: "reaper" },
+    { retired: "home-streaming-resi", replacement: "home-streaming", key: "platform", value: "resi" },
+    { retired: "home-streaming-youtube", replacement: "home-streaming", key: "platform", value: "youtube" },
+  ];
+
+  for (const { retired, replacement, key, value } of PAIRS) {
+    for (const home of [true, false]) {
+      for (const live of [true, false]) {
+        const where = `${home ? "Home" : "wall"}, ${live ? "live" : "idle"}`;
+        test(`${retired} === ${replacement} ${key}=${value} (${where})`, async () => {
+          // The retired card takes no such key — its source is in its type — so it
+          // is drawn from its own default config, untouched.
+          const old = await draw(retired, "__unused", undefined, home, live);
+          const now = await draw(replacement, key, value, home, live);
+          assert.equal(now, old,
+            `${replacement} with ${key}="${value}" no longer draws what ${retired} draws on ${where} — ` +
+              `retiring it changed somebody's page`);
+        });
+      }
+    }
   }
 });

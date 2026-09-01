@@ -18,7 +18,7 @@ import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useDisplayPresence } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
-import { streamers, streamIndicator } from "../app/recording-status";
+import { streamers, streamIndicator, STREAMER_FOR } from "../app/recording-status";
 import { usePvpState, usePvpSkewMs } from "./use-pvp-state";
 import { useReaperState } from "./use-reaper-state";
 import { useScoresState } from "./use-scores-state";
@@ -795,7 +795,17 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // three `streamingReadout` takes, and passing an empty object dropped every
     // one of them on the surface they are loudest on. The menu wrote them, the
     // object stored them, the wall ignored them.
-    if (!ctx.home && hasWallTwin(c)) return streamingReadout(WALL_TWIN[c.type], c);
+    if (!ctx.home && hasWallTwin(c)) {
+      // WALL_TWIN still answers WHICH types have a twin — the render-parity guard
+      // scans it for exactly that. What it can no longer answer alone is which
+      // platform, because `home-streaming` now carries one in its config instead
+      // of encoding it in the type. The two retired cards keep their fixed names,
+      // so an object saved as `home-streaming-resi` draws the Resi twin exactly
+      // as it always has.
+      const only =
+        c.type === "home-streaming" ? (STREAMER_FOR[c.platform ?? "any"] ?? null) : WALL_TWIN[c.type];
+      return streamingReadout(only, c);
+    }
     const live = ctx.home && ctx.interactive;
     return (
       <div className={live ? "w-full h-full" : "w-full h-full pointer-events-none"}>
@@ -1227,10 +1237,13 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       });
     }
     case "stream-status":
-      return streamingReadout(
-        c.platform && c.platform !== "any" ? (c.platform === "resi" ? "Resi" : "YouTube") : null,
-        { showElapsed: c.showElapsed, hideWhenIdle: c.hideWhenIdle, fillWhenLive: c.fillWhenLive },
-      );
+      // One shared table, not a ternary: `platform === "resi" ? "Resi" : "YouTube"`
+      // rendered a YouTube-labelled widget for ANY value that was not "resi".
+      return streamingReadout(STREAMER_FOR[c.platform ?? "any"] ?? null, {
+        showElapsed: c.showElapsed,
+        hideWhenIdle: c.hideWhenIdle,
+        fillWhenLive: c.fillWhenLive,
+      });
 
     case "reaper-status": {
       const reaper = ctx.reaper;

@@ -35,9 +35,9 @@ import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
 import { addCard, cardsForNow, removeCard, replaceCard, setSize, setWhen } from "./home-cards";
 import { SIZES, SIZE_ORDER, WHEN_LABELS, sizeOf, whenOf } from "./home-cards";
-import { pickedValue, togglesFor, withToggle } from "./card-toggles";
+import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles";
 import { gameOptions } from "../../main/scores-object";
-import { meterOptions } from "../recording-status";
+import { meterOptions, sourceOptions } from "../recording-status";
 import { useSplState } from "../../main/use-spl-state";
 import { invoke } from "../../lib/api";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
@@ -294,6 +294,29 @@ export function HomeRoute() {
           checked: pinned === o.value,
           onSelect: () => {
             save((objs) => replaceCard(objs, withToggle(card, "game", o.value)));
+            setMenu(null);
+          },
+        })),
+      });
+    }
+    // The picks whose options are the app's own vocabulary rather than something
+    // fetched: which recorder the Recording card answers for, which platform the
+    // Streaming card watches. ONE block for both, driven by PICK_OPTIONS, because
+    // a second hand-written submenu is how the two would drift apart.
+    for (const [key, label, anyLabel] of [
+      ["recorder", "Recorder", "Every recorder"],
+      ["platform", "Platform", "Every platform"],
+    ] as const) {
+      const current = pickedValue(card, key);
+      const map = PICK_OPTIONS[key];
+      if (current == null || !map) continue;
+      items.push({
+        label,
+        items: sourceOptions(map, anyLabel).map((o) => ({
+          label: o.label,
+          checked: current === o.value,
+          onSelect: () => {
+            save((objs) => replaceCard(objs, withToggle(card, key, o.value)));
             setMenu(null);
           },
         })),
