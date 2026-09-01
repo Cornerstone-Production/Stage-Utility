@@ -11,7 +11,7 @@
 
 import { inTrendScope, inAverageScope } from "./overview-scope";
 import type { SplServiceSummary } from "@main/types/stage";
-import { combineLeq } from "@main/services/spl-leq";
+import { combineLeq, leqOf } from "@main/services/spl-leq";
 import { formatClock } from "../../lib/clock-format";
 
 export function fmtTime(iso: string | null): string {
@@ -64,6 +64,45 @@ export function computeTrend(series: number[], higherIsBetter: boolean, opts?: {
   const withinDeadband = pct != null && Math.abs(pct) < deadband;
   const tone: TrendTone = withinDeadband ? "neutral" : (dir === "up") === higherIsBetter ? "good" : "bad";
   return { dir, tone, pct, priorCount: prior.length };
+}
+
+/**
+ * The SPL equivalent of `Trend`: the latest settled weekend's level against the
+ * prior window, as a DIFFERENCE IN DECIBELS.
+ *
+ * Not a percentage, which is what `Trend` reports. dB is a logarithmic scale, so
+ * "+2% of 84 dB" is not a statement about loudness — the honest comparison
+ * between two levels is their difference, and 3 dB means the same thing whether
+ * the room was at 80 or at 100. No tone either: a louder weekend is not a worse
+ * one, and colouring it would editorialise about a mix decision.
+ */
+export interface SplDelta {
+  dir: "up" | "down";
+  /** Signed: the latest level minus the prior window's Leq. */
+  db: number;
+  priorCount: number;
+}
+
+/**
+ * Compare the latest level in a chronological series of weekend Leqs to the
+ * ENERGY average of the prior window.
+ *
+ * Deliberately not `computeTrend`, which takes an arithmetic mean of the prior
+ * window: the arithmetic mean of decibels is not the average level and
+ * understates it whenever the material is dynamic — see main/services/spl-leq.ts
+ * for the arithmetic and for how far out it lands. Same window and the same
+ * shape of answer; different maths, because the unit is different.
+ *
+ * `null` where `computeTrend` returns null: no prior weekend to compare against.
+ */
+export function computeSplDelta(levels: readonly number[], window = 4): SplDelta | null {
+  if (levels.length < 2) return null;
+  const latest = levels[levels.length - 1];
+  const prior = levels.slice(Math.max(0, levels.length - 1 - window), levels.length - 1);
+  const priorLeq = leqOf(prior);
+  if (priorLeq == null) return null;
+  const db = latest - priorLeq;
+  return { dir: db >= 0 ? "up" : "down", db, priorCount: prior.length };
 }
 
 /** Seconds → "m:ss" (or "h:mm:ss"). */
@@ -160,6 +199,14 @@ export interface OverviewData {
   /** The metric `attPoints[].spl` was filled from: the caller's choice when it
    *  is one of `splMetrics`, else the preferred default, else null. */
   splMetric: string | null;
+  /** Average weekend level in dB for `splMetric` across settled weekends,
+   *  ENERGY-averaged. Null when nothing in scope carries a level: the caller
+   *  omits the whole readout rather than printing a dash, the same way the chart
+   *  breaks its line instead of drawing a silent Sunday. */
+  avgSpl: number | null;
+  /** That level against the prior window, in dB. Null on the same terms
+   *  `attTrend` is: not enough prior weekends to compare honestly. */
+  splDelta: SplDelta | null;
 }
 
 /**
@@ -277,6 +324,13 @@ export function computeOverview(
   // peak, and fake a downward trend for the first half of the morning.
   const settledPoints = attPoints.filter((p) => !p.live);
   const settledSeries = settledPoints.map((p) => p.value);
+  // The same settled weekends, restricted to the ones that carry a level, and
+  // ENERGY-averaged — `mean()` above is exactly the wrong helper for decibels
+  // (main/services/spl-leq.ts). A weekend with no recording is dropped rather
+  // than counted, so the window is the last four weekends there is a level for.
+  // One entry per WEEKEND, matching avgAttendance: this is the average weekend,
+  // not the average sample.
+  const settledSpl = settledPoints.map((p) => p.spl).filter((v): v is number => v != null);
   // Lead stat + peak are WEEKEND totals now, to stay coherent with the chart.
   const avgAttendance = mean(settledSeries);
   const peakWeekend = settledPoints.length ? settledPoints.reduce((m, p) => (p.value > m.value ? p : m)) : null;
@@ -308,6 +362,8 @@ export function computeOverview(
     scopeName: activeTypeName,
     splMetrics,
     splMetric: chosenMetric,
+    avgSpl: leqOf(settledSpl),
+    splDelta: computeSplDelta(settledSpl),
   };
 }
 

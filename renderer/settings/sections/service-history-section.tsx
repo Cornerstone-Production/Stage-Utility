@@ -872,8 +872,12 @@ function TrendChip({ trend, label }: { trend: Trend | null; label?: string }) {
 }
 
 /** The Overview blend: a lead stat (avg attendance) with a colored trend line, a
- *  real attendance trend chart, and a divided instrument stat strip below. */
-function OverviewBlend({
+ *  real attendance trend chart, and a divided instrument stat strip below.
+ *
+ *  Exported for its own tests: the History section around it fetches, and the
+ *  parts worth guarding — the right-click menu against the chart's hover, and
+ *  whether the SPL summary is there at all — are in this component alone. */
+export function OverviewBlend({
   overview,
   splTrend,
   onSplTrend,
@@ -938,6 +942,41 @@ function OverviewBlend({
               </span>
             </div>
           )}
+          {/* The level, read the same way, so the SPL line has a summary of its
+              own instead of one attendance figure over a chart with two series
+              in it. Present only when the line is drawn AND there is a level to
+              report — no dash, which would read as a measured silence. */}
+          {splTrend.shown && overview.avgSpl != null && (
+            <div className="mt-5">
+              <div className="flex items-center gap-1.5 text-caption1 uppercase tracking-[0.08em] text-fg-muted">
+                {/* The series' own colour, the same dot the chart's tooltip
+                    carries, so this says which line it is summarising without
+                    needing a legend. */}
+                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-ok-9)" }} />
+                Avg SPL
+              </div>
+              <div className="mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
+                <span>{overview.avgSpl.toFixed(1)}</span>
+                <span className="text-caption1 font-normal text-fg-muted">dB</span>
+              </div>
+              {overview.splDelta && (
+                // NEUTRAL, always — see SplDelta. A louder weekend is not a
+                // worse one, so this never goes red.
+                <div className={`mt-2 flex items-center gap-1.5 text-caption1 ${trendColor("neutral")}`}>
+                  <span aria-hidden="true">{overview.splDelta.dir === "up" ? "▲" : "▼"}</span>
+                  <span>
+                    {/* Decibels, not a percentage: a percentage of a logarithmic
+                        quantity says nothing about how loud it was. */}
+                    {overview.splDelta.db >= 0 ? "+" : "−"}
+                    {Math.abs(overview.splDelta.db).toFixed(1)} dB vs the prior{" "}
+                    {overview.splDelta.priorCount}{" "}
+                    {overview.scopeName ?? "service"}
+                    {overview.splDelta.priorCount === 1 ? "" : "s"}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div
           className="flex-1 min-w-0 md:max-w-[640px]"
@@ -949,6 +988,10 @@ function OverviewBlend({
           <AttendanceTrendChart
             points={overview.attPoints}
             splLabel={splTrend.shown ? overview.splMetric : null}
+            // The chart tracked the pointer underneath the menu it had just
+            // opened: the tooltip drew through the menu and moved as you
+            // reached for an item.
+            hoverSuppressed={chartMenu != null}
           />
         </div>
         {chartMenu && (
