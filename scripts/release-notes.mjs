@@ -17,6 +17,11 @@
 // anchor question the version calculation answers.
 
 import { execFileSync } from "node:child_process";
+import SCOPE_LABEL_FILE from "../main/services/scope-labels.json" with { type: "json" };
+
+const SCOPE_LABELS = Object.fromEntries(
+  Object.entries(SCOPE_LABEL_FILE).filter(([k]) => !k.startsWith("_")),
+);
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
@@ -182,7 +187,7 @@ for (const entry of parsed) {
   const { type, scope, bang, text } = entry;
   // The scope is the most useful part of a subject — it says which surface
   // changed — so keep it as a lead-in rather than dropping it.
-  const line = scope ? `**${scope}** — ${text}` : text;
+  const line = scope ? `**${scopeLabel(scope)}** — ${text}` : text;
   if (seen.has(line)) continue;
   seen.add(line);
 
@@ -192,6 +197,21 @@ for (const entry of parsed) {
     if (isBuildOutFix(entry, oldScopes)) buildOutFixes++;
     else fixes.push(line);
   }
+}
+
+/**
+ * What to call a scope in something an operator reads.
+ *
+ * `a11y` is the one that prompted this: it went out in 1.13.0's notes eight
+ * times, and it means nothing to anybody who has not written a commit message.
+ * The map is shared with main/services/changelog.ts, which formats the same
+ * lines for a checkout's update dialog, so the two cannot drift.
+ *
+ * A scope that is not listed is shown as written — scores, calendar, patch,
+ * layout and the rest already say what they are.
+ */
+function scopeLabel(scope) {
+  return SCOPE_LABELS[scope.toLowerCase()] ?? scope;
 }
 
 /** A capped bullet list, saying plainly how much was left out. */
