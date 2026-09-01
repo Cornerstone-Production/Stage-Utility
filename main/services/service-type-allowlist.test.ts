@@ -182,6 +182,10 @@ describe("no organisation's ids are baked into the source", () => {
         "main/services/fixtures/espn-nfl-scoreboard.json",
         "main/services/fixtures/pvp-playlists.json",
         "main/services/fixtures/pvp-workspace.json",
+        // Checked when it was added to this list: seven scope names and their
+        // English words. The only digits in it are the 11 of a11y and the 18 of
+        // i18n — nothing organisation-shaped, nothing pasted.
+        "main/services/scope-labels.json",
         "main/tsconfig.json",
       ],
       "the set of scanned .json files changed — check the new one for pasted ids",

@@ -392,7 +392,15 @@ function SetSwitch({ value, onChange }: { value: BarSet; onChange: (v: BarSet) =
     { id: "mobile", label: "Phone", Icon: SmartphoneIcon },
   ];
   return (
-    <div role="group" aria-label="Which bar to edit" className="flex items-center gap-px rounded-lg bg-accent/12 p-0.5">
+    // INLINE-flex, so the tinted track is the width of the two chips. A block
+    // `flex` div fills its line, and this one stopped being a flex ITEM when the
+    // sentence beside it was removed — so the tint ran 663px across a dialog for
+    // 174px of buttons, reading as a filled row rather than a segmented control.
+    <div
+      role="group"
+      aria-label="Which bar to edit"
+      className="inline-flex items-center gap-px rounded-lg bg-accent/12 p-0.5"
+    >
       {options.map(({ id, label, Icon }) => (
         <button
           key={id}
