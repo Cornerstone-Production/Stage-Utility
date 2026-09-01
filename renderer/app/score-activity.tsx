@@ -30,6 +30,7 @@ import { leagueById } from "@main/types/scores";
 import { formatClock } from "../lib/clock-format";
 import { cn } from "../lib/cn";
 import { scoreActivity, useScoreActivity } from "./score-activity-store";
+import { halfInning, halfInningLabel } from "./score-capsule-state";
 // ONE definition of "does this viewer want motion", in lib. There were FOUR —
 // here, view-transition.ts, expand-overlay.tsx and the lib copy — and a fifth
 // was about to be added for the drawer drag. Only the lib one carried the
@@ -322,17 +323,53 @@ export function ScoreCapsule({
   // one scores: without the id, switching to a game whose away score happened to
   // match the old one would reuse the node and play nothing.
   //
+  // Null for anything that is not a baseball half-inning, which is every other
+  // sport's period, a start time, "Final" and "Delayed".
+  const half = halfInning(game.shortDetail);
+
   // The BUTTON is deliberately never remounted: it can hold focus, and a
   // keyboard operator must not lose it because somebody scored.
   const inner = (
     <>
       <ScoreSide key={scoreKey(game, "away")} team={game.away} side="away" size="capsule" scored={scored === "away"} />
-      {/* "Bot 7th" is the first thing the capsule gives up when the bar runs out
-          of room — it is the widest part of the capsule that is not a score, and
-          the panel behind it says the same thing at length. The scores either
-          side of it never go and never shorten: a shortened score is a different
-          number. See bar-fit.ts. */}
-      <span className="score-capsule-mid bar-drop-1">{game.shortDetail}</span>
+      {/* A HALF-INNING IS A TRIANGLE AND A NUMBER. "Bot 9th" was 45px of a 156px
+          capsule — 29% of it, and the widest part that is not a score — which made
+          one game a third of the context bar. As a triangle and a 9 it is about
+          20px, and it reads faster: the half is a direction rather than a word,
+          and the ordinal was three glyphs saying nothing the number did not.
+
+          Only a half-inning. Every other sport keeps its own string, because
+          "2nd Quarter" compressed this way reads as a down and a start time is
+          not a period at all — see score-capsule-state.ts.
+
+          Still the first thing the capsule gives up when the bar runs out of
+          room: the panel behind it says the same thing at length, and the scores
+          either side never go and never shorten, because a shortened score is a
+          different number. See bar-fit.ts. */}
+      <span className="score-capsule-mid bar-drop-1">
+        {half ? (
+          <>
+            {/* Drawn, not typed. ▲ and ▼ are geometric shapes rather than text,
+                and IBM Plex Sans does not carry them — the browser would fall
+                back to whatever font on the machine does, at a different weight
+                and baseline on every OS. */}
+            <svg
+              className={cn("score-half", half.half === "bottom" && "is-bottom")}
+              viewBox="0 0 8 6"
+              aria-hidden="true"
+            >
+              <path d="M4 0 L8 6 L0 6 Z" />
+            </svg>
+            <span aria-hidden="true">{half.inning}</span>
+            {/* The triangle is a shape and the number has lost its ordinal, so
+                between them they say nothing a screen reader can use. The phrase
+                they stand for goes here instead. */}
+            <span className="sr-only">{halfInningLabel(half)}</span>
+          </>
+        ) : (
+          game.shortDetail
+        )}
+      </span>
       <ScoreSide key={scoreKey(game, "home")} team={game.home} side="home" size="capsule" scored={scored === "home"} />
     </>
   );
