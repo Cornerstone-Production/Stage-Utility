@@ -231,6 +231,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "spl:listHistory":
       return apiFetch<T>("/api/spl/history");
 
+    case "spl:getSummary":
+      return apiFetch<T>("/api/spl/summary");
+
+    case "spl:getTrendPrefs":
+      return apiFetch<T>("/api/spl/trend");
+    case "spl:setTrendPrefs":
+      return post<T>("/api/spl/trend", p);
+
     case "people:getCount":
       return apiFetch<T>("/api/people/count");
 

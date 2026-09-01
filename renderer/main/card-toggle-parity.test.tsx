@@ -101,6 +101,50 @@ const SCORES_LIVE: ScoresStatusDTO = {
  *  is why the guard only needs ONE of its four cells to differ. */
 const SCORES_IDLE: ScoresStatusDTO = { ...SCORES_LIVE, games: [], scoreRev: 0, fetchedAt: null };
 
+/**
+ * Three weekends of history, so `home-recent-services` has a chart to draw at all
+ * (it renders nothing below two points) and the SPL line has something to differ
+ * about — the levels are far apart so a metric swap cannot come out the same.
+ */
+const WEEKENDS = ["2026-08-16", "2026-08-23", "2026-08-30"];
+const attendance = (day: string, peak: number): ServiceAttendance => ({
+  serviceKey: `st-1:plan-${day}:${day}`,
+  serviceTypeId: "st-1",
+  serviceTypeName: "Weekend",
+  planId: `plan-${day}`,
+  planTitle: "Sample plan",
+  seriesTitle: null,
+  serviceDate: day,
+  serviceTimeId: null,
+  serviceTimeStartsAt: `${day}T15:00:00.000Z`,
+  startedAt: `${day}T15:00:00.000Z`,
+  endedAt: `${day}T16:30:00.000Z`,
+  samples: [],
+  attendanceBaseline: 0,
+  totalAttendance: peak,
+  peakAttendance: peak,
+  peakOccupancy: peak,
+  minOccupancy: 0,
+  lastAttendance: peak,
+  lastOccupancy: peak,
+});
+const ATTENDANCE: ServiceAttendance[] = [
+  attendance(WEEKENDS[0], 210),
+  attendance(WEEKENDS[1], 245),
+  attendance(WEEKENDS[2], 232),
+];
+/** Two metrics, far apart, so "which metric" changes the drawing. */
+const SPL_SUMMARY: SplServiceSummary[] = WEEKENDS.map((day, i) => ({
+  serviceKey: `st-1:plan-${day}:${day}`,
+  serviceTypeId: "st-1",
+  serviceTypeName: "Weekend",
+  serviceDate: day,
+  metrics: {
+    "LAeq 10": { leq: 88 + i * 2, count: 1000 },
+    "SPL C Fast": { leq: 101 - i * 3, count: 1000 },
+  },
+}));
+
 /** Two calibrated meters at DIFFERENT levels, so "loudest" and a pinned quiet
  *  channel cannot come out the same number. Balcony is the quiet one. */
 const SPL_LIVE: SplMetricsDTO = {
@@ -189,6 +233,9 @@ let happening = true;
     : url.includes("/api/pvp/status") ? pick(PVP_LIVE, PVP_IDLE)
     : url.includes("/api/spl/metrics") ? pick(SPL_LIVE, SPL_IDLE)
     : url.includes("/api/scores/status") ? pick(SCORES_LIVE, SCORES_IDLE)
+    : url.includes("/api/attendance/history") ? ATTENDANCE
+    : url.includes("/api/spl/summary") ? SPL_SUMMARY
+    : url.includes("/api/service-timeline") ? []
     : {};
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
@@ -198,6 +245,18 @@ const React = (await import("react")).default;
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
 const { LAYOUT_OBJECTS } = await import("./layout-objects.js");
+// A router IN CONTEXT, because one of the cards under test carries a link.
+// `home-recent-services` renders "Open History" as a real <Link>, and a Link asks
+// the router to build its location — with none in context it throws, and the pair
+// test would fail for the harness's reasons rather than the widget's.
+const { RouterContextProvider, createRootRoute, createRouter, createMemoryHistory } =
+  await import("@tanstack/react-router");
+const router = createRouter({
+  routeTree: createRootRoute(),
+  history: createMemoryHistory({ initialEntries: ["/"] }),
+});
+// Loaded before any render: an unloaded router cannot build a location.
+await router.load();
 const { TOGGLE_PAIRS, PICK_PAIRS } = await import("../app/home/card-toggles.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -238,6 +297,21 @@ function ctxFor(home: boolean, live: boolean) {
 const VALUES: Record<string, [unknown, unknown]> = { format: ["24h", "12h"] };
 const valuesFor = (key: string) => VALUES[key] ?? [true, false];
 
+/**
+ * Config a setting needs switched on before it can do anything.
+ *
+ * `splMetric` chooses which metric the SPL trend line plots, and there is no line
+ * until `showSpl` is on. Without this the pair renders two identical cards and
+ * reports a live setting as dead — the false negative that mirrors the false
+ * positive above, and just as misleading.
+ *
+ * Deliberately narrow: a setting that needs a prerequisite is a setting the menu
+ * should be hiding until then, and both of these are.
+ */
+const PREREQ: Record<string, Record<string, unknown>> = {
+  splMetric: { showSpl: true },
+};
+
 /** One render of one object, as markup. */
 async function draw(type: string, key: string, value: unknown, home: boolean, live: boolean): Promise<string> {
   happening = live;
@@ -245,14 +319,29 @@ async function draw(type: string, key: string, value: unknown, home: boolean, li
   let container!: HTMLElement;
   await act(async () => {
     ({ container } = render(
-      React.createElement(ObjectContent, {
-        o: { id: "o1", x: 0, y: 0, w: 6, h: 4, z: 1, config: { ...base, [key]: value }, style: {} },
-        ctx: ctxFor(home, live),
-      } as never),
+      React.createElement(
+        RouterContextProvider as never,
+        { router },
+        React.createElement(ObjectContent, {
+          o: {
+            id: "o1", x: 0, y: 0, w: 6, h: 4, z: 1,
+            config: { ...base, ...(PREREQ[key] ?? {}), [key]: value },
+            style: {},
+          },
+          ctx: ctxFor(home, live),
+        } as never),
+      ),
     ));
     await settle();
   });
-  const html = container.innerHTML;
+  // React's useId values are NOT evidence of anything. They increment per render
+  // tree, so two renders of the same card carry different ids by construction —
+  // and any card whose markup contains one differs from itself no matter what the
+  // setting does. `home-recent-services` draws the trend chart, which mints two
+  // gradient ids, so both of its pair tests passed on `_r_0_` vs `_r_2_` alone;
+  // deleting the whole feature left them green. Normalised, the comparison is
+  // about the widget again.
+  const html = container.innerHTML.replace(/_r_[0-9a-z]+_/gi, "_id_");
   cleanup();
   return html;
 }
@@ -304,6 +393,8 @@ const PICK_VALUES: Record<string, [unknown, unknown]> = {
   recorder: ["any", "reaper"],
   // Same idea: "any" answers for all three streamers, "youtube" for one.
   platform: ["any", "youtube"],
+  // Two metrics whose levels are nowhere near each other, so the line moves.
+  splMetric: ["LAeq 10", "SPL C Fast"],
 };
 
 describe("every CHOICE Home's card menu offers changes what the widget draws", () => {

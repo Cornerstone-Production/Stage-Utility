@@ -10,6 +10,8 @@
 // No hooks, no fetching - both callers already hold the data.
 
 import { inTrendScope, inAverageScope } from "./overview-scope";
+import type { SplServiceSummary } from "@main/types/stage";
+import { combineLeq } from "@main/services/spl-leq";
 import { formatClock } from "../../lib/clock-format";
 
 export function fmtTime(iso: string | null): string {
@@ -24,7 +26,16 @@ export function shortDay(day: string): string {
 
 /** One point on the attendance trend chart — a service occurrence with its peak
  *  in-room count and the day it happened (for the axis labels). */
-export interface TrendPoint { day: string; value: number; parts?: { label: string; value: number }[]; live?: boolean }
+export interface TrendPoint {
+  day: string;
+  value: number;
+  parts?: { label: string; value: number }[];
+  live?: boolean;
+  /** That day's service Leq in dB for the chosen metric, or null when nothing was
+   *  recorded. Null rather than 0 — the SPL line breaks over a gap instead of
+   *  diving to the floor and inventing a silent Sunday. */
+  spl?: number | null;
+}
 
 /** A trend indicator: which direction the latest value moved vs the mean of the
  *  prior window, and whether that direction is good or bad for THIS metric.
@@ -142,6 +153,34 @@ export interface OverviewData {
    *  has always filtered by activeType; the labels said "weekend" regardless, so
    *  an Events night showed Events numbers under a Weekend heading. */
   scopeName: string | null;
+  /** Metric keys with a level behind them, in scope, sorted — what the "Metric"
+   *  submenu offers. Built from the data rather than a fixed list because which
+   *  metrics exist is Smaart's business, not this app's. */
+  splMetrics: string[];
+  /** The metric `attPoints[].spl` was filled from: the caller's choice when it
+   *  is one of `splMetrics`, else the preferred default, else null. */
+  splMetric: string | null;
+}
+
+/**
+ * The metric to plot when nobody has chosen one.
+ *
+ * An LAeq-style key first: the trend line answers "how loud was the service",
+ * and an equivalent-continuous A-weighted level is the number that means that.
+ * A "SPL A"-style key is the fallback because it is what most Smaart setups
+ * report; anything else only if the meter reports nothing more familiar.
+ *
+ * Case-insensitive and substring-matched, because Smaart names these itself and
+ * the exact spelling varies ("LAeq 10", "LAeq10", "SPL A Slow").
+ */
+export function preferredSplMetric(keys: readonly string[]): string | null {
+  return (
+    keys.find((k) => /laeq/i.test(k)) ??
+    keys.find((k) => /leq/i.test(k)) ??
+    keys.find((k) => /spl\s*a/i.test(k)) ??
+    keys[0] ??
+    null
+  );
 }
 
 /**
@@ -157,8 +196,19 @@ export function computeOverview(
   day: string | null,
   activeType: string | null,
   activeTypeName: string | null,
-  now = Date.now(),
+  /**
+   * The optional extras, as a bag rather than three more positional arguments.
+   *
+   * `now` sat sixth, so reaching the SPL parameters meant passing it — and the
+   * only honest value at a call site is `Date.now()`, which inside a useMemo is
+   * an impure call the lint rule rejects. Named, a caller passes what it has and
+   * the clock keeps defaulting itself inside.
+   */
+  opts: { now?: number; splList?: readonly SplServiceSummary[]; splMetric?: string | null } = {},
 ): OverviewData {
+  const now = opts.now ?? Date.now();
+  const splList = opts.splList ?? [];
+  const splMetric = opts.splMetric ?? null;
   const asOf = day;
   const tl = (list ?? []).filter((t) => inAverageScope(t, activeType, asOf));
   const att = attList.filter((a) => inTrendScope(a, activeType, asOf));
@@ -172,6 +222,29 @@ export function computeOverview(
   const startFmt = (sec: number) => (sec >= 0 ? `${fmtDur(sec)} late` : `${fmtDur(-sec)} early`);
   const avgPunct = mean(punct);
   const avgOverrun = mean(overruns);
+
+  // ── The SPL line ───────────────────────────────────────────────────────────
+  // Scoped the same way the attendance points are, then folded to one level per
+  // DATE so the two series share an x axis exactly. Several services on a Sunday
+  // combine by energy, weighted by samples — the same rule that built each
+  // service's own level, applied once more.
+  const splInScope = splList.filter((r) => inTrendScope(r, activeType, asOf));
+  const splMetrics = [...new Set(splInScope.flatMap((r) => Object.keys(r.metrics)))].sort();
+  // The caller's choice only if it is really there. A metric saved into a layout
+  // months ago can be one this meter no longer reports, and honouring it would
+  // draw an empty line with no way to tell that from a quiet room.
+  const chosenMetric =
+    splMetric && splMetrics.includes(splMetric) ? splMetric : preferredSplMetric(splMetrics);
+  const splByDate = new Map<string, { leq: number; count: number }[]>();
+  if (chosenMetric) {
+    for (const r of splInScope) {
+      const m = r.metrics[chosenMetric];
+      if (!m) continue;
+      const arr = splByDate.get(r.serviceDate);
+      if (arr) arr.push(m);
+      else splByDate.set(r.serviceDate, [m]);
+    }
+  }
 
   // One point per WEEKEND (service date): value = TOTAL attendance across that
   // day's services (the headline weekend number), with a per-service breakdown
@@ -193,6 +266,10 @@ export function computeOverview(
         // A weekend is "live" while any of its services is still recording — its
         // total is a partial that will keep climbing.
         live: svcs.some((a) => a.endedAt == null),
+        // Undefined when no metric is chosen at all, null when this date has no
+        // reading for it. The chart tells those apart: no metric draws no line;
+        // a gap breaks the line it is already drawing.
+        spl: chosenMetric ? combineLeq(splByDate.get(d) ?? []) : undefined,
       };
     });
   // Stats are computed over SETTLED weekends only. A weekend still recording has
@@ -229,6 +306,8 @@ export function computeOverview(
     peakAttendance: peakWeekend ? peakWeekend.value.toLocaleString() : "—",
     peakSub: peakWeekend ? shortDay(peakWeekend.day) : undefined,
     scopeName: activeTypeName,
+    splMetrics,
+    splMetric: chosenMetric,
   };
 }
 

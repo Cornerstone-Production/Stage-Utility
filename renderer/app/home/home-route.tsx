@@ -38,6 +38,7 @@ import { SIZES, SIZE_ORDER, WHEN_LABELS, sizeOf, whenOf } from "./home-cards";
 import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles";
 import { gameOptions } from "../../main/scores-object";
 import { meterOptions, sourceOptions } from "../recording-status";
+import { preferredSplMetric } from "../../settings/sections/overview-data";
 import { useSplState } from "../../main/use-spl-state";
 import { invoke } from "../../lib/api";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
@@ -145,6 +146,20 @@ export function HomeRoute() {
     (o) => pickedValue(o, "meterId") != null,
   );
   const spl = useSplState(wantsMeters);
+  /**
+   * The metrics history actually has, for the "Metric" submenu on the Recent
+   * services card. Gated like the two above: a summary read for a card nobody
+   * has switched the line on for is traffic for nothing.
+   */
+  const wantsSplMetrics = (pending ?? homeView?.layout?.objects ?? []).some(
+    (o) => pickedValue(o, "splMetric") != null,
+  );
+  const { data: splSummary } = useQuery({
+    queryKey: ["spl:getSummary"],
+    queryFn: () => invoke<SplServiceSummary[]>("spl:getSummary"),
+    enabled: wantsSplMetrics,
+    retry: 1,
+  });
 
   /** Has anything been placed by hand? */
   const arranged = (homeView?.layout?.objects ?? []).some((o) => isPlaced(o));
@@ -321,6 +336,27 @@ export function HomeRoute() {
           },
         })),
       });
+    }
+    // Which metric the Recent services card's trend line plots. Offered only
+    // while the line is ON — a metric picker above a switch that is off is a
+    // setting for something the operator cannot see.
+    const splMetric = pickedValue(card, "splMetric");
+    if (splMetric != null && (card.config as { showSpl?: boolean }).showSpl) {
+      const keys = [...new Set((splSummary ?? []).flatMap((r) => Object.keys(r.metrics)))].sort();
+      const chosen = splMetric || (preferredSplMetric(keys) ?? "");
+      if (keys.length > 0) {
+        items.push({
+          label: "Metric",
+          items: keys.map((k) => ({
+            label: k,
+            checked: chosen === k,
+            onSelect: () => {
+              save((objs) => replaceCard(objs, withToggle(card, "splMetric", k)));
+              setMenu(null);
+            },
+          })),
+        });
+      }
     }
     // The SPL card's "which meter", beside the scores card's "which game" and
     // for the same reason: a setting of the WIDGET, from a list this page has to

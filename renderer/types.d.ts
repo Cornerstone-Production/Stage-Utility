@@ -96,6 +96,7 @@ declare global {
   type SplMeterDTO = Stage.SplMeterDTO;
   type SplMetricsDTO = Stage.SplMetricsDTO;
   type SplMetricStat = Stage.SplMetricStat;
+  type SplServiceSummary = Stage.SplServiceSummary;
   type StageState = Stage.StageState;
   type TaperWindow = Stage.TaperWindow;
   type TeamMemberDTO = Stage.TeamMemberDTO;

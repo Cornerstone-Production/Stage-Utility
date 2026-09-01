@@ -14,7 +14,15 @@ import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
 /** Real attendance trend chart (SVG): a baseline, the per-service polyline, the
  *  latest point marked, and first/last date labels. The hero of the blend — not
  *  decorative. Falls back to a quiet note when there isn't enough to plot. */
-export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
+export function AttendanceTrendChart({
+  points,
+  splLabel,
+}: {
+  points: TrendPoint[];
+  /** The Smaart metric the SPL series is, for the tooltip row. Absent draws no
+   *  SPL series at all, whatever the points carry. */
+  splLabel?: string | null;
+}) {
   /**
    * The chart's own size, measured, and used as PLAIN PIXELS — see the svg
    * below for why there is no viewBox to scale them.
@@ -27,6 +35,7 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   // Unique per instance: Home and History can both be mounted, and two <defs>
   // sharing an id means the second chart paints with the first one's gradient.
   const gradientId = useId();
+  const splGradientId = useId();
   const [W, setW] = useState(640);
   /**
    * And the HEIGHT, because a trend needs an aspect to be a shape.
@@ -108,6 +117,41 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
   // under it is what makes a shallow slope read as a shape rather than as a
   // scratch, and it costs one path.
   const area = `${padX},${H - padBottom} ${poly} ${plotW - padX},${H - padBottom}`;
+
+  // ── The SPL series ─────────────────────────────────────────────────────────
+  //
+  // ITS OWN SCALE, and it has to be. Attendance is a count in the hundreds and a
+  // service level is a number between about 70 and 100 dB; on one axis the SPL
+  // line is a flat wire pinned to the floor of the chart. So the dB band is fitted
+  // to the dB data and the two series share only the x axis, which is the honest
+  // reading anyway — this is "did it get louder", not "is it bigger than the
+  // attendance".
+  //
+  // PADDED, because a service that runs within 2 dB every week is a real and
+  // useful answer, and stretched edge to edge that reads as wild swings. The
+  // padding is proportional with a floor, so a steady series sits as a calm line
+  // through the middle rather than a cliff.
+  const splVals = points.map((p) => p.spl).filter((v): v is number => v != null);
+  const showSpl = splLabel != null && splVals.length >= 2;
+  const sMin = splVals.length ? Math.min(...splVals) : 0;
+  const sMax = splVals.length ? Math.max(...splVals) : 1;
+  const sPad = Math.max(1.5, (sMax - sMin) * 0.3);
+  const sLo = sMin - sPad;
+  const sRange = sMax + sPad - sLo || 1;
+  const sy = (v: number) => padTop + (1 - (v - sLo) / sRange) * (H - padTop - padBottom);
+  // BROKEN INTO RUNS, so a week with no recording is a gap rather than a dive to
+  // the bottom of the band. A missing reading is not a quiet service.
+  const splRuns: { i: number; v: number }[][] = [];
+  {
+    let run: { i: number; v: number }[] = [];
+    points.forEach((p, i) => {
+      if (p.spl == null) {
+        if (run.length) splRuns.push(run);
+        run = [];
+      } else run.push({ i, v: p.spl });
+    });
+    if (run.length) splRuns.push(run);
+  }
   const lastX = x(points.length - 1);
   const lastY = y(points[points.length - 1].value);
   const latest = points[points.length - 1].value;
@@ -154,7 +198,46 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
             <stop offset="0%" stopColor="var(--su-accent)" stopOpacity={0.28} />
             <stop offset="100%" stopColor="var(--su-accent)" stopOpacity={0} />
           </linearGradient>
+          <linearGradient id={`${splGradientId}`} x1="0" y1="0" x2="0" y2="1">
+            {/* Lighter than the attendance fill, deliberately. Two washes of equal
+                weight read as two foregrounds fighting; this one has to sit under
+                the attendance curve and still be legible where they overlap. */}
+            <stop offset="0%" stopColor="var(--su-ok-9)" stopOpacity={0.2} />
+            <stop offset="100%" stopColor="var(--su-ok-9)" stopOpacity={0} />
+          </linearGradient>
         </defs>
+        {/* SPL FIRST — SVG paints in document order, so everything below this is
+            drawn over it. That is the depth: the level is the ground the
+            attendance curve stands on, not a second line competing with it.
+            Slightly thinner and slightly transparent for the same reason. */}
+        {showSpl &&
+          splRuns.map((run, ri) => (
+            <g key={ri}>
+              {run.length > 1 && (
+                <polygon
+                  points={`${x(run[0].i).toFixed(1)},${H - padBottom} ${run
+                    .map((r) => `${x(r.i).toFixed(1)},${sy(r.v).toFixed(1)}`)
+                    .join(" ")} ${x(run[run.length - 1].i).toFixed(1)},${H - padBottom}`}
+                  fill={`url(#${splGradientId})`}
+                />
+              )}
+              <polyline
+                points={run.map((r) => `${x(r.i).toFixed(1)},${sy(r.v).toFixed(1)}`).join(" ")}
+                fill="none"
+                stroke="var(--su-ok-9)"
+                strokeWidth={2}
+                strokeOpacity={0.85}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+              {/* A single reading between two gaps has no line to be seen as, so
+                  it is drawn as a dot rather than silently disappearing. */}
+              {run.length === 1 && (
+                <circle cx={x(run[0].i)} cy={sy(run[0].v)} r={2.5} fill="var(--su-ok-9)" fillOpacity={0.85} />
+              )}
+            </g>
+          ))}
         <polygon points={area} fill={`url(#${gradientId})`} />
         <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         {/* The newest point is hollow while its service is still recording — that
@@ -169,6 +252,9 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
           <g pointerEvents="none">
             <line x1={hx} y1={padTop} x2={hx} y2={H - padBottom} stroke="var(--su-line-strong)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
             <circle cx={hx} cy={hy} r={4} fill="var(--su-accent)" stroke="var(--su-bg)" strokeWidth={1.5} />
+            {showSpl && hp?.spl != null && (
+              <circle cx={hx} cy={sy(hp.spl)} r={3.5} fill="var(--su-ok-9)" stroke="var(--su-bg)" strokeWidth={1.5} />
+            )}
           </g>
         )}
         <text x={padX} y={H - 8} fontFamily="var(--font-mono)" fontSize={11} fill="var(--su-fg-subtle)">{shortDay(points[0].day)}</text>
@@ -185,6 +271,18 @@ export function AttendanceTrendChart({ points }: { points: TrendPoint[] }) {
             {shortDay(hp.day)}{hp.live ? " · recording" : ""}
           </div>
           <div className="font-mono text-caption1 font-medium tabular-nums text-fg text-center">{hp.value.toLocaleString()}</div>
+          {/* The level for this day, under the attendance figure and marked with
+              the series' own colour so the tooltip says which line it belongs to
+              without needing a legend. Only when there IS one — a day with no
+              recording says nothing rather than "—", which would read as a
+              measured silence. */}
+          {showSpl && hp.spl != null && (
+            <div className="mt-0.5 flex items-center justify-center gap-1.5 font-mono text-caption2 tabular-nums whitespace-nowrap">
+              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-ok-9)" }} />
+              <span className="text-fg-muted">{splLabel}</span>
+              <span className="text-fg">{hp.spl.toFixed(1)} dB</span>
+            </div>
+          )}
           {hp.parts && hp.parts.length > 1 && (
             <div className="mt-1 flex flex-col gap-0.5 border-t border-line pt-1">
               {hp.parts.map((p, i) => (
