@@ -59,6 +59,62 @@ const REAPER_IDLE: ReaperStatusDTO = { connected: true, recording: false, record
 const STREAM_LIVE: StreamStatusDTO = { connected: true, live: true, startedAt: SINCE, detail: "Main encoder" };
 const STREAM_IDLE: StreamStatusDTO = { connected: true, live: false, startedAt: null, detail: null };
 
+/** Two followed games with different teams and different scores, so "any
+ *  followed team" (which takes the first) and a pin to the SECOND cannot draw
+ *  the same thing. Invented teams and ids — this is a public repo. */
+const team = (id: string, name: string, score: number): ScoreTeamDTO => ({
+  id,
+  abbreviation: name.slice(0, 3).toUpperCase(),
+  name,
+  displayName: `City of ${name}`,
+  color: null,
+  logo: null,
+  record: null,
+  score,
+});
+const game = (eventId: string, away: ScoreTeamDTO, home: ScoreTeamDTO, state: ScoreState): ScoreGameDTO => ({
+  eventId,
+  league: "mlb" as LeagueId,
+  sport: "baseball" as SportKind,
+  state,
+  delayed: false,
+  detail: state === "in" ? "Top 3rd" : "Final",
+  shortDetail: state === "in" ? "Top 3rd" : "Final",
+  clock: "",
+  startsAt: new Date(NOW - 3_600_000).toISOString(),
+  venue: null,
+  away,
+  home,
+  situation: null,
+});
+const GAME_A = game("evt-a", team("t-100", "Anvils", 3), team("t-101", "Beacons", 1), "in");
+const GAME_B = game("evt-b", team("t-200", "Cyphers", 7), team("t-201", "Drifters", 5), "in");
+const SCORES_LIVE: ScoresStatusDTO = {
+  connected: true,
+  games: [GAME_A, GAME_B],
+  scoreRev: 1,
+  lastEvents: [],
+  fetchedAt: new Date(NOW).toISOString(),
+  error: null,
+};
+/** Connected with nothing on today — both choices draw the same empty card, which
+ *  is why the guard only needs ONE of its four cells to differ. */
+const SCORES_IDLE: ScoresStatusDTO = { ...SCORES_LIVE, games: [], scoreRev: 0, fetchedAt: null };
+
+/** Two calibrated meters at DIFFERENT levels, so "loudest" and a pinned quiet
+ *  channel cannot come out the same number. Balcony is the quiet one. */
+const SPL_LIVE: SplMetricsDTO = {
+  connected: true,
+  apiVersion: "4",
+  meters: {
+    "Console::Main": { deviceName: "Console", channelName: "Main", metrics: { "SPL A Slow": 92.4 }, ts: SINCE },
+    "Console::Balcony": { deviceName: "Console", channelName: "Balcony", metrics: { "SPL A Slow": 78.1 }, ts: SINCE },
+  },
+};
+/** Connected, reporting nothing — the loudest-meter path says "no readings yet"
+ *  and a pinned meter says that meter is not reporting, which still differ. */
+const SPL_IDLE: SplMetricsDTO = { connected: true, apiVersion: "4", meters: {} };
+
 const LAYER: PvpLayerDTO = {
   uuid: "layer-1",
   name: "Lower third",
@@ -131,6 +187,8 @@ let happening = true;
     : url.includes("/api/reaper/status") ? pick(REAPER_LIVE, REAPER_IDLE)
     : url.includes("/api/resi/status") || url.includes("/api/youtube/status") ? pick(STREAM_LIVE, STREAM_IDLE)
     : url.includes("/api/pvp/status") ? pick(PVP_LIVE, PVP_IDLE)
+    : url.includes("/api/spl/metrics") ? pick(SPL_LIVE, SPL_IDLE)
+    : url.includes("/api/scores/status") ? pick(SCORES_LIVE, SCORES_IDLE)
     : {};
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
@@ -140,7 +198,7 @@ const React = (await import("react")).default;
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
 const { LAYOUT_OBJECTS } = await import("./layout-objects.js");
-const { TOGGLE_PAIRS } = await import("../app/home/card-toggles.js");
+const { TOGGLE_PAIRS, PICK_PAIRS } = await import("../app/home/card-toggles.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 before(() => {
@@ -160,6 +218,10 @@ function ctxFor(home: boolean, live: boolean) {
     resi: live ? STREAM_LIVE : STREAM_IDLE,
     youtube: live ? STREAM_LIVE : STREAM_IDLE,
     pvp: live ? PVP_LIVE : PVP_IDLE,
+    spl: live ? SPL_LIVE : SPL_IDLE,
+    // The WALL scores object reads ctx; the Home card opens its own hook. Both
+    // are fed, because the guard renders each pair on both surfaces.
+    scores: live ? SCORES_LIVE : SCORES_IDLE,
     propresenter: live ? PRO_LIVE : null,
     serviceTimeline: live ? TIMELINE : null,
   });
@@ -220,6 +282,53 @@ describe("every setting Home's card menu offers changes what the widget draws", 
       assert.fail(
         `${key} on a ${type} draws exactly the same thing whether it is on or off, on all four of ` +
           `${tried.join(", ")} — the menu writes it into the object and persists it, and nothing reads it`,
+      );
+    });
+  }
+});
+
+/**
+ * The two values a PICK is compared between.
+ *
+ * A pick is a choice from a list, not a flip, so there is no "off" to compute —
+ * each key names its default and one real alternative. A pick added without an
+ * entry here lands as [undefined, undefined] and fails to differ, which is the
+ * right way round: it says so rather than quietly testing nothing.
+ */
+const PICK_VALUES: Record<string, [unknown, unknown]> = {
+  meterId: ["loudest", "Console::Balcony"],
+  // "auto" takes the first followed game; the pin names the second.
+  game: ["auto", "mlb:t-200"],
+};
+
+describe("every CHOICE Home's card menu offers changes what the widget draws", () => {
+  // The picks were outside this file entirely. TOGGLE_PAIRS is derived from
+  // APPLIES, and PICKS is a separate record — so "Game" had shipped unguarded
+  // against exactly the failure the toggles above exist to catch, and a new pick
+  // would have inherited that hole.
+  test("the pick list is the menu's own, and it is not empty", () => {
+    assert.ok(PICK_PAIRS.length > 0, "PICK_PAIRS is empty — the guard below would check nothing");
+    for (const { type } of PICK_PAIRS) {
+      assert.ok(type in LAYOUT_OBJECTS, `the menu offers a choice on "${type}", which is not an object type`);
+    }
+  });
+
+  for (const { type, key } of PICK_PAIRS) {
+    test(`${type} reads ${key}`, async () => {
+      const [on, off] = PICK_VALUES[key] ?? [undefined, undefined];
+      const tried: string[] = [];
+      for (const home of [false, true]) {
+        for (const live of [true, false]) {
+          const a = await draw(type, key, on, home, live);
+          const b = await draw(type, key, off, home, live);
+          if (a !== b) return;
+          tried.push(`${home ? "Home" : "wall"}/${live ? "live" : "idle"}`);
+        }
+      }
+      assert.fail(
+        `${key} on a ${type} draws exactly the same thing whichever of ${JSON.stringify(on)} / ` +
+          `${JSON.stringify(off)} it holds, on all four of ${tried.join(", ")} — the menu writes it ` +
+          `into the object and persists it, and nothing reads it`,
       );
     });
   }

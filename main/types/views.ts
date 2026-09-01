@@ -390,7 +390,16 @@ export type LayoutObjectConfig =
   | { type: "home-streaming"; hideWhenIdle?: boolean; fillWhenLive?: boolean; showElapsed?: boolean }
   | { type: "home-streaming-resi"; hideWhenIdle?: boolean; fillWhenLive?: boolean; showElapsed?: boolean }
   | { type: "home-streaming-youtube"; hideWhenIdle?: boolean; fillWhenLive?: boolean; showElapsed?: boolean }
-  | { type: "home-spl" }
+  // `meterId` names one Smaart meter, keyed "device::channel" as the SPL DTO
+  // keys them. ABSENT — and the sentinel "loudest" — mean whichever meter is
+  // loudest right now, which is what this card did before the setting existed
+  // and is still what an operator who never opens the menu gets.
+  //
+  // Deliberately NOT the same meaning `spl-meter` gives the same key: there,
+  // null falls back to the FIRST meter. Two cards, two defaults, because the
+  // wall object is one chosen instrument and this one answers "how loud is it
+  // in here" without being told where.
+  | { type: "home-spl"; meterId?: string | null }
   | { type: "home-screens" }
   | { type: "home-recent-services" }
   // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from

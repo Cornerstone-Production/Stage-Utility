@@ -37,6 +37,8 @@ import { addCard, cardsForNow, removeCard, replaceCard, setSize, setWhen } from 
 import { SIZES, SIZE_ORDER, WHEN_LABELS, sizeOf, whenOf } from "./home-cards";
 import { pickedValue, togglesFor, withToggle } from "./card-toggles";
 import { gameOptions } from "../../main/scores-object";
+import { meterOptions } from "../recording-status";
+import { useSplState } from "../../main/use-spl-state";
 import { invoke } from "../../lib/api";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
@@ -132,6 +134,18 @@ export function HomeRoute() {
     enabled: wantsFavourites,
     retry: 1,
   });
+  /**
+   * The Smaart meters, for the "Meter" submenu on an SPL card.
+   *
+   * Gated exactly like the favourites above, and for the same reason: Home is
+   * the page every operator lands on, and opening an SPL subscription for a card
+   * nobody placed is the always-on traffic this app tries not to make.
+   */
+  const wantsMeters = (pending ?? homeView?.layout?.objects ?? []).some(
+    (o) => pickedValue(o, "meterId") != null,
+  );
+  const spl = useSplState(wantsMeters);
+
   /** Has anything been placed by hand? */
   const arranged = (homeView?.layout?.objects ?? []).some((o) => isPlaced(o));
   // The controls live in the page HEADER, not on a row of their own — that row
@@ -280,6 +294,24 @@ export function HomeRoute() {
           checked: pinned === o.value,
           onSelect: () => {
             save((objs) => replaceCard(objs, withToggle(card, "game", o.value)));
+            setMenu(null);
+          },
+        })),
+      });
+    }
+    // The SPL card's "which meter", beside the scores card's "which game" and
+    // for the same reason: a setting of the WIDGET, from a list this page has to
+    // fetch. The default reads the loudest meter, so an operator who never opens
+    // this menu is on exactly the behaviour the card has always had.
+    const meter = pickedValue(card, "meterId");
+    if (meter != null) {
+      items.push({
+        label: "Meter",
+        items: meterOptions(spl, meter).map((o) => ({
+          label: o.label,
+          checked: meter === o.value,
+          onSelect: () => {
+            save((objs) => replaceCard(objs, withToggle(card, "meterId", o.value)));
             setMenu(null);
           },
         })),

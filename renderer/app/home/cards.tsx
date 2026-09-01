@@ -47,7 +47,7 @@ import { visibleLayers } from "../../main/pvp-object";
 import { PvpNowObject } from "../../main/pvp-now";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
-import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl } from "../recording-status";
+import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl, pinnedSpl, LOUDEST_METER } from "../recording-status";
 import { useResiState, useYouTubeState } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
 import { useScoresState } from "../../main/use-scores-state";
@@ -602,9 +602,12 @@ export function StreamingCard({
 }
 
 /** The loudest meter right now, and which one. */
-export function SplCard() {
-  const loud = loudestSpl(useSplState());
-  return <Stat label="SPL" value={loud.value} sub={loud.sub} />;
+export function SplCard({ meterId }: { meterId?: string | null } = {}) {
+  const spl = useSplState();
+  // Unpinned is the untouched path: same call, same output as before the setting
+  // existed. Pinning changes WHICH meter is read, never the composition.
+  const r = meterId && meterId !== LOUDEST_METER ? pinnedSpl(spl, meterId) : loudestSpl(spl);
+  return <Stat label="SPL" value={r.value} sub={r.sub} />;
 }
 
 /**
@@ -927,7 +930,7 @@ export function HomeCard({
     case "home-streaming-youtube":
       return <StreamingCard platform="YouTube" now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-spl":
-      return <SplCard />;
+      return <SplCard meterId={c.meterId} />;
     case "home-pvp":
       return <PvpCard now={now} showProgress={c.showProgress ?? false} />;
     case "home-pvp-now":
