@@ -42,10 +42,11 @@ function buildRepo(): string {
         GIT_COMMITTER_EMAIL: "t@t",
       },
     });
-  const commit = (subject: string) => {
+  const commit = (subject: string, body?: string) => {
     fs.appendFileSync(path.join(dir, "f"), `${subject}\n`);
     git("add", "-A");
-    git("commit", "-m", subject);
+    if (body) git("commit", "-m", subject, "-m", body);
+    else git("commit", "-m", subject);
   };
 
   git("init", "-q", "-b", "main");
@@ -61,6 +62,12 @@ function buildRepo(): string {
   commit("fix(signage): a lost edit and a clipped number");
   commit("fix(signage): stop sending every wall back to its first graphic");
   commit("fix(patch): the rack colour bled onto the row stripes");
+  // The case the scope heuristic is blind to: `patch` is an OLD scope, so a fix
+  // under it reads as a fix to something the reader has had all along. This one
+  // is not — it repairs a feature added in this very range, and only the author
+  // knows that, so the author says so.
+  commit("feat(patch): a printable diagram");
+  commit("fix(patch): the diagram printed its legend twice", "Beta-only: true");
   git("tag", "v1.1.0");
   git("tag", "v1.1.0-beta.1");
 
@@ -151,7 +158,33 @@ describe("fixes made while building a brand-new feature", () => {
   it("and says how many it held back, rather than filtering silently", () => {
     // A silent filter reads as "nothing else changed", which is the failure the
     // whole generator exists to avoid.
-    assert.match(notesFor("1.1.0", "v1.0.0", repo), /2 further fixes made while building/);
+    assert.match(notesFor("1.1.0", "v1.0.0", repo), /3 further fixes made while building/);
+  });
+
+  it("holds back a fix the author marked Beta-only, whatever its scope", () => {
+    // THE SCOPE HEURISTIC IS BLIND TO THIS ONE. `patch` shipped before the
+    // anchor, so every rule above reads a fix under it as a fix to long-standing
+    // behaviour — and this one repairs a feature added in the same range. Only
+    // the author knows; the trailer is how they say so.
+    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo));
+    assert.doesNotMatch(
+      fixed,
+      /legend twice/,
+      "a fix the author marked Beta-only reached a stable release's notes — the reader never had that bug",
+    );
+    // And the rule did not become "suppress everything under an old scope".
+    assert.match(
+      fixed,
+      /rack colour bled/,
+      "an unmarked fix to the same old scope was suppressed with it",
+    );
+  });
+
+  it("a Beta-only fix still counts toward the held-back total", () => {
+    // Suppressed is not the same as unmentioned. A silent filter is the failure
+    // the whole generator exists to avoid, and that is as true of a fix the
+    // author held back as of one the scope rule held back.
+    assert.match(notesFor("1.1.0", "v1.0.0", repo), /3 further fixes made while building/);
   });
 
   it("a PRERELEASE keeps everything", () => {
@@ -160,6 +193,8 @@ describe("fixes made while building a brand-new feature", () => {
     const fixed = fixedSection(notesFor("1.1.0-beta.1", "v1.0.0", repo));
     assert.match(fixed, /a lost edit and a clipped number/);
     assert.match(fixed, /first graphic/);
+    // Including one marked Beta-only: the beta reader IS the person who had it.
+    assert.match(fixed, /legend twice/);
     assert.doesNotMatch(fixed, /further fixes made while building/);
   });
 

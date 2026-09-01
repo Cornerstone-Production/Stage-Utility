@@ -80,6 +80,32 @@ Claude-Session: https://claude.ai/code/session_…
 
 These are informational and do not affect the release level.
 
+#### `Beta-only: true`
+
+Put this on a `fix:` or `perf:` commit whose bug **never reached a stable
+release** — a regression introduced and repaired inside the same release cycle.
+
+```
+fix(integrations): the Setup guide links to this build's branch
+
+Beta-only: true
+```
+
+The release-notes generator drops such a commit from a stable release's
+**Fixed** list, and counts it into the "N further fixes … were never in a
+released version" line, so the omission is stated rather than silent. A
+prerelease keeps it: somebody on the beta track has been running the broken
+version, and for them the fix is the news.
+
+The generator already suppresses a fix whose whole **scope** is new this release.
+That rule cannot see a new feature built under an existing scope — in 1.13.0,
+thirteen scopes carried both a `feat` and 42 fixes, and `integrations` is years
+old even though the setup-guide link it fixes shipped in the same release. Only
+the author knows whether the bug ever shipped, so only the author can say.
+
+Rule of thumb: if somebody upgrading from the last stable release could not have
+hit the bug, mark it.
+
 ## Releases
 
 Automated from the commit types above, by `.github/workflows/release.yml`. Your
