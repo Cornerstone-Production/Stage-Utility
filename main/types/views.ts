@@ -419,7 +419,11 @@ export type LayoutObjectConfig =
   // in here" without being told where.
   | { type: "home-spl"; meterId?: string | null }
   | { type: "home-screens" }
-  | { type: "home-recent-services" }
+  // `showSpl` draws the service-level SPL line under the attendance curve;
+  // `splMetric` names which Smaart metric it plots (null = the preferred
+  // default). Off by default — an existing card must not gain a second line
+  // unasked.
+  | { type: "home-recent-services"; showSpl?: boolean; splMetric?: string | null }
   // A timer running INSIDE ProPresenter (its stage/countdown timers) — distinct from
   // the PCO countdown. `timerName` picks one by name (blank = the first reported);
   // `warnStates` colors the readout when the timer's state reads as overrun/expired.

@@ -87,6 +87,10 @@ const APPLIES = {
   // the output to differ.
   showProgress: { "pvp-layers": true, "home-pvp": true, "pvp-now": true, "home-pvp-now": true },
   showNextCue: { "pvp-now": true, "home-pvp-now": true },
+  // The SPL trend line on Home's Recent services card. History's copy of the
+  // same switch lives in settings rather than here, because that chart is not a
+  // layout object and has no config to write into.
+  showSpl: { "home-recent-services": true },
 } satisfies { [K in ToggleKey]: Record<TypesWith<K>, true> };
 
 /**
@@ -118,9 +122,12 @@ const PICKS = {
   // one prop changed. `stream-status` carries the key too and the record is
   // exhaustive, so it is named here; the wall object's own picker is unchanged.
   platform: { "home-streaming": true, "stream-status": true },
+  // Which metric that line plots. A choice from a list this file cannot know —
+  // Smaart names the metrics and the card offers the ones history actually has.
+  splMetric: { "home-recent-services": true },
 } satisfies { [K in PickKey]: Record<TypesWith<K>, true> };
 
-type PickKey = "game" | "meterId" | "recorder" | "platform";
+type PickKey = "game" | "meterId" | "recorder" | "platform" | "splMetric";
 
 /**
  * What a card is doing when it has never been given a value for a pick.
@@ -135,6 +142,10 @@ const PICK_FALLBACK: Record<PickKey, string> = {
   meterId: LOUDEST_METER,
   recorder: "any",
   platform: "any",
+  // The empty string is "follow the preferred default" — the menu ticks the
+  // metric that default resolved to, so the row that is checked is the one being
+  // drawn rather than a placeholder nobody chose.
+  splMetric: "",
 };
 
 /** The choices each pick offers, for the picks whose list is FIXED. `game` and
@@ -194,7 +205,8 @@ type ToggleKey =
   | "fillWhenLive"
   | "fillWhenRecording"
   | "showProgress"
-  | "showNextCue";
+  | "showNextCue"
+  | "showSpl";
 
 /** What to call each setting, and what "on" means for it. `format` is the only
  *  one that is not a boolean. */
@@ -246,6 +258,9 @@ const SPECS: {
     fallbackFor: { "pvp-now": true, "home-pvp-now": true },
   },
   { key: "showNextCue", label: "Next cue", fallback: true },
+  // `false` to agree with the renderer: a card that has never been told draws
+  // attendance alone, exactly as it did before the line existed.
+  { key: "showSpl", label: "SPL trend line", fallback: false },
 ];
 
 export interface CardToggle {

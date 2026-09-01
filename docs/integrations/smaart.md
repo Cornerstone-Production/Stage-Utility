@@ -37,6 +37,11 @@ stored encrypted on this machine.
 (`deviceName::channelName`) and metric key; optional peak-hold shows the highest
 value seen for that meter/metric.
 
+**On History:** the attendance trend can draw a second line — each date's service
+level, energy-averaged across the plan items. Right-click the chart to switch it on
+and choose the metric. See
+[Attendance and history](../features/attendance-and-history.md).
+
 **On Home:** add widget → **Sound level**. It reads whichever meter is loudest;
 right-click the tile and use **Meter** to pin one instead. Pinning changes which
 meter is read, not which metric — both paths prefer the A-weighted reading.

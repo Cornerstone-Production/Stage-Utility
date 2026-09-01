@@ -12,6 +12,7 @@ import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
+import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
 import { SplDetail } from "./spl-history-section";
 import {
@@ -142,6 +143,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const [baptisms, setBaptisms] = useState<BaptismSession[]>([]);
   // Attendance records for all services — for the Overview card's avg in-room.
   const [attList, setAttList] = useState<ServiceAttendance[]>([]);
+  /** One level per service — the SPL trend line's data. A summary, not the
+   *  archive: see splHistoryStore.summary(). */
+  const [splList, setSplList] = useState<SplServiceSummary[]>([]);
+  const [splTrend, setSplTrend] = useState<{ shown: boolean; metric: string | null }>({
+    shown: false,
+    metric: null,
+  });
+
   const [day, setDay] = useState<string | null>(null);
   // Editing the service window (times) in the detail view.
   const [editingTimes, setEditingTimes] = useState(false);
@@ -171,6 +180,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     window.location.assign(`/api/history/export?${params.toString()}`);
   }
 
+  /** Persist a trend-line preference and apply it immediately. Optimistic, then
+   *  reconciled with what the server actually stored — the same shape every other
+   *  setting in this app is written with. */
+  function saveSplTrend(patch: { shown?: boolean; metric?: string | null }) {
+    setSplTrend((prev) => ({ ...prev, ...patch }));
+    invoke<{ shown: boolean; metric: string | null }>("spl:setTrendPrefs", patch)
+      .then((p) => setSplTrend(p))
+      .catch(() => {
+        toast.error("Could not save the SPL trend setting");
+      });
+  }
+
   function reload() {
     invoke<ServiceTimeline[]>("serviceTimeline:list")
       .then((l) => setList(l))
@@ -181,6 +202,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     invoke<ServiceAttendance[]>("attendance:listHistory")
       .then((a) => setAttList(a ?? []))
       .catch(() => setAttList([]));
+    invoke<SplServiceSummary[]>("spl:getSummary")
+      .then((r) => setSplList(r ?? []))
+      .catch(() => setSplList([]));
+    invoke<{ shown: boolean; metric: string | null }>("spl:getTrendPrefs")
+      .then((p) => setSplTrend(p))
+      .catch(() => {
+        /* the chart draws without the line; the toggle is still offered */
+      });
   }, []);
 
   // Live updates while a service is recording — refresh the open detail/list, the
@@ -361,8 +390,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // Delegates to the shared derivation - Home shows the same headline figures,
   // and two implementations is how two screens come to disagree about one number.
   const overview = useMemo<OverviewData>(
-    () => computeOverview(list, attList, day, activeType, activeTypeName),
-    [list, attList, day, activeType, activeTypeName],
+    () =>
+      computeOverview(list, attList, day, activeType, activeTypeName, { splList, splMetric: splTrend.metric }),
+    [list, attList, day, activeType, activeTypeName, splList, splTrend.metric],
   );
 
   async function deleteService(key: string, title: string) {
@@ -744,7 +774,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             </select>
           )}
         </div>
-        <OverviewBlend overview={overview} />
+        <OverviewBlend overview={overview} splTrend={splTrend} onSplTrend={saveSplTrend} />
       </div>
 
       {/* Calendar (sticky) + selected-day detail. */}
@@ -843,7 +873,41 @@ function TrendChip({ trend, label }: { trend: Trend | null; label?: string }) {
 
 /** The Overview blend: a lead stat (avg attendance) with a colored trend line, a
  *  real attendance trend chart, and a divided instrument stat strip below. */
-function OverviewBlend({ overview }: { overview: OverviewData }) {
+function OverviewBlend({
+  overview,
+  splTrend,
+  onSplTrend,
+}: {
+  overview: OverviewData;
+  splTrend: { shown: boolean; metric: string | null };
+  onSplTrend: (patch: { shown?: boolean; metric?: string | null }) => void;
+}) {
+  /** Where the chart's right-click menu is, or null. */
+  const [chartMenu, setChartMenu] = useState<{ x: number; y: number } | null>(null);
+  /** The menu the chart offers: the line on or off, and which metric it plots.
+   *  The metric list comes from the data in scope — see OverviewData.splMetrics —
+   *  so it offers exactly the metrics there is something to draw for. */
+  const chartMenuItems: ContextMenuItem[] = [
+    {
+      label: "SPL trend line",
+      checked: splTrend.shown,
+      onSelect: () => onSplTrend({ shown: !splTrend.shown }),
+    },
+  ];
+  if (splTrend.shown && overview.splMetrics.length > 0) {
+    chartMenuItems.push({
+      label: "Metric",
+      items: overview.splMetrics.map((m) => ({
+        label: m,
+        checked: overview.splMetric === m,
+        onSelect: () => {
+          onSplTrend({ metric: m });
+          setChartMenu(null);
+        },
+      })),
+    });
+  }
+
   const strip: { k: string; v: string; accent?: string; trend?: Trend | null; trendLabel?: string }[] = [
     { k: "Services", v: overview.services },
     { k: "Avg length", v: overview.avgLength },
@@ -875,9 +939,26 @@ function OverviewBlend({ overview }: { overview: OverviewData }) {
             </div>
           )}
         </div>
-        <div className="flex-1 min-w-0 md:max-w-[640px]">
-          <AttendanceTrendChart points={overview.attPoints} />
+        <div
+          className="flex-1 min-w-0 md:max-w-[640px]"
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setChartMenu({ x: e.clientX, y: e.clientY });
+          }}
+        >
+          <AttendanceTrendChart
+            points={overview.attPoints}
+            splLabel={splTrend.shown ? overview.splMetric : null}
+          />
         </div>
+        {chartMenu && (
+          <ContextMenu
+            x={chartMenu.x}
+            y={chartMenu.y}
+            items={chartMenuItems}
+            onClose={() => setChartMenu(null)}
+          />
+        )}
       </div>
       {/* Wrapping grid so the readouts never collide: 2 cols on mobile, 3 at sm,
           all at lg. Value + trend can wrap within a cell rather than overrun. */}

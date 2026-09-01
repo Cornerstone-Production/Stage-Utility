@@ -51,6 +51,11 @@ switches.
 | **Embedded screen** | What another screen is showing, following its routing | This app |
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
+**Recent services** draws the same attendance trend the History tab does.
+Right-click it for **SPL trend line** — the service level for each date, behind the
+attendance curve on its own dB scale — and **Metric**, which picks the Smaart metric
+it plots. See [Attendance and history](../features/attendance-and-history.md).
+
 **Service pacing** carries slippage forward from earlier items and keeps growing
 while the current item runs long, so it answers "are we going to finish on time",
 not "was that item long". It needs a recorded service timeline; without one it

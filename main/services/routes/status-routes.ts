@@ -154,6 +154,23 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       json(res, await splHistoryStore.list());
       return;
     }
+    // NOT under /api/spl/history/… — that path is matched by the per-service
+    // regex below, where "current" already needs excluding by name. One more
+    // reserved word in a path that otherwise holds service keys is a trap for
+    // whoever adds the next one.
+    if (method === "GET" && pathname === "/api/spl/summary") {
+      json(res, await splHistoryStore.summary());
+      return;
+    }
+    if (method === "GET" && pathname === "/api/spl/trend") {
+      json(res, await splHistoryStore.getTrendPrefs());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/spl/trend") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      json(res, await splHistoryStore.setTrendPrefs(body));
+      return;
+    }
     if (method === "GET" && pathname === "/api/spl/visible-metrics") {
       json(res, { metrics: await splHistoryStore.getVisibleMetrics() });
       return;

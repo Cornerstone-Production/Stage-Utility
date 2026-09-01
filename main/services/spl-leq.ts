@@ -35,3 +35,34 @@ export function leqOf(samples: readonly number[]): number | null {
   if (usable.length === 0) return null;
   return 10 * Math.log10(usable.reduce((sum, s) => sum + 10 ** (s / 10), 0) / usable.length);
 }
+
+/**
+ * Combine already-computed Leqs into one, weighted by how many samples each
+ * covers.
+ *
+ *   Leq = 10 · log10( Σ(nᵢ · 10^(Lᵢ/10)) / Σnᵢ )
+ *
+ * WEIGHTED, because the parts are not the same length. A service is a 30-second
+ * welcome, a 25-minute sermon and six songs; averaging their Leqs evenly lets the
+ * welcome count as much as the sermon and reports a level nobody experienced.
+ * With the weights it is exactly the Leq of the whole service — the same number
+ * `leqOf` would give if every sample had been kept and folded in one pass, which
+ * is what `combineLeq matches leqOf over the same samples` asserts.
+ *
+ * Parts with no level, or no samples, are skipped rather than counted as zero:
+ * an item the meter never reported during is absent from the average, not a
+ * silent stretch pulling it down.
+ */
+export function combineLeq(
+  parts: readonly { leq: number | null | undefined; count: number }[],
+): number | null {
+  let energy = 0;
+  let n = 0;
+  for (const p of parts) {
+    if (p.leq == null || !Number.isFinite(p.leq) || p.count <= 0) continue;
+    energy += p.count * 10 ** (p.leq / 10);
+    n += p.count;
+  }
+  if (n === 0) return null;
+  return 10 * Math.log10(energy / n);
+}
