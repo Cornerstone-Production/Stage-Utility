@@ -80,10 +80,13 @@ describe("the gutter is decided in one place", () => {
   const consoleRoute = withoutComments(readFileSync(path.join(HERE, "console-route.tsx"), "utf8"));
 
   test("the shell withholds the padding on a console", () => {
+    // The predicate generalised when ScriptView's rundown turned out to have the
+    // same problem — it is `isFullBleedPath` now, of which a console is one case.
+    // See scriptview-full-bleed.test.ts, which pins the membership.
     assert.match(
       shell,
-      /!chromeless && !onConsole && "sm:pt-4"/,
-      "the shell applies its top gutter without asking whether this is a console — a console renders it as a white band against the stage-black",
+      /!chromeless && !fullBleed && "sm:pt-4"/,
+      "the shell applies its top gutter without asking whether this route paints its own surface — a console renders it as a white band against the stage-black",
     );
   });
 

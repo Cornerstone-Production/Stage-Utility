@@ -19,7 +19,7 @@ import { PAGE_SCROLLER_ID, useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
 import { PageActionsProvider, PageActionsSlot } from "./page-actions";
 import { ContextBar } from "./context-bar";
-import { consoleHidesChrome, consolePages, isConsolePath, resolvePage } from "./active-page";
+import { consoleHidesChrome, consolePages, isFullBleedPath, resolvePage } from "./active-page";
 import { useStageState } from "../main/use-stage-state";
 import { useStageLiveWiring } from "./live-wiring";
 import { UpdateNotices } from "./update-notices";
@@ -36,9 +36,10 @@ export function Shell() {
   const { state: liveState } = useStageState();
   const consoles = useMemo(() => consolePages(liveState?.views), [liveState?.views]);
   const active = useMemo(() => resolvePage(pathname, consoles), [pathname, consoles]);
-  // A console fills its area edge to edge and has no page to give air to, so it
-  // is the one route that does not get the gutter under the strip.
-  const onConsole = useMemo(() => isConsolePath(pathname, liveState?.views), [pathname, liveState?.views]);
+  // A route that paints its own surface edge to edge has no page to give air to,
+  // so it does not get the gutter under the strip. A console, and the ScriptView
+  // rundown, which paints a kiosk surface.
+  const fullBleed = useMemo(() => isFullBleedPath(pathname, liveState?.views), [pathname, liveState?.views]);
   // A console the operator has asked to run without the app's chrome. BOTH bands
   // go — the phone's top bar (SplitView's, hidden through `chromeless`) and the
   // context bar below — because 89px of an 844px phone is the number that makes
@@ -144,7 +145,7 @@ export function Shell() {
               // is `h-full`, and a negative margin moves the box without giving
               // it the height back, so cancelling it that way just moved the
               // white band to the bottom.
-              !chromeless && !onConsole && "sm:pt-4",
+              !chromeless && !fullBleed && "sm:pt-4",
             )}
           >
             {/* Keyed so re-selecting the active rail item remounts the route,
