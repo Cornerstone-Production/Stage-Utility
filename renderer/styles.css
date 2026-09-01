@@ -1210,23 +1210,38 @@ button.score-capsule:focus-visible {
   outline: 2px solid var(--su-focus);
   outline-offset: 3px;
 }
+/* NARROWER THAN THE PANEL'S STRIP, and narrower than it used to be. At 180px the
+   capsule was 27% of a 676px bar for one reading, which is what made it read as a
+   banner rather than an item. 157px now, measured with "SD 0 · Bot 3rd · 0 CIN".
+
+   The width came off the FEATHER, not off the numbers. The mask below is a
+   percentage gradient, so its opaque region scales with the side — shrinking the
+   side alone drags the number into the fade, and every naive tightening measured
+   at 0.50-0.63 backing behind the score where the shipped capsule has 0.74. The
+   stops are shifted to match, so the number's backing comes out at 0.83: better
+   than what shipped, on a capsule 24px narrower. */
+.score-capsule {
+  --score-feather-r: linear-gradient(to right, #000 0%, #000 55%, rgba(0,0,0,.92) 66%, rgba(0,0,0,.74) 76%, rgba(0,0,0,.5) 84%, rgba(0,0,0,.28) 90%, rgba(0,0,0,.12) 95%, rgba(0,0,0,.04) 98%, transparent 100%);
+  --score-feather-l: linear-gradient(to left,  #000 0%, #000 55%, rgba(0,0,0,.92) 66%, rgba(0,0,0,.74) 76%, rgba(0,0,0,.5) 84%, rgba(0,0,0,.28) 90%, rgba(0,0,0,.12) 95%, rgba(0,0,0,.04) 98%, transparent 100%);
+}
 .score-capsule .score-side {
   flex: 0 0 auto;
-  gap: 7px;
-  padding: 5px 9px;
+  gap: 6px;
+  padding: 5px 8px;
 }
 /* The colour has to run past the seam before it can fade, or the feather starts
-   under the number. */
+   under the number. 16px, with the stops above shifted to suit; 22px with the
+   panel's stops was the same idea paid for in width. */
 .score-capsule .score-side-away {
-  padding-right: 22px;
+  padding-right: 16px;
 }
 .score-capsule .score-side-home {
-  padding-left: 22px;
+  padding-left: 16px;
 }
 .score-capsule .score-logo {
-  width: 18px;
-  height: 18px;
-  font-size: 8px;
+  width: 16px;
+  height: 16px;
+  font-size: 7.5px;
 }
 .score-capsule .score-value {
   font-size: 15px;
@@ -1235,8 +1250,8 @@ button.score-capsule:focus-visible {
   margin: 0;
 }
 .score-capsule-mid {
-  padding: 0 7px;
-  font-size: 9.5px;
+  padding: 0 6px;
+  font-size: 9px;
   color: var(--score-muted);
   letter-spacing: .05em;
   white-space: nowrap;
