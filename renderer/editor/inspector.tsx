@@ -68,7 +68,7 @@ import {
   typeLabel,
   usesPropInstance,
 } from "../main/layout-objects";
-import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
+import { DEFAULT_READOUT_ALIGN, READOUT_ALIGNED_TYPES } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
@@ -1480,7 +1480,7 @@ export function Inspector({
               first click would then appear to do nothing. */}
           <Row label="Align">
             <AlignPad
-              h={s.textAlign ?? (sizesTypeFromItsBox(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
+              h={s.textAlign ?? (READOUT_ALIGNED_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
               v={s.vAlign ?? "middle"}
               onChange={onStyle}
             />

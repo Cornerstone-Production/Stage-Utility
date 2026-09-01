@@ -713,11 +713,16 @@ export function PvpNowCard({
   const skewMs = usePvpSkewMs(pvp);
   return (
     <div className={STAT_CARD}>
+      {/* No `align`: PvpNowObject passes it to Readout, which defaults to LEFT,
+          and a Home card is centred like every other Stat. Dropping it silently
+          was what made this card render left while its Align pad said centre and
+          every cell in that pad did nothing. */}
       <PvpNowObject
         config={{ showProgress, showNextCue }}
         status={pvp}
         now={now}
         skewMs={skewMs}
+        align="center"
         uniform
       />
     </div>
