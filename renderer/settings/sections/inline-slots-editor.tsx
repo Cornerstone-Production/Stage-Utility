@@ -9,6 +9,7 @@ import { useStageState } from "../../main/use-stage-state";
 import { SortableSlotGroup, AlignmentPanel, PresetsPanel, makeSharesWith, type PresetHandlers } from "./slots-section";
 import type { WirelessChannel } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useReportUnsavedWork } from "../../components/unsaved-work";
 
 function freshSlotId(): string {
   return `slot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -133,7 +134,12 @@ export function InlineSlotsEditor({
     setDirty(true);
   }
 
-  async function save() {
+  /**
+   * Land the buffer. Resolves FALSE when it did not, because the editor's own
+   * Save runs this first and must not report success — or close — over a save
+   * that failed.
+   */
+  async function save(): Promise<boolean> {
     setSaving(true);
     try {
       const slots = localSlots.map((s, i) => ({ ...s, order: i }));
@@ -141,12 +147,23 @@ export function InlineSlotsEditor({
       queryClient.setQueryData(["stage:getState"], next);
       setDirty(false);
       toast.success("Slots saved.");
+      return true;
     } catch (err) {
       toast.error(`Failed to save slots: ${String(err)}`);
+      return false;
     } finally {
       setSaving(false);
     }
   }
+
+  // The slots are the layout editor's work too. Its "Unsaved changes" pill
+  // compares the LAYOUT against what is saved, which cannot see this buffer —
+  // the slots live on the server per service type, not in the layout — so
+  // arranging mics and pressing the editor's Save saved the layout and silently
+  // left the arrangement behind. Reported upward through the same registry the
+  // integration dialog's sub-panels use, so the pill lights and the editor's
+  // Save lands this first.
+  useReportUnsavedWork(`inline-slots:${objectId}`, dirty && !!serviceTypeId, save);
 
   // Copy a slots-View's lineup into this grid as a starting point (fresh ids).
   // Also carry over the source view's physical-inch alignment so the columns line
