@@ -555,6 +555,7 @@ export function HomeRoute() {
             e.preventDefault();
             setMenu({ x: e.clientX, y: e.clientY, cardId: o.id });
           }}
+          menuCardId={menu?.cardId ?? null}
           boxes={previewBoxes}
           animate={!!dragId}
           chrome={

@@ -158,6 +158,20 @@ export interface LayoutRenderCtx {
    * pass it" must not be indistinguishable from it.
    */
   onlineOutputIds: readonly string[];
+
+  /**
+   * The id of the Home card whose own right-click menu is open right now, or
+   * null/absent when none is.
+   *
+   * Optional, like `rosstalkSimulate` above — not required, and not set by
+   * either of the other two builders of this context: no surface but Home's
+   * own grid ever opens a per-card menu over a widget it draws, so nothing
+   * else has to name it. Home's Recent services card compares this to its own
+   * object id to suppress its chart's hover the same way History's copy of
+   * the same chart already does over ITS right-click menu — a widget drawn
+   * anywhere else never receives one.
+   */
+  activeCardMenuId?: string | null;
 }
 
 /**
@@ -817,6 +831,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           skewMs={ctx.skewMs}
           onlineOutputIds={ctx.onlineOutputIds}
           secondsToStart={homeSecondsToStart(ctx)}
+          hoverSuppressed={ctx.activeCardMenuId === o.id}
         />
       </div>
     );
