@@ -503,7 +503,9 @@ export function EditorCanvas({
         geom = { x: clamp(snapped.x, 0, 1 - drag.start.w), y: clamp(snapped.y, 0, 1 - drag.start.h), w: drag.start.w, h: drag.start.h };
       } else {
         const g = applyResize(drag.start, drag.mode, dx, dy);
-        geom = gridOn && !free ? snapRectToGrid(g, drag.parentAbs, boxW, boxH, true) : g;
+        // The HANDLE, not `true`: a resize snaps the edges being dragged and
+        // leaves the opposite ones exactly where they were.
+        geom = gridOn && !free ? snapRectToGrid(g, drag.parentAbs, boxW, boxH, drag.mode) : g;
       }
 
       // Alignment runs AFTER the grid and in absolute canvas space, so a nested

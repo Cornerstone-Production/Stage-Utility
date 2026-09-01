@@ -55,10 +55,47 @@ export function snapRectToGrid(
   parentAbs: FracRect,
   boxW: number,
   boxH: number,
-  size: boolean,
+  /**
+   * What is being snapped.
+   *
+   *   false     a MOVE: the position lands on the grid, the size is untouched
+   *   true      the whole rect, as "Snap all" and "Snap to grid" mean it
+   *   a Handle  a RESIZE: only the edges that handle drags
+   *
+   * The third case exists because the first two treated x, y, w and h as four
+   * independent numbers. `applyResize` correctly holds the opposite edge still,
+   * and then snapping rounded x as well — so dragging the EAST handle moved the
+   * WEST edge, by however far the object happened to sit off the grid. Which is
+   * exactly the situation you are in when you are trying to match another
+   * widget's size by eye, and it is why that was reported as impossible without
+   * typing the numbers into the inspector.
+   */
+  size: boolean | Handle,
 ): FracRect {
   const { xUnit, yUnit } = gridUnits(boxW, boxH);
   const abs = composeRect(parentAbs, local);
+
+  if (typeof size === "string") {
+    // An edge the handle does not name keeps its EXACT value — not a snapped
+    // one, not a rounded one. That is the whole fix.
+    const right = abs.x + abs.w;
+    const bottom = abs.y + abs.h;
+    let { x, y, w, h } = abs;
+
+    if (size.includes("w")) {
+      w = Math.max(xUnit, right - snapTo(abs.x, xUnit));
+      x = right - w;
+    }
+    if (size.includes("e")) w = Math.max(xUnit, snapTo(right, xUnit) - abs.x);
+    if (size.includes("n")) {
+      h = Math.max(yUnit, bottom - snapTo(abs.y, yUnit));
+      y = bottom - h;
+    }
+    if (size.includes("s")) h = Math.max(yUnit, snapTo(bottom, yUnit) - abs.y);
+
+    return localizeRect(parentAbs, { x, y, w, h });
+  }
+
   const snapped = {
     x: snapTo(abs.x, xUnit),
     y: snapTo(abs.y, yUnit),
