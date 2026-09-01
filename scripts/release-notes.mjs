@@ -69,8 +69,46 @@ function log(range) {
   }
 }
 
+/**
+ * Subject AND body, so a commit can say something about itself that its subject
+ * cannot — see BETA_ONLY.
+ *
+ * Records are separated by RS and the subject from the body by NUL, because a
+ * commit body contains blank lines, bullet lists and code fences, and every
+ * cheaper separator has appeared inside one.
+ */
+function commits(range) {
+  try {
+    return execFileSync("git", ["log", "--no-merges", "--format=%s%x00%b%x1e", range], { encoding: "utf8" })
+      .split("\x1e")
+      .map((rec) => {
+        const [subject = "", body = ""] = rec.split("\x00");
+        return { subject: subject.trim(), body };
+      })
+      .filter((c) => c.subject);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * `Beta-only: true` — this fixed a bug that never reached a stable release.
+ *
+ * The scope heuristic below cannot see these. It asks whether a fix's SCOPE is
+ * new this release, which catches a whole new subsystem and misses a new feature
+ * built under an existing one: `fix(integrations): the Setup guide links to this
+ * build's branch` is a fix to something added in the same release, but
+ * `integrations` is years old, so it reads as a fix to long-standing behaviour
+ * and survives into the notes. In 1.13.0 there were 13 such scopes carrying 42
+ * fixes — a reader coming from 1.12.1 being told about bugs they never had.
+ *
+ * Only the author knows, so only the author can say. Prereleases keep them
+ * either way: someone on the beta track HAS been running the broken version.
+ */
+const BETA_ONLY = /^Beta-only:\s*(true|yes)\s*$/im;
+
 const range = fromRef ? `${fromRef}..v${version}` : `v${version}`;
-const subjects = log(range);
+const entries = commits(range);
 
 /** A prerelease has a `-` in it: 1.11.0-beta.27. A stable release does not. */
 const isPrerelease = version.includes("-");
@@ -100,7 +138,7 @@ const seen = new Set();
 const parsed = [];
 const featScopes = new Set();
 
-for (const subject of subjects) {
+for (const { subject, body } of entries) {
   const m = CONVENTIONAL.exec(subject);
   if (!m) continue;
   const [, rawType, scope, bang, text] = m;
@@ -108,7 +146,7 @@ for (const subject of subjects) {
   if (INVISIBLE.has(type) && !bang) continue;
   const key = scope?.toLowerCase() ?? null;
   if (!bang && type === "feat" && key) featScopes.add(key);
-  parsed.push({ type, scope, key, bang, text });
+  parsed.push({ type, scope, key, bang, text, betaOnly: BETA_ONLY.test(body) });
 }
 
 /**
@@ -130,7 +168,11 @@ for (const subject of subjects) {
  * broken version — for them the fix IS the news.
  */
 function isBuildOutFix(entry, oldScopes) {
-  if (isPrerelease || !oldScopes || !entry.key) return false;
+  if (isPrerelease) return false;
+  // The author said so outright. No scope reasoning required, and it is the only
+  // thing that catches a new feature built under an old scope.
+  if (entry.betaOnly) return true;
+  if (!oldScopes || !entry.key) return false;
   return featScopes.has(entry.key) && !oldScopes.has(entry.key);
 }
 
