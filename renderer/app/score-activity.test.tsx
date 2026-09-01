@@ -105,7 +105,7 @@ function status(over: Partial<ScoresStatusDTO> = {}): ScoresStatusDTO {
 describe("the panel opens itself once per score, and lets go when told", () => {
   test("one score opens it once", () => {
     const s = createScoreActivity();
-    s.scored(5, 0);
+    s.scored(5, 0, null);
     assert.equal(s.get().open, true);
     assert.equal(s.get().seenRev, 5);
 
@@ -115,7 +115,7 @@ describe("the panel opens itself once per score, and lets go when told", () => {
     // operator closed re-opens on the next unrelated frame carrying the same
     // rev.
     s.close();
-    s.scored(5, 0);
+    s.scored(5, 0, null);
     assert.equal(s.get().open, false, "a rev already seen re-opened the panel");
   });
 
@@ -123,7 +123,7 @@ describe("the panel opens itself once per score, and lets go when told", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     try {
       const s = createScoreActivity();
-      s.scored(1, 0);
+      s.scored(1, 0, null);
       assert.equal(s.get().open, true);
 
       // The operator opens it by hand. From this moment the panel is THEIRS.
@@ -148,7 +148,7 @@ describe("the panel opens itself once per score, and lets go when told", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     try {
       const s = createScoreActivity();
-      s.scored(1, 0);
+      s.scored(1, 0, null);
       mock.timers.tick(SCORE_HOLD_MS + 1);
       assert.equal(s.get().open, false, "an auto-opened panel never folded away");
     } finally {
@@ -167,7 +167,7 @@ describe("the panel opens itself once per score, and lets go when told", () => {
     assert.equal(s.get().seenRev, 9);
 
     // And it has actually taken effect: the rev it seeded is now spent.
-    s.scored(9, 0);
+    s.scored(9, 0, null);
     assert.equal(s.get().open, false, "a seeded rev still auto-opened");
   });
 
@@ -175,7 +175,7 @@ describe("the panel opens itself once per score, and lets go when told", () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     try {
       const s = createScoreActivity();
-      s.scored(1, 0);
+      s.scored(1, 0, null);
       s.focus(2);
       assert.deepEqual(
         { open: s.get().open, focus: s.get().focus },
@@ -348,12 +348,21 @@ function strips(container: HTMLElement): Element[] {
 
 describe("a score replays the animation on the game that scored, and only that one", () => {
   test("THE GUARD: the OTHER game's strip is not rebuilt", () => {
+    // HAND-OPENED, and the scoreRev does not move. A score-driven open narrows
+    // the panel to the one game that scored, so the other card is not rendered
+    // at all and there is no second strip to compare — which is a stronger
+    // guarantee than this guard asks for, but it is not the guarantee this guard
+    // is about. The keying still governs whenever the stack is open with several
+    // cards in it, which is what this reproduces.
+    scoreActivity.toggle();
     const { container, rerender } = render(<ScoreActivityHost scores={twoGames(0)} />);
     const before = strips(container);
     assert.equal(before.length, 2, "the stack did not render both games");
 
-    rerender(<ScoreActivityHost scores={scoreInGameTwo(1)} />);
+    // Game two's score moves; the rev does not, so nothing narrows.
+    rerender(<ScoreActivityHost scores={{ ...twoGames(1), scoreRev: 0 }} />);
     const after = strips(container);
+    assert.equal(after.length, 2, "the stack stopped rendering both games");
 
     // `assert.ok` on a comparison, never `assert.notEqual` on the nodes
     // themselves: a failing assert.equal INSPECTS both values to build its diff,
@@ -376,8 +385,9 @@ describe("a score replays the animation on the game that scored, and only that o
   });
 
   test("THE GUARD: a SECOND score in the SAME game restarts it", () => {
+    // Narrowed to game two both times, so it is the only strip on screen.
     const { container, rerender } = render(<ScoreActivityHost scores={scoreInGameTwo(1)} />);
-    const first = strips(container)[1];
+    const first = strips(container)[0];
 
     rerender(<ScoreActivityHost scores={scoreInGameTwo(2)} />);
 
@@ -385,7 +395,7 @@ describe("a score replays the animation on the game that scored, and only that o
     // most likely to drop: key on the game id alone and the second run in a game
     // reuses the node and animates nothing.
     assert.ok(
-      strips(container)[1] !== first,
+      strips(container)[0] !== first,
       "the second score in the same game reused the node, so nothing replayed",
     );
   });
@@ -842,5 +852,89 @@ describe("a shut panel is not a row of invisible tab stops", () => {
     // cleanup() is idempotent, so the file's own afterEach still works.
     cleanup();
     shutPanel();
+  });
+});
+
+// The app store is a singleton and `scored` is guarded on seenRev, so a rev any
+// earlier test has already consumed is silently ignored. Each test takes its own.
+let revCounter = 100;
+const NEXT_REV = () => ++revCounter;
+
+describe("what the panel shows", () => {
+  test("a score shows ONLY the game that scored", () => {
+    // Reported: "the only card that should show on a score update is the one
+    // where there was actually the score, i dont need all the cards dropping
+    // down otherwise I wont know which game had the score update."
+    scoreActivity.close();
+    // TWO deliveries. The first only seeds — a page opened five minutes after a
+    // touchdown must not pop the panel for it — so the score has to arrive on a
+    // later one to open anything at all.
+    const { container, rerender } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    rerender(<ScoreActivityHost scores={scoreInGameTwo(NEXT_REV())} />);
+    const cards = [...container.querySelectorAll("[data-score-card]")];
+    assert.equal(cards.length, 1, `a score dropped ${cards.length} cards open, not one`);
+    // Identified by the score only game two carries: its home side is 1, game
+    // one's is 6. The eventIds "one"/"two" are never rendered — the strip shows
+    // team names and numbers.
+    const shown = cards[0].textContent ?? "";
+    assert.ok(!shown.includes("6"), `the card shown is game one, not the one that scored: ${shown}`);
+  });
+
+  test("opening it by hand still shows every live game", () => {
+    // The other intent. A score is a notification about one game; tapping the
+    // capsule is "show me everything", and must not inherit the narrowing.
+    scoreActivity.close();
+    const { container, rerender } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    rerender(<ScoreActivityHost scores={scoreInGameTwo(NEXT_REV())} />);
+    assert.equal(container.querySelectorAll("[data-score-card]").length, 1);
+
+    scoreActivity.toggle(); // closes the score-opened panel
+    scoreActivity.toggle(); // and opens it by hand
+    rerender(<ScoreActivityHost scores={{ ...twoGames(1), scoreRev: 1 }} />);
+    assert.equal(
+      container.querySelectorAll("[data-score-card]").length,
+      2,
+      "a hand-driven open inherited the score's narrowing",
+    );
+  });
+
+  test("a finished game leaves the panel", () => {
+    // The capsule already ignores anything not "in" (liveIndex), so a game that
+    // ended stayed only in the panel behind it — a Final card sitting there all
+    // evening under a capsule that had moved on.
+    scoreActivity.close();
+    scoreActivity.toggle();
+    const done = twoGames(0);
+    const withFinal = {
+      ...done,
+      games: [{ ...done.games[0], state: "post" as const }, done.games[1]],
+    };
+    const { container } = render(<ScoreActivityHost scores={withFinal} />);
+    const cards = [...container.querySelectorAll("[data-score-card]")];
+    assert.equal(cards.length, 1, "the finished game is still in the panel");
+    // Game one is the finished one, and its home score is 6; game two's is 1.
+    assert.ok(
+      !(cards[0].textContent ?? "").includes("6"),
+      "the live game was dropped and the finished one kept",
+    );
+  });
+
+  test("a walk-off still announces itself", () => {
+    // The game that scored ends in the SAME poll that reports the run. Filtering
+    // finished games before honouring the narrowing would drop the card in the
+    // act of announcing it — the one delivery where both rules apply at once.
+    scoreActivity.close();
+    const t = scoreInGameTwo(NEXT_REV());
+    const walkOff = {
+      ...t,
+      games: [t.games[0], { ...t.games[1], state: "post" as const }],
+    };
+    const { container, rerender } = render(<ScoreActivityHost scores={twoGames(0)} />);
+    rerender(<ScoreActivityHost scores={walkOff} />);
+    assert.equal(
+      container.querySelectorAll("[data-score-card]").length,
+      1,
+      "the walk-off was filtered out by the finished-game rule before it could be shown",
+    );
   });
 });
