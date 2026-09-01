@@ -1034,6 +1034,29 @@ export const usesPropInstance = (t: LayoutObjectType): boolean => findLayoutObje
  * Wall types Home does not offer, because Home has a card of its own for that
  * reading. Derived from the specs rather than listed, so the two cannot drift.
  */
+/**
+ * Home cards a WALL does not offer, because a wall widget already covers that
+ * reading. The mirror of SUPERSEDED_ON_HOME, from the same declarations.
+ *
+ * NOT every `home-*` card. Three of them — home-streaming and its Resi and
+ * YouTube siblings — are dual-surface BY DESIGN: they are what an operator picks
+ * for a console as well as for Home, there is no separate wall widget for Resi
+ * or YouTube, and layout-renderer diverts them to a wall presentation through
+ * WALL_TWIN. Hiding those would take Resi and YouTube status off walls entirely.
+ * Five more (Readiness, Next service, Service timer, Recent services, Screens
+ * online) have no wall equivalent at all, so hiding them would remove the
+ * reading rather than relocate it.
+ *
+ * Only a card whose wall twin EXISTS is hidden from the wall, which is why this
+ * reads the same `homeCardFor` declarations as the Home side rather than
+ * matching on the `home-` prefix.
+ */
+export const SUPERSEDED_ON_WALL: ReadonlySet<LayoutObjectType> = new Set(
+  (Object.entries(LAYOUT_OBJECTS) as [LayoutObjectType, { homeCardFor?: LayoutObjectType }][])
+    .filter(([, s]) => !!s.homeCardFor)
+    .map(([t]) => t),
+);
+
 export const SUPERSEDED_ON_HOME: ReadonlySet<LayoutObjectType> = new Set(
   Object.values(LAYOUT_OBJECTS)
     .map((s) => (s as { homeCardFor?: LayoutObjectType }).homeCardFor)
