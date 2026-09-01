@@ -1250,12 +1250,31 @@ button.score-capsule:focus-visible {
   margin: 0;
 }
 .score-capsule-mid {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   padding: 0 6px;
-  font-size: 9px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
   color: var(--score-muted);
   letter-spacing: .05em;
   white-space: nowrap;
   z-index: 1;
+}
+
+/* The half-inning's direction: up for the top, down for the bottom.
+
+   Drawn rather than typed — see the capsule's JSX. Sized in em so it tracks the
+   number beside it, and given the same muted ink, because it is a reading and
+   not a control. */
+.score-half {
+  width: .7em;
+  height: .55em;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+.score-half.is-bottom {
+  transform: rotate(180deg);
 }
 
 /* THE PANEL FLOATS. It used to be a flex item in the shell's content column, so
