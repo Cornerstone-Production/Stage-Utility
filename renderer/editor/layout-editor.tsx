@@ -74,6 +74,7 @@ import {
 import { useConfiguredIntegrations } from "../main/use-integration-states";
 import {
   PALETTE_GROUPS,
+  SUPERSEDED_ON_WALL,
   defaultConfig,
   defaultStyleFor,
   objectIntegration,
@@ -1034,12 +1035,30 @@ export function LayoutEditor({
   // set, filtered by the same rule. Two lists that could disagree about which
   // objects exist is how an operator finds a widget in one place and not the
   // other.
-  const paletteTypes = PALETTE_GROUPS.flatMap((g) =>
-    g.types.filter((t) => {
+  /**
+   * Does this editor offer that type at all?
+   *
+   * ONE predicate, because the palette and the right-click "Add object" submenu
+   * are the same set — the comment above the submenu already says two lists that
+   * could disagree is how an operator finds a widget in one place and not the
+   * other, and they each carried their own copy of this filter, so the first
+   * rule below would have gone into one of them and not the other.
+   *
+   * A Home card whose wall twin exists is not offered here; the twin is. Six of
+   * them. The streaming three stay — they ARE the wall widget for Resi and
+   * YouTube and there is no other — and the five with no wall equivalent stay,
+   * because hiding those would remove the reading rather than relocate it.
+   */
+  const offersType = useCallback(
+    (t: LayoutObjectType) => {
+      if (SUPERSEDED_ON_WALL.has(t)) return false;
       const need = objectIntegration(t);
       return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
-    }),
+    },
+    [hideUnconfigured, configuredIntegrations],
   );
+
+  const paletteTypes = PALETTE_GROUPS.flatMap((g) => g.types.filter(offersType));
   // Dimmed, not hidden: the object works, its data source just is not set up yet.
   const dimmedTypes = new Set(
     paletteTypes.filter((t) => {
@@ -1436,10 +1455,7 @@ export function LayoutEditor({
     const count = selection.size;
     const many = count > 1 ? ` (${count})` : "";
     const addSub: ContextMenuItem[] = PALETTE_GROUPS.flatMap((g) => {
-      const types = g.types.filter((t) => {
-        const need = objectIntegration(t);
-        return !(hideUnconfigured && need && !configuredIntegrations.has(need.id));
-      });
+      const types = g.types.filter(offersType);
       if (types.length === 0) return [];
       return [
         { separator: true } as ContextMenuItem,
