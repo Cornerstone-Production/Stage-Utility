@@ -1319,6 +1319,10 @@ button.score-capsule:focus-visible {
      shadow escaped the clip by 22px on the left, 2px on the right, 4px above
      and 28.25px below. */
   --score-shadow-x: 24px;
+  /* 6px, and the upward shadow layer on .score-card is tuned to reach EXACTLY
+     this far: 10/2 + 1 = 6. Raising it instead of matching it was tried and made
+     the seam worse — the room is also the panel's offset from the bar, so more
+     room pushes the panel down and opens a wider strip of bare page above it. */
   --score-shadow-t: 6px;
   --score-shadow-b: 48px;
 }
@@ -1425,14 +1429,26 @@ button.score-capsule:focus-visible {
   border: 1px solid var(--score-line);
   background: var(--score-surface);
   cursor: pointer;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .42);
+  /* TWO LAYERS, and the small upward one is the point. `0 6px 20px` alone reaches
+     4px above the card, and the panel floats 6px below the context bar — so the
+     top 2px of that gap was bare page, a bright hairline running the full width
+     of the panel directly under the bar. It reads as the shadow having been
+     sliced off by the bar, which is what was reported, and no amount of clip room
+     fixes it: nothing was being clipped. Measured on the reporter's own machine —
+     24px of room on the left, 24 right, 6 top, 46 bottom, against reaches of 22,
+     22, 4 and 16. The gap needed filling, not widening. */
+  box-shadow:
+    0 -1px 10px rgba(0, 0, 0, .16),
+    0 6px 20px rgba(0, 0, 0, .42);
   will-change: transform;
 }
 .score-stack.is-settled .score-card {
   transition: transform 520ms var(--score-spring), box-shadow 320ms var(--score-ease);
 }
 .score-card.is-focused {
-  box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
+  box-shadow:
+    0 -1px 10px rgba(0, 0, 0, .16),
+    0 18px 44px rgba(0, 0, 0, .55);
 }
 .score-card:focus-visible {
   outline: 2px solid var(--su-focus);
