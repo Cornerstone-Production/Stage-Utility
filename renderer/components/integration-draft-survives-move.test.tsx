@@ -21,7 +21,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, settle, idle, assertAbsent , integrationCard } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
@@ -40,11 +40,9 @@ after(async () => {
   teardown();
 });
 
-const tile = (c: { container: HTMLElement }, id: string) => {
-  const el = c.container.querySelector<HTMLElement>(`[data-integration-card="${id}"]`);
-  assert.ok(el, `no card for ${id}`);
-  return el;
-};
+/** Awaits the card. The synchronous read this replaced could run before React
+ *  had committed it — see integrationCard. */
+const tile = (c: { container: HTMLElement }, id: string) => integrationCard(c.container, id);
 
 /** The settings dialog, which renders in a portal outside the container. */
 const dialog = (): HTMLElement | null =>
@@ -63,7 +61,7 @@ describe("a draft survives the card moving between groups", () => {
     const c = render(withQueryClient(<IntegrationsPanel />));
     await idle();
 
-    fireEvent.click(tile(c, "obs"));
+    fireEvent.click((await tile(c, "obs")));
     await settle();
     fireEvent.change(hostField(), { target: { value: "192.0.2.77" } });
     assert.equal(hostField().value, "192.0.2.77", "the field did not take the value at all");
@@ -99,7 +97,7 @@ describe("a draft survives the card moving between groups", () => {
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
     await idle();
-    fireEvent.click(tile(c, "obs"));
+    fireEvent.click((await tile(c, "obs")));
     await settle();
 
     const before = dialog();
@@ -124,7 +122,7 @@ describe("a draft survives the card moving between groups", () => {
     const c = render(withQueryClient(<IntegrationsPanel />));
     await idle();
 
-    fireEvent.click(tile(c, "obs"));
+    fireEvent.click((await tile(c, "obs")));
     await settle();
     fireEvent.change(hostField(), { target: { value: "192.0.2.9" } });
 
@@ -136,7 +134,7 @@ describe("a draft survives the card moving between groups", () => {
     await settle();
     assertAbsent(dialog(), "the dialog did not close");
 
-    fireEvent.click(tile(c, "obs"));
+    fireEvent.click((await tile(c, "obs")));
     await settle();
     assert.equal(hostField().value, "", "a discarded edit came back on the next open");
   });
