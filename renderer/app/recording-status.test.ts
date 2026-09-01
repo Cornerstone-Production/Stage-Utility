@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { recordIndicator, loudestSpl, pinnedSpl, meterOptions, LOUDEST_METER } from "./recording-status.js";
+import { recordIndicator, loudestSpl, pinnedSpl, meterOptions, LOUDEST_METER, STREAMER_FOR, RECORDER_FOR, sourceOptions } from "./recording-status.js";
 
 // Mid-service, recording and SPL are the two things you cannot recover after the
 // fact, so these read the state rather than restate it. The distinction that
@@ -112,6 +112,38 @@ describe("the meter submenu's options", () => {
   test("does not duplicate a pinned meter that IS reporting", () => {
     const o = meterOptions(spl, "dev::FOH");
     assert.equal(o.filter((x) => x.value === "dev::FOH").length, 1);
+  });
+});
+
+describe("the source vocabularies", () => {
+  // One table per family, because the same lowercase config value has to resolve
+  // to the same operator-facing name on Home, on a wall and in the inspector.
+  test("every value names the source an operator reads", () => {
+    assert.deepEqual(STREAMER_FOR, { any: null, resi: "Resi", youtube: "YouTube" });
+    assert.deepEqual(RECORDER_FOR, { any: null, obs: "OBS", reaper: "REAPER" });
+  });
+
+  test("an unknown value resolves to nothing, not to another source", () => {
+    // The failure this exists for: the wall object did this with
+    // `platform === "resi" ? "Resi" : "YouTube"`, so ANY value that was not
+    // "resi" — a typo, a hand-edited views.json, a platform added later and
+    // wired in only one place — drew a widget labelled YouTube reporting
+    // something else. A lookup cannot do that; a two-way ternary always can.
+    assert.equal(STREAMER_FOR["twitch"], undefined);
+    assert.equal(RECORDER_FOR["protools"], undefined);
+    assert.notEqual(STREAMER_FOR["twitch"], "YouTube");
+  });
+
+  test("the submenu options are the table, in its order, with the any-choice named", () => {
+    assert.deepEqual(sourceOptions(RECORDER_FOR, "Every recorder"), [
+      { value: "any", label: "Every recorder" },
+      { value: "obs", label: "OBS" },
+      { value: "reaper", label: "REAPER" },
+    ]);
+    assert.deepEqual(sourceOptions(STREAMER_FOR, "Any platform")[0], {
+      value: "any",
+      label: "Any platform",
+    });
   });
 });
 

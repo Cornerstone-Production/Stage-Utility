@@ -378,7 +378,12 @@ export type LayoutObjectConfig =
    * has to know to look for. A new recording integration adds one entry to
    * `recorders()` (which the combined one picks up for free) and one type here.
    */
-  | { type: "home-recording" }
+  // `recorder` is lowercase "any" | "obs" | "reaper", the vocabulary the wall
+  // `record-status` uses for the same choice. NOT called `source`: that key is
+  // already carried by unrelated objects meaning unrelated things (a graph's
+  // live-or-recorded, an embed's view-or-inline), and the exhaustive PICKS record
+  // would then have to name all of them.
+  | { type: "home-recording"; recorder?: string; showElapsed?: boolean }
   | { type: "home-recording-obs" }
   | { type: "home-recording-reaper" }
   /**
@@ -387,7 +392,20 @@ export type LayoutObjectConfig =
    * for the same reason the per-recorder ones do — a combined widget reading
    * LIVE while one destination sits off air is reassurance nobody asked for.
    */
-  | { type: "home-streaming"; hideWhenIdle?: boolean; fillWhenLive?: boolean; showElapsed?: boolean }
+  // `platform` uses the SAME vocabulary as the wall `stream-status` — lowercase
+  // "any" | "resi" | "youtube" — because it is the same key on the same union and
+  // one key must not mean two things. The capitalised streamer NAME the card
+  // filters and labels by comes from STREAMER_FOR, in one place.
+  //
+  // Absent means every platform at once, which is what this card did before the
+  // setting existed.
+  | {
+      type: "home-streaming";
+      platform?: string;
+      hideWhenIdle?: boolean;
+      fillWhenLive?: boolean;
+      showElapsed?: boolean;
+    }
   | { type: "home-streaming-resi"; hideWhenIdle?: boolean; fillWhenLive?: boolean; showElapsed?: boolean }
   | { type: "home-streaming-youtube"; hideWhenIdle?: boolean; fillWhenLive?: boolean; showElapsed?: boolean }
   // `meterId` names one Smaart meter, keyed "device::channel" as the SPL DTO

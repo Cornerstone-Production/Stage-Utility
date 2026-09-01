@@ -110,6 +110,41 @@ export interface Streamer {
  * tells us it is recording tells us it is live, and leaving that out would mean
  * the app knew and did not say.
  */
+/**
+ * The streamer a `platform` value names, or null for "every platform at once".
+ *
+ * Config stores lowercase ("resi"); `streamers()` names them as an operator reads
+ * them ("Resi"), and the card uses that name both to filter and as its label. One
+ * table, because the conversion now happens on two surfaces.
+ *
+ * TOTAL, not a ternary. The wall object did this inline as
+ * `platform === "resi" ? "Resi" : "YouTube"`, so any third platform silently
+ * rendered as YouTube — a card labelled YouTube reporting something else.
+ * A lookup that returns undefined for an unknown value cannot do that.
+ */
+export const STREAMER_FOR: Readonly<Record<string, string | null>> = {
+  any: null,
+  resi: "Resi",
+  youtube: "YouTube",
+};
+
+/** The recorder a `recorder` value names, or null for "every recorder at once".
+ *  Same shape and same reasoning as STREAMER_FOR. */
+export const RECORDER_FOR: Readonly<Record<string, string | null>> = {
+  any: null,
+  obs: "OBS",
+  reaper: "REAPER",
+};
+
+/** The options a "which one" submenu offers, built from a mapping above. `anyLabel`
+ *  is what the every-source choice is called on that card. */
+export function sourceOptions(
+  map: Readonly<Record<string, string | null>>,
+  anyLabel: string,
+): { value: string; label: string }[] {
+  return Object.entries(map).map(([value, name]) => ({ value, label: name ?? anyLabel }));
+}
+
 export function streamers(
   resi: { connected: boolean; live: boolean; startedAt: string | null } | null,
   youtube: { connected: boolean; live: boolean; startedAt: string | null } | null,

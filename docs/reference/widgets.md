@@ -110,8 +110,8 @@ clock has drifted still marks the right day.
 | **Streaming status** | Whether anything is going out, and for how long | Resi + YouTube + OBS together |
 | **Integration status** | Whether one integration is connected | That integration |
 | **Screens online** | How many displays are connected, of how many | Live display presence |
-| **Recording** *(Home)* | Is anything rolling — every recorder at once | OBS + REAPER |
-| **Streaming** *(Home)* | Live or off air, across every platform | Resi + YouTube + OBS |
+| **Recording** *(Home)* | Is anything rolling — every recorder, or one you pick | OBS + REAPER |
+| **Streaming** *(Home)* | Live or off air, across every platform or one you pick | Resi + YouTube + OBS |
 | **Live scores** | Live score for a team you follow | ESPN public scoreboard |
 | **Scores** *(Home)* | Followed teams' scores, on your own page | ESPN public scoreboard |
 
@@ -147,20 +147,30 @@ recording**, which colours just the word instead), hide the number, or make it a
 tally light with **Hide when idle** — nothing drawn at all until something is
 going out.
 
-The Home streaming tiles — **Streaming**, **Resi** and **YouTube** — are the same
-object in two presentations. On Home they are a card in a row of cards; put one on
-a screen and it wears the composition above, beside OBS status and REAPER status.
-So all three of their settings are offered on Home, and two of them describe what
-the tile does on a screen: **Elapsed time** applies on both surfaces, while **Fill
-the card when live** and **Hide when idle** shape the screen presentation, which
-is the only one that fills or hides.
+The Home **Streaming** tile is one object in two presentations. On Home it is a
+card in a row of cards; put one on a screen and it wears the composition above,
+beside OBS status and REAPER status. So all of its settings are offered on Home,
+and two of them describe what the tile does on a screen: **Elapsed time** applies
+on both surfaces, while **Fill the card when live** and **Hide when idle** shape
+the screen presentation, which is the only one that fills or hides.
+
+Right-click a Home tile to choose what it answers for: **Platform** on
+**Streaming** (any, Resi, YouTube) and **Recorder** on **Recording** (every
+recorder, OBS, REAPER). Both also offer **Elapsed time**.
+
+> Four Home cards are marked *replaced* below — **OBS recording**, **REAPER
+> recording**, **Resi status** and **YouTube status**. Each was the general card
+> with its source fixed, so the choice moved onto the card itself and the four left
+> the palette. Cards already on a page keep working and keep drawing exactly what
+> they drew; open the layout inspector on one to swap it for the card that
+> replaced it.
 
 ## OBS
 
 | Widget | What it shows | Source |
 |---|---|---|
 | **OBS status** | Red while OBS is recording, streaming or running a virtual camera | obs-websocket |
-| **OBS recording** *(Home)* | Rolling or stopped, with the elapsed time | obs-websocket |
+| **OBS recording** *(Home, replaced)* | Rolling or stopped, with the elapsed time | obs-websocket |
 
 **OBS status** picks which output it watches — recording, streaming or virtual
 camera — and can show the record timecode underneath. See
@@ -171,7 +181,7 @@ camera — and can show the record timecode underneath. See
 | Widget | What it shows | Source |
 |---|---|---|
 | **REAPER status** | Red while REAPER is recording | REAPER web interface |
-| **REAPER recording** *(Home)* | Rolling or stopped, with the elapsed time | REAPER web interface |
+| **REAPER recording** *(Home, replaced)* | Rolling or stopped, with the elapsed time | REAPER web interface |
 
 **Show position** puts REAPER's transport position under the word, trimmed to
 whole seconds. See [REAPER](../integrations/reaper.md).
@@ -180,9 +190,10 @@ whole seconds. See [REAPER](../integrations/reaper.md).
 
 | Widget | What it shows | Source |
 |---|---|---|
-| **Resi status** | Live or off air, with the elapsed time | Resi encoder status |
+| **Resi status** *(Home, replaced)* | Live or off air, with the elapsed time | Resi encoder status |
 
-Resi does not report when a broadcast started, so the elapsed time runs from the
+Set the Home **Streaming** card's **Platform** to Resi for the same reading on your
+own page. Resi does not report when a broadcast started, so the elapsed time runs from the
 moment the app watched the stream go live. A stream already running the first time
 it looked shows **Live** with no number — see [Resi](../integrations/resi.md).
 
@@ -190,9 +201,10 @@ it looked shows **Live** with no number — see [Resi](../integrations/resi.md).
 
 | Widget | What it shows | Source |
 |---|---|---|
-| **YouTube status** | Live or off air, with the elapsed time | YouTube Data API |
+| **YouTube status** *(Home, replaced)* | Live or off air, with the elapsed time | YouTube Data API |
 
-YouTube reports a real broadcast start, so its elapsed time is exact. See
+Set the Home **Streaming** card's **Platform** to YouTube for the same reading on
+your own page. YouTube reports a real broadcast start, so its elapsed time is exact. See
 [YouTube](../integrations/youtube.md).
 
 ## ProVideoPlayer
@@ -385,9 +397,10 @@ NDI needs the native client. The web build ignores this widget.
 
 ## Home tiles and wall widgets
 
-Some widgets appear twice in the palette — **Resi status** under Resi and
-**Streaming** under Status, for instance. They are not duplicates: one is Home's
-tile and one is the wall's, and each is drawn the way its surface wants.
+A few widgets exist as a Home tile and as a wall widget — **Streaming** and
+**Streaming status**, for instance. They are not duplicates: one is Home's tile
+and one is the wall's, and each is drawn the way its surface wants. Each palette
+offers only the one that belongs to it.
 
 - **On Home** they are three-line cards in a grid of equal tiles, with a
   connection line at the bottom ("YouTube not connected") and values sized as

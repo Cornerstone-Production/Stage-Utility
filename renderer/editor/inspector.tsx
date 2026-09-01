@@ -59,6 +59,7 @@ import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { screensListViews } from "@main/services/home-view";
 import { gameOptions } from "../main/scores-object";
+import { STREAMER_FOR, sourceOptions } from "../app/recording-status";
 import { formatClock } from "../lib/clock-format";
 import {
   isKnownObjectType,
@@ -942,11 +943,11 @@ export function Inspector({
               label="Platform"
               hint="Which platform to report. Any answers every one at once — live if anything is going out."
               value={c.platform ?? "any"}
-              options={[
-                { value: "any", label: "Any platform" },
-                { value: "resi", label: "Resi" },
-                { value: "youtube", label: "YouTube" },
-              ]}
+              // Built from STREAMER_FOR, the one table that says which platforms
+              // exist and what each is called. Written out here as well, this list
+              // and the renderer's lookup were two places to add a platform and
+              // one to forget.
+              options={sourceOptions(STREAMER_FOR, "Any platform")}
               onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" })}
             />
           )}

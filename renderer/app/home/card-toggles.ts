@@ -21,7 +21,7 @@
 
 import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 
-import { LOUDEST_METER } from "../recording-status";
+import { LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
 
 /** The members of the config union that declare `K`, by their `type`. */
 type TypesWith<K extends PropertyKey, T = LayoutObjectConfig> = T extends { type: infer N }
@@ -39,7 +39,16 @@ const APPLIES = {
   showMeridiem: { clock: true },
   showTimecode: { "obs-status": true },
   showPosition: { "reaper-status": true },
-  showElapsed: { "stream-status": true, "home-streaming": true, "home-streaming-resi": true, "home-streaming-youtube": true },
+  // On the recording card too, which draws a timecode on its sub-line exactly as
+  // the streaming card draws a clock on its own. The two sat side by side on Home
+  // with one offering the switch and the other not, for no reason anybody chose.
+  showElapsed: {
+    "stream-status": true,
+    "home-streaming": true,
+    "home-streaming-resi": true,
+    "home-streaming-youtube": true,
+    "home-recording": true,
+  },
   showProjectedEnd: { "service-pacing": true },
   warnStates: { "pp-timer": true },
   hideWhenIdle: {
@@ -100,9 +109,18 @@ const PICKS = {
   // not because a wall object is expected on Home. If one ever is, offering the
   // same choice there is the honest thing anyway.
   meterId: { "home-spl": true, "spl-meter": true },
+  // Which recorder the Home card answers for. This is what retires the OBS and
+  // REAPER cards: they were `<RecordingCard recorder="OBS" />` and
+  // `recorder="REAPER"` — one component, one prop — so the prop becomes a choice
+  // and three palette entries become one.
+  recorder: { "home-recording": true },
+  // The same move for streaming, whose three cards were `<StreamingCard />` with
+  // one prop changed. `stream-status` carries the key too and the record is
+  // exhaustive, so it is named here; the wall object's own picker is unchanged.
+  platform: { "home-streaming": true, "stream-status": true },
 } satisfies { [K in PickKey]: Record<TypesWith<K>, true> };
 
-type PickKey = "game" | "meterId";
+type PickKey = "game" | "meterId" | "recorder" | "platform";
 
 /**
  * What a card is doing when it has never been given a value for a pick.
@@ -112,7 +130,20 @@ type PickKey = "game" | "meterId";
  * would tick the wrong row on one of them, and the only job of this table is
  * that the menu agrees with the renderer.
  */
-const PICK_FALLBACK: Record<PickKey, string> = { game: "auto", meterId: LOUDEST_METER };
+const PICK_FALLBACK: Record<PickKey, string> = {
+  game: "auto",
+  meterId: LOUDEST_METER,
+  recorder: "any",
+  platform: "any",
+};
+
+/** The choices each pick offers, for the picks whose list is FIXED. `game` and
+ *  `meterId` are absent because their options come from live data the menu
+ *  fetches; these two are the app's own vocabulary and cannot change at runtime. */
+export const PICK_OPTIONS: Partial<Record<PickKey, Readonly<Record<string, string | null>>>> = {
+  recorder: RECORDER_FOR,
+  platform: STREAMER_FOR,
+};
 
 /** Every (widget type, pick) pair the menu can write, flattened — the picks'
  *  half of TOGGLE_PAIRS, and walked by the same guard. */
