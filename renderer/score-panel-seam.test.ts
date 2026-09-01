@@ -1,26 +1,25 @@
-// The panel's shadow reaches the context bar exactly — no bright line, no cut.
+// The panel's shadow paints ONTO the context bar.
 //
-// The panel floats `--score-shadow-t` below the bar. A card's shadow is offset
-// DOWNWARD, so with a single `0 6px 20px` layer it reached only 4px above the
-// card and the top 2px of that gap was bare page: a bright hairline running the
-// full width of the panel, directly under the bar, which reads as the shadow
-// having been sliced off by the bar.
+// It could not before, and no amount of room on the other edges changed that:
+// `.score-clip` hides its overflow and its top edge sat exactly at the bar's
+// bottom, so the shadow stopped dead at the boundary. That hard line is what
+// reads as a sliced shadow — reported three times, against measurements that
+// kept saying every edge had slack, because every edge did.
 //
-// NOTHING WAS BEING CLIPPED. Measured on the reporter's own machine with the
-// panel open — 24px of room on the left, 24 right, 6 top, 46 bottom, against
-// reaches of 22, 22, 4 and 16. Slack on every edge. The gap needed FILLING.
+// Two earlier attempts are worth knowing about, because both made it worse:
 //
-// Two ways to get it wrong, and both were tried:
+//   - widen `--score-shadow-t`. It is also the panel's offset from the bar, so
+//     more room pushed the panel DOWN and opened a wider strip of bare page.
+//     Measured: 6px of room gave a 2px bare gap, 12px gave 5px.
+//   - fill the gap with an upward shadow layer tuned to exactly the room. That
+//     removed the bright line but the shadow still terminated at the bar, which
+//     is the thing that was actually wrong.
 //
-//   - widen the room, so the shadow has space to reach up. The room is also the
-//     panel's offset from the bar, so this pushes the panel DOWN and opens a
-//     wider strip of bare page. Measured: 6px of room gave a 2px bare gap, 12px
-//     of room gave 5px.
-//   - reach further up than the room allows, and the layer that exists to soften
-//     the seam is itself clipped at the bar's edge.
-//
-// So the two numbers are one number: the upward reach must EQUAL the room. This
-// asserts that, from the CSS, rather than asserting either value on its own.
+// So the clip now starts `--score-cast` ABOVE the bar's bottom edge, and the same
+// amount is added to the shell's top margin — the cards do not move, and what
+// fills the band is shadow. Measured with the panel open on two live games: the
+// clip starts 24px above the bar, the first card is unmoved at y=50, the shadow
+// reaches y=36, and the bar's bottom 8px carry it.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -48,34 +47,75 @@ function shadowLayers(selector: string): string[] {
   return decl[1].split(/,(?![^(]*\))/).map((l) => l.trim());
 }
 
-const ROOM = (() => {
-  const m = /--score-shadow-t:\s*(\d+(?:\.\d+)?)px/.exec(CSS);
-  assert.ok(m, "--score-shadow-t is not declared");
+/** How far the clip starts above the bar's bottom edge. */
+const CAST = (() => {
+  const m = /--score-cast:\s*(\d+(?:\.\d+)?)px/.exec(CSS);
+  assert.ok(m, "--score-cast is not declared");
   return Number(m[1]);
 })();
 
-describe("the score panel meets the bar without a seam", () => {
-  it("the room above the panel is declared", () => {
-    assert.ok(ROOM > 0, `--score-shadow-t is ${ROOM}px — the panel would sit against the bar`);
+/** How far the panel floats below the bar — the gap the shadow must cross. */
+const FLOAT = (() => {
+  const m = /--score-shadow-t:\s*calc\((\d+(?:\.\d+)?)px\s*\+/.exec(CSS);
+  assert.ok(m, "--score-shadow-t is no longer the float plus the cast");
+  return Number(m[1]);
+})();
+
+/** Total room above the cards inside the clip. */
+const ROOM = FLOAT + CAST;
+
+describe("the score panel casts onto the bar", () => {
+  it("the clip starts above the bar, so the shadow has somewhere to go", () => {
+    assert.ok(
+      CAST > 0,
+      "--score-cast is 0 — the clip's top edge is the bar's bottom edge again, and the shadow will stop dead at it",
+    );
+    assert.match(
+      CSS,
+      /top:\s*calc\(-1 \* var\(--score-cast\)\)/,
+      "the host does not start above the bar, so the room --score-cast reserves is never opened",
+    );
+  });
+
+  it("the panel does not move when the room opens", () => {
+    // The band is paid for out of the shell's top margin. If the two ever stop
+    // matching, the cards slide down the page by the difference.
+    assert.match(
+      CSS,
+      /--score-shadow-t:\s*calc\(\d+(?:\.\d+)?px\s*\+\s*var\(--score-cast\)\)/,
+      "the shell's top margin no longer tracks --score-cast, so opening the band moves the cards",
+    );
   });
 
   for (const selector of [".score-card", ".score-card.is-focused"]) {
-    it(`${selector} reaches the bar exactly`, () => {
+    it(`${selector} reaches past the bar rather than stopping at it`, () => {
       const layers = shadowLayers(selector);
       assert.ok(
         layers.length >= 2,
-        `${selector} has one shadow layer, offset downward — it cannot reach the ${ROOM}px above it, ` +
-          "so the top of that gap renders as a bright line under the bar",
+        `${selector} has one shadow layer, offset downward — it reaches barely above the card, ` +
+          `so it cannot cross the ${FLOAT}px the panel floats below the bar, let alone paint on it`,
       );
       const up = Math.max(...layers.map(reachUp));
-      assert.equal(
-        up,
-        ROOM,
-        `${selector} reaches ${up}px above itself into ${ROOM}px of room — ` +
-          (up < ROOM
-            ? `${ROOM - up}px of bare page is left under the bar, which is the bright line`
-            : `${up - ROOM}px of the shadow is clipped by the bar's edge`),
+      assert.ok(
+        up > FLOAT,
+        `${selector} reaches ${up}px above itself and the panel floats ${FLOAT}px below the bar — ` +
+          "the shadow ends in the gap, which is the bright line all over again",
+      );
+      assert.ok(
+        up <= ROOM,
+        `${selector} reaches ${up}px into ${ROOM}px of room — the last ${up - ROOM}px is clipped, ` +
+          "which is the cut this whole arrangement exists to remove",
       );
     });
   }
+
+  it("the bar keeps room to spare, so the corners are not cut either", () => {
+    // A shadow's corner is a rounded blob: it reaches further diagonally than on
+    // either axis, so matching the axis exactly still cuts the corners.
+    const up = Math.max(...shadowLayers(".score-card.is-focused").map(reachUp));
+    assert.ok(
+      ROOM - up >= 8,
+      `only ${ROOM - up}px of headroom above the shadow's reach — the corners will clip before the edges do`,
+    );
+  });
 });

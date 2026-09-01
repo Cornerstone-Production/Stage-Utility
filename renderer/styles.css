@@ -1309,7 +1309,17 @@ button.score-capsule:focus-visible {
    the capsule at the bar's right end and still centre it on a phone. */
 .score-host {
   position: absolute;
-  top: 0;
+  /* ABOVE THE BAR'S BOTTOM EDGE, by --score-cast. The clip's top edge used to sit
+     exactly there, so the panel's shadow could never reach the bar — it stopped
+     dead at the boundary, which is what reads as a sliced shadow however much
+     room the other edges have. Starting the clip higher lets the shadow paint
+     ONTO the bar, the way a menu casts onto the strip it drops out of.
+
+     The panel does not move: the room this opens is added to the shell's top
+     margin below, so the cards sit exactly where they did and what fills the band
+     is shadow and nothing else. Collapsed the row is still 0fr, so there is
+     nothing there to see until it opens. */
+  top: calc(-1 * var(--score-cast));
   inset-inline: 0;
   display: grid;
   grid-template-rows: 0fr;
@@ -1342,7 +1352,17 @@ button.score-capsule:focus-visible {
      this far: 10/2 + 1 = 6. Raising it instead of matching it was tried and made
      the seam worse — the room is also the panel's offset from the bar, so more
      room pushes the panel down and opens a wider strip of bare page above it. */
-  --score-shadow-t: 6px;
+  /* How far the shadow may climb past the bar's bottom edge and paint on the bar
+     itself. The clip starts this far above it so the shadow has somewhere to go,
+     and the same amount is added to the shell's top margin so the cards do not
+     move. */
+  --score-cast: 24px;
+  /* The room above the cards INSIDE the clip: the 6px the panel floats below the
+     bar, plus the band opened above it. The upward shadow layer on .score-card is
+     tuned to clear the 6px gap; the rest is headroom, so the corners are not cut
+     either — a shadow's corner is a rounded blob and reaches further diagonally
+     than it does on either axis. */
+  --score-shadow-t: calc(6px + var(--score-cast));
   --score-shadow-b: 48px;
 }
 .score-host.is-open {
@@ -1457,7 +1477,7 @@ button.score-capsule:focus-visible {
      24px of room on the left, 24 right, 6 top, 46 bottom, against reaches of 22,
      22, 4 and 16. The gap needed filling, not widening. */
   box-shadow:
-    0 -1px 10px rgba(0, 0, 0, .16),
+    0 -2px 24px rgba(0, 0, 0, .20),
     0 6px 20px rgba(0, 0, 0, .42);
   will-change: transform;
 }
@@ -1466,7 +1486,7 @@ button.score-capsule:focus-visible {
 }
 .score-card.is-focused {
   box-shadow:
-    0 -1px 10px rgba(0, 0, 0, .16),
+    0 -2px 24px rgba(0, 0, 0, .20),
     0 18px 44px rgba(0, 0, 0, .55);
 }
 .score-card:focus-visible {
