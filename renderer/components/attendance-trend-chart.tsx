@@ -17,11 +17,21 @@ import { shortDay, type TrendPoint } from "../settings/sections/overview-data";
 export function AttendanceTrendChart({
   points,
   splLabel,
+  hoverSuppressed = false,
 }: {
   points: TrendPoint[];
   /** The Smaart metric the SPL series is, for the tooltip row. Absent draws no
    *  SPL series at all, whatever the points carry. */
   splLabel?: string | null;
+  /**
+   * Something else owns the pointer, so draw no hover at all.
+   *
+   * History opens a right-click menu over this chart, and the chart kept
+   * tracking the pointer underneath it: the tooltip drew through the menu and
+   * moved as you tried to reach an item. Optional and off by default — Home has
+   * no menu over its chart and passes nothing.
+   */
+  hoverSuppressed?: boolean;
 }) {
   /**
    * The chart's own size, measured, and used as PLAIN PIXELS — see the svg
@@ -88,6 +98,47 @@ export function AttendanceTrendChart({
   const padX = 10;
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<number | null>(null);
+  /**
+   * The tooltip's own box, measured the same way the chart's is — see `box`.
+   *
+   * Its WIDTH is what keeps it on screen: centred on the hovered point it hangs
+   * half its width past the last point, which sits at the right edge of the
+   * chart, and a chart near the edge of the window had the tooltip clipped by
+   * the browser. Mirrored at the first point on a narrow container.
+   *
+   * The BORDER box, deliberately, and not the observer's `contentRect` the way
+   * `box` reads it: what hangs off the card is the tooltip's padding and border
+   * as much as its text. The two differ by 18px here, so clamping to the content
+   * box would leave 9px of it outside the chart at either end.
+   */
+  const [tip, setTip] = useState<HTMLDivElement | null>(null);
+  const [tipW, setTipW] = useState(0);
+  useEffect(() => {
+    if (!tip) return;
+    // An observer answers with its first observation as soon as it is given a
+    // target, so this needs no separate initial measurement — the same reason
+    // the box above does not take one either.
+    const ro = new ResizeObserver(() => setTipW(tip.getBoundingClientRect().width));
+    ro.observe(tip);
+    return () => ro.disconnect();
+  }, [tip]);
+  /**
+   * Drop the hover when something else takes the pointer.
+   *
+   * CLEARED, not merely hidden: closing the menu must not pop the old tooltip
+   * back up under a pointer that never moved.
+   *
+   * Adjusted during the render rather than from an effect, which is both what
+   * React asks for when state has to follow a prop and what this needs — an
+   * effect would commit one frame with the tooltip still drawn over the menu
+   * that suppressed it, where a render-phase update is re-run before anything
+   * is painted.
+   */
+  const [wasSuppressed, setWasSuppressed] = useState(hoverSuppressed);
+  if (hoverSuppressed !== wasSuppressed) {
+    setWasSuppressed(hoverSuppressed);
+    if (hoverSuppressed) setHover(null);
+  }
   if (points.length < 2) {
     return (
       <div className="flex h-full min-h-[130px] items-center justify-center text-caption1 text-fg-subtle">
@@ -158,6 +209,18 @@ export function AttendanceTrendChart({
   const hp = hover != null ? points[hover] : null;
   const hx = hover != null ? x(hover) : 0;
   const hy = hp ? y(hp.value) : 0;
+  // The tooltip's left edge, HELD INSIDE THE CHART. Centred on the point while
+  // there is room, sliding along the edge once there is not.
+  //
+  // In pixels: `hx` already is one and `plotW` is the box's own width, so the
+  // percentage this used to be was the same number divided and multiplied back —
+  // and no percentage of the box can express "half a tooltip in from the edge".
+  const tipMargin = 4;
+  const tipLo = tipW / 2 + tipMargin;
+  const tipHi = plotW - tipW / 2 - tipMargin;
+  // A tooltip wider than the chart it sits in cannot be held inside it at all;
+  // centred, it at least overhangs evenly rather than pinning to one edge.
+  const tipLeft = tipLo <= tipHi ? clamp(hx, tipLo, tipHi) : plotW / 2;
   return (
     <div className="relative h-full min-h-[130px]" ref={setBox}>
       <div className="relative h-full">
@@ -182,6 +245,7 @@ export function AttendanceTrendChart({
         height={H}
         style={{ display: "block" }}
         onPointerMove={(e) => {
+          if (hoverSuppressed) return;
           const svg = svgRef.current;
           if (!svg) return;
           const r = svg.getBoundingClientRect();
@@ -264,8 +328,17 @@ export function AttendanceTrendChart({
           app's own type and wraps like everything else. */}
       {hp && (
         <div
+          ref={setTip}
           className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl"
-          style={{ left: `${(hx / plotW) * 100}%`, top: `${Math.max(hy - 8, 4)}px` }}
+          style={{
+            left: `${tipLeft}px`,
+            top: `${Math.max(hy - 8, 4)}px`,
+            // Held back for the one frame between mounting and being measured,
+            // because an unmeasured tooltip cannot be clamped and would appear
+            // hanging off the edge and then jump. The width survives the
+            // tooltip unmounting, so only the first hover of a page waits.
+            opacity: tipW > 0 ? undefined : 0,
+          }}
         >
           <div className="font-mono text-caption2 tabular-nums text-fg-subtle whitespace-nowrap">
             {shortDay(hp.day)}{hp.live ? " · recording" : ""}
