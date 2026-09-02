@@ -325,6 +325,31 @@ describe("the tooltip's vertical placement", () => {
       "a point with room above it flipped to sit below for no reason",
     );
   });
+
+  test("overhangs the SHORTER side when a tall tooltip fits on neither", (t) => {
+    // Checking only "is there room above?" flips down the moment the top does
+    // not fit — including for a LOW point, where below is the tighter side. That
+    // traded a small overflow for a large one, and on Home a small clip for a
+    // large one, in a fix whose whole purpose was to stop the tooltip being cut
+    // off. Here the point sits near the floor and the tooltip is taller than
+    // either gap: above overhangs by 7px, below would overhang by 163.
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    const restore = stubLayout(1500, 175);
+    t.after(() => restore());
+    const view = render(<AttendanceTrendChart points={week} />);
+    const svg = view.container.querySelector("svg")!;
+    // index 0 -> value 100, the series minimum: y = 180 of a 200px band, so
+    // there are 168px above it and 8px below.
+    fireEvent.pointerMove(svg, { clientX: 10, clientY: 180 });
+
+    const tip = tooltip(view.container)!;
+    assert.ok(tip, "no tooltip: the pointer did not land on the point being tested");
+    assert.match(tip.textContent ?? "", /100/, "the pointer did not land on the lowest point");
+    assert.ok(
+      tip.className.includes("-translate-y-full"),
+      "the tooltip flipped below a point that had far less room below than above, overflowing further than it would have above",
+    );
+  });
 });
 
 describe("hoverSuppressed", () => {

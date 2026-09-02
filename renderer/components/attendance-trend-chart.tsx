@@ -256,9 +256,17 @@ export function AttendanceTrendChart({
   // tooltip silently loses its top few lines for exactly the point an
   // operator is most likely to be checking. Flips below the point instead of
   // letting that happen.
+  //
+  // Which side is chosen compares BOTH, rather than flipping down the moment
+  // the top does not fit. Room-above-only sent a tooltip taller than the space
+  // below it over the bottom edge instead — a bigger overflow than the one it
+  // was replacing, and on Home a bigger clip. A tooltip too tall for either
+  // side now overhangs the shorter distance.
   const tipMarginY = 4;
-  const tipAbove = hy - 8 - tipH >= tipMarginY;
-  const tipTop = tipAbove ? Math.max(hy - 8, tipMarginY) : hy + 8;
+  const roomAbove = hy - 8 - tipMarginY;
+  const roomBelow = H - tipMarginY - (hy + 8);
+  const tipAbove = roomAbove >= tipH || (roomBelow < tipH && roomAbove >= roomBelow);
+  const tipTop = tipAbove ? hy - 8 : hy + 8;
   return (
     <div className="relative h-full min-h-[130px]" ref={setBox}>
       <div className="relative h-full">
