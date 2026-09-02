@@ -7,9 +7,11 @@
  *  the service ends, endedAt is stamped and it becomes an ordinary point in both. */
 type Scoped = { endedAt?: string | null; serviceTypeId: string | null; serviceDate: string };
 /** A record with a lifecycle. Only the AVERAGE needs one — see above — so this
- *  is where `endedAt` becomes required, and the SPL summary (written once, after
- *  the service is over, with no endedAt of its own) can be scoped by the trend
- *  filter without being given a fake one. */
+ *  is where `endedAt` becomes required. `SplServiceSummary` carries its own —
+ *  the recorder persists a live record on every tick, the same as attendance
+ *  and the timeline — so it is scoped by both filters on exactly the terms
+ *  every other recorder is, rather than by asking a DIFFERENT recorder
+ *  (attendance) whether it thinks the occurrence is still live. */
 type Settled = Scoped & { endedAt: string | null };
 
 function matchesFilters(r: Scoped, activeType: string | null, asOf: string | null): boolean {

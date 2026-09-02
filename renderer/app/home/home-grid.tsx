@@ -151,7 +151,7 @@ const NOMINAL_H = ROW_PX * 6;
  * layout, so a Home with no SPL meter never opens an SPL subscription — the same
  * efficiency rule every other surface follows.
  */
-function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
+function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderCtx | null {
   // HOME_VIEW_ID, matching `embedChain` below: the gate walks embedded layouts
   // under the same cycle/depth limiter the renderer uses, so seeding it with
   // nothing would give the gate one more level of budget than the render and
@@ -209,6 +209,10 @@ function useHomeCtx(layout: LayoutDTO): LayoutRenderCtx | null {
     // embeds a view carries its own expand control.
     insideEmbedTile: false,
     placed: undefined,
+    // The one caller that actually populates this — see LayoutRenderCtx. Read
+    // by a card's own chart to stop tracking the pointer under the menu that
+    // right-clicking that same card just opened.
+    activeCardMenuId: menuCardId,
   };
 }
 
@@ -220,6 +224,7 @@ export function HomeGrid({
   animate = false,
   gridRef,
   onCardContextMenu,
+  menuCardId = null,
 }: {
   layout: LayoutDTO;
   /** The cards to draw, already filtered and ordered by the caller. */
@@ -237,8 +242,13 @@ export function HomeGrid({
    *  drawn by the shared renderer and some of them are interactive, so putting
    *  the handler inside would mean each one had to remember to forward it. */
   onCardContextMenu?: (card: LayoutObject, e: ReactMouseEvent) => void;
+  /** The id of the card whose menu `onCardContextMenu` opened, so its own
+   *  widget can be told to stop tracking the pointer under it. The caller owns
+   *  the menu's whole lifecycle (position, items, close) — this is only the
+   *  one bit of that state a widget underneath needs to see. */
+  menuCardId?: string | null;
 }) {
-  const ctx = useHomeCtx(layout);
+  const ctx = useHomeCtx(layout, menuCardId);
   const boxes = boxesOverride ?? boxesOf(cards);
   const byId = new Map(boxes.map((b) => [b.id, b]));
   // A signature rather than the array: the effect must run when a card MOVES,

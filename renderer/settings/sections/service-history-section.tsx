@@ -26,6 +26,7 @@ import {
   trendColor,
   type OverviewData,
   type Trend,
+  type TrendTone,
 } from "./overview-data";
 
 function fmtDate(iso: string): string {
@@ -852,28 +853,62 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   );
 }
 
-/** Real triangle glyph (▲/▼) trend indicator + optional label, in a semantic
- *  status color. Renders nothing when there wasn't enough prior data. */
-function TrendChip({ trend, label }: { trend: Trend | null; label?: string }) {
-  if (!trend) return null;
-  const glyph = trend.dir === "up" ? "▲" : "▼";
-  const text =
-    label != null
-      ? label
-      : trend.pct != null
-        ? `${trend.pct >= 0 ? "+" : "−"}${Math.round(Math.abs(trend.pct) * 100)}%`
-        : "";
+/** "+12%" / "−12%" — the sign+magnitude spelling every percentage trend uses.
+ *  `fallback` covers "there's a direction but no percentage" (a zero prior
+ *  mean — `computeTrend` already turns that case into `pct: null`). */
+function fmtTrendPct(pct: number | null, fallback = ""): string {
+  return pct != null ? `${pct >= 0 ? "+" : "−"}${Math.round(Math.abs(pct) * 100)}%` : fallback;
+}
+
+/** "vs the prior 4 Weekends" / "vs the prior 1 Weekend" — the tail every
+ *  trend readout in the Overview ends with, once for both of them rather than
+ *  copied into the attendance trend and the SPL delta separately. */
+function vsPrior(priorCount: number, scopeName: string | null): string {
+  const noun = scopeName ?? "service";
+  return `vs the prior ${priorCount} ${noun}${priorCount === 1 ? "" : "s"}`;
+}
+
+/**
+ * Real triangle glyph (▲/▼) + trailing text, in a semantic status color.
+ *
+ * The one spelling of "direction + color + words": the attendance trend, the
+ * SPL delta beneath it, and this instrument strip's own cell were three
+ * copies of the same markup, and `SplDelta`'s arrow shipped hard-coded to
+ * `trendColor("neutral")` in one of the three while the other two still took
+ * a `tone`.
+ *
+ * `dir` is optional so a caller can render NO arrow at all — `SplDelta.dir`
+ * has a third state, "flat", for exactly that: a change too small to be a
+ * real direction, drawn with no glyph rather than an uncoloured, misleading
+ * one (this block is never coloured by tone, so a wrong arrow here has
+ * nothing else to soften it).
+ */
+function TrendChip({
+  dir,
+  tone,
+  text,
+  className,
+}: {
+  dir?: "up" | "down";
+  tone: TrendTone;
+  text: string;
+  className?: string;
+}) {
   return (
-    <span className={`inline-flex items-center gap-1 text-caption1 ${trendColor(trend.tone)}`}>
-      <span aria-hidden="true">{glyph}</span>
+    <span className={cn("flex items-center gap-1.5 text-caption1", trendColor(tone), className)}>
+      {dir && <span aria-hidden="true">{dir === "up" ? "▲" : "▼"}</span>}
       {text && <span>{text}</span>}
     </span>
   );
 }
 
 /** The Overview blend: a lead stat (avg attendance) with a colored trend line, a
- *  real attendance trend chart, and a divided instrument stat strip below. */
-function OverviewBlend({
+ *  real attendance trend chart, and a divided instrument stat strip below.
+ *
+ *  Exported for its own tests: the History section around it fetches, and the
+ *  parts worth guarding — the right-click menu against the chart's hover, and
+ *  whether the SPL summary is there at all — are in this component alone. */
+export function OverviewBlend({
   overview,
   splTrend,
   onSplTrend,
@@ -926,16 +961,45 @@ function OverviewBlend({
             {overview.avgAttendance}
           </div>
           {overview.attTrend && (
-            <div className={`mt-2 flex items-center gap-1.5 text-caption1 ${trendColor(overview.attTrend.tone)}`}>
-              <span aria-hidden="true">{overview.attTrend.dir === "up" ? "▲" : "▼"}</span>
-              <span>
-                {overview.attTrend.pct != null
-                  ? `${overview.attTrend.pct >= 0 ? "+" : "−"}${Math.round(Math.abs(overview.attTrend.pct) * 100)}%`
-                  : "changed"}{" "}
-                vs the prior {overview.attTrend.priorCount}{" "}
-                {overview.scopeName ?? "service"}
-                {overview.attTrend.priorCount === 1 ? "" : "s"}
-              </span>
+            <TrendChip
+              dir={overview.attTrend.dir}
+              tone={overview.attTrend.tone}
+              text={`${fmtTrendPct(overview.attTrend.pct, "changed")} ${vsPrior(overview.attTrend.priorCount, overview.scopeName)}`}
+              className="mt-2"
+            />
+          )}
+          {/* The level, read the same way, so the SPL line has a summary of its
+              own instead of one attendance figure over a chart with two series
+              in it. Present only when the line is drawn AND there is a level to
+              report — no dash, which would read as a measured silence. */}
+          {splTrend.shown && overview.avgSpl != null && (
+            <div className="mt-5" data-testid="spl-summary">
+              <div className="flex items-center gap-1.5 text-caption1 uppercase tracking-[0.08em] text-fg-muted">
+                {/* The series' own colour, the same dot the chart's tooltip
+                    carries, so this says which line it is summarising without
+                    needing a legend. */}
+                <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-ok-9)" }} />
+                Avg SPL
+              </div>
+              <div className="mt-1 flex items-baseline gap-1.5 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
+                <span>{overview.avgSpl.toFixed(1)}</span>
+                <span className="text-caption1 font-normal text-fg-muted">dB</span>
+              </div>
+              {overview.splDelta && (
+                // NEUTRAL, always — see SplDelta. A louder weekend is not a
+                // worse one, so this never goes red. Decibels, not a
+                // percentage: a percentage of a logarithmic quantity says
+                // nothing about how loud it was. The sign comes from `dir`,
+                // never recomputed from `db` — one fact, one place to read it,
+                // so the glyph and the sign can't disagree about which way a
+                // level moved.
+                <TrendChip
+                  dir={overview.splDelta.dir === "flat" ? undefined : overview.splDelta.dir}
+                  tone="neutral"
+                  text={`${overview.splDelta.dir === "up" ? "+" : overview.splDelta.dir === "down" ? "−" : "±"}${Math.abs(overview.splDelta.db).toFixed(1)} dB ${vsPrior(overview.splDelta.priorCount, overview.scopeName)}`}
+                  className="mt-2"
+                />
+              )}
             </div>
           )}
         </div>
@@ -949,6 +1013,10 @@ function OverviewBlend({
           <AttendanceTrendChart
             points={overview.attPoints}
             splLabel={splTrend.shown ? overview.splMetric : null}
+            // The chart tracked the pointer underneath the menu it had just
+            // opened: the tooltip drew through the menu and moved as you
+            // reached for an item.
+            hoverSuppressed={chartMenu != null}
           />
         </div>
         {chartMenu && (
@@ -968,7 +1036,9 @@ function OverviewBlend({
             <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle">{s.k}</div>
             <div className={`mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 font-mono tabular-nums text-lg ${s.accent ?? "text-fg"}`}>
               <span>{s.v}</span>
-              {s.trend && <TrendChip trend={s.trend} label={s.trendLabel} />}
+              {s.trend && (
+                <TrendChip dir={s.trend.dir} tone={s.trend.tone} text={s.trendLabel ?? fmtTrendPct(s.trend.pct)} />
+              )}
             </div>
           </div>
         ))}

@@ -61,6 +61,18 @@ export interface SplServiceSummary {
   serviceTypeId: string | null;
   serviceTypeName?: string | null;
   serviceDate: string;
+  /**
+   * Null while the recording behind this summary is still running.
+   *
+   * NOT written once at the end: the recorder persists `current` on every live
+   * tick (see spl-recorder.ts's schedulePersist), so a service still in
+   * progress already has a summary here, and its Leq is a partial that will
+   * keep climbing as more items are sung or spoken. The overview's average
+   * has to know that on the SPL data's own terms — see overview-data.ts —
+   * rather than by asking a different recorder (attendance) whether IT thinks
+   * the occurrence is still live.
+   */
+  endedAt: string | null;
   /** Service-level Leq per Smaart metric key, with the samples behind it. */
   metrics: Record<string, { leq: number; count: number }>;
 }

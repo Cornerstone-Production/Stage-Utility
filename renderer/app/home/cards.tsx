@@ -474,10 +474,15 @@ export function RecentServicesCard({
   state,
   showSpl = false,
   splMetric = null,
+  hoverSuppressed = false,
 }: {
   state: StageState;
   showSpl?: boolean;
   splMetric?: string | null;
+  /** Home's own right-click menu is open over this card. Same problem History
+   *  solved for its copy of this chart: without it, the tooltip draws through
+   *  the menu and keeps tracking the pointer underneath it. */
+  hoverSuppressed?: boolean;
 }) {
   const { list, attList, splList } = useHistoryRecords(showSpl);
 
@@ -525,6 +530,10 @@ export function RecentServicesCard({
         <AttendanceTrendChart
           points={overview.attPoints}
           splLabel={showSpl ? overview.splMetric : null}
+          // Home has the identical right-click menu History does — the chart
+          // was tracking the pointer under it here too, the one call site the
+          // History fix did not reach.
+          hoverSuppressed={hoverSuppressed}
         />
       </div>
     </section>
@@ -919,6 +928,7 @@ export function HomeCard({
   skewMs,
   onlineOutputIds,
   secondsToStart,
+  hoverSuppressed = false,
 }: {
   /**
    * The card's WHOLE config, not just its type.
@@ -943,6 +953,11 @@ export function HomeCard({
    */
   onlineOutputIds: readonly string[];
   secondsToStart: number | null;
+  /** This card's own right-click menu is open, so its chart (if it has one)
+   *  must stop tracking the pointer underneath it. Only `home-recent-services`
+   *  reads it today; every other case ignores it, the same way most of them
+   *  ignore `onlineOutputIds`. */
+  hoverSuppressed?: boolean;
 }) {
   const c = config;
   switch (c.type) {
@@ -992,6 +1007,7 @@ export function HomeCard({
           state={state}
           showSpl={c.showSpl ?? false}
           splMetric={c.splMetric ?? null}
+          hoverSuppressed={hoverSuppressed}
         />
       );
     default: {

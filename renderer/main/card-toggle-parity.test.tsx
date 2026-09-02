@@ -139,6 +139,7 @@ const SPL_SUMMARY: SplServiceSummary[] = WEEKENDS.map((day, i) => ({
   serviceTypeId: "st-1",
   serviceTypeName: "Weekend",
   serviceDate: day,
+  endedAt: `${day}T16:30:00.000Z`,
   metrics: {
     "LAeq 10": { leq: 88 + i * 2, count: 1000 },
     "SPL C Fast": { leq: 101 - i * 3, count: 1000 },

@@ -44,7 +44,18 @@ count as much as a 25-minute sermon. Several services on one date combine the sa
 way. A date with no recording breaks the line rather than dropping it to zero — a
 missing reading is not a quiet service. The setting is per-machine and off by
 default; Home's **Recent services** widget offers the same two settings on its own
-right-click menu.
+right-click menu, but only History shows the summary below — Home stays headline
+figures only.
+
+On History, while the line is on, the same right-click menu also puts an average
+level under the average attendance, in the same shape: the level across settled
+weekends, then the latest weekend against the four before it. The comparison is
+a **dB difference**, not a percentage — decibels are logarithmic, so a percentage
+of one says nothing about loudness — and it is never coloured, because a louder
+weekend is not a worse one. A change under half a dB, below what most listeners
+can tell apart, shows no arrow at all rather than a direction nobody could hear.
+Both figures are energy averages. Weekends with no SPL recording are left out,
+and the block is absent entirely when nothing in scope carries a level.
 
 Above them is a KPI overview you can reorder and toggle sparklines on: service
 timers, attendance, highest and lowest attended, day totals. On a baptism weekend
