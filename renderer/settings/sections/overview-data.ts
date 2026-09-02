@@ -314,6 +314,15 @@ export function computeOverview(
   // one point per weekend on a shared x axis is what the chart needs the
   // attendance points for in the first place.
   const splByDateSettled = new Map<string, { leq: number; count: number }[]>();
+  // Settled is a property of the WEEKEND, not of each recording in it, and it
+  // has to be — `avgAttendance` drops a date the moment any one of its services
+  // is still open (`live: svcs.some(endedAt == null)` below), so settling SPL
+  // per record would have the two headline figures disagreeing about whether
+  // the same Sunday is over. On a two-service morning with the 9am finished and
+  // the 11am still recording, that read as a settled level built from the 9am
+  // alone: a confident "+20 dB" for a weekend still in progress, which then
+  // moves, possibly reversing, once the 11am folds in.
+  const liveSplDates = new Set<string>();
   if (chosenMetric) {
     for (const r of splInScope) {
       const m = r.metrics[chosenMetric];
@@ -321,12 +330,12 @@ export function computeOverview(
       const arr = splByDate.get(r.serviceDate);
       if (arr) arr.push(m);
       else splByDate.set(r.serviceDate, [m]);
-      if (inAverageScope(r, activeType, asOf)) {
-        const settledArr = splByDateSettled.get(r.serviceDate);
-        if (settledArr) settledArr.push(m);
-        else splByDateSettled.set(r.serviceDate, [m]);
-      }
+      if (!inAverageScope(r, activeType, asOf)) liveSplDates.add(r.serviceDate);
+      const settledArr = splByDateSettled.get(r.serviceDate);
+      if (settledArr) settledArr.push(m);
+      else splByDateSettled.set(r.serviceDate, [m]);
     }
+    for (const d of liveSplDates) splByDateSettled.delete(d);
   }
 
   // One point per WEEKEND (service date): value = TOTAL attendance across that

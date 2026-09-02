@@ -203,6 +203,40 @@ describe("the SPL summary", () => {
     );
   });
 
+  test("drops a whole weekend while ANY ONE of its services is still recording", () => {
+    // Settled is a property of the weekend, not of each recording in it. A
+    // two-service Sunday with the 9am finished and the 11am still running used
+    // to average the 9am alone and present it as settled — a confident figure
+    // for a morning still in progress, which then moves once the 11am folds in.
+    // `avgAttendance` has always dropped the whole date in this case, so
+    // settling SPL per record had the two headline numbers disagreeing about
+    // whether the same Sunday was over.
+    const o = computeOverview(
+      WEEKENDS.map((d) => svc({ serviceKey: `k-${d}`, serviceDate: d })),
+      [
+        ...settledWeekends,
+        att({
+          serviceKey: "k-2026-08-09", serviceDate: "2026-08-09",
+          startedAt: "2026-08-09T10:00:00Z", endedAt: "2026-08-09T11:00:00Z", peakOccupancy: 150,
+        }),
+      ],
+      null, null, null,
+      {
+        splList: [
+          ...WEEKENDS.map((d, i) => spl(d, LEVELS[i])),
+          // The 9am: finished, and loud enough to be unmissable if it leaks.
+          spl("2026-08-09", 120, { serviceKey: "k-9am" }),
+          // The 11am: still recording, so the morning is not over.
+          spl("2026-08-09", 60, { serviceKey: "k-11am", endedAt: null }),
+        ],
+      },
+    );
+    assert.ok(
+      Math.abs(o.avgSpl! - leqOf(LEVELS)!) < 0.01,
+      `average level is ${o.avgSpl!.toFixed(2)} dB — a weekend with a service still recording was averaged as if it had finished`,
+    );
+  });
+
   test("keeps a weekend's settled level even while its ATTENDANCE is still live", () => {
     // The other half of the same fix: SPL and attendance are separate
     // recorders, so a live occupancy sensor must not suppress a level Smaart
