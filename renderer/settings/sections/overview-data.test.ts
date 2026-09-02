@@ -283,6 +283,13 @@ describe("computeSplDelta", () => {
     assert.equal(d.priorCount, 4);
     assert.ok(Math.abs(d.db) < 0.01, `read ${d.db.toFixed(2)} dB — it looked back past the window`);
   });
+
+  test("refuses to compare a latest reading that isn't a real number", () => {
+    // leqOf already screens the PRIOR window for non-finite samples; the
+    // latest reading went unchecked, so a NaN there produced `db: NaN` and
+    // rendered as a comparison against a real prior window.
+    assert.equal(computeSplDelta([80, 80, 80, 80, NaN]), null, "a NaN latest reading produced a comparison");
+  });
 });
 
 describe("summarize", () => {

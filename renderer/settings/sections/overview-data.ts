@@ -97,6 +97,12 @@ export interface SplDelta {
  */
 export function computeSplDelta(levels: readonly number[], window = 4): SplDelta | null {
   const latest = levels[levels.length - 1];
+  // `leqOf` below already screens the PRIOR window for non-finite values; the
+  // latest reading was never screened the same way, so one bad sample here
+  // (a metric key present but empty, a NaN from upstream) produced `db: NaN`
+  // and rendered as "vs the prior N Weekends" — a real-looking comparison
+  // built on an unreal number.
+  if (!Number.isFinite(latest)) return null;
   const prior = levels.slice(Math.max(0, levels.length - 1 - window), levels.length - 1);
   const priorLeq = leqOf(prior);
   if (priorLeq == null) return null;
