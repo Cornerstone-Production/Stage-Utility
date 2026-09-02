@@ -96,7 +96,6 @@ export interface SplDelta {
  * `null` where `computeTrend` returns null: no prior weekend to compare against.
  */
 export function computeSplDelta(levels: readonly number[], window = 4): SplDelta | null {
-  if (levels.length < 2) return null;
   const latest = levels[levels.length - 1];
   const prior = levels.slice(Math.max(0, levels.length - 1 - window), levels.length - 1);
   const priorLeq = leqOf(prior);

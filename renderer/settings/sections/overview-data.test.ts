@@ -258,6 +258,11 @@ describe("the SPL summary", () => {
 
 describe("computeSplDelta", () => {
   test("refuses to guess without a prior weekend", () => {
+    // A behaviour pin, not a guard on any one line: both inputs already return
+    // null through the `priorLeq == null` check below (an empty `prior` slice
+    // leqOf's to null either way) — there is no length<2 special case left to
+    // exercise. Kept because "no prior weekend" is a real input worth pinning,
+    // even though nothing in the function is written just for it.
     assert.equal(computeSplDelta([84]), null);
     assert.equal(computeSplDelta([]), null);
   });
