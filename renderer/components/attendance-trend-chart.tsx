@@ -83,8 +83,22 @@ export function AttendanceTrendChart({
   useEffect(() => {
     if (!box) return;
     const ro = new ResizeObserver(([entry]) => {
-      // Floors, so a card mid-mount at zero size cannot divide by nothing.
-      setW(Math.max(240, Math.round(entry.contentRect.width)));
+      // WIDTH gets no floor above zero. The svg below has no viewBox, so its
+      // RENDERED width is the real DOM width (CSS 100%) — `W` only decides
+      // where the drawing math THINKS that box ends, and nothing here divides
+      // by it, so a floor buys no safety. It used to buy a mismatch instead:
+      // on a container narrower than the floor (a phone-width History
+      // column), the math drew for a box 240px wide while the real one was
+      // whatever CSS gave it, and the tooltip's edge-clamp — built to hold
+      // the tooltip inside the box it was ACTUALLY measuring — clamped
+      // against the wrong number and sat past the real right edge.
+      //
+      // HEIGHT keeps its floor: unlike width, the svg's `height` attribute IS
+      // `H` (no CSS percentage involved), so there's no real box for it to
+      // disagree with — measuring 0 back is just the chart reporting its own
+      // last-drawn height during a mid-mount frame, not a truth to obey.
+      const w = Math.round(entry.contentRect.width);
+      if (w > 0) setW(w);
       setH(Math.max(130, Math.round(entry.contentRect.height)));
     });
     ro.observe(box);
@@ -113,12 +127,20 @@ export function AttendanceTrendChart({
    */
   const [tip, setTip] = useState<HTMLDivElement | null>(null);
   const [tipW, setTipW] = useState(0);
+  /** Its HEIGHT, the same way — see the vertical placement below `tipTop`.
+   *  Held at 0 until measured, same as `tipW`: nothing reads it before then,
+   *  since the tooltip is invisible (`opacity`) until it has been. */
+  const [tipH, setTipH] = useState(0);
   useEffect(() => {
     if (!tip) return;
     // An observer answers with its first observation as soon as it is given a
     // target, so this needs no separate initial measurement — the same reason
     // the box above does not take one either.
-    const ro = new ResizeObserver(() => setTipW(tip.getBoundingClientRect().width));
+    const ro = new ResizeObserver(() => {
+      const r = tip.getBoundingClientRect();
+      setTipW(r.width);
+      setTipH(r.height);
+    });
     ro.observe(tip);
     return () => ro.disconnect();
   }, [tip]);
@@ -221,6 +243,22 @@ export function AttendanceTrendChart({
   // A tooltip wider than the chart it sits in cannot be held inside it at all;
   // centred, it at least overhangs evenly rather than pinning to one edge.
   const tipLeft = tipLo <= tipHi ? clamp(hx, tipLo, tipHi) : plotW / 2;
+  // The tooltip's vertical placement — held inside the TOP of the chart the
+  // same way its horizontal one is held inside the sides.
+  //
+  // Above the point by default (`-translate-y-full`, applied below), which is
+  // exactly where it runs out of room first: `hy` is smallest at the
+  // HIGHEST-attendance point, so the point people are most likely to hover is
+  // the one closest to the chart's own top edge. On History that only drew
+  // the tooltip over the card above it — visible, if untidy. On Home this
+  // chart sits inside two `overflow-hidden` ancestors (cards.tsx), so the
+  // same negative top does not overhang there, it is cut off outright — the
+  // tooltip silently loses its top few lines for exactly the point an
+  // operator is most likely to be checking. Flips below the point instead of
+  // letting that happen.
+  const tipMarginY = 4;
+  const tipAbove = hy - 8 - tipH >= tipMarginY;
+  const tipTop = tipAbove ? Math.max(hy - 8, tipMarginY) : hy + 8;
   return (
     <div className="relative h-full min-h-[130px]" ref={setBox}>
       <div className="relative h-full">
@@ -329,10 +367,10 @@ export function AttendanceTrendChart({
       {hp && (
         <div
           ref={setTip}
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl"
+          className={`pointer-events-none absolute z-10 -translate-x-1/2 rounded-md border border-line-strong bg-popover px-2 py-1 shadow-md backdrop-blur-xl${tipAbove ? " -translate-y-full" : ""}`}
           style={{
             left: `${tipLeft}px`,
-            top: `${Math.max(hy - 8, 4)}px`,
+            top: `${tipTop}px`,
             // Held back for the one frame between mounting and being measured,
             // because an unmeasured tooltip cannot be clamped and would appear
             // hanging off the edge and then jump. The width survives the
