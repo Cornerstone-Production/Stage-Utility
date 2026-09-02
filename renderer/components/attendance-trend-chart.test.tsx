@@ -401,3 +401,116 @@ describe("hoverSuppressed", () => {
     assert.ok(tooltip(view.container), "hovering never worked again after the menu closed");
   });
 });
+
+// ── The SPL endpoint dot and label ──────────────────────────────────────────
+//
+// The attendance series has always ended in a marked dot and a "latest value"
+// label; the SPL series drew neither and its line just stopped. These guard
+// the equivalent for SPL: the RIGHT point (the last one with a level, not
+// necessarily the chart's own last point), the live/settled look, and a label
+// placement that cannot land on top of the attendance one even though the two
+// series are scaled independently and can converge.
+describe("the SPL endpoint dot and label", () => {
+  const sp = (day: string, value: number, spl: number | null, live = false) => ({ day, value, spl, live });
+  /** The hollow signature is unambiguous — only the endpoint dot ever draws
+   *  it, unlike a plain `su-ok-9` fill, which the lone-reading-between-gaps
+   *  dot (splRuns above) also uses. */
+  const hollowSplDot = (c: HTMLElement) => c.querySelector('circle[fill="var(--su-bg)"][stroke="var(--su-ok-9)"]');
+  const splDbLabel = (c: HTMLElement) => [...c.querySelectorAll("span")].find((s) => /dB/.test(s.textContent ?? ""));
+
+  test("marks the last point that actually carries a level, not necessarily the chart's own last point", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    t.after(() => cleanup());
+    // The newest weekend has attendance but no Smaart reading (a gap at the
+    // very end) — the endpoint must sit on the PRIOR point, not vanish.
+    const points = [sp("2026-06-21", 500, 60), sp("2026-06-28", 400, 70), sp("2026-07-05", 300, null)];
+    const view = render(<AttendanceTrendChart points={points} splLabel="LAeq" />);
+
+    // 1500 wide, 3 points, 10px padding a side: index 1 (the last WITH a
+    // reading) sits at 10 + (1/2)*(1500-20) = 750; index 2 (the gap) at 1490.
+    const dots = [...view.container.querySelectorAll('circle[fill="var(--su-ok-9)"]')];
+    const dot = dots.find((c) => Math.abs(Number(c.getAttribute("cx")) - 750) < 0.5);
+    assert.ok(dot, `no SPL dot at index 1; saw cx values ${dots.map((c) => c.getAttribute("cx"))}`);
+    assert.ok(
+      !dots.some((c) => Math.abs(Number(c.getAttribute("cx")) - 1490) < 0.5),
+      "an SPL dot was drawn on the gap at the chart's own last point",
+    );
+
+    const label = splDbLabel(view.container);
+    assert.ok(label, "no SPL label at all");
+    assert.match(label!.textContent ?? "", /70\.0\s*dB/, "the label shows the last READING, not the chart's last point");
+  });
+
+  test("the endpoint dot is hollow only when it is the chart's FINAL point and that point is live", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    t.after(() => cleanup());
+
+    // The endpoint IS the chart's final point, and it's live: still climbing.
+    const live = render(
+      <AttendanceTrendChart points={[sp("2026-06-21", 500, 60), sp("2026-06-28", 400, 70, true)]} splLabel="LAeq" />,
+    );
+    assert.ok(hollowSplDot(live.container), "a live final reading did not draw hollow");
+    cleanup();
+
+    // The endpoint IS the final point, but settled: solid.
+    const settled = render(
+      <AttendanceTrendChart points={[sp("2026-06-21", 500, 60), sp("2026-06-28", 400, 70, false)]} splLabel="LAeq" />,
+    );
+    assert.ok(!hollowSplDot(settled.container), "a settled final reading drew hollow");
+    cleanup();
+
+    // The SERVICE is still live, but its Smaart reading is not the chart's
+    // final POINT — a later weekend already has attendance with no level yet.
+    // The dot marks a SETTLED past reading and must not borrow the live look.
+    const laterGap = render(
+      <AttendanceTrendChart points={[sp("2026-06-21", 500, 60, true), sp("2026-06-28", 400, null)]} splLabel="LAeq" />,
+    );
+    assert.ok(
+      !hollowSplDot(laterGap.container),
+      "an endpoint that isn't the chart's own final point drew hollow anyway",
+    );
+  });
+
+  test("draws neither the dot nor the label when no SPL metric is chosen", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    t.after(() => cleanup());
+    const points = [sp("2026-06-21", 500, 60), sp("2026-06-28", 400, 70)];
+    const view = render(<AttendanceTrendChart points={points} splLabel={null} />);
+    assert.equal(
+      view.container.querySelectorAll('circle[fill="var(--su-ok-9)"]').length,
+      0,
+      "drew an SPL dot with no metric chosen",
+    );
+    assert.ok(!splDbLabel(view.container), "drew an SPL label with no metric chosen");
+  });
+
+  test("the SPL label cannot land inside the attendance label's own band, even when the two series converge", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    t.after(() => cleanup());
+    // Engineered so the two independently-scaled dots land close together on
+    // screen: attendance's last point maps to y=70 of the 200-tall box this
+    // file's default ResizeObserver reports; SPL's endpoint — at its OWN
+    // series maximum, with enough range that the 30% pad doesn't hit its 1.5
+    // floor — maps to yβ‰ˆ41.9. "Above its own dot" for one and "below its own
+    // dot" for the other overlap by about 16px without the floor this test
+    // guards (confirmed by hand before writing this: naturalSplTop=49.875
+    // falls inside the attendance label's own 50-66 band).
+    const points = [sp("2026-06-21", 0, 60), sp("2026-06-28", 170, 65), sp("2026-07-05", 110, 95)];
+    const view = render(<AttendanceTrendChart points={points} splLabel="LAeq" />);
+
+    const spans = [...view.container.querySelectorAll("span")];
+    const attLabel = spans.find((s) => (s.textContent ?? "").trim() === "110");
+    const splLabel = splDbLabel(view.container);
+    assert.ok(attLabel, "no attendance label to compare against");
+    assert.ok(splLabel, "no SPL label to compare against");
+
+    const attTop = parseFloat(attLabel!.style.top);
+    const splTop = parseFloat(splLabel!.style.top);
+    // The attendance label's own height: caption1's line-height (styles.css).
+    const ATT_LABEL_H = 16;
+    assert.ok(
+      splTop >= attTop + ATT_LABEL_H,
+      `the SPL label (top ${splTop}) overlaps the attendance label's own band (top ${attTop}, height ${ATT_LABEL_H})`,
+    );
+  });
+});
