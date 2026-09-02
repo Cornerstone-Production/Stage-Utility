@@ -77,7 +77,19 @@ export function computeTrend(series: number[], higherIsBetter: boolean, opts?: {
  * one, and colouring it would editorialise about a mix decision.
  */
 export interface SplDelta {
-  dir: "up" | "down";
+  /**
+   * "flat" below the deadband, not just "up" or "down" left uncoloured.
+   *
+   * `Trend` has the same problem — a change inside ITS deadband is still
+   * `dir: "up"` or `"down"`, just with `tone: "neutral"` — and gets away with
+   * it because the neutral GREY carries the "this doesn't mean anything"
+   * signal on its own. `SplDelta` is deliberately never coloured at all (a
+   * louder weekend is not a worse one), so its arrow has nothing to soften
+   * it: a `▼` next to a sub-tenth-of-a-dB reading of room noise reads as a
+   * real, judged direction with no visual hedge attached. Flat removes the
+   * arrow instead of relying on a colour this type refuses to have.
+   */
+  dir: "up" | "down" | "flat";
   /** Signed: the latest level minus the prior window's Leq. */
   db: number;
   priorCount: number;
@@ -94,8 +106,12 @@ export interface SplDelta {
  * shape of answer; different maths, because the unit is different.
  *
  * `null` where `computeTrend` returns null: no prior weekend to compare against.
+ *
+ * `deadbandDb` defaults to 0.5 — below a just-noticeable difference for most
+ * listeners, and comfortably inside the week-to-week noise of a room mixed by
+ * the same person to the same target. Below it, `dir` reads "flat".
  */
-export function computeSplDelta(levels: readonly number[], window = 4): SplDelta | null {
+export function computeSplDelta(levels: readonly number[], window = 4, deadbandDb = 0.5): SplDelta | null {
   const latest = levels[levels.length - 1];
   // `leqOf` below already screens the PRIOR window for non-finite values; the
   // latest reading was never screened the same way, so one bad sample here
@@ -107,7 +123,8 @@ export function computeSplDelta(levels: readonly number[], window = 4): SplDelta
   const priorLeq = leqOf(prior);
   if (priorLeq == null) return null;
   const db = latest - priorLeq;
-  return { dir: db >= 0 ? "up" : "down", db, priorCount: prior.length };
+  const dir: SplDelta["dir"] = Math.abs(db) < deadbandDb ? "flat" : db >= 0 ? "up" : "down";
+  return { dir, db, priorCount: prior.length };
 }
 
 /** Seconds → "m:ss" (or "h:mm:ss"). */

@@ -276,6 +276,15 @@ describe("computeSplDelta", () => {
     assert.ok(Math.abs(d.db - (90 - leqOf([80, 80, 80, 100])!)) < 0.01, `read ${d.db.toFixed(2)} dB`);
   });
 
+  test("a change smaller than the deadband reads flat, not a direction", () => {
+    // 80 four times, then 79.96 — a few hundredths of a dB, the normal case for
+    // a room mixed by the same person to the same target. SplDelta is never
+    // coloured, so an arrow here is the only signal in the block; "down" would
+    // have rendered "▼ −0.0 dB" with nothing to say it doesn't mean anything.
+    const d = computeSplDelta([80, 80, 80, 80, 79.96])!;
+    assert.equal(d.dir, "flat", `a 0.04 dB nothing-change read as ${d.dir}`);
+  });
+
   test("only looks back over the window", () => {
     // Ten weekends, the last five all at 80: the window is the four before the
     // latest, so the ancient loud ones cannot move it.
