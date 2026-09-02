@@ -228,6 +228,31 @@ export function AttendanceTrendChart({
   const lastX = x(points.length - 1);
   const lastY = y(points[points.length - 1].value);
   const latest = points[points.length - 1].value;
+  // The SPL endpoint: the LAST point that actually carries a level, not
+  // necessarily the chart's own last point. SPL breaks into runs over a gap
+  // (see splRuns above), so the newest weekend can be one with attendance and
+  // no Smaart reading yet — marking that gap as "the latest level" would be
+  // the same lie the broken line already refuses to tell.
+  let splEndpointIdx = -1;
+  let splLevel: number | null = null;
+  if (showSpl) {
+    for (let i = 0; i < points.length; i++) {
+      const v = points[i].spl;
+      if (v != null) {
+        splEndpointIdx = i;
+        splLevel = v;
+      }
+    }
+  }
+  const splEndpointX = x(Math.max(splEndpointIdx, 0));
+  const splEndpointY = splLevel != null ? sy(splLevel) : 0;
+  // Hollow on the SAME terms as the attendance dot below: only when this
+  // reading is the FINAL point in the whole series — not merely the last one
+  // with a level — and that point is still recording. A live weekend whose
+  // Smaart reading stopped early (SenSource still counting, the meter gone
+  // quiet) must not borrow the "still climbing" look for what is actually its
+  // last SETTLED level.
+  const splEndpointLive = splEndpointIdx === points.length - 1 && !!points[splEndpointIdx]?.live;
   const hp = hover != null ? points[hover] : null;
   const hx = hover != null ? x(hover) : 0;
   const hy = hp ? y(hp.value) : 0;
@@ -267,6 +292,28 @@ export function AttendanceTrendChart({
   const roomBelow = H - tipMarginY - (hy + 8);
   const tipAbove = roomAbove >= tipH || (roomBelow < tipH && roomAbove >= roomBelow);
   const tipTop = tipAbove ? hy - 8 : hy + 8;
+  // The SPL endpoint's own label — same idea as the attendance one below, but
+  // it must never land where THAT one already sits. The two series are scaled
+  // independently and can converge onto the same y for very different
+  // attendance and dB numbers, so a placement that only looks at the SPL
+  // dot's OWN position collides exactly there. The floor is anchored to the
+  // attendance label's already-decided band instead, which holds regardless
+  // of where either dot lands — two rectangles with disjoint y ranges cannot
+  // overlap no matter what either one does on x.
+  //
+  // SPL_LABEL_H is the caption1 line-height (styles.css), the same "one line"
+  // the attendance label's own "-20" already assumes — not a measurement,
+  // because unlike the tooltip's caller-supplied content this text is OUR OWN
+  // fixed format (`N.N dB`) and does not vary the way a plotted label does.
+  const SPL_LABEL_H = 16;
+  const attLabelBottom = Math.max(0, lastY - 20) + SPL_LABEL_H;
+  const splLabelTop = clamp(Math.max(splEndpointY + 8, attLabelBottom + 4), 0, H - SPL_LABEL_H - 4);
+  // Horizontal: centred on the endpoint, clamped inside the chart the same
+  // way the tooltip is above (`tipLo`/`tipHi`) — a fixed half-width, again
+  // because the content's size is fixed rather than caller-supplied.
+  const splLabelHalfW = 28;
+  const splLabelLeft =
+    splLabelHalfW * 2 <= plotW ? clamp(splEndpointX, splLabelHalfW, plotW - splLabelHalfW) : plotW / 2;
   return (
     <div className="relative h-full min-h-[130px]" ref={setBox}>
       <div className="relative h-full">
@@ -347,6 +394,17 @@ export function AttendanceTrendChart({
                 <circle cx={x(run[0].i)} cy={sy(run[0].v)} r={2.5} fill="var(--su-ok-9)" fillOpacity={0.85} />
               )}
             </g>
+          ))}
+        {/* The SPL endpoint — the latest point that actually carries a level,
+            marked the same way the newest attendance point is (hollow while
+            still live, solid once settled), in the series' own colour. Not
+            necessarily the same x as the attendance dot below it: a weekend
+            can have attendance with no Smaart reading at all. */}
+        {splLevel != null &&
+          (splEndpointLive ? (
+            <circle cx={splEndpointX} cy={splEndpointY} r={4} fill="var(--su-bg)" stroke="var(--su-ok-9)" strokeWidth={2} />
+          ) : (
+            <circle cx={splEndpointX} cy={splEndpointY} r={4} fill="var(--su-ok-9)" />
           ))}
         <polygon points={area} fill={`url(#${gradientId})`} />
         <polyline points={poly} fill="none" stroke="var(--su-accent)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
@@ -431,6 +489,17 @@ export function AttendanceTrendChart({
           style={{ top: `${Math.max(0, lastY - 20)}px`, right: lastY - 20 < 0 ? 18 : 4 }}
         >
           {latest.toLocaleString()}
+        </span>
+      )}
+      {/* Latest SPL, mirroring the attendance label above but on its own
+          endpoint and in the series' own colour — hidden on the same terms
+          (no metric chosen, or hovering). */}
+      {splLevel != null && !hp && (
+        <span
+          className="pointer-events-none absolute -translate-x-1/2 font-mono text-caption1 font-medium tabular-nums"
+          style={{ top: `${splLabelTop}px`, left: `${splLabelLeft}px`, color: "var(--su-ok-9)" }}
+        >
+          {splLevel.toFixed(1)} dB
         </span>
       )}
       </div>
