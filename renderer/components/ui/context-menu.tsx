@@ -37,17 +37,7 @@ const ITEM_CLS =
   "flex w-full items-center gap-2 rounded-[5px] px-2 py-[3px] text-left text-footnote " +
   "text-fg outline-none disabled:pointer-events-none disabled:text-fg-subtle";
 
-function MenuList({
-  items,
-  onClose,
-  depth = 0,
-}: {
-  items: ContextMenuItem[];
-  onClose: () => void;
-  depth?: number;
-}) {
-  const [openSub, setOpenSub] = useState<number | null>(null);
-
+function MenuList({ items, onClose }: { items: ContextMenuItem[]; onClose: () => void }) {
   return (
     <div
       className={cn(
@@ -60,31 +50,11 @@ function MenuList({
         item.separator ? (
           <div key={`sep-${i}`} className="my-1 h-px bg-line" role="separator" />
         ) : item.items?.length ? (
-          <div
+          <SubmenuItem
             key={item.label ?? i}
-            className="relative"
-            onMouseEnter={() => setOpenSub(i)}
-            onMouseLeave={() => setOpenSub((cur) => (cur === i ? null : cur))}
-          >
-            <button type="button" className={cn(ITEM_CLS, "hover:bg-fill-active")} role="menuitem">
-              {item.icon}
-              <span className="flex-1 truncate">{item.label}</span>
-              <span className="text-fg-subtle">›</span>
-            </button>
-            {openSub === i && (
-              // Submenus open to the right, and to the LEFT once there is not room —
-              // a menu opened near the right edge is the common case on a wide canvas.
-              <div
-                className={cn(
-                  "absolute top-0 z-10",
-                  depth > 0 || typeof window === "undefined" ? "left-full" : "left-full",
-                )}
-                style={{ marginLeft: 2 }}
-              >
-                <MenuList items={item.items} onClose={onClose} depth={depth + 1} />
-              </div>
-            )}
-          </div>
+            item={item as ContextMenuItem & { items: ContextMenuItem[] }}
+            onClose={onClose}
+          />
         ) : (
           <button
             key={item.label ?? i}
@@ -125,6 +95,71 @@ function MenuList({
             {item.shortcut && <span className="ml-3 tabular-nums text-fg-subtle">{item.shortcut}</span>}
           </button>
         ),
+      )}
+    </div>
+  );
+}
+
+/**
+ * One item that opens a submenu on hover — pulled out of `MenuList`'s
+ * `.map()` because each one needs its OWN ref and its OWN open/flip state,
+ * not a shared array of them keyed by index.
+ *
+ * Opens to the right and down by default, and flips to whichever side of
+ * ITSELF actually has room once the real size is known — measured, not
+ * estimated, for the same reason the root menu's own flip is (see
+ * `ContextMenu` below): the item list is caller-supplied and its size
+ * varies, from a two-line toggle to a long "Metric" list a multi-band
+ * Smaart rig reports.
+ *
+ * Local `open` state also drops the race the old shared-index version
+ * needed a defensive check for: if this item's mouseleave and a sibling's
+ * mouseenter land in the order enter-then-leave, a single shared "which one
+ * is open" index has the leave clobber the sibling's just-set value back to
+ * closed. Two independent booleans have nothing to clobber.
+ */
+function SubmenuItem({
+  item,
+  onClose,
+}: {
+  item: ContextMenuItem & { items: ContextMenuItem[] };
+  onClose: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const [side, setSide] = useState<{ h: "left" | "right"; v: "up" | "down" }>({ h: "right", v: "down" });
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const pad = 8;
+    setSide({
+      h: r.right > window.innerWidth - pad ? "left" : "right",
+      v: r.bottom > window.innerHeight - pad ? "up" : "down",
+    });
+  }, [open, item.items]);
+
+  return (
+    <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button type="button" className={cn(ITEM_CLS, "hover:bg-fill-active")} role="menuitem">
+        {item.icon}
+        <span className="flex-1 truncate">{item.label}</span>
+        <span className="text-fg-subtle">›</span>
+      </button>
+      {open && (
+        <div
+          ref={ref}
+          className={cn(
+            "absolute z-10",
+            side.h === "right" ? "left-full" : "right-full",
+            side.v === "down" ? "top-0" : "bottom-0",
+          )}
+          style={{ [side.h === "right" ? "marginLeft" : "marginRight"]: 2 }}
+        >
+          <MenuList items={item.items} onClose={onClose} />
+        </div>
       )}
     </div>
   );
