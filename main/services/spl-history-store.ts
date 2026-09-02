@@ -40,6 +40,10 @@ class SplHistoryStore extends KeyedRecordStore<ServiceSplHistory> {
    * A metric no item reported is absent rather than present-and-null: the caller
    * builds its picker from the keys that are actually here, and an empty key
    * would offer a metric with nothing behind it.
+   *
+   * `endedAt` rides along unreduced — this is the one field the reduction does
+   * NOT throw away — so the caller can tell a settled level from a still-live
+   * one without a second lookup against a different recorder's records.
    */
   async summary(): Promise<SplServiceSummary[]> {
     const records = await this.list();
@@ -62,6 +66,7 @@ class SplHistoryStore extends KeyedRecordStore<ServiceSplHistory> {
         serviceTypeId: r.serviceTypeId,
         serviceTypeName: r.serviceTypeName ?? null,
         serviceDate: r.serviceDate,
+        endedAt: r.endedAt,
         metrics,
       };
     });

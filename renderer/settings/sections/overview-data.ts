@@ -283,6 +283,15 @@ export function computeOverview(
   const chosenMetric =
     splMetric && splMetrics.includes(splMetric) ? splMetric : preferredSplMetric(splMetrics);
   const splByDate = new Map<string, { leq: number; count: number }[]>();
+  // The same records, restricted to the ones `inAverageScope` calls settled —
+  // SplServiceSummary carries its own endedAt now (main/types/history.ts), so
+  // this reads whether THAT recording finished, never whether the occupancy
+  // sensor saw anything for the date. Folded separately from splByDate above:
+  // avgSpl/splDelta must not see a still-live record's climbing partial level,
+  // but the CHART keeps drawing it — that coupling to attPoints stays, because
+  // one point per weekend on a shared x axis is what the chart needs the
+  // attendance points for in the first place.
+  const splByDateSettled = new Map<string, { leq: number; count: number }[]>();
   if (chosenMetric) {
     for (const r of splInScope) {
       const m = r.metrics[chosenMetric];
@@ -290,6 +299,11 @@ export function computeOverview(
       const arr = splByDate.get(r.serviceDate);
       if (arr) arr.push(m);
       else splByDate.set(r.serviceDate, [m]);
+      if (inAverageScope(r, activeType, asOf)) {
+        const settledArr = splByDateSettled.get(r.serviceDate);
+        if (settledArr) settledArr.push(m);
+        else splByDateSettled.set(r.serviceDate, [m]);
+      }
     }
   }
 
@@ -324,13 +338,18 @@ export function computeOverview(
   // peak, and fake a downward trend for the first half of the morning.
   const settledPoints = attPoints.filter((p) => !p.live);
   const settledSeries = settledPoints.map((p) => p.value);
-  // The same settled weekends, restricted to the ones that carry a level, and
-  // ENERGY-averaged — `mean()` above is exactly the wrong helper for decibels
-  // (main/services/spl-leq.ts). A weekend with no recording is dropped rather
-  // than counted, so the window is the last four weekends there is a level for.
-  // One entry per WEEKEND, matching avgAttendance: this is the average weekend,
-  // not the average sample.
-  const settledSpl = settledPoints.map((p) => p.spl).filter((v): v is number => v != null);
+  // The SPL series' OWN settled dates — NOT attPoints's. Coupling this to
+  // attendance dropped a weekend Smaart recorded whenever the occupancy sensor
+  // recorded nothing for it (offline, a genuine zero, or no SenSource at all):
+  // a site with Smaart and no SenSource got no SPL summary whatsoever.
+  // Chronological, so the last entry is genuinely the latest SETTLED weekend
+  // carrying a level, not whichever date attPoints happened to end on.
+  // ENERGY-averaged, one entry per WEEKEND — `mean()` above is exactly the
+  // wrong helper for decibels (main/services/spl-leq.ts).
+  const settledSplDates = [...splByDateSettled.keys()].sort((a, b) => Date.parse(a) - Date.parse(b));
+  const settledSpl = settledSplDates
+    .map((d) => combineLeq(splByDateSettled.get(d)!))
+    .filter((v): v is number => v != null);
   // Lead stat + peak are WEEKEND totals now, to stay coherent with the chart.
   const avgAttendance = mean(settledSeries);
   const peakWeekend = settledPoints.length ? settledPoints.reduce((m, p) => (p.value > m.value ? p : m)) : null;

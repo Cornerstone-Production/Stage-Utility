@@ -107,12 +107,15 @@ describe("computeOverview", () => {
 // test below is built on a series where the two answers differ by ~9 dB, so a
 // figure computed with `mean()` cannot pass any of them.
 
-/** A weekend, with a level for one metric. `count` is samples behind the level. */
+/** A weekend, with a level for one metric — SETTLED (endedAt set) by default.
+ *  `count` is samples behind the level. Pass `{ endedAt: null }` for a
+ *  recording that is still live. */
 function spl(serviceDate: string, leq: number, over: Partial<SplServiceSummary> = {}): SplServiceSummary {
   return {
     serviceKey: `k-${serviceDate}`,
     serviceTypeId: "st1",
     serviceDate,
+    endedAt: `${serviceDate}T11:00:00Z`,
     metrics: { "LAeq 10": { leq, count: 100 } },
     ...over,
   };
@@ -172,9 +175,38 @@ describe("the SPL summary", () => {
     assert.equal(o.splMetric, null, "a metric was chosen out of nothing");
   });
 
-  test("leaves the weekend that is still recording out of the average", () => {
-    // The same rule the attendance average follows. A service still running has
-    // a partial level, which would drag the figure around all morning.
+  test("excludes a weekend while ITS OWN SPL recording is still live", () => {
+    // Attendance for this date is SETTLED — the OLD, attendance-coupled code
+    // would have let this straight through, since attPoints would carry a
+    // non-live point for it. Only SplServiceSummary's OWN endedAt
+    // (main/types/history.ts) can catch this: a still-running recording's Leq
+    // is a partial that will keep climbing. 999 dB is absurd on purpose: if it
+    // leaked into the average, it could not be missed.
+    const settledAttendanceOverALiveRecording = att({
+      serviceKey: "k-2026-08-09", serviceDate: "2026-08-09",
+      startedAt: "2026-08-09T10:00:00Z", endedAt: "2026-08-09T11:00:00Z", peakOccupancy: 150,
+    });
+    const o = computeOverview(
+      WEEKENDS.map((d) => svc({ serviceKey: `k-${d}`, serviceDate: d })),
+      [...settledWeekends, settledAttendanceOverALiveRecording],
+      null, null, null,
+      {
+        splList: [
+          ...WEEKENDS.map((d, i) => spl(d, LEVELS[i])),
+          spl("2026-08-09", 999, { endedAt: null }),
+        ],
+      },
+    );
+    assert.ok(
+      Math.abs(o.avgSpl! - leqOf(LEVELS)!) < 0.01,
+      `average level is ${o.avgSpl!.toFixed(2)} dB — the still-recording weekend's partial level was folded in`,
+    );
+  });
+
+  test("keeps a weekend's settled level even while its ATTENDANCE is still live", () => {
+    // The other half of the same fix: SPL and attendance are separate
+    // recorders, so a live occupancy sensor must not suppress a level Smaart
+    // already finished recording for the same date.
     const live = att({
       serviceKey: "k-live", serviceDate: "2026-08-09",
       startedAt: "2026-08-09T10:00:00Z", endedAt: null, peakOccupancy: 20,
@@ -186,9 +218,40 @@ describe("the SPL summary", () => {
       { splList: [...WEEKENDS.map((d, i) => spl(d, LEVELS[i])), spl("2026-08-09", 60)] },
     );
     assert.equal(o.attPoints.length, 6, "the live weekend still appears on the chart");
+    const expected = leqOf([...LEVELS, 60])!;
+    assert.ok(
+      Math.abs(o.avgSpl! - expected) < 0.01,
+      `average level is ${o.avgSpl!.toFixed(2)} dB, not ${expected.toFixed(2)} dB — a SETTLED SPL recording was dropped because attendance alone was still live`,
+    );
+  });
+
+  test("keeps a weekend's level even when the occupancy sensor recorded nothing for it at all", () => {
+    // The exact repro from the review that found this: five weekends of SPL,
+    // only four with an attendance record — SenSource offline, absent, or a
+    // genuine zero for the fifth. The level must not vanish because of an
+    // unrelated sensor, and splDelta's "latest" must still be the loud
+    // weekend, not an earlier one relabelled because the real latest had no
+    // attendance point to hang off of.
+    const o = computeOverview(
+      WEEKENDS.map((d) => svc({ serviceKey: `k-${d}`, serviceDate: d })),
+      settledWeekends.slice(0, 4), // no attendance record at all for the loud (5th) weekend
+      null, null, null,
+      { splList: WEEKENDS.map((d, i) => spl(d, LEVELS[i])) },
+    );
+    assert.equal(o.attPoints.length, 4, "sanity check: the fifth weekend really has no attendance point");
+    assert.ok(o.avgSpl != null, "the whole SPL summary vanished because one sensor saw nothing");
     assert.ok(
       Math.abs(o.avgSpl! - leqOf(LEVELS)!) < 0.01,
-      `average level is ${o.avgSpl!.toFixed(2)} dB — the weekend still recording was folded in`,
+      `average level is ${o.avgSpl!.toFixed(2)} dB, not ${leqOf(LEVELS)!.toFixed(2)} dB — the loudest weekend was dropped`,
+    );
+    assert.ok(o.splDelta != null, "no comparison at all");
+    assert.equal(
+      o.splDelta!.priorCount, 4,
+      "the window slid — a weekend with no attendance record was treated as absent from SPL too",
+    );
+    assert.ok(
+      Math.abs(o.splDelta!.db - 20) < 0.01,
+      `latest weekend reads ${o.splDelta!.db.toFixed(2)} dB, not +20 — splDelta compared against the wrong "latest" weekend`,
     );
   });
 });
