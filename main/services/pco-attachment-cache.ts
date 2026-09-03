@@ -2,7 +2,19 @@
 // the attachment id (immutable per upload). PCO only hands out short-lived S3
 // links, so we download once on first request and reuse the file for every kiosk
 // display — and for every week the same plan is loaded.
+//
+// Two things a cache miss has to survive, both measured on a live server:
+//   * The signed link dies before we expect it to. Measured 2026-09-03 against a
+//     live plan, a link worked at +1, +2 and +3 minutes and answered HTTP 403 at
+//     +4 — so a download can fail on a link we still believe is good. A 401/403
+//     re-opens the attachment once and retries.
+//   * Two surfaces miss at the same instant. The layout editor and an open stage
+//     display both request a fresh stage plot; without dedupe both download and
+//     both write the same path, and a third reader can read a half-written file.
+//     Work is deduped per cache path and written to a temp file + renamed, so the
+//     final path only ever exists complete.
 
+import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -57,17 +69,56 @@ export function mimeForExt(ext: string): string {
   }
 }
 
+type CachedFile = { path: string; ext: string };
+
+/** Downloads in flight, keyed by cache file path, so concurrent misses share one. */
+const inFlight = new Map<string, Promise<CachedFile | null>>();
+
+/** Write bytes to a private temp file, then rename onto `filePath` — readers only
+ *  ever see a complete file, and two racing writers cannot interleave. */
+async function writeAtomic(filePath: string, bytes: Buffer): Promise<void> {
+  const tmp = `${filePath}.tmp-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
+  try {
+    await fs.writeFile(tmp, bytes);
+    await fs.rename(tmp, filePath);
+  } catch (err) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+async function download(
+  id: string,
+  filePath: string,
+  ext: string,
+  openUrl: (opts?: { fresh?: boolean }) => Promise<string>,
+): Promise<CachedFile | null> {
+  let resp = await fetch(await openUrl());
+  if (resp.status === 401 || resp.status === 403) {
+    // The cached signed link expired ahead of its TTL; one re-open, one retry.
+    console.warn(`[attachment-cache] link for ${id} rejected (HTTP ${resp.status}); re-opening`);
+    resp = await fetch(await openUrl({ fresh: true }));
+  }
+  if (!resp.ok) {
+    console.error(`[attachment-cache] fetch ${id} → HTTP ${resp.status}`);
+    return null;
+  }
+  await writeAtomic(filePath, Buffer.from(await resp.arrayBuffer()));
+  return { path: filePath, ext };
+}
+
 /**
  * Return the cached file path + extension for an attachment, downloading it from
  * a freshly-opened PCO link on first request. `openUrl` is a thunk so we only pay
- * the `open` round-trip on a cache miss. Returns null on download failure.
+ * the `open` round-trip on a cache miss; called with `{ fresh: true }` it must
+ * bypass any caller-side link cache. Returns null on download failure.
  */
 export async function getAttachmentFile(
   id: string,
   contentType: string | null,
   filename: string,
-  openUrl: () => Promise<string>,
-): Promise<{ path: string; ext: string } | null> {
+  openUrl: (opts?: { fresh?: boolean }) => Promise<string>,
+): Promise<CachedFile | null> {
   try {
     const dir = await getCacheDir();
     const ext = extFor(contentType, filename);
@@ -81,14 +132,12 @@ export async function getAttachmentFile(
       // Not cached yet — open + download.
     }
 
-    const url = await openUrl();
-    const resp = await fetch(url);
-    if (!resp.ok) {
-      console.error(`[attachment-cache] fetch ${id} → HTTP ${resp.status}`);
-      return null;
-    }
-    await fs.writeFile(filePath, Buffer.from(await resp.arrayBuffer()));
-    return { path: filePath, ext };
+    const existing = inFlight.get(filePath);
+    if (existing) return await existing;
+
+    const job = download(id, filePath, ext, openUrl).finally(() => inFlight.delete(filePath));
+    inFlight.set(filePath, job);
+    return await job;
   } catch (err) {
     console.error("[attachment-cache] error:", err);
     return null;

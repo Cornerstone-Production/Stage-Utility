@@ -334,8 +334,12 @@ function mediumTtlMs(): number {
 // retry storm, short enough that a blip does not blank the countdown for the
 // fifteen minutes a success is held for.
 const TTL_FAILED_MS = 30_000;
-/** Short-lived cache for attachment `open` signed URLs (PCO issues ~1h links). */
-const ATTACH_OPEN_TTL_MS = 10 * 60_000;
+/** Short-lived cache for attachment `open` signed URLs. PCO documents ~1h links,
+ *  but measured against a live plan on 2026-09-03 one worked at +1, +2 and +3
+ *  minutes and was rejected with HTTP 403 at +4 — a real lifetime between 3 and 4
+ *  minutes. This TTL is only a first line; the real guard is pco-attachment-cache
+ *  re-opening on a 401/403. */
+const ATTACH_OPEN_TTL_MS = 2 * 60_000;
 /** Retry budget for transient PCO failures (429 / 5xx / network). */
 /** Pagination ceiling for /services/v2 collections. 100 × 6 is far past the
  *  longest plan or attachment list this has to draw, and a bound is what stops a
@@ -883,10 +887,10 @@ class PcoService {
   }
 
   /**
-   * Request a temporary download link for a plan attachment. PCO only hands out
-   * short-lived (≈1h) S3 URLs via the `open` action, so callers should download
-   * promptly (we cache the bytes by attachment id, which is immutable). Not cached
-   * here since the link expires.
+   * Request a temporary download link for a plan attachment. PCO hands out
+   * short-lived S3 URLs via the `open` action, so callers should download promptly
+   * (we cache the bytes by attachment id, which is immutable). Pass
+   * `{ fresh: true }` to bypass the signed-URL cache after a link is rejected.
    */
   async openAttachment(
     appId: string,
@@ -894,12 +898,16 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
     attachmentId: string,
+    opts?: { fresh?: boolean },
   ): Promise<{ url: string; contentType: string | null }> {
     // Cache the signed URL briefly so N kiosks showing the same plan file don't
-    // each POST an `open` (PCO links last ~1h; we keep ours well under that).
+    // each POST an `open`. A caller that just saw the link rejected asks for a
+    // fresh one, which must not be answered from that cache.
     const cacheKey = `attach-open:${attachmentId}`;
-    const cached = this.cacheGet<{ url: string; contentType: string | null }>(cacheKey);
-    if (cached) return cached;
+    if (!opts?.fresh) {
+      const cached = this.cacheGet<{ url: string; contentType: string | null }>(cacheKey);
+      if (cached) return cached;
+    }
 
     // `all_attachments/{id}/open` is the uniform open action for every attachable
     // type (plan file, service-type file, item/arrangement chart).
