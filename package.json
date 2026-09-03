@@ -1,6 +1,6 @@
 {
   "name": "stage-utility",
-  "version": "1.14.0-beta.3",
+  "version": "1.14.0-beta.4",
   "description": "Display band lineup and wireless device status pulled from Planning Center Online and Shure wireless systems.",
   "private": true,
   "license": "GPL-3.0-or-later",
