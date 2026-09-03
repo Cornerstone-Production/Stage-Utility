@@ -1,7 +1,7 @@
 import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../components/ui/tooltip";
-import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useServerSkew } from "@renderer/lib/use-server-skew";
 import { ArrowLeftIcon } from "lucide-react";
 
 import { ScriptViewBody, ScriptViewHeader, useScriptViewRender } from "./scriptview-body";
@@ -56,10 +56,7 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-  const [skewMs, setSkewMs] = useState(0);
-  useResyncOn([pcoLive?.serverNow], () => {
-    if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  });
+  const skewMs = useServerSkew(pcoLive?.serverNow);
 
   const allLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
   // Resolve the layout slug (or raw id) to a layout; the All-columns slug/id → null.

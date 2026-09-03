@@ -22,6 +22,7 @@ import { Loader2Icon, PencilIcon, CheckIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useServerSkew } from "@renderer/lib/use-server-skew";
 import { useDashboardState } from "../../main/use-dashboard-state";
 import { useStageSettings } from "../use-stage-settings";
 import { GettingStarted } from "../../settings/getting-started";
@@ -92,10 +93,7 @@ export function HomeRoute() {
 
   // Skew between this client and the server, recomputed whenever a pco:live
   // arrives. Same pattern as dashboard-view.tsx and the context bar.
-  const [skewMs, setSkewMs] = useState(0);
-  useResyncOn([pcoLive?.serverNow], () => {
-    if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  });
+  const skewMs = useServerSkew(pcoLive?.serverNow);
 
   // The server has caught up — stop preferring the optimistic copy, so an edit
   // made anywhere else (a restored snapshot, a second tab) is not masked forever.
