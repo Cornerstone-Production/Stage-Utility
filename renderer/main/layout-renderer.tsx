@@ -647,6 +647,10 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       caption?: string | null;
       upper?: boolean;
       dim?: boolean;
+      /** Override the surface default below. For a widget whose sub-line comes
+       *  and goes with its STATE rather than with its configuration — see the
+       *  status readouts, which must not resize themselves when they go live. */
+      uniform?: boolean;
     },
   ) => (
     <Readout
@@ -699,6 +703,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // for "not recording" when the recorder simply cannot be reached.
       dim={!s.active && !s.connected}
       align={o.style?.textAlign}
+      // The same rule the streaming readout takes, and for the same reason: a
+      // recorder showing its timecode gains a third line when it rolls. It also
+      // keeps the two kinds the same size beside each other, which is the whole
+      // point of them sharing this composition.
+      uniform
     />
   );
 
@@ -759,6 +768,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       dim: !live,
       fill: live && filled ? "var(--green-9)" : null,
       valueColor: live && !filled ? "var(--green-10)" : null,
+      // SIZED AS THOUGH THE CLOCK WERE ALWAYS THERE, on a wall as well as on
+      // Home. The elapsed sub-line only exists while live, and the value's size
+      // is a share of what the other lines leave — so without this the word
+      // LIVE shrank and lifted at the exact moment it started mattering, while
+      // RECORDING beside it held its size because a recorder's timecode line is
+      // off by default. Reported as the streaming widget losing its styling
+      // when it went live; it was the one tile in the row resizing itself.
+      uniform: true,
     });
   };
 

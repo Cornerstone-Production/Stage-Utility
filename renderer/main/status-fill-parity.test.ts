@@ -17,6 +17,7 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { readFileSync } from "node:fs";
 
 import { LAYOUT_OBJECTS } from "./layout-objects.js";
 
@@ -71,5 +72,84 @@ describe("status widgets fill on the same terms", () => {
       const cfg = LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS].config() as Record<string, unknown>;
       assert.ok(key in cfg, `${type} leaves ${key} unset in its default config`);
     }
+  });
+});
+
+// ── And they must not resize themselves when they go loud ────────────────────
+//
+// The other half of "the same way". A status widget's sub-line — a recorder's
+// timecode, a stream's elapsed clock — appears only while the thing is
+// happening, and the value's size is a share of whatever the other lines leave.
+// So the word grew a third line at the exact moment it started mattering, and
+// LIVE shrank and lifted while RECORDING beside it held its size, because a
+// recorder's timecode line is off by default and a stream's clock is on.
+// Reported as the streaming widget "losing its styling" when it went live.
+//
+// `uniform` sizes the value as though all three lines were always there, so the
+// tile is the same before and after. This reads the source because the decision
+// is a PROP PASSED at two call sites inside a component that jsdom cannot lay
+// out — every readout is 0px tall there, so a render proves nothing about size.
+// It matches on the prop being passed, which a comment cannot satisfy, and
+// asserts an exact count both ways.
+
+const RENDERER_SRC = readFileSync(new URL("./layout-renderer.tsx", import.meta.url), "utf8");
+
+/** The builders that compose a status widget: caption, state word, sub-line. */
+const STATUS_BUILDERS = ["statusReadout", "streamingReadout"];
+
+/**
+ * The body of a `const <name> = (` arrow, to whichever closer comes FIRST.
+ *
+ * Both shapes exist here and the difference is not cosmetic: `statusReadout`
+ * returns JSX directly and closes on `\n  );`, while `streamingReadout` has a
+ * block body and closes on `\n  };`. Bounding on `);` alone ran 40,000
+ * characters past the end of the block-bodied one, swallowing most of the file
+ * — so the scan found `uniform` somewhere else and passed with the prop
+ * deleted. Caught by proving BOTH halves red rather than one.
+ *
+ * The length assertion is the backstop: a builder body is tens of lines, so
+ * anything approaching the file's size means the bound slipped again.
+ */
+function builderBody(name: string): string {
+  const start = RENDERER_SRC.indexOf(`const ${name} = (`);
+  assert.notEqual(start, -1, `${name} is gone from the renderer — this scan cannot run`);
+  const ends = ["\n  );", "\n  };"]
+    .map((close) => RENDERER_SRC.indexOf(close, start))
+    .filter((i) => i !== -1);
+  assert.ok(ends.length, `could not find the end of ${name}`);
+  const end = Math.min(...ends);
+  const body = RENDERER_SRC.slice(start, end);
+  assert.ok(
+    body.length < 4000,
+    `the scan captured ${body.length} characters for ${name} — the bound slipped and this test is reading the wrong code`,
+  );
+  return body;
+}
+
+describe("status widgets keep their size when they go live", () => {
+  test("every status builder passes uniform", () => {
+    for (const name of STATUS_BUILDERS) {
+      const body = builderBody(name);
+      // The prop or the object key, either spelling — but PASSED, not mentioned.
+      assert.match(
+        body,
+        /(^|[\s{])uniform(\s*[:=]|\s*[,}\n])/m,
+        `${name} does not pass uniform — its value will shrink when its sub-line appears`,
+      );
+    }
+  });
+
+  test("no status builder was added without being held to the rule", () => {
+    // Exact, both ways. A fourth status composition added later fails here
+    // until it is named above — the same argument the fill list makes, and the
+    // same drift: the first version of this family missed record-status.
+    const found = [...RENDERER_SRC.matchAll(/const (\w*[Rr]eadout) = \(/g)]
+      .map((m) => m[1])
+      .filter((n) => n !== "readout");
+    assert.deepEqual(
+      found.sort(),
+      [...STATUS_BUILDERS].sort(),
+      "a readout builder exists that this rule does not cover",
+    );
   });
 });
