@@ -97,6 +97,12 @@ otherwise drag those figures toward an empty room. Where two services are close
 enough that one's taper overlaps the next one's ramp, the ramp wins — the room is
 filling for the next service, not emptying from the last.
 
+A service shows up in History as soon as its attendance recording begins — up to
+60 minutes before the scheduled start by default (the arrival-ramp window above)
+— marked "arriving" with a running count of people in the room. Its own charts
+and stats fill in once the first plan item goes live in Planning Center and the
+timeline record opens; until then there is no rundown to show.
+
 ## Sound levels
 
 Levels are energy-averaged (Leq), not arithmetically. Decibels are logarithmic, so
