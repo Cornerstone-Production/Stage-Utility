@@ -33,3 +33,13 @@ jobs:
           # disagrees with the CI enforcing it.
           git fetch -q origin "${{ github.base_ref }}"
           node scripts/check-commit-subjects.mjs "origin/${{ github.base_ref }}"
+
+      - name: Flag fixes that look beta-only
+        run: |
+          set -uo pipefail
+          # A heuristic reminder, not a gate: warns when a fix shares a file
+          # with a feat commit from this release cycle. See
+          # scripts/check-beta-only.mjs for what it catches and what it
+          # cannot. Always exits 0.
+          git fetch -q origin "${{ github.base_ref }}"
+          node scripts/check-beta-only.mjs "origin/${{ github.base_ref }}"
