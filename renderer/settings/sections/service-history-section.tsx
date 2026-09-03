@@ -943,6 +943,16 @@ export function OverviewBlend({
     });
   }
 
+  /**
+   * Whether the two stat labels wear their series' colour.
+   *
+   * True exactly when the chart is drawing two lines AND there is a level to
+   * summarise — which is also exactly when the SPL block renders. One condition
+   * rather than two, because the dots only mean anything as a pair: they are
+   * the chart's legend, and the chart has none of its own.
+   */
+  const showsSeriesDots = splTrend.shown && overview.avgSpl != null;
+
   const strip: { k: string; v: string; accent?: string; trend?: Trend | null; trendLabel?: string }[] = [
     { k: "Services", v: overview.services },
     { k: "Avg length", v: overview.avgLength },
@@ -954,7 +964,17 @@ export function OverviewBlend({
     <div className="su-card px-5 py-5 flex flex-col">
       <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between md:gap-8">
         <div className="shrink-0">
-          <div className="text-caption1 uppercase tracking-[0.08em] text-fg-muted">
+          {/* The dot appears on BOTH labels or on neither, and only when there
+              are two series to tell apart. It is a legend for the chart beside
+              them — which line is this number about — so a single blue dot with
+              the SPL line switched off would be a legend for nothing, and a
+              green one on its own reads as an afterthought bolted to an
+              attendance summary. `showsSeriesDots` is the one condition, read
+              by both, so the pair cannot drift apart. */}
+          <div className={cn("text-caption1 uppercase tracking-[0.08em] text-fg-muted", showsSeriesDots && "flex items-center gap-1.5")}>
+            {showsSeriesDots && (
+              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-accent)" }} />
+            )}
             Avg {overview.scopeName ?? "service"}
           </div>
           <div className="mt-1 font-mono tabular-nums text-[2.5rem] leading-none font-medium text-fg tracking-tight">
@@ -972,12 +992,16 @@ export function OverviewBlend({
               own instead of one attendance figure over a chart with two series
               in it. Present only when the line is drawn AND there is a level to
               report — no dash, which would read as a measured silence. */}
-          {splTrend.shown && overview.avgSpl != null && (
+          {/* `avgSpl != null` again, redundant at runtime but not to the type
+              checker: `showsSeriesDots` is a boolean, so narrowing does not
+              travel through it and the level below would be possibly-null. */}
+          {showsSeriesDots && overview.avgSpl != null && (
             <div className="mt-5" data-testid="spl-summary">
               <div className="flex items-center gap-1.5 text-caption1 uppercase tracking-[0.08em] text-fg-muted">
                 {/* The series' own colour, the same dot the chart's tooltip
                     carries, so this says which line it is summarising without
-                    needing a legend. */}
+                    needing a legend. See the attendance label above: the two
+                    dots are a pair. */}
                 <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "var(--su-ok-9)" }} />
                 Avg SPL
               </div>

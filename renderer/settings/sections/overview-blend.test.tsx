@@ -104,6 +104,36 @@ describe("the SPL summary under the lead stat", () => {
     );
   });
 
+  test("both labels wear their series' colour, or neither does", (t) => {
+    // The dots are the chart's legend — it has none of its own — so they only
+    // mean anything as a pair. One green dot on the SPL label and none on
+    // attendance was reported as the two summaries not matching; a lone blue
+    // one with the SPL line off would be a legend for a single line.
+    //
+    // Counted, not merely present: asserting "attendance has a dot" would pass
+    // just as well if the SPL one had been dropped, which is the asymmetry this
+    // exists to catch.
+    const withSpl = show();
+    t.after(() => cleanup());
+    const dots = (c: HTMLElement) => c.querySelectorAll("span.rounded-full").length;
+    assert.equal(
+      dots(withSpl.container),
+      2,
+      `expected a dot on each label, saw ${dots(withSpl.container)} — the two summaries do not match`,
+    );
+    cleanup();
+
+    const withoutSpl = show({}, false);
+    t.after(() => cleanup());
+    assert.equal(
+      dots(withoutSpl.container),
+      0,
+      "a series dot is drawn with only one series on the chart — a legend for nothing",
+    );
+    // The positive half: the attendance summary itself is still there.
+    assert.ok(text(withoutSpl.container).includes("2,355"), "the attendance figure went missing with the dots");
+  });
+
   test("draws no arrow when the change is inside the deadband", (t) => {
     // SplDelta.dir === "flat": a change too small to be a real direction. This
     // block is never coloured, so an arrow is the only signal it has — one
