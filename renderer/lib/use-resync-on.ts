@@ -24,8 +24,13 @@ import { useState } from "react";
  * ```
  */
 export function useResyncOn(deps: readonly unknown[], reset: () => void): void {
-  const [last, setLast] = useState(deps);
-  if (deps.length !== last.length || deps.some((d, i) => !Object.is(d, last[i]))) {
+  // `null` until the first render has run `reset`. The effect this replaces ran
+  // on mount, and so must this: seeding `last` with the mount-time deps instead
+  // meant a component that mounted with its source already in hand (the slot
+  // editor opened from Screens, stage state already cached) never mirrored it,
+  // and showed nothing until a refresh happened to mount it mid-load.
+  const [last, setLast] = useState<readonly unknown[] | null>(null);
+  if (last === null || deps.length !== last.length || deps.some((d, i) => !Object.is(d, last[i]))) {
     setLast(deps);
     reset();
   }
