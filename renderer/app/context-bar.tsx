@@ -23,7 +23,7 @@
 // bar carries them, exactly as it always has.
 
 import { useEffect, useState } from "react";
-import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useServerSkew } from "@renderer/lib/use-server-skew";
 import { useDashboardState } from "../main/use-dashboard-state";
 import { computePcoTimer, fmtDuration } from "../main/pco-timer";
 import { cn } from "../lib/cn";
@@ -149,10 +149,7 @@ export function useBarContext(): BarItemContext {
 
   // Skew between this client and the server, recomputed whenever a pco:live
   // arrives. Same pattern as dashboard-view.tsx.
-  const [skewMs, setSkewMs] = useState(0);
-  useResyncOn([pcoLive?.serverNow], () => {
-    if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  });
+  const skewMs = useServerSkew(pcoLive?.serverNow);
 
   const bar = contextBarState(pcoLive, now, skewMs);
   return { state, bar, now, obs, reaper, integrations, resi, youtube, scores };

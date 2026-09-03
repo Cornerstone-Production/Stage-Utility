@@ -1,9 +1,13 @@
 import { useState } from "react";
 
 /**
- * Run `reset` during render whenever any of `deps` changes, including the render
- * in which it changed. Dependencies are compared like `useEffect`'s, so the call
- * reads the same way the effect it replaces did.
+ * Run `reset` during render on mount and whenever any of `deps` changes,
+ * including the render in which it changed. Dependencies are compared like
+ * `useEffect`'s, so the call reads the same way the effect it replaces did.
+ *
+ * A value that must NOT be read at mount — a clock skew measured from a
+ * replayed frame — belongs in a hook that keys on change only, see
+ * use-server-skew.ts.
  *
  * This replaces the `useEffect(() => setX(...), [prop])` shape used to mirror a
  * prop or a server value into local state. That shape renders twice for every
