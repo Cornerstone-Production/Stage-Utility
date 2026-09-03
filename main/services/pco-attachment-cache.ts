@@ -14,12 +14,12 @@
 //     Work is deduped per cache path and written to a temp file + renamed, so the
 //     final path only ever exists complete.
 
-import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
 import { pruneCacheDir } from "./cache-prune.js";
+import { atomicWrite } from "./write-queue.js";
 
 // Attachments (PDFs/images) are larger but rarely change; keep ~90 days, 500 MB.
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -76,17 +76,6 @@ const inFlight = new Map<string, Promise<CachedFile | null>>();
 
 /** Write bytes to a private temp file, then rename onto `filePath` — readers only
  *  ever see a complete file, and two racing writers cannot interleave. */
-async function writeAtomic(filePath: string, bytes: Buffer): Promise<void> {
-  const tmp = `${filePath}.tmp-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
-  try {
-    await fs.writeFile(tmp, bytes);
-    await fs.rename(tmp, filePath);
-  } catch (err) {
-    await fs.rm(tmp, { force: true }).catch(() => {});
-    throw err;
-  }
-}
-
 async function download(
   id: string,
   filePath: string,
@@ -103,7 +92,7 @@ async function download(
     console.error(`[attachment-cache] fetch ${id} → HTTP ${resp.status}`);
     return null;
   }
-  await writeAtomic(filePath, Buffer.from(await resp.arrayBuffer()));
+  await atomicWrite(filePath, Buffer.from(await resp.arrayBuffer()));
   return { path: filePath, ext };
 }
 

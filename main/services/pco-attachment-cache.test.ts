@@ -98,7 +98,10 @@ describe("attachment cache", () => {
     }
   });
 
-  test("a download that fails mid-body leaves no file at all, partial or temp", async (t) => {
+  // The write is never reached here — the body tears before it — so this pins
+  // only that a torn download reports failure and creates nothing at the final
+  // path. Temp-file cleanup on a failed WRITE is atomicWrite's job (write-queue.ts).
+  test("a download that fails mid-body reports null and creates no file", async (t) => {
     t.after(() => {
       globalThis.fetch = realFetch;
     });
@@ -120,7 +123,7 @@ describe("attachment cache", () => {
 
     assert.equal(file, null, "a torn download must report failure, not a path to nothing");
     const left = (await fs.readdir(cacheDir)).filter((n) => n.startsWith("torn-1"));
-    assert.deepEqual(left, [], `a torn download must leave no file or temp behind, found: ${left.join(", ")}`);
+    assert.deepEqual(left, [], `a torn download must leave nothing at the final path, found: ${left.join(", ")}`);
   });
 
   // The half-written file is the bug that put "Couldn't load file" on a display:
