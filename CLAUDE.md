@@ -117,6 +117,19 @@ and the failures.
 "No docs needed" and "nothing worth logging" are both legitimate answers. Say
 which you chose, so the next reader knows it was a decision.
 
+## A fix to something that never shipped says so
+
+Before committing a `fix:` or `perf:`, ask: does the thing I am fixing exist on
+`main`? If the bug could not have been hit by someone upgrading from the last
+stable tag, carry the trailer `Beta-only: true` in the commit body, per
+[docs/contributing.md](docs/contributing.md#beta-only-true). CI warns when a
+fix touches a file also touched by a `feat:` commit from this release cycle,
+but that check cannot tell a shared file from a shared bug, and misses a fix to
+a new feature in a file no `feat:` commit touched — the trailer is the
+author's job, not the check's. In the 1.14.0 cycle, twelve fixes to a feature
+built in the same cycle shipped without it and were the entire generated Fixed
+list.
+
 ## Do not swallow a failure
 
 A new `catch` either rethrows or returns the failure to its caller. A `catch` that

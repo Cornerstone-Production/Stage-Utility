@@ -8,6 +8,7 @@ import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useServerSkew } from "@renderer/lib/use-server-skew";
 import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
@@ -2300,6 +2301,11 @@ export async function loadProcessedAttachment(
   return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height };
 }
 
+/** Gaps between retries of a failed plan-attachment load. Three tries over about
+ *  a minute covers a signed link that expired mid-service and a first download
+ *  the editor was still writing; after that the notice stands. */
+export const PLAN_ATTACHMENT_RETRY_MS: readonly number[] = [5_000, 15_000, 45_000];
+
 function PlanAttachment({
   match,
   planId,
@@ -2308,6 +2314,11 @@ function PlanAttachment({
 }: AttachmentProcessOpts & { match: string; planId: string | null; H: number }) {
   const [src, setSrc] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">("loading");
+  // Which try this is. A failed download used to be final: the object sat on
+  // "Couldn't load file" until somebody refreshed the display, which on a wall
+  // nobody is standing next to is never. One expired signed link, or a display
+  // racing the editor for the first download of a new plan's file, was enough.
+  const [attempt, setAttempt] = useState(0);
 
   // Stable dep for the options object (crop is nested).
   const optsKey = JSON.stringify(opts);
@@ -2317,7 +2328,20 @@ function PlanAttachment({
   useResyncOn([match, optsKey, planId], () => {
     setSrc(null);
     setStatus("loading");
+    setAttempt(0);
   });
+
+  // Retry a FAILED load, with a widening gap, a bounded number of times. Only
+  // "error": "empty" is an answer (no such file on this plan), and a plan
+  // change re-fetches on its own through `planId`.
+  useEffect(() => {
+    if (status !== "error" || attempt >= PLAN_ATTACHMENT_RETRY_MS.length) return;
+    const t = setTimeout(() => {
+      setStatus("loading");
+      setAttempt((a) => a + 1);
+    }, PLAN_ATTACHMENT_RETRY_MS[attempt]);
+    return () => clearTimeout(t);
+  }, [status, attempt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2340,8 +2364,9 @@ function PlanAttachment({
     return () => {
       cancelled = true;
     };
-    // Re-fetch when the plan changes — the matched file rolls over week to week.
-  }, [match, optsKey, planId]);
+    // Re-fetch when the plan changes — the matched file rolls over week to week —
+    // and on every retry.
+  }, [match, optsKey, planId, attempt]);
 
   if (status === "ready" && src) {
     return <img src={src} alt="" className="w-full h-full object-contain" draggable={false} />;
@@ -2926,10 +2951,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-  const [skewMs, setSkewMs] = useState(0);
-  useResyncOn([pcoLive?.serverNow], () => {
-    if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  });
+  const skewMs = useServerSkew(pcoLive?.serverNow);
 
   return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs };
 }

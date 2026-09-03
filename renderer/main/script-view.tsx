@@ -1,6 +1,6 @@
 import { errorMessage } from "@main/services/errors";
 import { useEffect, useMemo, useState } from "react";
-import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useServerSkew } from "@renderer/lib/use-server-skew";
 import { Loader2Icon } from "lucide-react";
 
 import { QrHint } from "../components/qr-hint";
@@ -89,10 +89,7 @@ export function ScriptView({ scriptViewLayoutId, showHeader = true, textSizeClas
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-  const [skewMs, setSkewMs] = useState(0);
-  useResyncOn([pcoLive?.serverNow], () => {
-    if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  });
+  const skewMs = useServerSkew(pcoLive?.serverNow);
 
   const layout = useMemo(
     () => (scriptViewLayoutId ? layouts.find((l) => l.id === scriptViewLayoutId) ?? null : null),
