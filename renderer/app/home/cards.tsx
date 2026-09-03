@@ -47,7 +47,7 @@ import { visibleLayers } from "../../main/pvp-object";
 import { PvpNowObject } from "../../main/pvp-now";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
-import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl } from "../recording-status";
+import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl, pinnedSpl, LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
 import { useResiState, useYouTubeState } from "../../main/use-stream-state";
 import { Readout } from "../../main/readout";
 import { useScoresState } from "../../main/use-scores-state";
@@ -249,9 +249,21 @@ export function Stat({
  * consumer, and the same SSE channels History listens to keep it current, so a
  * service that finishes on Sunday updates Thursday's headline without a reload.
  */
-function useHistoryRecords() {
+function useHistoryRecords(wantSpl = false) {
   const [list, setList] = useState<ServiceTimeline[] | null>(null);
   const [attList, setAttList] = useState<ServiceAttendance[]>([]);
+  /** One level per service. Fetched only when a card is actually drawing the
+   *  line — Home is the page every operator lands on, and this is a read nobody
+   *  who leaves the setting off should ever pay for. */
+  const [splList, setSplList] = useState<SplServiceSummary[]>([]);
+  useEffect(() => {
+    if (!wantSpl) return;
+    let alive = true;
+    invoke<SplServiceSummary[]>("spl:getSummary")
+      .then((r) => { if (alive) setSplList(r ?? []); })
+      .catch(() => { if (alive) setSplList([]); });
+    return () => { alive = false; };
+  }, [wantSpl]);
 
   useEffect(() => {
     let alive = true;
@@ -291,7 +303,7 @@ function useHistoryRecords() {
     return () => { offTl(); offAtt(); };
   }, []);
 
-  return { list, attList };
+  return { list, attList, splList };
 }
 
 /* ── The cards ────────────────────────────────────────────────────────────── */
@@ -458,8 +470,21 @@ function useRowBudget(rowPx: number, headerPx: number) {
  * Renders nothing until something has been recorded: a row of "—" teaches an
  * operator that this card is broken.
  */
-export function RecentServicesCard({ state }: { state: StageState }) {
-  const { list, attList } = useHistoryRecords();
+export function RecentServicesCard({
+  state,
+  showSpl = false,
+  splMetric = null,
+  hoverSuppressed = false,
+}: {
+  state: StageState;
+  showSpl?: boolean;
+  splMetric?: string | null;
+  /** Home's own right-click menu is open over this card. Same problem History
+   *  solved for its copy of this chart: without it, the tooltip draws through
+   *  the menu and keeps tracking the pointer underneath it. */
+  hoverSuppressed?: boolean;
+}) {
+  const { list, attList, splList } = useHistoryRecords(showSpl);
 
   // Scoped to the ACTIVE service type, like History's Overview — an Events night
   // must not show up under a Weekend heading. asOf is null: on Home the question
@@ -470,6 +495,7 @@ export function RecentServicesCard({ state }: { state: StageState }) {
     null,
     state.serviceTypeId,
     state.serviceTypeName,
+    { splList, splMetric },
   );
 
   if (!(overview.attPoints.length > 0 || list?.length)) return null;
@@ -501,7 +527,14 @@ export function RecentServicesCard({ state }: { state: StageState }) {
         <Headline label="Start" value={overview.avgStart} sub="average" />
       </div>
       <div className="min-h-0 flex-1 overflow-hidden border-t border-line px-2 pb-1 [&:has(>*:empty)]:hidden">
-        <AttendanceTrendChart points={overview.attPoints} />
+        <AttendanceTrendChart
+          points={overview.attPoints}
+          splLabel={showSpl ? overview.splMetric : null}
+          // Home has the identical right-click menu History does — the chart
+          // was tracking the pointer under it here too, the one call site the
+          // History fix did not reach.
+          hoverSuppressed={hoverSuppressed}
+        />
       </div>
     </section>
   );
@@ -549,7 +582,16 @@ export function LiveStatusCard({
  * only OBS would read as reassurance while REAPER sat stopped. A new recording
  * integration joins by being added to `recorders()`; nothing here changes.
  */
-export function RecordingCard({ recorder = "any" }: { recorder?: string }) {
+export function RecordingCard({
+  recorder = "any",
+  showElapsed = true,
+}: {
+  recorder?: string;
+  /** Home's "Elapsed time" switch. Off, the card drops the running timecode and
+   *  keeps the state — the same thing the same switch does to the streaming card
+   *  beside it, which is why it carries the same name. */
+  showElapsed?: boolean;
+}) {
   const list = recorders(useObsState(), useReaperState());
   const chosen = recorder === "any" ? list : list.filter((r) => r.name === recorder);
   const ind = recordIndicator(chosen);
@@ -560,7 +602,7 @@ export function RecordingCard({ recorder = "any" }: { recorder?: string }) {
     <Stat
       label={recorder === "any" ? "Recording" : recorder}
       value={ind.value}
-      sub={ind.sub ?? undefined}
+      sub={showElapsed ? (ind.sub ?? undefined) : undefined}
       tone={ind.state === "live" ? "live" : undefined}
     />
   );
@@ -602,9 +644,12 @@ export function StreamingCard({
 }
 
 /** The loudest meter right now, and which one. */
-export function SplCard() {
-  const loud = loudestSpl(useSplState());
-  return <Stat label="SPL" value={loud.value} sub={loud.sub} />;
+export function SplCard({ meterId }: { meterId?: string | null } = {}) {
+  const spl = useSplState();
+  // Unpinned is the untouched path: same call, same output as before the setting
+  // existed. Pinning changes WHICH meter is read, never the composition.
+  const r = meterId && meterId !== LOUDEST_METER ? pinnedSpl(spl, meterId) : loudestSpl(spl);
+  return <Stat label="SPL" value={r.value} sub={r.sub} />;
 }
 
 /**
@@ -713,11 +758,16 @@ export function PvpNowCard({
   const skewMs = usePvpSkewMs(pvp);
   return (
     <div className={STAT_CARD}>
+      {/* No `align`: PvpNowObject passes it to Readout, which defaults to LEFT,
+          and a Home card is centred like every other Stat. Dropping it silently
+          was what made this card render left while its Align pad said centre and
+          every cell in that pad did nothing. */}
       <PvpNowObject
         config={{ showProgress, showNextCue }}
         status={pvp}
         now={now}
         skewMs={skewMs}
+        align="center"
         uniform
       />
     </div>
@@ -878,6 +928,7 @@ export function HomeCard({
   skewMs,
   onlineOutputIds,
   secondsToStart,
+  hoverSuppressed = false,
 }: {
   /**
    * The card's WHOLE config, not just its type.
@@ -902,19 +953,30 @@ export function HomeCard({
    */
   onlineOutputIds: readonly string[];
   secondsToStart: number | null;
+  /** This card's own right-click menu is open, so its chart (if it has one)
+   *  must stop tracking the pointer underneath it. Only `home-recent-services`
+   *  reads it today; every other case ignores it, the same way most of them
+   *  ignore `onlineOutputIds`. */
+  hoverSuppressed?: boolean;
 }) {
   const c = config;
   switch (c.type) {
     case "home-live-status":
       return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
     case "home-recording":
-      return <RecordingCard />;
+      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} showElapsed={c.showElapsed ?? true} />;
     case "home-recording-obs":
       return <RecordingCard recorder="OBS" />;
     case "home-recording-reaper":
       return <RecordingCard recorder="REAPER" />;
     case "home-streaming":
-      return <StreamingCard now={now} showElapsed={c.showElapsed ?? true} />;
+      return (
+        <StreamingCard
+          platform={STREAMER_FOR[c.platform ?? "any"] ?? "any"}
+          now={now}
+          showElapsed={c.showElapsed ?? true}
+        />
+      );
     case "home-scores":
       return <ScoresCard game={c.game ?? "auto"} />;
     case "home-streaming-resi":
@@ -922,7 +984,7 @@ export function HomeCard({
     case "home-streaming-youtube":
       return <StreamingCard platform="YouTube" now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-spl":
-      return <SplCard />;
+      return <SplCard meterId={c.meterId} />;
     case "home-pvp":
       return <PvpCard now={now} showProgress={c.showProgress ?? false} />;
     case "home-pvp-now":
@@ -940,7 +1002,14 @@ export function HomeCard({
     case "home-readiness":
       return <ReadinessCard checks={readinessChecks(state, onlineOutputIds)} />;
     case "home-recent-services":
-      return <RecentServicesCard state={state} />;
+      return (
+        <RecentServicesCard
+          state={state}
+          showSpl={c.showSpl ?? false}
+          splMetric={c.splMetric ?? null}
+          hoverSuppressed={hoverSuppressed}
+        />
+      );
     default: {
       const _never: never = c;
       void _never;

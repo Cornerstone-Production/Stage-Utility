@@ -59,6 +59,7 @@ import { usePropInstances } from "../main/use-dashboard-state";
 import { useIntegrations } from "../main/use-integration-states";
 import { screensListViews } from "@main/services/home-view";
 import { gameOptions } from "../main/scores-object";
+import { STREAMER_FOR, sourceOptions } from "../app/recording-status";
 import { formatClock } from "../lib/clock-format";
 import {
   isKnownObjectType,
@@ -68,7 +69,7 @@ import {
   typeLabel,
   usesPropInstance,
 } from "../main/layout-objects";
-import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
+import { DEFAULT_READOUT_ALIGN, READOUT_ALIGNED_TYPES } from "@main/types/readout-types";
 import { invoke } from "../lib/api";
 import {
   Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
@@ -942,11 +943,11 @@ export function Inspector({
               label="Platform"
               hint="Which platform to report. Any answers every one at once — live if anything is going out."
               value={c.platform ?? "any"}
-              options={[
-                { value: "any", label: "Any platform" },
-                { value: "resi", label: "Resi" },
-                { value: "youtube", label: "YouTube" },
-              ]}
+              // Built from STREAMER_FOR, the one table that says which platforms
+              // exist and what each is called. Written out here as well, this list
+              // and the renderer's lookup were two places to add a platform and
+              // one to forget.
+              options={sourceOptions(STREAMER_FOR, "Any platform")}
               onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" })}
             />
           )}
@@ -1480,7 +1481,7 @@ export function Inspector({
               first click would then appear to do nothing. */}
           <Row label="Align">
             <AlignPad
-              h={s.textAlign ?? (sizesTypeFromItsBox(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
+              h={s.textAlign ?? (READOUT_ALIGNED_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
               v={s.vAlign ?? "middle"}
               onChange={onStyle}
             />

@@ -1,0 +1,10 @@
+{
+  "_comment": "Commit scopes an operator would not recognise, and what to call them in release notes. Read by main/services/changelog.ts (a checkout's update dialog) and by scripts/release-notes.mjs (the published release body), so the two cannot drift. A scope not listed here is shown as written, which is right for scores, calendar, patch, layout and the rest.",
+  "a11y": "accessibility",
+  "i18n": "translation",
+  "ux": "usability",
+  "perf": "performance",
+  "deps": "dependencies",
+  "ci": "build",
+  "dx": "developer tooling"
+}

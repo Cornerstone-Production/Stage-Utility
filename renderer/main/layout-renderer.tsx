@@ -8,6 +8,7 @@ import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useServerSkew } from "@renderer/lib/use-server-skew";
 import { invoke } from "../lib/api";
 import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
@@ -18,7 +19,7 @@ import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useDisplayPresence } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
-import { streamers, streamIndicator } from "../app/recording-status";
+import { streamers, streamIndicator, STREAMER_FOR } from "../app/recording-status";
 import { usePvpState, usePvpSkewMs } from "./use-pvp-state";
 import { useReaperState } from "./use-reaper-state";
 import { useScoresState } from "./use-scores-state";
@@ -158,6 +159,20 @@ export interface LayoutRenderCtx {
    * pass it" must not be indistinguishable from it.
    */
   onlineOutputIds: readonly string[];
+
+  /**
+   * The id of the Home card whose own right-click menu is open right now, or
+   * null/absent when none is.
+   *
+   * Optional, like `rosstalkSimulate` above — not required, and not set by
+   * either of the other two builders of this context: no surface but Home's
+   * own grid ever opens a per-card menu over a widget it draws, so nothing
+   * else has to name it. Home's Recent services card compares this to its own
+   * object id to suppress its chart's hover the same way History's copy of
+   * the same chart already does over ITS right-click menu — a widget drawn
+   * anywhere else never receives one.
+   */
+  activeCardMenuId?: string | null;
 }
 
 /**
@@ -633,6 +648,10 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       caption?: string | null;
       upper?: boolean;
       dim?: boolean;
+      /** Override the surface default below. For a widget whose sub-line comes
+       *  and goes with its STATE rather than with its configuration — see the
+       *  status readouts, which must not resize themselves when they go live. */
+      uniform?: boolean;
     },
   ) => (
     <Readout
@@ -685,6 +704,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // for "not recording" when the recorder simply cannot be reached.
       dim={!s.active && !s.connected}
       align={o.style?.textAlign}
+      // The same rule the streaming readout takes, and for the same reason: a
+      // recorder showing its timecode gains a third line when it rolls. It also
+      // keeps the two kinds the same size beside each other, which is the whole
+      // point of them sharing this composition.
+      uniform
     />
   );
 
@@ -745,6 +769,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       dim: !live,
       fill: live && filled ? "var(--green-9)" : null,
       valueColor: live && !filled ? "var(--green-10)" : null,
+      // SIZED AS THOUGH THE CLOCK WERE ALWAYS THERE, on a wall as well as on
+      // Home. The elapsed sub-line only exists while live, and the value's size
+      // is a share of what the other lines leave — so without this the word
+      // LIVE shrank and lifted at the exact moment it started mattering, while
+      // RECORDING beside it held its size because a recorder's timecode line is
+      // off by default. Reported as the streaming widget losing its styling
+      // when it went live; it was the one tile in the row resizing itself.
+      uniform: true,
     });
   };
 
@@ -795,7 +827,17 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // three `streamingReadout` takes, and passing an empty object dropped every
     // one of them on the surface they are loudest on. The menu wrote them, the
     // object stored them, the wall ignored them.
-    if (!ctx.home && hasWallTwin(c)) return streamingReadout(WALL_TWIN[c.type], c);
+    if (!ctx.home && hasWallTwin(c)) {
+      // WALL_TWIN still answers WHICH types have a twin — the render-parity guard
+      // scans it for exactly that. What it can no longer answer alone is which
+      // platform, because `home-streaming` now carries one in its config instead
+      // of encoding it in the type. The two retired cards keep their fixed names,
+      // so an object saved as `home-streaming-resi` draws the Resi twin exactly
+      // as it always has.
+      const only =
+        c.type === "home-streaming" ? (STREAMER_FOR[c.platform ?? "any"] ?? null) : WALL_TWIN[c.type];
+      return streamingReadout(only, c);
+    }
     const live = ctx.home && ctx.interactive;
     return (
       <div className={live ? "w-full h-full" : "w-full h-full pointer-events-none"}>
@@ -807,6 +849,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           skewMs={ctx.skewMs}
           onlineOutputIds={ctx.onlineOutputIds}
           secondsToStart={homeSecondsToStart(ctx)}
+          hoverSuppressed={ctx.activeCardMenuId === o.id}
         />
       </div>
     );
@@ -1227,10 +1270,13 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       });
     }
     case "stream-status":
-      return streamingReadout(
-        c.platform && c.platform !== "any" ? (c.platform === "resi" ? "Resi" : "YouTube") : null,
-        { showElapsed: c.showElapsed, hideWhenIdle: c.hideWhenIdle, fillWhenLive: c.fillWhenLive },
-      );
+      // One shared table, not a ternary: `platform === "resi" ? "Resi" : "YouTube"`
+      // rendered a YouTube-labelled widget for ANY value that was not "resi".
+      return streamingReadout(STREAMER_FOR[c.platform ?? "any"] ?? null, {
+        showElapsed: c.showElapsed,
+        hideWhenIdle: c.hideWhenIdle,
+        fillWhenLive: c.fillWhenLive,
+      });
 
     case "reaper-status": {
       const reaper = ctx.reaper;
@@ -1345,7 +1391,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "wireless-summary": {
       const ch = ctx.wireless;
-      if (ch.length === 0) return <Readout value="—" dim />;
+      // `align` here too. The populated state honours the operator's alignment
+      // and this one did not, so a right-aligned wireless tile jumped to the
+      // left the moment the fleet went dark — which is the moment it is being
+      // looked at.
+      if (ch.length === 0) return <Readout value="—" dim align={o.style?.textAlign} />;
       const online = ch.filter((d) => d.online).length;
       const live = ch.filter((d) => d.online);
       const batteries = live.filter((d) => d.battery != null).map((d) => d.battery as number);
@@ -1386,7 +1436,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "wireless-channel": {
       const d = c.channelId ? ctx.wireless.find((x) => x.channelId === c.channelId) : ctx.wireless[0];
-      if (!d) return <Readout value="—" dim />;
+      // Same jump as wireless-summary above: the populated channel honours the
+      // stored alignment, so its empty state must too.
+      if (!d) return <Readout value="—" dim align={o.style?.textAlign} />;
       const show = c.show ?? { rf: true, battery: true, frequency: true };
       // The channel already had this composition — a small dim name over a row of
       // figures — hand-rolled at 0.55em. It is the idiom, so it uses the idiom:
@@ -2249,6 +2301,11 @@ export async function loadProcessedAttachment(
   return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height };
 }
 
+/** Gaps between retries of a failed plan-attachment load. Three tries over about
+ *  a minute covers a signed link that expired mid-service and a first download
+ *  the editor was still writing; after that the notice stands. */
+export const PLAN_ATTACHMENT_RETRY_MS: readonly number[] = [5_000, 15_000, 45_000];
+
 function PlanAttachment({
   match,
   planId,
@@ -2257,6 +2314,11 @@ function PlanAttachment({
 }: AttachmentProcessOpts & { match: string; planId: string | null; H: number }) {
   const [src, setSrc] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">("loading");
+  // Which try this is. A failed download used to be final: the object sat on
+  // "Couldn't load file" until somebody refreshed the display, which on a wall
+  // nobody is standing next to is never. One expired signed link, or a display
+  // racing the editor for the first download of a new plan's file, was enough.
+  const [attempt, setAttempt] = useState(0);
 
   // Stable dep for the options object (crop is nested).
   const optsKey = JSON.stringify(opts);
@@ -2266,7 +2328,20 @@ function PlanAttachment({
   useResyncOn([match, optsKey, planId], () => {
     setSrc(null);
     setStatus("loading");
+    setAttempt(0);
   });
+
+  // Retry a FAILED load, with a widening gap, a bounded number of times. Only
+  // "error": "empty" is an answer (no such file on this plan), and a plan
+  // change re-fetches on its own through `planId`.
+  useEffect(() => {
+    if (status !== "error" || attempt >= PLAN_ATTACHMENT_RETRY_MS.length) return;
+    const t = setTimeout(() => {
+      setStatus("loading");
+      setAttempt((a) => a + 1);
+    }, PLAN_ATTACHMENT_RETRY_MS[attempt]);
+    return () => clearTimeout(t);
+  }, [status, attempt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2289,8 +2364,9 @@ function PlanAttachment({
     return () => {
       cancelled = true;
     };
-    // Re-fetch when the plan changes — the matched file rolls over week to week.
-  }, [match, optsKey, planId]);
+    // Re-fetch when the plan changes — the matched file rolls over week to week —
+    // and on every retry.
+  }, [match, optsKey, planId, attempt]);
 
   if (status === "ready" && src) {
     return <img src={src} alt="" className="w-full h-full object-contain" draggable={false} />;
@@ -2875,10 +2951,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-  const [skewMs, setSkewMs] = useState(0);
-  useResyncOn([pcoLive?.serverNow], () => {
-    if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  });
+  const skewMs = useServerSkew(pcoLive?.serverNow);
 
   return { state, isLoading, error, pcoLive, propresenter, propInstances, planItems, transcript, spl, obs, reaper, pvp, pvpSkewMs, resi, youtube, osc, scores, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptism, serviceTimeline, integrationsSnap, wireless, onlineOutputIds, now, skewMs };
 }

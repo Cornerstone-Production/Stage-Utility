@@ -32,6 +32,31 @@ The History tab puts all three on one calendar — days with data are marked. Op
 a service for its charts: an attendance trend with plan-item markers and a service
 average, and per-item SPL.
 
+The overview's attendance trend can carry a second line: the **service SPL** for
+each date, drawn behind the attendance curve on its own dB scale. Right-click the
+chart to switch it on and to choose which Smaart metric it plots — the list offers
+the metrics your history actually holds, and defaults to an LAeq-style one because
+that is the number that means "how loud was the service".
+
+Each point is the service's equivalent continuous level, energy-averaged across
+its plan items and weighted by how long each ran, so a 30-second welcome does not
+count as much as a 25-minute sermon. Several services on one date combine the same
+way. A date with no recording breaks the line rather than dropping it to zero — a
+missing reading is not a quiet service. The setting is per-machine and off by
+default; Home's **Recent services** widget offers the same two settings on its own
+right-click menu, but only History shows the summary below — Home stays headline
+figures only.
+
+On History, while the line is on, the same right-click menu also puts an average
+level under the average attendance, in the same shape: the level across settled
+weekends, then the latest weekend against the four before it. The comparison is
+a **dB difference**, not a percentage — decibels are logarithmic, so a percentage
+of one says nothing about loudness — and it is never coloured, because a louder
+weekend is not a worse one. A change under half a dB, below what most listeners
+can tell apart, shows no arrow at all rather than a direction nobody could hear.
+Both figures are energy averages. Weekends with no SPL recording are left out,
+and the block is absent entirely when nothing in scope carries a level.
+
 Above them is a KPI overview you can reorder and toggle sparklines on: service
 timers, attendance, highest and lowest attended, day totals. On a baptism weekend
 a Baptisms block appears alongside, showing people, total, testimony and baptism

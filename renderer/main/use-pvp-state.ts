@@ -1,7 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
-import { useResyncOn } from "../lib/use-resync-on";
+import { useServerSkew } from "../lib/use-server-skew";
 import { useStatusChannel } from "./use-status-channel";
 
 /**
@@ -36,16 +36,9 @@ export function usePvpState(enabled = true): PvpStatusDTO | null {
  * `sampledAt` is stamped as the poll returns and arrives within a broadcast of
  * being taken, so the moment a frame lands is a fair reading of the offset. Only
  * moved when a NEW sample arrives — re-measuring on every render would chase the
- * render loop rather than the clock.
+ * render loop rather than the clock, and never on mount, where `sampledAt` can
+ * be a replayed hello-burst snapshot minutes old. See use-server-skew.ts.
  */
 export function usePvpSkewMs(pvp: PvpStatusDTO | null): number {
-  const [skewMs, setSkewMs] = useState(0);
-  // useResyncOn, not an effect, and for the same reason the PCO skew uses it:
-  // the reading must be taken when the frame ARRIVES. An effect runs a paint
-  // later, so the offset would absorb however long the render took.
-  useResyncOn([pvp?.sampledAt], () => {
-    const serverMs = Date.parse(pvp?.sampledAt ?? "");
-    if (Number.isFinite(serverMs)) setSkewMs(serverMs - Date.now());
-  });
-  return skewMs;
+  return useServerSkew(pvp?.sampledAt);
 }

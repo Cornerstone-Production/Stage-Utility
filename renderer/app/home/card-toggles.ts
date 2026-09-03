@@ -21,6 +21,8 @@
 
 import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 
+import { LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
+
 /** The members of the config union that declare `K`, by their `type`. */
 type TypesWith<K extends PropertyKey, T = LayoutObjectConfig> = T extends { type: infer N }
   ? K extends keyof T
@@ -37,7 +39,16 @@ const APPLIES = {
   showMeridiem: { clock: true },
   showTimecode: { "obs-status": true },
   showPosition: { "reaper-status": true },
-  showElapsed: { "stream-status": true, "home-streaming": true, "home-streaming-resi": true, "home-streaming-youtube": true },
+  // On the recording card too, which draws a timecode on its sub-line exactly as
+  // the streaming card draws a clock on its own. The two sat side by side on Home
+  // with one offering the switch and the other not, for no reason anybody chose.
+  showElapsed: {
+    "stream-status": true,
+    "home-streaming": true,
+    "home-streaming-resi": true,
+    "home-streaming-youtube": true,
+    "home-recording": true,
+  },
   showProjectedEnd: { "service-pacing": true },
   warnStates: { "pp-timer": true },
   hideWhenIdle: {
@@ -76,6 +87,10 @@ const APPLIES = {
   // the output to differ.
   showProgress: { "pvp-layers": true, "home-pvp": true, "pvp-now": true, "home-pvp-now": true },
   showNextCue: { "pvp-now": true, "home-pvp-now": true },
+  // The SPL trend line on Home's Recent services card. History's copy of the
+  // same switch lives in settings rather than here, because that chart is not a
+  // layout object and has no config to write into.
+  showSpl: { "home-recent-services": true },
 } satisfies { [K in ToggleKey]: Record<TypesWith<K>, true> };
 
 /**
@@ -93,9 +108,59 @@ const APPLIES = {
  */
 const PICKS = {
   game: { scores: true, "home-scores": true },
+  // Which Smaart meter the SPL card reads. `spl-meter` is listed because it
+  // carries the key and the record is exhaustive — the compiler requires it —
+  // not because a wall object is expected on Home. If one ever is, offering the
+  // same choice there is the honest thing anyway.
+  meterId: { "home-spl": true, "spl-meter": true },
+  // Which recorder the Home card answers for. This is what retires the OBS and
+  // REAPER cards: they were `<RecordingCard recorder="OBS" />` and
+  // `recorder="REAPER"` — one component, one prop — so the prop becomes a choice
+  // and three palette entries become one.
+  recorder: { "home-recording": true },
+  // The same move for streaming, whose three cards were `<StreamingCard />` with
+  // one prop changed. `stream-status` carries the key too and the record is
+  // exhaustive, so it is named here; the wall object's own picker is unchanged.
+  platform: { "home-streaming": true, "stream-status": true },
+  // Which metric that line plots. A choice from a list this file cannot know —
+  // Smaart names the metrics and the card offers the ones history actually has.
+  splMetric: { "home-recent-services": true },
 } satisfies { [K in PickKey]: Record<TypesWith<K>, true> };
 
-type PickKey = "game";
+type PickKey = "game" | "meterId" | "recorder" | "platform" | "splMetric";
+
+/**
+ * What a card is doing when it has never been given a value for a pick.
+ *
+ * Per-key, not one shared string: "auto" is what an untouched scores card does,
+ * and the loudest meter is what an untouched SPL card does. A single fallback
+ * would tick the wrong row on one of them, and the only job of this table is
+ * that the menu agrees with the renderer.
+ */
+const PICK_FALLBACK: Record<PickKey, string> = {
+  game: "auto",
+  meterId: LOUDEST_METER,
+  recorder: "any",
+  platform: "any",
+  // The empty string is "follow the preferred default" — the menu ticks the
+  // metric that default resolved to, so the row that is checked is the one being
+  // drawn rather than a placeholder nobody chose.
+  splMetric: "",
+};
+
+/** The choices each pick offers, for the picks whose list is FIXED. `game` and
+ *  `meterId` are absent because their options come from live data the menu
+ *  fetches; these two are the app's own vocabulary and cannot change at runtime. */
+export const PICK_OPTIONS: Partial<Record<PickKey, Readonly<Record<string, string | null>>>> = {
+  recorder: RECORDER_FOR,
+  platform: STREAMER_FOR,
+};
+
+/** Every (widget type, pick) pair the menu can write, flattened — the picks'
+ *  half of TOGGLE_PAIRS, and walked by the same guard. */
+export const PICK_PAIRS: readonly { type: string; key: PickKey }[] = Object.entries(
+  PICKS as Record<string, Record<string, true>>,
+).flatMap(([key, types]) => Object.keys(types).map((type) => ({ type, key: key as PickKey })));
 
 /**
  * Every (widget type, setting) pair the menu can write, flattened.
@@ -122,9 +187,9 @@ export function pickedValue(card: LayoutObject, key: PickKey): string | null {
   const config = card.config as Config;
   if (!((config.type as string) in PICKS[key])) return null;
   const value = config[key];
-  // "auto" is the fallback for `game` on both widgets, and it is what a card
-  // saved before the field existed was already doing.
-  return typeof value === "string" ? value : "auto";
+  // A card saved before the field existed has no value, and neither has one
+  // explicitly set to null — both are doing whatever PICK_FALLBACK names.
+  return typeof value === "string" ? value : PICK_FALLBACK[key];
 }
 
 type ToggleKey =
@@ -140,7 +205,8 @@ type ToggleKey =
   | "fillWhenLive"
   | "fillWhenRecording"
   | "showProgress"
-  | "showNextCue";
+  | "showNextCue"
+  | "showSpl";
 
 /** What to call each setting, and what "on" means for it. `format` is the only
  *  one that is not a boolean. */
@@ -192,6 +258,9 @@ const SPECS: {
     fallbackFor: { "pvp-now": true, "home-pvp-now": true },
   },
   { key: "showNextCue", label: "Next cue", fallback: true },
+  // `false` to agree with the renderer: a card that has never been told draws
+  // attendance alone, exactly as it did before the line existed.
+  { key: "showSpl", label: "SPL trend line", fallback: false },
 ];
 
 export interface CardToggle {

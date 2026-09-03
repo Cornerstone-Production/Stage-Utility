@@ -9,7 +9,7 @@ import { INTEGRATION_IDS } from "@main/services/integration-ids.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, blankState, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, settle, idle, blankState, assertAbsent , integrationCard } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import(
@@ -40,11 +40,9 @@ async function panel(overrides: Record<string, Partial<IntegrationState>> = {}) 
   return c;
 }
 
-const tile = (c: { container: HTMLElement }, id: string) => {
-  const el = c.container.querySelector<HTMLElement>(`[data-integration-card="${id}"]`);
-  assert.ok(el, `no card for ${id}`);
-  return el;
-};
+/** Awaits the card. The synchronous read this replaced could run before React
+ *  had committed it — see integrationCard. */
+const tile = (c: { container: HTMLElement }, id: string) => integrationCard(c.container, id);
 
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]');
 
@@ -69,17 +67,17 @@ describe("the integration card", () => {
     const companion = INTEGRATION_DESCRIPTOR_FIXTURE.find((d) => d.inbound)!;
     assert.equal(companion.id, "companion");
     assertAbsent(
-      tile(c, "companion").querySelector('[aria-label="Enable Bitfocus Companion"]'),
+      (await tile(c, "companion")).querySelector('[aria-label="Enable Bitfocus Companion"]'),
       "an inbound integration was given an enable switch",
     );
     // And every outbound one does have one, so the assertion above is not
     // passing because no card has a switch at all.
-    assert.ok(tile(c, "obs").querySelector('[aria-label="Enable OBS Studio"]'));
+    assert.ok((await tile(c, "obs")).querySelector('[aria-label="Enable OBS Studio"]'));
   });
 
   test("clicking the switch flips it without opening the dialog", async () => {
     const c = await panel();
-    const sw = tile(c, "obs").querySelector<HTMLElement>('[aria-label="Enable OBS Studio"]')!;
+    const sw = (await tile(c, "obs")).querySelector<HTMLElement>('[aria-label="Enable OBS Studio"]')!;
     fireEvent.click(sw);
     await settle();
     assert.equal(server.states.get("obs")?.enabled, true, "the switch did not enable anything");
@@ -88,20 +86,20 @@ describe("the integration card", () => {
 
   test("clicking the card opens that integration's dialog", async () => {
     const c = await panel();
-    fireEvent.click(tile(c, "reaper"));
+    fireEvent.click((await tile(c, "reaper")));
     await settle();
     assert.match(dialog()?.textContent ?? "", /REAPER/);
   });
 
   test("Enter and Space open it too", async () => {
     const c = await panel();
-    fireEvent.keyDown(tile(c, "reaper"), { key: "Enter" });
+    fireEvent.keyDown((await tile(c, "reaper")), { key: "Enter" });
     await settle();
     assert.ok(dialog(), "Enter did not open the dialog");
     fireEvent.keyDown(dialog()!, { key: "Escape" });
     await settle();
 
-    fireEvent.keyDown(tile(c, "reaper"), { key: " " });
+    fireEvent.keyDown((await tile(c, "reaper")), { key: " " });
     await settle();
     assert.ok(dialog(), "Space did not open the dialog");
   });
@@ -125,7 +123,7 @@ describe("the integration card", () => {
   test("every card carries the id the slide animation follows", async () => {
     const c = await panel();
     for (const id of INTEGRATION_IDS) {
-      assert.equal(tile(c, id).getAttribute("data-slide-id"), id);
+      assert.equal((await tile(c, id)).getAttribute("data-slide-id"), id);
     }
   });
 });

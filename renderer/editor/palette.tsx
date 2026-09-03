@@ -113,8 +113,6 @@ const GROUP_ACCENT: Record<PaletteGroup, string> = {
   People: "var(--green-9)",
   Baptisms: "var(--blue-9)",
   OBS: "var(--gray-9)",
-  Resi: "var(--green-9)",
-  YouTube: "var(--red-9)",
   REAPER: "var(--gray-9)",
   ProVideoPlayer: "var(--blue-9)",
   Control: "var(--amber-9)",

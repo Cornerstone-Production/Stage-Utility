@@ -231,6 +231,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "spl:listHistory":
       return apiFetch<T>("/api/spl/history");
 
+    case "spl:getSummary":
+      return apiFetch<T>("/api/spl/summary");
+
+    case "spl:getTrendPrefs":
+      return apiFetch<T>("/api/spl/trend");
+    case "spl:setTrendPrefs":
+      return post<T>("/api/spl/trend", p);
+
     case "people:getCount":
       return apiFetch<T>("/api/people/count");
 
@@ -888,35 +896,29 @@ function reportChannels(): void {
 }
 
 // ── Shared-worker SSE relay ─────────────────────────────────────────────────
-// One EventSource shared across all this machine's tabs. Browsers cap concurrent
-// connections at ~6 per origin over HTTP/1.1, and every tab holds one permanently
-// for its event stream — so the sixth tab could not load AT ALL: nothing was left
-// for its /api/state, which then died at REQUEST_TIMEOUT_MS. Measured: three tabs
-// hold three connections direct and one through the worker.
+// ON by default. One EventSource shared across all of this machine's tabs, and
+// across every iframe in them. Browsers cap concurrent connections at ~6 per
+// origin over HTTP/1.1 and each stream is held permanently, so without the relay
+// the sixth tab could not load AT ALL: nothing was left for its /api/state, which
+// then died at REQUEST_TIMEOUT_MS. The Screens page renders a live preview iframe
+// per display, so a machine reaches the cap on one page — with eight displays the
+// seventh onward never loaded. Measured: three tabs hold three connections direct
+// and one through the worker.
 //
-// STILL OPT-IN, deliberately, even though the worker now carries reconnect with
-// backoff, hydrate replay and a wake nudge. Those close the worker-to-SERVER gap.
-// Testing an 8-tab machine through a server restart found the remaining hole is
-// tab-to-WORKER: when the shared stream breaks, every already-open tab is
-// orphaned silently. `ensureWorker` builds the worker once and nothing watches
-// the port afterwards, so a tab has no way to notice it has stopped receiving —
-// observed as three tabs sitting on a title three state-changes stale, while a
-// reloaded tab picked up the next change immediately.
+// It was opt-in until the tab-to-WORKER gap was closed. Worker-to-SERVER breaks
+// were already covered by reconnect with backoff, hydrate replay and a wake nudge,
+// but `ensureWorker` built the worker once and nothing watched the port
+// afterwards: when the shared stream broke, every already-open tab was orphaned
+// silently — observed on an 8-tab machine through a server restart as three tabs
+// sitting on a title three state-changes stale, while a reloaded tab picked up the
+// next change immediately. That was worse than the per-tab path it replaces, where
+// a dead stream costs one tab and self-heals. The port heartbeat below (tab pings,
+// worker pongs, `abandonWorker` falls back to a direct EventSource when the pong
+// stops) is what closed it and what makes defaulting this on safe.
 //
-// That is worse than the per-tab path it would replace: there a dead stream costs
-// one tab and self-heals, here it costs every tab on the machine and does not.
-// Defaulting this on needs a port heartbeat (tab pings, worker pongs, tab
-// re-creates the worker or falls back to a direct EventSource when the pong stops).
-//   Enable:  localStorage.setItem("stage:sharedSse", "1")  (then reload)
+//   Opt out: localStorage.setItem("stage:sharedSse", "0")  (then reload)
 let sharedSse = (() => {
   try {
-    // ON by default now that the heartbeat below exists. One SSE per MACHINE
-    // instead of one per tab and per iframe is not a micro-optimisation here: a
-    // browser allows ~6 concurrent connections per origin over HTTP/1.1, and the
-    // Screens page renders a live preview iframe per display. With eight
-    // displays the seventh onward never loaded and the page's own /api/state
-    // request queued behind them until it timed out.
-    //   Opt out: localStorage.setItem("stage:sharedSse", "0")  (then reload)
     return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") !== "0";
   } catch {
     return false;

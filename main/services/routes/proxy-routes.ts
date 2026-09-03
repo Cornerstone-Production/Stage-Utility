@@ -72,7 +72,7 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
           att.id,
           att.contentType,
           att.filename,
-          async () => (await stageController.openPlanAttachment(att.id)).url,
+          async (opts) => (await stageController.openPlanAttachment(att.id, opts)).url,
         );
         if (!file) {
           res.writeHead(502, { "Content-Type": "text/plain" });

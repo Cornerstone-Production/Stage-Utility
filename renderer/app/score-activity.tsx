@@ -23,7 +23,7 @@
 // focused. The mockup drew them as two components; they have identical markup, and
 // a second one would be a second set of dimensions to keep in step.
 
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import { gameLabel, ScoreSide, ScoreStrip } from "../main/score-strip";
 import { leagueById } from "@main/types/scores";
@@ -397,8 +397,29 @@ export function ScoreCapsule({
  * the multiview expand overlay — and the page underneath is untouched.
  */
 export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }) {
-  const { open, focus } = useScoreActivity();
-  const games = scores?.games ?? [];
+  const { open, focus, only } = useScoreActivity();
+  /**
+   * What the panel actually shows.
+   *
+   * A FINISHED game leaves. The capsule already ignores anything not "in" (see
+   * liveIndex), so a game that ended stayed only in the panel behind it — a Final
+   * card sitting there all evening under a capsule that had already moved on.
+   *
+   * And a SCORE narrows the panel to the game that scored. Dropping the whole
+   * stack open told you something had happened and then left you to work out
+   * which card it was, which is the one question the notification exists to
+   * answer. Opening the capsule by hand still shows everything.
+   */
+  const games = useMemo(() => {
+    const all = scores?.games ?? [];
+    const live = all.filter((g) => g.state !== "post");
+    if (!only) return live;
+    // From `all`, not `live`: a walk-off ends the game in the same poll that
+    // reports the run, and the card the notification is about must not vanish in
+    // the act of announcing itself.
+    const one = all.find((g) => g.eventId === only);
+    return one ? [one] : live;
+  }, [scores?.games, only]);
   const isOpen = open && games.length > 0;
   const clamped = focus >= 0 && focus < games.length ? focus : 0;
   // Read at render, so the panel honours a setting changed mid-session on the
@@ -428,7 +449,9 @@ export function ScoreActivityHost({ scores }: { scores: ScoresStatusDTO | null }
     const at = scores.games.findIndex((g) =>
       scores.lastEvents.some((e) => e.eventId === g.eventId),
     );
-    scoreActivity.scored(scores.scoreRev, at < 0 ? 0 : at);
+    // The eventId, not just the index: the panel narrows to this one game, and an
+    // index into a list that is about to be filtered is not a game.
+    scoreActivity.scored(scores.scoreRev, at < 0 ? 0 : at, at < 0 ? null : scores.games[at].eventId);
   }, [scores]);
 
   const relayout = useCallback(() => {

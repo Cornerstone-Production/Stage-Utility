@@ -9,7 +9,7 @@ import { channelColor, channelLabel } from "./channel-color";
 import { LiveControls } from "./live-controls";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { Loader2Icon } from "lucide-react";
-import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useServerSkew } from "@renderer/lib/use-server-skew";
 
 interface DashboardViewProps {
   displayId: string;
@@ -50,12 +50,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
 
   // Skew between this client and the server, recomputed whenever a pco:live
   // arrives, so the countdown matches the server clock even if this kiosk drifts.
-  const [skewMs, setSkewMs] = useState(0);
-  useResyncOn([pcoLive?.serverNow], () => {
-    if (pcoLive?.serverNow) {
-      setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-    }
-  });
+  const skewMs = useServerSkew(pcoLive?.serverNow);
 
   if (isLoading) {
     return (

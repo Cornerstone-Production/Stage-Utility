@@ -22,6 +22,7 @@ import { Loader2Icon, PencilIcon, CheckIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useServerSkew } from "@renderer/lib/use-server-skew";
 import { useDashboardState } from "../../main/use-dashboard-state";
 import { useStageSettings } from "../use-stage-settings";
 import { GettingStarted } from "../../settings/getting-started";
@@ -35,8 +36,11 @@ import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
 import { addCard, cardsForNow, removeCard, replaceCard, setSize, setWhen } from "./home-cards";
 import { SIZES, SIZE_ORDER, WHEN_LABELS, sizeOf, whenOf } from "./home-cards";
-import { pickedValue, togglesFor, withToggle } from "./card-toggles";
+import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles";
 import { gameOptions } from "../../main/scores-object";
+import { meterOptions, sourceOptions } from "../recording-status";
+import { preferredSplMetric } from "../../settings/sections/overview-data";
+import { useSplState } from "../../main/use-spl-state";
 import { invoke } from "../../lib/api";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
@@ -89,10 +93,7 @@ export function HomeRoute() {
 
   // Skew between this client and the server, recomputed whenever a pco:live
   // arrives. Same pattern as dashboard-view.tsx and the context bar.
-  const [skewMs, setSkewMs] = useState(0);
-  useResyncOn([pcoLive?.serverNow], () => {
-    if (pcoLive?.serverNow) setSkewMs(Date.parse(pcoLive.serverNow) - Date.now());
-  });
+  const skewMs = useServerSkew(pcoLive?.serverNow);
 
   // The server has caught up — stop preferring the optimistic copy, so an edit
   // made anywhere else (a restored snapshot, a second tab) is not masked forever.
@@ -132,6 +133,32 @@ export function HomeRoute() {
     enabled: wantsFavourites,
     retry: 1,
   });
+  /**
+   * The Smaart meters, for the "Meter" submenu on an SPL card.
+   *
+   * Gated exactly like the favourites above, and for the same reason: Home is
+   * the page every operator lands on, and opening an SPL subscription for a card
+   * nobody placed is the always-on traffic this app tries not to make.
+   */
+  const wantsMeters = (pending ?? homeView?.layout?.objects ?? []).some(
+    (o) => pickedValue(o, "meterId") != null,
+  );
+  const spl = useSplState(wantsMeters);
+  /**
+   * The metrics history actually has, for the "Metric" submenu on the Recent
+   * services card. Gated like the two above: a summary read for a card nobody
+   * has switched the line on for is traffic for nothing.
+   */
+  const wantsSplMetrics = (pending ?? homeView?.layout?.objects ?? []).some(
+    (o) => pickedValue(o, "splMetric") != null,
+  );
+  const { data: splSummary } = useQuery({
+    queryKey: ["spl:getSummary"],
+    queryFn: () => invoke<SplServiceSummary[]>("spl:getSummary"),
+    enabled: wantsSplMetrics,
+    retry: 1,
+  });
+
   /** Has anything been placed by hand? */
   const arranged = (homeView?.layout?.objects ?? []).some((o) => isPlaced(o));
   // The controls live in the page HEADER, not on a row of their own — that row
@@ -280,6 +307,68 @@ export function HomeRoute() {
           checked: pinned === o.value,
           onSelect: () => {
             save((objs) => replaceCard(objs, withToggle(card, "game", o.value)));
+            setMenu(null);
+          },
+        })),
+      });
+    }
+    // The picks whose options are the app's own vocabulary rather than something
+    // fetched: which recorder the Recording card answers for, which platform the
+    // Streaming card watches. ONE block for both, driven by PICK_OPTIONS, because
+    // a second hand-written submenu is how the two would drift apart.
+    for (const [key, label, anyLabel] of [
+      ["recorder", "Recorder", "Every recorder"],
+      ["platform", "Platform", "Every platform"],
+    ] as const) {
+      const current = pickedValue(card, key);
+      const map = PICK_OPTIONS[key];
+      if (current == null || !map) continue;
+      items.push({
+        label,
+        items: sourceOptions(map, anyLabel).map((o) => ({
+          label: o.label,
+          checked: current === o.value,
+          onSelect: () => {
+            save((objs) => replaceCard(objs, withToggle(card, key, o.value)));
+            setMenu(null);
+          },
+        })),
+      });
+    }
+    // Which metric the Recent services card's trend line plots. Offered only
+    // while the line is ON — a metric picker above a switch that is off is a
+    // setting for something the operator cannot see.
+    const splMetric = pickedValue(card, "splMetric");
+    if (splMetric != null && (card.config as { showSpl?: boolean }).showSpl) {
+      const keys = [...new Set((splSummary ?? []).flatMap((r) => Object.keys(r.metrics)))].sort();
+      const chosen = splMetric || (preferredSplMetric(keys) ?? "");
+      if (keys.length > 0) {
+        items.push({
+          label: "Metric",
+          items: keys.map((k) => ({
+            label: k,
+            checked: chosen === k,
+            onSelect: () => {
+              save((objs) => replaceCard(objs, withToggle(card, "splMetric", k)));
+              setMenu(null);
+            },
+          })),
+        });
+      }
+    }
+    // The SPL card's "which meter", beside the scores card's "which game" and
+    // for the same reason: a setting of the WIDGET, from a list this page has to
+    // fetch. The default reads the loudest meter, so an operator who never opens
+    // this menu is on exactly the behaviour the card has always had.
+    const meter = pickedValue(card, "meterId");
+    if (meter != null) {
+      items.push({
+        label: "Meter",
+        items: meterOptions(spl, meter).map((o) => ({
+          label: o.label,
+          checked: meter === o.value,
+          onSelect: () => {
+            save((objs) => replaceCard(objs, withToggle(card, "meterId", o.value)));
             setMenu(null);
           },
         })),
@@ -464,6 +553,7 @@ export function HomeRoute() {
             e.preventDefault();
             setMenu({ x: e.clientX, y: e.clientY, cardId: o.id });
           }}
+          menuCardId={menu?.cardId ?? null}
           boxes={previewBoxes}
           animate={!!dragId}
           chrome={

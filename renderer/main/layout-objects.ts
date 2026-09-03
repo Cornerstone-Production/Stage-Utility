@@ -30,8 +30,6 @@ export const PALETTE_GROUP_ORDER = [
   "Baptisms",
   "OBS",
   "REAPER",
-  "Resi",
-  "YouTube",
   "ProVideoPlayer",
   "Control",
   "Status",
@@ -93,6 +91,24 @@ export interface LayoutObjectSpec {
    * have happened and such a snapshot is no longer one anybody would restore.
    */
   retired?: { replacedBy: LayoutObjectType; why: string };
+  /**
+   * This is Home's version of that wall widget, so the Home picker offers this
+   * one and hides that one.
+   *
+   * The two are not interchangeable. A wall widget draws its own card — see the
+   * CARD style fragment — and Home already draws a card around whatever it is
+   * given, so the wall version on Home is a card inside a card. Every `home-*`
+   * spec is BARE for exactly that reason.
+   *
+   * Named explicitly rather than derived from the `home-` prefix, because the
+   * prefix does not encode the pairing: `home-spl` replaces `spl-meter` and
+   * `home-recording` replaces `record-status`, neither of which match by name.
+   *
+   * HIDDEN FROM THE PICKER, NOT RETIRED. A Home card already placed with the wall
+   * type keeps working and keeps rendering — this only stops the wall version
+   * being offered again where a purpose-built card exists.
+   */
+  homeCardFor?: LayoutObjectType;
 }
 
 // ── Shared style fragments ────────────────────────────────────────────────────
@@ -544,6 +560,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
 
   // Transcription
   "home-spl": {
+    homeCardFor: "spl-meter",
     label: "Sound level",
     blurb: "The loudest meter right now, and which one",
     group: "Audio (SPL)",
@@ -646,6 +663,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     integration: { id: "pvp", label: "ProVideoPlayer" },
   },
   "home-pvp": {
+    homeCardFor: "pvp-layers",
     // Label unchanged. It ships, it is in the widget reference, and an operator
     // knows it — the new card below takes a name of its own rather than this one.
     label: "ProVideoPlayer",
@@ -669,6 +687,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     integration: { id: "pvp", label: "ProVideoPlayer" },
   },
   "home-pvp-now": {
+    homeCardFor: "pvp-now",
     // Its own name, not a second "ProVideoPlayer": two entries in one palette
     // group with the same label is a choice an operator cannot make.
     label: "On screen now",
@@ -733,18 +752,24 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     homeSize: "s",
   },
   "home-recording": {
+    homeCardFor: "record-status",
     label: "Recording",
-    blurb: "Is anything rolling — every recorder answered at once",
+    blurb: "Is anything rolling — every recorder, or one you pick",
     group: "Status",
-    config: () => ({ type: "home-recording" }),
+    config: () => ({ type: "home-recording", recorder: "any", showElapsed: true }),
     style: BARE,
     homeSize: "s",
     stylingOnly: true,
   },
   "home-recording-obs": {
+    homeCardFor: "obs-status",
     label: "OBS recording",
     blurb: "Rolling or stopped, with the elapsed time",
-    group: "OBS",
+    group: null,
+    retired: {
+      replacedBy: "home-recording",
+      why: "Recording now picks its recorder — right-click the card and choose OBS. One card instead of three, and it can be changed without being replaced.",
+    },
     config: () => ({ type: "home-recording-obs" }),
     style: BARE,
     homeSize: "s",
@@ -752,9 +777,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     integration: { id: "obs", label: "OBS" },
   },
   "home-recording-reaper": {
+    homeCardFor: "reaper-status",
     label: "REAPER recording",
     blurb: "Rolling or stopped, with the elapsed time",
-    group: "REAPER",
+    group: null,
+    retired: {
+      replacedBy: "home-recording",
+      why: "Recording now picks its recorder — right-click the card and choose REAPER. One card instead of three, and it can be changed without being replaced.",
+    },
     config: () => ({ type: "home-recording-reaper" }),
     style: BARE,
     homeSize: "s",
@@ -772,9 +802,9 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   },
   "home-streaming": {
     label: "Streaming",
-    blurb: "Live or off air, across every platform at once",
+    blurb: "Live or off air, across every platform or one you pick",
     group: "Status",
-    config: () => ({ type: "home-streaming" }),
+    config: () => ({ type: "home-streaming", platform: "any" }),
     style: BARE,
     homeSize: "s",
     stylingOnly: true,
@@ -782,7 +812,11 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   "home-streaming-resi": {
     label: "Resi status",
     blurb: "Live or off air, with the elapsed time",
-    group: "Resi",
+    group: null,
+    retired: {
+      replacedBy: "home-streaming",
+      why: "Streaming now picks its platform — right-click the card and choose Resi. One card instead of three, and it can be changed without being replaced.",
+    },
     config: () => ({ type: "home-streaming-resi" }),
     style: BARE,
     homeSize: "s",
@@ -792,7 +826,11 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
   "home-streaming-youtube": {
     label: "YouTube status",
     blurb: "Live or off air, with the elapsed time",
-    group: "YouTube",
+    group: null,
+    retired: {
+      replacedBy: "home-streaming",
+      why: "Streaming now picks its platform — right-click the card and choose YouTube. One card instead of three, and it can be changed without being replaced.",
+    },
     config: () => ({ type: "home-streaming-youtube" }),
     style: BARE,
     homeSize: "s",
@@ -1006,6 +1044,39 @@ export const defaultStyle = (t: LayoutObjectType): LayoutStyle => {
 export const objectIntegration = (t: LayoutObjectType) => findLayoutObjectSpec(t)?.integration;
 export const isStylingOnly = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.stylingOnly === true;
 export const usesPropInstance = (t: LayoutObjectType): boolean => findLayoutObjectSpec(t)?.propInstance === true;
+/**
+ * Wall types Home does not offer, because Home has a card of its own for that
+ * reading. Derived from the specs rather than listed, so the two cannot drift.
+ */
+/**
+ * Home cards a WALL does not offer, because a wall widget already covers that
+ * reading. The mirror of SUPERSEDED_ON_HOME, from the same declarations.
+ *
+ * NOT every `home-*` card. Three of them — home-streaming and its Resi and
+ * YouTube siblings — are dual-surface BY DESIGN: they are what an operator picks
+ * for a console as well as for Home, there is no separate wall widget for Resi
+ * or YouTube, and layout-renderer diverts them to a wall presentation through
+ * WALL_TWIN. Hiding those would take Resi and YouTube status off walls entirely.
+ * Five more (Readiness, Next service, Service timer, Recent services, Screens
+ * online) have no wall equivalent at all, so hiding them would remove the
+ * reading rather than relocate it.
+ *
+ * Only a card whose wall twin EXISTS is hidden from the wall, which is why this
+ * reads the same `homeCardFor` declarations as the Home side rather than
+ * matching on the `home-` prefix.
+ */
+export const SUPERSEDED_ON_WALL: ReadonlySet<LayoutObjectType> = new Set(
+  (Object.entries(LAYOUT_OBJECTS) as [LayoutObjectType, { homeCardFor?: LayoutObjectType }][])
+    .filter(([, s]) => !!s.homeCardFor)
+    .map(([t]) => t),
+);
+
+export const SUPERSEDED_ON_HOME: ReadonlySet<LayoutObjectType> = new Set(
+  Object.values(LAYOUT_OBJECTS)
+    .map((s) => (s as { homeCardFor?: LayoutObjectType }).homeCardFor)
+    .filter((t): t is LayoutObjectType => !!t),
+);
+
 export const objectRetired = (t: LayoutObjectType) => findLayoutObjectSpec(t)?.retired;
 
 /**

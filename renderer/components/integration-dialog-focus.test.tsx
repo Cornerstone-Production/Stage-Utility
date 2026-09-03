@@ -25,7 +25,7 @@ import { installDom } from "../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, until, idle } = await import(
+const { installFakeServer, withQueryClient, settle, until, idle , integrationCard } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel } = await import("./integrations-panel.js");
@@ -56,11 +56,11 @@ const where = (el: Element | null): string => {
 const find = (c: { container: HTMLElement }, id: string) =>
   c.container.querySelector<HTMLElement>(`[data-integration-card="${id}"]`);
 
-const card = (c: { container: HTMLElement }, id: string) => {
-  const el = find(c, id);
-  assert.ok(el, `no card for ${id}`);
-  return el;
-};
+/** The card, awaited. `find` above stays synchronous because it is called inside
+ *  `until()` predicates, where polling is already the caller's job; this one is
+ *  the "give me the card so I can act on it" form and has to wait for React to
+ *  have committed it — see integrationCard. */
+const card = (c: { container: HTMLElement }, id: string) => integrationCard(c.container, id);
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]');
 
 /**
@@ -83,7 +83,7 @@ async function panel() {
 describe("focus returns to the card", () => {
   test("after a plain open and close", async () => {
     const c = await panel();
-    const before = card(c, "reaper");
+    const before = (await card(c, "reaper"));
     before.focus();
     fireEvent.click(before);
     await until(
@@ -106,7 +106,7 @@ describe("focus returns to the card", () => {
     // The case that used to drop focus on <body>: the node focus was taken from
     // has been unmounted by the time the dialog closes.
     const c = await panel();
-    const before = card(c, "reaper");
+    const before = (await card(c, "reaper"));
     before.focus();
     fireEvent.click(before);
     await until(
@@ -155,7 +155,7 @@ describe("focus returns to the card", () => {
     // renders a diff of whatever it is given, and inspecting two jsdom elements
     // takes long enough that the file is killed on a timeout instead of
     // reporting the failure.
-    const settled = card(c, "reaper");
+    const settled = (await card(c, "reaper"));
     assert.equal(before === settled, false, "the card never moved, so nothing was proved");
     assert.equal(
       document.activeElement === settled,

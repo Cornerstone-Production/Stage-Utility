@@ -160,3 +160,69 @@ test("every handle has a cursor, and opposite corners share one", () => {
   assert.equal(handleCursor("n"), "ns-resize");
   assert.equal(handleCursor("e"), "ew-resize");
 });
+
+// ── Resizing snaps the edge you are dragging, and only that edge ────────────
+//
+// Reported: "when resizing a widget, particularly one of the sides, it will
+// automatically resize the opposite side… I can usually never get it right
+// without changing the dimensions in the right side panel."
+//
+// The cause is that snapping treated x, y, w and h as four independent numbers.
+// applyResize correctly holds the opposite edge still, and then snapping rounded
+// x as well — so dragging the EAST handle moved the WEST edge, by however far the
+// object happened to sit off the grid. Which is exactly the case you are in when
+// you are trying to match another widget's size by eye.
+
+test("dragging the east handle leaves the west edge exactly where it was", () => {
+  const { xUnit } = gridUnits(1000, 1000);
+  // Deliberately off-grid: x sits a third of a cell past a line, which is how an
+  // imported or freely-placed object arrives.
+  const offGrid = xUnit / 3;
+  const out = snapRectToGrid({ x: offGrid, y: 0.2, w: 0.4, h: 0.3 }, FULL, 1000, 1000, "e");
+  near(out.x, offGrid, "the west edge moved while dragging the east handle");
+  near(out.x + out.w, snapTo(offGrid + 0.4, xUnit), "the east edge did not land on the grid");
+});
+
+test("dragging the west handle leaves the east edge exactly where it was", () => {
+  const { xUnit } = gridUnits(1000, 1000);
+  const start = { x: xUnit / 3, y: 0.2, w: 0.4, h: 0.3 };
+  const right = start.x + start.w;
+  const out = snapRectToGrid(start, FULL, 1000, 1000, "w");
+  near(out.x + out.w, right, "the east edge moved while dragging the west handle");
+  near(out.x, snapTo(start.x, xUnit), "the west edge did not land on the grid");
+});
+
+test("dragging the south handle leaves the top edge exactly where it was", () => {
+  const { yUnit } = gridUnits(1000, 1000);
+  const start = { x: 0.2, y: yUnit / 3, w: 0.3, h: 0.4 };
+  const out = snapRectToGrid(start, FULL, 1000, 1000, "s");
+  near(out.y, start.y, "the top edge moved while dragging the south handle");
+  near(out.y + out.h, snapTo(start.y + start.h, yUnit), "the bottom edge did not land on the grid");
+});
+
+test("a corner snaps both of its own edges and neither of the others", () => {
+  const { xUnit, yUnit } = gridUnits(1000, 1000);
+  const start = { x: xUnit / 3, y: yUnit / 3, w: 0.4, h: 0.4 };
+  const right = start.x + start.w;
+  const bottom = start.y + start.h;
+  const out = snapRectToGrid(start, FULL, 1000, 1000, "nw");
+  near(out.x, snapTo(start.x, xUnit), "the west edge did not snap");
+  near(out.y, snapTo(start.y, yUnit), "the north edge did not snap");
+  near(out.x + out.w, right, "the east edge moved while dragging a north-west corner");
+  near(out.y + out.h, bottom, "the south edge moved while dragging a north-west corner");
+});
+
+test("the whole-rect snap still moves everything — that is a different action", () => {
+  // "Snap all" and "Snap to grid" DO put the whole object on the grid. Only a
+  // drag of one handle is required to leave the other edges alone.
+  const { xUnit } = gridUnits(1000, 1000);
+  const out = snapRectToGrid({ x: xUnit / 3, y: xUnit / 3, w: 0.4, h: 0.4 }, FULL, 1000, 1000, true);
+  near(out.x, 0, "a whole-rect snap must still move x");
+  near(out.w, snapTo(0.4, xUnit), "a whole-rect snap must still round w");
+});
+
+test("a resized edge never collapses past one cell", () => {
+  const { xUnit } = gridUnits(1000, 1000);
+  const out = snapRectToGrid({ x: 0.5, y: 0.5, w: 0.00001, h: 0.2 }, FULL, 1000, 1000, "e");
+  assert.ok(out.w >= xUnit - 1e-9, `width collapsed to ${out.w}`);
+});

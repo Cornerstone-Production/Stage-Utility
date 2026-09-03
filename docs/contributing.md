@@ -106,6 +106,13 @@ the author knows whether the bug ever shipped, so only the author can say.
 Rule of thumb: if somebody upgrading from the last stable release could not have
 hit the bug, mark it.
 
+CI runs a heuristic check (`scripts/check-beta-only.mjs`) that warns, but never
+fails the build, on a `fix:`/`perf:` commit that touches a file also touched by
+a `feat:` commit from this release cycle. It is a reminder, not a judge: sharing
+a file does not mean sharing a bug, and a fix to a new feature in a file no
+`feat:` commit happened to touch is invisible to it — the trailer remains the
+author's call.
+
 ## Releases
 
 Automated from the commit types above, by `.github/workflows/release.yml`. Your

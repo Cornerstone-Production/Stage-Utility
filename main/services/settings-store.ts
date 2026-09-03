@@ -122,6 +122,12 @@ export interface SettingsData {
   oscFeedbackPort: number;
   /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */
   splVisibleMetrics: string[];
+  /** Draw the service-level SPL line on History's attendance chart. Off by
+   *  default — an existing chart must not gain a second line unasked. */
+  splTrendShown: boolean;
+  /** Which Smaart metric that line plots. Null follows the preferred default,
+   *  which is what an operator who never opens the menu wants. */
+  splTrendMetric: string | null;
   /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
   onboardingDismissed: boolean;
   /**
@@ -196,6 +202,8 @@ export const DEFAULT_SETTINGS: SettingsData = {
   autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
   oscFeedbackPort: 9000,
   splVisibleMetrics: [],
+  splTrendShown: false,
+  splTrendMetric: null,
   onboardingDismissed: false,
   checklistNoteCategories: [],
   checklistNoteTeams: [],

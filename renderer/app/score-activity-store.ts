@@ -25,6 +25,16 @@ export interface ScoreActivityState {
   focus: number;
   /** The rev the panel last auto-opened for, so one score opens it once. */
   seenRev: number;
+  /**
+   * The one game a SCORE-driven open is about, by eventId — or null when the
+   * panel was opened by hand.
+   *
+   * A score is a notification about one game. Dropping the whole stack open told
+   * you something had happened and then made you work out WHICH, which is the
+   * one question the notification exists to answer. Opening the capsule by hand
+   * is the other intent — "show me everything" — and keeps the full stack.
+   */
+  only: string | null;
 }
 
 /** How long an auto-opened activity stays up before folding away by itself. */
@@ -50,7 +60,7 @@ export interface ScoreActivityStore {
    * late SSE subscriber from the hello burst, and without this a page opened five
    * minutes after a touchdown would pop the panel as if it had just happened.
    */
-  scored(rev: number, focus: number): void;
+  scored(rev: number, focus: number, eventId: string | null): void;
   /**
    * Seed `seenRev` without opening — used on first mount so a page loaded long
    * after a score does not animate a stale one.
@@ -59,7 +69,7 @@ export interface ScoreActivityStore {
 }
 
 export function createScoreActivity(): ScoreActivityStore {
-  let state: ScoreActivityState = { open: false, focus: 0, seenRev: 0 };
+  let state: ScoreActivityState = { open: false, focus: 0, seenRev: 0, only: null };
   const subscribers = new Set<() => void>();
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -90,21 +100,26 @@ export function createScoreActivity(): ScoreActivityStore {
     },
     toggle() {
       clearHold();
-      publish({ ...state, open: !state.open });
+      // A hand-driven open is "show me everything", so it clears the single-game
+      // narrowing a score left behind — including when it is REOPENED after a
+      // score folded away, which would otherwise still be showing one card.
+      publish({ ...state, open: !state.open, only: null });
     },
     close() {
       clearHold();
-      publish({ ...state, open: false });
+      publish({ ...state, open: false, only: null });
     },
     focus(i) {
       clearHold();
-      publish({ ...state, focus: i, open: true });
+      // Choosing a card is a hand-driven act too: it means the stack is open and
+      // being read, so the narrowing goes.
+      publish({ ...state, focus: i, open: true, only: null });
     },
-    scored(rev, focus) {
+    scored(rev, focus, eventId) {
       if (rev === state.seenRev) return;
       clearHold();
-      publish({ open: true, focus, seenRev: rev });
-      holdTimer = setTimeout(() => publish({ ...state, open: false }), SCORE_HOLD_MS);
+      publish({ open: true, focus, seenRev: rev, only: eventId });
+      holdTimer = setTimeout(() => publish({ ...state, open: false, only: null }), SCORE_HOLD_MS);
     },
     seed(rev) {
       if (state.seenRev === 0) publish({ ...state, seenRev: rev });

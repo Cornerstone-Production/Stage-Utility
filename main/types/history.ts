@@ -44,6 +44,39 @@ export interface SplItemHistory {
   endedAt: string | null;
 }
 
+/**
+ * One service's SPL, reduced to a level per metric.
+ *
+ * The trend line needs one number per service, not every item of every service.
+ * A year of weekly services is a few thousand per-item stat objects; this is one
+ * row each, so the History chart and the Home tile can both read the whole
+ * history without pulling the archive across the wire.
+ *
+ * `count` rides along per metric because the client combines rows further — the
+ * trend plots one point per DATE, and two services on a Sunday morning combine
+ * by the same energy weighting that built each of these in the first place.
+ */
+export interface SplServiceSummary {
+  serviceKey: string;
+  serviceTypeId: string | null;
+  serviceTypeName?: string | null;
+  serviceDate: string;
+  /**
+   * Null while the recording behind this summary is still running.
+   *
+   * NOT written once at the end: the recorder persists `current` on every live
+   * tick (see spl-recorder.ts's schedulePersist), so a service still in
+   * progress already has a summary here, and its Leq is a partial that will
+   * keep climbing as more items are sung or spoken. The overview's average
+   * has to know that on the SPL data's own terms — see overview-data.ts —
+   * rather than by asking a different recorder (attendance) whether IT thinks
+   * the occurrence is still live.
+   */
+  endedAt: string | null;
+  /** Service-level Leq per Smaart metric key, with the samples behind it. */
+  metrics: Record<string, { leq: number; count: number }>;
+}
+
 /** SPL recording for one service occurrence, keyed by serviceKey. */
 export interface ServiceSplHistory {
   /** `${serviceTypeId}:${planId}:${serviceTimeId ?? YYYY-MM-DD}`. */

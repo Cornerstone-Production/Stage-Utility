@@ -59,6 +59,107 @@ const REAPER_IDLE: ReaperStatusDTO = { connected: true, recording: false, record
 const STREAM_LIVE: StreamStatusDTO = { connected: true, live: true, startedAt: SINCE, detail: "Main encoder" };
 const STREAM_IDLE: StreamStatusDTO = { connected: true, live: false, startedAt: null, detail: null };
 
+/** Two followed games with different teams and different scores, so "any
+ *  followed team" (which takes the first) and a pin to the SECOND cannot draw
+ *  the same thing. Invented teams and ids — this is a public repo. */
+const team = (id: string, name: string, score: number): ScoreTeamDTO => ({
+  id,
+  abbreviation: name.slice(0, 3).toUpperCase(),
+  name,
+  displayName: `City of ${name}`,
+  color: null,
+  logo: null,
+  record: null,
+  score,
+});
+const game = (eventId: string, away: ScoreTeamDTO, home: ScoreTeamDTO, state: ScoreState): ScoreGameDTO => ({
+  eventId,
+  league: "mlb" as LeagueId,
+  sport: "baseball" as SportKind,
+  state,
+  delayed: false,
+  detail: state === "in" ? "Top 3rd" : "Final",
+  shortDetail: state === "in" ? "Top 3rd" : "Final",
+  clock: "",
+  startsAt: new Date(NOW - 3_600_000).toISOString(),
+  venue: null,
+  away,
+  home,
+  situation: null,
+});
+const GAME_A = game("evt-a", team("t-100", "Anvils", 3), team("t-101", "Beacons", 1), "in");
+const GAME_B = game("evt-b", team("t-200", "Cyphers", 7), team("t-201", "Drifters", 5), "in");
+const SCORES_LIVE: ScoresStatusDTO = {
+  connected: true,
+  games: [GAME_A, GAME_B],
+  scoreRev: 1,
+  lastEvents: [],
+  fetchedAt: new Date(NOW).toISOString(),
+  error: null,
+};
+/** Connected with nothing on today — both choices draw the same empty card, which
+ *  is why the guard only needs ONE of its four cells to differ. */
+const SCORES_IDLE: ScoresStatusDTO = { ...SCORES_LIVE, games: [], scoreRev: 0, fetchedAt: null };
+
+/**
+ * Three weekends of history, so `home-recent-services` has a chart to draw at all
+ * (it renders nothing below two points) and the SPL line has something to differ
+ * about — the levels are far apart so a metric swap cannot come out the same.
+ */
+const WEEKENDS = ["2026-08-16", "2026-08-23", "2026-08-30"];
+const attendance = (day: string, peak: number): ServiceAttendance => ({
+  serviceKey: `st-1:plan-${day}:${day}`,
+  serviceTypeId: "st-1",
+  serviceTypeName: "Weekend",
+  planId: `plan-${day}`,
+  planTitle: "Sample plan",
+  seriesTitle: null,
+  serviceDate: day,
+  serviceTimeId: null,
+  serviceTimeStartsAt: `${day}T15:00:00.000Z`,
+  startedAt: `${day}T15:00:00.000Z`,
+  endedAt: `${day}T16:30:00.000Z`,
+  samples: [],
+  attendanceBaseline: 0,
+  totalAttendance: peak,
+  peakAttendance: peak,
+  peakOccupancy: peak,
+  minOccupancy: 0,
+  lastAttendance: peak,
+  lastOccupancy: peak,
+});
+const ATTENDANCE: ServiceAttendance[] = [
+  attendance(WEEKENDS[0], 210),
+  attendance(WEEKENDS[1], 245),
+  attendance(WEEKENDS[2], 232),
+];
+/** Two metrics, far apart, so "which metric" changes the drawing. */
+const SPL_SUMMARY: SplServiceSummary[] = WEEKENDS.map((day, i) => ({
+  serviceKey: `st-1:plan-${day}:${day}`,
+  serviceTypeId: "st-1",
+  serviceTypeName: "Weekend",
+  serviceDate: day,
+  endedAt: `${day}T16:30:00.000Z`,
+  metrics: {
+    "LAeq 10": { leq: 88 + i * 2, count: 1000 },
+    "SPL C Fast": { leq: 101 - i * 3, count: 1000 },
+  },
+}));
+
+/** Two calibrated meters at DIFFERENT levels, so "loudest" and a pinned quiet
+ *  channel cannot come out the same number. Balcony is the quiet one. */
+const SPL_LIVE: SplMetricsDTO = {
+  connected: true,
+  apiVersion: "4",
+  meters: {
+    "Console::Main": { deviceName: "Console", channelName: "Main", metrics: { "SPL A Slow": 92.4 }, ts: SINCE },
+    "Console::Balcony": { deviceName: "Console", channelName: "Balcony", metrics: { "SPL A Slow": 78.1 }, ts: SINCE },
+  },
+};
+/** Connected, reporting nothing — the loudest-meter path says "no readings yet"
+ *  and a pinned meter says that meter is not reporting, which still differ. */
+const SPL_IDLE: SplMetricsDTO = { connected: true, apiVersion: "4", meters: {} };
+
 const LAYER: PvpLayerDTO = {
   uuid: "layer-1",
   name: "Lower third",
@@ -131,6 +232,11 @@ let happening = true;
     : url.includes("/api/reaper/status") ? pick(REAPER_LIVE, REAPER_IDLE)
     : url.includes("/api/resi/status") || url.includes("/api/youtube/status") ? pick(STREAM_LIVE, STREAM_IDLE)
     : url.includes("/api/pvp/status") ? pick(PVP_LIVE, PVP_IDLE)
+    : url.includes("/api/spl/metrics") ? pick(SPL_LIVE, SPL_IDLE)
+    : url.includes("/api/scores/status") ? pick(SCORES_LIVE, SCORES_IDLE)
+    : url.includes("/api/attendance/history") ? ATTENDANCE
+    : url.includes("/api/spl/summary") ? SPL_SUMMARY
+    : url.includes("/api/service-timeline") ? []
     : {};
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
@@ -140,7 +246,19 @@ const React = (await import("react")).default;
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
 const { LAYOUT_OBJECTS } = await import("./layout-objects.js");
-const { TOGGLE_PAIRS } = await import("../app/home/card-toggles.js");
+// A router IN CONTEXT, because one of the cards under test carries a link.
+// `home-recent-services` renders "Open History" as a real <Link>, and a Link asks
+// the router to build its location — with none in context it throws, and the pair
+// test would fail for the harness's reasons rather than the widget's.
+const { RouterContextProvider, createRootRoute, createRouter, createMemoryHistory } =
+  await import("@tanstack/react-router");
+const router = createRouter({
+  routeTree: createRootRoute(),
+  history: createMemoryHistory({ initialEntries: ["/"] }),
+});
+// Loaded before any render: an unloaded router cannot build a location.
+await router.load();
+const { TOGGLE_PAIRS, PICK_PAIRS } = await import("../app/home/card-toggles.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 before(() => {
@@ -160,6 +278,10 @@ function ctxFor(home: boolean, live: boolean) {
     resi: live ? STREAM_LIVE : STREAM_IDLE,
     youtube: live ? STREAM_LIVE : STREAM_IDLE,
     pvp: live ? PVP_LIVE : PVP_IDLE,
+    spl: live ? SPL_LIVE : SPL_IDLE,
+    // The WALL scores object reads ctx; the Home card opens its own hook. Both
+    // are fed, because the guard renders each pair on both surfaces.
+    scores: live ? SCORES_LIVE : SCORES_IDLE,
     propresenter: live ? PRO_LIVE : null,
     serviceTimeline: live ? TIMELINE : null,
   });
@@ -176,6 +298,21 @@ function ctxFor(home: boolean, live: boolean) {
 const VALUES: Record<string, [unknown, unknown]> = { format: ["24h", "12h"] };
 const valuesFor = (key: string) => VALUES[key] ?? [true, false];
 
+/**
+ * Config a setting needs switched on before it can do anything.
+ *
+ * `splMetric` chooses which metric the SPL trend line plots, and there is no line
+ * until `showSpl` is on. Without this the pair renders two identical cards and
+ * reports a live setting as dead — the false negative that mirrors the false
+ * positive above, and just as misleading.
+ *
+ * Deliberately narrow: a setting that needs a prerequisite is a setting the menu
+ * should be hiding until then, and both of these are.
+ */
+const PREREQ: Record<string, Record<string, unknown>> = {
+  splMetric: { showSpl: true },
+};
+
 /** One render of one object, as markup. */
 async function draw(type: string, key: string, value: unknown, home: boolean, live: boolean): Promise<string> {
   happening = live;
@@ -183,14 +320,29 @@ async function draw(type: string, key: string, value: unknown, home: boolean, li
   let container!: HTMLElement;
   await act(async () => {
     ({ container } = render(
-      React.createElement(ObjectContent, {
-        o: { id: "o1", x: 0, y: 0, w: 6, h: 4, z: 1, config: { ...base, [key]: value }, style: {} },
-        ctx: ctxFor(home, live),
-      } as never),
+      React.createElement(
+        RouterContextProvider as never,
+        { router },
+        React.createElement(ObjectContent, {
+          o: {
+            id: "o1", x: 0, y: 0, w: 6, h: 4, z: 1,
+            config: { ...base, ...(PREREQ[key] ?? {}), [key]: value },
+            style: {},
+          },
+          ctx: ctxFor(home, live),
+        } as never),
+      ),
     ));
     await settle();
   });
-  const html = container.innerHTML;
+  // React's useId values are NOT evidence of anything. They increment per render
+  // tree, so two renders of the same card carry different ids by construction —
+  // and any card whose markup contains one differs from itself no matter what the
+  // setting does. `home-recent-services` draws the trend chart, which mints two
+  // gradient ids, so both of its pair tests passed on `_r_0_` vs `_r_2_` alone;
+  // deleting the whole feature left them green. Normalised, the comparison is
+  // about the widget again.
+  const html = container.innerHTML.replace(/_r_[0-9a-z]+_/gi, "_id_");
   cleanup();
   return html;
 }
@@ -222,5 +374,121 @@ describe("every setting Home's card menu offers changes what the widget draws", 
           `${tried.join(", ")} — the menu writes it into the object and persists it, and nothing reads it`,
       );
     });
+  }
+});
+
+/**
+ * The two values a PICK is compared between.
+ *
+ * A pick is a choice from a list, not a flip, so there is no "off" to compute —
+ * each key names its default and one real alternative. A pick added without an
+ * entry here lands as [undefined, undefined] and fails to differ, which is the
+ * right way round: it says so rather than quietly testing nothing.
+ */
+const PICK_VALUES: Record<string, [unknown, unknown]> = {
+  meterId: ["loudest", "Console::Balcony"],
+  // "auto" takes the first followed game; the pin names the second.
+  game: ["auto", "mlb:t-200"],
+  // Every recorder at once vs one of them. REAPER is idle in the LIVE fixture
+  // while OBS is rolling, so "any" and "reaper" cannot draw the same thing.
+  recorder: ["any", "reaper"],
+  // Same idea: "any" answers for all three streamers, "youtube" for one.
+  platform: ["any", "youtube"],
+  // Two metrics whose levels are nowhere near each other, so the line moves.
+  splMetric: ["LAeq 10", "SPL C Fast"],
+};
+
+describe("every CHOICE Home's card menu offers changes what the widget draws", () => {
+  // The picks were outside this file entirely. TOGGLE_PAIRS is derived from
+  // APPLIES, and PICKS is a separate record — so "Game" had shipped unguarded
+  // against exactly the failure the toggles above exist to catch, and a new pick
+  // would have inherited that hole.
+  test("the pick list is the menu's own, and it is not empty", () => {
+    assert.ok(PICK_PAIRS.length > 0, "PICK_PAIRS is empty — the guard below would check nothing");
+    for (const { type } of PICK_PAIRS) {
+      assert.ok(type in LAYOUT_OBJECTS, `the menu offers a choice on "${type}", which is not an object type`);
+    }
+  });
+
+  for (const { type, key } of PICK_PAIRS) {
+    test(`${type} reads ${key}`, async () => {
+      const [on, off] = PICK_VALUES[key] ?? [undefined, undefined];
+      const tried: string[] = [];
+      for (const home of [false, true]) {
+        for (const live of [true, false]) {
+          const a = await draw(type, key, on, home, live);
+          const b = await draw(type, key, off, home, live);
+          if (a !== b) return;
+          tried.push(`${home ? "Home" : "wall"}/${live ? "live" : "idle"}`);
+        }
+      }
+      assert.fail(
+        `${key} on a ${type} draws exactly the same thing whichever of ${JSON.stringify(on)} / ` +
+          `${JSON.stringify(off)} it holds, on all four of ${tried.join(", ")} — the menu writes it ` +
+          `into the object and persists it, and nothing reads it`,
+      );
+    });
+  }
+});
+
+describe("a pick that both surfaces read is read on BOTH", () => {
+  // The four-cell rule above is right in general: a setting may legitimately
+  // belong to one surface, and demanding a difference on both would fail on a
+  // design decision instead of a bug.
+  //
+  // `platform` is not one of those. It decides which platform the HOME card
+  // filters to and names itself after, AND which twin the wall draws — and the
+  // two read it through different code (`STREAMER_FOR` at the card, the wall-twin
+  // lookup at the renderer). So a Home card that ignored the setting completely
+  // still differs on the wall, and the pair test above passes on the wall cell
+  // alone. Caught exactly that way: hardcoding the card to "any" left it green.
+  test("home-streaming reads platform on Home, not only on its wall twin", async () => {
+    const any = await draw("home-streaming", "platform", "any", true, true);
+    const one = await draw("home-streaming", "platform", "youtube", true, true);
+    assert.notEqual(any, one,
+      "the Home card draws the same thing for every platform and for one — it is ignoring the setting " +
+        "and only its wall twin reads it");
+  });
+});
+
+describe("a retired per-source card draws exactly what its replacement draws", () => {
+  // The whole promise of the retirement: the four cards left the palette, and
+  // NOTHING about what they draw changed. Each was the general card with one prop
+  // fixed, so the general card carrying the equivalent choice has to be
+  // indistinguishable from it — same markup, on both surfaces, live and idle.
+  //
+  // Anything less and an operator with one of these already on a page sees their
+  // page change under them, which is the one outcome the retirement was supposed
+  // to avoid. A saved card is not migrated, so both code paths stay live and both
+  // have to agree.
+  //
+  // WHAT IT CANNOT SEE: the two arms hand the SAME component different props, so a
+  // change inside that component moves both sides together and this stays green.
+  // Found the honest way — relabelling `RecordingCard` to prove this red did
+  // nothing, because it relabelled the retired card too. What it pins is that the
+  // two DISPATCHES agree, which is where a retirement actually goes wrong; the
+  // component's own drawing is the pair tests' job above.
+  const PAIRS: { retired: string; replacement: string; key: string; value: string }[] = [
+    { retired: "home-recording-obs", replacement: "home-recording", key: "recorder", value: "obs" },
+    { retired: "home-recording-reaper", replacement: "home-recording", key: "recorder", value: "reaper" },
+    { retired: "home-streaming-resi", replacement: "home-streaming", key: "platform", value: "resi" },
+    { retired: "home-streaming-youtube", replacement: "home-streaming", key: "platform", value: "youtube" },
+  ];
+
+  for (const { retired, replacement, key, value } of PAIRS) {
+    for (const home of [true, false]) {
+      for (const live of [true, false]) {
+        const where = `${home ? "Home" : "wall"}, ${live ? "live" : "idle"}`;
+        test(`${retired} === ${replacement} ${key}=${value} (${where})`, async () => {
+          // The retired card takes no such key — its source is in its type — so it
+          // is drawn from its own default config, untouched.
+          const old = await draw(retired, "__unused", undefined, home, live);
+          const now = await draw(replacement, key, value, home, live);
+          assert.equal(now, old,
+            `${replacement} with ${key}="${value}" no longer draws what ${retired} draws on ${where} — ` +
+              `retiring it changed somebody's page`);
+        });
+      }
+    }
   }
 });

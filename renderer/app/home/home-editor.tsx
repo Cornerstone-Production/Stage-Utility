@@ -13,7 +13,7 @@ import { useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { XIcon, GripVerticalIcon } from "lucide-react";
 
-import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, widgetMatchesQuery } from "../../main/layout-objects";
+import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, SUPERSEDED_ON_HOME, widgetMatchesQuery } from "../../main/layout-objects";
 import type { HomeCardSize, HomeVisibility, LayoutObject } from "@main/types/views";
 import { DialogOverlay } from "../../components/ui/dialog";
 import type { PointerEvent as ReactPointerEvent } from "react";
@@ -148,6 +148,12 @@ export function AddWidgetSheet({
       // things sit", which on Home is the grid's job. Offering them here would
       // be offering a control that does nothing.
       .filter(([t]) => !CANVAS_ONLY.has(t))
+      // Where Home has a card of its own for the same reading, offer THAT and
+      // not the wall widget. A wall widget draws its own card and Home already
+      // draws one around whatever it is given, so the wall version here is a
+      // card inside a card — which is what made "ProVideoPlayer now" and
+      // "On screen now" look like duplicates in this list. Six pairs.
+      .filter(([t]) => !SUPERSEDED_ON_HOME.has(t as LayoutObjectType))
       // Shared with the layout editor's palette, which offers the same search
       // box: one predicate, so the same words find the same widgets on both.
       .filter(([t]) => widgetMatchesQuery(t as LayoutObjectType, q)),

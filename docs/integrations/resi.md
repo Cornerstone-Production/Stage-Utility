@@ -55,8 +55,8 @@ over both.
 
 ## On a screen
 
-**Resi status** is a layout object, and the twin of **OBS status** and **REAPER
-status** — the same three states in the same words, so a wall carrying more than
+**Streaming status**, with its **Platform** set to Resi, is a layout object and the
+twin of **OBS status** and **REAPER status** — the same three states in the same words, so a wall carrying more than
 one of them reads as one design:
 
 | | |

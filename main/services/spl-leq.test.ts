@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { addLeqSample, leqOf } from "./spl-leq.js";
+import { addLeqSample, combineLeq, leqOf } from "./spl-leq.js";
 
 /** Fold a whole series through the incremental form, the way the recorder does. */
 function accumulate(samples: readonly number[]): number | null {
@@ -93,5 +93,59 @@ describe("addLeqSample", () => {
 
   test("a non-finite reading leaves the running level untouched", () => {
     assert.equal(addLeqSample(91, 5, Number.NaN), 91);
+  });
+});
+
+describe("combining per-item Leqs into a service level", () => {
+  test("matches leqOf over the same samples, weights and all", () => {
+    // The reference. Three items of very different lengths and levels; folding
+    // their Leqs with their sample counts must land on the level you would get
+    // by keeping every sample and averaging once.
+    const items = [
+      Array.from({ length: 5 }, () => 70),
+      Array.from({ length: 200 }, () => 95),
+      Array.from({ length: 40 }, () => 82),
+    ];
+    const parts = items.map((xs) => ({ leq: leqOf(xs), count: xs.length }));
+    const combined = combineLeq(parts);
+    const direct = leqOf(items.flat());
+    assert.ok(combined != null && direct != null);
+    assert.ok(Math.abs(combined - direct) < 1e-9, `${combined} vs ${direct}`);
+  });
+
+  test("the weights are the point — a short quiet item cannot cancel a long loud one", () => {
+    // The failure this exists for: an unweighted mean of these two Leqs is 82.5,
+    // which is 12 dB below what anybody in the room heard for all but five
+    // seconds of it. Averaging Leqs evenly is the same class of mistake as
+    // averaging dB arithmetically, one level up.
+    const weighted = combineLeq([
+      { leq: 70, count: 5 },
+      { leq: 95, count: 600 },
+    ]);
+    assert.ok(weighted != null);
+    assert.ok(weighted > 94, `expected the long loud item to dominate, got ${weighted}`);
+    const unweighted = (70 + 95) / 2;
+    assert.ok(weighted - unweighted > 10, "an even average would understate this by more than 10 dB");
+  });
+
+  test("items the meter never reported during are skipped, not counted as silence", () => {
+    // A null is "no reading", not 0 dB. Counting it as zero would drag a service
+    // average down by an item that was simply not measured.
+    const withGap = combineLeq([
+      { leq: 90, count: 100 },
+      { leq: null, count: 100 },
+      { leq: undefined, count: 100 },
+    ]);
+    assert.equal(withGap, 90);
+  });
+
+  test("a zero-sample part carries no weight even when it has a level", () => {
+    assert.equal(combineLeq([{ leq: 90, count: 100 }, { leq: 60, count: 0 }]), 90);
+  });
+
+  test("nothing to combine is null, not zero", () => {
+    assert.equal(combineLeq([]), null);
+    assert.equal(combineLeq([{ leq: null, count: 10 }]), null);
+    assert.equal(combineLeq([{ leq: 90, count: 0 }]), null);
   });
 });

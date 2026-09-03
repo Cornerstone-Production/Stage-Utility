@@ -21,7 +21,7 @@ const teardown = installDom();
 
 const React = await import("react");
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
-const { installFakeServer, withQueryClient, settle, idle, assertAbsent } = await import(
+const { installFakeServer, withQueryClient, settle, idle, assertAbsent , integrationCard } = await import(
   "../test-fixtures/integrations-harness.js"
 );
 const { IntegrationsPanel, integrationFlashId } = await import("./integrations-panel.js");
@@ -94,7 +94,7 @@ describe("the panel opens whatever it is told to", () => {
 
   test("clicking a card reports the id up rather than opening on its own", async () => {
     const c = await controlled(null);
-    fireEvent.click(c.container.querySelector<HTMLElement>('[data-integration-card="reaper"]')!);
+    fireEvent.click(await integrationCard(c.container, "reaper"));
     await settle(60);
     assert.deepEqual(seen, ["reaper"], "the panel did not tell its parent which card was clicked");
     assert.match(dialog()?.textContent ?? "", /REAPER/);
@@ -112,7 +112,7 @@ describe("the panel opens whatever it is told to", () => {
     server = installFakeServer();
     const c = render(withQueryClient(<IntegrationsPanel />));
     await idle();
-    fireEvent.click(c.container.querySelector<HTMLElement>('[data-integration-card="reaper"]')!);
+    fireEvent.click(await integrationCard(c.container, "reaper"));
     await settle(60);
     assert.match(dialog()?.textContent ?? "", /REAPER/);
   });

@@ -210,6 +210,46 @@ export async function until(ok: () => boolean, say: () => string, capMs = 5000):
 }
 
 /**
+ * The integration card for `id`, once it is actually on the page.
+ *
+ * `idle()` below answers a question about REACT-QUERY, not about the DOM. It
+ * returns as soon as the last query settles; React commits the render that draws
+ * the cards after that. On an unloaded machine the gap is invisible, which is why
+ * reading the DOM straight afterwards worked for a year. On a loaded CI runner it
+ * is wide enough to lose, and it took a release build down with
+ *
+ *   Unable to fire a "click" event - please provide a DOM element
+ *
+ * which is what `querySelector(...)!` reports when the card is simply not there
+ * yet. Five test files reached for a card that way.
+ *
+ * Polling for the card is NOT "waiting for the thing under test" here: every
+ * caller asserts about what happens after the click. The one test that does
+ * assert the cards render still uses `idle()` and asserts directly — see the note
+ * on `idle` about why that distinction matters.
+ */
+export async function integrationCard(
+  container: HTMLElement,
+  id: string,
+  capMs = 5000,
+): Promise<HTMLElement> {
+  const find = () => container.querySelector<HTMLElement>(`[data-integration-card="${id}"]`);
+  await until(
+    () => find() != null,
+    () => {
+      const seen = [...container.querySelectorAll("[data-integration-card]")].map((n) =>
+        n.getAttribute("data-integration-card"),
+      );
+      return seen.length === 0
+        ? `no integration cards rendered at all, so none for "${id}"`
+        : `no card for "${id}" — the page drew ${seen.length}: ${seen.join(", ")}`;
+    },
+    capMs,
+  );
+  return find()!;
+}
+
+/**
  * Wait until the page has finished loading — every query resolved, none in
  * flight.
  *
