@@ -29,6 +29,17 @@ Testing the integration reaches the ProdCom host/port; the API Key is only sent
 when ProdCom's "Require Authentication" is on. The key is stored encrypted
 (secret key `apiKey`).
 
+An in-progress line (a partial) is held per channel until its final arrives, or
+for 30 seconds after it last changed; an unchanged re-send from ProdCom does not
+reset that clock, and a sweep every five seconds clears a stale partial even when
+nobody else speaks. If a line ever sticks, the `/log` page has the evidence: a
+`[prodcom] partial on channel … in progress for Ns` line at one minute and every
+five after, a `[prodcom] final on channel … with no partial in flight` line when
+a final lands on a channel that has no partial while others do (the renamed
+channel case), and `[prodcom] transcript cleared by operator` naming every live
+partial and its age when the clear button is pressed. Text is never logged, only
+its length.
+
 ## Setup
 
 **In ProdCom:** enable the **Application API** in ProdCom's settings and note the
