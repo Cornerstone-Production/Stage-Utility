@@ -252,6 +252,10 @@ export interface PeopleCountDTO extends RevisionedStatus {
     avg?: number | null;
     /** Configured max capacity across the space(s) — for the % of capacity metric. */
     capacity?: number | null;
+    /** True when peak/min/avg/capacity are the last good values carried forward
+     *  because the day-aggregate request is failing, rather than this poll's.
+     *  Absent means they are current (or, on a site with no space, absent). */
+    dayAggregatesStale?: boolean;
   };
   zones: PeopleZoneCount[];
   /** Rolling building-total samples (oldest→newest) for the people-graph object.
