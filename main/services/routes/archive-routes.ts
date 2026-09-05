@@ -9,11 +9,17 @@
 import { errorMessage } from "../errors.js";
 import { buildArchive, importArchive, inspectArchive } from "../archive/archive-bundle.js";
 import { BodyTooLargeError, error, json, readRawBody, type RouteCtx } from "./context.js";
+import { zonedDateKey } from "../app-timezone.js";
+
+/** Dated in the app's zone, not the server's clock — see view-routes.exportFilename. */
+export function archiveExportFilename(at: number): string {
+  return `stage-archive-${zonedDateKey(at)}.zip`;
+}
 
 export async function archiveRoutes({ req, res, pathname, method }: RouteCtx): Promise<void> {
   if (method === "GET" && pathname === "/api/archive/export") {
     const zip = await buildArchive();
-    const fname = `stage-archive-${new Date().toISOString().slice(0, 10)}.zip`;
+    const fname = archiveExportFilename(Date.now());
     res.writeHead(200, {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="${fname}"`,

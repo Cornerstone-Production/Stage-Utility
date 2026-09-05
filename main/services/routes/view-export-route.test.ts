@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { exportFilename } from "./view-routes.js";
+import { configExportFilename } from "./system-routes.js";
+import { archiveExportFilename } from "./archive-routes.js";
+import { setAppTimeZone } from "../app-timezone.js";
 
 // The filename is the part of this route worth pinning in isolation: the body is
 // buildViewBundle's, already tested, and the wiring is proven against a real
@@ -36,5 +39,29 @@ describe("the download filename", () => {
     const out = exportFilename("x".repeat(500), new Date("2026-08-17T12:00:00Z"));
     assert.ok(out.length < 120, `filename is ${out.length} chars`);
     assert.ok(out.endsWith("2026-08-17.json"), "the date was truncated away");
+  });
+});
+
+// Every download is dated in the APP's zone, never the server's clock. Prod runs
+// UTC, so a config exported at 22:30 in Chicago on the 4th was named for the 5th
+// and read as a file from a day that had not happened yet. patch-export.ts had
+// the same line and the same fix first; these are the other three copies, held
+// to the same instant so they cannot drift apart again.
+describe("download dates follow the app time zone", () => {
+  // 04:30Z on the 5th is 23:30 on the 4th in Chicago — the exact report.
+  const lateEvening = Date.UTC(2026, 8, 5, 4, 30, 0);
+
+  test("the view, config and archive exports all date the file for the operator's day", (t) => {
+    setAppTimeZone("America/Chicago");
+    t.after(() => setAppTimeZone(null));
+    assert.equal(exportFilename("Left", new Date(lateEvening)), "stage-utility-view-left-2026-09-04.json");
+    assert.equal(configExportFilename(lateEvening), "stage-utility-config-2026-09-04.json");
+    assert.equal(archiveExportFilename(lateEvening), "stage-archive-2026-09-04.zip");
+  });
+
+  test("and still agree with the clock when the zone is UTC", (t) => {
+    setAppTimeZone("UTC");
+    t.after(() => setAppTimeZone(null));
+    assert.equal(configExportFilename(lateEvening), "stage-utility-config-2026-09-05.json");
   });
 });
