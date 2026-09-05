@@ -90,6 +90,10 @@ const CFG: SenSourceConfig = {
 };
 
 /** Every request the stub saw, in order. */
+/** The token endpoint, matched on the exact host — not a substring, which CodeQL
+ *  rightly flags: "auth.sensourceinc.com" can appear inside any URL. */
+const isAuthHost = (url: string): boolean => new URL(url).hostname === "auth.sensourceinc.com";
+
 let requests: string[] = [];
 /** DTOs the service actually published this run. */
 let emitted: PeopleCountDTO[] = [];
@@ -176,7 +180,7 @@ function stubFetch(opts: StubOptions = {}): void {
     requests.push(url);
     const auth = new Headers(init?.headers ?? {}).get("authorization") ?? "";
     if (url.includes("/data/traffic")) trafficAuth.push(auth);
-    if (url.includes("auth.sensourceinc.com")) {
+    if (isAuthHost(url)) {
       return opts.exchange?.() ?? json({ access_token: `t${requests.length}`, expires_in: 3600 });
     }
     const dataStatus = opts.dataStatus?.() ?? 200;
@@ -215,7 +219,7 @@ function stubFetch(opts: StubOptions = {}): void {
 const dayRequests = (): string[] =>
   requests.filter((u) => u.includes("/data/occupancy") && !u.includes("dateGroupings=minute"));
 const trafficRequests = (): string[] => requests.filter((u) => u.includes("/data/traffic"));
-const exchangeRequests = (): string[] => requests.filter((u) => u.includes("auth.sensourceinc.com"));
+const exchangeRequests = (): string[] => requests.filter(isAuthHost);
 
 /** Reset every scrap of poller state a previous case could have left behind. */
 function resetService(): void {
