@@ -646,12 +646,10 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       /** Overrides the object's own caption — for a widget whose caption names
        *  the source rather than being typed by the operator. */
       caption?: string | null;
+      /** The caption row's end slot — a reading that must not cost a line. */
+      captionEnd?: ReactNode;
       upper?: boolean;
       dim?: boolean;
-      /** Override the surface default below. For a widget whose sub-line comes
-       *  and goes with its STATE rather than with its configuration — see the
-       *  status readouts, which must not resize themselves when they go live. */
-      uniform?: boolean;
     },
   ) => (
     <Readout
@@ -694,9 +692,15 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     sub?: string | null;
   }) => (
     <Readout
+      // TWO LINES, ALWAYS — the same composition as the integration-status tile
+      // beside it, which is the size these were asked to match. A timecode or
+      // clock does not get a line of its own: a third line is paid for out of
+      // the value, and sizing every tile as though the line were always there
+      // (the previous fix) shrank the whole family instead. The reading takes
+      // the caption row's end slot, which costs no height.
       caption={s.caption}
+      captionEnd={s.active ? (s.sub ?? null) : null}
       value={s.active ? s.activeText : s.connected ? s.idleText : s.offlineText}
-      sub={s.active ? (s.sub ?? null) : null}
       upper
       fill={s.active && s.filled ? "var(--red-9)" : null}
       valueColor={s.active && !s.filled ? "var(--red-10)" : null}
@@ -704,11 +708,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // for "not recording" when the recorder simply cannot be reached.
       dim={!s.active && !s.connected}
       align={o.style?.textAlign}
-      // The same rule the streaming readout takes, and for the same reason: a
-      // recorder showing its timecode gains a third line when it rolls. It also
-      // keeps the two kinds the same size beside each other, which is the whole
-      // point of them sharing this composition.
-      uniform
     />
   );
 
@@ -753,9 +752,10 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // one red.
     return readout(ind.value, {
       caption: only ?? "Streaming",
-      // Only where there is a number to put underneath. On a wall the quiet
-      // states are one word; Home shows the connection line instead.
-      sub: ind.state === "live" ? ind.sub : null,
+      // The elapsed clock takes the caption row's end slot while live, exactly
+      // as a recorder's timecode does in statusReadout — see the note there.
+      // The quiet states are one word with nothing to add.
+      captionEnd: live ? ind.sub : null,
       upper: true,
       // QUIET IS ONE THING. Off air and unreachable both read at the same
       // strength, because both mean "nothing is going out" and the WORD already
@@ -769,14 +769,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       dim: !live,
       fill: live && filled ? "var(--green-9)" : null,
       valueColor: live && !filled ? "var(--green-10)" : null,
-      // SIZED AS THOUGH THE CLOCK WERE ALWAYS THERE, on a wall as well as on
-      // Home. The elapsed sub-line only exists while live, and the value's size
-      // is a share of what the other lines leave — so without this the word
-      // LIVE shrank and lifted at the exact moment it started mattering, while
-      // RECORDING beside it held its size because a recorder's timecode line is
-      // off by default. Reported as the streaming widget losing its styling
-      // when it went live; it was the one tile in the row resizing itself.
-      uniform: true,
     });
   };
 
