@@ -72,6 +72,31 @@ const TRANSCRIPT_THROTTLE_MS = 250;
  */
 const PARTIAL_TTL_MS = 30_000;
 
+/**
+ * How often the stale-partial sweep runs while a partial is held.
+ *
+ * pruneStalePartials() used to run only inside getBuffer(), which only executes
+ * on a broadcast or an HTTP read. In a quiet room — nobody else speaking, no
+ * poll hitting the backfill endpoint — a partial that went stale by the TTL
+ * above would sit on every open display until the next unrelated line from
+ * anyone nudged getBuffer(). This timer is the thing that notices on its own;
+ * it only runs while `partials` is non-empty, and stops the moment it empties
+ * (a final, a TTL drop, a clear, or a disconnect) so a quiet integration with no
+ * partial in flight has nothing ticking in the background.
+ */
+const PARTIAL_SWEEP_MS = 5_000;
+
+/**
+ * A partial that has been in progress this long is worth a log line even when
+ * it is behaving correctly (still updating, so the TTL above never touches
+ * it) — an operator watching a stuck-looking line at 9pm on a Sunday needs to
+ * be able to tell "this has genuinely been open for four minutes" from "the
+ * display froze". Measured from firstSeenAt, not seenAt, so it reflects how
+ * long the CHANNEL has been occupied, not how recently it last changed.
+ */
+const PARTIAL_LOG_AFTER_MS = 60_000;
+/** How often the still-open log repeats for a partial that keeps surviving. */
+const PARTIAL_LOG_REPEAT_MS = 5 * 60_000;
 
 function pick(obj: unknown, ...keys: string[]): unknown {
   let cur: unknown = obj;
@@ -109,6 +134,23 @@ function normalizeColor(raw: string | null): string | null {
   return /^[a-z]+$/i.test(s) ? s : null; // CSS named color, else ignore
 }
 
+/** One channel's in-progress partial, plus the bookkeeping the long-lived-
+ *  partial diagnostics below read. */
+type PartialEntry = {
+  line: TranscriptLineDTO;
+  /** OUR receive time of the last CHANGE (text or id differed) — drives the TTL. */
+  seenAt: number;
+  /** OUR receive time this channel's partial first appeared — drives the
+   *  "in progress for Ns" diagnostic, independent of whether it keeps changing. */
+  firstSeenAt: number;
+  /** Identical re-sends (same id, same text) since firstSeenAt. */
+  resendsUnchanged: number;
+  /** Re-sends where the text actually differed from the previous one. */
+  textChanges: number;
+  /** Last time the "in progress" log fired for this entry, or null if never. */
+  lastLoggedAt: number | null;
+};
+
 export class ProdComService extends ConnectionLifecycle {
   /** Wall clock, overridable so a test can age a partial without waiting 30s. */
   protected now(): number {
@@ -131,7 +173,17 @@ export class ProdComService extends ConnectionLifecycle {
    *  ProdCom event is whatever that box's clock said, and this is used to decide
    *  whether an entry has gone stale, which must not depend on a peer's clock. */
   private finals: TranscriptLineDTO[] = [];
-  private partials = new Map<string, { line: TranscriptLineDTO; seenAt: number }>();
+  private partials = new Map<string, PartialEntry>();
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  /** Channel keys already logged as "final with no matching partial" since the
+   *  current connection started — one log per key per connection, not one per
+   *  occurrence, or a channel stuck in that state would spam the log forever. */
+  private orphanFinalLogged = new Set<string>();
+
+  /** Test seam: whether the stale-partial sweep is currently armed. */
+  protected get partialSweepActive(): boolean {
+    return this.sweepTimer !== null;
+  }
 
   constructor() {
     super("prodcom", "prodcom:transcript");
@@ -164,6 +216,10 @@ export class ProdComService extends ConnectionLifecycle {
     // orphan kept here would sit under every real line until a restart. Finals are
     // deliberately kept, so a reconnect does not blank a display mid-service.
     this.partials.clear();
+    this.syncPartialSweep();
+    // A new connection is a new epoch for the renamed-channel diagnostic below —
+    // whatever channel keys existed before this reconnect are gone with it.
+    this.orphanFinalLogged.clear();
   }
 
   /** Restart the silence timer. Called on connect and on every chunk. */
@@ -195,7 +251,52 @@ export class ProdComService extends ConnectionLifecycle {
       dropped = true;
       console.log(`[prodcom] dropped a stale partial on channel ${scrub(ch)} — no final arrived`);
     }
+    this.syncPartialSweep();
     return dropped;
+  }
+
+  /**
+   * Arm the sweep timer while a partial is held, disarm it the moment none is.
+   * Called after every mutation of `partials` so the timer's lifetime tracks
+   * the map's emptiness exactly, rather than depending on every call site to
+   * remember both halves.
+   */
+  private syncPartialSweep(): void {
+    if (this.partials.size > 0) {
+      if (this.sweepTimer) return;
+      this.sweepTimer = setInterval(() => {
+        const dropped = this.pruneStalePartials();
+        this.logLongLivedPartials();
+        if (dropped) this.flushTranscript();
+      }, PARTIAL_SWEEP_MS);
+      this.sweepTimer.unref?.();
+    } else if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
+
+  /**
+   * Log a channel whose partial has been open a long time, whether or not it is
+   * behaving correctly — a live monologue and a stuck line both look the same
+   * from the outside ("still there"), and this is what tells them apart after
+   * the fact. Fires once at PARTIAL_LOG_AFTER_MS, then at most once every
+   * PARTIAL_LOG_REPEAT_MS while the same entry survives.
+   */
+  private logLongLivedPartials(): void {
+    const now = this.now();
+    for (const [ch, entry] of this.partials) {
+      const age = now - entry.firstSeenAt;
+      if (age < PARTIAL_LOG_AFTER_MS) continue;
+      if (entry.lastLoggedAt != null && now - entry.lastLoggedAt < PARTIAL_LOG_REPEAT_MS) continue;
+      entry.lastLoggedAt = now;
+      const lastUpdateAgo = Math.round((now - entry.seenAt) / 1000);
+      console.log(
+        `[prodcom] partial on channel ${scrub(ch)} in progress for ${Math.round(age / 1000)}s — ` +
+          `${entry.resendsUnchanged} unchanged re-sends, ${entry.textChanges} text changes, ` +
+          `last update ${lastUpdateAgo}s ago, ${entry.line.text.length} chars`,
+      );
+    }
   }
 
   /**
@@ -204,10 +305,24 @@ export class ProdComService extends ConnectionLifecycle {
    * Both halves, because the stuck-line case needs the partials gone and an
    * operator asking for a clear means the screen, which is the finals. Broadcasts
    * unconditionally: the point is that the display goes empty NOW.
+   *
+   * Logs each partial being discarded BEFORE clearing — the operator's button
+   * is the only cure for the stuck-line bug this file guards against, so the
+   * moment it's pressed is the moment to record which channel was stuck, for
+   * how long, and how it behaved, in case it happens again.
    */
   clearTranscript(): void {
+    const now = this.now();
+    for (const [ch, entry] of this.partials) {
+      const age = Math.round((now - entry.firstSeenAt) / 1000);
+      console.log(
+        `[prodcom] transcript cleared by operator: ${this.finals.length} finals, ${this.partials.size} partials; ` +
+          `partial ch=${scrub(ch)} age=${age}s unchanged-resends=${entry.resendsUnchanged} text-changes=${entry.textChanges}`,
+      );
+    }
     this.finals = [];
     this.partials.clear();
+    this.syncPartialSweep();
     broadcast("prodcom:transcript", this.getBuffer());
     console.log("[prodcom] transcript cleared");
   }
@@ -390,11 +505,40 @@ export class ProdComService extends ConnectionLifecycle {
   private ingest(line: TranscriptLineDTO): void {
     const ch = line.channel ?? "_";
     if (line.isFinal) {
+      const hadPartial = this.partials.has(ch);
+      // The renamed-channel case from the incident this file guards against: a
+      // final lands under a key with no partial to resolve, while OTHER
+      // channels are mid-utterance. Once per channel per connection, or a
+      // channel stuck in this state would spam the log on every final.
+      if (!hadPartial && this.partials.size > 0 && !this.orphanFinalLogged.has(ch)) {
+        this.orphanFinalLogged.add(ch);
+        console.log(
+          `[prodcom] final on channel ${scrub(ch)} with no partial in flight; ` +
+            `${this.partials.size} partial(s) live on other channels`,
+        );
+      }
       this.partials.delete(ch);
+      this.syncPartialSweep();
       this.addFinal(line);
       this.flushTranscript(); // finals land immediately
     } else {
-      this.partials.set(ch, { line, seenAt: this.now() });
+      // A re-send of the SAME partial (identical id and text) is not progress —
+      // ProdCom re-emitting an interim result on a keepalive, or a recogniser
+      // stalled on an open mic, both look like this. Only a genuine change
+      // refreshes seenAt; an unchanged re-send keeps the original arrival time,
+      // or the TTL below would never elapse no matter how long it sat there.
+      const existing = this.partials.get(ch);
+      const unchanged = !!existing && existing.line.id === line.id && existing.line.text === line.text;
+      const now = this.now();
+      this.partials.set(ch, {
+        line,
+        seenAt: unchanged ? existing!.seenAt : now,
+        firstSeenAt: existing ? existing.firstSeenAt : now,
+        resendsUnchanged: (existing?.resendsUnchanged ?? 0) + (unchanged ? 1 : 0),
+        textChanges: (existing?.textChanges ?? 0) + (existing && !unchanged ? 1 : 0),
+        lastLoggedAt: existing?.lastLoggedAt ?? null,
+      });
+      this.syncPartialSweep();
       this.scheduleTranscript(); // interim partials arrive many/sec — coalesce them
     }
   }
