@@ -13,7 +13,8 @@ SenSource has no push, webhook or streaming endpoint, so the poller
 - Auth is transparent to the operator: they enter an API client **id + secret**
   (created in the Vea app) and Stage exchanges those for a short-lived Bearer
   token via the client-credentials call, refreshing before expiry. A directly
-  pasted long-lived static token is also accepted and skips the exchange.
+  pasted long-lived static token is also accepted and skips the exchange. See
+  [Auth](#auth) for what happens when a token is rejected.
 - Per-zone breakdown comes from `/data/traffic` (`entityType=zone`), summed per
   zone. The Vea traffic endpoint has no working server-side location/zone filter,
   so Stage always requests every zone and narrows to the selected zones
@@ -22,11 +23,25 @@ SenSource has no push, webhook or streaming endpoint, so the poller
   (`entityType=space`) endpoint when a space exists — matching the Vea dashboard's
   live "Most Recent Occupancy" — with peak/min/avg/capacity. It falls back to the
   zone-derived net when a site has no spaces.
+- When the day request fails, today's peak, lowest, mean and capacity are
+  carried forward from the last good response for up to ten minutes, and live
+  occupancy stays this poll's. Attendance stays on the same source throughout:
+  the last space-derived count advanced by what the zone traffic has counted
+  since, never swapped for the raw zone total, which counts doors the space total
+  does not and would otherwise step up and down on alternate polls in the field
+  service history is recorded from. Past ten minutes — or once the date rolls
+  over in the app time zone, whichever comes first — the carried values go back
+  to unknown, the objects showing them read "—", and attendance falls back to the
+  zone total.
 - The zone-traffic and day-occupancy requests are issued together rather than one
-  after the other; the per-minute occupancy request follows only when the day
-  response reports at least one space. Both parallel requests ask for a Bearer
+  after the other; the per-minute occupancy request follows when the day response
+  **or** the `/space` listing reports a space, so it still runs on a poll whose
+  day request was rejected. Both parallel requests ask for a Bearer
   token, so the client-credentials exchange is de-duplicated behind a single
   in-flight promise.
+- A poll whose configuration is replaced while it is in flight publishes nothing
+  and carries nothing forward: its answers describe a scope the operator has
+  already changed.
 - Counts broadcast on the SSE channel **`people:count`** (skipping re-broadcasts
   when the substantive counts are unchanged); `GET /api/people/count` hydrates a
   freshly loaded display. A rolling trend buffer backs the people-graph.
@@ -99,7 +114,48 @@ raising it to stay inside an API quota does what you expect.
 
 A failing endpoint backs off instead of retrying at full rate, and logs the first
 failure rather than one line per attempt. Outside the service window it goes
-dormant with the other integrations.
+dormant with the other integrations. A partial failure — the day aggregates, or
+the live minute series — is logged when it starts and when it clears, never once
+per poll.
+
+## Auth
+
+**Give every Stage instance its own Vea API client.** Vea keeps one live token
+per API client: minting a token invalidates the client's previous one. Two
+instances sharing a client therefore knock each other offline in turn, and a
+spare box left running is enough to do it to production.
+
+Stage will not make that worse, and says so on the log when it sees it:
+
+- A rejected request is retried once on the same token. Whether the token itself
+  is at fault is decided **per poll**, once, from every request in that poll
+  together — never from a single response, whose arrival order says nothing.
+- One endpoint's 401 beside another endpoint's success is that endpoint failing.
+  The request fails alone and the token is left in place.
+- Every request in a poll rejected means the token is dead. A token more than a
+  minute old is replaced immediately and the poll re-run once on the new one, so
+  an ordinary token rollover costs a display nothing.
+- A token rejected **within a minute of being issued** is not replaced — that is
+  the loop two instances get into. It is dropped, a probable shared API client is
+  reported with the fix named, and the poll backs off. The line is written at
+  most once an hour, because the condition lasts until somebody changes the
+  configuration.
+- No token is minted more often than once every 30 seconds. That floor holds for
+  the poller and for the **Test connection** button alike; a Test pressed inside
+  the window reports how long is left rather than minting a second token. Saving
+  the integration's settings resets the floor, so a corrected client id takes
+  effect at once.
+- Because a dead token is replaced and the poll re-run, a genuinely shared API
+  client is usually recognised on the poll AFTER the one that first hit it: the
+  re-run mints, the next poll's rejection is the one that arrives on a
+  seconds-old token.
+- `HTTP 429` on the token exchange honours `Retry-After`, capped at 15 minutes,
+  or waits a minute when the response does not carry one.
+
+The first rejected response of an outage is logged with what Vea said, per
+request — so the reason is on `/log` once, whatever the body says. A response
+whose text changes every time (a timestamp, a request id) does not turn that into
+a line per poll.
 
 The trend buffer behind the people-graph samples on its own 45s clock rather than
 once per poll, so its ~3h span does not shrink when the interval drops.
