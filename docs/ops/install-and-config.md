@@ -330,8 +330,9 @@ Greenwich — 19:00 in Chicago, 16:00 in Los Angeles.
 
 The setting shows what the host clock reads plus a live clock in the zone you
 pick, so a wrong one is obvious immediately. It governs which day a service is
-filed under, the scheduled update window, and the day-of-week and time-of-day
-automation conditions. It does not govern whether a live service is recorded —
+filed under, the date in the name of every downloaded file (config, archive, view
+and patch exports), the scheduled update window, and the day-of-week and
+time-of-day automation conditions. It does not govern whether a live service is recorded —
 that is deliberately independent of the clock.
 
 Setting the host's own zone (`timedatectl set-timezone America/Chicago`) also
