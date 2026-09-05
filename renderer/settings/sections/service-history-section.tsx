@@ -1,5 +1,5 @@
 import { errorMessage } from "@main/services/errors";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { linkBaptisms, baptismStats } from "../../lib/link-baptisms";
 import { cn } from "../../lib/cn";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
@@ -119,6 +119,25 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
  * started late and total over/under. One record per PCO service-time occurrence
  * (same scheme as SPL History / Attendance), grouped by day.
  */
+/**
+ * One row in the day list — a service occurrence with EITHER (or both) of its
+ * two possible records. A timeline record starts when the first PCO item goes
+ * live; the attendance recorder opens its own record an hour earlier, at the
+ * start of the pre-service arrival ramp (see attendance-recorder.ts), so a
+ * service that hasn't gone live yet has attendance but no timeline. Union'd on
+ * `serviceKey` so that service is still one row, not a missing one.
+ */
+interface HistoryRow {
+  serviceKey: string;
+  serviceDate: string;
+  serviceTypeId: string | null;
+  serviceTypeName?: string | null;
+  planTitle: string | null;
+  startsAt: string | null;
+  timeline: ServiceTimeline | null;
+  attendance: ServiceAttendance | null;
+}
+
 const EXPORT_SHEETS: { id: string; label: string; hint: string }[] = [
   { id: "services", label: "Services summary", hint: "one row per service" },
   { id: "attendance", label: "Attendance polls", hint: "every poll sample" },
@@ -151,6 +170,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     shown: false,
     metric: null,
   });
+
+  // A live-updating mirror of selectedKey for the service-timeline:history
+  // handler below, which subscribes once (empty deps) and would otherwise only
+  // ever see the selectedKey from the render it mounted in.
+  const selectedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedKeyRef.current = selectedKey;
+  }, [selectedKey]);
 
   const [day, setDay] = useState<string | null>(null);
   // Editing the service window (times) in the detail view.
@@ -227,7 +254,16 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         next[i] = rec;
         return next;
       });
-      setDetail((d) => (d && d.serviceKey === rec.serviceKey ? rec : d));
+      setDetail((d) => {
+        if (d && d.serviceKey === rec.serviceKey) return rec;
+        // The service just went live — its timeline record now exists where a
+        // moment ago there was only an attendance one. If that's the record
+        // open right now (as the attendance-only branch, `d` still null), swap
+        // straight to the full detail instead of leaving it stuck showing the
+        // arrival-only view.
+        if (d == null && selectedKeyRef.current === rec.serviceKey) return rec;
+        return d;
+      });
     });
     const offAtt = onNotification("attendance:history", (p) => {
       const rec = p as ServiceAttendance | null;
@@ -253,8 +289,54 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // list — tick every second so the live "Actual"/"running" durations count up
   // between attendance/timeline broadcasts. (The Overview trend includes the
   // recording service; its computed stats stay over finished ones.)
-  const detailLive = detail != null && detail.endedAt == null;
-  const listLive = (list ?? []).some((t) => t.endedAt == null);
+  // One row per service occurrence — the union of timeline records and any
+  // attendance record with no timeline record of the same serviceKey (the
+  // arrival ramp, recorded before the first PCO item goes live). See
+  // HistoryRow above. Everything the day list, the calendar and the service-type
+  // picker are built from; the Overview's computed averages are NOT — those stay
+  // on `computeOverview(list, attList, …)` below, over settled timeline records
+  // only, exactly as before this change.
+  const rows = useMemo<HistoryRow[]>(() => {
+    const tlKeys = new Set((list ?? []).map((t) => t.serviceKey));
+    const tlRows: HistoryRow[] = (list ?? []).map((t) => ({
+      serviceKey: t.serviceKey,
+      serviceDate: t.serviceDate,
+      serviceTypeId: t.serviceTypeId,
+      serviceTypeName: t.serviceTypeName,
+      planTitle: t.planTitle,
+      startsAt: t.serviceTimeStartsAt ?? t.startedAt,
+      timeline: t,
+      attendance: attList.find((a) => a.serviceKey === t.serviceKey) ?? null,
+    }));
+    const attOnlyRows: HistoryRow[] = attList
+      .filter((a) => !tlKeys.has(a.serviceKey))
+      .map((a) => ({
+        serviceKey: a.serviceKey,
+        serviceDate: a.serviceDate,
+        serviceTypeId: a.serviceTypeId,
+        serviceTypeName: a.serviceTypeName,
+        planTitle: a.planTitle,
+        startsAt: a.serviceTimeStartsAt ?? a.startedAt,
+        timeline: null,
+        attendance: a,
+      }));
+    return [...tlRows, ...attOnlyRows].sort((a, b) => Date.parse(b.startsAt ?? "") - Date.parse(a.startsAt ?? ""));
+  }, [list, attList]);
+  /** The row for the current selection, if any — known synchronously from `list`/
+   *  `attList` (no fetch to wait on), so it tells the detail view whether a
+   *  timeline record is ever coming for this key without racing `detail`'s own
+   *  async load (see the `!detail && attendance` branch below). */
+  const selectedRow = useMemo(
+    () => rows.find((r) => r.serviceKey === selectedKey) ?? null,
+    [rows, selectedKey],
+  );
+
+  // Live also while the open detail is an attendance-only record (no timeline
+  // yet) — `detail` stays null for that branch, so its liveness comes from
+  // `attendance` instead, but only when `detail` really has nothing to say
+  // (an attendance-only selection never populates `detail` at all).
+  const detailLive = detail != null ? detail.endedAt == null : attendance != null && attendance.endedAt == null;
+  const listLive = rows.some((r) => (r.timeline ?? r.attendance)?.endedAt == null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
     if (!detailLive && !listLive) return;
@@ -296,43 +378,43 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
 
   // The service type the overview reflects — derived, not user-picked. It follows
   // whatever you've selected (a drilled-in service, else the selected calendar
-  // day's service), and defaults to the most recent service's type (list is sorted
+  // day's service), and defaults to the most recent service's type (rows is sorted
   // newest-first; `day` auto-selects the newest day, so this lands on "most recent"
   // out of the box). Keeps each type's averages separate without a manual filter.
   const activeType = useMemo<string | null>(() => {
     if (overviewType) return overviewType;
     if (selectedKey) {
-      const s = (list ?? []).find((x) => x.serviceKey === selectedKey);
+      const s = rows.find((x) => x.serviceKey === selectedKey);
       if (s) return s.serviceTypeId;
     }
     if (day) {
-      const s = (list ?? []).find((x) => x.serviceDate === day);
+      const s = rows.find((x) => x.serviceDate === day);
       if (s) return s.serviceTypeId;
     }
-    return (list ?? [])[0]?.serviceTypeId ?? null;
-  }, [overviewType, selectedKey, day, list]);
+    return rows[0]?.serviceTypeId ?? null;
+  }, [overviewType, selectedKey, day, rows]);
   /** Every service type in the history, for the Overview scope picker. Only worth
    *  showing when there is more than one — a single-type church should not see a
    *  control with one option in it. */
   const serviceTypes = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const s of list ?? []) {
+    for (const s of rows) {
       if (s.serviceTypeId && !seen.has(s.serviceTypeId)) {
         seen.set(s.serviceTypeId, s.serviceTypeName ?? s.serviceTypeId);
       }
     }
     return [...seen].map(([id, name]) => ({ id, name }));
-  }, [list]);
+  }, [rows]);
 
   const activeTypeName = useMemo<string | null>(() => {
     if (!activeType) return null;
-    const s = (list ?? []).find((x) => x.serviceTypeId === activeType);
+    const s = rows.find((x) => x.serviceTypeId === activeType);
     return s?.serviceTypeName ?? activeType;
-  }, [list, activeType]);
+  }, [rows, activeType]);
 
   // All services — the calendar and day list stay global so you can navigate to any
   // service; only the overview scopes to activeType (below).
-  const filtered = useMemo(() => list ?? [], [list]);
+  const filtered = rows;
 
   const days = useMemo(() => {
     const set = new Set<string>();
@@ -340,10 +422,21 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
   }, [filtered]);
 
-  // Auto-select the newest day; also re-select when the filter drops the current day.
-  useResyncOn([days, day], () => {
-    if (days.length > 0 && (day == null || !days.includes(day))) setDay(days[0]);
+  // Follow the newest day until the operator picks one; also re-select when the
+  // filter drops the current day. FOLLOW, not select-once: the timeline list and
+  // the attendance list arrive separately, and the newest day can change when the
+  // second one lands — today's arrival ramp is an attendance-only day that did not
+  // exist when the timeline list chose yesterday. A day the operator clicked is
+  // theirs and is left alone.
+  const [dayPicked, setDayPicked] = useState(false);
+  useResyncOn([days, day, dayPicked], () => {
+    if (days.length === 0) return;
+    if (day == null || !days.includes(day) || (!dayPicked && day !== days[0])) setDay(days[0]);
   });
+  const pickDay = (d: string) => {
+    setDayPicked(true);
+    setDay(d);
+  };
 
   const dayServices = useMemo(() => filtered.filter((s) => s.serviceDate === day), [filtered, day]);
   // Per-day service counts for the calendar (respects the type filter).
@@ -408,6 +501,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       destructive: true,
     }))) return;
     setList((prev) => (prev ? prev.filter((s) => s.serviceKey !== key) : prev));
+    // deleteServiceRecords removes the attendance record too (same serviceKey,
+    // one of the three stores it always names in the confirm dialog above) — if
+    // this row is attendance-only, it would otherwise resurrect itself the
+    // instant `rows` recomputes, from an attList entry nothing ever cleared.
+    setAttList((prev) => prev.filter((a) => a.serviceKey !== key));
     if (selectedKey === key) setSelectedKey(null);
     try {
       await invoke("serviceTimeline:delete", { serviceKey: key });
@@ -416,6 +514,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       // reads as a glitch, and the most likely reason for a refusal is one the
       // operator can act on: the service is still recording.
       reload();
+      invoke<ServiceAttendance[]>("attendance:listHistory")
+        .then((a) => setAttList(a ?? []))
+        .catch(() => {
+          /* the optimistic removal above just stays applied */
+        });
       toast.error(`Couldn't delete that recording: ${errorMessage(e)}`);
     }
   }
@@ -428,7 +531,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     );
   }
 
-  if (list.length === 0) {
+  if (rows.length === 0) {
     return (
       <div className="py-8">
         <EmptyState
@@ -695,6 +798,53 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     );
   }
 
+  // ── Detail: a service that is only in the middle of its pre-service arrival
+  // ramp — attendance recording has started, but the first PCO item hasn't
+  // gone live yet, so there is no timeline record (and no rundown, stats or
+  // report to build from one). `selectedRow` (built synchronously from
+  // `list`/`attList`, no fetch involved) is what tells this apart from "the
+  // timeline record for this key just hasn't loaded yet" — that case falls
+  // through to the list view below until `detail` resolves, exactly as before.
+  if (!detail && attendance && selectedRow && !selectedRow.timeline) {
+    const live = attendance.endedAt == null;
+    const lastOccupancy = attendance.samples[attendance.samples.length - 1]?.occupancy ?? 0;
+    const statusText = live ? `${lastOccupancy.toLocaleString()} in the room now` : "no items recorded";
+    return (
+      <div className="flex flex-col gap-4">
+        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
+          ← All services
+        </button>
+        <div className="flex flex-col min-w-0">
+          <span className="text-title3 font-semibold text-gray-12">
+            {attendance.planTitle ?? attendance.serviceKey}
+            {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
+          </span>
+          <span className="text-caption1 text-gray-9">
+            {fmtDate(attendance.startedAt)}
+            {live
+              ? ` · arriving · recording since ${fmtTime(attendance.startedAt)} · ${statusText}`
+              : ` · recorded ${fmtTime(attendance.startedAt)}–${fmtTime(attendance.endedAt as string)} · ${statusText}`}
+          </span>
+        </div>
+        <p className="text-caption1 text-gray-9">
+          Item timings appear here when the first item goes live in Planning Center.
+        </p>
+        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
+          <span className="text-body font-semibold text-gray-12">Attendance</span>
+          <AttendanceDetail detail={attendance} timeline={null} />
+        </div>
+        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
+          <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
+          {spl ? (
+            <SplDetail detail={spl} />
+          ) : (
+            <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ── List view: services for the selected day. ──
   return (
     <div className="flex flex-col gap-3">
@@ -781,7 +931,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       {/* Calendar (sticky) + selected-day detail. */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-[320px_1fr] sm:items-start">
         <div className="sm:sticky sm:top-0 flex flex-col gap-3">
-          <HistoryCalendar counts={dateCounts} intensity={dateIntensity} selected={day} onPick={setDay} />
+          <HistoryCalendar counts={dateCounts} intensity={dateIntensity} selected={day} onPick={pickDay} />
           {day && daySummary && (
             <div className="su-card px-4 py-3 text-caption1 text-fg-muted">
               Selected: <span className="font-mono tabular-nums text-fg">{shortDay(day)}</span>
@@ -801,7 +951,42 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
 
         <div className="min-w-0 flex flex-col gap-2">
           {day && <span className="text-body font-semibold text-gray-12">{fmtDay(day)}</span>}
-          {dayServices.map((s) => {
+          {dayServices.map((row) => {
+            // Attendance-only rows (arrival ramp, no timeline record yet) have no
+            // items and no rundown to summarize — a separate, simpler card.
+            if (!row.timeline) {
+              const att = row.attendance!;
+              const rowLive = att.endedAt == null;
+              const lastOccupancy = att.samples[att.samples.length - 1]?.occupancy ?? 0;
+              const caption = rowLive
+                ? `${fmtTime(row.startsAt)} · arriving · ${lastOccupancy.toLocaleString()} in the room`
+                : `${fmtTime(row.startsAt)} · no items recorded`;
+              return (
+                <div key={row.serviceKey} className="flex items-center gap-1 su-card pr-1.5 hover:bg-fill transition-colors">
+                  <button className="flex flex-1 min-w-0 items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={() => setSelectedKey(row.serviceKey)}>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-body font-medium text-gray-12 truncate">{row.planTitle ?? row.serviceKey}</span>
+                      <span className="text-caption2 text-gray-9 truncate">{caption}</span>
+                    </div>
+                    <span className="shrink-0 tabular-nums text-caption1 text-right">
+                      <span className="ml-3 whitespace-nowrap"><span className="text-gray-9">recording since </span><span className="text-accent">{fmtTime(att.startedAt)}</span></span>
+                    </span>
+                  </button>
+                  {!readOnly && (
+                    <Tooltip label="Delete recording">
+                      <button
+                        className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                        onClick={() => deleteService(row.serviceKey, row.planTitle ?? row.serviceKey)}
+                        aria-label={`Delete recording for ${row.planTitle ?? "service"}`}
+                      >
+                        <Trash2Icon className="size-4" />
+                      </button>
+                    </Tooltip>
+                  )}
+                </div>
+              );
+            }
+            const s = row.timeline;
             const live = s.endedAt == null;
             // Live rows count up (summarize adds the in-progress item's elapsed);
             // finished rows show the settled total.

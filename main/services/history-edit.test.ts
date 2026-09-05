@@ -272,6 +272,25 @@ describe("deleteServiceRecords", () => {
     const r = await deleteServiceRecords("st1:plan9:9am");
     assert.equal(r.deleted, true, "the 9am must still be deletable while the 11am runs");
   });
+
+  it("deletes an attendance-only record — the pre-service arrival ramp, before any timeline record exists", async () => {
+    // The attendance recorder opens its record up to an hour before the first
+    // PCO item goes live (main/services/attendance-recorder.ts) — History's
+    // "arriving" row is exactly this case, with no timeline or SPL record yet.
+    // "Delete recording" on that row must not assume all three stores are there.
+    const key = "st1:plan9:arriving-only";
+    await attendanceStore.upsert({
+      ...identity, serviceKey: key,
+      attendanceBaseline: 0, totalAttendance: 0, peakAttendance: 0, peakOccupancy: 0,
+      minOccupancy: null, lastAttendance: 0, lastOccupancy: 0, samples: [],
+    } as never);
+    assert.equal(await serviceTimelineStore.get(key), null, "precondition: no timeline record");
+    assert.equal(await splHistoryStore.get(key), null, "precondition: no SPL record");
+
+    const result = await deleteServiceRecords(key);
+    assert.deepEqual(result, { deleted: true, records: ["attendance"] });
+    assert.equal(await attendanceStore.get(key), null, "attendance record still there");
+  });
 });
 
 describe("editServiceWindow and recalcAttendance", () => {
