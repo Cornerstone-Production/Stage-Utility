@@ -335,6 +335,27 @@ export function HomeRoute() {
         })),
       });
     }
+    // Which name the compact PVP "now" caption borrows. Offered only while
+    // Compact is ON, the same reason the SPL metric picker below is gated on
+    // its own switch — a Label picker for a mode the card is not drawing is a
+    // setting for something the operator cannot see.
+    const nowLabel = pickedValue(card, "nowLabel");
+    if (nowLabel != null && (card.config as { compact?: boolean }).compact) {
+      const map = PICK_OPTIONS.nowLabel;
+      if (map) {
+        items.push({
+          label: "Label",
+          items: sourceOptions(map, "Cue").map((o) => ({
+            label: o.label,
+            checked: nowLabel === o.value,
+            onSelect: () => {
+              save((objs) => replaceCard(objs, withToggle(card, "nowLabel", o.value)));
+              setMenu(null);
+            },
+          })),
+        });
+      }
+    }
     // Which metric the Recent services card's trend line plots. Offered only
     // while the line is ON — a metric picker above a switch that is off is a
     // setting for something the operator cannot see.

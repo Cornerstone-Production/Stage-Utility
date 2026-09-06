@@ -311,6 +311,9 @@ const valuesFor = (key: string) => VALUES[key] ?? [true, false];
  */
 const PREREQ: Record<string, Record<string, unknown>> = {
   splMetric: { showSpl: true },
+  // Label only has an effect in compact mode — the normal composition's value
+  // stays the media name regardless of it.
+  nowLabel: { compact: true },
 };
 
 /** One render of one object, as markup. */
@@ -396,6 +399,10 @@ const PICK_VALUES: Record<string, [unknown, unknown]> = {
   platform: ["any", "youtube"],
   // Two metrics whose levels are nowhere near each other, so the line moves.
   splMetric: ["LAeq 10", "SPL C Fast"],
+  // The fixture layer's cue name and its file name (minus extension) are
+  // deliberately different strings, so the two labels cannot draw the same
+  // caption.
+  nowLabel: ["cue", "file"],
 };
 
 describe("every CHOICE Home's card menu offers changes what the widget draws", () => {

@@ -26,7 +26,10 @@ import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { PvpNowObject, chooseNowLayer, nowBadge, nowEmptyReason, PVP_NOW_CAPTION } from "./pvp-now.js";
+import {
+  PvpNowObject, chooseNowLayer, nowBadge, nowEmptyReason, pvpNowLabel, stripExtension,
+  PVP_NOW_CAPTION, type PvpNowConfig,
+} from "./pvp-now.js";
 import { computePvpProgress } from "./pvp-progress.js";
 import type { PvpLayerDTO, PvpStatusDTO } from "@main/types/pvp";
 
@@ -55,7 +58,7 @@ const status = (layers: PvpLayerDTO[]): PvpStatusDTO => ({ connected: true, laye
 
 const draw = (
   s: PvpStatusDTO | null,
-  config: { layerName?: string | null; showProgress?: boolean; showNextCue?: boolean } = {},
+  config: PvpNowConfig = {},
 ): string => renderToStaticMarkup(<PvpNowObject config={config} status={s} now={AT} skewMs={0} />);
 
 const progressOf = (l: PvpLayerDTO) => computePvpProgress(l, T, AT, 0);
@@ -176,5 +179,105 @@ describe("the next cue", () => {
     const html = draw(status([layer({ nextCueName: null })]));
     assert.ok(!/Next/.test(html), `drew a Next label with no cue behind it:\n${html}`);
     assert.ok(html.includes("loop_a.mp4"), html);
+  });
+});
+
+// ── Compact mode — the countdown-first treatment ────────────────────────────
+//
+// One fixture throughout: a layer whose file, cue and layer names are all
+// different strings, so a test that reads the wrong one fails loudly instead
+// of passing on a coincidence.
+const COMPACT_LAYER = layer({
+  name: "Graphics (1s)",
+  mediaName: "Mark Vance - Lead Pastor.mov",
+  lastCueName: "Mark Vance",
+  // remainingSec = durationSec - anchorElapsedSec = 277 = "4:37", with sampledAt
+  // equal to `now` so there is no drift to add.
+  anchorElapsedSec: 0,
+  durationSec: 277,
+  playbackRate: 1,
+});
+
+describe("compact mode", () => {
+  test("a playing clip: `PVP · <cue>`, the badge, and the countdown alone", () => {
+    const html = draw(status([COMPACT_LAYER]), { compact: true });
+    assert.ok(html.includes("PVP · Mark Vance"), html);
+    assert.ok(html.includes("playing"), html);
+    assert.ok(html.includes("4:37"), html);
+    assert.ok(!html.includes("remaining"), `compact mode drew the "remaining" word:\n${html}`);
+    // The next-cue footer never draws in compact mode, even though this
+    // fixture carries one (COMPACT_LAYER inherits `nextCueName: "CLEAR GRAPHIC"`
+    // from the base fixture).
+    assert.ok(!/Next/.test(html), `compact mode drew a next-cue line:\n${html}`);
+    assert.ok(!html.includes("CLEAR GRAPHIC"), html);
+  });
+
+  test("a still: no duration, dimmed, badge `still`", () => {
+    const html = draw(status([layer({ ...COMPACT_LAYER, ...STILL })]), { compact: true });
+    assert.ok(html.includes("no duration"), html);
+    assert.ok(html.includes("still"), html);
+    assert.ok(!/[0-9]:[0-9][0-9]/.test(html), `a compact still drew a countdown:\n${html}`);
+  });
+
+  test("empty: caption is bare `PVP`, value is a dash, sub is the empty reason", () => {
+    const html = draw(status([layer({ ...COMPACT_LAYER, ...EMPTY })]), { compact: true });
+    assert.ok(html.includes(">PVP<"), `compact empty caption was not bare "PVP":\n${html}`);
+    assert.ok(!html.includes("PVP ·"), html);
+    assert.ok(html.includes("empty"), html);
+    assert.ok(html.includes("—"), html);
+    assert.ok(html.includes("Nothing on screen"), html);
+  });
+
+  describe("the Label choice", () => {
+    test("cue: the layer's current cue name", () => {
+      assert.equal(pvpNowLabel(COMPACT_LAYER, "cue"), "Mark Vance");
+    });
+    test("file: the media name without its extension", () => {
+      assert.equal(pvpNowLabel(COMPACT_LAYER, "file"), "Mark Vance - Lead Pastor");
+    });
+    test("file-ext: the media name as-is", () => {
+      assert.equal(pvpNowLabel(COMPACT_LAYER, "file-ext"), "Mark Vance - Lead Pastor.mov");
+    });
+    test("layer: the layer's own name", () => {
+      assert.equal(pvpNowLabel(COMPACT_LAYER, "layer"), "Graphics (1s)");
+    });
+    test("cue null falls back to the file name without its extension", () => {
+      assert.equal(
+        pvpNowLabel({ ...COMPACT_LAYER, lastCueName: null }, "cue"),
+        "Mark Vance - Lead Pastor",
+      );
+    });
+    test("each choice reaches the drawn caption", () => {
+      const withLabel = (nowLabel: "cue" | "file" | "file-ext" | "layer") =>
+        draw(status([COMPACT_LAYER]), { compact: true, nowLabel });
+      assert.ok(withLabel("cue").includes("PVP · Mark Vance"), withLabel("cue"));
+      assert.ok(withLabel("file").includes("PVP · Mark Vance - Lead Pastor"), withLabel("file"));
+      assert.ok(withLabel("file-ext").includes("PVP · Mark Vance - Lead Pastor.mov"), withLabel("file-ext"));
+      assert.ok(withLabel("layer").includes("PVP · Graphics (1s)"), withLabel("layer"));
+    });
+  });
+
+  describe("stripExtension", () => {
+    test("drops the last extension", () => {
+      assert.equal(stripExtension("Mark Vance - Lead Pastor.mov"), "Mark Vance - Lead Pastor");
+    });
+    test("a name with no dot is unchanged", () => {
+      assert.equal(stripExtension("noext"), "noext");
+    });
+    test("a leading-dot name (a dotfile) is unchanged", () => {
+      assert.equal(stripExtension(".hidden"), ".hidden");
+    });
+  });
+
+  test("normal mode is untouched: the same fixture still draws its three lines", () => {
+    // GUARD: this is what pins the normal composition against compact-mode
+    // regressions. It renders the SAME fixture COMPACT_LAYER used above, with
+    // `compact` simply absent.
+    const html = draw(status([COMPACT_LAYER]));
+    assert.ok(html.includes(PVP_NOW_CAPTION), html);
+    assert.ok(html.includes("Mark Vance - Lead Pastor.mov"), html);
+    assert.ok(html.includes("remaining"), html);
+    assert.ok(html.includes("4:37"), html);
+    assert.ok(html.includes("CLEAR GRAPHIC"), html);
   });
 });

@@ -263,6 +263,15 @@ this line is wrong until the next poll. It is the quietest line on the widget fo
 that reason, it is never drawn without a current cue to anchor it, and it can be
 switched off.
 
+**Compact** trades the three-line composition above for two: the caption becomes
+`PVP · <label>`, and the value is the countdown alone — no "remaining" word, no
+next-cue footer. A still shows `no duration`, dimmed, in place of a countdown; an
+empty layer still says so, with a bare `PVP` caption. **Label** chooses what the
+compact caption names: the layer's current cue, the media file's name with or
+without its extension, or the layer's own name. It falls back to the file name
+when there is no cue name to read, and it has no effect outside compact mode —
+the normal composition's value is always the media name.
+
 The **last cue** a layer played is deliberately not shown on any of these. PVP
 reports it and it never clears, so four idle layers were observed all naming the
 same cue while showing nothing — and it disagrees with the file that is actually
