@@ -218,11 +218,16 @@ describe("the background sweep for a stale partial in a quiet room", () => {
     assert.equal(svc.sweepActive, true, "arms once a partial exists");
 
     svc.feed(final("EM", "hi there"));
-    assert.equal(svc.sweepActive, false, "disarms again once the partial resolved to a final");
+    // Stays armed, not disarmed: the sweep also ages finals out after
+    // LINE_MAX_AGE_MS (prodcom-line-age.test.ts), and a final now lives in the
+    // buffer, so the timer's condition is `partials.size > 0 || finals.length >
+    // 0` rather than partials alone. This assertion changed from "disarms" to
+    // "stays armed" for that reason.
+    assert.equal(svc.sweepActive, true, "the final it resolved to still needs sweeping until it ages out");
 
     const before = broadcasts.length;
     t.mock.timers.tick(60_000);
-    assert.equal(broadcasts.length, before, "a disarmed sweep does not keep firing");
+    assert.equal(broadcasts.length, before, "nothing has gone stale yet at 60s, so the armed sweep does not broadcast");
   });
 });
 
