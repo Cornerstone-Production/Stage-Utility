@@ -35,8 +35,9 @@ average, and per-item SPL.
 The overview's attendance trend can carry a second line: the **service SPL** for
 each date, drawn behind the attendance curve on its own dB scale. Right-click the
 chart to switch it on and to choose which Smaart metric it plots — the list offers
-the metrics your history actually holds, and defaults to an LAeq-style one because
-that is the number that means "how loud was the service".
+the metrics your history actually holds, and defaults to the LAeq with the longest
+averaging window the meter reports (LAeq 10 over LAeq 2 over LAeq 1), because that
+is the steadiest number for "how loud was the service".
 
 Each point is the service's equivalent continuous level, energy-averaged across
 its plan items and weighted by how long each ran, so a 30-second welcome does not
