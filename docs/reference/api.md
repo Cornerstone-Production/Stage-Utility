@@ -41,7 +41,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET  | `/api/health` | `{ok, app, version, name}` — which server you reached, not just that one answered |
-| GET  | `/api/version` | The running code version, uncached |
+| GET  | `/api/version` | The running code version, uncached. A request from loopback also gets `dataDir` and `pid` — never a LAN caller, since those are a filesystem path and a process id |
 | GET  | `/api/state` | Current `StageState` |
 | GET  | `/api/service-types` | PCO service types |
 | GET  | `/api/team-positions` | Team positions for the active plan |

@@ -13,6 +13,8 @@
 //   ~/.stage-utility     — default
 
 import * as fs from "fs/promises";
+import { existsSync } from "fs";
+import * as path from "path";
 
 import { initLogCapture } from "./main/services/log-buffer.js";
 // Capture logs into the ring buffer (exposed at /log) as early as possible.
@@ -61,6 +63,7 @@ process.on("uncaughtException", (err) => {
 });
 
 import { getUserDataPath } from "./main/services/app-paths.js";
+import { SYSTEM_DATA_DIRS, wrongDataDirWarning } from "./main/services/port-holder.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { backupScheduler } from "./main/services/backup-scheduler.js";
@@ -87,6 +90,17 @@ import { reconcileOpenRecords } from "./main/services/reconcile-records.js";
 const DATA_DIR = getUserDataPath();
 await fs.mkdir(DATA_DIR, { recursive: true });
 console.log(`[server] data directory: ${DATA_DIR}`);
+
+// A second copy started by hand (or a leftover service unit) from the home-dir
+// default, alongside a real install that already has one, has silently raced
+// the real service for the port before — see port-holder.ts. This process is
+// the one currently serving /log, so it is the one that can say so.
+{
+  const systemDir = SYSTEM_DATA_DIRS[process.platform];
+  const systemDirHasSettings = !!systemDir && existsSync(path.join(systemDir, "settings.json"));
+  const warning = wrongDataDirWarning(DATA_DIR, process.env, process.platform, systemDirHasSettings);
+  if (warning) console.warn(warning);
+}
 
 // ── Init services ─────────────────────────────────────────────────────────────
 

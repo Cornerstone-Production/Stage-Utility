@@ -239,6 +239,17 @@ to, and take a backup first if the machine may be rebuilt
 A custom `STAGE_DATA` at install time overrides these; the running server prints
 its own path in **Settings → Advanced**.
 
+If the main port is already held when the service tries to bind it, the log
+names the holder rather than just its pid: if it answers `/api/version` as
+another Stage Utility, the retry line gives its version, pid and data
+directory, so a second copy started by hand (or a leftover unit from an old
+install) is obvious instead of an hour of remote diagnosis. And if this
+process itself resolved the home-directory default (`~/.stage-utility`) while
+the platform's installed-service data directory above also holds a
+configuration, it warns about that on its own `/log` on startup — the case
+where the accidental second copy is the one that won the port and is the only
+one an operator can actually reach.
+
 ## Updates
 
 **Advanced → Updates** works however the server was installed, and so does
