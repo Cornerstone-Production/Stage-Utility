@@ -746,7 +746,8 @@ function AutoBackupPanel() {
               />
             </Field>
 
-            <div className="flex flex-wrap items-center gap-3">
+            {/* The one action row here that is not a Field; it takes the Field gutter so it does not sit on the card edge. */}
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3">
               <Button variant="filled" size="small" onClick={runNow} disabled={busy}>
                 <SaveIcon className="size-3.5 text-gray-9" /> Back up now
               </Button>
@@ -1233,7 +1234,8 @@ export function AdvancedSection({
                 <Button
                   variant="transparent"
                   size="small"
-                  className="self-start px-0"
+                  // Keeps the button padding so the hover pill has air, and pulls it back by that much so the text still sits on the column.
+                  className="self-start -ml-2"
                   aria-expanded={showCommands}
                   onClick={() => setShowCommands((v) => !v)}
                 >
