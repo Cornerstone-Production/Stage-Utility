@@ -226,7 +226,7 @@ reinstalls, until something boots it out.
 Left intact by every command above, because it holds config, history, and the
 encryption key that makes stored secrets readable. Remove it only when you mean
 to, and take a backup first if the machine may be rebuilt
-(**Settings → Advanced → Backup & restore**, or copy the directory).
+(**Settings → Advanced → Data → Config snapshots**, or copy the directory).
 
 | Install | Data directory |
 |---|---|

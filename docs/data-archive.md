@@ -27,10 +27,10 @@ no automatic pruning.
 
 ## Export and import
 
-**Settings → Advanced → Data archive.** Download produces
+**Settings → Advanced → Data → Data archive.** Download produces
 `stage-archive-YYYY-MM-DD.zip` — the raw CSVs plus the recorded service records.
 
-This is not the config snapshot. **Backup & restore** covers how the app is set up;
+This is not the config snapshot. **Config snapshots** covers how the app is set up;
 the **Data archive** covers what it recorded. They are separate files with separate
 importers, and giving one to the other is refused by name.
 

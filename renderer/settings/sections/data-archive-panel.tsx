@@ -1,6 +1,6 @@
 // data-archive-panel.tsx — download / restore everything the app has recorded.
 //
-// Sits beside Backup & restore, which does the other half: that one restores how
+// Sits beside Config snapshots, which does the other half: that one restores how
 // the app is set up, this one restores what it recorded. They are one click apart,
 // so the wording carries the distinction the layout does not.
 //

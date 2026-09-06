@@ -191,7 +191,7 @@ function open(zip: Uint8Array): { files: Record<string, Uint8Array>; manifest: A
     // leaving the operator with "not a readable zip" and nowhere to go.
     throw new Error(
       looksLikeConfigSnapshot(zip)
-        ? "That is a config snapshot, not a Stage Utility data archive. Restore it under Backup & restore."
+        ? "That is a config snapshot, not a Stage Utility data archive. Restore it under Config snapshots."
         : "That file is not a readable zip.",
     );
   }
@@ -206,7 +206,7 @@ function open(zip: Uint8Array): { files: Record<string, Uint8Array>; manifest: A
   if (manifest.kind !== ARCHIVE_KIND) {
     throw new Error(
       manifest.kind === "stage-utility-config"
-        ? "That is a config snapshot, not a Stage Utility data archive. Restore it under Backup & restore."
+        ? "That is a config snapshot, not a Stage Utility data archive. Restore it under Config snapshots."
         : "Unrecognized file — not a Stage Utility data archive.",
     );
   }

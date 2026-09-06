@@ -154,14 +154,17 @@ function button(name: string): HTMLButtonElement {
  * Pick the track this server is NOT on, which is the only thing that enables
  * Switch.
  *
+ * The track picker is a segmented control (one small Button per branch), not
+ * a Select — clicking the "main" button selects it, the same way clicking any
+ * other segmented option would.
+ *
  * Without this the parity check below is worthless: Switch is disabled by its
  * own rule whatever the lock does, so "same disabled either way" passes on a
  * lock that disables it. Proven — the first version of that check stayed green
  * with `guarded ||` added to Switch's `disabled`.
  */
 function pickOtherTrack() {
-  const select = screen.getByLabelText("Update track") as HTMLSelectElement;
-  fireEvent.change(select, { target: { value: "main" } });
+  fireEvent.click(screen.getByRole("button", { name: "main" }));
 }
 
 describe("update lock affordance", () => {
