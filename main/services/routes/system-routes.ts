@@ -16,6 +16,7 @@ import { configSnapshot } from "../config-snapshot.js";
 import { splRecorder } from "../spl-recorder.js";
 import { attendanceRecorder } from "../attendance-recorder.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
+import { zonedDateKey } from "../app-timezone.js";
 
 /** Whether a live service / active recording is in progress, and why. Used to lock
  *  self-updates (which restart the process and would interrupt a service mid-flight
@@ -38,6 +39,11 @@ function serviceActivity(): { active: boolean; reasons: string[] } {
  *  config restore once left a Homebrew box dark exactly this way. */
 function scheduleRestart(): void {
   exitForRestart(1200);
+}
+
+/** Dated in the app's zone, not the server's clock — see view-routes.exportFilename. */
+export function configExportFilename(at: number): string {
+  return `stage-utility-config-${zonedDateKey(at)}.json`;
 }
 
 export async function systemRoutes(c: RouteCtx): Promise<void> {
@@ -194,7 +200,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     // Download the full config (secrets excluded) as a .json file.
     if (method === "GET" && pathname === "/api/config/export") {
       const bundle = await configSnapshot.build();
-      const fname = `stage-utility-config-${new Date().toISOString().slice(0, 10)}.json`;
+      const fname = configExportFilename(Date.now());
       res.writeHead(200, {
         "Content-Type": "application/json",
         "Content-Disposition": `attachment; filename="${fname}"`,
