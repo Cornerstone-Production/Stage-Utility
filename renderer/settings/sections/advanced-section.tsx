@@ -746,7 +746,8 @@ function AutoBackupPanel() {
               />
             </Field>
 
-            <div className="flex flex-wrap items-center gap-3">
+            {/* The one action row here that is not a Field; it takes the Field gutter so it does not sit on the card edge. */}
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3">
               <Button variant="filled" size="small" onClick={runNow} disabled={busy}>
                 <SaveIcon className="size-3.5 text-gray-9" /> Back up now
               </Button>
