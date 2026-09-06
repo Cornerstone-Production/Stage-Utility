@@ -65,6 +65,14 @@ times, and per-person averages.
 Service windows are editable if a capture went wrong, individual items can be
 excluded from the timers, and a service report is exportable.
 
+While a service is recording, **Reset pacing** (in the live service's detail
+here, and beside the Previous/Next controls wherever the console offers them)
+stops items before now from counting toward the Service pacing widget: items
+that started before the reset are excluded, and the readout's baseline moves
+forward to the reset instant. It touches only that one widget's math — the
+recorded rundown itself is untouched, so nothing is deleted or re-windowed.
+Available only while a service is live; the server refuses otherwise.
+
 Two recordings of the same service — a run that overran its planned end and
 rolled its tail into the next occurrence — can be merged back together, in either
 direction. Attendance is stored per-service, so the two curves are re-expressed

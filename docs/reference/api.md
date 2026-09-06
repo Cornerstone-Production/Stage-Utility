@@ -206,6 +206,7 @@ thing.
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
+| POST | `/api/service-timeline/current/reset-pacing` | Reset the Service pacing readout on the LIVE record: items that started before now stop counting toward it. 409 if no service is recording |
 
 Two things to know:
 

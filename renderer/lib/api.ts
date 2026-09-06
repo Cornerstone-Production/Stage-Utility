@@ -290,6 +290,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return del<T>(`/api/service-timeline/${encodeURIComponent(key)}`);
     }
 
+    case "serviceTimeline:resetPacing":
+      return post<T>("/api/service-timeline/current/reset-pacing");
+
     case "baptism:get":
       return apiFetch<T>("/api/baptism");
     case "baptism:sessions":

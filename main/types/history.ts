@@ -207,5 +207,11 @@ export interface ServiceTimeline {
   startedAt: string;
   /** ISO when recording ended / service finalized. */
   endedAt: string | null;
+  /** An operator reset of the pacing readout: items that started before this
+   *  instant do not count toward pacing, and the live item's baseline moves
+   *  forward to it. Never set by the recorder — only POST
+   *  /api/service-timeline/current/reset-pacing sets it, and nothing clears it;
+   *  a new record always starts null. */
+  pacingResetAt?: string | null;
   items: ServiceTimelineItem[];
 }

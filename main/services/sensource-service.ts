@@ -59,7 +59,7 @@
 // a 429 is honoured, and a token rejected seconds after issue says so on the log
 // with the fix (a second API client) named.
 
-import { appTimeZone, zonedDateKey } from "./app-timezone.js";
+import { clockOf, zonedDateKey } from "./app-timezone.js";
 import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import type { PeopleCountDTO, PeopleHistoryPoint, PeopleZoneCount } from "../types/stage.js";
@@ -159,22 +159,6 @@ function as401(r: PromiseSettledResult<unknown>): SenSourceHttpError | null {
   return r.reason instanceof SenSourceHttpError && r.reason.status === 401 ? r.reason : null;
 }
 
-/** HH:MM:SS in the APP time zone. The production box runs UTC, so a host-clock
- *  time in a log line is one no operator can match to their morning. */
-function clockOf(ms: number): string {
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone: appTimeZone(),
-      hourCycle: "h23",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(new Date(ms));
-  } catch {
-    // An unusable zone must not cost the log line it was decorating.
-    return `${new Date(ms).toISOString().slice(11, 19)} UTC`;
-  }
-}
 
 const OFFLINE: PeopleCountDTO = {
   connected: false,

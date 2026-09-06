@@ -15,6 +15,9 @@ import { attendanceRecorder } from "../attendance-recorder.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
 import { baptismTimerService } from "../baptism-timer-service.js";
+import { broadcast } from "../broadcaster.js";
+import { clockOf } from "../app-timezone.js";
+import { scrub } from "../scrub.js";
 import {
   deleteServiceRecords,
   editServiceWindow,
@@ -98,6 +101,27 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     // ── Service timeline (actual rundown timing; mirrors the SPL/attendance routes) ──
     if (method === "GET" && pathname === "/api/service-timeline/current") {
       json(res, serviceTimelineRecorder.getCurrent());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/service-timeline/current/reset-pacing") {
+      // Mutates the SAME object the recorder holds (getCurrent() returns
+      // `this.current`, not a copy), so the next debounced persist writes this
+      // change too — no forget()/re-fetch dance, unlike the post-hoc edits in
+      // history-edit.ts, which operate on a record the recorder has already
+      // finalised and would otherwise overwrite with its own stale copy.
+      const current = serviceTimelineRecorder.getCurrent();
+      if (!current || current.endedAt != null) {
+        error(res, "No service is live right now — pacing can only be reset while one is recording.", 409);
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      current.pacingResetAt = nowIso;
+      await serviceTimelineStore.upsert(current);
+      broadcast("service-timeline:history", current);
+      console.log(
+        `[service-timeline] pacing reset by operator at ${scrub(clockOf(Date.now()))} — items before it no longer count toward pacing`,
+      );
+      json(res, current);
       return;
     }
     if (method === "GET" && pathname === "/api/service-timeline") {

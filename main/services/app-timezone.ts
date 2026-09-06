@@ -167,3 +167,22 @@ export function startOfZonedDay(dateKey: string, tz: TimeZone = appTimeZone()): 
   // so the later candidate is the first instant on it.
   return later;
 }
+
+/** HH:MM:SS in `tz` (the app zone by default) — for a log line an operator has
+ *  to match against their own clock. The production box runs UTC, so a
+ *  host-clock time in a log line is one no operator can match to their
+ *  morning. One definition: this was written twice, once per caller. */
+export function clockOf(ms: number, tz: TimeZone = appTimeZone()): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(new Date(ms));
+  } catch {
+    // An unusable zone must not cost the log line it was decorating.
+    return `${new Date(ms).toISOString().slice(11, 19)} UTC`;
+  }
+}
