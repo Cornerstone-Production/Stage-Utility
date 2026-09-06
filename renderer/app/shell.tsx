@@ -156,7 +156,13 @@ export function Shell() {
     return (
       <div className="h-[100dvh] overflow-hidden bg-bg">
         <UpdateNotices />
-        <PageActionsProvider>{content}</PageActionsProvider>
+        {/* The same flex column the shell's content area uses: `content` is
+            `flex-1 min-h-0`, which only bounds its height inside a flex
+            column. Dropped straight into this block wrapper it grew to its
+            content and the wrapper clipped it, so the page could not scroll. */}
+        <div className="flex flex-col h-full min-w-0">
+          <PageActionsProvider>{content}</PageActionsProvider>
+        </div>
       </div>
     );
   }
