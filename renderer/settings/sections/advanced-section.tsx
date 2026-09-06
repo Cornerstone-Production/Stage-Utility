@@ -1234,7 +1234,8 @@ export function AdvancedSection({
                 <Button
                   variant="transparent"
                   size="small"
-                  className="self-start px-0"
+                  // Keeps the button padding so the hover pill has air, and pulls it back by that much so the text still sits on the column.
+                  className="self-start -ml-2"
                   aria-expanded={showCommands}
                   onClick={() => setShowCommands((v) => !v)}
                 >
