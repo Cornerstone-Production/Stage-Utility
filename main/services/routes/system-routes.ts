@@ -17,6 +17,7 @@ import { splRecorder } from "../spl-recorder.js";
 import { attendanceRecorder } from "../attendance-recorder.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
 import { zonedDateKey } from "../app-timezone.js";
+import type { UpdateMode } from "../../types/state.js";
 
 /** Whether a live service / active recording is in progress, and why. Used to lock
  *  self-updates (which restart the process and would interrupt a service mid-flight
@@ -117,7 +118,8 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     }
     if (method === "POST" && pathname === "/api/update/auto") {
       const body = await readBody(req) as Record<string, unknown>;
-      const partial: { enabled?: boolean; dayOfWeek?: number | null; hour?: number } = {};
+      const partial: { mode?: UpdateMode; enabled?: boolean; dayOfWeek?: number | null; hour?: number } = {};
+      if (body.mode === "manual" || body.mode === "auto-install" || body.mode === "auto-full") partial.mode = body.mode;
       if (typeof body.enabled === "boolean") partial.enabled = body.enabled;
       if (body.dayOfWeek === null || typeof body.dayOfWeek === "number") partial.dayOfWeek = body.dayOfWeek;
       if (typeof body.hour === "number") partial.hour = body.hour;
