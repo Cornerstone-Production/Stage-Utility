@@ -226,7 +226,7 @@ reinstalls, until something boots it out.
 Left intact by every command above, because it holds config, history, and the
 encryption key that makes stored secrets readable. Remove it only when you mean
 to, and take a backup first if the machine may be rebuilt
-(**Settings → Advanced → Backup & restore**, or copy the directory).
+(**Settings → Advanced → Data → Config snapshots**, or copy the directory).
 
 | Install | Data directory |
 |---|---|
@@ -238,6 +238,17 @@ to, and take a backup first if the machine may be rebuilt
 
 A custom `STAGE_DATA` at install time overrides these; the running server prints
 its own path in **Settings → Advanced**.
+
+If the main port is already held when the service tries to bind it, the log
+names the holder rather than just its pid: if it answers `/api/version` as
+another Stage Utility, the retry line gives its version, pid and data
+directory, so a second copy started by hand (or a leftover unit from an old
+install) is obvious instead of an hour of remote diagnosis. And if this
+process itself resolved the home-directory default (`~/.stage-utility`) while
+the platform's installed-service data directory above also holds a
+configuration, it warns about that on its own `/log` on startup — the case
+where the accidental second copy is the one that won the port and is the only
+one an operator can actually reach.
 
 ## Updates
 
@@ -330,8 +341,9 @@ Greenwich — 19:00 in Chicago, 16:00 in Los Angeles.
 
 The setting shows what the host clock reads plus a live clock in the zone you
 pick, so a wrong one is obvious immediately. It governs which day a service is
-filed under, the scheduled update window, and the day-of-week and time-of-day
-automation conditions. It does not govern whether a live service is recorded —
+filed under, the date in the name of every downloaded file (config, archive, view
+and patch exports), the scheduled update window, and the day-of-week and
+time-of-day automation conditions. It does not govern whether a live service is recorded —
 that is deliberately independent of the clock.
 
 Setting the host's own zone (`timedatectl set-timezone America/Chicago`) also

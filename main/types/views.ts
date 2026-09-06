@@ -648,6 +648,26 @@ export type LayoutObjectConfig =
        * auto-advancing. A hand-fired cue makes it wrong until the next poll.
        */
       showNextCue?: boolean;
+      /**
+       * Two lines instead of four: caption + countdown, nothing else.
+       *
+       * The countdown-first treatment for a small tile — the caption becomes
+       * `PVP · <label>` (see `nowLabel`), the value is the remaining time alone
+       * (no "remaining" word), and the next-cue footer never draws. Off by
+       * default: the three-line composition above is what the mockup approved
+       * first, and this is the alternative for a tile too small for it.
+       */
+      compact?: boolean;
+      /**
+       * Which name `compact`'s caption borrows. Ignored outside compact mode —
+       * the normal composition's value stays the media name, always.
+       *
+       * Named `nowLabel`, not `label`: `label` is already a required string on
+       * several other members of this union — a button's own caption — and
+       * card-toggles.ts derives an EXHAUSTIVE record from the key name alone,
+       * so reusing it would have pulled every button type into this setting.
+       */
+      nowLabel?: "cue" | "file" | "file-ext" | "layer";
     }
   // The same reading on the operator's own page. No `layerName`: Home's card
   // settings are a short menu of switches, so a text field there would be a
@@ -657,6 +677,10 @@ export type LayoutObjectConfig =
       type: "home-pvp-now";
       showProgress?: boolean;
       showNextCue?: boolean;
+      /** Same meaning as the wall object's — see `pvp-now`. */
+      compact?: boolean;
+      /** Same meaning as the wall object's — see `pvp-now`. */
+      nowLabel?: "cue" | "file" | "file-ext" | "layer";
     }
   // Followed scores on the operator's own Home page. A quiet composition, NOT
   // the wall strip: a Home tile sits beside a readiness list and a next-service

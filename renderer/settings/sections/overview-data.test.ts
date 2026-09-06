@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { computeOverview, summarize, computeTrend, computeSplDelta } from "./overview-data.js";
+import { computeOverview, summarize, computeTrend, computeSplDelta, preferredSplMetric } from "./overview-data.js";
 import { leqOf } from "@main/services/spl-leq";
 import type { SplServiceSummary } from "@main/types/stage";
 
@@ -364,5 +364,23 @@ describe("computeTrend", () => {
 
   test("a change inside the deadband reads neutral, not a direction", () => {
     assert.equal(computeTrend([100, 100, 100, 101], true)?.tone, "neutral");
+  });
+});
+
+// The trend's default metric. Prod's meter reports LAeq 1 and LAeq 2 and Smaart
+// lists the 1-second one first, so "first LAeq wins" put a near-instantaneous
+// reading on a week-scale trend. The longest window the meter offers is the one.
+describe("preferredSplMetric", () => {
+  test("picks the longest LAeq window, whatever order Smaart lists them in", () => {
+    const smaartOrder = ["SPL A Slow", "Leq 1", "LAeq 1", "LCeq 1", "Leq 2", "LAeq 2", "LCeq 2"];
+    assert.equal(preferredSplMetric(smaartOrder), "LAeq 2", "a 1-second Leq was chosen over the 2-second one");
+    assert.equal(preferredSplMetric(["LAeq 1", "LAeq 10", "LAeq 2"]), "LAeq 10");
+  });
+
+  test("falls through the families in order: LAeq, then Leq, then SPL A, then anything", () => {
+    assert.equal(preferredSplMetric(["Leq 1", "Leq 10", "SPL A Slow"]), "Leq 10");
+    assert.equal(preferredSplMetric(["SPL C Fast", "SPL A Slow"]), "SPL A Slow");
+    assert.equal(preferredSplMetric(["FS Peak"]), "FS Peak");
+    assert.equal(preferredSplMetric([]), null);
   });
 });

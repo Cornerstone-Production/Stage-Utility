@@ -22,6 +22,7 @@
 import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 
 import { LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
+import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS } from "../../main/pvp-now";
 
 /** The members of the config union that declare `K`, by their `type`. */
 type TypesWith<K extends PropertyKey, T = LayoutObjectConfig> = T extends { type: infer N }
@@ -87,6 +88,9 @@ const APPLIES = {
   // the output to differ.
   showProgress: { "pvp-layers": true, "home-pvp": true, "pvp-now": true, "home-pvp-now": true },
   showNextCue: { "pvp-now": true, "home-pvp-now": true },
+  // The countdown-first compact treatment, on both PVP "now" widgets. Off by
+  // default on both, agreeing with the renderer.
+  compact: { "pvp-now": true, "home-pvp-now": true },
   // The SPL trend line on Home's Recent services card. History's copy of the
   // same switch lives in settings rather than here, because that chart is not a
   // layout object and has no config to write into.
@@ -108,6 +112,8 @@ const APPLIES = {
  */
 const PICKS = {
   game: { scores: true, "home-scores": true },
+  // Which name compact mode's caption borrows, on both PVP "now" widgets.
+  nowLabel: { "pvp-now": true, "home-pvp-now": true },
   // Which Smaart meter the SPL card reads. `spl-meter` is listed because it
   // carries the key and the record is exhaustive — the compiler requires it —
   // not because a wall object is expected on Home. If one ever is, offering the
@@ -127,7 +133,7 @@ const PICKS = {
   splMetric: { "home-recent-services": true },
 } satisfies { [K in PickKey]: Record<TypesWith<K>, true> };
 
-type PickKey = "game" | "meterId" | "recorder" | "platform" | "splMetric";
+type PickKey = "game" | "meterId" | "recorder" | "platform" | "splMetric" | "nowLabel";
 
 /**
  * What a card is doing when it has never been given a value for a pick.
@@ -146,6 +152,7 @@ const PICK_FALLBACK: Record<PickKey, string> = {
   // metric that default resolved to, so the row that is checked is the one being
   // drawn rather than a placeholder nobody chose.
   splMetric: "",
+  nowLabel: DEFAULT_PVP_NOW_LABEL,
 };
 
 /** The choices each pick offers, for the picks whose list is FIXED. `game` and
@@ -154,6 +161,7 @@ const PICK_FALLBACK: Record<PickKey, string> = {
 export const PICK_OPTIONS: Partial<Record<PickKey, Readonly<Record<string, string | null>>>> = {
   recorder: RECORDER_FOR,
   platform: STREAMER_FOR,
+  nowLabel: Object.fromEntries(PVP_NOW_LABEL_OPTIONS.map((o) => [o.value, o.label])),
 };
 
 /** Every (widget type, pick) pair the menu can write, flattened — the picks'
@@ -206,6 +214,7 @@ type ToggleKey =
   | "fillWhenRecording"
   | "showProgress"
   | "showNextCue"
+  | "compact"
   | "showSpl";
 
 /** What to call each setting, and what "on" means for it. `format` is the only
@@ -258,6 +267,7 @@ const SPECS: {
     fallbackFor: { "pvp-now": true, "home-pvp-now": true },
   },
   { key: "showNextCue", label: "Next cue", fallback: true },
+  { key: "compact", label: "Compact", fallback: false },
   // `false` to agree with the renderer: a card that has never been told draws
   // attendance alone, exactly as it did before the line existed.
   { key: "showSpl", label: "SPL trend line", fallback: false },

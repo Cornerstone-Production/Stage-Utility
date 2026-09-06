@@ -87,9 +87,11 @@ to `/screens`, and the old `#hash` deep links into the settings window resolve
 to their new routes — bookmarks and printed links keep working.
 
 `/history` is **read-only**: it is a link handed to people outside Production, so
-it shows the record without the controls that change it. The operator's own
-history — edit recorded times, merge a split service, delete one — is
-`/history/manage`, in the sidebar under Services.
+it shows the record without the controls that change it. It also renders without
+the app's sidebar and header — just the record and its own "History" heading — so
+the link shows nothing else of the app. The operator's own history — edit
+recorded times, merge a split service, delete one — is `/history/manage`, in the
+sidebar under Services, with the app's usual chrome.
 
 ## QR codes
 

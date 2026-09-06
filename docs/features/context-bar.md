@@ -2,8 +2,10 @@
 
 The strip above every operator page: the clock, which service is loaded, whether
 one is running, and whether anything needs attention. It is the same on every
-page, so `/patch` and `/history` know a service is live without carrying their
-own copy of the state.
+page, so `/patch` knows a service is live without carrying its own copy of the
+state. `/history` is the one page it does not appear on: it renders without the
+app's chrome at all, for the volunteer it is handed to. See
+[Read-only links to hand out](operator-app.md#read-only-links-to-hand-out).
 
 On a desktop it also carries the **page's name** at its left and the page's own
 controls at its right, so a page has one band of chrome above it rather than two.
@@ -12,8 +14,9 @@ is an item and neither can be configured — the readings below are what you
 arrange.
 
 **Right-click the bar and choose "Configure bar"**, or use **Settings → Advanced
-→ Context bar**. Both open the same thing. There are two arrangements, both
-shared by everybody: the one above a desktop page, and the one a phone shows.
+→ Server → Context bar**. Both open the same thing. There are two arrangements,
+both shared by everybody: the one above a desktop page, and the one a phone
+shows.
 
 ## What it can show
 
@@ -215,7 +218,7 @@ it gives up is words the ladder was built to give up.
 
 ## 12-hour or 24-hour
 
-**Settings → Advanced → Network & behavior → Clock format**, beside the time
+**Settings → Advanced → Server → Clock format**, beside the time
 zone. It sets how *every* clock in the app reads — the context bar, service
 times in History and the Overview, the rundown, the automation log, and stage
 displays.

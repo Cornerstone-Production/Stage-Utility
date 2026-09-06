@@ -83,10 +83,24 @@ describe("the gutter is decided in one place", () => {
     // The predicate generalised when ScriptView's rundown turned out to have the
     // same problem — it is `isFullBleedPath` now, of which a console is one case.
     // See scriptview-full-bleed.test.ts, which pins the membership.
+    //
+    // `fullBleed` alone, with no `!chromeless` alongside it any more: every
+    // console is full-bleed whether or not its `hideChrome` flag is set, so a
+    // chrome-hidden console was already a subset of `fullBleed` and the
+    // `!chromeless` term never excluded anything `!fullBleed` did not already
+    // exclude. It had to go when `chromeless` grew a second, non-console case
+    // — the shared `/history` page (see active-page.test.tsx's `hidesChrome`
+    // describe) — which is chromeless but NOT full-bleed and must keep this
+    // gutter; `!chromeless && !fullBleed` would have dropped it there too.
     assert.match(
       shell,
-      /!chromeless && !fullBleed && "sm:pt-4"/,
+      /!fullBleed && "sm:pt-4"/,
       "the shell applies its top gutter without asking whether this route paints its own surface — a console renders it as a white band against the stage-black",
+    );
+    assert.doesNotMatch(
+      shell,
+      /!chromeless && !fullBleed/,
+      "a shared chromeless page like /history is not full-bleed and must keep sm:pt-4 — this term would drop it again",
     );
   });
 

@@ -58,7 +58,10 @@ layers with content.
 
 **ProVideoPlayer now** answers the other question: what is up right now, on one
 layer, as a single reading with a state word beside it. Options: which layer,
-the progress bar, and the next cue. **On screen now** is its Home card.
+the progress bar, the next cue, and Compact — a two-line treatment for a small
+tile, caption plus countdown, whose Label chooses what the caption names (the
+current cue, the file name with or without its extension, or the layer name).
+**On screen now** is its Home card.
 
 Home's cards take their settings from a right-click on the card, not from the
 layout editor. See [Widgets](../reference/widgets.md) for what each line means.
@@ -74,11 +77,13 @@ pane is the one to enter.
 **The cue name is the last cue that TOUCHED the layer, not what is playing.** It
 is the only thing PVP reports and it never clears — four idle layers were observed
 simultaneously naming the same cue while displaying nothing, and it disagrees with
-the file that is up even on a layer that is playing. **No widget draws it**, which
-is why they look different from PVP's own UI. It is kept because a rule that fires
-a cue verifies itself against it, and because it is what anchors the next-cue
-lookup. "Has content" is decided by whether the layer holds media, and by nothing
-else.
+the file that is up even on a layer that is playing. The default view of every
+widget does not draw it, which is why they look different from PVP's own UI —
+**ProVideoPlayer now**'s compact mode is the one place it can appear, as the
+caption's Label, and only for a layer that HAS CONTENT, never an idle one. It is
+kept because a rule that fires a cue verifies itself against it, and because it is
+what anchors the next-cue lookup. "Has content" is decided by whether the layer
+holds media, and by nothing else.
 
 **"Next cue" is the next PLAYLIST ENTRY, not a prediction.** Stage finds the
 current cue in the playlist tree and names the entry after it, which is what plays

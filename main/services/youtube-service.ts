@@ -142,6 +142,19 @@ export function uploadsPlaylistFrom(channelId: string): string | null {
   return /^UC[\w-]{20,}$/.test(channelId) ? `UU${channelId.slice(2)}` : null;
 }
 
+/** ": reason — message" from a Google error envelope, or "" when the body is not one. */
+export function googleReason(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: string; errors?: { reason?: string }[] } };
+    const reason = parsed.error?.errors?.[0]?.reason;
+    const message = parsed.error?.message;
+    if (!reason && !message) return "";
+    return `: ${[reason, message].filter(Boolean).join(" — ")}`;
+  } catch {
+    return "";
+  }
+}
+
 /** Does this error mean the daily quota is spent? */
 export function isQuotaError(status: number, body: string): boolean {
   return status === 403 && /quota/i.test(body);
@@ -234,7 +247,12 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
         throw new Error("YouTube's daily API quota is spent — it resets at midnight Pacific");
       }
       if (res.status === 400 || res.status === 403) {
-        throw new Error(`YouTube rejected the request (HTTP ${res.status}) — check the API key and channel`);
+        // Google says what it disliked — "incompatibleParameters",
+        // "insufficientLivePermissions" — and the operator can act on that.
+        // The generic hint used to name the API key in both modes; the OAuth
+        // path has no API key to check.
+        const hint = apiKey ? "check the API key and channel" : "check the OAuth client, its scope and the refresh token";
+        throw new Error(`YouTube rejected the request (HTTP ${res.status}${googleReason(text)}) — ${hint}`);
       }
       throw new Error(`YouTube returned HTTP ${res.status}`);
     }
@@ -338,7 +356,12 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
   private async lookOwn(cfg: YouTubeConfig): Promise<{ live: boolean; startedAt: string | null; detail: string | null }> {
     const token = await this.ensureAccessToken(cfg);
     const body = await this.json<{ items?: YouTubeBroadcast[] }>(
-      `${API}/liveBroadcasts?part=snippet%2Cstatus&broadcastStatus=active&mine=true&maxResults=5`,
+      // liveBroadcasts.list takes EXACTLY ONE filter — broadcastStatus, id or
+      // mine. broadcastStatus already means "the authorised channel's
+      // broadcasts", so it does the job of mine=true on its own; sending both
+      // is answered with HTTP 400 incompatibleParameters, which is how this
+      // mode shipped broken from 1.11.0 to 1.14.0.
+      `${API}/liveBroadcasts?part=snippet%2Cstatus&broadcastStatus=active&maxResults=5`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     const live = (body.items ?? []).filter(broadcastIsLive);

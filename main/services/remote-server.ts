@@ -16,12 +16,13 @@ import { fileURLToPath } from "url";
 
 
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
-import { execFileSync } from "node:child_process";
 
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
 import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./history-export.js";
 import { serverPort } from "./server-port.js";
+import { buildVersionPayload, describePortHolder, rawPortHolder } from "./port-holder.js";
+import { getUserDataPath } from "./app-paths.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
 import { logRoutes } from "./routes/log-routes.js";
 
@@ -425,34 +426,6 @@ export class RemoteServer {
   }
 
   /**
-   * Best-effort "who is holding this port", for the log only.
-   *
-   * Fixed argument vectors, no shell, no interpolation of anything a request can
-   * reach — the port is a number this process chose. Any failure is silent: this
-   * runs while something has already gone wrong, and it must not become a second
-   * problem.
-   */
-  private portHolder(): string {
-    const probes: [string, string[]][] =
-      process.platform === "win32"
-        ? [["netstat", ["-ano", "-p", "TCP"]]]
-        : [
-            ["lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]],
-            ["ss", ["-lptn", `sport = :${PORT}`]],
-          ];
-    for (const [cmd, args] of probes) {
-      try {
-        const out = execFileSync(cmd, args, { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] });
-        const line = out.split("\n").find((l: string) => l.includes(String(PORT)));
-        if (line?.trim()) return line.trim();
-      } catch {
-        // Tool missing or nothing listening — try the next one.
-      }
-    }
-    return "could not determine which process holds it";
-  }
-
-  /**
    * Bind the main port, tolerating a previous instance that has not let go yet.
    *
    * This used to reject straight into an unhandled rejection, which exited with a
@@ -468,6 +441,10 @@ export class RemoteServer {
     const RETRY_MS = 2000;
     const GIVE_UP_AFTER_MS = 60_000;
     const started = Date.now();
+    // The HTTP probe in describePortHolder runs at most once per bind attempt —
+    // on the first EADDRINUSE — never on every 2s retry.
+    let described = false;
+    let description: string | null = null;
 
     for (;;) {
       try {
@@ -495,18 +472,24 @@ export class RemoteServer {
         const e = err as NodeJS.ErrnoException;
         if (e.code !== "EADDRINUSE") throw err;
 
+        if (!described) {
+          described = true;
+          description = await describePortHolder(PORT);
+          console.warn(`[remote-server] port ${PORT} in use — ${description}`);
+        }
+
         const waited = Date.now() - started;
         if (waited >= GIVE_UP_AFTER_MS) {
           console.error(
             `[remote-server] port ${PORT} is still held after ${Math.round(waited / 1000)}s. ` +
-              `Holder: ${this.portHolder()}. ` +
+              `Holder: ${description ?? rawPortHolder(PORT)}. ` +
               `Stop that process (kill its pid, or: sudo fuser -k ${PORT}/tcp) and start the service again.`,
           );
           throw err;
         }
         console.warn(
           `[remote-server] port ${PORT} in use, retrying in ${RETRY_MS / 1000}s ` +
-            `(${Math.round(waited / 1000)}s so far). Holder: ${this.portHolder()}`,
+            `(${Math.round(waited / 1000)}s so far). Holder: ${rawPortHolder(PORT)}`,
         );
         await new Promise((r) => setTimeout(r, RETRY_MS));
       }
@@ -803,8 +786,15 @@ export class RemoteServer {
     // Running code version — an installed PWA polls this on foreground to detect
     // a stale cached shell and reload (see useStageState). Never cached.
     if (method === "GET" && pathname === "/api/version") {
+      // dataDir and pid are loopback-only (see buildVersionPayload) — a filesystem
+      // path must never be readable from the LAN. describePortHolder relies on
+      // exactly this gate to identify a colliding Stage Utility from 127.0.0.1.
+      const payload = buildVersionPayload(SERVER_VERSION, req.socket.remoteAddress, {
+        dataDir: getUserDataPath(),
+        pid: process.pid,
+      });
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      res.end(JSON.stringify({ version: SERVER_VERSION }));
+      res.end(JSON.stringify(payload));
       return;
     }
 

@@ -39,6 +39,7 @@ import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration, projectedServiceEndMs } from "./pco-timer";
+import { servicePacing } from "./service-pacing";
 import { EmbeddedView, EmbedFontBox, EmbedNotice } from "./embedded-view";
 import { useEmbedBoxHeight } from "./embed-box";
 import { childChain, embedRefusal } from "./embed-chain";
@@ -646,12 +647,10 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       /** Overrides the object's own caption — for a widget whose caption names
        *  the source rather than being typed by the operator. */
       caption?: string | null;
+      /** The caption row's end slot — a reading that must not cost a line. */
+      captionEnd?: ReactNode;
       upper?: boolean;
       dim?: boolean;
-      /** Override the surface default below. For a widget whose sub-line comes
-       *  and goes with its STATE rather than with its configuration — see the
-       *  status readouts, which must not resize themselves when they go live. */
-      uniform?: boolean;
     },
   ) => (
     <Readout
@@ -694,9 +693,15 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     sub?: string | null;
   }) => (
     <Readout
+      // TWO LINES, ALWAYS — the same composition as the integration-status tile
+      // beside it, which is the size these were asked to match. A timecode or
+      // clock does not get a line of its own: a third line is paid for out of
+      // the value, and sizing every tile as though the line were always there
+      // (the previous fix) shrank the whole family instead. The reading takes
+      // the caption row's end slot, which costs no height.
       caption={s.caption}
+      captionEnd={s.active ? (s.sub ?? null) : null}
       value={s.active ? s.activeText : s.connected ? s.idleText : s.offlineText}
-      sub={s.active ? (s.sub ?? null) : null}
       upper
       fill={s.active && s.filled ? "var(--red-9)" : null}
       valueColor={s.active && !s.filled ? "var(--red-10)" : null}
@@ -704,11 +709,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // for "not recording" when the recorder simply cannot be reached.
       dim={!s.active && !s.connected}
       align={o.style?.textAlign}
-      // The same rule the streaming readout takes, and for the same reason: a
-      // recorder showing its timecode gains a third line when it rolls. It also
-      // keeps the two kinds the same size beside each other, which is the whole
-      // point of them sharing this composition.
-      uniform
     />
   );
 
@@ -753,9 +753,10 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     // one red.
     return readout(ind.value, {
       caption: only ?? "Streaming",
-      // Only where there is a number to put underneath. On a wall the quiet
-      // states are one word; Home shows the connection line instead.
-      sub: ind.state === "live" ? ind.sub : null,
+      // The elapsed clock takes the caption row's end slot while live, exactly
+      // as a recorder's timecode does in statusReadout — see the note there.
+      // The quiet states are one word with nothing to add.
+      captionEnd: live ? ind.sub : null,
       upper: true,
       // QUIET IS ONE THING. Off air and unreachable both read at the same
       // strength, because both mean "nothing is going out" and the WORD already
@@ -769,14 +770,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       dim: !live,
       fill: live && filled ? "var(--green-9)" : null,
       valueColor: live && !filled ? "var(--green-10)" : null,
-      // SIZED AS THOUGH THE CLOCK WERE ALWAYS THERE, on a wall as well as on
-      // Home. The elapsed sub-line only exists while live, and the value's size
-      // is a share of what the other lines leave — so without this the word
-      // LIVE shrank and lifted at the exact moment it started mattering, while
-      // RECORDING beside it held its size because a recorder's timecode line is
-      // off by default. Reported as the streaming widget losing its styling
-      // when it went live; it was the one tile in the row resizing itself.
-      uniform: true,
     });
   };
 
@@ -881,35 +874,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "service-pacing": {
       // Live cumulative drift: how far ahead/behind the whole schedule we are
-      // right NOW. actualElapsed (wall-clock since the service began) minus the
-      // planned position (sum of planned lengths of finished items + the live
-      // item's elapsed, capped at its planned length). Result carries slippage
-      // from earlier items and only grows "behind" once the current item runs
-      // past its plan. Negative = ahead (green), positive = behind (red).
+      // right NOW. See servicePacing() in service-pacing.ts for the math (also
+      // used by History) — negative = ahead (green), positive = behind (red).
       const tol = 3; // within ±3s of plan reads "0:00"
       const serverNow = ctx.now + ctx.skewMs;
-      let deltaSec: number | null = null;
-      const tl = ctx.serviceTimeline;
-      if (tl) {
-        // Counted items only — exclude pre-service/buffer padding (a per-item
-        // override wins, else default to not-pre-service), mirroring History.
-        const items = tl.items.filter((it) => (typeof it.counted === "boolean" ? it.counted : !(it.preService ?? false)));
-        const startMs = items[0]?.startedAt ? Date.parse(items[0].startedAt) : NaN;
-        let plannedElapsed = 0;
-        let live: { startedAt: string; plannedLengthSec: number | null } | null = null;
-        for (const it of items) {
-          // Finished items add their planned length; an item PCO gave no planned
-          // time falls back to its actual so it reads neutral (not "behind").
-          if (it.endedAt != null) plannedElapsed += it.plannedLengthSec ?? it.actualDurationSec ?? 0;
-          else if (it.startedAt) live = it;
-        }
-        if (live && Number.isFinite(startMs)) {
-          const liveElapsed = Math.max(0, (serverNow - Date.parse(live.startedAt)) / 1000);
-          const livePlanned = live.plannedLengthSec ?? liveElapsed;
-          plannedElapsed += Math.min(liveElapsed, livePlanned);
-          deltaSec = (serverNow - startMs) / 1000 - plannedElapsed;
-        }
-      }
+      const { deltaSec } = servicePacing(ctx.serviceTimeline, serverNow);
       // Ahead/behind is derived from the drift where there IS one. In projected-
       // end mode the drift is optional — the timeline recorder may not be
       // running — so these stay false and the clock reads in the neutral colour.
@@ -1100,7 +1069,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // editor/preview it renders the same buttons but they don't fire.
       return (
         <div className={ctx.interactive ? "w-full h-full" : "w-full h-full pointer-events-none"}>
-          <LiveControls className="w-full h-full" />
+          <LiveControls className="w-full h-full" live={ctx.pcoLive?.mode === "item"} />
         </div>
       );
     case "brand-logo": {

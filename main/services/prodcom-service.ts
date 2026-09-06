@@ -50,6 +50,21 @@ const SOCKET_KEEPALIVE_MS = 30_000;
  */
 const STREAM_IDLE_MS = 15 * 60_000;
 const MAX_LINES = 100;
+
+/**
+ * How old a finalised caption may be before it is dropped from the buffer and
+ * skipped on backfill.
+ *
+ * This is live captions, not history — History has its own records, and a
+ * caption older than a few hours on a display is never wanted there. A
+ * service runs roughly ninety minutes, so two services back-to-back in a
+ * morning both stay visible; yesterday's does not. This horizon also bounds
+ * backfill(): a reconnect legitimately re-imports the service in progress
+ * from ProdCom's own history, but must not re-import a service from days ago
+ * just because ProdCom's history still happens to hold it — which is exactly
+ * what put Thursday's lines on a display on a later day.
+ */
+const LINE_MAX_AGE_MS = 4 * 60 * 60_000;
 // Coalesce interim partials (which arrive many/sec while someone speaks) into at most
 // one full-buffer broadcast per this window; finals still push immediately.
 const TRANSCRIPT_THROTTLE_MS = 250;
@@ -72,6 +87,31 @@ const TRANSCRIPT_THROTTLE_MS = 250;
  */
 const PARTIAL_TTL_MS = 30_000;
 
+/**
+ * How often the stale-partial sweep runs while a partial is held.
+ *
+ * pruneStalePartials() used to run only inside getBuffer(), which only executes
+ * on a broadcast or an HTTP read. In a quiet room — nobody else speaking, no
+ * poll hitting the backfill endpoint — a partial that went stale by the TTL
+ * above would sit on every open display until the next unrelated line from
+ * anyone nudged getBuffer(). This timer is the thing that notices on its own;
+ * it only runs while `partials` is non-empty, and stops the moment it empties
+ * (a final, a TTL drop, a clear, or a disconnect) so a quiet integration with no
+ * partial in flight has nothing ticking in the background.
+ */
+const PARTIAL_SWEEP_MS = 5_000;
+
+/**
+ * A partial that has been in progress this long is worth a log line even when
+ * it is behaving correctly (still updating, so the TTL above never touches
+ * it) — an operator watching a stuck-looking line at 9pm on a Sunday needs to
+ * be able to tell "this has genuinely been open for four minutes" from "the
+ * display froze". Measured from firstSeenAt, not seenAt, so it reflects how
+ * long the CHANNEL has been occupied, not how recently it last changed.
+ */
+const PARTIAL_LOG_AFTER_MS = 60_000;
+/** How often the still-open log repeats for a partial that keeps surviving. */
+const PARTIAL_LOG_REPEAT_MS = 5 * 60_000;
 
 function pick(obj: unknown, ...keys: string[]): unknown {
   let cur: unknown = obj;
@@ -109,6 +149,32 @@ function normalizeColor(raw: string | null): string | null {
   return /^[a-z]+$/i.test(s) ? s : null; // CSS named color, else ignore
 }
 
+/** One channel's in-progress partial, plus the bookkeeping the long-lived-
+ *  partial diagnostics below read. */
+type PartialEntry = {
+  line: TranscriptLineDTO;
+  /** OUR receive time of the last CHANGE (text or id differed) — drives the TTL. */
+  seenAt: number;
+  /** OUR receive time this channel's partial first appeared — drives the
+   *  "in progress for Ns" diagnostic, independent of whether it keeps changing. */
+  firstSeenAt: number;
+  /** Identical re-sends (same id, same text) since firstSeenAt. */
+  resendsUnchanged: number;
+  /** Re-sends where the text actually differed from the previous one. */
+  textChanges: number;
+  /** Last time the "in progress" log fired for this entry, or null if never. */
+  lastLoggedAt: number | null;
+};
+
+/** One finalised line plus OUR receive time — bookkeeping private to this
+ *  service, the same way PartialEntry keeps its fields off the DTO the
+ *  renderer sees. Only read when the line's own `at` (ProdCom's timestamp)
+ *  doesn't parse, as the fallback age reference for LINE_MAX_AGE_MS. */
+type FinalEntry = {
+  line: TranscriptLineDTO;
+  receivedAt: number;
+};
+
 export class ProdComService extends ConnectionLifecycle {
   /** Wall clock, overridable so a test can age a partial without waiting 30s. */
   protected now(): number {
@@ -130,8 +196,18 @@ export class ProdComService extends ConnectionLifecycle {
    *  `seenAt` is OUR receive time, not the payload's -- the timestamp in a
    *  ProdCom event is whatever that box's clock said, and this is used to decide
    *  whether an entry has gone stale, which must not depend on a peer's clock. */
-  private finals: TranscriptLineDTO[] = [];
-  private partials = new Map<string, { line: TranscriptLineDTO; seenAt: number }>();
+  private finals: FinalEntry[] = [];
+  private partials = new Map<string, PartialEntry>();
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  /** Channel keys already logged as "final with no matching partial" since the
+   *  current connection started — one log per key per connection, not one per
+   *  occurrence, or a channel stuck in that state would spam the log forever. */
+  private orphanFinalLogged = new Set<string>();
+
+  /** Test seam: whether the stale-partial sweep is currently armed. */
+  protected get partialSweepActive(): boolean {
+    return this.sweepTimer !== null;
+  }
 
   constructor() {
     super("prodcom", "prodcom:transcript");
@@ -164,6 +240,10 @@ export class ProdComService extends ConnectionLifecycle {
     // orphan kept here would sit under every real line until a restart. Finals are
     // deliberately kept, so a reconnect does not blank a display mid-service.
     this.partials.clear();
+    this.syncPartialSweep();
+    // A new connection is a new epoch for the renamed-channel diagnostic below —
+    // whatever channel keys existed before this reconnect are gone with it.
+    this.orphanFinalLogged.clear();
   }
 
   /** Restart the silence timer. Called on connect and on every chunk. */
@@ -195,7 +275,74 @@ export class ProdComService extends ConnectionLifecycle {
       dropped = true;
       console.log(`[prodcom] dropped a stale partial on channel ${scrub(ch)} — no final arrived`);
     }
+    this.syncPartialSweep();
     return dropped;
+  }
+
+  /** OUR reference time for a final: its own `at` when parseable, else the
+   *  time we received it (see FinalEntry). */
+  private finalTimestamp(entry: FinalEntry): number {
+    const parsed = Date.parse(entry.line.at);
+    return Number.isNaN(parsed) ? entry.receivedAt : parsed;
+  }
+
+  /** Drop finalised lines older than LINE_MAX_AGE_MS. Returns whether any went. */
+  private pruneStaleFinals(): boolean {
+    const cutoff = this.now() - LINE_MAX_AGE_MS;
+    const before = this.finals.length;
+    this.finals = this.finals.filter((e) => this.finalTimestamp(e) >= cutoff);
+    const dropped = before - this.finals.length;
+    if (dropped > 0) console.log(`[prodcom] dropped ${dropped} line(s) older than 4h`);
+    this.syncPartialSweep();
+    return dropped > 0;
+  }
+
+  /**
+   * Arm the sweep timer while a partial is held OR a final is in the buffer,
+   * disarm it the moment both are empty. Called after every mutation of
+   * `partials` or `finals` so the timer's lifetime tracks the buffer's
+   * emptiness exactly, rather than depending on every call site to remember
+   * every half. Finals age out on their own four-hour horizon (LINE_MAX_AGE_MS)
+   * the same way partials age out on PARTIAL_TTL_MS, so both need the same
+   * background sweep in a quiet room where nothing else calls getBuffer().
+   */
+  private syncPartialSweep(): void {
+    if (this.partials.size > 0 || this.finals.length > 0) {
+      if (this.sweepTimer) return;
+      this.sweepTimer = setInterval(() => {
+        const droppedPartials = this.pruneStalePartials();
+        const droppedFinals = this.pruneStaleFinals();
+        this.logLongLivedPartials();
+        if (droppedPartials || droppedFinals) this.flushTranscript();
+      }, PARTIAL_SWEEP_MS);
+      this.sweepTimer.unref?.();
+    } else if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
+
+  /**
+   * Log a channel whose partial has been open a long time, whether or not it is
+   * behaving correctly — a live monologue and a stuck line both look the same
+   * from the outside ("still there"), and this is what tells them apart after
+   * the fact. Fires once at PARTIAL_LOG_AFTER_MS, then at most once every
+   * PARTIAL_LOG_REPEAT_MS while the same entry survives.
+   */
+  private logLongLivedPartials(): void {
+    const now = this.now();
+    for (const [ch, entry] of this.partials) {
+      const age = now - entry.firstSeenAt;
+      if (age < PARTIAL_LOG_AFTER_MS) continue;
+      if (entry.lastLoggedAt != null && now - entry.lastLoggedAt < PARTIAL_LOG_REPEAT_MS) continue;
+      entry.lastLoggedAt = now;
+      const lastUpdateAgo = Math.round((now - entry.seenAt) / 1000);
+      console.log(
+        `[prodcom] partial on channel ${scrub(ch)} in progress for ${Math.round(age / 1000)}s — ` +
+          `${entry.resendsUnchanged} unchanged re-sends, ${entry.textChanges} text changes, ` +
+          `last update ${lastUpdateAgo}s ago, ${entry.line.text.length} chars`,
+      );
+    }
   }
 
   /**
@@ -204,10 +351,24 @@ export class ProdComService extends ConnectionLifecycle {
    * Both halves, because the stuck-line case needs the partials gone and an
    * operator asking for a clear means the screen, which is the finals. Broadcasts
    * unconditionally: the point is that the display goes empty NOW.
+   *
+   * Logs each partial being discarded BEFORE clearing — the operator's button
+   * is the only cure for the stuck-line bug this file guards against, so the
+   * moment it's pressed is the moment to record which channel was stuck, for
+   * how long, and how it behaved, in case it happens again.
    */
   clearTranscript(): void {
+    const now = this.now();
+    for (const [ch, entry] of this.partials) {
+      const age = Math.round((now - entry.firstSeenAt) / 1000);
+      console.log(
+        `[prodcom] transcript cleared by operator: ${this.finals.length} finals, ${this.partials.size} partials; ` +
+          `partial ch=${scrub(ch)} age=${age}s unchanged-resends=${entry.resendsUnchanged} text-changes=${entry.textChanges}`,
+      );
+    }
     this.finals = [];
     this.partials.clear();
+    this.syncPartialSweep();
     broadcast("prodcom:transcript", this.getBuffer());
     console.log("[prodcom] transcript cleared");
   }
@@ -215,7 +376,8 @@ export class ProdComService extends ConnectionLifecycle {
   /** Current rolling buffer (finals + active partials), oldest → newest. */
   getBuffer(): TranscriptLineDTO[] {
     this.pruneStalePartials();
-    return [...this.finals, ...[...this.partials.values()].map((e) => e.line)];
+    this.pruneStaleFinals();
+    return [...this.finals.map((e) => e.line), ...[...this.partials.values()].map((e) => e.line)];
   }
 
   /** One-shot connectivity check for the Integrations "Test connection" button. */
@@ -390,11 +552,40 @@ export class ProdComService extends ConnectionLifecycle {
   private ingest(line: TranscriptLineDTO): void {
     const ch = line.channel ?? "_";
     if (line.isFinal) {
+      const hadPartial = this.partials.has(ch);
+      // The renamed-channel case from the incident this file guards against: a
+      // final lands under a key with no partial to resolve, while OTHER
+      // channels are mid-utterance. Once per channel per connection, or a
+      // channel stuck in this state would spam the log on every final.
+      if (!hadPartial && this.partials.size > 0 && !this.orphanFinalLogged.has(ch)) {
+        this.orphanFinalLogged.add(ch);
+        console.log(
+          `[prodcom] final on channel ${scrub(ch)} with no partial in flight; ` +
+            `${this.partials.size} partial(s) live on other channels`,
+        );
+      }
       this.partials.delete(ch);
+      this.syncPartialSweep();
       this.addFinal(line);
       this.flushTranscript(); // finals land immediately
     } else {
-      this.partials.set(ch, { line, seenAt: this.now() });
+      // A re-send of the SAME partial (identical id and text) is not progress —
+      // ProdCom re-emitting an interim result on a keepalive, or a recogniser
+      // stalled on an open mic, both look like this. Only a genuine change
+      // refreshes seenAt; an unchanged re-send keeps the original arrival time,
+      // or the TTL below would never elapse no matter how long it sat there.
+      const existing = this.partials.get(ch);
+      const unchanged = !!existing && existing.line.id === line.id && existing.line.text === line.text;
+      const now = this.now();
+      this.partials.set(ch, {
+        line,
+        seenAt: unchanged ? existing!.seenAt : now,
+        firstSeenAt: existing ? existing.firstSeenAt : now,
+        resendsUnchanged: (existing?.resendsUnchanged ?? 0) + (unchanged ? 1 : 0),
+        textChanges: (existing?.textChanges ?? 0) + (existing && !unchanged ? 1 : 0),
+        lastLoggedAt: existing?.lastLoggedAt ?? null,
+      });
+      this.syncPartialSweep();
       this.scheduleTranscript(); // interim partials arrive many/sec — coalesce them
     }
   }
@@ -426,10 +617,12 @@ export class ProdComService extends ConnectionLifecycle {
   // Append a finalised line, replacing any existing one with the same id (so a
   // backfilled line and a streamed update of it don't both appear).
   private addFinal(line: TranscriptLineDTO): void {
-    const at = this.finals.findIndex((l) => l.id === line.id);
-    if (at !== -1) this.finals[at] = line;
-    else this.finals.push(line);
+    const entry: FinalEntry = { line, receivedAt: this.now() };
+    const at = this.finals.findIndex((e) => e.line.id === line.id);
+    if (at !== -1) this.finals[at] = entry;
+    else this.finals.push(entry);
     if (this.finals.length > MAX_LINES) this.finals.splice(0, this.finals.length - MAX_LINES);
+    this.syncPartialSweep();
   }
 
   // Prime the buffer from the REST snapshot so a display opened mid-service shows
@@ -452,15 +645,7 @@ export class ProdComService extends ConnectionLifecycle {
               ? parsed
               : (pick(parsed, "transcripts") ?? pick(parsed, "items") ?? pick(parsed, "data"));
             if (!Array.isArray(rows)) return;
-            let added = false;
-            for (const row of rows) {
-              const line = this.normalizeLine(row);
-              if (line?.isFinal) {
-                this.addFinal(line);
-                added = true;
-              }
-            }
-            if (added) broadcast("prodcom:transcript", this.getBuffer());
+            this.applyBackfillRows(rows);
           } catch {
             /* snapshot not JSON / unavailable — ignore, stream still works */
           }
@@ -471,6 +656,35 @@ export class ProdComService extends ConnectionLifecycle {
     req.on("error", () => {
       /* backfill is best-effort */
     });
+  }
+
+  /**
+   * Apply ProdCom's own transcript history to the buffer on (re)connect.
+   * Rows older than LINE_MAX_AGE_MS are skipped — see that constant's doc for
+   * why a reconnect must not re-import a service ProdCom's history still
+   * happens to hold from days ago. Protected (not private) so a test can
+   * drive it directly without a real ProdCom host.
+   */
+  protected applyBackfillRows(rows: unknown[]): void {
+    const cutoff = this.now() - LINE_MAX_AGE_MS;
+    let added = false;
+    let skipped = 0;
+    for (const row of rows) {
+      const line = this.normalizeLine(row);
+      if (!line?.isFinal) continue;
+      const parsed = Date.parse(line.at);
+      const at = Number.isNaN(parsed) ? this.now() : parsed;
+      if (at < cutoff) {
+        skipped++;
+        continue;
+      }
+      this.addFinal(line);
+      added = true;
+    }
+    if (skipped > 0) {
+      console.log(`[prodcom] backfill skipped ${skipped} line(s) older than 4h`);
+    }
+    if (added) broadcast("prodcom:transcript", this.getBuffer());
   }
 }
 

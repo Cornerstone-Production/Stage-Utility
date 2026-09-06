@@ -9,8 +9,17 @@ object.
 ProdCom (prodcom.io) exposes an HTTP Application API (default port 24480) with a
 purpose-built transcript SSE stream. `prodcom-service.ts` holds one long-lived
 connection to `GET /api/v1/transcript/stream`, normalises each event into a
-`TranscriptLineDTO`, keeps a rolling buffer (up to 100 lines), and re-broadcasts
-on the `prodcom:transcript` channel. It reconnects (~4 s) if the stream drops.
+`TranscriptLineDTO`, keeps a rolling buffer (up to 100 lines from the last four
+hours), and re-broadcasts on the `prodcom:transcript` channel. It reconnects
+(~4 s) if the stream drops.
+
+This is live captions, not history — a finalised line older than four hours is
+dropped from the buffer even if fewer than 100 lines have arrived since. On
+(re)connect it backfills from ProdCom's own `GET /api/v1/transcript` history so
+a display opened mid-service shows prior lines immediately, but skips any row
+in that history older than the same four-hour horizon — so a reconnect cannot
+re-import a service from days ago just because ProdCom's own history still
+holds it.
 
 A dropped cable or a switch port going down leaves the socket half-open — no
 close arrives, so nothing would notice. TCP keepalive probes the box every 30s
@@ -28,6 +37,17 @@ each speaker.
 Testing the integration reaches the ProdCom host/port; the API Key is only sent
 when ProdCom's "Require Authentication" is on. The key is stored encrypted
 (secret key `apiKey`).
+
+An in-progress line (a partial) is held per channel until its final arrives, or
+for 30 seconds after it last changed; an unchanged re-send from ProdCom does not
+reset that clock, and a sweep every five seconds clears a stale partial even when
+nobody else speaks. If a line ever sticks, the `/log` page has the evidence: a
+`[prodcom] partial on channel … in progress for Ns` line at one minute and every
+five after, a `[prodcom] final on channel … with no partial in flight` line when
+a final lands on a channel that has no partial while others do (the renamed
+channel case), and `[prodcom] transcript cleared by operator` naming every live
+partial and its age when the clear button is pressed. Text is never logged, only
+its length.
 
 ## Setup
 

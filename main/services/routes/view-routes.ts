@@ -27,6 +27,7 @@ import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../..
 import { LayoutConflictError, stageController } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
+import { zonedDateKey } from "../app-timezone.js";
 
 /**
  * An untrusted body value that is a list of `{ id, name }` strings.
@@ -59,7 +60,10 @@ function isSelectionList(v: unknown): v is CalendarSelection[] {
  */
 export function exportFilename(name: string, now: Date): string {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-  return `stage-utility-view-${slug ? `${slug}-` : ""}${now.toISOString().slice(0, 10)}.json`;
+  // The app's zone, not the server's clock: a UTC box dates a file exported at
+  // 22:30 in Chicago as the next day. patch-export.ts fixed the same line first;
+  // this and the config and archive exports are the other three copies.
+  return `stage-utility-view-${slug ? `${slug}-` : ""}${zonedDateKey(now.getTime())}.json`;
 }
 
 export async function viewRoutes(c: RouteCtx): Promise<void> {

@@ -49,6 +49,7 @@ import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsState } from "../main/use-obs-state";
 import { hasContent, type PvpStatusDTO } from "@main/types/pvp";
+import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, type PvpNowLabel } from "../main/pvp-now";
 import { usePvpState } from "../main/use-pvp-state";
 import { useQuery } from "@tanstack/react-query";
 import { useReaperState } from "../main/use-reaper-state";
@@ -1050,6 +1051,18 @@ export function Inspector({
               hint="The next entry in the playlist — what plays next only while the playlist keeps auto-advancing. A cue fired by hand makes it wrong until the next poll."
               checked={c.showNextCue ?? true}
               onChange={(v) => onConfig({ ...c, showNextCue: v })}
+            />
+            <RowSwitch
+              label="Compact"
+              hint="Two lines instead of three or four: the caption becomes PVP · <label>, and the value is the countdown alone."
+              checked={c.compact ?? false}
+              onChange={(v) => onConfig({ ...c, compact: v })}
+            />
+            <RowSelect
+              label="Label"
+              value={c.nowLabel ?? DEFAULT_PVP_NOW_LABEL}
+              options={PVP_NOW_LABEL_OPTIONS}
+              onChange={(v) => onConfig({ ...c, nowLabel: v as PvpNowLabel })}
             />
           </>
       )}

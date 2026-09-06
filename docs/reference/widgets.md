@@ -61,6 +61,17 @@ while the current item runs long, so it answers "are we going to finish on time"
 not "was that item long". It needs a recorded service timeline; without one it
 shows nothing.
 
+An item Planning Center Live had already been sitting on before this recording
+began — left running from an earlier session, e.g. an operator who forgot to
+advance PCO Live after a previous service — does not count toward pacing: it is
+carried into the record with its start clamped to the moment recording opened,
+so it cannot backdate the readout by hours or days. An operator can also reset
+pacing mid-service (**Settings → History**, or the console's live controls,
+while a service is recording): items before the reset stop counting and the
+baseline moves to the reset instant, which is the tool for "this item ran long,
+stop holding it against the rest of the service" without touching the recording
+itself.
+
 Turn on **Projected end time** and the same widget leads with the wall-clock time
 the plan runs out instead of the drift figure. The drift moves under it when
 **Show ahead/behind label** is on. The projection needs a live item with a planned
@@ -262,6 +273,15 @@ plays next only while the playlist keeps auto-advancing.** Fire a cue by hand an
 this line is wrong until the next poll. It is the quietest line on the widget for
 that reason, it is never drawn without a current cue to anchor it, and it can be
 switched off.
+
+**Compact** trades the three-line composition above for two: the caption becomes
+`PVP · <label>`, and the value is the countdown alone — no "remaining" word, no
+next-cue footer. A still shows `no duration`, dimmed, in place of a countdown; an
+empty layer still says so, with a bare `PVP` caption. **Label** chooses what the
+compact caption names: the layer's current cue, the media file's name with or
+without its extension, or the layer's own name. It falls back to the file name
+when there is no cue name to read, and it has no effect outside compact mode —
+the normal composition's value is always the media name.
 
 The **last cue** a layer played is deliberately not shown on any of these. PVP
 reports it and it never clears, so four idle layers were observed all naming the

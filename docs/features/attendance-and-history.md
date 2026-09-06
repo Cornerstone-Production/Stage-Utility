@@ -35,8 +35,9 @@ average, and per-item SPL.
 The overview's attendance trend can carry a second line: the **service SPL** for
 each date, drawn behind the attendance curve on its own dB scale. Right-click the
 chart to switch it on and to choose which Smaart metric it plots — the list offers
-the metrics your history actually holds, and defaults to an LAeq-style one because
-that is the number that means "how loud was the service".
+the metrics your history actually holds, and defaults to the LAeq with the longest
+averaging window the meter reports (LAeq 10 over LAeq 2 over LAeq 1), because that
+is the steadiest number for "how loud was the service".
 
 Each point is the service's equivalent continuous level, energy-averaged across
 its plan items and weighted by how long each ran, so a 30-second welcome does not
@@ -64,6 +65,14 @@ times, and per-person averages.
 
 Service windows are editable if a capture went wrong, individual items can be
 excluded from the timers, and a service report is exportable.
+
+While a service is recording, **Reset pacing** (in the live service's detail
+here, and beside the Previous/Next controls wherever the console offers them)
+stops items before now from counting toward the Service pacing widget: items
+that started before the reset are excluded, and the readout's baseline moves
+forward to the reset instant. It touches only that one widget's math — the
+recorded rundown itself is untouched, so nothing is deleted or re-windowed.
+Available only while a service is live; the server refuses otherwise.
 
 Two recordings of the same service — a run that overran its planned end and
 rolled its tail into the next occurrence — can be merged back together, in either
@@ -96,6 +105,12 @@ Only the service proper feeds peak, low and last; the ramp and taper would
 otherwise drag those figures toward an empty room. Where two services are close
 enough that one's taper overlaps the next one's ramp, the ramp wins — the room is
 filling for the next service, not emptying from the last.
+
+A service shows up in History as soon as its attendance recording begins — up to
+60 minutes before the scheduled start by default (the arrival-ramp window above)
+— marked "arriving" with a running count of people in the room. Its own charts
+and stats fill in once the first plan item goes live in Planning Center and the
+timeline record opens; until then there is no rundown to show.
 
 ## Sound levels
 

@@ -41,7 +41,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET  | `/api/health` | `{ok, app, version, name}` — which server you reached, not just that one answered |
-| GET  | `/api/version` | The running code version, uncached |
+| GET  | `/api/version` | The running code version, uncached. A request from loopback also gets `dataDir` and `pid` — never a LAN caller, since those are a filesystem path and a process id |
 | GET  | `/api/state` | Current `StageState` |
 | GET  | `/api/service-types` | PCO service types |
 | GET  | `/api/team-positions` | Team positions for the active plan |
@@ -206,6 +206,7 @@ thing.
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
+| POST | `/api/service-timeline/current/reset-pacing` | Reset the Service pacing readout on the LIVE record: items that started before now stop counting toward it. 409 if no service is recording |
 
 Two things to know:
 

@@ -84,7 +84,7 @@ export interface LayoutObjectSpec {
    * conversion in the inspector.
    *
    * Not deleted: an object type lives in views.json, which is a CONFIG store and
-   * therefore what Backup & restore puts back. Removing the type outright means
+   * therefore what Config snapshots puts back. Removing the type outright means
    * restoring any snapshot taken before the change hands the renderer an object
    * it no longer understands, and the object silently vanishes from a layout the
    * operator believes they just restored. Deletion waits until the conversions
@@ -681,7 +681,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "ProVideoPlayer now",
     blurb: "What is on screen right now, and how long is left",
     group: "ProVideoPlayer",
-    config: () => ({ type: "pvp-now", layerName: null, showProgress: true, showNextCue: true }),
+    config: () => ({ type: "pvp-now", layerName: null, showProgress: true, showNextCue: true, compact: false, nowLabel: "cue" }),
     style: () => CARD({ fontSize: 0.05 }),
     homeSize: "m",
     integration: { id: "pvp", label: "ProVideoPlayer" },
@@ -693,7 +693,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "On screen now",
     blurb: "The one thing ProVideoPlayer has up, and how long is left",
     group: "ProVideoPlayer",
-    config: () => ({ type: "home-pvp-now", showProgress: true, showNextCue: true }),
+    config: () => ({ type: "home-pvp-now", showProgress: true, showNextCue: true, compact: false, nowLabel: "cue" }),
     style: BARE,
     homeSize: "m",
     integration: { id: "pvp", label: "ProVideoPlayer" },

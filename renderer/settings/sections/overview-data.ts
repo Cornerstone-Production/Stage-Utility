@@ -244,12 +244,37 @@ export interface OverviewData {
  */
 export function preferredSplMetric(keys: readonly string[]): string | null {
   return (
-    keys.find((k) => /laeq/i.test(k)) ??
-    keys.find((k) => /leq/i.test(k)) ??
+    longestWindow(keys, /laeq/i) ??
+    longestWindow(keys, /leq/i) ??
     keys.find((k) => /spl\s*a/i.test(k)) ??
     keys[0] ??
     null
   );
+}
+
+/**
+ * Among the keys matching `family`, the one with the LONGEST averaging window —
+ * "LAeq 10" over "LAeq 2" over "LAeq 1".
+ *
+ * Taking the first match in Smaart's own key order landed a week-scale trend on
+ * "LAeq 1": a one-second Leq is close to an instantaneous reading, and Smaart
+ * happened to list it first. The longer the window the steadier the number, and a
+ * trend of whole services wants the steadiest one the meter offers. A key with no
+ * number ("Leq") counts as the shortest, so a numbered window always wins over it.
+ */
+function longestWindow(keys: readonly string[], family: RegExp): string | null {
+  let best: string | null = null;
+  let bestWindow = -1;
+  for (const k of keys) {
+    if (!family.test(k)) continue;
+    const m = /(\d+(?:\.\d+)?)/.exec(k);
+    const w = m ? Number(m[1]) : 0;
+    if (w > bestWindow) {
+      bestWindow = w;
+      best = k;
+    }
+  }
+  return best;
 }
 
 /**

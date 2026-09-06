@@ -214,6 +214,11 @@ for that reason:
 | `/history` | service history, timing and attendance, without the controls that change it |
 | `/patch` | this week's stage patch, following the live or next plan on its own |
 
+`/history` also renders with none of the app's chrome — no sidebar, no context
+bar — since the person it is sent to has nothing else on the page to reach.
+`/patch` keeps the ordinary shell; it is read-only in what it lets you do, not in
+what surrounds it.
+
 The operator's own versions are in the sidebar: **History** (which is
 `/history/manage`, and keeps Edit times, Merge and Delete) and **Patch**, whose
 editor is at `/patch/edit`.

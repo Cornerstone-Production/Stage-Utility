@@ -158,9 +158,9 @@ Every widget that shows a value — clocks, countdowns, timers, SPL, counters, t
 status and wireless objects — draws the same three lines:
 
 ```
-OBS              caption: what this is
-RECORDING        value: the reading itself
-00:35:09         sub-line: the qualifier
+SERVICE ENDS IN  caption: what this is
+12:34            value: the reading itself
+behind           sub-line: the qualifier
 ```
 
 All three sizes come from the **widget's own height**, so a readout is legible at
@@ -169,6 +169,12 @@ setting a font size. The stored font size no longer governs the value.
 
 Only the caption and sub-line a widget actually has are drawn; a clock with
 neither gets a value that fills the box.
+
+The status widgets — OBS, REAPER, the recorder and streaming tiles — draw two
+lines, the same as the integration-status tile beside them, so a row of them
+matches. Their timecode, position or elapsed clock joins the caption while the
+thing is running (`OBS · 00:35:09`) rather than taking a line of its own, which
+would be paid for out of the state word.
 
 **Alignment** defaults to left, because three stacked lines of different widths
 read as one object when they share an edge. It is still yours to change per
