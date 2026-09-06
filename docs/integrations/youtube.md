@@ -37,11 +37,26 @@ means nothing to find, and this mode is the only one that can see them.
 ### My broadcasts (OAuth)
 
 1. The same project, with the same API enabled.
-2. Create an **OAuth client ID** of type *Desktop app*.
-3. Use it once to authorise the scope
-   `https://www.googleapis.com/auth/youtube.readonly`, and keep the **refresh
-   token** it returns.
-4. Paste the client ID, client secret and refresh token below.
+2. **APIs & Services → OAuth consent screen**: External, then add the Google
+   account that owns the channel as a **test user**. The app never needs to be
+   published or verified — nobody but you signs in to it.
+3. Create an **OAuth client ID** of type *Web application*, and add
+   `https://developers.google.com/oauthplayground` as an authorised redirect URI.
+4. Open the [OAuth Playground](https://developers.google.com/oauthplayground).
+   Under the gear icon tick **Use your own OAuth credentials** and paste the
+   client ID and secret. In step 1 enter the scope
+   `https://www.googleapis.com/auth/youtube.readonly` and authorise as the
+   channel's account; in step 2 press **Exchange authorization code for
+   tokens** and copy the **refresh token**.
+5. Paste the client ID, client secret and refresh token below.
+
+A token minted while the consent screen is in *Testing* expires after seven
+days, and one minted with the Playground's own credentials (the gear box left
+unticked) belongs to Google's project, not yours — either way the check fails
+with `invalid_grant` and the operator does step 4 again. Moving the consent
+screen to *In production* removes the seven-day limit; Google shows an
+"unverified app" warning on the way through, which is fine for an app only you
+sign in to.
 
 An API key cannot do this second job. "Are *my* broadcasts live" is a question
 about the signed-in channel, and only an OAuth token can answer it.
