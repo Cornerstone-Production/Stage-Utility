@@ -23,7 +23,61 @@ export type PvpNowConfig = {
   layerName?: string | null;
   showProgress?: boolean;
   showNextCue?: boolean;
+  compact?: boolean;
+  // Named `nowLabel`, not the shorter `label`: half the button-type objects in
+  // this same config union already carry a required `label: string` of their
+  // own (a button's caption), and card-toggles.ts derives its exhaustive
+  // per-setting type from the KEY NAME alone — `label` would have pulled every
+  // one of those unrelated types into this setting's record.
+  nowLabel?: PvpNowLabel;
 };
+
+/** Which name compact mode's caption borrows. See {@link pvpNowLabel}. */
+export type PvpNowLabel = "cue" | "file" | "file-ext" | "layer";
+
+export const DEFAULT_PVP_NOW_LABEL: PvpNowLabel = "cue";
+
+/** The Label picker's options, shared by the layout inspector's select and
+ *  Home's card menu — one list, so the two cannot drift apart. */
+export const PVP_NOW_LABEL_OPTIONS: { value: PvpNowLabel; label: string }[] = [
+  { value: "cue", label: "Cue" },
+  { value: "file", label: "File name" },
+  { value: "file-ext", label: "File name (with extension)" },
+  { value: "layer", label: "Layer name" },
+];
+
+/**
+ * Drop a file name's extension. PURE, so the one rule ("Mark Vance - Lead
+ * Pastor.mov" -> "Mark Vance - Lead Pastor") is testable without a layer.
+ *
+ * A name with no dot, or a leading dot with nothing before it (a dotfile),
+ * is returned unchanged — `lastIndexOf` gives -1 or 0 for those, and neither
+ * is a real extension to strip.
+ */
+export function stripExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
+/**
+ * The name compact mode's caption borrows from a layer that HAS CONTENT.
+ *
+ * Never called on an empty layer — the caller draws the bare "PVP" caption for
+ * that case instead, because a label borrowed from stale content (a name that
+ * lingers after the layer clears) is exactly the "residual" trap `lastCueName`
+ * already carries elsewhere in this file.
+ *
+ * "cue" reads `lastCueName` — the DTO carries no "current cue" field of its own,
+ * and this is the one place reading it is safe: the layer holds content, so it
+ * is not the stale echo `hasContent`'s own doc warns about. Falls back to the
+ * file name without its extension when PVP has not sent a cue name at all.
+ */
+export function pvpNowLabel(layer: PvpLayerDTO, label: PvpNowLabel): string {
+  if (label === "layer") return layer.name;
+  if (label === "file-ext") return layer.mediaName ?? layer.name;
+  if (label === "file") return layer.mediaName ? stripExtension(layer.mediaName) : layer.name;
+  return layer.lastCueName ?? (layer.mediaName ? stripExtension(layer.mediaName) : layer.name);
+}
 
 /**
  * The caption, fixed.
@@ -139,11 +193,12 @@ export function PvpNowObject({
   const layer = chooseNowLayer(status?.layers ?? [], config.layerName);
   const progress = layer ? computePvpProgress(layer, status?.sampledAt ?? null, now, skewMs) : null;
   const badge = nowBadge(layer, progress);
+  const compact = config.compact ?? false;
 
   if (badge === "empty") {
     return (
       <Readout
-        caption={PVP_NOW_CAPTION}
+        caption={compact ? "PVP" : PVP_NOW_CAPTION}
         captionEnd={<Badge badge="empty" />}
         // A DASH in the value, the sentence in the sub-line — the app's existing
         // shape for a readout with nothing to report (layout-renderer draws
@@ -160,6 +215,33 @@ export function PvpNowObject({
         align={align}
         uniform={uniform}
         dim
+      />
+    );
+  }
+
+  if (compact) {
+    // `layer` is non-null in practice — `badge === "empty"` above is the only
+    // case it can be null, and that already returned — but the ternary reads
+    // truer than an assertion the type checker cannot itself verify.
+    const labelText = layer ? pvpNowLabel(layer, config.nowLabel ?? DEFAULT_PVP_NOW_LABEL) : null;
+    return (
+      <Readout
+        caption={labelText ? `PVP · ${labelText}` : "PVP"}
+        captionEnd={<Badge badge={badge} />}
+        // The countdown alone — no "remaining" word, no next-cue line. That is
+        // the whole point of the compact treatment: two lines, not three or
+        // four, whenever content is up.
+        value={progress ? fmtDuration(progress.remainingSec) : "no duration"}
+        mono={!!progress}
+        // A STILL SHOWS NO TIME AT ALL, for the same reason the normal
+        // composition below shows none: dimming "no duration" rather than
+        // reading a countdown is what stops a graphic that never ends looking
+        // like a clip about to.
+        dim={!progress}
+        meter={progress && (config.showProgress ?? true) ? progress.fraction : null}
+        meterKey={pvpMeterKey(layer)}
+        align={align}
+        uniform={uniform}
       />
     );
   }

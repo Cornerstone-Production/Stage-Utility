@@ -44,7 +44,7 @@ import { useObsState } from "../../main/use-obs-state";
 import { usePvpState, usePvpSkewMs } from "../../main/use-pvp-state";
 import { PvpLayerRow } from "../../main/pvp-layer-row";
 import { visibleLayers } from "../../main/pvp-object";
-import { PvpNowObject } from "../../main/pvp-now";
+import { PvpNowObject, type PvpNowLabel } from "../../main/pvp-now";
 import { useReaperState } from "../../main/use-reaper-state";
 import { useSplState } from "../../main/use-spl-state";
 import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl, pinnedSpl, LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
@@ -749,10 +749,14 @@ export function PvpNowCard({
   now,
   showProgress = true,
   showNextCue = true,
+  compact = false,
+  nowLabel,
 }: {
   now: number;
   showProgress?: boolean;
   showNextCue?: boolean;
+  compact?: boolean;
+  nowLabel?: PvpNowLabel;
 }) {
   const pvp = usePvpState();
   const skewMs = usePvpSkewMs(pvp);
@@ -763,7 +767,7 @@ export function PvpNowCard({
           was what made this card render left while its Align pad said centre and
           every cell in that pad did nothing. */}
       <PvpNowObject
-        config={{ showProgress, showNextCue }}
+        config={{ showProgress, showNextCue, compact, nowLabel }}
         status={pvp}
         now={now}
         skewMs={skewMs}
@@ -993,6 +997,8 @@ export function HomeCard({
           now={now}
           showProgress={c.showProgress ?? true}
           showNextCue={c.showNextCue ?? true}
+          compact={c.compact ?? false}
+          nowLabel={c.nowLabel}
         />
       );
     case "home-screens":
