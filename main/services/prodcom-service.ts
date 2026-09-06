@@ -50,6 +50,21 @@ const SOCKET_KEEPALIVE_MS = 30_000;
  */
 const STREAM_IDLE_MS = 15 * 60_000;
 const MAX_LINES = 100;
+
+/**
+ * How old a finalised caption may be before it is dropped from the buffer and
+ * skipped on backfill.
+ *
+ * This is live captions, not history — History has its own records, and a
+ * caption older than a few hours on a display is never wanted there. A
+ * service runs roughly ninety minutes, so two services back-to-back in a
+ * morning both stay visible; yesterday's does not. This horizon also bounds
+ * backfill(): a reconnect legitimately re-imports the service in progress
+ * from ProdCom's own history, but must not re-import a service from days ago
+ * just because ProdCom's history still happens to hold it — which is exactly
+ * what put Thursday's lines on a display on a later day.
+ */
+const LINE_MAX_AGE_MS = 4 * 60 * 60_000;
 // Coalesce interim partials (which arrive many/sec while someone speaks) into at most
 // one full-buffer broadcast per this window; finals still push immediately.
 const TRANSCRIPT_THROTTLE_MS = 250;
@@ -151,6 +166,15 @@ type PartialEntry = {
   lastLoggedAt: number | null;
 };
 
+/** One finalised line plus OUR receive time — bookkeeping private to this
+ *  service, the same way PartialEntry keeps its fields off the DTO the
+ *  renderer sees. Only read when the line's own `at` (ProdCom's timestamp)
+ *  doesn't parse, as the fallback age reference for LINE_MAX_AGE_MS. */
+type FinalEntry = {
+  line: TranscriptLineDTO;
+  receivedAt: number;
+};
+
 export class ProdComService extends ConnectionLifecycle {
   /** Wall clock, overridable so a test can age a partial without waiting 30s. */
   protected now(): number {
@@ -172,7 +196,7 @@ export class ProdComService extends ConnectionLifecycle {
    *  `seenAt` is OUR receive time, not the payload's -- the timestamp in a
    *  ProdCom event is whatever that box's clock said, and this is used to decide
    *  whether an entry has gone stale, which must not depend on a peer's clock. */
-  private finals: TranscriptLineDTO[] = [];
+  private finals: FinalEntry[] = [];
   private partials = new Map<string, PartialEntry>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   /** Channel keys already logged as "final with no matching partial" since the
@@ -255,19 +279,41 @@ export class ProdComService extends ConnectionLifecycle {
     return dropped;
   }
 
+  /** OUR reference time for a final: its own `at` when parseable, else the
+   *  time we received it (see FinalEntry). */
+  private finalTimestamp(entry: FinalEntry): number {
+    const parsed = Date.parse(entry.line.at);
+    return Number.isNaN(parsed) ? entry.receivedAt : parsed;
+  }
+
+  /** Drop finalised lines older than LINE_MAX_AGE_MS. Returns whether any went. */
+  private pruneStaleFinals(): boolean {
+    const cutoff = this.now() - LINE_MAX_AGE_MS;
+    const before = this.finals.length;
+    this.finals = this.finals.filter((e) => this.finalTimestamp(e) >= cutoff);
+    const dropped = before - this.finals.length;
+    if (dropped > 0) console.log(`[prodcom] dropped ${dropped} line(s) older than 4h`);
+    this.syncPartialSweep();
+    return dropped > 0;
+  }
+
   /**
-   * Arm the sweep timer while a partial is held, disarm it the moment none is.
-   * Called after every mutation of `partials` so the timer's lifetime tracks
-   * the map's emptiness exactly, rather than depending on every call site to
-   * remember both halves.
+   * Arm the sweep timer while a partial is held OR a final is in the buffer,
+   * disarm it the moment both are empty. Called after every mutation of
+   * `partials` or `finals` so the timer's lifetime tracks the buffer's
+   * emptiness exactly, rather than depending on every call site to remember
+   * every half. Finals age out on their own four-hour horizon (LINE_MAX_AGE_MS)
+   * the same way partials age out on PARTIAL_TTL_MS, so both need the same
+   * background sweep in a quiet room where nothing else calls getBuffer().
    */
   private syncPartialSweep(): void {
-    if (this.partials.size > 0) {
+    if (this.partials.size > 0 || this.finals.length > 0) {
       if (this.sweepTimer) return;
       this.sweepTimer = setInterval(() => {
-        const dropped = this.pruneStalePartials();
+        const droppedPartials = this.pruneStalePartials();
+        const droppedFinals = this.pruneStaleFinals();
         this.logLongLivedPartials();
-        if (dropped) this.flushTranscript();
+        if (droppedPartials || droppedFinals) this.flushTranscript();
       }, PARTIAL_SWEEP_MS);
       this.sweepTimer.unref?.();
     } else if (this.sweepTimer) {
@@ -330,7 +376,8 @@ export class ProdComService extends ConnectionLifecycle {
   /** Current rolling buffer (finals + active partials), oldest → newest. */
   getBuffer(): TranscriptLineDTO[] {
     this.pruneStalePartials();
-    return [...this.finals, ...[...this.partials.values()].map((e) => e.line)];
+    this.pruneStaleFinals();
+    return [...this.finals.map((e) => e.line), ...[...this.partials.values()].map((e) => e.line)];
   }
 
   /** One-shot connectivity check for the Integrations "Test connection" button. */
@@ -570,10 +617,12 @@ export class ProdComService extends ConnectionLifecycle {
   // Append a finalised line, replacing any existing one with the same id (so a
   // backfilled line and a streamed update of it don't both appear).
   private addFinal(line: TranscriptLineDTO): void {
-    const at = this.finals.findIndex((l) => l.id === line.id);
-    if (at !== -1) this.finals[at] = line;
-    else this.finals.push(line);
+    const entry: FinalEntry = { line, receivedAt: this.now() };
+    const at = this.finals.findIndex((e) => e.line.id === line.id);
+    if (at !== -1) this.finals[at] = entry;
+    else this.finals.push(entry);
     if (this.finals.length > MAX_LINES) this.finals.splice(0, this.finals.length - MAX_LINES);
+    this.syncPartialSweep();
   }
 
   // Prime the buffer from the REST snapshot so a display opened mid-service shows
@@ -596,15 +645,7 @@ export class ProdComService extends ConnectionLifecycle {
               ? parsed
               : (pick(parsed, "transcripts") ?? pick(parsed, "items") ?? pick(parsed, "data"));
             if (!Array.isArray(rows)) return;
-            let added = false;
-            for (const row of rows) {
-              const line = this.normalizeLine(row);
-              if (line?.isFinal) {
-                this.addFinal(line);
-                added = true;
-              }
-            }
-            if (added) broadcast("prodcom:transcript", this.getBuffer());
+            this.applyBackfillRows(rows);
           } catch {
             /* snapshot not JSON / unavailable — ignore, stream still works */
           }
@@ -615,6 +656,35 @@ export class ProdComService extends ConnectionLifecycle {
     req.on("error", () => {
       /* backfill is best-effort */
     });
+  }
+
+  /**
+   * Apply ProdCom's own transcript history to the buffer on (re)connect.
+   * Rows older than LINE_MAX_AGE_MS are skipped — see that constant's doc for
+   * why a reconnect must not re-import a service ProdCom's history still
+   * happens to hold from days ago. Protected (not private) so a test can
+   * drive it directly without a real ProdCom host.
+   */
+  protected applyBackfillRows(rows: unknown[]): void {
+    const cutoff = this.now() - LINE_MAX_AGE_MS;
+    let added = false;
+    let skipped = 0;
+    for (const row of rows) {
+      const line = this.normalizeLine(row);
+      if (!line?.isFinal) continue;
+      const parsed = Date.parse(line.at);
+      const at = Number.isNaN(parsed) ? this.now() : parsed;
+      if (at < cutoff) {
+        skipped++;
+        continue;
+      }
+      this.addFinal(line);
+      added = true;
+    }
+    if (skipped > 0) {
+      console.log(`[prodcom] backfill skipped ${skipped} line(s) older than 4h`);
+    }
+    if (added) broadcast("prodcom:transcript", this.getBuffer());
   }
 }
 

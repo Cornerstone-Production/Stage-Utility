@@ -9,8 +9,17 @@ object.
 ProdCom (prodcom.io) exposes an HTTP Application API (default port 24480) with a
 purpose-built transcript SSE stream. `prodcom-service.ts` holds one long-lived
 connection to `GET /api/v1/transcript/stream`, normalises each event into a
-`TranscriptLineDTO`, keeps a rolling buffer (up to 100 lines), and re-broadcasts
-on the `prodcom:transcript` channel. It reconnects (~4 s) if the stream drops.
+`TranscriptLineDTO`, keeps a rolling buffer (up to 100 lines from the last four
+hours), and re-broadcasts on the `prodcom:transcript` channel. It reconnects
+(~4 s) if the stream drops.
+
+This is live captions, not history — a finalised line older than four hours is
+dropped from the buffer even if fewer than 100 lines have arrived since. On
+(re)connect it backfills from ProdCom's own `GET /api/v1/transcript` history so
+a display opened mid-service shows prior lines immediately, but skips any row
+in that history older than the same four-hour horizon — so a reconnect cannot
+re-import a service from days ago just because ProdCom's own history still
+holds it.
 
 A dropped cable or a switch port going down leaves the socket half-open — no
 close arrives, so nothing would notice. TCP keepalive probes the box every 30s
