@@ -51,7 +51,7 @@ export const PAD_SCALE = 0.11;
 /** Line heights. Exported because the budget below counts them, and because the
  *  rendered leading must be the same number the budget spent. */
 export const CAPTION_LEADING = 1.1;
-export const VALUE_LEADING = 1.05;
+export const VALUE_LEADING = 1.2;
 export const SUB_LEADING = 1.2;
 
 /** Below this share of the box the value stops shrinking, however little budget
