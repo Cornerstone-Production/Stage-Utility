@@ -220,15 +220,39 @@ function ScriptViewPlanRoute() {
  * collide with `$serviceType/$layout`, which is three deep.
  */
 /**
+ * Name and description for the shared `/history` page, the one place that
+ * literal lives. The NESTED_ROUTES entry below and the heading
+ * `ServiceHistoryShared` draws both read it, rather than each carrying its own
+ * copy of the same two strings.
+ */
+const HISTORY_SHARED_PAGE = {
+  label: "History",
+  description: "Every service that has been run — timing and attendance.",
+};
+
+/**
  * Service history WITHOUT the destructive controls.
  *
  * The link volunteers are given: tiled on the display picker, listed under
  * Connect → Tools, and documented in docs/display-urls.md. It renders the same
  * section the operator's page does, so any change to History shows up in both —
  * just without Edit times, Merge or Delete.
+ *
+ * Draws its OWN heading. The shell renders `/history` with no rail, no context
+ * bar and no mobile top bar (see shell.tsx), so nothing else on the page would
+ * ever say what it is — the same reason a console draws its own name in the
+ * layout editor.
  */
 function ServiceHistoryShared() {
-  return <ServiceHistorySection readOnly />;
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h1 className="text-subheadline font-semibold text-fg">{HISTORY_SHARED_PAGE.label}</h1>
+        <p className="text-footnote text-fg-muted">{HISTORY_SHARED_PAGE.description}</p>
+      </div>
+      <ServiceHistorySection readOnly />
+    </div>
+  );
 }
 
 export interface NestedRoute {
@@ -254,8 +278,7 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   {
     path: "/history",
     Component: ServiceHistoryShared,
-    label: "History",
-    description: "Every service that has been run — timing and attendance.",
+    ...HISTORY_SHARED_PAGE,
   },
   { path: "/scriptview/$serviceType/$layout", Component: ScriptViewPlanRoute },
   { path: "/scriptview/presets", Component: ScriptViewSection },

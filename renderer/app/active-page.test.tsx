@@ -23,7 +23,8 @@ const teardown = installDom();
 const { render, cleanup } = await import("@testing-library/react");
 const { router } = await import("./router.js");
 const { MOVED_ROUTES } = await import("./redirects.js");
-const { consoleHidesChrome, consolePageFor, consolePages, resolvePage } = await import("./active-page.js");
+const { consoleHidesChrome, consolePageFor, consolePages, hidesChrome, resolvePage } =
+  await import("./active-page.js");
 const { PageTitle } = await import("./page-title.js");
 const { PageActionsProvider } = await import("./page-actions.js");
 
@@ -279,5 +280,45 @@ describe("a console can ask for the shell's chrome to be hidden", () => {
   test("no views at all is not a crash", () => {
     assert.equal(consoleHidesChrome(`/consoles/${HIDDEN}`, undefined), false);
     assert.equal(consoleHidesChrome(`/consoles/${HIDDEN}`, []), false);
+  });
+});
+
+describe("hidesChrome adds the shared read-only pages beside a console's own flag", () => {
+  const HIDDEN = "view-booth-console";
+  const withFlag = [
+    ...VIEWS,
+    { id: HIDDEN, name: "Booth", kind: "custom", surface: "console", hideChrome: true, createdAt: "2026-01-01T00:00:00.000Z" },
+  ] as unknown as NonNullable<Parameters<typeof consolePages>[0]>;
+
+  test("/history is chromeless before views has loaded", () => {
+    assert.equal(hidesChrome("/history", undefined), true);
+  });
+
+  test("/history is chromeless once views has loaded too", () => {
+    assert.equal(hidesChrome("/history", VIEWS), true);
+  });
+
+  test("/history/manage — the operator's page, in the rail — keeps its chrome", () => {
+    assert.equal(hidesChrome("/history/manage", VIEWS), false);
+    assert.equal(hidesChrome("/history/manage", undefined), false);
+  });
+
+  test("a trailing slash still matches, since the router serves the same page", () => {
+    // The router serves /history/ as the same page and keeps the slash in the pathname.
+    assert.equal(hidesChrome("/history/", VIEWS), true);
+  });
+
+  test("a longer path sharing the prefix does not match", () => {
+    assert.equal(hidesChrome("/historyx", VIEWS), false);
+  });
+
+  test("a console still asking for its chrome hidden still gets it", () => {
+    assert.equal(hidesChrome(`/consoles/${HIDDEN}`, withFlag), true);
+  });
+
+  test("no other page loses its chrome", () => {
+    for (const path of ["/", "/screens"]) {
+      assert.equal(hidesChrome(path, withFlag), false, `${path} lost its chrome`);
+    }
   });
 });
