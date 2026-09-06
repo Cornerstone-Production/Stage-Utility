@@ -148,6 +148,7 @@ const NOT_SCANNED = new Map<string, string>([
   ["rosstalk-manager.ts", DEVICE],
   ["scores-service.ts", DEVICE],
   ["sensource-service.ts", DEVICE],
+  ["service-timeline-recorder.ts", DEVICE],
   ["smaart-service.ts", DEVICE],
   ["tsl-service.ts", DEVICE],
   ["wireless-manager.ts", DEVICE],

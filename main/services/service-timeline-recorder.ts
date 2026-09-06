@@ -16,7 +16,20 @@ import type { PcoLiveDTO, ServiceTimeline } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { shouldRecordLive } from "./live-service-gate.js";
-import { ServiceRecorder, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
+import { ServiceRecorder, SERVICE_GAP_MS, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
+
+/** "2d 3h" past a day, "3h 12m" under one — for the carry-over log line. Not
+ *  fmtDuration from renderer/main/pco-timer.ts: that one is renderer-side and
+ *  formats a clock-style "H:MM:SS", which reads wrong for "how long has this
+ *  been sitting live in PCO" (a duration, not a countdown). */
+function fmtCarryoverDuration(ms: number): string {
+  const totalMin = Math.round(ms / 60_000);
+  const days = Math.floor(totalMin / (24 * 60));
+  if (days >= 1) return `${days}d ${Math.floor((totalMin % (24 * 60)) / 60)}h`;
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  return hours >= 1 ? `${hours}h ${mins}m` : `${mins}m`;
+}
 
 class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
   protected readonly label = "service-timeline-recorder";
@@ -88,15 +101,35 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
       item.actualDurationSec = null;
       return;
     }
+    // A NEW item whose PCO live_start_at predates this record by more than the
+    // same-service gap was already live in Planning Center before this record
+    // opened — a leftover from an earlier session left sitting on-air (the
+    // production incident this guards: a BENEDICTION left live since Thursday
+    // night adopted its two-day-old start and the pacing widget read +2d 10h).
+    // Clamp its start to the record's own and mark it not counted; a real item
+    // that started within the gap is unchanged.
+    let startedAt = live.liveStartAt ?? new Date().toISOString();
+    let counted: boolean | undefined;
+    const liveStartMs = live.liveStartAt ? Date.parse(live.liveStartAt) : NaN;
+    const recordStartMs = Date.parse(this.current.startedAt);
+    if (Number.isFinite(liveStartMs) && Number.isFinite(recordStartMs) && recordStartMs - liveStartMs > SERVICE_GAP_MS) {
+      const carriedMs = recordStartMs - liveStartMs;
+      startedAt = this.current.startedAt;
+      counted = false;
+      console.log(
+        `[service-timeline] "${title}" had been live in Planning Center for ${fmtCarryoverDuration(carriedMs)} before this record opened — carried over from an earlier session, not counted`,
+      );
+    }
     this.current.items.push({
       itemId: id,
       title,
       sequence: this.nextSequence++,
       plannedLengthSec: planned,
-      startedAt: live.liveStartAt ?? new Date().toISOString(),
+      startedAt,
       endedAt: null,
       actualDurationSec: null,
       preService: live.beforeServiceStart === true, // pre-service default (position-based)
+      counted,
     });
   }
 
