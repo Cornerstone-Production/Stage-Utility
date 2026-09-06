@@ -90,7 +90,28 @@ export interface LayoutObjectSpec {
    * operator believes they just restored. Deletion waits until the conversions
    * have happened and such a snapshot is no longer one anybody would restore.
    */
-  retired?: { replacedBy: LayoutObjectType; why: string };
+  retired?: {
+    replacedBy: LayoutObjectType;
+    why: string;
+    /**
+     * Builds the replacement config from the retired object's own config, plus
+     * whatever context the conversion needs but the type itself does not carry
+     * (right now, only which Script view to point an Embedded view at).
+     *
+     * One function per retired type rather than one shared "convert to X"
+     * button, because the five retirements do not share a shape: two pick a
+     * recorder, two pick a platform, one points at a view by id. A single
+     * generic conversion would have to special-case all three anyway.
+     */
+    convert: (old: LayoutObjectConfig, ctx: { scriptViewId: string | null }) => LayoutObjectConfig;
+    /**
+     * Extra caveat text shown under `why`, for a conversion that is not a
+     * like-for-like swap. Only `service-order` has one today: the replacement
+     * scrolls instead of fitting, and drops settings the legacy object had.
+     * Plain text — this file has no JSX — so no bold marks carry over.
+     */
+    caveat?: string;
+  };
   /**
    * This is Home's version of that wall widget, so the Home picker offers this
    * one and hides that one.
@@ -350,6 +371,15 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     retired: {
       replacedBy: "view-embed",
       why: "Embedded view renders the full ScriptView rundown — the same table as the ScriptView pages, with your saved column presets.",
+      caveat:
+        "It is not a like-for-like swap, so read this first: the replacement scrolls rather than shrinking to fit, and Fit to height, Scroll and the note-category picker do not carry over. Its columns come from the Script view's preset instead. Set the object's font size afterwards — nothing auto-fits it now.",
+      convert: (_old, ctx) => ({
+        type: "view-embed",
+        // Only auto-pick when there is no ambiguity; otherwise leave it for the
+        // picker rather than guessing which view was meant.
+        viewId: ctx.scriptViewId,
+        showHeader: false,
+      }),
     },
     config: () => ({ type: "service-order", noteCategories: null, showLength: false, highlightLive: true, scroll: "auto", autoFit: true }),
     style: () => TEXT({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
@@ -769,6 +799,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     retired: {
       replacedBy: "home-recording",
       why: "Recording now picks its recorder — right-click the card and choose OBS. One card instead of three, and it can be changed without being replaced.",
+      convert: () => ({ type: "home-recording", recorder: "obs", showElapsed: true }),
     },
     config: () => ({ type: "home-recording-obs" }),
     style: BARE,
@@ -784,6 +815,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     retired: {
       replacedBy: "home-recording",
       why: "Recording now picks its recorder — right-click the card and choose REAPER. One card instead of three, and it can be changed without being replaced.",
+      convert: () => ({ type: "home-recording", recorder: "reaper", showElapsed: true }),
     },
     config: () => ({ type: "home-recording-reaper" }),
     style: BARE,
@@ -816,6 +848,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     retired: {
       replacedBy: "home-streaming",
       why: "Streaming now picks its platform — right-click the card and choose Resi. One card instead of three, and it can be changed without being replaced.",
+      convert: () => ({ type: "home-streaming", platform: "resi" }),
     },
     config: () => ({ type: "home-streaming-resi" }),
     style: BARE,
@@ -830,6 +863,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     retired: {
       replacedBy: "home-streaming",
       why: "Streaming now picks its platform — right-click the card and choose YouTube. One card instead of three, and it can be changed without being replaced.",
+      convert: () => ({ type: "home-streaming", platform: "youtube" }),
     },
     config: () => ({ type: "home-streaming-youtube" }),
     style: BARE,
