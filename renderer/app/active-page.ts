@@ -136,6 +136,37 @@ export function consoleHidesChrome(
   return view?.hideChrome === true;
 }
 
+/**
+ * Shared (non-console) pages that are always chromeless, keyed by their exact
+ * path. `/history` is the first: it is the read-only link handed to
+ * volunteers, and it must not flash the rail while `views` is still loading —
+ * unlike a console, its chromelessness is not the operator's per-View setting,
+ * it is a property of the route itself. A second shared chromeless page later
+ * is a one-line addition here rather than a new matcher.
+ */
+export const SHARED_CHROMELESS_PATHS: ReadonlySet<string> = new Set(["/history"]);
+
+/**
+ * Does this EXACT path want the shell's chrome hidden, whether that is a
+ * shared page or an operator's console?
+ *
+ * `consoleHidesChrome` stays as it is — other code and tests key off it
+ * directly — this just adds the shared-path check beside it.
+ */
+/**
+ * Is this a shared chromeless page? The router serves `/history/` as the same
+ * page as `/history` but reports the pathname with its slash, so one trailing
+ * slash is forgiven; `/history/manage` is a different path and is not.
+ */
+export function isSharedChromelessPath(pathname: string): boolean {
+  const bare = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  return SHARED_CHROMELESS_PATHS.has(bare);
+}
+
+export function hidesChrome(pathname: string, views: readonly View[] | undefined): boolean {
+  return isSharedChromelessPath(pathname) || consoleHidesChrome(pathname, views);
+}
+
 /** Nested routes that the shell titles. The rest fall back to their parent
  *  destination's name, because they draw their own heading. */
 const TITLED_NESTED: readonly PageIdentity[] = NESTED_ROUTES.flatMap((r) =>

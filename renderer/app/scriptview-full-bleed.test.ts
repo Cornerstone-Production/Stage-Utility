@@ -63,9 +63,13 @@ describe("the page and the shell each do their half", () => {
   const page = readFileSync(new URL("../main/scriptview-plan-view.tsx", import.meta.url), "utf8");
 
   it("the shell withholds the top gutter for a full-bleed route", () => {
+    // `!chromeless` dropped out of this expression — see console-gutter.test.tsx
+    // for why: every console is full-bleed regardless of `hideChrome`, so it
+    // added nothing, and `chromeless` now also covers a non-full-bleed shared
+    // page (`/history`) that must keep this gutter.
     assert.match(
       shell,
-      /!chromeless && !fullBleed && "sm:pt-4"/,
+      /!fullBleed && "sm:pt-4"/,
       "the shell applies its top gutter regardless, so the band above the rundown comes back",
     );
   });

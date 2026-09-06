@@ -19,7 +19,13 @@ import { PAGE_SCROLLER_ID, useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
 import { PageActionsProvider, PageActionsSlot } from "./page-actions";
 import { ContextBar } from "./context-bar";
-import { consoleHidesChrome, consolePages, isFullBleedPath, resolvePage } from "./active-page";
+import {
+  consolePages,
+  hidesChrome,
+  isFullBleedPath,
+  isSharedChromelessPath,
+  resolvePage,
+} from "./active-page";
 import { useStageState } from "../main/use-stage-state";
 import { useStageLiveWiring } from "./live-wiring";
 import { UpdateNotices } from "./update-notices";
@@ -59,10 +65,24 @@ export function Shell() {
   // waiting: ConsoleRoute itself renders null without `stageState`, so the
   // content area is empty for exactly that window either way.
   const views = liveState?.views;
+  // `/history` is chromeless from first paint, independent of `views` — it is
+  // a property of the route, not the operator's per-console setting, so it
+  // must not wait on the hydrate the way a console's flag does. Once `views`
+  // is known, `hidesChrome` folds the console check back in.
   const chromeless = useMemo(
-    () => (views ? consoleHidesChrome(pathname, views) : pathname.startsWith("/consoles/")),
+    () =>
+      views
+        ? hidesChrome(pathname, views)
+        : isSharedChromelessPath(pathname) || pathname.startsWith("/consoles/"),
     [pathname, views],
   );
+  // A shared chromeless page (today, only `/history`) gets none of the shell:
+  // no rail, no context bar, no mobile top bar — it is a link handed to
+  // volunteers with no other page to navigate to. A chromeless CONSOLE is
+  // different: the rail stays on desktop (see SplitView), because the rail is
+  // the operator's way back to the rest of the app. So this is its own flag
+  // rather than a reuse of `chromeless` above, which covers both.
+  const isSharedChromelessPage = isSharedChromelessPath(pathname);
   const { collapsed, toggle } = useSidebarCollapsed();
   const resetKey = useRouteResetKey();
   // Mounted HERE, not on a route: these subscriptions must outlive any single
@@ -76,6 +96,70 @@ export function Shell() {
   const { data: stageState } = useStageStateQuery();
   useStageLiveWiring(stageState?.accentColor);
   const { width, dragging, startResize, reset: resetWidth } = useSidebarWidth();
+
+  // The app's ONE scroller, and the only one the router knows by name — see
+  // PAGE_SCROLLER_ID. Without the id, TanStack identifies it by an
+  // `nth-child` path, which changes when the scores panel adds a sibling
+  // above. Built once and reused by both branches below rather than declared
+  // twice, so exactly one element in this file ever carries the id —
+  // page-scroll-reset.test.tsx counts the literal assignment in source and
+  // fails past one, which a second copy (one per branch) would trip.
+  const content = (
+    <main
+      data-scroll-restoration-id={PAGE_SCROLLER_ID}
+      className={cn(
+        "flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3",
+        // `sm:pt-4` is the air between the band and the page. With no band
+        // there is nothing for it to separate, and it would hand 16px of
+        // the reclaimed height straight back as padding. The HORIZONTAL
+        // gutter stays: a console cancels it with its own negative margins,
+        // so dropping it here would push the console off the left edge.
+        //
+        // A CONSOLE NEVER GETS IT, band or no band. It fills its area edge
+        // to edge, so the padding is a white band between the strip and the
+        // stage-black rather than air under a page. Dropped HERE rather
+        // than cancelled by the console with a negative margin: the console
+        // is `h-full`, and a negative margin moves the box without giving
+        // it the height back, so cancelling it that way just moved the
+        // white band to the bottom.
+        //
+        // `fullBleed` ALONE decides this, with no separate `chromeless`
+        // check needed: every console is full-bleed whether or not its
+        // `hideChrome` flag is set, so a chrome-hidden console is already a
+        // subset of `fullBleed` and adding `!chromeless` here changed
+        // nothing. It used to read `!chromeless && !fullBleed` — but
+        // `chromeless` now ALSO covers a shared page like `/history`, which
+        // is NOT full-bleed and must keep this gutter, so the old term would
+        // have dropped it there. `fullBleed` alone is the correct condition
+        // for both the console it was written for and the shared page it
+        // was not.
+        !fullBleed && "sm:pt-4",
+      )}
+    >
+      {/* Keyed so re-selecting the active rail item remounts the route,
+          returning it to its top view. */}
+      <div key={resetKey} className="contents">
+        <Outlet />
+      </div>
+    </main>
+  );
+
+  // A shared chromeless page has no rail to give back to — there is nowhere
+  // else on this page to navigate to, and SplitView renders its `sidebar`
+  // prop into the desktop panel and the mobile drawer regardless of
+  // `chromeless`, so passing `chromeless` to SplitView alone would still draw
+  // the rail beside it. Skip SplitView entirely instead: no rail, no mobile
+  // top bar, no floating "way back" hamburger (a console needs one because a
+  // chrome-free console IS the whole app surface; `/history` is one ordinary
+  // page reached by a plain URL).
+  if (isSharedChromelessPage) {
+    return (
+      <div className="h-[100dvh] overflow-hidden bg-bg">
+        <UpdateNotices />
+        <PageActionsProvider>{content}</PageActionsProvider>
+      </div>
+    );
+  }
 
   return (
     // The rail carries `bg-rail` (grayer than the content in light, seamless in
@@ -119,41 +203,7 @@ export function Shell() {
           {/* Page gutter, applied ONCE here rather than by each route. Routes were
                 padding themselves individually and the ones added recently did not,
                 so the editor and Screens sat flush against the right edge. */}
-          {/* The app's ONE scroller, and the only one the router knows by name —
-              see PAGE_SCROLLER_ID. Without the id, TanStack identifies it by an
-              `nth-child` path, which changes when the scores panel adds a
-              sibling above. */}
-          {/* `sm:pt-4` REPLACES THE HEADER'S OWN TOP PADDING, and only on the
-              surface that had one. The header band supplied the 20px of air
-              between the strip and the page; without it a desktop page starts
-              flush against the bar and reads as part of it. A phone never had a
-              header and gets no padding here, so nothing below 640px moves. */}
-          <main
-            data-scroll-restoration-id={PAGE_SCROLLER_ID}
-            className={cn(
-              "flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3",
-              // `sm:pt-4` is the air between the band and the page. With no band
-              // there is nothing for it to separate, and it would hand 16px of
-              // the reclaimed height straight back as padding. The HORIZONTAL
-              // gutter stays: a console cancels it with its own negative margins,
-              // so dropping it here would push the console off the left edge.
-              //
-              // A CONSOLE NEVER GETS IT, band or no band. It fills its area edge
-              // to edge, so the padding is a white band between the strip and the
-              // stage-black rather than air under a page. Dropped HERE rather
-              // than cancelled by the console with a negative margin: the console
-              // is `h-full`, and a negative margin moves the box without giving
-              // it the height back, so cancelling it that way just moved the
-              // white band to the bottom.
-              !chromeless && !fullBleed && "sm:pt-4",
-            )}
-          >
-            {/* Keyed so re-selecting the active rail item remounts the route,
-                returning it to its top view. */}
-            <div key={resetKey} className="contents">
-              <Outlet />
-            </div>
-          </main>
+          {content}
         </div>
       </SplitView>
       </PageActionsProvider>

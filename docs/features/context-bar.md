@@ -2,8 +2,10 @@
 
 The strip above every operator page: the clock, which service is loaded, whether
 one is running, and whether anything needs attention. It is the same on every
-page, so `/patch` and `/history` know a service is live without carrying their
-own copy of the state.
+page, so `/patch` knows a service is live without carrying its own copy of the
+state. `/history` is the one page it does not appear on: it renders without the
+app's chrome at all, for the volunteer it is handed to. See
+[Read-only links to hand out](operator-app.md#read-only-links-to-hand-out).
 
 On a desktop it also carries the **page's name** at its left and the page's own
 controls at its right, so a page has one band of chrome above it rather than two.
