@@ -12,11 +12,11 @@ import {
   FieldLabel,
   FieldDescription,
   InfoHint,
-  Collapsible,
   Switch,
   Input,
   NumberInput,
   Button,
+  ButtonGroup,
   type ButtonProps,
   Select,
   SelectTrigger,
@@ -43,6 +43,49 @@ const ANY_DAY = "any";
 // window during an in-app self-update. Mirrors the backend default so a newer bundle
 // never crashes against an older API. Keep in sync with settings-store DEFAULT_SETTINGS.
 const DEFAULT_AUTO_UPDATE: StageState["autoUpdate"] = { mode: "manual", dayOfWeek: null, hour: 3 };
+
+/**
+ * A segmented control built from `ButtonGroup` + small `Button`s — one filled
+ * "selected" button and the rest quiet, exactly the shape Data archive's
+ * Keep mine / Merge / Replace mine row already used. Reused for every
+ * Select-with-a-handful-of-options this section replaced: update track,
+ * update mode, clock format.
+ *
+ * `value` may be null (nothing known yet, e.g. an unreadable install's
+ * branch) — every option then renders unselected rather than guessing one.
+ */
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  /** Accessible name for the group; the visible FieldLabel beside it is not associated. */
+  label: string;
+  options: { value: T; label: ReactNode; hint?: string }[];
+  value: T | null;
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <ButtonGroup role="group" aria-label={label}>
+      {options.map((o) => (
+        <Button
+          key={o.value}
+          variant={value === o.value ? "accent" : "filled"}
+          aria-pressed={value === o.value}
+          size="small"
+          disabled={disabled}
+          title={o.hint}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </Button>
+      ))}
+    </ButtonGroup>
+  );
+}
 
 function formatHour(h: number): string {
   const am = h < 12;
@@ -273,7 +316,7 @@ export function UpdatesPanel({
   // freshly-restarted server flashes this before the first check runs.
   if (s && s.canUpdate === false && s.lastCheckedAt) {
     return (
-      <FieldSet>
+      <FieldSet flat>
         <FieldGroup>
           <Field orientation="vertical">
             <FieldContent>
@@ -291,7 +334,7 @@ export function UpdatesPanel({
   }
 
   return (
-    <FieldSet>
+    <FieldSet flat>
       <FieldGroup>
         <Field orientation="vertical">
           <FieldContent>
@@ -456,17 +499,16 @@ export function UpdatesPanel({
               </FieldDescription>
             </FieldContent>
             <div className="flex items-center gap-2">
-              <Select value={trackSel ?? s.branch ?? ""} onValueChange={setTrackSel} disabled={updating}>
-                {/* Placeholder rather than a default: the track is unknown on an
-                    install whose layout we cannot read, and showing "main" there
-                    is how a beta box came to report itself as stable. */}
-                <SelectTrigger className="w-28" aria-label="Update track">
-                  <SelectValue placeholder="unknown" />
-                </SelectTrigger>
-                <SelectContent>
-                  {s.tracks.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {/* No selection rather than a default when the track is unknown —
+                  an install whose layout we cannot read — since guessing "main"
+                  is how a beta box came to report itself as stable. */}
+              <Segmented
+                label="Update track"
+                value={trackSel ?? s.branch ?? null}
+                onChange={setTrackSel}
+                disabled={updating}
+                options={s.tracks.map((t) => ({ value: t, label: t }))}
+              />
               {/* Locked too: a track switch reinstalls, rebuilds and restarts,
                   and onSwitchTrack already asks for the same override. */}
               <GuardedButton
@@ -516,19 +558,16 @@ export function UpdatesPanel({
               service is live, whichever mode you pick.
             </FieldDescription>
           </FieldContent>
-          <Select
+          <Segmented
+            label="Updates"
             value={autoUpdate.mode}
-            onValueChange={(v: string) =>
-              handlers.handleSetAutoUpdate({ mode: v as StageState["autoUpdate"]["mode"] })
-            }
-          >
-            <SelectTrigger className="w-56" aria-label="Update mode"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="manual">Manual — I check and apply</SelectItem>
-              <SelectItem value="auto-install">Install automatically, restart when I say</SelectItem>
-              <SelectItem value="auto-full">Install and restart automatically</SelectItem>
-            </SelectContent>
-          </Select>
+            onChange={(mode) => handlers.handleSetAutoUpdate({ mode })}
+            options={[
+              { value: "manual", label: "Manual", hint: "Manual — I check and apply." },
+              { value: "auto-install", label: "Install", hint: "Install automatically, restart when I say." },
+              { value: "auto-full", label: "Install + restart", hint: "Install and restart automatically." },
+            ]}
+          />
         </Field>
 
         {autoUpdate.mode === "auto-install" ? (
@@ -986,15 +1025,15 @@ function HourCycleField({
           other keeps its own choice.
         </FieldDescription>
       </FieldContent>
-      <Select value={hourCycle} onValueChange={(v: string) => void onChange(v as "12h" | "24h")}>
-        <SelectTrigger className="w-64" aria-label="Clock format">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="24h">24-hour ({formatClock(SAMPLE_EVENING, { seconds: true, hourCycle: "24h" })})</SelectItem>
-          <SelectItem value="12h">12-hour ({formatClock(SAMPLE_EVENING, { seconds: true, hourCycle: "12h" })})</SelectItem>
-        </SelectContent>
-      </Select>
+      <Segmented
+        label="Clock format"
+        value={hourCycle}
+        onChange={(v) => void onChange(v)}
+        options={[
+          { value: "24h", label: `24-hour (${formatClock(SAMPLE_EVENING, { seconds: true, hourCycle: "24h" })})` },
+          { value: "12h", label: `12-hour (${formatClock(SAMPLE_EVENING, { seconds: true, hourCycle: "12h" })})` },
+        ]}
+      />
     </Field>
   );
 }
@@ -1016,6 +1055,11 @@ export function AdvancedSection({
   // Local field state so typing doesn't fight the live store; commit on blur.
   const [publicUrl, setPublicUrl] = useState(stageState.publicUrl ?? "");
   const [configuringBar, setConfiguringBar] = useState(false);
+  // Bulky and rarely needed — collapsed by default, expanded with a plain
+  // inline text button rather than a Collapsible, since this is the one
+  // disclosure the one-sheet redesign keeps (everything else on the tab is
+  // now always on screen).
+  const [showCommands, setShowCommands] = useState(false);
 
   function commitPublicUrl() {
     const trimmed = publicUrl.trim();
@@ -1030,56 +1074,137 @@ export function AdvancedSection({
 
   return (
     <div className="flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-      <UpdatesPanel
-        updateStatus={updateStatus}
-        autoUpdate={stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE}
-        handlers={handlers}
-        justUpdated={justUpdated ?? null}
-        onDismissJustUpdated={onDismissJustUpdated}
-      />
+      <div className="su-card">
+        <UpdatesPanel
+          updateStatus={updateStatus}
+          autoUpdate={stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE}
+          handlers={handlers}
+          justUpdated={justUpdated ?? null}
+          onDismissJustUpdated={onDismissJustUpdated}
+        />
+      </div>
 
-      <FieldSet>
-        <FieldGroup>
-          {/* The one thing worth keeping from the Connect tab's Tools list.
-              Every other entry there — ScriptView, Patch, History, Baptisms —
-              is in the rail; the raw log is not, and it was the only route to
-              it. Advanced is where the rest of the diagnostics already live. */}
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel>Server log</FieldLabel>
-              <FieldDescription>
-                The raw log, for diagnosing a problem. Not something to hand to a volunteer.
-              </FieldDescription>
-            </FieldContent>
-            <Button
-              variant="filled"
-              size="small"
-              onClick={() => window.open("/log", "_blank", "noreferrer")}
-            >
-              Open log
-            </Button>
-          </Field>
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel>Context bar</FieldLabel>
-              <FieldDescription>
-                Which readings appear above every page, and where they sit. Right-clicking the bar
-                itself opens the same thing.
-              </FieldDescription>
-            </FieldContent>
-            <Button variant="filled" size="small" onClick={() => setConfiguringBar(true)}>
-              Configure…
-            </Button>
-          </Field>
-        </FieldGroup>
-      </FieldSet>
-
-      <BarConfigurator open={configuringBar} onOpenChange={setConfiguringBar} />
-
-      <FieldSet>
-        <Collapsible label="Kiosk devices" summary="Let screens find this server and be claimed" headerClassName="px-4 py-2.5">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 items-start">
+        <div className="su-card">
+          <div className="border-b border-line px-4 py-3">
+            <h3 className="text-callout font-semibold text-fg">Server</h3>
+          </div>
           <FieldSet flat>
             <FieldGroup>
+              <Field orientation="vertical">
+                <FieldContent>
+                  <FieldLabel>Public address (DNS)</FieldLabel>
+                  <FieldDescription>
+                    The address people use to reach this server — e.g. a DNS name behind a reverse proxy.
+                    When set, the connect QR code and the display links use it instead of the local IP.
+                    Leave blank to use the auto-detected network address.
+                  </FieldDescription>
+                </FieldContent>
+                <Input
+                  value={publicUrl}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setPublicUrl(e.target.value)}
+                  onBlur={commitPublicUrl}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
+                  placeholder="http://stage-display.example.com"
+                  className="text-gray-12"
+                  aria-label="Public address (DNS)"
+                />
+              </Field>
+
+              <TimezoneField
+                timezone={stageState.timezone ?? null}
+                hostTimezone={stageState.hostTimezone ?? "UTC"}
+                onChange={handlers.handleSetTimezone}
+              />
+              <HourCycleField
+                hourCycle={stageState.hourCycle ?? "24h"}
+                onChange={handlers.handleSetHourCycle}
+              />
+
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>
+                    Wake around service times
+                    <InfoHint className="ml-1.5 align-middle">
+                      Church gear is off most of the week, so retrying at full speed is wasted
+                      traffic and log noise. Rehearsal and service windows come from Planning
+                      Center; outside them connections back off toward the idle interval below,
+                      and the Planning Center poll slows too. Nothing ever sleeps past the moment
+                      the next window opens, and if the schedule cannot be worked out — no
+                      credentials, a failed fetch — everything stays at full speed rather than
+                      going quiet.
+                    </InfoHint>
+                  </FieldLabel>
+                  <FieldDescription>
+                    Back off reconnects when gear is off for the week, and ramp up before a
+                    rehearsal or service. Off = a fixed 2-minute retry.
+                  </FieldDescription>
+                </FieldContent>
+                <Switch
+                  checked={rc.enabled}
+                  onCheckedChange={(v: boolean) => handlers.handleSetReconnectSchedule({ enabled: v })}
+                />
+              </Field>
+              {rc.enabled && (
+                <>
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel>Lead time before rehearsal (minutes)</FieldLabel>
+                      <FieldDescription>Start reconnecting this long before a scheduled rehearsal or service.</FieldDescription>
+                    </FieldContent>
+                    <NumberInput value={rc.leadMin} min={0} max={1440} className="w-28"
+                      onChange={(v) => { if (v !== rc.leadMin) handlers.handleSetReconnectSchedule({ leadMin: Math.round(v) }); }}
+                      aria-label="Lead time before rehearsal (minutes)" />
+                  </Field>
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel>Keep active after service ends (minutes)</FieldLabel>
+                      <FieldDescription>Stay in fast-reconnect mode this long after the service end time.</FieldDescription>
+                    </FieldContent>
+                    <NumberInput value={rc.tailMin} min={0} max={1440} className="w-28"
+                      onChange={(v) => { if (v !== rc.tailMin) handlers.handleSetReconnectSchedule({ tailMin: Math.round(v) }); }}
+                      aria-label="Keep active after service ends (minutes)" />
+                  </Field>
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel>Idle retry interval (minutes)</FieldLabel>
+                      <FieldDescription>Longest gap between reconnect attempts when far from any service (the dead-week cadence).</FieldDescription>
+                    </FieldContent>
+                    <NumberInput value={rc.dormantMin} min={1} max={1440} className="w-28"
+                      onChange={(v) => { if (v !== rc.dormantMin) handlers.handleSetReconnectSchedule({ dormantMin: Math.round(v) }); }}
+                      aria-label="Idle retry interval (minutes)" />
+                  </Field>
+                </>
+              )}
+
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>Pre-service ramp (minutes)</FieldLabel>
+                  <FieldDescription>Start sampling attendance this long before the service start, so the graph shows the room filling up. 0 = off.</FieldDescription>
+                </FieldContent>
+                <NumberInput value={tw.preMin} min={0} max={240} className="w-28"
+                  onChange={(v) => { if (v !== tw.preMin) handlers.handleSetTaperWindow({ preMin: Math.round(v) }); }}
+                  aria-label="Pre-service ramp (minutes)" />
+              </Field>
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>
+                    Post-service taper (minutes)
+                    <InfoHint className="ml-1.5 align-middle">
+                      Sampling continues even once the live plan is cleared, so an emptying room
+                      is still recorded. These samples are excluded from the Peak and Lowest
+                      figures — otherwise the taper would drag the low toward an empty room.
+                    </InfoHint>
+                  </FieldLabel>
+                  <FieldDescription>Keep sampling this long after the service ends, to capture how fast the room empties. 0 = off.</FieldDescription>
+                </FieldContent>
+                <NumberInput value={tw.postMin} min={0} max={240} className="w-28"
+                  onChange={(v) => { if (v !== tw.postMin) handlers.handleSetTaperWindow({ postMin: Math.round(v) }); }}
+                  aria-label="Post-service taper (minutes)" />
+              </Field>
+
               <Field orientation="horizontal">
                 <FieldContent>
                   <FieldLabel>Answer devices looking for a server</FieldLabel>
@@ -1095,6 +1220,7 @@ export function AdvancedSection({
                   aria-label="Answer kiosk devices looking for a server"
                 />
               </Field>
+
               <Field orientation="vertical">
                 <FieldContent>
                   <FieldLabel>Setting up a screen</FieldLabel>
@@ -1104,182 +1230,89 @@ export function AdvancedSection({
                     moves.
                   </FieldDescription>
                 </FieldContent>
-                <div className="flex flex-col gap-1.5">
-                  {[
-                    ["Linux / Raspberry Pi", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-linux.sh | sudo sh`],
-                    ["macOS", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-macos.sh | sudo sh`],
-                    ["Windows (elevated)", `irm ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-windows.ps1 | iex`],
-                  ].map(([os, cmd]) => (
-                    <div key={os}>
-                      <div className="text-caption2 text-fg-subtle">{os}</div>
-                      <code className="block select-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-caption1 text-fg">
-                        {cmd}
-                      </code>
-                    </div>
-                  ))}
-                </div>
+                <Button
+                  variant="transparent"
+                  size="small"
+                  className="self-start px-0"
+                  aria-expanded={showCommands}
+                  onClick={() => setShowCommands((v) => !v)}
+                >
+                  {showCommands ? "Hide commands" : "Show commands"}
+                </Button>
+                {showCommands && (
+                  <div className="flex flex-col gap-1.5">
+                    {[
+                      ["Linux / Raspberry Pi", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-linux.sh | sudo sh`],
+                      ["macOS", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-macos.sh | sudo sh`],
+                      ["Windows (elevated)", `irm ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-windows.ps1 | iex`],
+                    ].map(([os, cmd]) => (
+                      <div key={os}>
+                        <div className="text-caption2 text-fg-subtle">{os}</div>
+                        <code className="block select-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-caption1 text-fg">
+                          {cmd}
+                        </code>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Field>
+
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>Context bar</FieldLabel>
+                  <FieldDescription>
+                    Which readings appear above every page, and where they sit. Right-clicking the bar
+                    itself opens the same thing.
+                  </FieldDescription>
+                </FieldContent>
+                <Button variant="filled" size="small" onClick={() => setConfiguringBar(true)}>
+                  Configure…
+                </Button>
+              </Field>
+
+              {/* The one thing worth keeping from the Connect tab's Tools list.
+                  Every other entry there — ScriptView, Patch, History, Baptisms —
+                  is in the rail; the raw log is not, and it was the only route to
+                  it. Advanced is where the rest of the diagnostics already live. */}
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>Server log</FieldLabel>
+                  <FieldDescription>
+                    The raw log, for diagnosing a problem. Not something to hand to a volunteer.
+                  </FieldDescription>
+                </FieldContent>
+                <Button
+                  variant="filled"
+                  size="small"
+                  onClick={() => window.open("/log", "_blank", "noreferrer")}
+                >
+                  Open log
+                </Button>
               </Field>
             </FieldGroup>
           </FieldSet>
-        </Collapsible>
-      </FieldSet>
+        </div>
 
-      <FieldSet>
-        <Collapsible label="Network & behavior" summary="Public address, reconnects, attendance" headerClassName="px-4 py-2.5">
-          <FieldSet flat>
-        <FieldGroup>
-          <Field orientation="vertical">
-            <FieldContent>
-              <FieldLabel>Public address (DNS)</FieldLabel>
-              <FieldDescription>
-                The address people use to reach this server — e.g. a DNS name behind a reverse proxy.
-                When set, the connect QR code and the display links use it instead of the local IP.
-                Leave blank to use the auto-detected network address.
-              </FieldDescription>
-            </FieldContent>
-            <Input
-              value={publicUrl}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setPublicUrl(e.target.value)}
-              onBlur={commitPublicUrl}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") e.currentTarget.blur();
-              }}
-              placeholder="http://stage-display.example.com"
-              className="text-gray-12"
-              aria-label="Public address (DNS)"
-            />
-          </Field>
-        </FieldGroup>
-      </FieldSet>
-
-          <FieldSet flat>
-        <FieldGroup>
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel>
-                Wake around service times
-                <InfoHint className="ml-1.5 align-middle">
-                  Church gear is off most of the week, so retrying at full speed is wasted
-                  traffic and log noise. Rehearsal and service windows come from Planning
-                  Center; outside them connections back off toward the idle interval below,
-                  and the Planning Center poll slows too. Nothing ever sleeps past the moment
-                  the next window opens, and if the schedule cannot be worked out — no
-                  credentials, a failed fetch — everything stays at full speed rather than
-                  going quiet.
-                </InfoHint>
-              </FieldLabel>
-              <FieldDescription>
-                Back off reconnects when gear is off for the week, and ramp up before a
-                rehearsal or service. Off = a fixed 2-minute retry.
-              </FieldDescription>
-            </FieldContent>
-            <Switch
-              checked={rc.enabled}
-              onCheckedChange={(v: boolean) => handlers.handleSetReconnectSchedule({ enabled: v })}
-            />
-          </Field>
-          {rc.enabled && (
-            <>
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>Lead time before rehearsal (minutes)</FieldLabel>
-                  <FieldDescription>Start reconnecting this long before a scheduled rehearsal or service.</FieldDescription>
-                </FieldContent>
-                <NumberInput value={rc.leadMin} min={0} max={1440} className="w-28"
-                  onChange={(v) => { if (v !== rc.leadMin) handlers.handleSetReconnectSchedule({ leadMin: Math.round(v) }); }}
-                  aria-label="Lead time before rehearsal (minutes)" />
-              </Field>
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>Keep active after service ends (minutes)</FieldLabel>
-                  <FieldDescription>Stay in fast-reconnect mode this long after the service end time.</FieldDescription>
-                </FieldContent>
-                <NumberInput value={rc.tailMin} min={0} max={1440} className="w-28"
-                  onChange={(v) => { if (v !== rc.tailMin) handlers.handleSetReconnectSchedule({ tailMin: Math.round(v) }); }}
-                  aria-label="Keep active after service ends (minutes)" />
-              </Field>
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>Idle retry interval (minutes)</FieldLabel>
-                  <FieldDescription>Longest gap between reconnect attempts when far from any service (the dead-week cadence).</FieldDescription>
-                </FieldContent>
-                <NumberInput value={rc.dormantMin} min={1} max={1440} className="w-28"
-                  onChange={(v) => { if (v !== rc.dormantMin) handlers.handleSetReconnectSchedule({ dormantMin: Math.round(v) }); }}
-                  aria-label="Idle retry interval (minutes)" />
-              </Field>
-            </>
-          )}
-        </FieldGroup>
-      </FieldSet>
-
-          <FieldSet flat>
-        <FieldGroup>
-          <TimezoneField
-            timezone={stageState.timezone ?? null}
-            hostTimezone={stageState.hostTimezone ?? "UTC"}
-            onChange={handlers.handleSetTimezone}
-          />
-          <HourCycleField
-            hourCycle={stageState.hourCycle ?? "24h"}
-            onChange={handlers.handleSetHourCycle}
-          />
-        </FieldGroup>
-      </FieldSet>
-
-          <FieldSet flat>
-        <FieldGroup>
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel>Pre-service ramp (minutes)</FieldLabel>
-              <FieldDescription>Start sampling attendance this long before the service start, so the graph shows the room filling up. 0 = off.</FieldDescription>
-            </FieldContent>
-            <NumberInput value={tw.preMin} min={0} max={240} className="w-28"
-              onChange={(v) => { if (v !== tw.preMin) handlers.handleSetTaperWindow({ preMin: Math.round(v) }); }}
-              aria-label="Pre-service ramp (minutes)" />
-          </Field>
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel>
-                Post-service taper (minutes)
-                <InfoHint className="ml-1.5 align-middle">
-                  Sampling continues even once the live plan is cleared, so an emptying room
-                  is still recorded. These samples are excluded from the Peak and Lowest
-                  figures — otherwise the taper would drag the low toward an empty room.
-                </InfoHint>
-              </FieldLabel>
-              <FieldDescription>Keep sampling this long after the service ends, to capture how fast the room empties. 0 = off.</FieldDescription>
-            </FieldContent>
-            <NumberInput value={tw.postMin} min={0} max={240} className="w-28"
-              onChange={(v) => { if (v !== tw.postMin) handlers.handleSetTaperWindow({ postMin: Math.round(v) }); }}
-              aria-label="Post-service taper (minutes)" />
-          </Field>
-        </FieldGroup>
-          </FieldSet>
-        </Collapsible>
-      </FieldSet>
-
-      <FieldSet>
-        <Collapsible label="Backup & restore" summary="Save, download & recall how the app is set up" headerClassName="px-4 py-2.5">
-          <ConfigSnapshotPanel />
-        </Collapsible>
-      </FieldSet>
-
-      <FieldSet>
-        <Collapsible
-          label="Data archive"
-          summary="Download & restore what the app recorded"
-          headerClassName="px-4 py-2.5"
-        >
-          <DataArchivePanel />
-        </Collapsible>
-      </FieldSet>
-
-      {/* Last, because it schedules the two above rather than being a third thing to back up. */}
-      <FieldSet>
-        <Collapsible label="Automatic backups" summary="Save a copy on a schedule" headerClassName="px-4 py-2.5">
+        <div className="su-card">
+          <div className="border-b border-line px-4 py-3">
+            <h3 className="text-callout font-semibold text-fg">Data</h3>
+          </div>
+          <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
+            Automatic backups
+          </p>
           <AutoBackupPanel />
-        </Collapsible>
-      </FieldSet>
+          <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
+            Config snapshots
+          </p>
+          <ConfigSnapshotPanel />
+          <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
+            Data archive
+          </p>
+          <DataArchivePanel />
+        </div>
+      </div>
+
+      <BarConfigurator open={configuringBar} onOpenChange={setConfiguringBar} />
     </div>
   );
 }

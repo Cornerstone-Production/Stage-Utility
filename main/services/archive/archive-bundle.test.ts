@@ -139,7 +139,7 @@ test("the config snapshot json — the realistic mistake — is named, not calle
   const snapshot = strToU8(
     JSON.stringify({ kind: "stage-utility-config", version: 1, appVersion: "1.6.0", files: { "views.json": {} } }),
   );
-  await assert.rejects(() => inspectArchive(snapshot), /config snapshot.*Backup & restore/is);
+  await assert.rejects(() => inspectArchive(snapshot), /config snapshot.*Config snapshots/is);
 });
 
 test("importing a service this box does not have adds it, raw files and all", async () => {

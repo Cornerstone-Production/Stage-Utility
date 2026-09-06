@@ -84,7 +84,7 @@ export interface LayoutObjectSpec {
    * conversion in the inspector.
    *
    * Not deleted: an object type lives in views.json, which is a CONFIG store and
-   * therefore what Backup & restore puts back. Removing the type outright means
+   * therefore what Config snapshots puts back. Removing the type outright means
    * restoring any snapshot taken before the change hands the renderer an object
    * it no longer understands, and the object silently vanishes from a layout the
    * operator believes they just restored. Deletion waits until the conversions

@@ -14,13 +14,14 @@ screen's own card.
 
 ## Setting one up
 
-**1. Turn discovery on.** Settings → Advanced → Kiosk devices → *Answer devices
+**1. Turn discovery on.** Settings → Advanced → Server → *Answer devices
 looking for a server*. It is off until you switch it on, so a test instance on
 the same network cannot claim a screen meant for the real server. Restart the
 server afterwards.
 
 **2. Run the installer on the screen.** The exact command, with this server's
-address already in it, is on that same panel.
+address already in it, is under *Setting up a screen* on the same card — click
+"Show commands" to reveal it.
 
 | | |
 |---|---|

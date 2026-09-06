@@ -32,7 +32,7 @@ settings change. Two safeguards: nothing sleeps past the moment the next window
 opens, and if the schedule cannot be worked out — no credentials, a failed fetch,
 the feature off — everything stays at its active cadence rather than going quiet.
 
-Tunable under **Settings → Advanced → Network & behavior**.
+Tunable under **Settings → Advanced → Server**.
 
 ## Where your data lives
 
@@ -122,15 +122,15 @@ cannot be recovered — you would re-enter every one.
 
 Two backups exist in the app, and they cover different things:
 
-- **Settings → Advanced → Backup & restore** — a config snapshot, saved in-app or
-  downloaded as a file, for moving a configuration between machines. Credentials
-  are deliberately excluded, so the file is safe to store.
-- **Settings → Advanced → Data archive** — recorded services and their raw samples.
-  See [data archive](../data-archive.md).
+- **Settings → Advanced → Data → Config snapshots** — a config snapshot, saved
+  in-app or downloaded as a file, for moving a configuration between machines.
+  Credentials are deliberately excluded, so the file is safe to store.
+- **Settings → Advanced → Data → Data archive** — recorded services and their
+  raw samples. See [data archive](../data-archive.md).
 
 ## Automatic backups
 
-**Settings → Advanced → Automatic backups.** Writes a config snapshot, and
+**Settings → Advanced → Data → Automatic backups.** Writes a config snapshot, and
 optionally the data archive, on an interval you choose — keeping the most recent
 few and deleting the rest.
 
