@@ -35,8 +35,12 @@ import { stageController } from "./stage-controller.js";
  * separates them cleanly while bridging any within-service lull.
  *
  * One definition: this was declared identically in all three recorders.
+ *
+ * Exported so a recorder can tell a leftover PCO item (still live from BEFORE
+ * this record opened) from one that genuinely started within the same service —
+ * see openItem in service-timeline-recorder.ts.
  */
-const SERVICE_GAP_MS = 10 * 60_000;
+export const SERVICE_GAP_MS = 10 * 60_000;
 
 /** The identity every service record carries. */
 export interface ServiceRecord {

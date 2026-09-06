@@ -238,7 +238,7 @@ export function DashboardView({ displayId }: DashboardViewProps) {
 
         <TranscriptStrip lines={transcript} />
 
-        <LiveControls />
+        <LiveControls live={pcoLive?.mode === "item"} />
       </div>
     </div>
   );

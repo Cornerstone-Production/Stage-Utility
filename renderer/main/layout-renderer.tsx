@@ -39,6 +39,7 @@ import { useTranscript } from "./use-transcript";
 import { usePlanItems } from "./use-plan-items";
 import { useServiceTimeline } from "./use-service-timeline";
 import { computePcoTimer, fmtDuration, projectedServiceEndMs } from "./pco-timer";
+import { servicePacing } from "./service-pacing";
 import { EmbeddedView, EmbedFontBox, EmbedNotice } from "./embedded-view";
 import { useEmbedBoxHeight } from "./embed-box";
 import { childChain, embedRefusal } from "./embed-chain";
@@ -873,35 +874,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "service-pacing": {
       // Live cumulative drift: how far ahead/behind the whole schedule we are
-      // right NOW. actualElapsed (wall-clock since the service began) minus the
-      // planned position (sum of planned lengths of finished items + the live
-      // item's elapsed, capped at its planned length). Result carries slippage
-      // from earlier items and only grows "behind" once the current item runs
-      // past its plan. Negative = ahead (green), positive = behind (red).
+      // right NOW. See servicePacing() in service-pacing.ts for the math (also
+      // used by History) — negative = ahead (green), positive = behind (red).
       const tol = 3; // within ±3s of plan reads "0:00"
       const serverNow = ctx.now + ctx.skewMs;
-      let deltaSec: number | null = null;
-      const tl = ctx.serviceTimeline;
-      if (tl) {
-        // Counted items only — exclude pre-service/buffer padding (a per-item
-        // override wins, else default to not-pre-service), mirroring History.
-        const items = tl.items.filter((it) => (typeof it.counted === "boolean" ? it.counted : !(it.preService ?? false)));
-        const startMs = items[0]?.startedAt ? Date.parse(items[0].startedAt) : NaN;
-        let plannedElapsed = 0;
-        let live: { startedAt: string; plannedLengthSec: number | null } | null = null;
-        for (const it of items) {
-          // Finished items add their planned length; an item PCO gave no planned
-          // time falls back to its actual so it reads neutral (not "behind").
-          if (it.endedAt != null) plannedElapsed += it.plannedLengthSec ?? it.actualDurationSec ?? 0;
-          else if (it.startedAt) live = it;
-        }
-        if (live && Number.isFinite(startMs)) {
-          const liveElapsed = Math.max(0, (serverNow - Date.parse(live.startedAt)) / 1000);
-          const livePlanned = live.plannedLengthSec ?? liveElapsed;
-          plannedElapsed += Math.min(liveElapsed, livePlanned);
-          deltaSec = (serverNow - startMs) / 1000 - plannedElapsed;
-        }
-      }
+      const { deltaSec } = servicePacing(ctx.serviceTimeline, serverNow);
       // Ahead/behind is derived from the drift where there IS one. In projected-
       // end mode the drift is optional — the timeline recorder may not be
       // running — so these stay false and the clock reads in the neutral colour.
@@ -1092,7 +1069,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // editor/preview it renders the same buttons but they don't fire.
       return (
         <div className={ctx.interactive ? "w-full h-full" : "w-full h-full pointer-events-none"}>
-          <LiveControls className="w-full h-full" />
+          <LiveControls className="w-full h-full" live={ctx.pcoLive?.mode === "item"} />
         </div>
       );
     case "brand-logo": {

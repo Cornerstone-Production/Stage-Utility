@@ -306,7 +306,7 @@ export function StageDisplayView({ displayId }: StageDisplayViewProps) {
           );
         })()}
 
-        <LiveControls />
+        <LiveControls live={pcoLive?.mode === "item"} />
       </div>
     </div>
   );

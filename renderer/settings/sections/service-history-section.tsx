@@ -6,7 +6,7 @@ import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon, RotateCcwIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast } from "../../components/ui";
@@ -598,6 +598,20 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         toast.error("Recalculate failed");
       }
     }
+    async function doResetPacing() {
+      if (!(await confirm({
+        title: "Reset pacing?",
+        message: "Items before now stop counting toward the pacing readout. The recording itself is untouched.",
+        confirmLabel: "Reset pacing",
+      }))) return;
+      try {
+        await invoke("serviceTimeline:resetPacing");
+        toast.success("Pacing reset");
+        // Broadcasts service-timeline:history → detail refreshes via the SSE handler.
+      } catch (e) {
+        toast.error(`Couldn't reset pacing: ${errorMessage(e)}`);
+      }
+    }
     // Other same-day recordings this one could merge into (fix a mis-split service).
     const mergeCandidates = (list ?? []).filter((s) => s.serviceKey !== det.serviceKey && s.serviceDate === det.serviceDate);
     async function doMerge() {
@@ -653,6 +667,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             </span>
           </div>
           <div className="flex items-center gap-2 flex-wrap sm:shrink-0">
+            {!readOnly && live && (
+              <Button variant="filled" size="small" onClick={doResetPacing} tooltip="Stop items before now from counting toward the pacing readout — the recording itself is untouched">
+                <RotateCcwIcon className="size-3.5 text-gray-9" /> Reset pacing
+              </Button>
+            )}
             {!readOnly && (
               <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
                 <ClockIcon className="size-3.5 text-gray-9" /> Edit times
