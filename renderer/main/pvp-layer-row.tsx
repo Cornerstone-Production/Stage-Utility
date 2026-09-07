@@ -52,6 +52,7 @@ export interface PvpLayerRowProps {
  *   rolling video   ->  []                 the number says it
  *   still graphic   ->  ["still"]          up, but not counting
  *   paused clip     ->  ["paused"]         keeps its duration, number stops
+ *   ended clip      ->  ["ended"]          ran out, holding its last frame
  *   hidden / muted  ->  ["hidden"]         live content nobody can see
  *
  * `hidden` covers a zero opacity too: a layer faded to nothing is invisible for
@@ -68,8 +69,14 @@ export function rowQualifiers(layer: PvpLayerDTO, timed: boolean): string[] {
   // ROLLING is playbackRate > 0, never isPlaying: a still reports isPlaying true
   // with rate 0, so isPlaying would call every still a rolling clip and put a
   // countdown to nothing under a graphic that is up indefinitely.
-  if (timed && layer.playbackRate <= 0) out.push("paused");
-  if (!timed) out.push("still");
+  //
+  // "ended" is checked before the timed/still split: an ended clip is never
+  // timed (its durationSec is null), so without this branch it would fall into
+  // the `!timed` arm and read as a plain "still" — losing the distinction the
+  // state exists for.
+  if (layer.state === "ended") out.push("ended");
+  else if (timed && layer.playbackRate <= 0) out.push("paused");
+  else if (!timed) out.push("still");
   return out;
 }
 

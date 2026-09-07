@@ -23,7 +23,7 @@ function byName(layers: PvpLayerDTO[], name: string): PvpLayerDTO {
 
 describe("parseWorkspace", () => {
   test("reads every layer in the workspace", () => {
-    assert.equal(parseWorkspace(FIXTURE).length, 4);
+    assert.equal(parseWorkspace(FIXTURE).length, 5);
   });
 
   test("a layer with a rolling video is 'video'", () => {
@@ -112,6 +112,43 @@ describe("parseWorkspace", () => {
     assert.equal(byName(layers, "Graphics").anchorElapsedSec, 9.6);
     // A still's timeRemaining is 0, so a "duration" would just echo its elapsed.
     assert.equal(byName(layers, "Lower third").durationSec, null);
+  });
+
+  test("a clip that ran out is 'ended', not 'video' — real PVP output for a", () => {
+    // finished clip holding its last frame: playbackRate: 1 (never reset),
+    // timeRemaining: 0, timeElapsed > 0, isPlaying: false. Read naively that is
+    // "video" with durationSec null, which drew "playing" beside "no duration".
+    const l = byName(parseWorkspace(FIXTURE), "Tag");
+    assert.equal(l.state, "ended");
+    assert.equal(l.mediaName, "speaker_bumper.mov");
+    assert.equal(l.playbackRate, 1, "PVP never resets the rate on a clip that ran out");
+    assert.equal(l.durationSec, null, "nothing is left to count for a clip that already ended");
+    assert.equal(l.anchorElapsedSec, 7.97);
+  });
+
+  test("a still is unchanged: isPlaying true keeps it 'still', never 'ended'", () => {
+    // The case an ended clip could be confused with: same timeRemaining 0, same
+    // shape otherwise, but a still reports isPlaying true.
+    const l = byName(parseWorkspace(FIXTURE), "Lower third");
+    assert.equal(l.state, "still");
+  });
+
+  test("a paused clip is unchanged: timeRemaining > 0 keeps it 'video', never 'ended'", () => {
+    const l = parseWorkspace({
+      data: [{
+        transportState: {
+          isPlaying: false, playbackRate: 0, timeElapsed: 10, timeRemaining: 10,
+          playingMedia: { name: "clip.mp4", uuid: "m1" },
+          layer: { uuid: "p2", name: "Paused" },
+        },
+      }],
+    })[0];
+    assert.equal(l.state, "video", "time left on the clock is never 'ended'");
+  });
+
+  test("a rolling video is unchanged: isPlaying true (or absent) keeps it 'video'", () => {
+    const l = byName(parseWorkspace(FIXTURE), "Graphics");
+    assert.equal(l.state, "video");
   });
 
   test("an empty layer has no anchor and no duration", () => {
@@ -318,10 +355,25 @@ describe("driftedLayers", () => {
   test("an idle workspace of stills never drifts, however long it sits", () => {
     // Every still has rate 0, so it predicts no movement. Without that, a
     // workspace holding one graphic between services would force a frame on
-    // every poll for hours.
+    // every poll for hours. The fixture's "Tag" layer is ENDED here, not a
+    // still, and its own test below is the one that matters for it.
     const stills = base.filter((l) => l.state !== "video");
     const later = "2026-08-30T13:00:00.000Z";
     assert.deepEqual(driftedLayers(at(T0, stills), at(later, stills), 1), []);
+  });
+
+  test("AN ENDED CLIP NEVER DRIFTS, however non-zero the rate it stopped at", () => {
+    // GUARD. PVP was observed reporting playbackRate: 1 on a clip that had
+    // already ended (see the parser's own test for the raw shape). Restore
+    // driftedLayers to predicting from raw playbackRate with no state gate and
+    // this goes red: an hour-old ended clip whose anchor never moved would
+    // "drift" further from its frozen anchor every second, forcing a frame on
+    // every keepalive for the rest of the service.
+    const ended = base.filter((l) => l.state === "ended");
+    assert.ok(ended.length > 0, "the fixture has no ended layer to test with");
+    assert.ok(ended.some((l) => l.playbackRate > 0), "the ended layer must carry a non-zero rate to prove this");
+    const later = "2026-08-30T13:00:00.000Z";
+    assert.deepEqual(driftedLayers(at(T0, ended), at(later, ended), 1), []);
   });
 });
 

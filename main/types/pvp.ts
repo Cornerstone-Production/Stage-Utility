@@ -19,8 +19,15 @@ import type { RevisionedStatus } from "./live.js";
  * `playingItem` is residual — four idle layers were observed simultaneously
  * naming the same cue while showing nothing — so nothing about it can decide
  * whether a layer holds content.
+ *
+ * "ended" is a clip that ran out and is holding its last frame: PVP reports it
+ * as `playbackRate: 1, timeRemaining: 0, timeElapsed: 7.97, isPlaying: false`.
+ * Read naively — rate > 0 — that is a rolling video with `durationSec: null`,
+ * which drew "playing" beside "no duration". A still reports `isPlaying: true`
+ * with the same zero `timeRemaining`, so the third field is what tells the two
+ * apart.
  */
-export type PvpLayerState = "empty" | "still" | "video";
+export type PvpLayerState = "empty" | "still" | "video" | "ended";
 
 export interface PvpLayerDTO {
   /** PVP's layer uuid. The diff key for every trigger and the address for every
