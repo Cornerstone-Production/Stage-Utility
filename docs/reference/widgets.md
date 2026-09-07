@@ -244,7 +244,10 @@ The word after the time says what is unusual — **still** for a graphic, which 
 no duration to count and so shows no time at all; **paused** for a clip that has
 stopped where it was; **ended** for a clip that ran out and is holding its last
 frame; **hidden** or **muted** for live content nobody can see or hear; and a
-percentage for a layer that has been faded.
+percentage for a layer that has been faded. A still also reads **on screen
+m:ss**, counting UP from when its current file first appeared — there is no
+per-layer hold to count DOWN against here; that lives on **ProVideoPlayer now**,
+below.
 
 **Show** chooses between every layer, only the layers holding something (the
 default), and one layer by name. Naming one layer picks it from a dropdown of
@@ -302,6 +305,25 @@ chooses what the caption names when no layer is pinned: the layer's current cue,
 the media file's name with or without its extension, or the layer's own name. It
 falls back to the file name when there is no cue name to read, and it has no
 effect on a pinned tile, whose caption is always the layer's own name.
+
+**Count down stills**, off by default, counts a STILL down the way a rolling clip
+already counts down — the value slot, the progress bar and (in the normal
+composition) the sub line all read exactly as they do for a clip. PVP's API never
+reports a still's duration, so the hold comes from **Still hold (seconds)**, a
+per-widget number that appears once this is on; left alone it follows the PVP
+integration card's own Image Duration default, and editing it pins the widget to
+its own number. It is off by default and
+per-widget on purpose: a still's Duration is set at import and stored on every
+image in the library, including ones whose Next Behavior is None and that never
+advance — a countdown on a graphic that is not going anywhere would be a lie, so
+this is the operator opting IN a specific widget, for a layer whose cue actually
+advances on the hold (a rotating pre-roll, say). Once the hold runs out the
+countdown holds at 0:00 with a full bar rather than switching to another state.
+
+With **Count down stills** off, a still still gets one line the countdown steals
+otherwise: the normal composition's sub line gains **on screen**, counting UP
+from when the file first appeared, on the same clock the layer list's own **on
+screen** reads (compact mode shows nothing extra).
 
 The **last cue** a layer played is deliberately not shown on any of these. PVP
 reports it and it never clears, so four idle layers were observed all naming the

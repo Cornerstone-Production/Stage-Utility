@@ -64,6 +64,63 @@ export function computePvpProgress(
 }
 
 /**
+ * How long a still's CURRENT media has been on screen, in seconds — or null
+ * when it is not a still, or PVP has not told us when it arrived yet.
+ *
+ * Shared by the "now" readout's full-mode sub line and the layer list's row:
+ * both draw the same "on screen m:ss" fact from the same anchor
+ * (`mediaSinceAt`), and a second copy of this clock is exactly how the two
+ * would drift apart.
+ *
+ * No clamp at either end: `mediaSinceAt` is in the past by construction (it is
+ * set the moment the still was first seen), and there is no "duration" to run
+ * past — a still stays on screen for as long as it does.
+ */
+export function stillOnScreenSec(layer: PvpLayerDTO, now: number, skewMs: number): number | null {
+  if (layer.state !== "still" || layer.mediaSinceAt == null) return null;
+  const sinceMs = Date.parse(layer.mediaSinceAt);
+  if (!Number.isFinite(sinceMs)) return null;
+  return Math.max(0, (now + skewMs - sinceMs) / 1000);
+}
+
+/**
+ * A still's countdown, for a widget that has opted in.
+ *
+ * A DIFFERENT anchor from `computePvpProgress`: a still carries no
+ * `anchorElapsedSec`/`durationSec` of its own — PVP's API has nothing to give,
+ * which is the whole reason this feature exists — so this counts from
+ * `mediaSinceAt` against a HOLD the widget or the PVP integration card supplies,
+ * never from the DTO's own (null) duration.
+ *
+ * Returns null for anything that is not a still with a known arrival time, or a
+ * hold that is not a usable positive number — the caller decides what "no hold
+ * configured" means (today: fall back to showing the media name, exactly as an
+ * ended clip does).
+ *
+ * Deliberately does NOT run past `holdSec`: unlike a rolling clip's anchor,
+ * which can be arbitrarily stale after a keepalive, a still's elapsed time only
+ * grows, so clamping both elapsed and remaining at the hold is enough — there is
+ * no "impossible future" to guard against the way `computePvpProgress` does.
+ */
+export function computeStillProgress(
+  layer: PvpLayerDTO,
+  now: number,
+  skewMs: number,
+  holdSec: number | null,
+): PvpProgress | null {
+  if (holdSec == null || !(holdSec > 0)) return null;
+  const elapsedSec = stillOnScreenSec(layer, now, skewMs);
+  if (elapsedSec == null) return null;
+  const clamped = Math.min(holdSec, elapsedSec);
+  return {
+    elapsedSec: clamped,
+    remainingSec: Math.max(0, holdSec - elapsedSec),
+    durationSec: holdSec,
+    fraction: clamped / holdSec,
+  };
+}
+
+/**
  * WHICH clip a progress fraction is a fraction of.
  *
  * The progress rule interpolates between consecutive readings, and that is only

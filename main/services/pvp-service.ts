@@ -23,8 +23,9 @@ import { errorMessage } from "./errors.js";
 import { StatusIntegration } from "./integration-base.js";
 import {
   cueSuccessors, driftedLayers, hasUnknownCue, isPlaylistsResponse, isWorkspaceResponse,
-  layerSignature, parseWorkspace, withNextCues,
+  layerSignature, parseWorkspace, updateMediaSince, withMediaSinceAt, withNextCues,
 } from "./pvp-parse.js";
+import type { MediaSinceEntry } from "./pvp-parse.js";
 import { PVP_OFFLINE, hasContent, type PvpLayerDTO, type PvpStatusDTO } from "../types/pvp.js";
 
 /** Active cadence. Governs how fast a cue change reaches a rule, not how smooth
@@ -76,6 +77,15 @@ const PLAYLIST_TTL_MS = 5 * 60_000;
  */
 const PLAYLIST_MISS_COOLDOWN_MS = 30_000;
 
+/** What a real PVP install ships with under Preferences -> Import -> Image
+ *  Duration, and the fallback for a value outside the range below. */
+const DEFAULT_IMAGE_DURATION_SEC = 20;
+/** The range an operator's own Import setting can plausibly be. Outside it is
+ *  not "a fast slideshow", it is a fat-fingered field, and trusting it would
+ *  hand a widget a countdown from 0 seconds or one that never finishes. */
+const MIN_IMAGE_DURATION_SEC = 1;
+const MAX_IMAGE_DURATION_SEC = 3600;
+
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** What a command claims it did, and how to tell whether it happened. */
@@ -95,7 +105,17 @@ export interface PvpTarget {
 
 class PvpService extends StatusIntegration<PvpStatusDTO> {
   private target: PvpTarget | null = null;
+  private imageDurationSec: number = DEFAULT_IMAGE_DURATION_SEC;
   private lastBroadcastAtMs = 0;
+  /**
+   * Per-layer uuid -> the media currently on it and when it was first seen.
+   *
+   * Reset to empty on every (re)configure and on every fresh connect, never
+   * carried across an outage: a still already up when the app (re)connects
+   * counts its hold from the connection, because there is no honest way to know
+   * how long it had already been up before this process was watching.
+   */
+  private mediaSince = new Map<string, MediaSinceEntry>();
   /**
    * When the freshest read that has reached the channel was STARTED.
    *
@@ -130,10 +150,24 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
     return !!this.target;
   }
 
-  configure(host: string, port: number, https: boolean, token: string | null): void {
+  configure(host: string, port: number, https: boolean, token: string | null, imageDurationSec: number): void {
     const h = host?.trim() || null;
     const p = port > 0 ? Math.floor(port) : null;
     this.target = h && p ? { host: h, port: p, https, token: token?.trim() || null } : null;
+    if (
+      Number.isFinite(imageDurationSec) &&
+      imageDurationSec >= MIN_IMAGE_DURATION_SEC &&
+      imageDurationSec <= MAX_IMAGE_DURATION_SEC
+    ) {
+      this.imageDurationSec = Math.round(imageDurationSec);
+    } else {
+      console.warn(`[pvp] image duration ${imageDurationSec} ignored, using ${DEFAULT_IMAGE_DURATION_SEC}`);
+      this.imageDurationSec = DEFAULT_IMAGE_DURATION_SEC;
+    }
+    // A (re)configure is a fresh start for "how long has this been up" — the
+    // old map may be keyed against a workspace on a machine the operator just
+    // switched away from.
+    this.mediaSince = new Map();
     this.resetReport();
     this.restart();
   }
@@ -360,6 +394,10 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
       if (!this.last.connected) {
         this.resetBackoff();
         this.report("connected", `Connected to ProVideoPlayer at ${t.host}:${t.port}`);
+        // A fresh connect, whether the first one or a recovery from an outage.
+        // A still already up when we (re)connect counts its hold from now — see
+        // the field's doc on `mediaSince`.
+        this.mediaSince = new Map();
       }
       this.emitFresh(layers, startedAtMs);
       // inDemand, not hasSubscribers: a rule reading this channel is a watcher,
@@ -481,11 +519,23 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
   private emitFresh(layers: PvpLayerDTO[], readAtMs: number): void {
     if (readAtMs < this.freshestReadAtMs) return;
     this.freshestReadAtMs = readAtMs;
+    // Advanced from EVERY read that reaches here, including command()'s verify
+    // reads — those are real observations of layer state too, and skipping them
+    // would let a still that only ever shows up between polls, on a busy rule,
+    // never get a `mediaSinceAt` at all.
+    this.mediaSince = updateMediaSince(layers, this.mediaSince, readAtMs);
     // Decorated HERE, not at each call site: command()'s verify reads fold their
     // layers back into the channel too, and a frame from one of those without
-    // next cues would blank the line for a beat every time a rule fired.
-    const decorated = this.successors ? withNextCues(layers, this.successors) : layers;
-    this.emitIfChanged({ connected: true, layers: decorated, sampledAt: new Date().toISOString() });
+    // next cues (or a media-since stamp) would blank the line for a beat every
+    // time a rule fired.
+    const withCues = this.successors ? withNextCues(layers, this.successors) : layers;
+    const decorated = withMediaSinceAt(withCues, this.mediaSince);
+    this.emitIfChanged({
+      connected: true,
+      layers: decorated,
+      sampledAt: new Date().toISOString(),
+      imageDurationSec: this.imageDurationSec,
+    });
   }
 
   /**

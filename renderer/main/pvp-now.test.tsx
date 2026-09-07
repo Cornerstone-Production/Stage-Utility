@@ -39,6 +39,7 @@ const layer = (over: Partial<PvpLayerDTO> = {}): PvpLayerDTO => ({
   uuid: "l1", name: "Graphics", index: 0, state: "video",
   mediaName: "loop_a.mp4", mediaUuid: "m1",
   lastCueName: "MAIN GRAPHIC", lastCueUuid: "cue-0001", nextCueName: "CLEAR GRAPHIC",
+  mediaSinceAt: null,
   hidden: false, muted: false, opacity: 1, playbackRate: 1,
   anchorElapsedSec: 10, durationSec: 20,
   ...over,
@@ -53,7 +54,9 @@ const EMPTY = {
   anchorElapsedSec: null, durationSec: null,
 };
 
-const status = (layers: PvpLayerDTO[]): PvpStatusDTO => ({ connected: true, layers, sampledAt: T });
+const status = (layers: PvpLayerDTO[], over: Partial<PvpStatusDTO> = {}): PvpStatusDTO => ({
+  connected: true, layers, sampledAt: T, imageDurationSec: null, ...over,
+});
 
 const draw = (
   s: PvpStatusDTO | null,
@@ -206,6 +209,81 @@ describe("what it draws", () => {
     const off = draw(status([layer()]), { showProgress: false });
     assert.ok(!off.includes("data-readout-meter"), off);
     assert.ok(off.includes("0:10"), `switching the rule off took the time with it:\n${off}`);
+  });
+});
+
+describe("countStills — opting a still into the countdown", () => {
+  // 5s before AT, so a 20s hold has 15s left and a 10s hold has already run out.
+  const SINCE = new Date(AT - 5000).toISOString();
+  const countingStill = { ...STILL, mediaSinceAt: SINCE };
+
+  test("off (the default): the #458 composition, unchanged — no countdown, no bar", () => {
+    const html = draw(status([layer(countingStill)]));
+    assert.ok(!/0:1[0-9]|0:20/.test(html), `countStills off still drew a countdown:\n${html}`);
+    assert.ok(!html.includes("data-readout-meter"), `countStills off drew a progress rule:\n${html}`);
+  });
+
+  test("on: the still counts down from the card's imageDurationSec, exactly like a clip", () => {
+    const html = draw(status([layer(countingStill)], { imageDurationSec: 20 }), { countStills: true });
+    assert.ok(html.includes("0:15"), `expected a 15s countdown from a 20s hold, 5s in:\n${html}`);
+    assert.ok(html.includes("data-readout-meter"), `countStills on drew no progress rule:\n${html}`);
+    assert.ok(html.includes("slide.png"), `the file name should still be on the sub-line:\n${html}`);
+  });
+
+  test("THE GUARD: a widget's own stillHoldSec overrides the card default", () => {
+    // The rule this whole feature turns on. The card says 20s (15s left); the
+    // widget says 3s, which has already run OUT (0s left, 5s in) at the same
+    // instant. If the widget's own number were ever ignored, this would still
+    // read 0:15 — the card's own answer.
+    const html = draw(
+      status([layer(countingStill)], { imageDurationSec: 20 }),
+      { countStills: true, stillHoldSec: 3 },
+    );
+    assert.ok(html.includes("0:00"), `the widget's own hold was ignored in favour of the card's:\n${html}`);
+    assert.ok(!html.includes("0:15"), `the card's default leaked through the widget's own hold:\n${html}`);
+  });
+
+  test("once the hold runs out it holds at 0:00 with a full bar, never switches state", () => {
+    const html = draw(status([layer(countingStill)], { imageDurationSec: 3 }), { countStills: true });
+    assert.ok(html.includes("0:00"), html);
+    assert.ok(html.includes("data-readout-meter"), `a finished hold should still draw its (full) bar:\n${html}`);
+    assert.ok(html.includes("still"), `the state word must stay "still", never switch:\n${html}`);
+  });
+
+  test("no hold anywhere (no card default, no widget override): falls back exactly as countStills-off does", () => {
+    // Nothing to count down FROM, so there is nothing to count down TO either —
+    // the widget falls back to the same "on screen", counting UP, that
+    // countStills-off draws. It is not counting down: the value stays the cue
+    // name, not a time.
+    const html = draw(status([layer(countingStill)], { imageDurationSec: null }), { countStills: true });
+    assert.ok(html.includes("MAIN GRAPHIC"), `expected the value to fall back to the cue name:\n${html}`);
+    assert.ok(html.includes("on screen"), `expected the 'on screen' fallback:\n${html}`);
+  });
+
+  test("compact mode: countStills on counts down; off shows nothing extra", () => {
+    const on = draw(status([layer(countingStill)], { imageDurationSec: 20 }), { countStills: true, compact: true });
+    assert.ok(on.includes("0:15"), on);
+    const off = draw(status([layer(countingStill)], { imageDurationSec: 20 }), { countStills: false, compact: true });
+    assert.ok(!off.includes("on screen"), `compact mode should show nothing extra for a non-counting still:\n${off}`);
+    assert.ok(!/[0-9]:[0-9][0-9]/.test(off), `compact mode drew a countdown with countStills off:\n${off}`);
+  });
+
+  test("full mode, countStills off: the sub line gains 'on screen', counting UP", () => {
+    const html = draw(status([layer(countingStill)], { imageDurationSec: 20 }));
+    assert.ok(html.includes("on screen"), `expected the 'on screen' qualifier:\n${html}`);
+    assert.ok(html.includes("0:05"), `expected 5s counted up since mediaSinceAt:\n${html}`);
+  });
+
+  test("a still with no mediaSinceAt at all draws neither a countdown nor 'on screen'", () => {
+    const html = draw(status([layer(STILL)], { imageDurationSec: 20 }), { countStills: true });
+    assert.ok(!html.includes("on screen"), html);
+    assert.ok(!/[0-9]:[0-9][0-9]/.test(html), html);
+  });
+
+  test("a rolling clip is never touched by countStills", () => {
+    const withIt = draw(status([layer()], { imageDurationSec: 20 }), { countStills: true });
+    const withoutIt = draw(status([layer()], { imageDurationSec: 20 }), { countStills: false });
+    assert.equal(withIt, withoutIt, "countStills changed a rolling clip's own countdown");
   });
 });
 

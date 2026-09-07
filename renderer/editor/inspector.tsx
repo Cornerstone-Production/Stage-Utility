@@ -1141,6 +1141,23 @@ export function Inspector({
               options={PVP_NOW_LABEL_OPTIONS}
               onChange={(v) => onConfig({ ...c, nowLabel: v as PvpNowLabel })}
             />
+            <RowSwitch
+              label="Count down stills"
+              hint="Counts a still down from the image duration on the ProVideoPlayer card, or the hold below. For a layer whose cue advances on it, like a rotating pre-roll; off for a graphic that stays up."
+              checked={c.countStills ?? false}
+              onChange={(v) => onConfig({ ...c, countStills: v })}
+            />
+            {c.type === "pvp-now" && (c.countStills ?? false) && (
+              <RowNumber
+                label="Still hold (seconds)"
+                hint={`Left alone, it follows the card's Image duration (${pvp?.imageDurationSec ?? 20}s). Editing it pins this widget to its own number.`}
+                value={c.stillHoldSec ?? pvp?.imageDurationSec ?? 20}
+                step={1}
+                min={1}
+                max={3600}
+                onChange={(v) => onConfig({ ...c, stillHoldSec: Math.round(v) })}
+              />
+            )}
           </>
       )}
       {/* Both scores widgets, because both carry `game` and it means the same
