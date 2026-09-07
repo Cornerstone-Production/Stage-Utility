@@ -13,7 +13,7 @@
 // thumbnail, preview or frame endpoint at all.
 
 import { fmtDuration } from "./pco-timer";
-import { computePvpProgress, noSuchLayer, pvpMeterKey, pvpUnavailableReason, type PvpProgress } from "./pvp-progress";
+import { computePvpProgress, pvpMeterKey, pvpUnavailableReason } from "./pvp-progress";
 import { Readout } from "./readout";
 import type { LayoutHAlign } from "@main/types/views";
 import { hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
@@ -80,14 +80,51 @@ export function pvpNowLabel(layer: PvpLayerDTO, label: PvpNowLabel): string {
 }
 
 /**
- * The caption, fixed.
+ * Compact mode's value when there is no countdown to show — the next most
+ * useful name that is not ALREADY the caption.
  *
- * Not configurable, and that is the point of the widget: the Home card it
- * replaces had no caption at all, and "hard to know what widget I am looking at"
- * is the report this whole change came from. The full word rather than "PVP" —
- * the operator picked it — because a wall reader who does not already know the
- * initials learns nothing from them.
+ * A pinned layer's caption already names the layer, so the cue name is the
+ * useful thing left to show (falling back to the file name via `pvpNowLabel`'s
+ * own "cue" rule). With no layer pinned, the caption already carries whichever
+ * of cue/file the operator's Label choice picked, so the value shows the OTHER
+ * one — never the literal "no duration", and never the same name twice on a
+ * two-line tile.
  */
+export function pvpNowCompactValue(layer: PvpLayerDTO, pinned: boolean, label: PvpNowLabel): string {
+  if (pinned) return pvpNowLabel(layer, "cue");
+  return pvpNowLabel(layer, label === "cue" ? "file" : "cue");
+}
+
+/**
+ * The caption, fixed — unless a layer is pinned, in which case IT names the
+ * caption in every state.
+ *
+ * An operator who pinned a tile to "Graphics" wants that word on the tile
+ * whether Graphics is playing, empty, or the operator mistyped it and PVP has
+ * no such layer — the caption is the one thing on the widget that answers
+ * "which tile is this" without waiting for content. So a pinned name wins over
+ * everything else: Compact mode's Label choice, the fixed "ProVideoPlayer" of
+ * the normal composition, even the empty and not-found states below.
+ *
+ * With NO layer pinned, today's behaviour is unchanged: full mode's caption is
+ * the fixed word (the operator picked "ProVideoPlayer" over "PVP" because a wall
+ * reader who does not already know the initials learns nothing from them), and
+ * compact mode borrows the Label choice from whichever layer has content, or
+ * falls back to the bare "PVP" while nothing does.
+ */
+export function pvpNowCaption(
+  layerName: string | null | undefined,
+  compact: boolean,
+  layer: PvpLayerDTO | null,
+  label: PvpNowLabel,
+): string {
+  const pinned = (layerName ?? "").trim();
+  if (pinned) return `PVP · ${pinned}`;
+  if (compact) return layer ? `PVP · ${pvpNowLabel(layer, label)}` : "PVP";
+  return PVP_NOW_CAPTION;
+}
+
+/** The full mode caption, kept as the constant it always was. */
 export const PVP_NOW_CAPTION = "ProVideoPlayer";
 
 /**
@@ -112,20 +149,50 @@ export function chooseNowLayer(
   return layers.find(hasContent) ?? null;
 }
 
-export type PvpNowBadge = "playing" | "paused" | "still" | "empty";
+/**
+ * Does a pinned layer name exist among the live layers?
+ *
+ * Matched the way `chooseNowLayer` matches — trimmed, case-insensitive — so the
+ * two never disagree about whether a name is "in the list". An unpinned widget
+ * (blank name) has no notion of "not found" and answers true.
+ */
+export function pinnedLayerExists(layers: readonly PvpLayerDTO[], layerName: string | null | undefined): boolean {
+  const want = (layerName ?? "").trim().toLowerCase();
+  if (!want) return true;
+  return layers.some((l) => l.name.trim().toLowerCase() === want);
+}
+
+export type PvpNowBadge = "playing" | "paused" | "still" | "ended" | "empty" | "not found";
 
 /**
- * The state word beside the caption.
+ * The state word for a layer ALONE — no progress object needed, because
+ * "paused" vs "still" is decided by `state`, not by whether a countdown could be
+ * computed. Shared by `nowBadge` below and by the inspector's layer picker,
+ * which lists every live layer with this same word as a muted suffix.
  *
  * `playing` is `playbackRate > 0`, NEVER `isPlaying` — which the DTO does not
  * even carry, because a still reports it true with rate 0 and a field whose name
  * says the opposite of what it means is one somebody reads wrongly. A paused
- * clip is the one that still has a duration; a still is the one that does not.
+ * clip is the one whose state is still "video" but whose rate has dropped to 0;
+ * a still is the one whose state says so outright.
  */
-export function nowBadge(layer: PvpLayerDTO | null, progress: PvpProgress | null): PvpNowBadge {
+export function pvpLayerStateWord(layer: PvpLayerDTO | null): PvpNowBadge {
   if (!layer || !hasContent(layer)) return "empty";
-  if (layer.playbackRate > 0) return "playing";
-  return progress ? "paused" : "still";
+  if (layer.state === "ended") return "ended";
+  if (layer.state === "still") return "still";
+  return layer.playbackRate > 0 ? "playing" : "paused";
+}
+
+/**
+ * The state word beside the caption.
+ *
+ * `found` is false only for a PINNED name PVP is not reporting — never for the
+ * ordinary "nothing has content" case, which is `empty`. It is checked first:
+ * a layer that does not exist has no state of its own to report.
+ */
+export function nowBadge(layer: PvpLayerDTO | null, found = true): PvpNowBadge {
+  if (!found) return "not found";
+  return pvpLayerStateWord(layer);
 }
 
 /** Colour carries the state; the word carries it for anyone who cannot see the
@@ -153,10 +220,16 @@ function Badge({ badge }: { badge: PvpNowBadge }) {
 /**
  * Why this widget has nothing to show, in the operator's words.
  *
- * PURE and exported so the four cases are pinned by a test. Four different
+ * PURE and exported so the five cases are pinned by a test. Five different
  * nothings said differently, for the reason pvp-object's emptyReason exists: one
- * is a machine to go and look at, one is a layout to fix, one is neither, and
- * one is that we have not heard yet.
+ * is a machine to go and look at, one is a layout to fix, one is a name that
+ * does not match anything live, one is neither, and one is that we have not
+ * heard yet.
+ *
+ * The "not found" sentence deliberately does not echo the name back — unlike
+ * `noSuchLayer`, the list object's sentence for the same idea. Here the name is
+ * ALREADY the caption (see `pvpNowCaption`), so repeating it in the sub-line
+ * would say the same word twice on a two-line tile.
  */
 export function nowEmptyReason(status: PvpStatusDTO | null, layerName: string | null | undefined): string {
   // The first two rungs are pvp-object's too — see pvp-progress.ts. It answers
@@ -166,9 +239,7 @@ export function nowEmptyReason(status: PvpStatusDTO | null, layerName: string | 
   if (unavailable !== null) return unavailable;
   const want = (layerName ?? "").trim();
   if (want) {
-    const layers = status?.layers ?? [];
-    const found = layers.some((l) => l.name.trim().toLowerCase() === want.toLowerCase());
-    return found ? "Nothing on this layer" : noSuchLayer(want);
+    return pinnedLayerExists(status?.layers ?? [], want) ? "Nothing on this layer" : "No layer by this name in PVP";
   }
   return "Nothing on screen";
 }
@@ -190,16 +261,28 @@ export function PvpNowObject({
    *  of same-height tiles. */
   uniform?: boolean;
 }) {
-  const layer = chooseNowLayer(status?.layers ?? [], config.layerName);
+  const layers = status?.layers ?? [];
+  const layer = chooseNowLayer(layers, config.layerName);
+  // "not found" is a verdict about PVP's live layer list, so it needs one. With
+  // no usable snapshot (not configured, offline, nothing heard yet) the tile
+  // says "empty" and the sub-line says why; claiming the layer does not exist
+  // when we cannot see any layers would send the operator to fix a layout that
+  // is fine.
+  const found = pvpUnavailableReason(status) !== null || pinnedLayerExists(layers, config.layerName);
   const progress = layer ? computePvpProgress(layer, status?.sampledAt ?? null, now, skewMs) : null;
-  const badge = nowBadge(layer, progress);
+  const badge = nowBadge(layer, found);
   const compact = config.compact ?? false;
+  const label = config.nowLabel ?? DEFAULT_PVP_NOW_LABEL;
+  // The pinned-layer name, once, since both the caption and the compact value's
+  // fallback rule need to know whether a name is pinned at all.
+  const pinned = (config.layerName ?? "").trim();
+  const caption = pvpNowCaption(config.layerName, compact, layer, label);
 
-  if (badge === "empty") {
+  if (badge === "empty" || badge === "not found") {
     return (
       <Readout
-        caption={compact ? "PVP" : PVP_NOW_CAPTION}
-        captionEnd={<Badge badge="empty" />}
+        caption={caption}
+        captionEnd={<Badge badge={badge} />}
         // A DASH in the value, the sentence in the sub-line — the app's existing
         // shape for a readout with nothing to report (layout-renderer draws
         // `<Readout value="—" dim />` in two other places).
@@ -220,24 +303,24 @@ export function PvpNowObject({
   }
 
   if (compact) {
-    // `layer` is non-null in practice — `badge === "empty"` above is the only
-    // case it can be null, and that already returned — but the ternary reads
-    // truer than an assertion the type checker cannot itself verify.
-    const labelText = layer ? pvpNowLabel(layer, config.nowLabel ?? DEFAULT_PVP_NOW_LABEL) : null;
+    // `layer` is non-null here — the two cases it can be null (`empty` and
+    // `not found`) already returned above.
+    const valueText = progress
+      ? fmtDuration(progress.remainingSec)
+      : layer
+        ? pvpNowCompactValue(layer, !!pinned, label)
+        : "";
     return (
       <Readout
-        caption={labelText ? `PVP · ${labelText}` : "PVP"}
+        caption={caption}
         captionEnd={<Badge badge={badge} />}
-        // The countdown alone — no "remaining" word, no next-cue line. That is
-        // the whole point of the compact treatment: two lines, not three or
-        // four, whenever content is up.
-        value={progress ? fmtDuration(progress.remainingSec) : "no duration"}
+        // The countdown alone when there is one — no "remaining" word, no
+        // next-cue line. That is the whole point of the compact treatment: two
+        // lines, not three or four, whenever content is up.
+        value={valueText}
         mono={!!progress}
-        // A STILL SHOWS NO TIME AT ALL, for the same reason the normal
-        // composition below shows none: dimming "no duration" rather than
-        // reading a countdown is what stops a graphic that never ends looking
-        // like a clip about to.
-        dim={!progress}
+        // NEVER dimmed here: whatever is showing (a countdown, a cue name, a
+        // file name) is real content, unlike the empty/not-found dash above.
         meter={progress && (config.showProgress ?? true) ? progress.fraction : null}
         meterKey={pvpMeterKey(layer)}
         align={align}
@@ -261,29 +344,32 @@ export function PvpNowObject({
       </>
     ) : null;
 
+  // OPTION A: the countdown leads. While there is one to show, it takes the
+  // value slot — the biggest text on the tile — because "how long have I got"
+  // is the question this widget exists to answer during a service, and a media
+  // file name answers a different one. The still/ended/no-countdown case falls
+  // back to the same name compact mode shows, because there is nothing left to
+  // count and a file name is the next most useful thing on the tile.
+  const value = progress ? fmtDuration(progress.remainingSec) : layer ? pvpNowLabel(layer, "cue") : "Playing";
+  // The file name moves to the sub-line once the countdown has the value slot.
+  // Shown only when it says something the value does not already say — a cue
+  // name and a file name are often different strings for the same clip, and
+  // showing the file name twice (once as the fallback value, once as the sub)
+  // would be redundant on the still/ended tiles.
+  const sub = progress
+    ? layer?.mediaName ?? "Playing"
+    : layer?.mediaName && layer.mediaName !== value
+      ? layer.mediaName
+      : null;
+
   return (
     <Readout
-      caption={PVP_NOW_CAPTION}
+      caption={caption}
       captionEnd={<Badge badge={badge} />}
-      // The media file, truncating. PVP file names run long and this is the line
-      // read from across the room, so it takes the value slot and everything
-      // else steps down from it.
-      value={layer?.mediaName ?? "Playing"}
-      // A STILL SHOWS NO TIME AT ALL. It reports isPlaying true with rate 0 and
-      // timeRemaining 0, so a countdown under it would be a countdown to nothing
-      // — a graphic that is up indefinitely reading 0:00.
-      sub={progress ? "remaining" : "no duration"}
-      subEnd={
-        progress ? (
-          fmtDuration(progress.remainingSec)
-        ) : (
-          /* A rule, not a reading. The em-dash holds the column so the widget
-             does not reflow when a clip gives way to a graphic, and it says
-             "there is no number here" rather than showing a zero that would read
-             as a clip about to end. */
-          <span style={{ opacity: 0.55 }}>&mdash;</span>
-        )
-      }
+      value={value}
+      mono={!!progress}
+      sub={sub}
+      subEnd={progress ? fmtDuration(progress.durationSec) : null}
       meter={progress && (config.showProgress ?? true) ? progress.fraction : null}
       // Which clip the fraction above is a fraction of, so the rule can tell a
       // second of a clip playing from a cut to a different one.

@@ -49,7 +49,7 @@ import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsState } from "../main/use-obs-state";
 import { hasContent, type PvpStatusDTO } from "@main/types/pvp";
-import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, type PvpNowLabel } from "../main/pvp-now";
+import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, pvpLayerStateWord, type PvpNowLabel } from "../main/pvp-now";
 import { usePvpState } from "../main/use-pvp-state";
 import { useQuery } from "@tanstack/react-query";
 import { useReaperState } from "../main/use-reaper-state";
@@ -101,6 +101,103 @@ function pvpSummary(pvp: PvpStatusDTO | null): string {
   if (!pvp?.connected) return "Not connected";
   const withContent = pvp.layers.filter(hasContent).length;
   return `${pvp.layers.length} layers, ${withContent} with content`;
+}
+
+/** Matched the way `chooseNowLayer` in pvp-now.tsx matches: trimmed,
+ *  case-insensitive. Both the picker and the widget it configures have to
+ *  agree on what "in the list" means, or a name the picker calls found could
+ *  render `not found` on the wall. */
+function pvpLayerNamed(layers: readonly { name: string }[], name: string): { name: string } | undefined {
+  const want = name.trim().toLowerCase();
+  return layers.find((l) => l.name.trim().toLowerCase() === want);
+}
+
+const PVP_CUSTOM_LAYER = "__pvp-custom__";
+
+/**
+ * The Layer row both `pvp-now` and `pvp-layers` ("one layer") use: a Select
+ * fed by PVP's own live layer list, each option carrying its current state
+ * word, plus the free-text field the row started as.
+ *
+ * THE FREE TEXT STAYS. A dropdown is only ever populated while PVP answers —
+ * so an operator building a layout on a laptop, away from the machine, would
+ * find it empty with no way to type the name they already know. That is the
+ * reason this row was free text in the first place, and pinning it to a
+ * Select would have thrown that reason away rather than answered it: the text
+ * field is kept visible whenever the stored name is not (yet) one the Select
+ * can offer — not in the live list, or PVP is not connected at all — and
+ * additionally whenever the operator asks for it via "Type a layer name…".
+ *
+ * A stored name that matches nothing live gets its OWN selected option,
+ * labelled `<name> · not found`, rather than snapping to "Any layer with
+ * content" — losing what was typed because PVP has not reported it yet would
+ * be worse than showing that it has not.
+ */
+function PvpLayerPicker({
+  label,
+  hint,
+  value,
+  pvp,
+  onChange,
+  emptyLabel,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  pvp: PvpStatusDTO | null;
+  onChange: (v: string) => void;
+  /** What a blank name means to THIS widget. The now widget follows whichever
+   *  layer has content; the layer list's single-layer mode shows nothing until
+   *  a layer is chosen. One label for both would lie to one of them. */
+  emptyLabel: string;
+}) {
+  const [forceCustom, setForceCustom] = useState(false);
+  const layers = pvp?.layers ?? [];
+  const stored = value.trim();
+  const live = stored ? pvpLayerNamed(layers, stored) : undefined;
+  const notFound = stored !== "" && !live;
+  // A typed name that turns out to match a live layer is that layer: the select
+  // snaps to it rather than staying on "Type a layer name…" with the same
+  // value underneath.
+  const showText = (forceCustom && !live) || notFound || !pvp?.connected;
+
+  const selectValue = forceCustom && !live ? PVP_CUSTOM_LAYER : live ? live.name : stored ? stored : "";
+
+  return (
+    <>
+      <Row label={label} hint={hint}>
+        <Select
+          value={selectValue}
+          onValueChange={(v: string) => {
+            if (v === PVP_CUSTOM_LAYER) {
+              setForceCustom(true);
+              return;
+            }
+            setForceCustom(false);
+            onChange(v);
+          }}
+        >
+          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">{emptyLabel}</SelectItem>
+            {layers.map((l) => (
+              <SelectItem key={l.name} value={l.name}>{`${l.name} · ${pvpLayerStateWord(l)}`}</SelectItem>
+            ))}
+            {notFound && <SelectItem value={stored}>{`${stored} · not found`}</SelectItem>}
+            <SelectItem value={PVP_CUSTOM_LAYER}>Type a layer name…</SelectItem>
+          </SelectContent>
+        </Select>
+      </Row>
+      {showText && (
+        <RowText
+          label="Layer name"
+          value={value}
+          placeholder={layers.find(hasContent)?.name ?? "Layer name"}
+          onChange={onChange}
+        />
+      )}
+    </>
+  );
 }
 
 /** Inspector controls for the people-graph object: live vs. a recorded service,
@@ -991,15 +1088,11 @@ export function Inspector({
               onChange={(v) => onConfig({ ...c, show: v as "with-content" | "all" | "one" })}
             />
             {(c.show ?? "with-content") === "one" && (
-              /* A free text field, not a select. A dropdown would be populated
-                 only while PVP is connected, so an operator building a layout on
-                 a laptop away from the machine would find it empty and have no
-                 way to type the name they already know. The live first layer name
-                 is the placeholder instead. */
-              <RowText
+              <PvpLayerPicker
                 label="Layer name"
+                emptyLabel="No layer chosen"
                 value={c.layerName ?? ""}
-                placeholder={pvp?.layers[0]?.name ?? "Layer name"}
+                pvp={pvp}
                 onChange={(v) => onConfig({ ...c, layerName: v })}
               />
             )}
@@ -1018,15 +1111,12 @@ export function Inspector({
           <>
             <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
             {c.type === "pvp-now" && (
-              /* Free text, not a select, for the reason the layer list's field
-                 is: a dropdown is populated only while PVP is connected, so an
-                 operator building a layout on a laptop away from the machine
-                 would find it empty with no way to type the name they know. */
-              <RowText
+              <PvpLayerPicker
                 label="Layer"
-                hint="Leave empty to follow whichever layer has something on it."
+                emptyLabel="Any layer with content"
+                hint="Leave on Any layer with content to follow whichever layer has something on it — pinning a layer also names it in the widget's caption, in every state."
                 value={c.layerName ?? ""}
-                placeholder={pvp?.layers.find(hasContent)?.name ?? "Any layer with content"}
+                pvp={pvp}
                 onChange={(v) => onConfig({ ...c, layerName: v })}
               />
             )}

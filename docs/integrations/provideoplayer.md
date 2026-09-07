@@ -52,16 +52,19 @@ Home card for each.
 
 **ProVideoPlayer layers** is the list — one row per layer, with the file it is
 holding and how long is left. Options: which layers to show (all, only the ones
-holding something, or one by name), a hairline progress bar, and hide when
-nothing is on screen. **ProVideoPlayer** is its Home card, showing up to three
-layers with content.
+holding something, or one by name, picked from a dropdown of PVP's own live
+layers or typed by hand), a hairline progress bar, and hide when nothing is on
+screen. **ProVideoPlayer** is its Home card, showing up to three layers with
+content.
 
 **ProVideoPlayer now** answers the other question: what is up right now, on one
-layer, as a single reading with a state word beside it. Options: which layer,
-the progress bar, the next cue, and Compact — a two-line treatment for a small
-tile, caption plus countdown, whose Label chooses what the caption names (the
-current cue, the file name with or without its extension, or the layer name).
-**On screen now** is its Home card.
+layer, leading with the countdown while there is one and a state word beside the
+caption. Options: which layer (the same picker the layer list uses — naming one
+also puts its name in the caption, in every state), the progress bar, the next
+cue, and Compact — a two-line treatment for a small tile, caption plus value,
+whose Label chooses what an UNPINNED caption names (the current cue, the file
+name with or without its extension, or the layer name). **On screen now** is its
+Home card.
 
 Home's cards take their settings from a right-click on the card, not from the
 layout editor. See [Widgets](../reference/widgets.md) for what each line means.
