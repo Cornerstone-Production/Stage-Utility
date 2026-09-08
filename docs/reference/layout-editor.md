@@ -45,11 +45,12 @@ Replacing swaps the canvas outright, and **Undo** takes it back.
 
 **Add widget** opens the palette, grouped by what a widget reads from, with a
 search box over it. **Hide widgets whose integration is not set up** removes the
-ones you have no gear for — from the palette and from the right-click Add menu
-alike. Left on, they stay listed but dimmed, which is the right default while you
-are still connecting things.
+ones you have no gear for — from the palette and from the right-click (or tap
+and hold) Add menu alike. Left on, they stay listed but dimmed, which is the
+right default while you are still connecting things.
 
-Right-clicking the canvas offers the same catalogue as a menu.
+Right-clicking the canvas — or tap and hold on a touch screen — offers the same
+catalogue as a menu.
 
 ## Groups you reuse
 
@@ -126,13 +127,18 @@ On a small object the pads shrink rather than swallow it — under about
 the object can still be dragged. Resizing something that small is easier from
 **W** and **H** in the inspector.
 
+Tap and hold an object, or bare canvas, for 500&nbsp;ms to open the same menu a
+right-click does — Add, Copy, Paste, Duplicate and Delete all reach a touch
+screen this way. A press that turns into a drag before the hold completes drags
+the object instead of opening the menu. A selected object also carries a
+**⋯** button at its top-right corner, reachable with a tap and no hold, for the
+same menu.
+
 Some things have no touch equivalent and stay on a keyboard and mouse:
 
 - **Adding to a selection** (shift/⌘-tap) and everything that acts on more than
   one object at a time.
-- **Copy and Paste**, which live on ⌘C/⌘V and in the right-click menu only.
-- **The right-click menu** itself, and its Add-object list — the palette covers
-  adding.
+- **Copy and Paste**, which live on ⌘C/⌘V, or in the tap-and-hold menu above.
 
 The object toolbar above the inspector carries Duplicate and Delete, along with
 lock, layer order and snap-to-grid, and it appears only when exactly one object

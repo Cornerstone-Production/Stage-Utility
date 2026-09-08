@@ -24,7 +24,7 @@
 // - Anything about feel: how far is far enough, how a drag looks mid-flight.
 
 import assert from "node:assert/strict";
-import { after, beforeEach, describe, test } from "node:test";
+import { after, beforeEach, describe, mock, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
 
@@ -33,6 +33,7 @@ const teardown = installDom();
 const React = (await import("react")).default;
 const { render, cleanup, act } = await import("@testing-library/react");
 const { EditorCanvas, handlePadPx } = await import("./layout-editor.js");
+const { LONG_PRESS_MS } = await import("../components/ui/context-menu-trigger.js");
 
 const CANVAS = { width: 1920, height: 1080, background: null };
 
@@ -166,20 +167,32 @@ function touch(type: string, x: number, y: number, pointerId = 1, opts: { isPrim
   });
 }
 
-/** Down on an element (React's delegated listener); everything after it on the
- *  window, which is where the drag binds — exactly as a browser delivers it once
- *  the pointer is captured. */
+/** Which element took the pointerdown for a given pointerId — jsdom does not
+ *  forward captured events the way a real browser retargets them, so this
+ *  fakes the retarget by dispatching subsequent events (`on`) at the SAME
+ *  element the down landed on, letting them bubble to window from there. That
+ *  is what lets a node's own long-press handlers (`useContextMenuTrigger`) see
+ *  the up/cancel that ends a press, exactly as a captured pointer would. */
+const downTargets = new Map<number, Element>();
+
+/** Down on an element (React's delegated listener); everything after it
+ *  dispatched on the SAME element (see `downTargets`), bubbling to window —
+ *  exactly as a browser delivers it once the pointer is captured. */
 function down(el: Element, x: number, y: number, pointerId = 1, opts: { isPrimary?: boolean; button?: number } = {}) {
+  downTargets.set(pointerId, el);
   act(() => { el.dispatchEvent(touch("pointerdown", x, y, pointerId, opts)); });
 }
 function on(type: string, x: number, y: number, pointerId = 1) {
-  act(() => { window.dispatchEvent(touch(type, x, y, pointerId)); });
+  const el = downTargets.get(pointerId) ?? window;
+  act(() => { el.dispatchEvent(touch(type, x, y, pointerId)); });
+  if (type === "pointerup" || type === "pointercancel") downTargets.delete(pointerId);
 }
 
 beforeEach(() => {
   cleanup();
   captured.length = 0;
   held.clear();
+  downTargets.clear();
 });
 
 describe("a finger can move an object", () => {
@@ -388,6 +401,77 @@ describe("a non-primary button never starts a drag", () => {
       last && Math.abs(last.geom.x - (0.1 + 200 / BOX_W)) < 1e-6,
       `the original gesture lost its pointer (x=${last?.geom.x})`,
     );
+  });
+});
+
+describe("a long press opens the context menu, and a drag suppresses it", () => {
+  // React's own work-loop schedules its next pass with `setImmediate`, which
+  // `mock.timers` here leaves REAL (only `setTimeout` is faked). Draining the
+  // real macrotask queue once per test, before the fake timers reset, is what
+  // stops a queued React callback from firing after the DOM is torn down in
+  // `after()` — see the identical comment in context-menu-trigger.test.tsx.
+  function flushReact(): Promise<void> {
+    return new Promise((resolve) => setImmediate(resolve));
+  }
+
+  // THE guard for the object half of this change. Delete `trigger.onPointerDown`
+  // from OverlayNode's pointerdown handler (or drop `useContextMenuTrigger`
+  // entirely) and this goes red: nothing opens the menu on a held touch.
+  test(`a ${LONG_PRESS_MS}ms hold on an object opens the menu and does not move it`, async () => {
+    const h = mount();
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      down(h.node(), 300, 300);
+      // A finger always wobbles a little; well under the 8px slop.
+      on("pointermove", 302, 301);
+      act(() => { mock.timers.tick(LONG_PRESS_MS); });
+      assert.deepEqual(h.menus, ["o1"], `the hold did not open the object's menu (${JSON.stringify(h.menus)})`);
+      assert.equal(h.geoms.length, 0, `the long-press hold moved the object (${JSON.stringify(h.geoms)})`);
+      on("pointerup", 302, 301);
+      assert.equal(h.geoms.length, 0, "lifting after the menu opened still moved the object");
+    } finally {
+      mock.timers.reset();
+      await flushReact();
+    }
+  });
+
+  // THE guard for the other half: without `startDrag` calling `cancelPress`
+  // (via `DragState.cancelPress`) the moment its OWN slop is crossed, this
+  // still passes only by luck — a finger that drifts under 8px and then holds
+  // still is the actual reproduction (see the comment on `DragState.cancelPress`),
+  // but a full 10px drag exercises the same wiring end to end.
+  test("a hold that moves 10px drags the object and does not open the menu", async () => {
+    const h = mount();
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      down(h.node(), 300, 300);
+      on("pointermove", 310, 300);
+      assert.ok(h.geoms.length > 0, "a 10px move never started the drag");
+      act(() => { mock.timers.tick(LONG_PRESS_MS); });
+      assert.deepEqual(h.menus, [], `a live drag opened the menu on top of itself (${JSON.stringify(h.menus)})`);
+      on("pointerup", 310, 300);
+    } finally {
+      mock.timers.reset();
+      await flushReact();
+    }
+  });
+
+  // THE guard for the background half. Delete `bgTrigger.onPointerDown` from
+  // the canvas box's pointerdown handler and this goes red: a hold on bare
+  // canvas never reaches `onContextMenu` at all.
+  test(`a ${LONG_PRESS_MS}ms hold on empty canvas opens the canvas menu`, async () => {
+    const h = mount();
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      down(h.box(), 700, 500);
+      on("pointermove", 701, 501);
+      act(() => { mock.timers.tick(LONG_PRESS_MS); });
+      assert.deepEqual(h.menus, [null], `the hold did not open the canvas menu (${JSON.stringify(h.menus)})`);
+      on("pointerup", 701, 501);
+    } finally {
+      mock.timers.reset();
+      await flushReact();
+    }
   });
 });
 
