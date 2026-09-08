@@ -233,9 +233,9 @@ export function ScriptViewSection() {
                     </span>
                   )}
                   <div className="ml-auto flex items-center gap-1 shrink-0">
-                    <Button variant="transparent" size="small" iconOnly disabled={li === 0} onClick={() => moveLayout(l, -1)} aria-label="Move up"><ChevronUpIcon className="size-4" /></Button>
-                    <Button variant="transparent" size="small" iconOnly disabled={li === sortedLayouts.length - 1} onClick={() => moveLayout(l, 1)} aria-label="Move down"><ChevronDownIcon className="size-4" /></Button>
-                    <Button variant="transparent" size="small" iconOnly onClick={() => removeLayout(l)} aria-label="Delete"><Trash2Icon className="size-4 text-red-10" /></Button>
+                    <Button variant="transparent" size="small" iconOnly touchTargetY disabled={li === 0} onClick={() => moveLayout(l, -1)} aria-label="Move up"><ChevronUpIcon className="size-4" /></Button>
+                    <Button variant="transparent" size="small" iconOnly touchTargetY disabled={li === sortedLayouts.length - 1} onClick={() => moveLayout(l, 1)} aria-label="Move down"><ChevronDownIcon className="size-4" /></Button>
+                    <Button variant="transparent" size="small" iconOnly touchTargetY onClick={() => removeLayout(l)} aria-label="Delete"><Trash2Icon className="size-4 text-red-10" /></Button>
                   </div>
                 </div>
 
@@ -247,10 +247,10 @@ export function ScriptViewSection() {
                         {(l.columnRoles ?? []).length === 0 && <span className="text-caption1 text-gray-9">No columns — add one →</span>}
                         {(l.columnRoles ?? []).map((c, ci) => (
                           <span key={c} className="inline-flex items-center gap-1 rounded-md border border-gray-a5 bg-gray-a3 pl-2 pr-1 py-1 text-caption1 text-gray-12">
-                            <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === 0} onClick={() => moveColumn(l, ci, -1)} aria-label="Move left"><ChevronLeftIcon className="size-3.5" /></button>
+                            <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === 0} onClick={() => moveColumn(l, ci, -1)} aria-label="Move left"><ChevronLeftIcon className="size-3.5" /></button>
                             {roleName(c)}
-                            <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === (l.columnRoles ?? []).length - 1} onClick={() => moveColumn(l, ci, 1)} aria-label="Move right"><ChevronRightIcon className="size-3.5" /></button>
-                            <button className="text-gray-9 hover:text-red-10 ml-0.5" onClick={() => removeColumn(l, c)} aria-label={`Remove ${roleName(c)}`}><XIcon className="size-3.5" /></button>
+                            <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={ci === (l.columnRoles ?? []).length - 1} onClick={() => moveColumn(l, ci, 1)} aria-label="Move right"><ChevronRightIcon className="size-3.5" /></button>
+                            <button className="touch-target-y text-gray-9 hover:text-red-10 ml-0.5" onClick={() => removeColumn(l, c)} aria-label={`Remove ${roleName(c)}`}><XIcon className="size-3.5" /></button>
                           </span>
                         ))}
                         {remaining.length > 0 && (
@@ -461,10 +461,10 @@ function RolesPanel({
           <div className="flex flex-wrap items-center gap-1.5">
             {r.members.map((m, mi) => (
               <span key={m} className="inline-flex items-center gap-1 rounded-md border border-gray-a5 bg-gray-a3 pl-2 pr-1 py-0.5 text-caption2 text-gray-12">
-                <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={mi === 0} onClick={() => moveMember(r, mi, -1)} aria-label="Higher priority"><ChevronLeftIcon className="size-3" /></button>
+                <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={mi === 0} onClick={() => moveMember(r, mi, -1)} aria-label="Higher priority"><ChevronLeftIcon className="size-3" /></button>
                 {m}
-                <button className="text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={mi === r.members.length - 1} onClick={() => moveMember(r, mi, 1)} aria-label="Lower priority"><ChevronRightIcon className="size-3" /></button>
-                <button className="text-gray-9 hover:text-red-10" onClick={() => patch(r.id, { members: r.members.filter((x) => x !== m) })} aria-label={`Remove ${m}`}><XIcon className="size-3" /></button>
+                <button className="touch-target-y text-gray-9 hover:text-gray-12 disabled:opacity-30" disabled={mi === r.members.length - 1} onClick={() => moveMember(r, mi, 1)} aria-label="Lower priority"><ChevronRightIcon className="size-3" /></button>
+                <button className="touch-target-y text-gray-9 hover:text-red-10" onClick={() => patch(r.id, { members: r.members.filter((x) => x !== m) })} aria-label={`Remove ${m}`}><XIcon className="size-3" /></button>
               </span>
             ))}
             {categories.some((c) => !r.members.some((m) => norm(m) === norm(c))) && (

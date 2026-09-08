@@ -113,6 +113,14 @@ const stepper = (label: "Increase" | "Decrease"): HTMLButtonElement => {
 const type = (value: string) => fireEvent.change(hostField(), { target: { value } });
 const escape = () => fireEvent.keyDown(settings(), { key: "Escape" });
 
+/** A NumberInput stepper steps on pointerdown now (press-and-hold repeat —
+ *  see number-input.tsx), not on click; a released-quick press is still
+ *  exactly one step. */
+const tapStepper = (el: HTMLButtonElement) => {
+  fireEvent.pointerDown(el, { pointerId: 1, isPrimary: true });
+  fireEvent.pointerUp(el, { pointerId: 1, isPrimary: true });
+};
+
 describe("dismissing a dialog with unsaved changes", () => {
   test("Escape raises the confirm and does not close", async () => {
     const o = await openObs();
@@ -188,9 +196,9 @@ describe("dismissing a dialog with unsaved changes", () => {
     // unequal for ever, so one click on the port stepper left Save enabled and
     // put the blocking confirm in front of a config identical to the saved one.
     const o = await openObs();
-    fireEvent.click(stepper("Increase"));
+    tapStepper(stepper("Increase"));
     await settle();
-    fireEvent.click(stepper("Decrease"));
+    tapStepper(stepper("Decrease"));
     await settle();
 
     assert.equal(portField().value, "4455", "the round trip did not land back on the saved port");
@@ -335,10 +343,10 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
     };
 
     const before = pollInput().value;
-    fireEvent.click(poll("Increase"));
+    tapStepper(poll("Increase"));
     await settle();
     assert.notEqual(pollInput().value, before, "the Increase stepper moved nothing");
-    fireEvent.click(poll("Decrease"));
+    tapStepper(poll("Decrease"));
     await settle();
     assert.equal(pollInput().value, before, "the round trip did not land back on the shown value");
 

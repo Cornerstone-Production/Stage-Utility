@@ -113,6 +113,18 @@ export function AttendanceTrendChart({
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<number | null>(null);
   /**
+   * Whether `hover` is a TAP pin rather than a live mouse hover.
+   *
+   * A finger has no hover: `onPointerMove` never runs for a touch pointer
+   * (see the SVG's handlers below), so the only way a touch reading gets
+   * shown at all is a tap that sets it and leaves it standing after the
+   * finger lifts — a mouse's reading disappears the instant the pointer
+   * moves on, but there is no "moves on" for a touch that already ended.
+   * Cleared by a tap elsewhere (the outside-tap effect below) or by
+   * `hoverSuppressed` taking the pointer, same as a live hover is.
+   */
+  const [pinned, setPinned] = useState(false);
+  /**
    * The tooltip's own box, measured the same way the chart's is — see `box`.
    *
    * Its WIDTH is what keeps it on screen: centred on the hovered point it hangs
@@ -159,8 +171,30 @@ export function AttendanceTrendChart({
   const [wasSuppressed, setWasSuppressed] = useState(hoverSuppressed);
   if (hoverSuppressed !== wasSuppressed) {
     setWasSuppressed(hoverSuppressed);
-    if (hoverSuppressed) setHover(null);
+    if (hoverSuppressed) {
+      setHover(null);
+      setPinned(false);
+    }
   }
+
+  // A pinned reading (see `pinned` above) clears on the NEXT tap anywhere
+  // outside the chart — `box` is the same measured root the ResizeObserver
+  // above already tracks, so this needs no ref of its own. A tap INSIDE the
+  // chart is handled by the SVG's own `onPointerDown` instead (it re-pins at
+  // the new point rather than clearing), so this only ever fires for a tap
+  // genuinely elsewhere on the page.
+  useEffect(() => {
+    if (!pinned || !box) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target && box.contains(target)) return;
+      setHover(null);
+      setPinned(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, [pinned, box]);
+
   if (points.length < 2) {
     return (
       <div className="flex h-full min-h-[130px] items-center justify-center text-caption1 text-fg-subtle">
@@ -337,15 +371,38 @@ export function AttendanceTrendChart({
         width="100%"
         height={H}
         style={{ display: "block" }}
+        onPointerDown={(e) => {
+          // A finger, not a mouse: touch gets no `onPointerMove` at all (see
+          // below), so a tap is the only gesture it has, and this is where it
+          // both sets AND pins the reading — see `pinned`'s own comment.
+          if (hoverSuppressed || e.pointerType !== "touch") return;
+          const svg = svgRef.current;
+          if (!svg) return;
+          const r = svg.getBoundingClientRect();
+          const frac = (e.clientX - r.left) / r.width;
+          setHover(clamp(Math.round(frac * (points.length - 1)), 0, points.length - 1));
+          setPinned(true);
+        }}
         onPointerMove={(e) => {
           if (hoverSuppressed) return;
+          // Touch has no hover to follow — see `onPointerDown` above for what
+          // a touch pointer does instead. Left to this handler, a touch DRAG
+          // across the chart would drag the pin along with it, which is not a
+          // tap and not what pinning a reading means.
+          if (e.pointerType === "touch") return;
           const svg = svgRef.current;
           if (!svg) return;
           const r = svg.getBoundingClientRect();
           const frac = (e.clientX - r.left) / r.width; // 0..1 across the plotted width
           setHover(clamp(Math.round(frac * (points.length - 1)), 0, points.length - 1));
         }}
-        onPointerLeave={() => setHover(null)}
+        onPointerLeave={() => {
+          // A pinned (touch) reading survives the pointer leaving — it is
+          // supposed to still be there after the finger lifts. Only a live
+          // (mouse) hover clears on leave.
+          if (pinned) return;
+          setHover(null);
+        }}
         role="img"
         aria-label="Attendance trend across recent services"
       >

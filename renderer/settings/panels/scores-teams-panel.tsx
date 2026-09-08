@@ -526,7 +526,7 @@ export function ScoresTeamsPanel({ className }: { className?: string } = {}) {
                 type="button"
                 aria-label={`Stop following ${f.displayName}`}
                 onClick={() => edit((current) => current.filter((x) => keyOf(x) !== keyOf(f)))}
-                className="shrink-0 rounded p-1 text-fg-muted hover:bg-gray-a3 hover:text-red-11"
+                className="touch-target shrink-0 rounded p-1 text-fg-muted hover:bg-gray-a3 hover:text-red-11"
               >
                 <TrashIcon className="size-3.5" />
               </button>

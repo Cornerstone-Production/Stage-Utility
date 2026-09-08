@@ -160,7 +160,7 @@ function KeyValueField({
             <button
               type="button"
               onClick={() => write(rows.filter((_, j) => j !== i))}
-              className="rounded p-0.5 text-fg-subtle hover:text-warn-11"
+              className="touch-target rounded p-0.5 text-fg-subtle hover:text-warn-11"
               aria-label="Remove row"
             >
               <Trash2Icon className="size-3.5" />

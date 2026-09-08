@@ -996,7 +996,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                   {!readOnly && (
                     <Tooltip label="Delete recording">
                       <button
-                        className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                        className="touch-target shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
                         onClick={() => deleteService(row.serviceKey, row.planTitle ?? row.serviceKey)}
                         aria-label={`Delete recording for ${row.planTitle ?? "service"}`}
                       >
@@ -1041,7 +1041,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 {!readOnly && (
                   <Tooltip label="Delete recording">
                     <button
-                      className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
+                      className="touch-target shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors"
                       onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
                       aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
                     >

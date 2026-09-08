@@ -248,14 +248,14 @@ export function PatchSection() {
               {s.name}
             </button>
           ))}
-          <button type="button" onClick={addSheet} className="shrink-0 rounded-md px-2 py-1.5 text-fg-subtle hover:text-fg transition-colors" aria-label="Add sheet">
+          <button type="button" onClick={addSheet} className="touch-target shrink-0 rounded-md px-2 py-1.5 text-fg-subtle hover:text-fg transition-colors" aria-label="Add sheet">
             <PlusIcon className="size-4" />
           </button>
         </div>
         <div className="ml-auto flex items-center gap-1">
           <Input value={sheet.name} onChange={(e) => renameSheet(e.target.value)} className="w-36" placeholder="Sheet name" aria-label="Sheet name" />
           {draft.sheets.length > 1 && (
-            <button type="button" onClick={deleteSheet} className="rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors" aria-label={`Delete ${sheet.name} sheet`}>
+            <button type="button" onClick={deleteSheet} className="touch-target rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors" aria-label={`Delete ${sheet.name} sheet`}>
               <Trash2Icon className="size-4" />
             </button>
           )}
@@ -314,7 +314,7 @@ export function PatchSection() {
         {editingVariant ? (
           <>
             <Input value={editingVariant.name} onChange={(e) => renameVariant(editingVariant.id, e.target.value)} className="w-40" placeholder="Variant name" />
-            <button type="button" onClick={() => deleteVariant(editingVariant.id)} className="rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors" aria-label="Delete variant">
+            <button type="button" onClick={() => deleteVariant(editingVariant.id)} className="touch-target rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors" aria-label="Delete variant">
               <Trash2Icon className="size-4" />
             </button>
             <span className="text-caption2 text-fg-muted">Only changes vs the default are saved.</span>

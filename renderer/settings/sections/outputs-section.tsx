@@ -562,7 +562,7 @@ function UnassignedViewCard({
         />
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button type="button" className="shrink-0 rounded-md p-1 text-fg-subtle hover:bg-fill hover:text-fg" aria-label={`More actions for ${view.name}`}>
+            <button type="button" className="touch-target shrink-0 rounded-md p-1 text-fg-subtle hover:bg-fill hover:text-fg" aria-label={`More actions for ${view.name}`}>
               <MoreVerticalIcon className="size-4" />
             </button>
           </DropdownMenu.Trigger>

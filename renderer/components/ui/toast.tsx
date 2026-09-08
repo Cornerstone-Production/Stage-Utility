@@ -82,7 +82,7 @@ export function Toaster() {
             {t.message}
           </ToastPrimitive.Description>
           <ToastPrimitive.Close asChild>
-            <button className="ml-1 rounded p-0.5 text-gray-9 hover:text-fg transition-colors">
+            <button className="touch-target ml-1 rounded p-0.5 text-gray-9 hover:text-fg transition-colors">
               <XIcon className="size-3.5" />
             </button>
           </ToastPrimitive.Close>

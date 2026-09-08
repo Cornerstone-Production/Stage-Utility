@@ -831,6 +831,7 @@ function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers:
         variant="transparent"
         size="small"
         iconOnly
+        touchTargetY
         onClick={async () => {
           if (await confirm({ title: "Overwrite preset?", message: `Overwrite "${preset.name}" with the current slots?`, confirmLabel: "Overwrite" })) handlers.handleOverwritePreset(preset.id);
         }}
@@ -843,12 +844,13 @@ function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers:
         variant="transparent"
         size="small"
         iconOnly
+        touchTargetY
         onClick={() => downloadJson(`${fileSlug(preset.name)}.slots.json`, { name: preset.name, slots: preset.slots })}
         aria-label={`Export ${preset.name}`}
       >
         <DownloadIcon className="size-3.5 text-gray-9" />
       </Button>
-      <Button variant="transparent" size="small" iconOnly onClick={() => handlers.handleDeletePreset(preset.id)} aria-label={`Delete ${preset.name}`}>
+      <Button variant="transparent" size="small" iconOnly touchTargetY onClick={() => handlers.handleDeletePreset(preset.id)} aria-label={`Delete ${preset.name}`}>
         <TrashIcon className="size-3.5 text-red-10" />
       </Button>
     </div>

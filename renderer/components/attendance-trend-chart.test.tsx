@@ -514,3 +514,105 @@ describe("the SPL endpoint dot and label", () => {
     );
   });
 });
+
+// ── Touch: tap pins the tooltip ─────────────────────────────────────────────
+//
+// A finger has no hover, so `onPointerMove` never runs for a touch pointer
+// (see the SVG's own comment) — the only touch gesture this chart has is a
+// tap, and it has to both show AND KEEP SHOWING the reading, since there is
+// no "still hovering" state for a touch that already lifted. What jsdom can
+// prove: the state transitions themselves (a pointerdown sets it, a pointerup
+// on the SAME point does not clear it, an outside pointerdown does). What it
+// CANNOT prove — that the pin visually survives real layout, or that a tap
+// dead-center on a real device lands on the index this arithmetic expects —
+// needs a browser; see the touch sweep notes for what was actually driven
+// there.
+describe("touch: tap pins the tooltip", () => {
+  test("a touch pointerdown sets the reading and it survives the pointerup", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    const restore = stubLayout(1500);
+    t.after(() => restore());
+    const view = render(<AttendanceTrendChart points={week} />);
+    const svg = view.container.querySelector("svg")!;
+
+    fireEvent.pointerDown(svg, { clientX: 750, clientY: 50, pointerType: "touch" });
+    assert.ok(tooltip(view.container), "a touch tap did not set a reading at all");
+
+    fireEvent.pointerUp(svg, { clientX: 750, clientY: 50, pointerType: "touch" });
+    assert.ok(tooltip(view.container), "the reading disappeared the moment the finger lifted — it should stay pinned");
+  });
+
+  test("a pinned reading survives pointerleave, unlike a live hover", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    const restore = stubLayout(1500);
+    t.after(() => restore());
+    const view = render(<AttendanceTrendChart points={week} />);
+    const svg = view.container.querySelector("svg")!;
+
+    fireEvent.pointerDown(svg, { clientX: 750, clientY: 50, pointerType: "touch" });
+    fireEvent.pointerUp(svg, { clientX: 750, clientY: 50, pointerType: "touch" });
+    fireEvent.pointerLeave(svg);
+    assert.ok(tooltip(view.container), "the pin cleared on pointerleave — it must survive until the next tap");
+  });
+
+  test("a mouse move does not pin anything — it clears on pointerleave same as before", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    const restore = stubLayout(1500);
+    t.after(() => restore());
+    const view = render(<AttendanceTrendChart points={week} />);
+    const svg = view.container.querySelector("svg")!;
+
+    fireEvent.pointerMove(svg, { clientX: 750, clientY: 50, pointerType: "mouse" });
+    assert.ok(tooltip(view.container), "a mouse move did not open a tooltip");
+    fireEvent.pointerLeave(svg);
+    assert.ok(!tooltip(view.container), "an ordinary mouse hover survived pointerleave — it must not be pinned");
+  });
+
+  test("a touch pointermove does not drag the pin along with it", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    const restore = stubLayout(1500);
+    t.after(() => restore());
+    const view = render(<AttendanceTrendChart points={week} />);
+    const svg = view.container.querySelector("svg")!;
+
+    fireEvent.pointerDown(svg, { clientX: 750, clientY: 50, pointerType: "touch" });
+    const pinnedTip = tooltip(view.container)!;
+    assert.match(pinnedTip.textContent ?? "", /150/, "the tap did not land on the point being tested");
+
+    // A drag across the chart under the same touch must not move the pin —
+    // only a fresh tap (a new pointerdown) is allowed to.
+    fireEvent.pointerMove(svg, { clientX: 10, clientY: 50, pointerType: "touch" });
+    const stillTip = tooltip(view.container)!;
+    assert.match(stillTip.textContent ?? "", /150/, "a touch drag moved the pinned reading");
+  });
+
+  test("a tap outside the chart clears the pin", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    const restore = stubLayout(1500);
+    t.after(() => restore());
+    const view = render(<AttendanceTrendChart points={week} />);
+    const svg = view.container.querySelector("svg")!;
+
+    fireEvent.pointerDown(svg, { clientX: 750, clientY: 50, pointerType: "touch" });
+    assert.ok(tooltip(view.container), "the tap did not pin a reading");
+
+    fireEvent.pointerDown(document.body, { clientX: 5, clientY: 5, pointerType: "touch" });
+    assert.ok(!tooltip(view.container), "a tap outside the chart did not clear the pinned reading");
+  });
+
+  test("hoverSuppressed clears a pinned reading the same way it clears a live one", (t) => {
+    globalThis.ResizeObserver = SpyResizeObserver as unknown as typeof ResizeObserver;
+    const restore = stubLayout(1500);
+    t.after(() => restore());
+    const view = render(<AttendanceTrendChart points={week} />);
+    const svg = view.container.querySelector("svg")!;
+
+    fireEvent.pointerDown(svg, { clientX: 750, clientY: 50, pointerType: "touch" });
+    assert.ok(tooltip(view.container), "the tap did not pin a reading");
+
+    act(() => {
+      view.rerender(<AttendanceTrendChart points={week} hoverSuppressed />);
+    });
+    assert.ok(!tooltip(view.container), "a menu taking the pointer did not clear a pinned reading");
+  });
+});
