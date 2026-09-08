@@ -280,7 +280,7 @@ function PastSession({ s, open, onToggle, onDelete }: { s: BaptismSession; open:
           <span className="shrink-0 tabular-nums text-caption1 text-gray-9">{n} baptized · {fmtClock(tot)}</span>
         </button>
         <Tooltip label="Delete session">
-          <button className="shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors" onClick={onDelete} aria-label="Delete session">
+          <button className="touch-target shrink-0 rounded-md p-2 text-gray-9 hover:bg-gray-4 hover:text-red-11 transition-colors" onClick={onDelete} aria-label="Delete session">
             <Trash2Icon className="size-4" />
           </button>
         </Tooltip>

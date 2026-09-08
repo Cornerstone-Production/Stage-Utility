@@ -386,7 +386,7 @@ export function UpdatesPanel({
                   <button
                     type="button"
                     onClick={onDismissJustUpdated}
-                    className="shrink-0 rounded p-0.5 text-green-11/70 hover:text-green-11"
+                    className="touch-target shrink-0 rounded p-0.5 text-green-11/70 hover:text-green-11"
                     aria-label="Dismiss"
                   >
                     <XIcon className="size-3.5" />

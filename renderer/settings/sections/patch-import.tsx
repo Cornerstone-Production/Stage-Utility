@@ -166,7 +166,7 @@ export function PatchImport({
     <div className="rounded-xl border border-line-strong bg-surface-raised p-4">
       <div className="flex items-center justify-between">
         <h3 className="text-footnote font-semibold text-fg">Import — {dir === "in" ? "Inputs" : "Outputs"}</h3>
-        <button type="button" onClick={onClose} className="rounded p-1 text-fg-subtle hover:text-fg" aria-label="Close import"><XIcon className="size-4" /></button>
+        <button type="button" onClick={onClose} className="touch-target rounded p-1 text-fg-subtle hover:text-fg" aria-label="Close import"><XIcon className="size-4" /></button>
       </div>
 
       {racks.length === 0 ? (

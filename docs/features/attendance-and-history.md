@@ -40,6 +40,10 @@ metrics your history actually holds, and defaults to the LAeq with the longest
 averaging window the meter reports (LAeq 10 over LAeq 2 over LAeq 1), because that
 is the steadiest number for "how loud was the service".
 
+Hovering a point with a mouse shows its reading in a tooltip; on a touch device,
+tapping a point pins that same reading in place — no hover needed — until another
+tap elsewhere on the page clears it.
+
 Each point is the service's equivalent continuous level, energy-averaged across
 its plan items and weighted by how long each ran, so a 30-second welcome does not
 count as much as a 25-minute sermon. Several services on one date combine the same

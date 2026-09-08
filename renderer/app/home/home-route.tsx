@@ -264,6 +264,7 @@ export function HomeRoute() {
             variant="filled"
             size="medium"
             iconOnly
+            touchTargetY
             onClick={() => setAdding(true)}
             aria-label="Add widget"
           >
@@ -278,6 +279,7 @@ export function HomeRoute() {
             variant="filled"
             size="medium"
             iconOnly
+            touchTargetY
             onClick={() => save((objs) => resetPlacement(objs))}
             aria-label="Pack widgets tight, clearing any gaps"
             tooltip="Pack tight — clears the gaps"
@@ -289,6 +291,7 @@ export function HomeRoute() {
           variant={editing ? "accent" : "filled"}
           size="medium"
           iconOnly
+          touchTargetY
           onClick={() => setEditing((e) => !e)}
           aria-label={editing ? "Done editing widgets" : "Edit widgets"}
         >

@@ -100,7 +100,7 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
                   <button
                     type="button"
                     onClick={() => openLabel(d.id)}
-                    className={`rounded-md p-1.5 transition-colors ${open ? "bg-fill text-fg" : "text-fg-subtle hover:bg-fill hover:text-fg"}`}
+                    className={`touch-target-y rounded-md p-1.5 transition-colors ${open ? "bg-fill text-fg" : "text-fg-subtle hover:bg-fill hover:text-fg"}`}
                     aria-label={`Generate connector labels for ${d.name}`}
                     aria-expanded={open}
                   >
@@ -109,7 +109,7 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
                   <button
                     type="button"
                     onClick={() => remove(d.id)}
-                    className="rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-warn-11 transition-colors"
+                    className="touch-target-y rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-warn-11 transition-colors"
                     aria-label={`Remove ${d.name}`}
                   >
                     <Trash2Icon className="size-4" />
