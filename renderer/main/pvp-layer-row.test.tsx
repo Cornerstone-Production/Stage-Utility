@@ -138,6 +138,17 @@ describe("PvpLayerRow — the five states in the approved table", () => {
     assert.deepEqual(rowQualifiers(layer({ muted: true }), true), ["muted"]);
   });
 
+  test("an ended clip reads `ended`, never `still` — it is not timed either", () => {
+    // GUARD: ended is never timed (durationSec is null), so without the
+    // dedicated branch it falls into the `!timed` arm and reads as a plain
+    // "still" — losing the one distinction the state exists for.
+    const ENDED = { state: "ended" as const, mediaName: "speaker_bumper.mov", playbackRate: 1, anchorElapsedSec: 7.97, durationSec: null };
+    const html = draw(layer(ENDED));
+    assert.ok(html.includes("speaker_bumper.mov"), html);
+    assert.deepEqual(rowQualifiers(layer(ENDED), false), ["ended"]);
+    assert.ok(!/[0-9]:[0-9][0-9]/.test(html), `an ended clip drew a countdown:\n${html}`);
+  });
+
   test("LAST CUE IS GONE FROM THE ROW, on a live layer too", () => {
     // It was the loudest text on the tile and it is the least trustworthy field
     // PVP reports: measured live, media LoopGraphic_1_HeisWorthy.mp4 under a cue
@@ -196,19 +207,20 @@ describe("visibleLayers", () => {
   const c = (over: Partial<Config> = {}): Config => ({ type: "pvp-layers", ...over });
 
   test("with-content drops the empty layers, which is the useful default", () => {
+    // "Tag" is the fixture's ended clip — ended has content, so it stays.
     const shown = visibleLayers(FIXTURE_LAYERS, c({ show: "with-content" }));
-    assert.deepEqual(shown.map((l) => l.name), ["Graphics", "Lower third"]);
+    assert.deepEqual(shown.map((l) => l.name), ["Graphics", "Lower third", "Tag"]);
   });
 
   test("an unset show behaves as with-content", () => {
     assert.deepEqual(
       visibleLayers(FIXTURE_LAYERS, c()).map((l) => l.name),
-      ["Graphics", "Lower third"],
+      ["Graphics", "Lower third", "Tag"],
     );
   });
 
   test("all shows all of them, empties included", () => {
-    assert.equal(visibleLayers(FIXTURE_LAYERS, c({ show: "all" })).length, 4);
+    assert.equal(visibleLayers(FIXTURE_LAYERS, c({ show: "all" })).length, 5);
   });
 
   test("one with no layer chosen shows NOTHING, not everything", () => {

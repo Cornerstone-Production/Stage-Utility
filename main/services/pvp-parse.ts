@@ -71,6 +71,11 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
     const playbackRate = num(t.playbackRate, 0);
     const elapsed = num(t.timeElapsed, 0);
     const remaining = num(t.timeRemaining, 0);
+    // Used ONLY to tell "ended" from a still — both report timeRemaining 0, and
+    // a still reports this true while an ended clip reports it false. Never
+    // stored on the DTO: the doc at the top of pvp.ts explains why a field named
+    // the opposite of what it means is not one to carry further.
+    const isPlaying = rec(t).isPlaying;
 
     // A still and a PAUSED CLIP both report playbackRate 0, and only
     // timeRemaining tells them apart: a still has none, a paused clip still has
@@ -78,11 +83,18 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
     // still, which dropped its duration, which made its progress bar and its
     // countdown VANISH mid-service rather than freezing where they were.
     const timed = hasMedia && remaining > 0;
-    // Written out, not as a nested ternary: this is the three-state decision the
-    // twelve lines of comment above explain, and it is worth being able to read
-    // one arm at a time.
+    // A clip that ran out reports playbackRate: 1 (it never resets the rate
+    // itself), timeRemaining: 0, timeElapsed > 0 and isPlaying: false — the one
+    // combination a still cannot produce, because a still reports isPlaying
+    // true. Checked BEFORE the video branch below: an ended clip's rate would
+    // otherwise satisfy `playbackRate > 0` and read as still rolling.
+    const ended = hasMedia && remaining <= 0 && elapsed > 0 && isPlaying === false;
+    // Written out, not as a nested ternary: this is the four-state decision the
+    // comments above explain, and it is worth being able to read one arm at a
+    // time.
     let state: PvpLayerState;
     if (!hasMedia) state = "empty";
+    else if (ended) state = "ended";
     else if (playbackRate > 0 || timed) state = "video";
     else state = "still";
 
@@ -277,6 +289,15 @@ export function anchorDriftSec(
  *
  * A layer absent from `prev` is NOT drift — it is a signature change, which is
  * already a reason to broadcast, and reporting it twice would be noise.
+ *
+ * Only a layer whose PREVIOUS state was "video" is even considered. An ended
+ * clip keeps whatever playbackRate it stopped at — PVP was observed reporting
+ * `playbackRate: 1` on a clip that had already run out — so multiplying that
+ * rate against elapsed time would predict a still-frozen clip drifting further
+ * from its anchor every second it sat there, forcing a frame on every keepalive
+ * for the rest of the service. A still already reports rate 0 and would never
+ * have tripped this, but "ended" cannot be trusted to, so the guard is on the
+ * STATE, not the rate.
  */
 export function driftedLayers(
   prev: PvpStatusDTO,
@@ -292,7 +313,7 @@ export function driftedLayers(
   const out: string[] = [];
   for (const l of next.layers) {
     const b = before.get(l.uuid);
-    if (!b) continue;
+    if (!b || b.state !== "video") continue;
     if (anchorDriftSec(b.anchorElapsedSec, prevAtMs, l.anchorElapsedSec, nextAtMs, b.playbackRate) > toleranceSec) {
       out.push(l.uuid);
     }
