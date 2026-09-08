@@ -50,7 +50,12 @@ export const PAD_SCALE = 0.11;
 
 /** Line heights. Exported because the budget below counts them, and because the
  *  rendered leading must be the same number the budget spent. */
-export const CAPTION_LEADING = 1.1;
+// 1.25, not the value line's 1.2: a caption is uppercase and never needs the
+// room, but the state word a PVP widget rides in the caption's end slot is
+// lowercase mono, and Plex Mono's descent runs 0.3em. At 1.1 a 20px "playing"
+// had 3.6px below the baseline for a 4.3px descender and lost the bottom of its
+// g; 1.2 fits by 0.3px, 1.25 by 0.8px. Measured in Chrome against the real font.
+export const CAPTION_LEADING = 1.25;
 export const VALUE_LEADING = 1.2;
 export const SUB_LEADING = 1.2;
 
