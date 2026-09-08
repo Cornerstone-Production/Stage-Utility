@@ -410,8 +410,11 @@ describe("a long press opens the context menu, and a drag suppresses it", () => 
   // real macrotask queue once per test, before the fake timers reset, is what
   // stops a queued React callback from firing after the DOM is torn down in
   // `after()` — see the identical comment in context-menu-trigger.test.tsx.
-  function flushReact(): Promise<void> {
-    return new Promise((resolve) => setImmediate(resolve));
+  async function flushReact(): Promise<void> {
+    // Two turns, not one: the hold's setPressing(false) plus the menu open can
+    // leave React a second pass queued, and on a slow runner one drain let it
+    // fire after the DOM was torn down ("window is not defined" in CI).
+    for (let i = 0; i < 3; i++) await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   // THE guard for the object half of this change. Delete `trigger.onPointerDown`
@@ -430,7 +433,11 @@ describe("a long press opens the context menu, and a drag suppresses it", () => 
       on("pointerup", 302, 301);
       assert.equal(h.geoms.length, 0, "lifting after the menu opened still moved the object");
     } finally {
+      // Real timers back first, then unmount while they are real, then drain:
+      // an unmount under fake timers queued React work that fired after
+      // teardown ("window is not defined"), deterministically.
       mock.timers.reset();
+      act(() => { cleanup(); });
       await flushReact();
     }
   });
@@ -451,7 +458,11 @@ describe("a long press opens the context menu, and a drag suppresses it", () => 
       assert.deepEqual(h.menus, [], `a live drag opened the menu on top of itself (${JSON.stringify(h.menus)})`);
       on("pointerup", 310, 300);
     } finally {
+      // Real timers back first, then unmount while they are real, then drain:
+      // an unmount under fake timers queued React work that fired after
+      // teardown ("window is not defined"), deterministically.
       mock.timers.reset();
+      act(() => { cleanup(); });
       await flushReact();
     }
   });
@@ -469,7 +480,11 @@ describe("a long press opens the context menu, and a drag suppresses it", () => 
       assert.deepEqual(h.menus, [null], `the hold did not open the canvas menu (${JSON.stringify(h.menus)})`);
       on("pointerup", 701, 501);
     } finally {
+      // Real timers back first, then unmount while they are real, then drain:
+      // an unmount under fake timers queued React work that fired after
+      // teardown ("window is not defined"), deterministically.
       mock.timers.reset();
+      act(() => { cleanup(); });
       await flushReact();
     }
   });

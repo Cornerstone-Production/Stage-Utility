@@ -18,6 +18,7 @@
 // must be free to win the gesture instead.
 
 import {
+  useEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -131,6 +132,13 @@ export function useContextMenuTrigger(
       gesture.current.timer = null;
     }
   }
+
+  // A trigger whose element unmounts mid-press must not fire later into a dead
+  // tree: the timer would call open() and setPressing() on nothing. Reads the
+  // ref at unmount time, so it needs no dependency on the function above.
+  useEffect(() => () => {
+    if (gesture.current.timer != null) clearTimeout(gesture.current.timer);
+  }, []);
 
   /** End the gesture without opening anything — a lift, a cancel, a second
    *  finger, or too much movement. Also the caller-facing `cancel()`: a
