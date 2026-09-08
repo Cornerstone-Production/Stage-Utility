@@ -52,11 +52,15 @@ export function ViewDetail({
   resolvedDraftSlots,
   slotPresets,
   layoutTemplates,
+  slotsTargetSide,
+  slotsTargetLabel,
+  slotsTargetHasPlan,
+  slotsTargetHasOverride,
   canDelete,
   handlers,
 }: Pick<
   SectionProps,
-  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "resolvedDraftSlots" | "slotPresets" | "layoutTemplates" | "handlers"
+  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "resolvedDraftSlots" | "slotPresets" | "layoutTemplates" | "slotsTargetSide" | "slotsTargetLabel" | "slotsTargetHasPlan" | "slotsTargetHasOverride" | "handlers"
 > & { view: View; canDelete: boolean; startEditing?: boolean }) {
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
@@ -294,6 +298,10 @@ export function ViewDetail({
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
             slotPresets={slotPresets}
+            slotsTargetSide={slotsTargetSide}
+            slotsTargetLabel={slotsTargetLabel}
+            slotsTargetHasPlan={slotsTargetHasPlan}
+            slotsTargetHasOverride={slotsTargetHasOverride}
             handlers={handlers}
           />
         </>

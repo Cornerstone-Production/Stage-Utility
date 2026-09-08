@@ -2,7 +2,7 @@ import { useState } from "react";
 import { DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Loader2Icon, PlusIcon } from "lucide-react";
-import { Button, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Separator, toast } from "../../components/ui";
+import { Button, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Separator, toast, confirm } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStageState } from "../../main/use-stage-state";
@@ -10,6 +10,7 @@ import { SortableSlotGroup, AlignmentPanel, PresetsPanel, makeSharesWith, type P
 import type { WirelessChannel } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useReportUnsavedWork } from "../../components/unsaved-work";
+import { SlotsTargetPill, useSlotsTarget } from "./slots-target-pill";
 
 function freshSlotId(): string {
   return `slot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -56,13 +57,37 @@ export function InlineSlotsEditor({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Mirror this object's resolved slots into the editor (unless mid-edit). Re-seeds
-  // when the object or active service type changes (state carries both).
-  useResyncOn([state, objectId, dirty], () => {
+  // Which of this grid's two boards is being edited — the service type's default
+  // or the current plan's own.
+  const slotsTarget = useSlotsTarget("object", objectId);
+
+  // Mirror the selected board's RAW rows into the editor (unless mid-edit).
+  //
+  // Not `state.slotsByLayoutObject`, which is whichever board is in effect: on
+  // the Default side while a plan override was live, that showed — and would
+  // then have saved back — the override's rows.
+  useResyncOn([slotsTarget.slotsForSide, objectId, dirty, slotsTarget.side], () => {
     if (dirty) return;
-    const slots = state?.slotsByLayoutObject?.[objectId] ?? [];
+    const slots = slotsTarget.slotsForSide ?? [];
     setLocalSlots([...slots].sort((a, b) => a.order - b.order));
   });
+
+  /** Move to the other board, asking about unsaved edits first — switching
+   *  re-reads the saved rows, so anything in the buffer would be lost. */
+  async function switchSide(next: "default" | "plan") {
+    if (next === slotsTarget.side) return;
+    if (dirty) {
+      const ok = await confirm({
+        title: "Discard unsaved slot changes?",
+        message: "Switching boards re-reads the saved slots, so anything unsaved here is lost.",
+        confirmLabel: "Discard",
+        destructive: true,
+      });
+      if (!ok) return;
+      setDirty(false);
+    }
+    slotsTarget.setSide(next);
+  }
 
   // Mouse and touch separately - see the note in settings-view.tsx. A single
   // PointerSensor claims the gesture on touch-down, which stops the list
@@ -143,10 +168,16 @@ export function InlineSlotsEditor({
     setSaving(true);
     try {
       const slots = localSlots.map((s, i) => ({ ...s, order: i }));
-      const next = await ipc<StageState>("layoutObjects:setSlots", { id: objectId, slots });
+      const next = await ipc<StageState>("layoutObjects:setSlots", {
+        id: objectId,
+        slots,
+        target: slotsTarget.wireTarget(),
+      });
       queryClient.setQueryData(["stage:getState"], next);
+      await slotsTarget.invalidate();
       setDirty(false);
-      toast.success("Slots saved.");
+      // Names the board it landed on — "Slots saved." was true of either.
+      slotsTarget.announceSaved();
       return true;
     } catch (err) {
       toast.error(`Failed to save slots: ${String(err)}`);
@@ -248,9 +279,20 @@ export function InlineSlotsEditor({
   const sharesWith = makeSharesWith(localSlots);
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-headline font-semibold text-gray-12 flex-1">Mic slots</span>
+    <div className="flex flex-col gap-3" data-slots-target={slotsTarget.side}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-headline font-semibold text-gray-12">Mic slots</span>
+        <SlotsTargetPill
+          side={slotsTarget.side}
+          label={slotsTarget.label}
+          hasPlan={slotsTarget.hasPlan}
+          hasOverride={slotsTarget.hasOverride}
+          disabled={!serviceTypeId}
+          onSwitch={(next) => void switchSide(next)}
+          onRevert={() => void slotsTarget.revert()}
+          onPromote={() => void slotsTarget.promote()}
+        />
+        <div className="flex-1" />
         {!serviceTypeId && <span className="text-caption2 text-amber-10">Pick a service type to edit slots</span>}
         {dirty && serviceTypeId && <span className="text-caption2 text-amber-10">Unsaved changes</span>}
         <Button variant="accent" size="small" onClick={save} disabled={saving || !dirty || !serviceTypeId}>

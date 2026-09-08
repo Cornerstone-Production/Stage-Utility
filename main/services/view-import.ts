@@ -131,7 +131,10 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
       // Fresh slot ids, matching what duplicateView does: two views must never
       // share a slot row identity.
       const fresh = rows.map((r) => ({ ...r, id: randomUUID() }));
-      await slotsStore.setSlots(newKey, serviceTypeId, fresh);
+      // The bundle carries defaults only (see view-export), so this is where
+      // they land — an imported view starts on its default board, with no
+      // per-plan exception to inherit.
+      await slotsStore.setDefault(newKey, serviceTypeId, fresh);
     }
   }
 

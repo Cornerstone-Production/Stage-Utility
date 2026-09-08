@@ -92,6 +92,8 @@ declare global {
   type SlotPositionMatch = Stage.SlotPositionMatch;
   type SlotPreset = Stage.SlotPreset;
   type SlotsLayout = Stage.SlotsLayout;
+  type SlotsScope = Stage.SlotsScope;
+  type SlotTargetsDTO = Stage.SlotTargetsDTO;
   type SplItemHistory = Stage.SplItemHistory;
   type SplMeterDTO = Stage.SplMeterDTO;
   type SplMetricsDTO = Stage.SplMetricsDTO;

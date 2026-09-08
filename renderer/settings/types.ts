@@ -56,6 +56,13 @@ export interface SectionHandlers {
   saveSlots: () => Promise<void>;
   /** Drop unsaved slot edits and revert the editor + preview to saved state. */
   discardSlots: () => void;
+  /** Move the editor between the service type's default board and the current
+   *  plan's own, asking about unsaved edits first. */
+  setSlotsTargetSide: (side: "default" | "plan") => Promise<void>;
+  /** Delete the current plan's board, so the screen goes back to the default. */
+  revertSlotsOverride: () => Promise<boolean>;
+  /** Make the current plan's board the service type's default. */
+  promoteSlotsOverride: () => Promise<boolean>;
   handleSetViewSlotsLayout: (id: string, slotsLayout: SlotsLayout | null) => Promise<void>;
   // Views (content)
   handleAddView: (name: string, kind: ViewKind, surface?: "display" | "console") => Promise<string | null>;
@@ -114,6 +121,13 @@ export interface SectionProps {
   isSavingSlots: boolean;
   /** Draft slots resolved server-side (no save) for the live preview; null when clean. */
   resolvedDraftSlots: Slot[] | null;
+  /** Which of the selected view's two boards the slot editor is on. */
+  slotsTargetSide: "default" | "plan";
+  /** The current plan's short date, e.g. "Wed Sep 13". */
+  slotsTargetLabel: string;
+  slotsTargetHasPlan: boolean;
+  /** True when the current plan has a board of its own (the "edited" badge). */
+  slotsTargetHasOverride: boolean;
   isRefreshing: boolean;
   slotPresets: SlotPreset[];
   updateStatus: UpdateStatus | null;

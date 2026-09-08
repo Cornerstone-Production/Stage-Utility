@@ -46,6 +46,44 @@ has two devices and needs to see both.
 The editor flags any slot sharing its set with another, since adding one position
 changes the grouping.
 
+## Defaults and this week
+
+Every service type has a **default** board — the lineup it comes back to every
+week. A change made while a Planning Center plan is selected is saved against
+**that plan only**, and the next plan of that type shows the default again.
+
+The editor's pill picks which of the two you are editing:
+
+| Side | What it is |
+|---|---|
+| **Default** | the service type's standing board |
+| the plan's date | that plan's board. Carries an **edited** badge once it has one |
+
+Two actions appear once a plan has a board of its own:
+
+- **Revert to default** deletes that plan's board, so the screens go back to the
+  service type's default.
+- **Set as default** makes that plan's board the service type's default, and the
+  plan stops being an exception.
+
+Both discard something, so both ask first. Saving the default while a plan's own
+board is in effect changes nothing on any screen — the plan's board still wins
+until it is reverted or the plan advances.
+
+Everything that writes slots lands on the side you are editing: a save, recalling
+an arrangement, and copying slots from another view. A copy reads the source's
+board for that same side and writes it to yours, and never deletes the board on
+the other side. Copying onto the plan side from a view that has no board for the
+plan copies that view's default into your plan's board, so your screen matches it
+without your default changing.
+
+A plan's board is deleted automatically once the plan is more than 30 days past.
+Defaults are never pruned. When Planning Center cannot be reached to date a
+plan, nothing of that service type is pruned.
+
+Exporting a view carries the defaults for every service type. Per-plan boards do
+not travel — a plan id means nothing on the far end.
+
 ### Presets
 
 Slot presets are global and can be recalled onto any service type. Position names

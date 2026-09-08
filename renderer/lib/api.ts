@@ -465,6 +465,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/presets/${encodeURIComponent(id)}/apply`, {
         viewId: p.viewId,
         displayId: p.displayId,
+        // Recalling an arrangement lands on the board the editor is showing, not
+        // always the service type's default.
+        target: p.target,
       });
     }
 
@@ -541,7 +544,34 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "views:setSlots": {
       const id = p.id as string;
-      return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, { slots: p.slots });
+      // `target` omitted = whichever board a plain save goes to (the current plan
+      // if one is selected, else the service type's default). Sent only when the
+      // editor has an explicit one, so every other caller keeps working.
+      const body: Record<string, unknown> = { slots: p.slots };
+      if (p.target) body.target = p.target;
+      return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, body);
+    }
+
+    // ── Slot targets (the type's default vs one plan's board) ──────────────
+    // One path shape for both scopes: a slots View's id and an inline slots-grid
+    // OBJECT's id name boards in the same file under the same rules.
+    case "slots:targets": {
+      const base = p.scope === "view" ? "views" : "layout-objects";
+      return apiFetch<T>(`/api/${base}/${encodeURIComponent(p.key as string)}/slot-targets`);
+    }
+
+    case "slots:clearOverride": {
+      const base = p.scope === "view" ? "views" : "layout-objects";
+      return del<T>(
+        `/api/${base}/${encodeURIComponent(p.key as string)}/slots/override/${encodeURIComponent(p.planId as string)}`,
+      );
+    }
+
+    case "slots:promoteOverride": {
+      const base = p.scope === "view" ? "views" : "layout-objects";
+      return post<T>(`/api/${base}/${encodeURIComponent(p.key as string)}/slots/promote`, {
+        planId: p.planId,
+      });
     }
 
     case "views:resolveSlots":
@@ -551,7 +581,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "layoutObjects:setSlots": {
       const id = p.id as string;
-      return post<T>(`/api/layout-objects/${encodeURIComponent(id)}/slots`, { slots: p.slots });
+      const body: Record<string, unknown> = { slots: p.slots };
+      if (p.target) body.target = p.target;
+      return post<T>(`/api/layout-objects/${encodeURIComponent(id)}/slots`, body);
     }
 
     case "views:duplicate": {
@@ -573,7 +605,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "views:copySlots": {
       const id = p.id as string;
-      return post<T>(`/api/views/${encodeURIComponent(id)}/copy-slots`, { fromViewId: p.fromViewId });
+      // `target` names ONE board on both sides of the copy: the source's rows for
+      // that board go to the destination's same board. Omitted = wherever a plain
+      // save would go.
+      const body: Record<string, unknown> = { fromViewId: p.fromViewId };
+      if (p.target) body.target = p.target;
+      return post<T>(`/api/views/${encodeURIComponent(id)}/copy-slots`, body);
     }
 
     case "views:remove": {
