@@ -11,7 +11,7 @@
 // palette PRESENTS a type, not part of what the type is. The spec carries the
 // label, group and blurb, which every surface needs.
 
-import { useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   BoxIcon, SquareIcon, ImageIcon, SparklesIcon, TypeIcon, ClockIcon, TimerIcon,
   TagIcon, ListIcon, ListOrderedIcon, GaugeIcon, PaperclipIcon, MonitorIcon,
@@ -27,6 +27,7 @@ import {
 
 import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, widgetMatchesQuery, type PaletteGroup } from "../main/layout-objects";
 import { cn } from "../lib/cn";
+import { bindGesture, TOUCH_SLOP_PX, type GestureHandle } from "../lib/pointer-gesture";
 import { Checkbox } from "../components/ui/checkbox";
 
 /** Icon per type. A full Record so a new object cannot appear as a blank tile. */
@@ -127,6 +128,21 @@ export interface PaletteProps {
   /** A drag has begun; the canvas listens for the drop. */
   onDragStart: (t: LayoutObjectType) => void;
   onDragEnd: () => void;
+  /**
+   * A widget dragged onto the canvas with a FINGER, released at this client
+   * point.
+   *
+   * HTML5 drag and drop — which is what `onDragStart`/`onDragEnd` above serve —
+   * has no touch implementation in any browser, so on an iPad the palette could
+   * only ever be tapped. This is the same gesture done in pointer events; the
+   * caller turns the point into canvas fractions and runs the SAME placement
+   * code the drop handler runs, so a finger and a mouse land a widget in the
+   * same place with the same size and the same container nesting.
+   *
+   * Absent → the palette is tap-only (the picker over a drawn box, which has no
+   * canvas to drop onto).
+   */
+  onDropAt?: (t: LayoutObjectType, clientX: number, clientY: number) => void;
   /** Types whose integration is not set up — dimmed, still usable. */
   dimmed?: Set<LayoutObjectType>;
   /** Hide types whose integration is not set up. Lives here rather than on the
@@ -136,13 +152,72 @@ export interface PaletteProps {
   onToggleHideUnconfigured?: () => void;
 }
 
-export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed, hideUnconfigured, onToggleHideUnconfigured }: PaletteProps) {
+export function Palette({ types, onAdd, onDragStart, onDragEnd, onDropAt, dimmed, hideUnconfigured, onToggleHideUnconfigured }: PaletteProps) {
   // The palette is a browse, and browsing every group is the wrong job when you
   // already know the widget's name — which is most of the time, after the first
   // week. Home's add-widget sheet already had this box; the predicate behind it
   // is shared (widgetMatchesQuery), so the same words find the same widgets on
   // both surfaces rather than two filters drifting apart.
   const [q, setQ] = useState("");
+  // What is under the finger right now, so a touch drag is visible. A mouse drag
+  // gets the browser's own drag image from HTML5 DnD; a pointer drag gets nothing
+  // unless it is drawn, and a widget that travels invisibly is a gesture the
+  // operator cannot aim.
+  const [ghost, setGhost] = useState<{ label: string; x: number; y: number } | null>(null);
+  // A finger drag ends with a pointerup on the button, and the browser follows it
+  // with a click. Without this the widget is placed at the drop point AND added
+  // again at the default spot.
+  const dragged = useRef(false);
+  // The drag in flight, so it can be unbound if the palette closes under it —
+  // which it does: dropping a widget can collapse a narrow layout's palette, and
+  // a popover picker is dismissed while the finger is still down. Left bound, the
+  // next move would setGhost into an unmounted component.
+  const paletteGesture = useRef<GestureHandle | null>(null);
+  useEffect(() => () => {
+    paletteGesture.current?.cancel();
+    paletteGesture.current = null;
+  }, []);
+
+  /**
+   * Press → drag → drop, in pointer events, for a finger.
+   *
+   * Mouse is left alone: it already has HTML5 drag and drop, which carries a
+   * drag image and a copy cursor that this cannot reproduce. A press that never
+   * travels `TOUCH_SLOP_PX` is not a drag at all — nothing is captured, nothing
+   * is drawn, and the click that follows adds the widget the way a tap always
+   * has.
+   */
+  function startTouchDrag(e: ReactPointerEvent<HTMLElement>, t: LayoutObjectType) {
+    // Cleared on every press, not only by the click that consumes it. A drag the
+    // system cancels is followed by no click at all, and a flag left standing
+    // would swallow the next tap on any tile in the list.
+    dragged.current = false;
+    if (!onDropAt || e.pointerType === "mouse" || e.button !== 0 || !e.isPrimary) return;
+    const el = e.currentTarget;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let moved = false;
+    paletteGesture.current = bindGesture(el, e.pointerId, {
+      move: (ev) => {
+        if (!moved) {
+          if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < TOUCH_SLOP_PX) return;
+          moved = true;
+          dragged.current = true;
+          onDragStart(t);
+        }
+        setGhost({ label: LAYOUT_OBJECTS[t].label, x: ev.clientX, y: ev.clientY });
+      },
+      end: (ev, cancelled) => {
+        paletteGesture.current = null;
+        setGhost(null);
+        if (!moved) return;
+        onDragEnd();
+        // A cancelled drag places nothing. The caller ignores a point outside the
+        // canvas, so letting go over the palette or the inspector is a no-op too.
+        if (!cancelled) onDropAt(t, ev.clientX, ev.clientY);
+      },
+    });
+  }
 
   const byGroup = PALETTE_GROUP_ORDER.map((g) => ({
     group: g,
@@ -196,7 +271,12 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed, hideUnco
                 draggable
                 // Click adds, drag places. Both reach the same code, so a
                 // keyboard user is not stuck with a gesture they cannot make.
-                onClick={() => onAdd(t)}
+                onClick={() => {
+                  // The click that trails a finger drag. See `dragged`.
+                  if (dragged.current) { dragged.current = false; return; }
+                  onAdd(t);
+                }}
+                onPointerDown={(e) => startTouchDrag(e, t)}
                 onDragStart={(e) => {
                   // Firefox refuses to start a drag without data on the transfer.
                   e.dataTransfer.setData("text/plain", t);
@@ -211,6 +291,13 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed, hideUnco
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
                   dimmed?.has(t) && "opacity-50",
                 )}
+                // pan-y, not none: the palette is a long scrolling list and must
+                // still scroll under a finger. A drag onto the canvas travels
+                // sideways out of the list, which this leaves to us. The one case
+                // it costs is the stacked narrow layout, where the palette sits
+                // ABOVE the canvas and the drag is vertical — there the browser
+                // scrolls instead, and tapping to add is the way in.
+                style={{ touchAction: onDropAt ? "pan-y" : undefined }}
               >
                 <span
                   aria-hidden="true"
@@ -235,6 +322,17 @@ export function Palette({ types, onAdd, onDragStart, onDragEnd, dimmed, hideUnco
           })}
         </div>
       ))}
+      {/* What the finger is carrying. Fixed to the viewport and pointer-events
+          none, so it never becomes the drop target for its own gesture. */}
+      {ghost && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed z-50 rounded-md border border-line-strong bg-popover px-2 py-1 text-caption2 text-fg shadow-lg"
+          style={{ left: ghost.x, top: ghost.y, transform: "translate(-50%, -140%)" }}
+        >
+          {ghost.label}
+        </div>
+      )}
     </div>
   );
 }
