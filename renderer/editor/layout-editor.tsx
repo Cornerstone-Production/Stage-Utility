@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useBlocker } from "@tanstack/react-router";
 import { Tooltip } from "../components/ui/tooltip";
 import { toast } from "../components/ui/toast";
@@ -26,6 +26,7 @@ import {
   LockIcon,
   UnlockIcon,
   FilePlusIcon,
+  EllipsisIcon,
 } from "lucide-react";
 import { DropdownMenu, Popover } from "radix-ui";
 import { Dialog as DialogPrimitive } from "radix-ui";
@@ -86,6 +87,8 @@ import { HOME_VIEW_ID } from "@main/services/home-view";
 import { useInspectorWidth } from "../lib/use-sidebar-width";
 import { cn } from "../lib/cn";
 import { bindGesture, TOUCH_SLOP_PX, type GestureHandle } from "../lib/pointer-gesture";
+import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
+import { useCoarsePointer } from "../lib/use-media-query";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
 import { Palette } from "./palette";
@@ -262,6 +265,25 @@ interface DragState {
   /** For a multi-selection move: start rects of all selected top-level objects
    *  (incl. the dragged one). Present → move the whole group by the same delta. */
   group?: { id: string; x: number; y: number; w: number; h: number }[];
+  /** The dragged object's OWN long-press timer (`useContextMenuTrigger` in
+   *  `OverlayNode`), called the instant this drag crosses ITS OWN slop — not
+   *  merely on the object's separate long-press movement threshold. The two
+   *  thresholds are passed the same `TOUCH_SLOP_PX`, but a finger that drifts
+   *  past this drag's slop while still under the long-press hook's own cancel
+   *  distance would otherwise leave that timer running under a live drag; see
+   *  `startCardDrag`'s identical `cancelPress` on Home for the reproduction. */
+  cancelPress?: () => void;
+}
+
+/** The minimum an `onContextMenu` callback needs, satisfied by a real
+ *  `MouseEvent` (a right-click) or a synthesized stand-in built from a long
+ *  press's `{x, y}` — `LayoutEditor`'s `openContextMenu` reads only these four
+ *  members to find the object under the point and place the menu. */
+export interface ContextMenuLikeEvent {
+  target: EventTarget | null;
+  clientX: number;
+  clientY: number;
+  preventDefault: () => void;
 }
 
 /**
@@ -305,7 +327,7 @@ export function handlePadPx(objW: number, objH: number): { corner: number; edge:
 // its parent overlay node so nested children resolve correctly. Recurses for a
 // container's children.
 function OverlayNode({
-  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, parentLocked = false, canvasLocked = false, boxW, boxH,
+  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, onContextMenu, parentLocked = false, canvasLocked = false, boxW, boxH,
 }: {
   o: LayoutObject;
   parentAbs: FracRect;
@@ -314,7 +336,10 @@ function OverlayNode({
   selectedIds: Set<string>;
   /** Id of the object currently being dragged, for a "lifting" cue. */
   draggingId?: string | null;
-  onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) => void;
+  onStart: (e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number, cancelPress?: () => void) => void;
+  /** Opens the right-click/long-press menu on THIS object. Undefined when the
+   *  canvas offers no menu at all (read-only preview never reaches here). */
+  onContextMenu?: (e: ContextMenuLikeEvent) => void;
   /** True when an ancestor container is locked, so this node is locked too. */
   parentLocked?: boolean;
   /** The whole canvas is locked. Distinct from the per-object padlock: this one
@@ -339,10 +364,29 @@ function OverlayNode({
   const locked = parentLocked || !!o.locked;
   const abs = depth === 0 ? { x: o.x, y: o.y, w: o.w, h: o.h } : composeRect(parentAbs, o);
   const kids = o.children?.length ? [...o.children].sort((a, b) => a.z - b.z) : null;
+  const nodeRef = useRef<HTMLDivElement | null>(null);
+  const isCoarse = useCoarsePointer();
+  // `cancelPx` matches `TOUCH_SLOP_PX`, the drag's own movement threshold, so
+  // the two gestures reading the same finger agree on "did this move" — but
+  // `startDrag` is ALSO handed `trigger.cancel` below and calls it the instant
+  // its OWN slop is crossed, which is what actually closes the gap between a
+  // long press and a drag. See `DragState.cancelPress` and `HomeCardCell`.
+  const trigger = useContextMenuTrigger(
+    (pt) => onContextMenu?.({ target: nodeRef.current, clientX: pt.x, clientY: pt.y, preventDefault: () => {} }),
+    { cancelPx: TOUCH_SLOP_PX },
+  );
   return (
     <div
+      ref={nodeRef}
       data-obj-id={o.id}
-      onPointerDown={(e) => onStart(e, o, "move", parentAbs, depth)}
+      onPointerDown={(e) => {
+        trigger.onPointerDown(e);
+        onStart(e, o, "move", parentAbs, depth, trigger.cancel);
+      }}
+      onPointerMove={trigger.onPointerMove}
+      onPointerUp={trigger.onPointerUp}
+      onPointerCancel={trigger.onPointerCancel}
+      onClickCapture={trigger.onClickCapture}
       className="absolute"
       style={{
         left: `${o.x * 100}%`, top: `${o.y * 100}%`,
@@ -358,6 +402,7 @@ function OverlayNode({
         outlineOffset: 0,
         opacity: dragging ? 0.7 : 1,
         boxShadow: inSel ? "0 0 0 1px rgba(0,0,0,0.4)" : "none",
+        ...trigger.style,
       }}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
@@ -379,6 +424,36 @@ function OverlayNode({
           {locked && <LockIcon style={{ width: 9, height: 9 }} />}
           {typeLabel(o.config.type)}
         </span>
+      )}
+      {/* On a coarse pointer, the menu's only other way in is a 500ms hold —
+       *  nothing on screen says to do that. Placed on the object itself, top
+       *  right, the same corner Home's card ellipsis already uses for this
+       *  exact pattern — not the floating label above it, which is 14px tall
+       *  and cannot host a 44px target, and can run off the top of the canvas
+       *  for an object docked at the very top; not the layers panel row
+       *  either, which stacks BELOW the canvas at narrow widths
+       *  (`@max-4xl:w-full` on the inspector) and needs a scroll to reach.
+       *  Mouse users see nothing: they already have the right-click they
+       *  always had. */}
+      {isCoarse && inSel && onContextMenu && (
+        <button
+          type="button"
+          aria-label={`${typeLabel(o.config.type)} options`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            const r = e.currentTarget.getBoundingClientRect();
+            onContextMenu({ target: nodeRef.current, clientX: r.right, clientY: r.bottom, preventDefault: () => {} });
+          }}
+          // 16 px in from the corner, not 4: the NE resize handle's coarse-pointer
+          // pad reaches 14 px into the object, and this 44 px box sits above it in
+          // z-order, so any overlap would turn a corner resize into a menu.
+          className="absolute right-4 top-4 z-[12] grid size-11 shrink-0 place-items-center rounded-md text-white opacity-80 hover:opacity-100"
+        >
+          <span className="grid size-8 place-items-center rounded-md bg-black/40 backdrop-blur">
+            <EllipsisIcon className="size-4" />
+          </span>
+        </button>
       )}
       {sel && !locked && !canvasLocked &&
         (() => {
@@ -428,7 +503,7 @@ function OverlayNode({
           });
         })()}
       {kids?.map((c) => (
-        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} parentLocked={locked} canvasLocked={canvasLocked} boxW={boxW} boxH={boxH} />
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} onContextMenu={onContextMenu} parentLocked={locked} canvasLocked={canvasLocked} boxW={boxW} boxH={boxH} />
       ))}
     </div>
   );
@@ -483,9 +558,12 @@ export function EditorCanvas({
    *  `objAbs` is the object's final absolute canvas rect; `containerAbs` the
    *  container's absolute rect — together they give the new parent-local geom. */
   onReparent: (id: string, containerId: string, objAbs: FracRect, containerAbs: FracRect) => void;
-  /** Right-click anywhere on the canvas. The handler works out which object (if
-   *  any) was under the cursor from `data-obj-id` on the event target. */
-  onContextMenu?: (e: ReactMouseEvent) => void;
+  /** Right-click, OR a long press (500ms hold, touch/pen only — see
+   *  `useContextMenuTrigger`), anywhere on the canvas. The handler works out
+   *  which object (if any) was under the point from `data-obj-id` on the
+   *  event target; a long press hands it a synthesized stand-in built from the
+   *  press's own point rather than a real `MouseEvent`. */
+  onContextMenu?: (e: ContextMenuLikeEvent) => void;
 }) {
   // Measure the available area (this wrapper), then letterbox the design canvas to
   // fit BOTH axes so it never overflows on ultrawide/portrait/short screens.
@@ -547,6 +625,16 @@ export function EditorCanvas({
   const [drag, setDrag] = useState<DragState | null>(null);
   // Marquee (rubber-band) selection on empty canvas: fractional rect while dragging.
   const boxRef = useRef<HTMLDivElement | null>(null);
+  // The canvas BACKGROUND's own long-press menu — objects stopPropagation on
+  // their own pointerdown (see startDrag/OverlayNode), so this only ever fires
+  // for a press that lands on bare canvas. `cancelPx` matches the marquee's own
+  // `TOUCH_SLOP_PX`, and `startMarquee` below calls `bgTrigger.cancel()` the
+  // instant a marquee (or a shift-drag draw) actually starts, for the same
+  // reason `startDrag` does for an object — see `DragState.cancelPress`.
+  const bgTrigger = useContextMenuTrigger(
+    (pt) => onContextMenu?.({ target: boxRef.current, clientX: pt.x, clientY: pt.y, preventDefault: () => {} }),
+    { cancelPx: TOUCH_SLOP_PX },
+  );
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   // The marquee/draw gesture in flight, so it can be unbound if the canvas goes
   // away under it. A route change or a layout switch mid-drag otherwise left the
@@ -615,6 +703,12 @@ export function EditorCanvas({
       if (!dragMoved.current) {
         if (Math.hypot(e.clientX - drag.px, e.clientY - drag.py) <= drag.slop) return;
         dragMoved.current = true;
+        // The instant THIS gesture is a real drag, not merely on its own slop —
+        // see `DragState.cancelPress`. Without this a finger that drifts less
+        // than `TOUCH_SLOP_PX` and then holds still still has the object's
+        // long-press timer running underneath it, and 500ms later the menu opens
+        // on top of a live drag.
+        drag.cancelPress?.();
         // The undo entry is pushed HERE, not at pointerdown. A tap is a
         // selection, and a selection is not an edit: pushing at pointerdown gave
         // every tap on the canvas its own history entry, so the first ⌘Z after
@@ -763,7 +857,7 @@ export function EditorCanvas({
     marqueeGesture.current = null;
   }, []);
 
-  function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) {
+  function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number, cancelPress?: () => void) {
     e.stopPropagation();
     // PRIMARY BUTTON ONLY, and one contact at a time — the same two gates
     // startMarquee has carried since a right-click left a marquee bound to the
@@ -844,7 +938,7 @@ export function EditorCanvas({
       id: o.id, mode, start: o, px: e.clientX, py: e.clientY,
       pointerId: e.pointerId, slop: e.pointerType === "mouse" ? 0 : TOUCH_SLOP_PX,
       parentW: parentAbs.w * boxW, parentH: parentAbs.h * boxH,
-      parentAbs, depth, canReparent: depth === 0, targets, siblings, group,
+      parentAbs, depth, canReparent: depth === 0, targets, siblings, group, cancelPress,
     });
   }
 
@@ -878,6 +972,7 @@ export function EditorCanvas({
       let drew = false;
       marqueeGesture.current = bindGesture(box, e.pointerId, {
         move: (ev) => {
+          if (!drew) bgTrigger.cancel();
           drew = true;
           setMarquee({ x0, y0, x1: (ev.clientX - rect.left) / boxW, y1: (ev.clientY - rect.top) / boxH });
         },
@@ -909,9 +1004,13 @@ export function EditorCanvas({
         const x1 = (ev.clientX - rect.left) / boxW;
         const y1 = (ev.clientY - rect.top) / boxH;
         if (
+          !moved &&
           (Math.abs(x1 - x0) > 0.004 || Math.abs(y1 - y0) > 0.004) &&
           Math.hypot(ev.clientX - downX, ev.clientY - downY) > slop
-        ) moved = true;
+        ) {
+          moved = true;
+          bgTrigger.cancel();
+        }
         setMarquee({ x0, y0, x1, y1 });
       },
       end: (ev, cancelled) => {
@@ -1011,8 +1110,13 @@ export function EditorCanvas({
               !["#000", "#000000", "#080810", "#0a0a0a"].includes(canvas.background)
                 ? canvas.background
                 : undefined,
+            ...(interactive ? bgTrigger.style : undefined),
           }}
-          onPointerDown={interactive ? startMarquee : undefined}
+          onPointerDown={interactive ? (e) => { bgTrigger.onPointerDown(e); startMarquee(e); } : undefined}
+          onPointerMove={interactive ? bgTrigger.onPointerMove : undefined}
+          onPointerUp={interactive ? bgTrigger.onPointerUp : undefined}
+          onPointerCancel={interactive ? bgTrigger.onPointerCancel : undefined}
+          onClickCapture={interactive ? bgTrigger.onClickCapture : undefined}
           onContextMenu={interactive && onContextMenu ? onContextMenu : undefined}
           // Palette drops. dragover must preventDefault or the browser refuses
           // the drop entirely. Nothing else about the canvas changes: pointer
@@ -1086,6 +1190,7 @@ export function EditorCanvas({
                   selectedIds={selectedIds}
                   draggingId={drag?.id ?? null}
                   onStart={startDrag}
+                  onContextMenu={onContextMenu}
                   canvasLocked={locked}
                   boxW={boxW}
                   boxH={boxH}
@@ -1708,8 +1813,9 @@ export function LayoutEditor({
     setSelectedIds(ids);
     setDirty(true);
   }
-  /** Right-click on the canvas: select what is under the cursor, then open the menu. */
-  function openContextMenu(e: ReactMouseEvent) {
+  /** Right-click, or a long press, on the canvas: select what is under the
+   *  point, then open the menu. */
+  function openContextMenu(e: ContextMenuLikeEvent) {
     e.preventDefault();
     const el = (e.target as HTMLElement | null)?.closest?.("[data-obj-id]") as HTMLElement | null;
     const objectId = el?.dataset.objId ?? null;
@@ -1917,7 +2023,21 @@ export function LayoutEditor({
 
       {/* Toolbar (edit mode) */}
       {isEditing && (
-      <div className="flex flex-wrap items-center gap-2">
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-2",
+          // The unsaved pill floats ABOVE this row (see the sticky anchor
+          // above) at a fixed right-aligned x — not merely at narrow
+          // viewports: `flex-1` pushes "Done" flush to this row's own right
+          // edge at ANY width, which sits in the exact column the pill
+          // claims, and measured overlapping in a browser at 1024px, 1366px
+          // AND 1920px alike (1366/1024 hid "Save as layout"/"Undo" under
+          // it; 1920 hid "Done" itself). Reserving this row's own right edge
+          // while dirty keeps every row's wrap point clear of that column,
+          // for whichever buttons land there.
+          (dirty || panels.dirty) && "pr-64",
+        )}
+      >
         {/* One button for one job. It replaces a dropdown, a Widgets toggle and
             a filter icon: three controls that all answered "what can I add?".
             The palette it opens carries the same set the dropdown listed, and

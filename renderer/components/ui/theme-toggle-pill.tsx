@@ -37,7 +37,17 @@ export function ThemeTogglePill({
             aria-label={label}
             aria-pressed={mode === m}
             className={cn(
+              // Neither is the plain `touch-target`: these sit a 1px gap
+              // apart (`gap-px` above), and the plain variant grows in BOTH
+              // axes, reaching past the gap into the neighbour's own box — a
+              // tap aimed at one segment's edge would land on the one beside
+              // it instead. Which one-way variant depends on which way the
+              // segments are stacked: `-y` grows the row's targets taller
+              // without touching their neighbours sideways; `vertical` stacks
+              // them in a COLUMN instead, where growing taller is exactly the
+              // bug this avoids, rotated — `-x` grows those wider instead.
               "flex h-5 w-6 items-center justify-center rounded-md transition-colors",
+              vertical ? "touch-target-x" : "touch-target-y",
               mode === m ? "text-accent" : "text-fg-subtle hover:text-fg",
             )}
           >
