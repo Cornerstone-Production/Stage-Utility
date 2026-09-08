@@ -77,8 +77,9 @@ default, which counts a still down the same way a rolling clip already counts
 down. See [Widgets](../reference/widgets.md) for what it uses as the hold and why
 it defaults off. **On screen now** is its Home card.
 
-Home's cards take their settings from a right-click on the card, not from the
-layout editor. See [Widgets](../reference/widgets.md) for what each line means.
+Home's cards take their settings from a right-click on the card (or tap and
+hold it), not from the layout editor. See [Widgets](../reference/widgets.md)
+for what each line means.
 
 ## Four things that will otherwise surprise you
 

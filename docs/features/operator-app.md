@@ -90,10 +90,12 @@ other surface draws from — anything you can put on a wall you can put here. Se
 gains a size picker, a visibility select, a remove button and a drag handle, and
 **Add widget** offers the whole registry. The tick finishes.
 
-**Right-click a tile** for its size, when it shows, remove, and the few settings
-that widget supports — seconds and the hour cycle on a clock, hide-when-idle and
-fill-when-recording on a status widget. No edit mode needed, and ticking one
-leaves the menu open so several can be changed at once.
+**Right-click a tile** — or tap and hold it — for its size, when it shows,
+remove, and the few settings that widget supports — seconds and the hour cycle
+on a clock, hide-when-idle and fill-when-recording on a status widget. No edit
+mode needed, and ticking one leaves the menu open so several can be changed at
+once. On a touch device each tile also carries a small **⋯ button** in its
+corner, since there is no right-click to discover.
 
 ### Sizes
 
@@ -156,8 +158,9 @@ also drive a physical screen, but only one whose mode is set to **panel**; the
 server refuses a console view on a screen left in display mode, so a wall cannot
 end up rendering a live button by accident.
 
-**Its icon.** Right-click the glyph in that sidebar row to pick another one, or
-focus the row and press **Shift+F10** (or the ContextMenu key) for the same set.
+**Its icon.** Right-click the glyph in that sidebar row — or tap and hold it — to
+pick another one, or focus the row and press **Shift+F10** (or the ContextMenu
+key) for the same set.
 The console shares one icon with any Screens card pointed at it, so changing it
 in either place changes both.
 

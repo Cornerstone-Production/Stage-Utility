@@ -6,13 +6,15 @@ import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon, RotateCcwIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon, RotateCcwIcon, EllipsisIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
+import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
+import { useCoarsePointer } from "../../lib/use-media-query";
 import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
 import { SplDetail } from "./spl-history-section";
 import {
@@ -1121,8 +1123,12 @@ export function OverviewBlend({
   splTrend: { shown: boolean; metric: string | null };
   onSplTrend: (patch: { shown?: boolean; metric?: string | null }) => void;
 }) {
-  /** Where the chart's right-click menu is, or null. */
+  /** Where the chart's right-click (or long-press) menu is, or null. */
   const [chartMenu, setChartMenu] = useState<{ x: number; y: number } | null>(null);
+  const chartTrigger = useContextMenuTrigger((pt) => setChartMenu(pt));
+  // A mouse user already has the right-click; the corner button only appears
+  // where a touch has no other way in.
+  const isCoarse = useCoarsePointer();
   /** The menu the chart offers: the line on or off, and which metric it plots.
    *  The metric list comes from the data in scope — see OverviewData.splMetrics —
    *  so it offers exactly the metrics there is something to draw for. */
@@ -1232,11 +1238,14 @@ export function OverviewBlend({
           )}
         </div>
         <div
-          className="flex-1 min-w-0 md:max-w-[640px]"
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setChartMenu({ x: e.clientX, y: e.clientY });
-          }}
+          className="relative flex-1 min-w-0 md:max-w-[640px]"
+          onContextMenu={chartTrigger.onContextMenu}
+          onPointerDown={chartTrigger.onPointerDown}
+          onPointerMove={chartTrigger.onPointerMove}
+          onPointerUp={chartTrigger.onPointerUp}
+          onPointerCancel={chartTrigger.onPointerCancel}
+          onClickCapture={chartTrigger.onClickCapture}
+          style={chartTrigger.style}
         >
           <AttendanceTrendChart
             points={overview.attPoints}
@@ -1246,6 +1255,21 @@ export function OverviewBlend({
             // reached for an item.
             hoverSuppressed={chartMenu != null}
           />
+          {isCoarse && (
+            <button
+              type="button"
+              aria-label="Chart options"
+              className="absolute right-1 top-1 grid size-11 place-items-center rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setChartMenu({ x: r.right, y: r.bottom });
+              }}
+            >
+              <span className="grid size-8 place-items-center rounded-md bg-bg/80 backdrop-blur">
+                <EllipsisIcon className="size-4" />
+              </span>
+            </button>
+          )}
         </div>
         {chartMenu && (
           <ContextMenu

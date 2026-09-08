@@ -38,6 +38,10 @@ const EXPOSED = [
   "MouseEvent",
   "InputEvent",
   "CustomEvent",
+  // Long-press context menus (context-menu-trigger.ts) are built on raw
+  // Pointer Events, so any test that fires one needs jsdom's constructor —
+  // Node has none of its own.
+  "PointerEvent",
   "getComputedStyle",
   "requestAnimationFrame",
   "cancelAnimationFrame",
