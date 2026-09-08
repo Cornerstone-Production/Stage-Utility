@@ -13,10 +13,11 @@ See [Every page says its name](operator-app.md#every-page-says-its-name). Neithe
 is an item and neither can be configured — the readings below are what you
 arrange.
 
-**Right-click the bar and choose "Configure bar"**, or use **Settings → Advanced
-→ Server → Context bar**. Both open the same thing. There are two arrangements,
-both shared by everybody: the one above a desktop page, and the one a phone
-shows.
+**Right-click the bar and choose "Configure bar"** — or tap and hold it — or use
+**Settings → Advanced → Server → Context bar**. All three open the same thing.
+On a touch device the bar also carries a **⋯ button** at its right edge, since
+there is no right-click to discover. There are two arrangements, both shared by
+everybody: the one above a desktop page, and the one a phone shows.
 
 ## What it can show
 

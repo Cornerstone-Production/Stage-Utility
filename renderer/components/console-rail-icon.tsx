@@ -23,6 +23,7 @@ import { IconMenu } from "./icon-menu";
 import { resolveIcon } from "./icon-set";
 import { useReturnFocus } from "../lib/dialog-focus";
 import { useStageState } from "../main/use-stage-state";
+import { useContextMenuTrigger } from "./ui/context-menu-trigger";
 
 export function ConsoleRailIcon({
   viewId,
@@ -109,16 +110,29 @@ export function ConsoleRailIcon({
     return () => row.removeEventListener("keydown", onKey);
   }, []);
 
+  // The point the long-press or right-click landed at is irrelevant here —
+  // IconMenu positions itself against the glyph ELEMENT, not a coordinate — so
+  // this trigger's callback ignores the point and re-reads the glyph fresh,
+  // exactly as the old onContextMenu handler did.
+  const trigger = useContextMenuTrigger(() => {
+    setAnchor((host.current?.firstElementChild as HTMLElement | null) ?? null);
+  });
+
   return (
     <>
       <span
         ref={host}
         className="contents"
         onContextMenu={(e) => {
-          e.preventDefault();
           e.stopPropagation();
-          setAnchor(e.currentTarget.firstElementChild as HTMLElement);
+          trigger.onContextMenu(e);
         }}
+        onPointerDown={trigger.onPointerDown}
+        onPointerMove={trigger.onPointerMove}
+        onPointerUp={trigger.onPointerUp}
+        onPointerCancel={trigger.onPointerCancel}
+        onClickCapture={trigger.onClickCapture}
+        style={trigger.style}
       >
         {createElement(glyph, { className: "size-4", style: colour ? { color: colour } : undefined })}
       </span>

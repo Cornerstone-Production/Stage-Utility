@@ -8,7 +8,8 @@
 // what makes "add any widget to Home" a real sentence rather than a promise
 // about a second widget set.
 
-import { type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { type CSSProperties, type ReactNode } from "react";
+import { EllipsisIcon } from "lucide-react";
 import type { LayoutDTO, LayoutObject } from "@main/types/views";
 import { HOME_VIEW_ID } from "@main/services/home-view";
 
@@ -17,6 +18,9 @@ import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { COLUMNS, SIZES, sizeOf } from "./home-cards";
 import { boxesOf, rowsNeeded, type Box } from "./home-placement";
 import { useSlideOnMove } from "../../lib/use-slide-on-move";
+import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
+import { useCoarsePointer } from "../../lib/use-media-query";
+import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 
 /**
  * The widget's own styling MINUS everything Home supplies itself: the frame AND
@@ -216,6 +220,91 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
   };
 }
 
+/**
+ * One card's cell — its own component, not inline in `.map()`, because it
+ * needs its OWN long-press timer. A shared hook called once for the whole
+ * grid could not tell which card a press landed on.
+ *
+ * The long press and the drag in home-route's `startCardDrag` are two
+ * different gestures reading the SAME pointer sequence, and closing the gap
+ * between them takes two things working together, not one number: the hook's
+ * own cancel threshold is passed 4px here to MATCH the drag's own start
+ * threshold, and — because a finger that drifts 5-7px and then holds still
+ * would otherwise clear this hook's cancel check while still being under a
+ * live drag, reproduced by moving 5px and holding 500ms — `startCardDrag`
+ * is handed this hook's `cancel()` and calls it the instant ITS gesture
+ * actually starts, so the invariant does not depend on the two thresholds
+ * staying numerically equal.
+ */
+export function HomeCardCell({
+  card,
+  w,
+  h,
+  box,
+  onCardContextMenu,
+  chrome,
+  children,
+}: {
+  card: LayoutObject;
+  w: number;
+  h: number;
+  box: Box | undefined;
+  onCardContextMenu?: (card: LayoutObject, point: { x: number; y: number }) => void;
+  /** The editor's per-card overlay, given this cell's own `cancel()` so a drag
+   *  starting under the overlay can kill a long press already being timed. */
+  chrome?: (card: LayoutObject, cancelPress: () => void) => ReactNode;
+  children: ReactNode;
+}) {
+  const trigger = useContextMenuTrigger((pt) => onCardContextMenu?.(card, pt), { cancelPx: 4 });
+  const isCoarse = useCoarsePointer();
+
+  return (
+    <div
+      className="home-card group/card relative min-w-0"
+      style={{
+        // Explicit cells, so a gap the operator left stays a gap. The narrow
+        // breakpoints below throw both away and let it flow — a column chosen
+        // on a three-wide page is not a column on a phone.
+        gridColumn: box ? `${box.col} / span ${w}` : `span ${w}`,
+        gridRow: box ? `${box.row} / span ${h}` : `span ${h}`,
+        ["--card-w" as string]: String(w),
+        ["--card-h" as string]: String(h),
+        ...trigger.style,
+      }}
+      data-card-id={card.id}
+      onContextMenu={onCardContextMenu ? trigger.onContextMenu : undefined}
+      onPointerDown={onCardContextMenu ? trigger.onPointerDown : undefined}
+      onPointerMove={onCardContextMenu ? trigger.onPointerMove : undefined}
+      onPointerUp={onCardContextMenu ? trigger.onPointerUp : undefined}
+      onPointerCancel={onCardContextMenu ? trigger.onPointerCancel : undefined}
+      onClickCapture={onCardContextMenu ? trigger.onClickCapture : undefined}
+    >
+      {children}
+      {chrome?.(card, trigger.cancel)}
+      {/* The ⋯ button: on touch, this menu's only other way in is a 500ms
+       *  hold, which nothing on screen says to do. Mouse users see nothing —
+       *  useCoarsePointer is false for them, and they already have the
+       *  right-click they always had. */}
+      {isCoarse && onCardContextMenu && (
+        <button
+          type="button"
+          aria-label={`${LAYOUT_OBJECTS[card.config.type as keyof typeof LAYOUT_OBJECTS]?.label ?? card.config.type} options`}
+          className="absolute right-1 top-1 z-[1] grid size-11 shrink-0 place-items-center rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          onClick={(e) => {
+            e.stopPropagation();
+            const r = e.currentTarget.getBoundingClientRect();
+            onCardContextMenu(card, { x: r.right, y: r.bottom });
+          }}
+        >
+          <span className="grid size-8 place-items-center rounded-md bg-bg/80 backdrop-blur">
+            <EllipsisIcon className="size-4" />
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function HomeGrid({
   layout,
   cards,
@@ -229,8 +318,10 @@ export function HomeGrid({
   layout: LayoutDTO;
   /** The cards to draw, already filtered and ordered by the caller. */
   cards: readonly LayoutObject[];
-  /** Per-card overlay — the editor's controls. Absent when not editing. */
-  chrome?: (o: LayoutObject) => ReactNode;
+  /** Per-card overlay — the editor's controls. Absent when not editing. Given
+   *  the card's own `cancel()` — see `HomeCardCell` — so a drag starting under
+   *  the overlay can kill a long press already being timed on the same cell. */
+  chrome?: (o: LayoutObject, cancelPress: () => void) => ReactNode;
   /** Placements to draw INSTEAD of the stored ones — the live preview of a drag
    *  in progress, so the page shows what dropping here would do. */
   boxes?: readonly Box[];
@@ -238,10 +329,13 @@ export function HomeGrid({
   animate?: boolean;
   /** The grid element itself, for turning a pointer position into a cell. */
   gridRef?: (el: HTMLDivElement | null) => void;
-  /** Right-click on a card. On the WRAPPER, not on the widget: a widget is
-   *  drawn by the shared renderer and some of them are interactive, so putting
-   *  the handler inside would mean each one had to remember to forward it. */
-  onCardContextMenu?: (card: LayoutObject, e: ReactMouseEvent) => void;
+  /** Right-click, long-press, or a tap of the card's ⋯ button. On the WRAPPER,
+   *  not on the widget: a widget is drawn by the shared renderer and some of
+   *  them are interactive, so putting the handler inside would mean each one
+   *  had to remember to forward it. A POINT, not the triggering event — a
+   *  long press and a button tap have no shared event shape, only a place the
+   *  menu should open. */
+  onCardContextMenu?: (card: LayoutObject, point: { x: number; y: number }) => void;
   /** The id of the card whose menu `onCardContextMenu` opened, so its own
    *  widget can be told to stop tracking the pointer under it. The caller owns
    *  the menu's whole lifecycle (position, items, close) — this is only the
@@ -285,27 +379,19 @@ export function HomeGrid({
           const { w, h } = SIZES[sizeOf(o)];
           const box = byId.get(o.id);
           return (
-            <div
+            <HomeCardCell
               key={o.id}
-              className="home-card group/card relative min-w-0"
-              style={{
-                // Explicit cells, so a gap the operator left stays a gap. The
-                // narrow breakpoints below throw both away and let it flow —
-                // a column chosen on a three-wide page is not a column on a
-                // phone.
-                gridColumn: box ? `${box.col} / span ${w}` : `span ${w}`,
-                gridRow: box ? `${box.row} / span ${h}` : `span ${h}`,
-                ["--card-w" as string]: String(w),
-                ["--card-h" as string]: String(h),
-              }}
-              data-card-id={o.id}
-              onContextMenu={onCardContextMenu ? (e) => onCardContextMenu(o, e) : undefined}
+              card={o}
+              w={w}
+              h={h}
+              box={box}
+              onCardContextMenu={onCardContextMenu}
+              chrome={chrome}
             >
               <CardFrame o={o}>
                 <ObjectContent o={o} ctx={ctx} />
               </CardFrame>
-              {chrome?.(o)}
-            </div>
+            </HomeCardCell>
           );
         })}
       </div>

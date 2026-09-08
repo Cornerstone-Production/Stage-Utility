@@ -63,8 +63,9 @@ tile, caption plus countdown, whose Label chooses what the caption names (the
 current cue, the file name with or without its extension, or the layer name).
 **On screen now** is its Home card.
 
-Home's cards take their settings from a right-click on the card, not from the
-layout editor. See [Widgets](../reference/widgets.md) for what each line means.
+Home's cards take their settings from a right-click on the card (or tap and
+hold it), not from the layout editor. See [Widgets](../reference/widgets.md)
+for what each line means.
 
 ## Four things that will otherwise surprise you
 

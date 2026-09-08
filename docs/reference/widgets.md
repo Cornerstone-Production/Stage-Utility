@@ -10,7 +10,8 @@ different on Home than on a wall, it says so below.
 - **Add one to a screen**: Screens → a view → **Edit** → **Add widget**.
 - **Add one to Home**: the pencil in the Home header → **Add widget**.
 - **Change one**: click it in the editor and use the inspector, or **right-click a
-  Home tile** for its size, when it shows, and the few settings it supports.
+  Home tile** — or tap and hold it — for its size, when it shows, and the few
+  settings it supports.
 
 A widget whose integration is not set up draws a dash rather than disappearing, so
 a screen does not silently lose a tile when a device goes offline. The palette can
@@ -52,9 +53,10 @@ switches.
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
 **Recent services** draws the same attendance trend the History tab does.
-Right-click it for **SPL trend line** — the service level for each date, behind the
-attendance curve on its own dB scale — and **Metric**, which picks the Smaart metric
-it plots. See [Attendance and history](../features/attendance-and-history.md).
+Right-click it — or tap and hold it — for **SPL trend line** — the service level
+for each date, behind the attendance curve on its own dB scale — and **Metric**,
+which picks the Smaart metric it plots. See
+[Attendance and history](../features/attendance-and-history.md).
 
 **Service pacing** carries slippage forward from earlier items and keeps growing
 while the current item runs long, so it answers "are we going to finish on time",
@@ -170,9 +172,9 @@ and two of them describe what the tile does on a screen: **Elapsed time** applie
 on both surfaces, while **Fill the card when live** and **Hide when idle** shape
 the screen presentation, which is the only one that fills or hides.
 
-Right-click a Home tile to choose what it answers for: **Platform** on
-**Streaming** (any, Resi, YouTube) and **Recorder** on **Recording** (every
-recorder, OBS, REAPER). Both also offer **Elapsed time**.
+Right-click a Home tile — or tap and hold it — to choose what it answers for:
+**Platform** on **Streaming** (any, Resi, YouTube) and **Recorder** on
+**Recording** (every recorder, OBS, REAPER). Both also offer **Elapsed time**.
 
 > Four Home cards are marked *replaced* below — **OBS recording**, **REAPER
 > recording**, **Resi status** and **YouTube status**. Each was the general card
@@ -348,10 +350,10 @@ See [Wireless Gear](../integrations/wireless.md) and [Mic slots](../slots.md).
 **SPL meter** picks its meter and which metric to read, and can colour itself past
 thresholds you set. See [Smaart](../integrations/smaart.md).
 
-**Sound level** reads whichever meter is loudest. To watch one instead, right-click
-the tile and pick it under **Meter**. A pinned meter that stops reporting says so
-rather than falling back to another one, so the number on the tile is always the
-channel it names.
+**Sound level** reads whichever meter is loudest. To watch one instead,
+right-click the tile — or tap and hold it — and pick it under **Meter**. A
+pinned meter that stops reporting says so rather than falling back to another
+one, so the number on the tile is always the channel it names.
 
 ## People
 
