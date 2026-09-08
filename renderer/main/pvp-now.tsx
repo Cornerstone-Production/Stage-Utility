@@ -13,7 +13,7 @@
 // thumbnail, preview or frame endpoint at all.
 
 import { fmtDuration } from "./pco-timer";
-import { computePvpProgress, pvpMeterKey, pvpUnavailableReason } from "./pvp-progress";
+import { computePvpProgress, computeStillProgress, pvpMeterKey, pvpUnavailableReason, stillOnScreenSec } from "./pvp-progress";
 import { Readout } from "./readout";
 import type { LayoutHAlign } from "@main/types/views";
 import { hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
@@ -30,6 +30,12 @@ export type PvpNowConfig = {
   // per-setting type from the KEY NAME alone — `label` would have pulled every
   // one of those unrelated types into this setting's record.
   nowLabel?: PvpNowLabel;
+  /** Count a still down, the way a rolling clip already counts down. See the
+   *  field's own doc on the `pvp-now` config member in main/types/views.ts. */
+  countStills?: boolean;
+  /** Per-widget override of the PVP card's Image Duration default. Ignored
+   *  unless `countStills` is on; absent on `home-pvp-now`. */
+  stillHoldSec?: number | null;
 };
 
 /** Which name compact mode's caption borrows. See {@link pvpNowLabel}. */
@@ -269,7 +275,20 @@ export function PvpNowObject({
   // when we cannot see any layers would send the operator to fix a layout that
   // is fine.
   const found = pvpUnavailableReason(status) !== null || pinnedLayerExists(layers, config.layerName);
-  const progress = layer ? computePvpProgress(layer, status?.sampledAt ?? null, now, skewMs) : null;
+  // The widget's own hold wins over the PVP card's default — an operator who
+  // set one on this specific tile did so to disagree with the card, and a
+  // fallback that ignored it would make the override a control that does
+  // nothing. Only consulted when countStills is actually on: a widget that
+  // never asked to count a still down should not go looking for a hold at all.
+  const stillHoldSec = config.countStills ? (config.stillHoldSec ?? status?.imageDurationSec ?? null) : null;
+  const progress =
+    (layer ? computePvpProgress(layer, status?.sampledAt ?? null, now, skewMs) : null) ??
+    (layer ? computeStillProgress(layer, now, skewMs, stillHoldSec) : null);
+  // A still NOT opted into the countdown, but whose arrival PVP has told us —
+  // the full mode's "on screen m:ss" line reads this. Never set at the same
+  // time as `progress`: a still that IS counting down already has its value
+  // slot, and a second clock beside it would answer the same question twice.
+  const onScreenSec = !progress && layer ? stillOnScreenSec(layer, now, skewMs) : null;
   const badge = nowBadge(layer, found);
   const compact = config.compact ?? false;
   const label = config.nowLabel ?? DEFAULT_PVP_NOW_LABEL;
@@ -356,11 +375,18 @@ export function PvpNowObject({
   // name and a file name are often different strings for the same clip, and
   // showing the file name twice (once as the fallback value, once as the sub)
   // would be redundant on the still/ended tiles.
+  // A still PVP has told us the arrival of, but that this widget is not
+  // counting down (countStills off, or no hold to count from): the file name
+  // gains "on screen", and the counting-up time takes the subEnd slot the
+  // countdown case uses for its own duration — the same slot, a different
+  // number, never both at once.
   const sub = progress
     ? layer?.mediaName ?? "Playing"
-    : layer?.mediaName && layer.mediaName !== value
-      ? layer.mediaName
-      : null;
+    : onScreenSec != null
+      ? `${layer?.mediaName ?? layer?.name} on screen`
+      : layer?.mediaName && layer.mediaName !== value
+        ? layer.mediaName
+        : null;
 
   return (
     <Readout
@@ -369,7 +395,7 @@ export function PvpNowObject({
       value={value}
       mono={!!progress}
       sub={sub}
-      subEnd={progress ? fmtDuration(progress.durationSec) : null}
+      subEnd={progress ? fmtDuration(progress.durationSec) : onScreenSec != null ? fmtDuration(onScreenSec) : null}
       meter={progress && (config.showProgress ?? true) ? progress.fraction : null}
       // Which clip the fraction above is a fraction of, so the rule can tell a
       // second of a clip playing from a cut to a different one.

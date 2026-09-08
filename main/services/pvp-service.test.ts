@@ -14,6 +14,7 @@ const snap = (over: Partial<PvpStatusDTO> = {}): PvpStatusDTO => ({
   connected: true,
   layers: LAYERS,
   sampledAt: "2026-08-30T12:00:00.000Z",
+  imageDurationSec: 20,
   ...over,
 });
 
@@ -140,7 +141,7 @@ function serviceUnderTest(token: string | null = null): PvpService {
     throw new Error("no transport stub installed");
   }) as typeof fetch;
   const svc = new PvpService();
-  svc.configure("pvp.invalid", 1, false, token);
+  svc.configure("pvp.invalid", 1, false, token, 20);
   started.push(svc);
   return svc;
 }
@@ -235,7 +236,7 @@ describe("command() proves the write landed", () => {
     // not.
     const svc = new PvpService();
     const log = stubPvp(() => FIXTURE_TEXT);
-    svc.configure("pvp.invalid", 1, false, null);
+    svc.configure("pvp.invalid", 1, false, null, 20);
     svc.stop();
 
     const res = await svc.command("/clear/workspace", undefined, { what: "x", holds: () => true });
@@ -337,6 +338,120 @@ describe("readLayers", () => {
   });
 });
 
+describe("configure() and the image duration default", () => {
+  test("a value in range is stamped on every status frame", async () => {
+    const svc = new PvpService();
+    started.push(svc);
+    globalThis.fetch = (async () => new Response(FIXTURE_TEXT, { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+    svc.configure("pvp.invalid", 1, false, null, 45);
+    await settle();
+    assert.equal(svc.getLatest().imageDurationSec, 45);
+  });
+
+  test("A VALUE OUTSIDE 1-3600s IS IGNORED, LOGS, AND FALLS BACK TO 20", async () => {
+    const svc = new PvpService();
+    started.push(svc);
+    globalThis.fetch = (async () => new Response(FIXTURE_TEXT, { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+    const originalWarn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (msg: string) => warnings.push(msg);
+    try {
+      svc.configure("pvp.invalid", 1, false, null, 0);
+      await settle();
+    } finally {
+      console.warn = originalWarn;
+    }
+    assert.equal(svc.getLatest().imageDurationSec, 20);
+    assert.ok(
+      warnings.some((w) => /\[pvp\] image duration 0 ignored, using 20/.test(w)),
+      `expected a log line about the ignored value, got ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  test("3601s and NaN are ALSO out of range", async () => {
+    const svc = new PvpService();
+    started.push(svc);
+    globalThis.fetch = (async () => new Response(FIXTURE_TEXT, { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+    svc.configure("pvp.invalid", 1, false, null, 3601);
+    await settle();
+    assert.equal(svc.getLatest().imageDurationSec, 20);
+  });
+});
+
+describe("mediaSinceAt — how long a still's current media has been up", () => {
+  test("the first read stamps every layer with content, and it survives an unrelated re-read", async () => {
+    const svc = serviceUnderTest();
+    stubPvp(() => FIXTURE_TEXT);
+    // command()'s own retry loop re-reads and folds the result back through the
+    // exact same emitFresh path the poll uses.
+    const res = await svc.command("/noop", undefined, { what: "x", holds: () => true });
+    assert.equal(res.ok, true, res.detail);
+    const stillFirst = svc.getLatest().layers.find((l) => l.uuid === "layer-0002");
+    assert.ok(stillFirst?.mediaSinceAt, "the still's current media was never stamped");
+
+    // A second, unrelated read of the SAME workspace must not move the stamp —
+    // the guard `updateMediaSince`'s own test pins directly, proven here through
+    // the real service.
+    await svc.command("/noop", undefined, { what: "x", holds: () => true });
+    const stillSecond = svc.getLatest().layers.find((l) => l.uuid === "layer-0002");
+    assert.equal(stillSecond?.mediaSinceAt, stillFirst?.mediaSinceAt, "an unchanged still got a fresh timestamp");
+  });
+
+  test("a cue change on the layer resets it; an emptied layer clears it", async () => {
+    const svc = serviceUnderTest();
+    let body = FIXTURE_TEXT;
+    stubPvp(() => body);
+    await svc.command("/noop", undefined, { what: "x", holds: () => true });
+    const first = svc.getLatest().layers.find((l) => l.uuid === "layer-0002")?.mediaSinceAt;
+    assert.ok(first);
+
+    const j = JSON.parse(FIXTURE_TEXT) as { data: { transportState: Record<string, unknown> }[] };
+    j.data[1].transportState.playingMedia = { name: "still_c.png", uuid: "media-0099" };
+    body = JSON.stringify(j);
+    await svc.command("/noop", undefined, { what: "x", holds: () => true });
+    const recued = svc.getLatest().layers.find((l) => l.uuid === "layer-0002")?.mediaSinceAt;
+    assert.ok(recued && recued !== first, "a cue change on the layer kept the old timestamp");
+
+    delete j.data[1].transportState.playingMedia;
+    body = JSON.stringify(j);
+    await svc.command("/noop", undefined, { what: "x", holds: () => true });
+    assert.equal(
+      svc.getLatest().layers.find((l) => l.uuid === "layer-0002")?.mediaSinceAt,
+      null,
+      "an emptied layer kept a stamp",
+    );
+  });
+
+  test("a fresh (re)connect after an outage starts the map over", async () => {
+    // The documented, deliberate choice: a still already up when we reconnect
+    // counts its hold from the connection, not from a guess about how long it
+    // had already been up while nobody was watching.
+    const svc = serviceUnderTest();
+    stubPvp(() => FIXTURE_TEXT);
+    await svc.command("/noop", undefined, { what: "x", holds: () => true });
+    const before = svc.getLatest().layers.find((l) => l.uuid === "layer-0002")?.mediaSinceAt;
+    assert.ok(before);
+
+    // configure() again — the same host, but it is the code path an operator's
+    // "switch machines" and a settings save both go through. Stamped BEFORE the
+    // call: the assertion below is "not older than this reconfigure", not "not
+    // equal to `before`" — a real-clock comparison between two ISO strings
+    // millisecond apart is exactly the kind of thing that flakes under a loaded
+    // CI runner, however unlikely it looks running alone.
+    const reconfiguredAtMs = Date.now();
+    svc.configure("pvp.invalid", 1, false, null, 20);
+    await settle();
+    stubPvp(() => FIXTURE_TEXT);
+    await svc.command("/noop", undefined, { what: "x", holds: () => true });
+    const after = svc.getLatest().layers.find((l) => l.uuid === "layer-0002")?.mediaSinceAt;
+    assert.ok(after, "the still lost its media-since stamp entirely after a reconfigure");
+    assert.ok(
+      Date.parse(after) >= reconfiguredAtMs,
+      `expected a stamp no older than the reconfigure (${new Date(reconfiguredAtMs).toISOString()}), got ${after}`,
+    );
+  });
+});
+
 // -- The emitIfChanged OVERRIDE, driven rather than described -----------------
 //
 // This is the guard the earlier version of this file CLAIMED to have and did
@@ -377,6 +492,7 @@ describe("the emitIfChanged override decides what reaches the wire", () => {
     connected: true,
     layers: LAYERS.map((l) => ({ ...l })),
     sampledAt: at,
+    imageDurationSec: 20,
     ...over,
   });
 
@@ -405,7 +521,7 @@ describe("the emitIfChanged override decides what reaches the wire", () => {
   test("going offline sends a frame even though the DTO is smaller", () => {
     const svc = probe();
     svc.poll(poll("2026-08-30T12:00:00.000Z"));
-    svc.poll({ connected: false, layers: [], sampledAt: null });
+    svc.poll({ connected: false, layers: [], sampledAt: null, imageDurationSec: null });
     assert.equal(frames.length, 2);
     assert.equal(frames[1].connected, false);
   });
@@ -463,9 +579,9 @@ describe("a stale read cannot broadcast backwards over a newer one", () => {
     const newWorkspace = LAYERS.map((l, i) => (i === 0 ? { ...l, mediaUuid: "media-NEW" } : { ...l }));
 
     // The verify read: started later, arrives first.
-    svc.foldIn({ connected: true, layers: newWorkspace, sampledAt: null }, t0 + 100);
+    svc.foldIn({ connected: true, layers: newWorkspace, sampledAt: null, imageDurationSec: 20 }, t0 + 100);
     // The poll: started earlier, arrives second, carrying the older workspace.
-    svc.foldIn({ connected: true, layers: oldWorkspace, sampledAt: null }, t0);
+    svc.foldIn({ connected: true, layers: oldWorkspace, sampledAt: null, imageDurationSec: 20 }, t0);
 
     assert.equal(frames.length, 1, `broadcast ${frames.length} frames; the stale one was not dropped`);
     assert.equal(frames[0].layers[0].mediaUuid, "media-NEW");
@@ -479,9 +595,9 @@ describe("a stale read cannot broadcast backwards over a newer one", () => {
     const svc = new OrderProbe();
     started.push(svc);
     const t0 = Date.now();
-    svc.foldIn({ connected: true, layers: LAYERS.map((l) => ({ ...l })), sampledAt: null }, t0);
+    svc.foldIn({ connected: true, layers: LAYERS.map((l) => ({ ...l })), sampledAt: null, imageDurationSec: 20 }, t0);
     svc.foldIn(
-      { connected: true, layers: LAYERS.map((l, i) => (i === 0 ? { ...l, mediaUuid: "m-2" } : { ...l })), sampledAt: null },
+      { connected: true, layers: LAYERS.map((l, i) => (i === 0 ? { ...l, mediaUuid: "m-2" } : { ...l })), sampledAt: null, imageDurationSec: 20 },
       t0 + 100,
     );
     assert.equal(frames.length, 2);
@@ -589,12 +705,12 @@ describe("the target changing while a read is in flight", () => {
       });
     }) as typeof fetch;
 
-    svc.configure("old-desk.invalid", 8080, false, null);
+    svc.configure("old-desk.invalid", 8080, false, null, 20);
     await settle();
     assert.equal(svc.getLatest().connected, false, "the old host answered when it was meant to hang");
 
     // The operator picks a different machine in Settings.
-    svc.configure("new-desk.invalid", 8080, false, null);
+    svc.configure("new-desk.invalid", 8080, false, null, 20);
     await settle();
     const settledLayers = svc.getLatest().layers.length;
     assert.equal(svc.getLatest().connected, true, "the new host never came up");
@@ -649,9 +765,9 @@ describe("the target changing while a read is in flight", () => {
       return await new Promise<Response>((resolve) => holding.set(which, resolve));
     }) as typeof fetch;
 
-    svc.configure("old-desk.invalid", 8080, false, null);
+    svc.configure("old-desk.invalid", 8080, false, null, 20);
     await settle();
-    svc.configure("new-desk.invalid", 8080, false, null);
+    svc.configure("new-desk.invalid", 8080, false, null, 20);
     await settle();
     assert.deepEqual([...holding.keys()].sort(), ["new", "old"], "both reads should be in the air");
 

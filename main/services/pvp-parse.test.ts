@@ -5,7 +5,9 @@ import { describe, test } from "node:test";
 import {
   parseWorkspace, layerSignature, anchorDriftSec, driftedLayers,
   cueSuccessors, hasUnknownCue, isPlaylistsResponse, isWorkspaceResponse, withNextCues,
+  updateMediaSince, withMediaSinceAt,
 } from "./pvp-parse.js";
+import type { MediaSinceEntry } from "./pvp-parse.js";
 import type { PvpLayerDTO, PvpStatusDTO } from "../types/pvp.js";
 
 const FIXTURE: unknown = JSON.parse(
@@ -271,6 +273,10 @@ describe("layerSignature", () => {
       // The uuid beside it is the identity; a name change under a stable uuid is
       // a relabel, not a cue.
       { mediaName: "something_else.mp4" },
+      // It moves only when the media changes, and a media change already trips
+      // `mediaUuid` above — so including it too would buy nothing except a
+      // second frame for the same event.
+      { mediaSinceAt: "2026-08-30T12:05:00.000Z" },
     ] as Partial<PvpLayerDTO>[]) {
       const next = base.map((l, i) => (i === 0 ? { ...l, ...patch } : l));
       assert.equal(
@@ -324,7 +330,7 @@ describe("anchorDriftSec", () => {
 });
 
 describe("driftedLayers", () => {
-  const at = (iso: string, layers: PvpLayerDTO[]): PvpStatusDTO => ({ connected: true, layers, sampledAt: iso });
+  const at = (iso: string, layers: PvpLayerDTO[]): PvpStatusDTO => ({ connected: true, layers, sampledAt: iso, imageDurationSec: 20 });
   const T0 = "2026-08-30T12:00:00.000Z";
   const T1 = "2026-08-30T12:00:01.000Z";
   const base = parseWorkspace(FIXTURE);
@@ -524,6 +530,90 @@ describe("withNextCues", () => {
 
   test("an unknown cue leaves null rather than guessing", () => {
     assert.equal(withNextCues(base, new Map())[0].nextCueName, null);
+  });
+});
+
+describe("updateMediaSince", () => {
+  const base = parseWorkspace(FIXTURE);
+  const graphics = () => byName(base, "Graphics"); // video, media-0001
+  const lowerThird = () => byName(base, "Lower third"); // still, media-0002
+  const T0 = 1_000_000;
+
+  test("first sight stamps every layer with content at the current clock", () => {
+    const map = updateMediaSince(base, new Map(), T0);
+    assert.equal(map.get(graphics().uuid)?.sinceMs, T0);
+    assert.equal(map.get(lowerThird().uuid)?.sinceMs, T0);
+  });
+
+  test("an empty layer gets no entry", () => {
+    const map = updateMediaSince(base, new Map(), T0);
+    const exitScreen = byName(base, "Exit screen"); // no playingMedia
+    assert.equal(map.has(exitScreen.uuid), false);
+  });
+
+  test("the SAME media across ticks keeps the ORIGINAL timestamp, not a fresh one", () => {
+    // THE guard this whole map exists for: if every poll re-stamped an unchanged
+    // media, a widget counting a still down would never see the timestamp move
+    // and would read as permanently just-arrived.
+    const first = updateMediaSince(base, new Map(), T0);
+    const second = updateMediaSince(base, first, T0 + 5000);
+    assert.equal(second.get(lowerThird().uuid)?.sinceMs, T0, "an unchanged still got a fresh timestamp");
+    // And the entry object itself is reused, not rebuilt — withMediaSinceAt
+    // below relies on that to avoid stamping every layer on every poll.
+    assert.equal(second.get(lowerThird().uuid), first.get(lowerThird().uuid));
+  });
+
+  test("a cue change on the SAME layer resets its timestamp", () => {
+    const first = updateMediaSince(base, new Map(), T0);
+    const recued = base.map((l) =>
+      l.uuid === lowerThird().uuid ? { ...l, mediaUuid: "media-9999", mediaName: "different.png" } : l,
+    );
+    const second = updateMediaSince(recued, first, T0 + 5000);
+    assert.equal(second.get(lowerThird().uuid)?.sinceMs, T0 + 5000);
+  });
+
+  test("a layer that goes empty drops its entry, so coming back counts as freshly seen", () => {
+    const first = updateMediaSince(base, new Map(), T0);
+    const emptied = base.map((l) => (l.uuid === lowerThird().uuid ? { ...l, mediaUuid: null, mediaName: null, state: "empty" as const } : l));
+    const second = updateMediaSince(emptied, first, T0 + 5000);
+    assert.equal(second.has(lowerThird().uuid), false);
+  });
+
+  test("no uuid at all still keys on the file name, so a build that omits it is not treated as unchanging forever", () => {
+    const noUuid = base.map((l) => (l.uuid === lowerThird().uuid ? { ...l, mediaUuid: null } : l));
+    const first = updateMediaSince(noUuid, new Map(), T0);
+    const recued = noUuid.map((l) => (l.uuid === lowerThird().uuid ? { ...l, mediaName: "different.png" } : l));
+    const second = updateMediaSince(recued, first, T0 + 5000);
+    assert.equal(second.get(lowerThird().uuid)?.sinceMs, T0 + 5000, "a file-name-only media change was not noticed");
+  });
+});
+
+describe("withMediaSinceAt", () => {
+  const base = parseWorkspace(FIXTURE);
+  const T0 = Date.parse("2026-08-30T12:00:00.000Z");
+
+  test("stamps the ISO time from the map, null when the layer has no entry", () => {
+    const since = new Map<string, MediaSinceEntry>([[byName(base, "Graphics").uuid, { mediaKey: "media-0001", sinceMs: T0 }]]);
+    const out = withMediaSinceAt(base, since);
+    assert.equal(byName(out, "Graphics").mediaSinceAt, new Date(T0).toISOString());
+    assert.equal(byName(out, "Lower third").mediaSinceAt, null);
+  });
+
+  test("it never mutates the layers it was given", () => {
+    const since = updateMediaSince(base, new Map(), T0);
+    const before = JSON.stringify(base);
+    withMediaSinceAt(base, since);
+    assert.equal(JSON.stringify(base), before);
+  });
+
+  test("an unchanged mediaSinceAt reuses the SAME layer object", () => {
+    // emitIfChanged compares the array via layerSignature, which does not
+    // include mediaSinceAt at all — but a fresh object here would still cost an
+    // allocation every poll for nothing, and this is the same discipline
+    // withNextCues already keeps.
+    const since = updateMediaSince(base, new Map(), T0);
+    const stamped = withMediaSinceAt(base, since);
+    assert.equal(withMediaSinceAt(stamped, since)[0], stamped[0]);
   });
 });
 

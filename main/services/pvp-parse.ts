@@ -114,6 +114,10 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
       // withNextCues fills it in once the service has a cached tree; null here
       // means "not looked up", which renders identically to "unknown".
       nextCueName: null,
+      // Filled by the SERVICE from a map it keeps across polls — this parser
+      // sees one sample and has no way to know when the media arrived.
+      // withMediaSinceAt fills it in once the service has stamped a layer.
+      mediaSinceAt: null,
       hidden: layer.isHidden === true,
       muted: layer.isMuted === true,
       // Absent means fully opaque. Defaulting to 0 would render every layer of a
@@ -252,6 +256,75 @@ export function layerSignature(layers: readonly PvpLayerDTO[]): string {
       l.hidden, l.muted, l.opacity, l.playbackRate,
     ]),
   );
+}
+
+/** What the service remembers about a layer's current media, to answer "how
+ *  long has this been up" without re-deriving it from scratch every poll. */
+export interface MediaSinceEntry {
+  /** `mediaUuid`, falling back to `mediaName` when PVP omits the uuid. Never the
+   *  layer alone: the whole point is to notice a CUE CHANGE on a stable layer. */
+  mediaKey: string;
+  /** When this key was first seen, in service-clock ms. */
+  sinceMs: number;
+}
+
+/**
+ * The media key a layer's PRESENCE map is keyed on, or null for an empty layer.
+ *
+ * `mediaUuid` first, because two cues in different playlists can share a file
+ * name (see the DTO's own doc on `mediaUuid`); `mediaName` only when PVP has
+ * given no uuid at all, so the layer still gets a key rather than being treated
+ * as unchanging forever.
+ */
+function mediaKeyFor(l: PvpLayerDTO): string | null {
+  return hasContent(l) ? (l.mediaUuid ?? l.mediaName ?? "") : null;
+}
+
+/**
+ * Advance the per-layer "media first seen" map by one poll.
+ *
+ * PURE: takes the previous map and the clock rather than reading either, so the
+ * whole lifecycle — first sight, an unchanged key across ticks, a cue change,
+ * and a layer going empty — is testable without a service.
+ *
+ * An empty layer gets NO entry, which is what "resets when the layer empties"
+ * means here: the next time that layer holds something, whether the same file
+ * or a different one, it counts as freshly seen. A layer whose key is unchanged
+ * from the previous map keeps its ORIGINAL entry object, not a new one stamped
+ * at `nowMs` — otherwise every poll would look like a fresh arrival and the
+ * widget answering "how long has this been up" would always say zero.
+ */
+export function updateMediaSince(
+  layers: readonly PvpLayerDTO[],
+  prev: ReadonlyMap<string, MediaSinceEntry>,
+  nowMs: number,
+): Map<string, MediaSinceEntry> {
+  const out = new Map<string, MediaSinceEntry>();
+  for (const l of layers) {
+    const key = mediaKeyFor(l);
+    if (key === null) continue;
+    const existing = prev.get(l.uuid);
+    out.set(l.uuid, existing && existing.mediaKey === key ? existing : { mediaKey: key, sinceMs: nowMs });
+  }
+  return out;
+}
+
+/**
+ * The same layers, each carrying its `mediaSinceAt`.
+ *
+ * Same shape as `withNextCues` and for the same reason: a new array only where
+ * the value actually changed, so `emitFresh`'s previous snapshot (which
+ * `emitIfChanged` compares against) is never mutated in place.
+ */
+export function withMediaSinceAt(
+  layers: readonly PvpLayerDTO[],
+  since: ReadonlyMap<string, MediaSinceEntry>,
+): PvpLayerDTO[] {
+  return layers.map((l) => {
+    const entry = since.get(l.uuid);
+    const iso = entry ? new Date(entry.sinceMs).toISOString() : null;
+    return l.mediaSinceAt === iso ? l : { ...l, mediaSinceAt: iso };
+  });
 }
 
 /**

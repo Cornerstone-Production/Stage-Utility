@@ -53,6 +53,7 @@ const FIXTURE_LAYERS = parseWorkspace(FIXTURE);
 const layer = (over: Partial<PvpLayerDTO> = {}): PvpLayerDTO => ({
   uuid: "l1", name: "Graphics", index: 0, state: "video",
   mediaName: "loop_a.mp4", mediaUuid: "m1", lastCueName: "MAIN GRAPHIC", lastCueUuid: "c1", nextCueName: null,
+  mediaSinceAt: null,
   hidden: false, muted: false, opacity: 1, playbackRate: 1,
   anchorElapsedSec: 10, durationSec: 20,
   ...over,
@@ -203,6 +204,28 @@ describe("the hairline rule", () => {
   });
 });
 
+describe("a still's 'on screen' qualifier", () => {
+  test("counts UP from mediaSinceAt, after the state qualifier, never a countdown", () => {
+    const since = new Date(AT - 65_000).toISOString(); // 1:05 ago
+    const html = draw(layer({ ...STILL, mediaSinceAt: since }));
+    assert.ok(html.includes("still"), html);
+    assert.ok(html.includes("on screen 1:05"), `expected the elapsed time counted UP:\n${html}`);
+  });
+
+  test("absent when PVP has not told us an arrival time", () => {
+    const html = draw(layer(STILL));
+    assert.ok(!html.includes("on screen"), html);
+  });
+
+  test("absent on a layer that is not a still, even with a mediaSinceAt", () => {
+    // Belt and braces: `stillOnScreenSec` itself already gates on `state`, but a
+    // regression that stopped gating it would put a stale "on screen" beside a
+    // rolling clip's own countdown.
+    const html = draw(layer({ mediaSinceAt: new Date(AT - 5000).toISOString() }));
+    assert.ok(!html.includes("on screen"), html);
+  });
+});
+
 describe("visibleLayers", () => {
   const c = (over: Partial<Config> = {}): Config => ({ type: "pvp-layers", ...over });
 
@@ -244,7 +267,7 @@ describe("visibleLayers", () => {
 
 describe("emptyReason", () => {
   const c = (over: Partial<Config> = {}): Config => ({ type: "pvp-layers", ...over });
-  const up: PvpStatusDTO = { connected: true, layers: [], sampledAt: T };
+  const up: PvpStatusDTO = { connected: true, layers: [], sampledAt: T, imageDurationSec: 20 };
 
   test("offline, idle and not-yet-heard are THREE different answers", () => {
     // One message for all of them would send an operator looking for a fault in
@@ -266,7 +289,7 @@ describe("emptyReason", () => {
 describe("PvpObject", () => {
   const render = (config: Config, status: PvpStatusDTO | null): string =>
     renderToStaticMarkup(<PvpObject config={config} status={status} now={AT} skewMs={0} H={1080} />);
-  const live: PvpStatusDTO = { connected: true, layers: FIXTURE_LAYERS, sampledAt: T };
+  const live: PvpStatusDTO = { connected: true, layers: FIXTURE_LAYERS, sampledAt: T, imageDurationSec: 20 };
 
   test("draws one row per visible layer", () => {
     const html = render({ type: "pvp-layers", show: "with-content" }, live);
@@ -290,7 +313,7 @@ describe("PvpObject", () => {
   });
 
   test("without hideWhenEmpty it says why it is empty", () => {
-    const offline: PvpStatusDTO = { connected: false, layers: [], sampledAt: null };
+    const offline: PvpStatusDTO = { connected: false, layers: [], sampledAt: null, imageDurationSec: null };
     assert.ok(render({ type: "pvp-layers", show: "with-content" }, offline).includes("ProVideoPlayer offline"));
     // And before the first snapshot it does not accuse PVP of anything.
     assert.ok(!render({ type: "pvp-layers", show: "with-content" }, null).includes("offline"));

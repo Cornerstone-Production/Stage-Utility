@@ -751,12 +751,14 @@ export function PvpNowCard({
   showNextCue = true,
   compact = false,
   nowLabel,
+  countStills = false,
 }: {
   now: number;
   showProgress?: boolean;
   showNextCue?: boolean;
   compact?: boolean;
   nowLabel?: PvpNowLabel;
+  countStills?: boolean;
 }) {
   const pvp = usePvpState();
   const skewMs = usePvpSkewMs(pvp);
@@ -767,7 +769,7 @@ export function PvpNowCard({
           was what made this card render left while its Align pad said centre and
           every cell in that pad did nothing. */}
       <PvpNowObject
-        config={{ showProgress, showNextCue, compact, nowLabel }}
+        config={{ showProgress, showNextCue, compact, nowLabel, countStills }}
         status={pvp}
         now={now}
         skewMs={skewMs}
@@ -999,6 +1001,7 @@ export function HomeCard({
           showNextCue={c.showNextCue ?? true}
           compact={c.compact ?? false}
           nowLabel={c.nowLabel}
+          countStills={c.countStills ?? false}
         />
       );
     case "home-screens":

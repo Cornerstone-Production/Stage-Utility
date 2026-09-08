@@ -88,6 +88,20 @@ export interface PvpLayerDTO {
    * for a value that changes when somebody edits a playlist.
    */
   nextCueName: string | null;
+  /**
+   * ISO time the media CURRENTLY on this layer was first seen, or null when the
+   * layer is empty.
+   *
+   * Keyed on `mediaUuid` (falling back to `mediaName` when PVP omits it), not on
+   * the layer alone: the field answers "how long has THIS media been up", so a
+   * cue change on the same layer resets the clock and an empty layer carries no
+   * answer at all. Filled by the SERVICE from a per-layer map it keeps across
+   * polls — parseWorkspace sees one sample and cannot know when the media
+   * arrived — and the map starts fresh on every reconnect, so a still already up
+   * when the app connects counts from the connection, which is the honest answer
+   * rather than a guess about time before this process was watching.
+   */
+  mediaSinceAt: string | null;
   hidden: boolean;
   muted: boolean;
   /** 0..1. PVP silently CLAMPS an out-of-range value it is sent rather than
@@ -123,9 +137,20 @@ export interface PvpStatusDTO extends RevisionedStatus {
    * overhead when the client can tick the number itself.
    */
   sampledAt: string | null;
+  /**
+   * The Image Duration configured on the PVP integration card, or null when
+   * unconfigured.
+   *
+   * PVP's own API never reports this — a still's timeRemaining and timeElapsed
+   * are both 0, always — so this is a DEFAULT the operator entered, stamped onto
+   * every status frame so a widget can count a still down against it. It is a
+   * setting, not an observation, and a widget must say so nowhere: the number is
+   * PVP's Preferences pane, not a fact this integration measured.
+   */
+  imageDurationSec: number | null;
 }
 
-export const PVP_OFFLINE: PvpStatusDTO = { connected: false, layers: [], sampledAt: null };
+export const PVP_OFFLINE: PvpStatusDTO = { connected: false, layers: [], sampledAt: null, imageDurationSec: null };
 
 /**
  * Is this layer showing anything?

@@ -711,7 +711,10 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "ProVideoPlayer now",
     blurb: "What is on screen right now, and how long is left",
     group: "ProVideoPlayer",
-    config: () => ({ type: "pvp-now", layerName: null, showProgress: true, showNextCue: true, compact: false, nowLabel: "cue" }),
+    config: () => ({
+      type: "pvp-now", layerName: null, showProgress: true, showNextCue: true, compact: false, nowLabel: "cue",
+      countStills: false, stillHoldSec: null,
+    }),
     style: () => CARD({ fontSize: 0.05 }),
     homeSize: "m",
     integration: { id: "pvp", label: "ProVideoPlayer" },
@@ -723,7 +726,10 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     label: "On screen now",
     blurb: "The one thing ProVideoPlayer has up, and how long is left",
     group: "ProVideoPlayer",
-    config: () => ({ type: "home-pvp-now", showProgress: true, showNextCue: true, compact: false, nowLabel: "cue" }),
+    config: () => ({
+      type: "home-pvp-now", showProgress: true, showNextCue: true, compact: false, nowLabel: "cue",
+      countStills: false,
+    }),
     style: BARE,
     homeSize: "m",
     integration: { id: "pvp", label: "ProVideoPlayer" },
