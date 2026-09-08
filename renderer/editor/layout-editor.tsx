@@ -85,6 +85,7 @@ import { fitFor } from "../main/console-fit";
 import { HOME_VIEW_ID } from "@main/services/home-view";
 import { useInspectorWidth } from "../lib/use-sidebar-width";
 import { cn } from "../lib/cn";
+import { bindGesture, TOUCH_SLOP_PX, type GestureHandle } from "../lib/pointer-gesture";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
 import { Palette } from "./palette";
@@ -96,6 +97,7 @@ import { AlignmentGuides } from "./alignment-guides";
 /** How close an edge must come before it snaps, in rendered pixels. Small enough
  *  that deliberate placement is never fought, large enough to catch a hand. */
 const ALIGN_TOLERANCE_PX = 8;
+
 import { uid, dashboardTemplate, confidenceMonitorTemplate, CANVAS_PRESETS } from "./layout-templates";
 import { Inspector } from "./inspector";
 import {
@@ -233,6 +235,14 @@ interface DragState {
   start: LayoutObject;
   px: number;
   py: number;
+  /** The pointer that owns this gesture. A second finger landing mid-drag has a
+   *  different id, and its moves must not steer an object it never picked up. */
+  pointerId: number;
+  /** Pointer travel, in rendered px, before the object starts following.
+   *  Zero for a mouse (a click is a click, and a mouse does not wobble); a few
+   *  px for a finger, which always does — without it every tap nudged whatever
+   *  it landed on and marked the layout dirty. */
+  slop: number;
   /** Rendered px size of the dragged object's PARENT box (canvas for top-level). */
   parentW: number;
   parentH: number;
@@ -254,11 +264,48 @@ interface DragState {
   group?: { id: string; x: number; y: number; w: number; h: number }[];
 }
 
+/**
+ * How big a transparent hit pad the resize handles may hang off themselves, in
+ * rendered CSS px, for an object drawn `objW` x `objH` px on screen.
+ *
+ * A flat 9.5px pad on all eight handles (28px total, the coarse-pointer target)
+ * is right for a big object and wrong for a small one: on a 40x30 widget the
+ * eight pads meet in the middle, every touch lands on a handle, and the object
+ * has no move region left at all — it can be resized and never dragged.
+ *
+ * So the pad is sized from the object, on one rule: the pads may claim at most
+ * 40% of the SHORTER side, leaving the middle 60% to the move gesture.
+ *
+ * - Under 48px on the shorter side there is no room to spend: no pads, and the
+ *   9px visual square is the whole target. Aim at it, or resize from the
+ *   inspector's W/H fields, which is the accessible path anyway.
+ * - Edge pads (n/s/e/w) go first when the budget is tight. They sit in the
+ *   MIDDLE of a side — exactly where a finger aims to move the thing — so they
+ *   only earn their place once the shorter side can afford both of them at full
+ *   size inside the budget: 2 x (4.5 + 9.5) = 28px, and 28 / 0.4 = 70px.
+ * - Corner pads then take whatever the budget allows, up to the full 9.5.
+ *
+ * Pure, and exported, because this is the only part of the coarse-pointer hit
+ * area a test can see: the pads themselves are a `@media (pointer: coarse)`
+ * pseudo-element, and jsdom parses no stylesheet and measures every box as 0.
+ */
+export function handlePadPx(objW: number, objH: number): { corner: number; edge: number } {
+  const HALF = 4.5; // half the 9px visual square
+  const FULL = 9.5; // 9 + 2 x 9.5 = 28px, the coarse-pointer target
+  const MIN_SIDE = 48;
+  const COVER = 0.4;
+  const s = Math.min(objW, objH);
+  if (!(s >= MIN_SIDE)) return { corner: 0, edge: 0 };
+  const corner = Math.max(0, Math.min(FULL, (COVER * s) / 2 - HALF));
+  const edge = s * COVER >= 2 * (HALF + FULL) ? corner : 0;
+  return { corner, edge };
+}
+
 // One overlay box (selection outline + move/resize handles), positioned in % of
 // its parent overlay node so nested children resolve correctly. Recurses for a
 // container's children.
 function OverlayNode({
-  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, parentLocked = false, canvasLocked = false,
+  o, parentAbs, depth, selectedId, selectedIds, draggingId = null, onStart, parentLocked = false, canvasLocked = false, boxW, boxH,
 }: {
   o: LayoutObject;
   parentAbs: FracRect;
@@ -273,6 +320,10 @@ function OverlayNode({
   /** The whole canvas is locked. Distinct from the per-object padlock: this one
    *  is about how you are working right now, not about the layout. */
   canvasLocked?: boolean;
+  /** The rendered canvas box, so the handles can size their touch pads from how
+   *  big this object actually is on screen. See handlePadPx. */
+  boxW: number;
+  boxH: number;
 }) {
   const sel = o.id === selectedId; // single "primary" → resize handles
   const inSel = selectedIds.has(o.id); // any selected → highlight outline
@@ -330,7 +381,9 @@ function OverlayNode({
         </span>
       )}
       {sel && !locked && !canvasLocked &&
-        HANDLES.map((h) => {
+        (() => {
+          const pad = handlePadPx(abs.w * boxW, abs.h * boxH);
+          return HANDLES.map((h) => {
           // Above every sibling overlay node. Nodes render in z order with no
           // z-index of their own, so an object stacked higher than the selected
           // one covered its handles — and since those nodes carry the pointerdown
@@ -344,17 +397,38 @@ function OverlayNode({
           // object for another. This node creates no stacking context of its own
           // (opacity 1, no transform), so the handles compete directly with the
           // sibling nodes and win.
-          const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2, zIndex: 10 };
+          // Corners above edges. With equal z-index DOM order decided the
+          // overlap, and `w` sat over the nw corner — so the one gesture an
+          // operator reaches for most on a small object (drag the corner,
+          // change both axes) came out as a width-only resize.
+          const corner = h.length === 2;
+          const pos: CSSProperties = { position: "absolute", width: 9, height: 9, background: "#3b82f6", borderRadius: 2, zIndex: corner ? 11 : 10 };
           if (h.includes("n")) pos.top = -5;
           if (h.includes("s")) pos.bottom = -5;
           if (h.includes("w")) pos.left = -5;
           if (h.includes("e")) pos.right = -5;
           if (h === "n" || h === "s") pos.left = "calc(50% - 4.5px)";
           if (h === "e" || h === "w") pos.top = "calc(50% - 4.5px)";
-          return <div key={h} onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)} style={{ ...pos, cursor: handleCursor(h) }} />;
-        })}
+          // The 9px square is the VISUAL, and it stays 9px: it is a mark on a
+          // design canvas, and growing it would cover the object it belongs to.
+          // `editor-handle` hangs a transparent 28px hit area off it on a coarse
+          // pointer (see styles.css) — a pseudo-element, so neither the square
+          // nor the selection outline moves by a pixel. How big that pad is comes
+          // from the OBJECT (handlePadPx) and travels as a CSS variable, because
+          // the rule that draws it lives in a media query and cannot compute it.
+          const padPx = corner ? pad.corner : pad.edge;
+          return (
+            <div
+              key={h}
+              className="editor-handle"
+              onPointerDown={(e) => onStart(e, o, h, parentAbs, depth)}
+              style={{ ...pos, cursor: handleCursor(h), ["--handle-pad" as string]: `${padPx}px` } as CSSProperties}
+            />
+          );
+          });
+        })()}
       {kids?.map((c) => (
-        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} parentLocked={locked} canvasLocked={canvasLocked} />
+        <OverlayNode key={c.id} o={c} parentAbs={abs} depth={depth + 1} selectedId={selectedId} selectedIds={selectedIds} draggingId={draggingId} onStart={onStart} parentLocked={locked} canvasLocked={canvasLocked} boxW={boxW} boxH={boxH} />
       ))}
     </div>
   );
@@ -367,7 +441,7 @@ function OverlayNode({
 export function EditorCanvas({
   canvas, objects, selectedId, selectedIds, gridOn, alignOn, locked, ctx, ndiSource, interactive,
   onSelect, onMarqueeSelect, onGeom, onGeomMany, onCommitStart, onReparent, onBoxSize,
-  onContextMenu, onDropType, onDrawn,
+  onContextMenu, onDropType, onDrawn, boxElRef,
 }: {
   canvas: LayoutCanvas;
   objects: LayoutObject[];
@@ -388,6 +462,11 @@ export function EditorCanvas({
   /** A widget was dropped from the palette, at this point in canvas fractions.
    *  Optional: the canvas works exactly as before without it. */
   onDropType?: (point: { x: number; y: number }) => void;
+  /** The rendered canvas box, handed back to the caller. The touch drag out of
+   *  the palette ends at a client point and needs this rect to turn it into
+   *  canvas fractions — the HTML5 drop path gets the same rect for free from its
+   *  own currentTarget. */
+  boxElRef?: React.MutableRefObject<HTMLDivElement | null>;
   /** A box was drawn; the caller asks what to put in it. */
   onDrawn?: (rect: FracRect) => void;
   onSelect: (id: string | null, additive?: boolean) => void;
@@ -469,12 +548,41 @@ export function EditorCanvas({
   // Marquee (rubber-band) selection on empty canvas: fractional rect while dragging.
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  // The marquee/draw gesture in flight, so it can be unbound if the canvas goes
+  // away under it. A route change or a layout switch mid-drag otherwise left the
+  // window listeners bound to a dead tree: the next move called setMarquee and
+  // the next release called onSelect on an unmounted component.
+  const marqueeGesture = useRef<GestureHandle | null>(null);
   // The container the dragged object would drop into right now (for the live
   // highlight). Null when not hovering a valid target.
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   // Latest local geom set during the active drag (so pointerup can hit-test the
   // drop without depending on the parent's async state update).
   const dragGeom = useRef<Pick<LayoutObject, "x" | "y" | "w" | "h"> | null>(null);
+  // The element the drag's pointer is captured on, so capture is released in the
+  // same place the listeners come off. Without capture a finger that leaves the
+  // object — which it does immediately, because a finger is 40px wide and the
+  // object is under it — stops delivering pointermove to anything at all.
+  const dragCapture = useRef<{ el: Element; pointerId: number } | null>(null);
+  // Has this gesture travelled past its slop yet? A ref, not state: it changes on
+  // a pointermove and must not re-render, and the effect below reads it live.
+  const dragMoved = useRef(false);
+  // The undo push, through a ref. The parent's onCommitStart closes over the
+  // object tree, so its identity changes on every frame of a drag; listing it as
+  // a dependency of the drag effect would re-subscribe the window listeners each
+  // frame, which the other callbacks are all []-stable specifically to avoid.
+  const onCommitStartRef = useRef(onCommitStart);
+  useEffect(() => { onCommitStartRef.current = onCommitStart; }, [onCommitStart]);
+  /** Release whatever the current gesture captured. Safe to call twice. */
+  const releaseDragCapture = useCallback(() => {
+    const held = dragCapture.current;
+    dragCapture.current = null;
+    if (!held) return;
+    // A pointer that has already been cancelled or lost is no longer captured,
+    // and releasing it throws NotFoundError in some engines.
+    if (typeof held.el.hasPointerCapture === "function" && !held.el.hasPointerCapture(held.pointerId)) return;
+    held.el.releasePointerCapture?.(held.pointerId);
+  }, []);
   // Guides for the CURRENT drag only. Mirrored into a ref so the move handler can
   // check "are any drawn?" without listing guides as an effect dependency, which
   // would rebind the window listeners on every frame of a drag.
@@ -486,12 +594,34 @@ export function EditorCanvas({
   }, []);
 
   // Window-level move/up while dragging.
+  //
+  // Hand-rolled rather than bindGesture: this one is driven by an EFFECT keyed on
+  // the drag state, and its handlers close over live deps (the box size, the grid
+  // and align toggles) that change mid-drag, so it re-subscribes where a
+  // bindGesture call binds once at pointerdown. It also must not release capture
+  // on every re-subscribe. Now that bindGesture returns a cancel handle the two
+  // could be reconciled — bind once, read the deps through refs — but that is a
+  // rewrite of the drag effect, not a cleanup, and it is not this change.
   useEffect(() => {
     if (!drag || boxW <= 0) return;
     // Deltas are fractions of the dragged object's PARENT box. Snapping is done in
     // ABSOLUTE canvas space (snapRectToGrid), so objects nested in a container land
     // on the same visible grid as top-level ones.
     const onMove = (e: globalThis.PointerEvent) => {
+      // One gesture, one pointer. A palm or a second finger landing on the canvas
+      // mid-drag reports its own pointerId, and steering the object from it makes
+      // the object jump to wherever the other contact is.
+      if (e.pointerId !== drag.pointerId) return;
+      if (!dragMoved.current) {
+        if (Math.hypot(e.clientX - drag.px, e.clientY - drag.py) <= drag.slop) return;
+        dragMoved.current = true;
+        // The undo entry is pushed HERE, not at pointerdown. A tap is a
+        // selection, and a selection is not an edit: pushing at pointerdown gave
+        // every tap on the canvas its own history entry, so the first ⌘Z after
+        // ten taps undid nothing visible ten times. Pushed before the first
+        // onGeom below, so the snapshot is still the pre-drag geometry.
+        onCommitStartRef.current();
+      }
       const dx = (e.clientX - drag.px) / drag.parentW;
       const dy = (e.clientY - drag.py) / drag.parentH;
       // Alt is the escape hatch from every kind of snapping. Read live from the
@@ -556,10 +686,27 @@ export function EditorCanvas({
       }
       onGeom(drag.id, geom);
     };
-    const onUp = () => {
+    /**
+     * End the gesture.
+     *
+     * `commit` is false for a pointercancel — an interrupted gesture. The object
+     * KEEPS where the last move put it (the same thing a mouse drag does when the
+     * window loses focus; undo is right there if it is not wanted), but it does
+     * not reparent: a drop into a container is a change to the layout's structure
+     * and needs a deliberate release, not a system gesture stealing the pointer
+     * with the object happening to be over a container at the time.
+     */
+    const finish = (commit: boolean) => {
       const g = dragGeom.current;
+      // A gesture that never crossed its slop is a TAP: it selected something and
+      // nothing else. `dragMoved` is the gate, not `g` — dragGeom is seeded at
+      // pointerdown with the object's own rect, so a tap on an object whose
+      // centre already sits inside a container reparented it into that container
+      // on the way back up. Nothing had been dragged anywhere; the object simply
+      // overlapped a container, and tapping it to select it moved it in the tree
+      // (and, on a tablet, tapping is how you select).
       // Only a lone top-level object dropped onto a container reparents into it.
-      if (drag.mode === "move" && drag.canReparent && !drag.group && g) {
+      if (commit && dragMoved.current && drag.mode === "move" && drag.canReparent && !drag.group && g) {
         const cx = g.x + g.w / 2;
         const cy = g.y + g.h / 2;
         const target = findDropContainer(drag.targets, drag.start.config.type === "container", cx, cy);
@@ -568,24 +715,73 @@ export function EditorCanvas({
         if (t) onReparent(drag.id, t.id, { x: g.x, y: g.y, w: g.w, h: g.h }, t.abs);
       }
       dragGeom.current = null;
+      dragMoved.current = false;
+      releaseDragCapture();
       setDropTargetId(null);
       setGuides([]);
       setDrag(null);
     };
+    const onUp = (e: globalThis.PointerEvent) => {
+      if (e.pointerId !== drag.pointerId) return;
+      finish(true);
+    };
+    // A cancelled pointer is the normal way a touch gesture ends badly: iOS takes
+    // the pointer for a system edge swipe, the browser decides mid-gesture that it
+    // was a scroll, a call comes in. Without this the drag never ends — the object
+    // stays "lifted", the next stray pointermove keeps moving it, and the only way
+    // out is a reload.
+    const onCancel = (e: globalThis.PointerEvent) => {
+      if (e.pointerId !== drag.pointerId) return;
+      finish(false);
+    };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      // Capture is NOT released here. This cleanup also runs whenever a dependency
+      // changes mid-drag (the box is re-measured, the grid is toggled), and
+      // dropping capture then would hand the rest of the gesture back to whatever
+      // is under the finger. It is released in finish(), and on unmount below.
       // A drag that ends by unmount (route change, undo, the object deleted from
       // under it) never reaches onUp, and a stale guide would hang on the canvas
       // with nothing dragging.
       setGuides([]);
     };
-  }, [drag, boxW, boxH, gridOn, alignOn, canvas, onGeom, onGeomMany, onReparent, setGuides]);
+    // releaseDragCapture is a []-dep useCallback, so it never re-runs this.
+  }, [drag, boxW, boxH, gridOn, alignOn, canvas, onGeom, onGeomMany, onReparent, setGuides, releaseDragCapture]);
+
+  // The canvas leaving with a pointer still captured on one of its children.
+  useEffect(() => releaseDragCapture, [releaseDragCapture]);
+
+  // The canvas leaving mid-marquee. Unbind, do not end: nothing was decided, and
+  // the end handler would select into a tree that is gone.
+  useEffect(() => () => {
+    marqueeGesture.current?.cancel();
+    marqueeGesture.current = null;
+  }, []);
 
   function startDrag(e: ReactPointerEvent, o: LayoutObject, mode: "move" | Handle, parentAbs: FracRect, depth: number) {
     e.stopPropagation();
+    // PRIMARY BUTTON ONLY, and one contact at a time — the same two gates
+    // startMarquee has carried since a right-click left a marquee bound to the
+    // window. A right-click on an OBJECT had neither: it started a real drag, the
+    // context menu swallowed the matching pointerup, and the object then followed
+    // the mouse with no button down. A second finger had neither either: its
+    // pointerdown replaced the drag state wholesale, so the object jumped to the
+    // new contact and the first finger's gesture was orphaned. openContextMenu
+    // does its own selecting, so returning here costs the right-click nothing.
+    // Middle-click's default action is Chrome/Windows' autoscroll widget, and it
+    // is armed by the compatibility mousedown this pointerdown produces — so it
+    // has to be prevented BEFORE the button gate returns, or the editor sprouts a
+    // scroll compass over the canvas. The right button is left alone on purpose:
+    // preventing its default here can suppress the contextmenu event, and the
+    // right-click menu is a real feature.
+    if (e.button === 1) e.preventDefault();
+    if (e.button !== 0 || !e.isPrimary) return;
+    if (drag) return;
     e.preventDefault();
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     // Shift/Cmd-click toggles selection only — don't start a drag.
@@ -604,7 +800,8 @@ export function EditorCanvas({
     if (locked) return;
     // Locked objects (and anything inside a locked container) select but never move.
     if (isLockedInTree(objects, o.id)) return;
-    onCommitStart();
+    // No onCommitStart() here: the undo entry is pushed by the first pointermove
+    // that crosses the slop (see the drag effect). A tap is not an edit.
     // Snapshot container drop targets, excluding the dragged object and its own
     // subtree (can't drop a container into itself or its descendant) and any locked
     // container (so nothing can be dropped INTO a locked container either).
@@ -631,8 +828,21 @@ export function EditorCanvas({
     forEachWithRect(objects, (n) => {
       if (!movingIds.has(n.o.id) && !n.o.hidden) siblings.push(n.abs);
     });
+    // Capture on the element that received the pointerdown — the overlay node for
+    // a move, the 9px square for a resize. A finger covers both, so pointermove
+    // stops being delivered the instant the contact drifts off the element; with
+    // capture the whole sequence keeps coming here until it ends. The id comes
+    // from a live pointerdown, so it is always a capturable pointer; the only
+    // reason for the guard is an engine (jsdom) that does not implement it.
+    const target = e.currentTarget;
+    if (typeof target.setPointerCapture === "function") {
+      target.setPointerCapture(e.pointerId);
+      dragCapture.current = { el: target, pointerId: e.pointerId };
+    }
+    dragMoved.current = false;
     setDrag({
       id: o.id, mode, start: o, px: e.clientX, py: e.clientY,
+      pointerId: e.pointerId, slop: e.pointerType === "mouse" ? 0 : TOUCH_SLOP_PX,
       parentW: parentAbs.w * boxW, parentH: parentAbs.h * boxH,
       parentAbs, depth, canReparent: depth === 0, targets, siblings, group,
     });
@@ -646,6 +856,11 @@ export function EditorCanvas({
     // menu that follows swallows the matching pointerup — so the move/up listeners
     // below stayed bound to the window and the next mouse movement drew a marquee
     // out of nowhere. Same for middle-click and stylus barrel taps.
+    //
+    // Middle-click still gets its default prevented first: the gate returns
+    // before anything else runs, and the default here is Chrome/Windows'
+    // autoscroll widget. Same reasoning as startDrag.
+    if (e.button === 1) e.preventDefault();
     if (e.button !== 0 || !e.isPrimary) return;
     const box = boxRef.current;
     if (!box) { onSelect(null); return; }
@@ -661,50 +876,61 @@ export function EditorCanvas({
     // on bare canvas. No toolbar mode, so nothing is armed and forgotten.
     if (e.shiftKey && onDrawn) {
       let drew = false;
-      const drawMove = (ev: globalThis.PointerEvent) => {
-        drew = true;
-        setMarquee({ x0, y0, x1: (ev.clientX - rect.left) / boxW, y1: (ev.clientY - rect.top) / boxH });
-      };
-      const drawUp = (ev: globalThis.PointerEvent) => {
-        window.removeEventListener("pointermove", drawMove);
-        window.removeEventListener("pointerup", drawUp);
-        setMarquee(null);
-        // A click that never moved is a click. Opening the picker on it is how a
-        // stray click on the canvas turned into an add-widget menu.
-        if (!drew) return;
-        onDrawn(rectFrom({ x: x0, y: y0 }, {
-          x: (ev.clientX - rect.left) / boxW,
-          y: (ev.clientY - rect.top) / boxH,
-        }));
-      };
-      window.addEventListener("pointermove", drawMove);
-      window.addEventListener("pointerup", drawUp);
+      marqueeGesture.current = bindGesture(box, e.pointerId, {
+        move: (ev) => {
+          drew = true;
+          setMarquee({ x0, y0, x1: (ev.clientX - rect.left) / boxW, y1: (ev.clientY - rect.top) / boxH });
+        },
+        end: (ev, cancelled) => {
+          marqueeGesture.current = null;
+          setMarquee(null);
+          // A click that never moved is a click. Opening the picker on it is how a
+          // stray click on the canvas turned into an add-widget menu. A cancelled
+          // gesture is not a click either — it asks for nothing.
+          if (!drew || cancelled) return;
+          onDrawn(rectFrom({ x: x0, y: y0 }, {
+            x: (ev.clientX - rect.left) / boxW,
+            y: (ev.clientY - rect.top) / boxH,
+          }));
+        },
+      });
       return;
     }
 
+    // A finger wobbles; see TOUCH_SLOP_PX. Without a pixel floor here a tap on
+    // bare canvas dragged a marquee a few px wide and selected nothing, instead
+    // of clearing the selection the way a click does.
+    const slop = e.pointerType === "mouse" ? 0 : TOUCH_SLOP_PX;
+    const downX = e.clientX;
+    const downY = e.clientY;
     let moved = false;
-    const move = (ev: globalThis.PointerEvent) => {
-      const x1 = (ev.clientX - rect.left) / boxW;
-      const y1 = (ev.clientY - rect.top) / boxH;
-      if (Math.abs(x1 - x0) > 0.004 || Math.abs(y1 - y0) > 0.004) moved = true;
-      setMarquee({ x0, y0, x1, y1 });
-    };
-    const up = (ev: globalThis.PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      setMarquee(null);
-      if (!moved) { onSelect(null); return; }
-      const x1 = (ev.clientX - rect.left) / boxW;
-      const y1 = (ev.clientY - rect.top) / boxH;
-      const rx0 = Math.min(x0, x1), rx1 = Math.max(x0, x1);
-      const ry0 = Math.min(y0, y1), ry1 = Math.max(y0, y1);
-      const hits = objects
-        .filter((o) => o.x < rx1 && o.x + o.w > rx0 && o.y < ry1 && o.y + o.h > ry0)
-        .map((o) => o.id);
-      onMarqueeSelect(hits, ev.shiftKey);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    marqueeGesture.current = bindGesture(box, e.pointerId, {
+      move: (ev) => {
+        const x1 = (ev.clientX - rect.left) / boxW;
+        const y1 = (ev.clientY - rect.top) / boxH;
+        if (
+          (Math.abs(x1 - x0) > 0.004 || Math.abs(y1 - y0) > 0.004) &&
+          Math.hypot(ev.clientX - downX, ev.clientY - downY) > slop
+        ) moved = true;
+        setMarquee({ x0, y0, x1, y1 });
+      },
+      end: (ev, cancelled) => {
+        marqueeGesture.current = null;
+        setMarquee(null);
+        // A cancelled marquee selects nothing new — and does not clear the
+        // selection either. The operator never finished asking for anything.
+        if (cancelled) return;
+        if (!moved) { onSelect(null); return; }
+        const x1 = (ev.clientX - rect.left) / boxW;
+        const y1 = (ev.clientY - rect.top) / boxH;
+        const rx0 = Math.min(x0, x1), rx1 = Math.max(x0, x1);
+        const ry0 = Math.min(y0, y1), ry1 = Math.max(y0, y1);
+        const hits = objects
+          .filter((o) => o.x < rx1 && o.x + o.w > rx0 && o.y < ry1 && o.y + o.h > ry0)
+          .map((o) => o.id);
+        onMarqueeSelect(hits, ev.shiftKey);
+      },
+    });
   }
 
   const sorted = [...objects].sort((a, b) => a.z - b.z);
@@ -739,7 +965,10 @@ export function EditorCanvas({
     <div ref={setWrap} className="relative w-full h-full flex items-start justify-center select-none">
       {boxW > 0 && boxH > 0 && (
         <div
-          ref={boxRef}
+          ref={(el) => {
+            boxRef.current = el;
+            if (boxElRef) boxElRef.current = el;
+          }}
           // kiosk-surface, the same class LayoutRenderer puts on the live
           // container. NOT decoration: the class is what re-declares --color-fg
           // and friends to the kiosk's white foregrounds, and a canvas that
@@ -749,10 +978,23 @@ export function EditorCanvas({
           // object types that draw text, which is invisible. Setting --su-* here
           // would not work; see the rule in styles.css for why the class has to
           // carry the Tailwind variables itself.
+          data-editor-canvas=""
           className="relative overflow-hidden rounded-xl kiosk-surface"
           style={{
             width: boxW,
             height: boxH,
+            // The single most important line for using this on a tablet. Without
+            // it Safari watches the first few pixels of every gesture and decides
+            // they were a scroll or a pinch, takes the pointer, and the object
+            // stops following the finger a moment after it started. Only while
+            // interactive: a read-only preview is a thing you scroll past.
+            touchAction: interactive ? "none" : undefined,
+            // A press-and-hold on iOS otherwise raises the copy/share callout over
+            // whatever is being dragged, and a drag across the canvas selects the
+            // text inside the widgets it passes.
+            WebkitUserSelect: "none",
+            userSelect: "none",
+            WebkitTouchCallout: "none",
             // Frame drawn as an INSET shadow, not a border: a real border + the
             // global border-box sizing would shrink the padding box, so the
             // `inset-0` overlay (selection boxes + resize handles) would sit in a
@@ -845,6 +1087,8 @@ export function EditorCanvas({
                   draggingId={drag?.id ?? null}
                   onStart={startDrag}
                   canvasLocked={locked}
+                  boxW={boxW}
+                  boxH={boxH}
                 />
               ))}
             </div>
@@ -997,6 +1241,9 @@ export function LayoutEditor({
   // The type mid-drag from the palette. A ref as well as state: the drop
   // handler runs from a DOM event and would otherwise read a stale closure.
   const paletteDragType = useRef<LayoutObjectType | null>(null);
+  // The rendered canvas box, for the palette's TOUCH drag, which ends at a client
+  // point rather than at a drop event that already knows its own target.
+  const canvasBoxRef = useRef<HTMLDivElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [tplName, setTplName] = useState("");
   // Rendered canvas box size (reported by EditorCanvas) — so the Snap actions use
@@ -1341,6 +1588,24 @@ export function LayoutEditor({
     }
     setSelectedIds(new Set([o.id]));
     setDirty(true);
+  }
+
+  /**
+   * The same drop, from a client point.
+   *
+   * The HTML5 path gets its rect off the drop event's currentTarget. A finger
+   * drag has no drop event, so the canvas box is read from the ref and the point
+   * converted here — then into dropObject, so both routes place, size and nest a
+   * widget identically. Releasing outside the canvas places nothing: a drag
+   * abandoned back over the palette should not dump a widget in the corner.
+   */
+  function dropObjectAtClient(type: LayoutObjectType, clientX: number, clientY: number) {
+    const el = canvasBoxRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return;
+    dropObject(type, { x: (clientX - r.left) / r.width, y: (clientY - r.top) / r.height });
   }
 
   function addObject(type: LayoutObjectType) {
@@ -1900,6 +2165,7 @@ export function LayoutEditor({
               onAdd={addObject}
               onDragStart={(t) => { paletteDragType.current = t; }}
               onDragEnd={() => { paletteDragType.current = null; }}
+              onDropAt={dropObjectAtClient}
             />
           </div>
         )}
@@ -1938,6 +2204,7 @@ export function LayoutEditor({
               onCommitStart={pushHistory}
               onReparent={reparentIntoContainer}
               onBoxSize={handleBoxSize}
+              boxElRef={canvasBoxRef}
               onContextMenu={isEditing ? openContextMenu : undefined}
               onDropType={isEditing ? (point) => {
                 const t = paletteDragType.current;

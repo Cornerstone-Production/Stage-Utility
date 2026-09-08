@@ -1746,3 +1746,29 @@ button.score-capsule:focus-visible {
   margin-right: 5px;
   vertical-align: middle;
 }
+
+/* ── layout editor: touch targets ────────────────────────────────────────────
+   A 9px resize handle is a fine mark on a design canvas and an impossible
+   target for a finger, which lands with about 40px of contact and no cursor to
+   aim it. The square stays 9px; a transparent pseudo-element extends the area
+   that ACCEPTS the pointerdown to 28px, centred on it. Pseudo-element rather
+   than padding so nothing about the handle's box, the selection outline or the
+   grid it sits on moves — the two must stay pixel-identical between a mouse and
+   a tablet or the editor draws differently on the two.
+
+   Coarse pointers only. On a mouse an invisible 28px pad around each of eight
+   handles would swallow clicks meant for the object underneath.
+
+   The pad is per handle, in --handle-pad, computed from the object's rendered
+   size by handlePadPx() in layout-editor.tsx: at a flat 9.5px the eight pads
+   meet in the middle of a small widget and leave it with no move region at all.
+   0px is the fallback and the small-object answer — the ::after then covers
+   nothing but the square itself. */
+@media (pointer: coarse) {
+  .editor-handle::after {
+    content: "";
+    position: absolute;
+    /* 9px square + up to 9.5px on each side = up to 28px. */
+    inset: calc(-1 * var(--handle-pad, 0px));
+  }
+}
