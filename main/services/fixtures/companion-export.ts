@@ -222,7 +222,16 @@ export function companionExportFixture(): Record<string, unknown> {
         { row: 1, col: 1, text: "Projectors OFF", connections: ["conn-lights"] },
       ]),
       "3": page(3, FIXTURE_PAGES.cameras, [
+        // TWO buttons that run nothing, deliberately, and the second one is not
+        // decoration: an actionless button has no identity but its coordinates,
+        // and the reconcile must never SEARCH the page for an empty
+        // fingerprint. With one such button on the page a search finds nothing
+        // and answers "missing" anyway, so the test for that refusal passed
+        // with the refusal deleted. With two, deleting it makes the search find
+        // exactly one and report a MOVE onto the wrong button. See
+        // companion-reconcile.test.ts.
         { row: 0, col: 0, text: "Cam 1", connections: [] },
+        { row: 1, col: 0, text: "Cam 2", connections: [] },
         // Its actions live inside a `logic_if`. Both what it drives and its
         // fingerprint have to come out of the nesting.
         { row: 0, col: 1, text: "Record Toggle", connections: ["conn-pjlink"], nested: true },

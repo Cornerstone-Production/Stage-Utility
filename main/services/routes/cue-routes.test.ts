@@ -790,7 +790,7 @@ describe("the button and pair endpoints", () => {
     assert.equal(r.status, 200);
     const body = r.json as { ok: boolean; buttons: { pageName: string; label: string }[] };
     assert.equal(body.ok, true);
-    assert.equal(body.buttons.length, 13);
+    assert.equal(body.buttons.length, 14);
     assert.ok(body.buttons.some((b) => b.pageName === FIXTURE_PAGES.screens));
   });
 
@@ -978,10 +978,12 @@ describe("importing single buttons", () => {
     const buttons = await offered();
     // Page 1: House Lights ON (an ON with no OFF), Take Screens. The unlabelled
     // button at r3c0 is left out — a cue called nothing cannot be called.
-    // Page 3: Cam 1, Record Toggle. Everything else on pages 1 and 2 is paired.
+    // Page 3: Cam 1 and Record Toggle on row 0, then Cam 2 on row 1 — Cam 1 and
+    // Cam 2 both run nothing, which is what the reconcile's "an empty
+    // fingerprint is never searched for" guard needs. See the fixture.
     assert.deepEqual(
       buttons.map((b) => `${b.page as number}:${b.slug as string}`),
-      ["1:house_lights_on", "1:take_screens", "3:cam_1", "3:record_toggle"],
+      ["1:house_lights_on", "1:take_screens", "3:cam_1", "3:record_toggle", "3:cam_2"],
     );
     assert.equal(
       buttons.some((b) => "suggested" in b),

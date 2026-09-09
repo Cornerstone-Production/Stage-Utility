@@ -359,12 +359,23 @@ describe("a button that runs nothing", () => {
   // 59 of the 536 buttons on the install this was built against. They have no
   // identity but their coordinates, and pretending otherwise is worse than
   // saying so.
-  const blank = (over: Record<string, string | number> = {}): PressEntry => ({
-    ruleId: "rule-blank",
-    label: "cam_1",
+  const blank = (
+    over: Record<string, string | number> = {},
+    row = 0,
+    col = 0,
+  ): PressEntry => ({
+    ruleId: `rule-blank-${row}-${col}`,
+    label: `cam_${row + 1}`,
     params: {
       ...fingerprintParams(
-        { page: 3, row: 0, col: 0, pageId: FIXTURE_PAGE_IDS[3]!, label: "Cam 1", actionIds: [] },
+        {
+          page: 3,
+          row,
+          col,
+          pageId: FIXTURE_PAGE_IDS[3]!,
+          label: `Cam ${row + 1}`,
+          actionIds: [],
+        },
         "in-place",
         EARLIER,
       ),
@@ -381,10 +392,20 @@ describe("a button that runs nothing", () => {
   test("is missing when its coordinates empty, and is never SEARCHED for", () => {
     // An empty fingerprint matches every other actionless button, so a search
     // would find several and could never find one. It must not be attempted.
+    //
+    // Page 3 carries TWO actionless buttons for this case. With one, deleting
+    // the `wanted === ""` branch left the search finding nothing and answering
+    // "missing" anyway — the guard was green on the bug. With two, removing the
+    // branch finds Cam 2 and reports the cue MOVED onto a camera button it has
+    // never been near.
     const d = doc();
     delete d.pages["3"]!.controls["0"]!["0"];
     const r = only([blank()], parse(d));
     assert.equal(r.changes[0]!.status, "missing");
+    assert.equal(r.changes[0]!.patch?.status, "missing");
+    // And nothing about where it is was rewritten to somebody else's key.
+    assert.equal(merged(blank(), r.changes[0]!.patch).row, 0);
+    assert.equal(merged(blank(), r.changes[0]!.patch).col, 0);
   });
 });
 
