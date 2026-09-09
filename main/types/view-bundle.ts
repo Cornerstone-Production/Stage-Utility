@@ -113,17 +113,30 @@ export interface ImportReport {
    *   assigned       already here and left as it is; this type now points at it
    *   kept           nothing written — the sheet and its assignment are untouched
    *   replaced       overwritten with the file's copy and this type assigned to it
+   *   reassigned     the type pointed at <previousVariantName>; it now uses the
+   *                  file's variant, which was added or overwritten
    *   no-such-sheet  no sheet here matches by id or by name; nothing written
    *
-   * "kept" covers the clash: the type already has a DIFFERENT variant on that
-   * sheet and the operator chose to keep theirs. The variant is not added in
-   * that case either, because a variant nothing points at is clutter in the
-   * patch editor rather than a useful spare.
+   * "kept" and "reassigned" are the two halves of a clash: the type already has
+   * a DIFFERENT variant on that sheet, and the operator chose Keep or Replace.
+   * Under Keep the variant is not even added, because a variant nothing points
+   * at is clutter in the patch editor rather than a useful spare. Under Replace
+   * the assignment moves, and the outcome names what it moved OFF — "added"
+   * alone never told the operator their assignment had been taken away.
    */
-  patchVariants: {
-    sheetName: string;
-    variantName: string;
-    outcome: "added" | "assigned" | "kept" | "replaced" | "no-such-sheet";
-  }[];
+  patchVariants: (
+    | {
+      sheetName: string;
+      variantName: string;
+      outcome: "added" | "assigned" | "kept" | "replaced" | "no-such-sheet";
+    }
+    | {
+      sheetName: string;
+      variantName: string;
+      outcome: "reassigned";
+      /** What this service type pointed at before the import moved it. */
+      previousVariantName: string;
+    }
+  )[];
   presets: { added: number; kept: number; replaced: number };
 }

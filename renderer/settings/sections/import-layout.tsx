@@ -400,14 +400,24 @@ function RebindList({ list, onOpen }: { list: UnresolvableRef[]; onOpen?: (u: Un
   );
 }
 
-/** One line each, in the operator's words rather than the wire's. */
-const PATCH_OUTCOME: Record<ImportReport["patchVariants"][number]["outcome"], string> = {
+type PatchRow = ImportReport["patchVariants"][number];
+
+/** One line each, in the operator's words rather than the wire's. "reassigned"
+ *  is not here: it has to name the variant the assignment came off, so it is
+ *  built per row by patchLine below. */
+const PATCH_OUTCOME: Record<Exclude<PatchRow["outcome"], "reassigned">, string> = {
   added: "added to that sheet, and this type now uses it",
   assigned: "already here — yours was kept, and this type now points at it",
   kept: "nothing changed — the sheet and its assignment are yours",
   replaced: "overwritten with the file's copy, and this type now uses it",
   "no-such-sheet": "no sheet here matches by id or name — nothing was written",
 };
+
+function patchLine(p: PatchRow): string {
+  return p.outcome === "reassigned"
+    ? `this type pointed at "${p.previousVariantName}" — it now uses the file's variant instead`
+    : PATCH_OUTCOME[p.outcome];
+}
 
 /** What landed, and what is left to do. */
 function ImportResult({ report, nameOfType, onClose }: {
@@ -447,7 +457,7 @@ function ImportResult({ report, nameOfType, onClose }: {
               <Row
                 key={`${p.sheetName}:${p.variantName}`}
                 label={`"${p.variantName}" on ${p.sheetName}`}
-                sub={PATCH_OUTCOME[p.outcome]}
+                sub={patchLine(p)}
                 warn={p.outcome === "no-such-sheet"}
               />
             ))}

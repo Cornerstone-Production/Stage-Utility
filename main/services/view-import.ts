@@ -369,17 +369,23 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       // make the section useless on every machine but a clone.
       const sheet = file.sheets.find((s) => s.id === entry.sheetId)
         ?? file.sheets.find((s) => s.name === entry.sheetName);
-      const say = (outcome: ImportReport["patchVariants"][number]["outcome"]): void => {
-        patchOutcomes.push({ sheetName: sheet?.name ?? entry.sheetName, variantName: entry.variant.name, outcome });
+      const names = { sheetName: sheet?.name ?? entry.sheetName, variantName: entry.variant.name };
+      // The whole row, not just the word: "reassigned" carries the variant the
+      // assignment came off, and the log line says it too — an operator reading
+      // /log on a Sunday needs to know which of their variants stopped being
+      // used, not only that something was.
+      const say = (row: ImportReport["patchVariants"][number]): void => {
+        patchOutcomes.push(row);
+        const off = row.outcome === "reassigned" ? ` (was "${scrub(row.previousVariantName)}")` : "";
         console.log(
-          `[view-import] patch variant "${scrub(entry.variant.name)}" ` +
-          `on ${scrub(sheet?.name ?? entry.sheetName)}: ${scrub(outcome)}`,
+          `[view-import] patch variant "${scrub(row.variantName)}" ` +
+          `on ${scrub(row.sheetName)}: ${scrub(row.outcome)}${off}`,
         );
       };
       if (!sheet) {
         // Reported, not fatal: the views and boards are already correct, and a
         // refusal here would throw them away over one sheet.
-        say("no-such-sheet");
+        say({ ...names, outcome: "no-such-sheet" });
         continue;
       }
       if (!isSafeKey(targetType)) {
@@ -394,11 +400,16 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       if (clash && onClash === "keep") {
         // Nothing written at all — not even the variant. A variant nothing
         // points at is clutter in the patch editor, not a useful spare.
-        say("kept");
+        say({ ...names, outcome: "kept" });
         continue;
       }
+      // Read BEFORE the variants array is touched, and only meaningful on a
+      // clash — the assignment is about to move off this one.
+      const previousVariantName = clash
+        ? sheet.variants.find((v) => v.id === assignedNow)?.name ?? assignedNow!
+        : undefined;
       const at = sheet.variants.findIndex((v) => v.id === entry.variant.id);
-      let outcome: ImportReport["patchVariants"][number]["outcome"];
+      let outcome: "added" | "assigned" | "kept" | "replaced";
       if (at === -1) {
         sheet.variants.push(entry.variant);
         outcome = "added";
@@ -410,7 +421,12 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       }
       sheet.assignments.byServiceType[targetType] = entry.variant.id;
       changed = true;
-      say(outcome);
+      // A clash reaching here is Replace — Keep returned above. Whether the
+      // file's variant was new or overwritten, what the operator has to be told
+      // is that THEIR assignment moved; "added" said nothing about it.
+      say(previousVariantName !== undefined
+        ? { ...names, outcome: "reassigned", previousVariantName }
+        : { ...names, outcome });
     }
     // One write for the whole file: patchStore.save replaces it wholesale, so
     // saving per sheet would be several read-modify-writes over the same bytes.

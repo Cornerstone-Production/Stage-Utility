@@ -71,6 +71,10 @@ Under **Keep**, a sheet where this type already points at a different variant is
 left completely alone — the variant is not even added, because a variant nothing
 points at is clutter in the patch editor rather than a useful spare.
 
+Under **Replace** the file's variant lands and the assignment moves onto it. The
+import report names the variant the type used before, so an assignment taken off
+one of yours is never silent.
+
 ## What comes with it
 
 | | |

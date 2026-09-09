@@ -457,14 +457,49 @@ describe("patch variants", () => {
       "an unassigned import is clutter in the patch editor, not a spare");
   });
 
-  test("Replace takes the assignment off the local variant", async () => {
+  test("Replace takes the assignment off the local variant, and says which", async () => {
+    // Reported as "added" this said only that the file's variant arrived — the
+    // operator was never told the variant their type used had been dropped.
     await blankPatch({
       variants: [{ id: "var-mine", name: "Mine", overrides: {} }],
       assignments: { byServiceType: { "st-src": "var-mine" }, byPlan: {} },
     });
     const report = await applyViewBundle(withVariant(), { onClash: "replace" });
-    assert.equal(report.patchVariants[0]!.outcome, "added");
+    assert.deepEqual(report.patchVariants, [{
+      sheetName: "Analog", variantName: "Sunday rig",
+      outcome: "reassigned", previousVariantName: "Mine",
+    }]);
     assert.equal((await patchStore.load()).sheets[0]!.assignments.byServiceType["st-src"], "var-1");
+  });
+
+  test("Replace onto a clash whose variant is also here overwrites AND reassigns", async () => {
+    // Both halves at once: the file's variant is on the sheet already, and the
+    // type points at a different one. "replaced" alone would be as silent about
+    // the assignment as "added" was.
+    await blankPatch({
+      variants: [
+        { id: "var-mine", name: "Mine", overrides: {} },
+        { id: "var-1", name: "Stale copy", overrides: {} },
+      ],
+      assignments: { byServiceType: { "st-src": "var-mine" }, byPlan: {} },
+    });
+    const report = await applyViewBundle(withVariant(), { onClash: "replace" });
+    assert.deepEqual(report.patchVariants, [{
+      sheetName: "Analog", variantName: "Sunday rig",
+      outcome: "reassigned", previousVariantName: "Mine",
+    }]);
+    const s = (await patchStore.load()).sheets[0]!;
+    assert.equal(s.variants.find((v) => v.id === "var-1")!.name, "Sunday rig");
+  });
+
+  test("no clash at all is still a plain add", async () => {
+    // The other side of the guard: "reassigned" must not swallow the case where
+    // nothing of the operator's was pointed at in the first place.
+    await blankPatch();
+    const report = await applyViewBundle(withVariant(), { onClash: "replace" });
+    assert.deepEqual(report.patchVariants, [{
+      sheetName: "Analog", variantName: "Sunday rig", outcome: "added",
+    }]);
   });
 
   test("the assignment follows a retype", async () => {
