@@ -260,11 +260,17 @@ pair's spoken name is composed by the import and never follows.
 ### Home Assistant
 
 **Copy YAML** in the same panel produces the whole configuration fragment: one
-`rest_command` per cue, a template `switch` per ON/OFF pair, and a `script` per
-cue that is not half of a pair. A cue that has been renamed carries a comment
-naming the `rest_command` it used to be; former names are never emitted as
-commands of their own. Paste it into
-`configuration.yaml`, put the token in `secrets.yaml` **with the scheme**:
+`rest_command` per cue, a template switch per pair under the `template:` key, and
+a `script` per cue that is not half of a pair. That is the current template
+format — the legacy `platform: template` under `switch:`, which Home Assistant
+now refuses with a repair notice, is not generated. A fragment pasted from an
+older version needs re-pasting. Each switch's entity id follows its name, so an
+automation of your own naming an old `switch.…` may need its id updating.
+
+A cue that has been renamed carries a comment naming the `rest_command` it used
+to be; former names are never emitted as commands of their own. Paste the
+fragment into `configuration.yaml`, put the token in `secrets.yaml` **with the
+scheme**:
 
 ```yaml
 stage_utility_token: "Bearer su_..."

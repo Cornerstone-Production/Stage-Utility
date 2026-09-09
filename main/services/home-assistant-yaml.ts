@@ -8,14 +8,23 @@
 // Three objects per cue set:
 //
 //  - a `rest_command` per cue, which is the plain "call this URL" primitive,
-//  - a template `switch` per ON/OFF pair, which is what a voice assistant can be
-//    asked to turn on and off by name, and
+//  - a template switch per ON/OFF pair, under the template integration's own
+//    `template:` key, which is what a voice assistant can be asked to turn on
+//    and off by name, and
 //  - a `script` per cue that is NOT half of a pair, which is what an assistant
 //    can be asked to RUN. A one-shot button has no on and no off; a switch for
 //    it would sit in Home Assistant permanently claiming a state it never had.
 //
 // A cue is never both. A pair's two halves are exactly the cues whose names end
 // `_on`/`_off` with a partner present, and those are excluded from the scripts.
+//
+// The switches go under `template:` and NOT under `switch:` with
+// `platform: template` beneath it. That legacy spelling is what this generated
+// before, and current Home Assistant refuses it outright with the repair
+// "configuring the template integration by adding `platform: template` under the
+// `switch:` key is not supported" — so every switch in a pasted fragment
+// vanished. `rest_command:`, `script:` and the `rest:` sensor are unaffected:
+// none of them is a template-integration object.
 //
 // A switch is `optimistic: true` UNLESS its pair names a Companion custom
 // variable to read its state from. Optimistic is the honest spelling of what
@@ -298,7 +307,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
       "# An `unknown` pair — Companion unreachable, the variable missing, or a value",
       "# matching neither of the two — reads OFF here and stays PRESSABLE; the reason",
       "# is on this sensor's attribute for that pair, and on the rule's row in Stage",
-      "# Utility. No availability_template on purpose: an unavailable switch cannot",
+      "# Utility. No availability template on purpose: an unavailable switch cannot",
       "# be commanded, so an unreachable Companion would also stop you turning the",
       "# device on.",
       "rest:",
@@ -321,35 +330,55 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     );
   }
 
+  // ONE `template:` key for the whole document, with every switch in the list
+  // under it. A second top-level `template:` would be a duplicate mapping key in
+  // the same file, and YAML keeps only the last one — so half the switches would
+  // silently not exist. `rest_command:`, `rest:` and `script:` are single keys
+  // for the same reason.
   if (pairs.length > 0) {
-    lines.push("", "switch:", "  - platform: template", "    switches:");
+    lines.push(
+      "",
+      "# Template switches, under the template integration's own key. Home",
+      "# Assistant refuses `platform: template` under `switch:` — the spelling",
+      "# these used to be generated in — so re-paste this over an older copy.",
+      "# Each entity id now follows the switch's name rather than the cue's, so an",
+      "# automation of your own naming an old `switch.…` may need its id updating.",
+      "template:",
+      "  - switch:",
+    );
     for (const p of pairs) {
       lines.push(
-        `      ${q(p.base)}:`,
-        `        friendly_name: ${q(spoken.get(`switch:${p.base}`) ?? p.friendly)}`,
+        `      - name: ${q(spoken.get(`switch:${p.base}`) ?? p.friendly)}`,
+        // Prefixed, so the id survives YAML 1.1: a pair based `no` or `on` would
+        // otherwise be a bare boolean. It is also what lets Home Assistant keep
+        // a rename — the entity is tracked by this, not by the name.
+        `        unique_id: ${q(`stage_utility_${p.base}`)}`,
         // A bound pair reads its state; an unbound one can only report what it
         // asked for. `optimistic: true` is dropped for a bound pair rather than
         // left beside the template: optimistic means "believe the press
         // immediately and do not wait for the state", which is precisely the
-        // behaviour a state variable exists to replace.
+        // behaviour a state variable exists to replace. It is kept on an unbound
+        // one even though omitting `state` already implies it — the docs still
+        // accept the key, and spelling it out is the difference between "assumed"
+        // and "somebody forgot the state template".
         //
         // `(… or {}).get('state')` rather than `….state`: before the sensor's
         // first poll the attribute does not exist, and `None.state` throws in
         // Jinja — which puts a template error in Home Assistant's log at every
         // restart and leaves the switch unavailable with no explanation. An
-        // `unknown` pair reads OFF here, because the legacy template switch has
-        // no third state; the reason is on the sensor's own attribute and on the
-        // rule's row in Stage Utility.
+        // `unknown` pair reads OFF here, because a template switch has no third
+        // state; the reason is on the sensor's own attribute and on the rule's
+        // row in Stage Utility.
         //
-        // And NO `availability_template`, which is the obvious way to say
-        // "unknown" and the wrong one: an unavailable entity cannot be
-        // commanded. An unreachable Companion would then also stop the operator
-        // turning the device ON — the press path does not depend on the state
-        // variable at all, so a read failure must never take the switch away.
-        // Reading off and staying pressable is the trade taken deliberately.
+        // And NO `availability`, which is the obvious way to say "unknown" and
+        // the wrong one: an unavailable entity cannot be commanded. An
+        // unreachable Companion would then also stop the operator turning the
+        // device ON — the press path does not depend on the state variable at
+        // all, so a read failure must never take the switch away. Reading off
+        // and staying pressable is the trade taken deliberately.
         ...(p.binding
           ? [
-              `        value_template: "{{ (state_attr('${SENSOR_ENTITY}', '${p.base}') or {}).get('state') == 'on' }}"`,
+              `        state: "{{ (state_attr('${SENSOR_ENTITY}', '${p.base}') or {}).get('state') == 'on' }}"`,
             ]
           : ["        optimistic: true"]),
         "        turn_on:",
