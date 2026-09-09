@@ -3,6 +3,7 @@ import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue
 import {
   cuePairs,
   stateBindingOf,
+  stateBindingParams,
   STATE_OFF_DEFAULT,
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
@@ -470,6 +471,32 @@ function CueStateFields({
   // A variable that is bound but no longer in Companion's export — renamed or
   // deleted — is still offered, so the select shows what the rule actually says.
   const options = [...new Set([...customVariables, ...(variable ? [variable] : [])])].sort();
+
+  /**
+   * Write the whole binding, all three params, through the module that owns the
+   * keys.
+   *
+   * The select used to patch `stateVariable` alone. Clearing it therefore left
+   * `stateOnValue` and `stateOffValue` behind, so a pair unbound and later bound
+   * to a different variable inherited the values typed for the old one — a
+   * switch reporting on for a device that is off, with nothing on screen saying
+   * where "POWER=ON" came from. The raw values are carried across rather than
+   * `binding`'s: `binding` resolves a blank to the default, and writing "on"
+   * and "off" out explicitly would turn a field the operator left alone into
+   * one they had filled in.
+   */
+  const setVariable = (next: string) =>
+    onChange(
+      stateBindingParams(
+        next.trim()
+          ? {
+              variable: next,
+              onValue: String(params.stateOnValue ?? ""),
+              offValue: String(params.stateOffValue ?? ""),
+            }
+          : null,
+      ),
+    );
   return (
     <>
       <Row
@@ -477,7 +504,7 @@ function CueStateFields({
         hint={`A Companion custom variable your ON/OFF buttons set. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`}
       >
         {options.length > 0 ? (
-          <Select value={variable} onValueChange={(v) => onChange({ stateVariable: v })}>
+          <Select value={variable} onValueChange={setVariable}>
             <SelectTrigger className="w-full" aria-label="State variable">
               <SelectValue placeholder="No state" />
             </SelectTrigger>
@@ -494,7 +521,7 @@ function CueStateFields({
           // refused by the server otherwise, with the reason.
           <Input
             value={variable}
-            onChange={(e) => onChange({ stateVariable: e.target.value })}
+            onChange={(e) => setVariable(e.target.value)}
             placeholder="projectors_state"
             aria-label="State variable"
             className="h-7 text-footnote"
@@ -908,6 +935,12 @@ export function AutomationSection() {
   // generates the Home Assistant config from — so the row that offers a state
   // binding is exactly the row that would get one.
   const pairs = useMemo(() => cuePairs(rules), [rules]);
+  // The `_on` half's rule id to its pair's base, which is what decides both the
+  // row's state pill and whether the editor offers the three state fields at
+  // all: a binding on a cue with no partner reads a variable nothing ever shows,
+  // so it is not offered there rather than offered and ignored. One Map over the
+  // resolved pairs rather than a per-row lookup — 200 rules asking "am I half of
+  // a pair" is 200 passes over the whole rules list on every render.
   const pairBases = useMemo(
     () => new Map(pairs.map((p) => [p.on.id, p.base] as const)),
     [pairs],

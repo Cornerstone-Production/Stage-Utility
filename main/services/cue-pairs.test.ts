@@ -18,7 +18,6 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
-  bindablePair,
   boundCuePairs,
   cuePairs,
   defaultStateVariable,
@@ -185,14 +184,6 @@ describe("a pair's state binding", () => {
     const rules = [...bound(), cue("amps_on"), cue("amps_off")];
     assert.deepEqual(cuePairs(rules).map((p) => p.base), ["amps", "projectors"]);
     assert.deepEqual(boundCuePairs(rules).map((p) => p.base), ["projectors"]);
-  });
-
-  test("bindablePair answers for the _on half and for nothing else", () => {
-    const rules = [...bound(), cue("take_screens")];
-    assert.equal(bindablePair(rules, "id-projectors_on")?.base, "projectors");
-    assert.equal(bindablePair(rules, "id-projectors_off"), null);
-    assert.equal(bindablePair(rules, "id-take_screens"), null);
-    assert.equal(bindablePair(rules, "nope"), null);
   });
 
   test("the stored form writes every key, so clearing one saves", () => {

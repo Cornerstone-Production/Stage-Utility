@@ -397,6 +397,78 @@ describe("the state fields in the rule editor", () => {
     assert.equal(names.includes("Value meaning on"), false);
   });
 
+  test("CLEARING the select blanks the on and off values too", async () => {
+    // The select used to patch `stateVariable` alone, so clearing it left the
+    // values behind: rebind the pair to another variable later and it inherits
+    // "POWER=ON" from the old one, reporting on for a device that is off with
+    // nothing on screen saying where that string came from. This is the PATCH.
+    RULES = [
+      cue("amps_on", {
+        stateVariable: "amps_state",
+        stateOnValue: "POWER=ON",
+        stateOffValue: "STANDBY",
+      }),
+      cue("amps_off"),
+    ];
+    CUSTOM_VARIABLES = ["amps_state"];
+    await mount();
+    await open("amps_on");
+    const { fireEvent } = await import("@testing-library/react");
+    const select = document.querySelector('select[aria-label="State variable"]');
+    assert.equal(select === null, false, "the state select is not rendered");
+    await act(async () => {
+      fireEvent.change(select!, { target: { value: "" } });
+    });
+    await act(async () => {
+      screen.getByText("Save").click();
+    });
+    await settle();
+    const patch = requests.find((r) => r.url.includes("/api/automation/rules/rule-amps_on"));
+    assert.equal(typeof patch?.body, "string");
+    const params = (JSON.parse(String(patch?.body)) as {
+      trigger: { params: Record<string, string> };
+    }).trigger.params;
+    assert.deepEqual(
+      {
+        stateVariable: params.stateVariable,
+        stateOnValue: params.stateOnValue,
+        stateOffValue: params.stateOffValue,
+      },
+      { stateVariable: "", stateOnValue: "", stateOffValue: "" },
+    );
+  });
+
+  test("choosing a variable keeps the values already typed", async () => {
+    // The other half: writing all three keys must not overwrite what is there
+    // with the resolved defaults, which would turn a field the operator left
+    // alone into one they had filled in.
+    RULES = [cue("amps_on", { stateOnValue: "POWER=ON", stateOffValue: "STANDBY" }), cue("amps_off")];
+    CUSTOM_VARIABLES = ["amps_state"];
+    await mount();
+    await open("amps_on");
+    const { fireEvent } = await import("@testing-library/react");
+    const select = document.querySelector('select[aria-label="State variable"]');
+    await act(async () => {
+      fireEvent.change(select!, { target: { value: "amps_state" } });
+    });
+    await act(async () => {
+      screen.getByText("Save").click();
+    });
+    await settle();
+    const patch = requests.find((r) => r.url.includes("/api/automation/rules/rule-amps_on"));
+    const params = (JSON.parse(String(patch?.body)) as {
+      trigger: { params: Record<string, string> };
+    }).trigger.params;
+    assert.deepEqual(
+      {
+        stateVariable: params.stateVariable,
+        stateOnValue: params.stateOnValue,
+        stateOffValue: params.stateOffValue,
+      },
+      { stateVariable: "amps_state", stateOnValue: "POWER=ON", stateOffValue: "STANDBY" },
+    );
+  });
+
   test("choosing a variable saves it on the _on rule", async () => {
     // A control that renders is not a control that does anything — the named
     // scar in this repo. This is the PATCH the editor sends.

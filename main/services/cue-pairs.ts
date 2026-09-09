@@ -1,7 +1,8 @@
 // cue-pairs.ts — which cues are two halves of one thing, and what reads its state.
 //
-// PURE: no I/O, no engine. The settings page imports it to decide whether a rule
-// can carry a state binding, so nothing here may reach for a file or a socket.
+// PURE: no I/O, no engine. The settings page imports it — `cuePairs` for the
+// rows that may carry a state binding, `stateBindingParams` for what the editor
+// writes — so nothing here may reach for a file or a socket.
 //
 // An ON/OFF pair is the object a voice assistant is asked to turn on and off:
 // `<base>_on` and `<base>_off`, which is exactly what the Companion import
@@ -199,17 +200,6 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
 /** The pairs that have somewhere to read their state from. */
 export function boundCuePairs(rules: readonly Rule[]): CuePair[] {
   return cuePairs(rules).filter((p) => p.binding !== null);
-}
-
-/**
- * Which cue, if any, is the `_on` half of a pair that could carry a binding.
- *
- * The rule editor asks this: the three state fields appear on the `_on` half of
- * a pair and nowhere else, because a binding on a cue with no partner is a
- * setting that reads a variable nothing ever shows.
- */
-export function bindablePair(rules: readonly Rule[], ruleId: string): CuePair | null {
-  return cuePairs(rules).find((p) => p.on.id === ruleId) ?? null;
 }
 
 /**
