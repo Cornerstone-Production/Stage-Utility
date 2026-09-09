@@ -211,8 +211,12 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   // Side data, re-keyed. A key may be a layout OBJECT id (an inline slots-grid)
   // or a VIEW id (a slots view), so both maps are consulted.
   const skipped: string[] = [];
-  let slotBoards = 0;
-  let slotRows = 0;
+  // Keyed by the board that ends up on disk — (key, service type) — and holding
+  // the row count of whatever wrote it LAST. Counting writes instead double
+  // counted the retyped "all"-scope case, where the file's own board for the
+  // chosen type and the retyped source board land on the same key and only the
+  // second survives: the report claimed two boards and the rows of both.
+  const landedBoards = new Map<string, number>();
   for (const [oldKey, byServiceType] of Object.entries(bundle.sideData?.slots ?? {})) {
     const newKey = objectIdMap.get(oldKey) ?? viewIdMap.get(oldKey);
     if (!newKey) continue;
@@ -247,10 +251,14 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       // has ever used. There is nothing of the operator's to overwrite, and the
       // Keep/Replace choice on the import screen says as much.
       await slotsStore.setDefault(newKey, landing, fresh);
-      slotBoards++;
-      slotRows += fresh.length;
+      // Joined on a NUL: a slots key is a minted id and a service type id has
+      // already passed isSafeKey, so neither half can contain one.
+      landedBoards.set(`${newKey}\u0000${landing}`, fresh.length);
     }
   }
+  const slotBoards = landedBoards.size;
+  let slotRows = 0;
+  for (const n of landedBoards.values()) slotRows += n;
 
   await notesStore.init();
   for (const [oldId, content] of Object.entries(bundle.sideData?.notes ?? {})) {

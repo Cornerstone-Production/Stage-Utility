@@ -332,6 +332,11 @@ describe("landing a plan under a different service type", () => {
     const report = await applyViewBundle(b, { serviceTypeId: "st-dst" });
     const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
     assert.equal(landed["st-dst"]!.length, 1, "the file's own st-dst board overwrote the exported one");
+    // And the report counts what is ON DISK, not what was written. Counting
+    // writes reported two boards and three rows for one board of one row —
+    // the second write landed on the first's key and replaced it.
+    assert.equal(report.slotBoards, 1, "a board that was overwritten was still counted");
+    assert.equal(report.slotRows, 1, "the overwritten board's rows were still counted");
   });
 
   test("a view export ignores the chosen type rather than re-keying a guess", async () => {
