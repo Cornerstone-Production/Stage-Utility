@@ -298,12 +298,12 @@ function renamePass(
     // Half of a pair. Both halves rename, to matching names, or neither does.
     const partner = candidates.find((c) => c.cue.ruleId === partnerId);
     done.add(candidate.cue.ruleId);
-    if (partnerId) done.add(partnerId);
+    done.add(partnerId);
     const refuse = (why: string): void => {
       // ONE line for the pair, on the half the pass reached first: two lines
       // saying the same thing about one switch is a puzzle, not a warning.
       out.set(candidate.cue.ruleId, { patch: null, log: kept(candidate, why, true) });
-      if (partnerId) out.set(partnerId, { patch: null, log: null });
+      out.set(partnerId, { patch: null, log: null });
     };
 
     if (!partner) {
