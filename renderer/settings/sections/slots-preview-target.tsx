@@ -43,7 +43,12 @@ export function useSlotsPreview(slots: Slot[], dirty: boolean): PreviewResolutio
   const { serviceTypeId, planId } = editing.target;
   // The live-vs-editing question is answered in ONE place — the same store the
   // switcher's badge reads — so the caption and the badge can never disagree.
-  const wanted = dirty || !editing.onLive;
+  //
+  // `serviceTypeId` has to be there for an off-live target to mean anything: the
+  // switcher's native select carries a "Plan…" placeholder whose value decodes to
+  // a target with no service type at all, and asking the server to preview that
+  // spends a round trip to be told what the iframe is already showing.
+  const wanted = dirty || (!editing.onLive && !!serviceTypeId);
 
   const [resolved, setResolved] = useState<SlotsPreviewDTO | null>(null);
 

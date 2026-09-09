@@ -366,3 +366,30 @@ describe("the caption", () => {
     assert.equal(noteTitle(), "getaddrinfo ENOTFOUND");
   });
 });
+
+describe("a target with no service type", () => {
+  // The switcher's native select carries a "Plan…" placeholder, and picking it
+  // decodes to `{ serviceTypeId: null, planId: null }` — off the live plan, so the
+  // badge reads `editing`, but naming no board at all. Driving this in a browser
+  // is where it turned up: the request went out, the server could only answer for
+  // the live plan, and the round trip bought nothing.
+  test("asks for nothing while clean — there is no board to preview", async () => {
+    mount();
+    await settle();
+    resolveBodies = [];
+    await pick("");
+    assert.deepEqual(resolveBodies, [], "no service type is no board, and no board is nothing to resolve");
+    assert.equal(roster(), "none-at-all");
+    assert.equal(note(), "");
+  });
+
+  test("but unsaved edits are still resolved, so they can still be previewed", async () => {
+    dirty = true;
+    mount();
+    await settle();
+    resolveBodies = [];
+    await pick("");
+    assert.equal(resolveBodies.length >= 1, true);
+    assert.deepEqual(targets(), resolveBodies.map(() => ""), "with no target — the server answers for the live plan");
+  });
+});
