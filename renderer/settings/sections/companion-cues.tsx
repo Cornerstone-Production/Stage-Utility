@@ -30,7 +30,7 @@ import {
 } from "@main/services/companion-fingerprint";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CopyIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
+import { CopyIcon, DownloadIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
 import {
@@ -495,11 +495,45 @@ function KindTag({ kind }: { kind: "switch" | "script" }) {
   );
 }
 
-function SectionHeading({ title, count }: { title: string; count: number }) {
+/**
+ * A section's heading, with an optional Select all / Clear pair.
+ *
+ * Both act on the rows CURRENTLY VISIBLE in this section only — the caller
+ * decides what that means (every pair, or the single buttons a search has
+ * filtered to) and passes it in as `selectAllLabel`, which is also the
+ * accessible name: the singles section has a search field, and "Select all"
+ * alone would not say whether that means every button on Companion or just
+ * the seven the search has narrowed to.
+ */
+function SectionHeading({
+  title,
+  count,
+  onSelectAll,
+  onClear,
+  selectAllLabel,
+  clearLabel,
+}: {
+  title: string;
+  count: number;
+  onSelectAll?: () => void;
+  onClear?: () => void;
+  selectAllLabel?: string;
+  clearLabel?: string;
+}) {
   return (
     <div className="sticky top-0 z-10 flex items-baseline gap-2 bg-bg py-1">
       <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">{title}</span>
       <span className="text-caption2 text-fg-subtle">{count}</span>
+      {onSelectAll && onClear && (
+        <span className="ml-auto flex items-center gap-1">
+          <Button variant="transparent" size="small" aria-label={selectAllLabel} onClick={onSelectAll}>
+            Select all
+          </Button>
+          <Button variant="transparent" size="small" aria-label={clearLabel} onClick={onClear}>
+            Clear
+          </Button>
+        </span>
+      )}
     </div>
   );
 }
@@ -617,7 +651,22 @@ export function ImportPairsDialog({
               <p className="py-4 text-caption1 text-fg-muted">Reading Companion…</p>
             )}
 
-            <SectionHeading title="ON/OFF pairs" count={pairs.length} />
+            <SectionHeading
+              title="ON/OFF pairs"
+              count={pairs.length}
+              selectAllLabel="Select all pairs"
+              clearLabel="Clear pairs"
+              onSelectAll={() => {
+                const next = new Set(chosen);
+                for (const p of pairs) if (!p.exists) next.add(key(p));
+                setPicked(next);
+              }}
+              onClear={() => {
+                const next = new Set(chosen);
+                for (const p of pairs) next.delete(key(p));
+                setPicked(next);
+              }}
+            />
             <p className="pb-1 text-caption2 text-fg-subtle">
               Buttons whose labels differ only by ON/OFF. Each becomes two cues and one Home Assistant
               switch.
@@ -687,7 +736,22 @@ export function ImportPairsDialog({
             ))}
 
             <div className="mt-3">
-              <SectionHeading title="Single buttons" count={singles.length} />
+              <SectionHeading
+                title="Single buttons"
+                count={singles.length}
+                selectAllLabel={`Select all ${shown.filter((b) => !b.exists).length} shown`}
+                clearLabel="Clear single buttons"
+                onSelectAll={() => {
+                  const next = new Set(pickedButtons);
+                  for (const b of shown) if (!b.exists) next.add(buttonKey(b));
+                  setPickedButtons(next);
+                }}
+                onClear={() => {
+                  const next = new Set(pickedButtons);
+                  for (const b of shown) next.delete(buttonKey(b));
+                  setPickedButtons(next);
+                }}
+              />
               <p className="pb-1 text-caption2 text-fg-subtle">
                 Every other labelled button. Each becomes one cue and one Home Assistant script — nothing
                 here is ticked for you.
@@ -873,6 +937,15 @@ export function CueAccessCard() {
           </p>
           <Button variant="transparent" size="small" onClick={() => void showYaml()}>
             <CopyIcon className="size-3.5" /> Copy YAML
+          </Button>
+          {/* Clipboard writes are a secure-context API and fail on the plain-HTTP
+              LAN address every real install answers on — see prod-insecure-context
+              notes. A plain anchor download works there, so it stays even though
+              Copy YAML does not always. */}
+          <Button variant="transparent" size="small" asChild>
+            <a href="/api/cues/home-assistant.yaml" download>
+              <DownloadIcon className="size-3.5" /> Download YAML
+            </a>
           </Button>
         </div>
       </div>
