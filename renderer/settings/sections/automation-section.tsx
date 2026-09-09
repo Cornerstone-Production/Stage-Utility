@@ -1,4 +1,5 @@
 import { errorMessage } from "@main/services/errors";
+import { encodeAliases, parseAliases } from "@main/services/cue-aliases";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -335,6 +336,49 @@ function ActivityLog() {
 
 // ── One rule ──────────────────────────────────────────────────────────────────
 
+/**
+ * The names a cue used to answer to, each with a remove.
+ *
+ * Renders nothing when there are none, which is every cue nobody has renamed.
+ * Removing one is an ordinary rule save — it goes through the same Save button
+ * and the same server-side name check as any other edit — because a former name
+ * is a live URL and dropping it is a decision, not a tidy-up.
+ */
+function FormerNamesField({
+  params,
+  onChange,
+}: {
+  params: Record<string, string | number>;
+  onChange: (aliases: string) => void;
+}) {
+  const names = parseAliases(params);
+  if (names.length === 0) return null;
+  return (
+    <Row
+      label="Former names"
+      hint="Names this cue still answers to, kept when its Companion button was relabelled. Remove one and that URL stops resolving — re-paste the Home Assistant config first."
+    >
+      <span className="flex flex-wrap gap-1" data-cue-former-list={names.join(",")}>
+        {names.map((name) => (
+          <span
+            key={name}
+            className="inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-caption1 text-fg-muted"
+          >
+            {name}
+            <button
+              type="button"
+              aria-label={`Remove former name ${name}`}
+              onClick={() => onChange(encodeAliases(names.filter((n) => n !== name)))}
+            >
+              <Trash2Icon className="size-3 text-fg-subtle" />
+            </button>
+          </span>
+        ))}
+      </span>
+    </Row>
+  );
+}
+
 function RuleCard({
   rule,
   registry,
@@ -352,6 +396,7 @@ function RuleCard({
 
   useResyncOn([rule], () => setDraft(rule));
 
+  const formerNames = rule.trigger.id === CALL_TRIGGER_ID ? parseAliases(rule.trigger.params) : [];
   const trigger = registry.triggers.find((t) => t.id === draft.trigger.id) ?? null;
   const action = registry.actions.find((a) => a.id === draft.action.id) ?? null;
   const dirty = JSON.stringify(draft) !== JSON.stringify(rule);
@@ -401,7 +446,21 @@ function RuleCard({
           className="min-w-0 flex-1 text-left"
           onClick={() => setOpen((o) => !o)}
         >
-          <div className="truncate text-footnote font-medium text-fg">{rule.name}</div>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-footnote font-medium text-fg">{rule.name}</span>
+            {/* The names this cue used to answer to, quietly. A cue is renamed
+                when its Companion button is relabelled, and the old name stays
+                live — so this is the only place the rules list says that the URL
+                in somebody's Home Assistant config is not the name on the row. */}
+            {formerNames.length > 0 && (
+              <span
+                data-cue-former-names={formerNames.join(",")}
+                className="shrink-0 truncate text-caption2 text-fg-subtle"
+              >
+                was {formerNames.join(", ")}
+              </span>
+            )}
+          </div>
           <div className="truncate text-caption1 text-fg-muted">{summary}</div>
           {/* What the last reconcile found about this rule's Companion button.
               Inside the row's own button, so the way to act on a `button
@@ -450,15 +509,29 @@ function RuleCard({
               ))}
             </select>
           </Row>
-          {trigger?.params.map((p) => (
-            <ParamField
-              key={p.key}
-              spec={p}
-              value={draft.trigger.params[p.key]}
-              dynamicOptions={dynamicOptions}
-              onChange={(v) => setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, [p.key]: v } } })}
+          {trigger?.params
+            // `aliases` is a list, not a string to type. It renders below as one
+            // chip per former name with a remove — a text field over a
+            // comma-joined list of live URLs is a typo away from a switch in
+            // Home Assistant that stops resolving.
+            .filter((p) => p.key !== "aliases")
+            .map((p) => (
+              <ParamField
+                key={p.key}
+                spec={p}
+                value={draft.trigger.params[p.key]}
+                dynamicOptions={dynamicOptions}
+                onChange={(v) => setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, [p.key]: v } } })}
+              />
+            ))}
+          {draft.trigger.id === CALL_TRIGGER_ID && (
+            <FormerNamesField
+              params={draft.trigger.params}
+              onChange={(aliases) =>
+                setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, aliases } } })
+              }
             />
-          ))}
+          )}
 
           <Separator />
           <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">If</span>
