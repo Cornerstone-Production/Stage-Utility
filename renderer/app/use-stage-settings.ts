@@ -32,6 +32,7 @@ import { toast, confirm } from "../components/ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { confirmDiscardSlotEdits, useSlotsTarget } from "../settings/sections/slots-target-pill";
 import { registerTargetGuard } from "../settings/sections/editing-target";
+import { useSlotsPreview } from "../settings/sections/slots-preview-target";
 import type { SectionHandlers } from "../settings/types";
 import {
   useStageStateQuery,
@@ -221,29 +222,12 @@ export function useStageSettings(pinnedViewId?: string) {
     setLocalSlots([...rows].sort((a, b) => a.order - b.order));
   });
 
-  // Live draft preview: while slots are dirty, resolve the in-progress edits
-  // server-side (no save) so the preview iframe can show the draft exactly as the
-  // kiosk would. Debounced to avoid a request per keystroke; cleared when clean.
-  const [resolvedDraftSlots, setResolvedDraftSlots] = useState<Slot[] | null>(null);
-  useResyncOn([slotsDirty], () => {
-    if (!slotsDirty) setResolvedDraftSlots(null);
-  });
-
-  useEffect(() => {
-    if (!slotsDirty) return;
-    let cancelled = false;
-    const t = setTimeout(() => {
-      ipc<Slot[]>("views:resolveSlots", { slots: localSlots.map((s, i) => ({ ...s, order: i })) })
-        .then((resolved) => {
-          if (!cancelled) setResolvedDraftSlots(resolved);
-        })
-        .catch((err) => console.error("[settings:resolveDraftSlots]", err));
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [slotsDirty, localSlots]);
+  // The preview iframe's rows. Resolved server-side (no save) so the preview
+  // shows the board being EDITED — unsaved edits, and whichever plan the switcher
+  // is on — exactly as the kiosk would draw it. Null while the editor is on the
+  // live plan with nothing unsaved, which leaves the iframe showing the kiosk.
+  // See slots-preview-target.tsx for the rules and the debounce.
+  const slotsPreview = useSlotsPreview(localSlots, slotsDirty);
   // DnD sensors — mouse and touch deliberately separate.
   //
   // A single PointerSensor treats them identically: it claims the gesture on
@@ -957,8 +941,9 @@ export function useStageSettings(pinnedViewId?: string) {
     slotsDirty,
     isSavingSlots,
     isRefreshing,
-    resolvedDraftSlots,
+    slotsPreview,
     slotsTargetSide: slotsTarget.side,
+    slotsTargetTypeName: slotsTarget.typeName,
     slotsTargetLabel: slotsTarget.label,
     slotsTargetHasPlan: slotsTarget.hasPlan,
     slotsTargetHasOverride: slotsTarget.hasOverride,

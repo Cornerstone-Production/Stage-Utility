@@ -104,6 +104,22 @@ one while not.
 **Now** returns to the plan the screens are following, and the editor follows it
 forward from then on — including when auto mode advances it mid-session.
 
+The preview beside the editor follows the switcher too: step to next Sunday and
+the preview draws next Sunday's board with next Sunday's people in it, and a line
+under it names the board — "Previewing Sun, Sep 20 · 6 of 8 positions filled".
+On a **Default** target it reads "positions only, no plan": a default board is
+every week, so it has no roster and the rows show the positions they are linked
+to rather than guessing at a week's names. If Planning Center cannot be read the
+line says so and the rows again show positions only, with the reason on hover.
+The line is absent while the editor is on the live plan, where the preview is
+simply the kiosk.
+
+Only the slot rows follow the switcher. Everything else the preview draws — the
+view's top bar, the series and plan title — still comes from the plan the screens
+are following, so a preview of another week is headed with the live plan's title.
+An inline mic-slots object inside a custom layout previews on the layout editor's
+own canvas, which does not follow the switcher.
+
 Two modes, set on the Plan page:
 
 | Mode | The middle | The arrows |

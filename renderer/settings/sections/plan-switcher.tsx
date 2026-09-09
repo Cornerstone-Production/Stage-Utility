@@ -79,13 +79,21 @@ export function PlanSwitcher({ disabled }: { disabled?: boolean }) {
       types.push({ id: p.serviceTypeId, name: p.serviceTypeName });
     }
   }
+  // The live type's name is a fallback only for the LIVE type. Off it, it named
+  // another service type with the name of the one the screens are following —
+  // the same trap the pill's date label already carries a note about.
+  const liveTypeName = (id: string | null) =>
+    id && id === (state?.serviceTypeId ?? null) ? (state?.serviceTypeName ?? null) : null;
   if (target.serviceTypeId && !types.some((t) => t.id === target.serviceTypeId)) {
-    types.push({ id: target.serviceTypeId, name: state?.serviceTypeName ?? "This service type" });
+    types.push({
+      id: target.serviceTypeId,
+      name: liveTypeName(target.serviceTypeId) ?? "This service type",
+    });
   }
 
   const currentLabel =
     target.planId === null
-      ? `${typeName(plans, target.serviceTypeId) ?? state?.serviceTypeName ?? "Service type"} default`
+      ? `${typeName(plans, target.serviceTypeId) ?? liveTypeName(target.serviceTypeId) ?? "Service type"} default`
       : entryLabel(
           options.plans.find((e) => e.planId === target.planId) ?? {
             serviceTypeId: target.serviceTypeId ?? "",

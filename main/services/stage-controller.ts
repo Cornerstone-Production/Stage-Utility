@@ -39,7 +39,7 @@ import type {
 } from "../types/calendar.js";
 
 import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, SlotsScope, SlotTargetsDTO, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -942,6 +942,21 @@ export class StageController {
     return this.upcomingCache?.plans.find((p) => p.planId === planId) ?? null;
   }
 
+  /**
+   * A service type's name from the switcher's own cached list.
+   *
+   * The DEFAULT side of a board has no plan, so there is no plan row to read a
+   * type name off — and the type is not necessarily the one the screens are on.
+   * Without this, another type's default was named with the LIVE type's name, in
+   * the save toast ("Saved the Cornerstone Youth default" for a Weekend board)
+   * and in the revert and promote confirmations.
+   */
+  private cachedTypeName(serviceTypeId: string | null): string | null {
+    if (!serviceTypeId) return null;
+    if (serviceTypeId === this.state.serviceTypeId) return this.state.serviceTypeName;
+    return this.upcomingCache?.plans.find((p) => p.serviceTypeId === serviceTypeId)?.serviceTypeName ?? null;
+  }
+
   /** How the editor's plan switcher steps. Operator setting; changes nothing the
    *  machine follows. */
   async setPlanSwitcherMode(mode: PlanSwitcherMode): Promise<StageState> {
@@ -1766,16 +1781,87 @@ export class StageController {
 
   // ── Slots ─────────────────────────────────────────────────────────────
 
-  /** Legacy alias — `target` is an output id (or empty for primary); routes to
-   *  that output's View. Kept for the /api/slots endpoint + phone control page. */
-  /** Resolve raw draft slots against the current team + device state WITHOUT
-   *  persisting or broadcasting. Powers the Views page live draft preview: the
-   *  settings UI resolves in-progress (unsaved) edits so the preview matches what
-   *  the kiosk would show, exactly as recomputeResolved() does for saved slots. */
-  resolveSlotsPreview(slots: Slot[]): Slot[] {
-    return resolveSlots(slots, this.teamMembers, this.deviceStatuses);
+  /**
+   * Resolve raw slots for a PREVIEW — no persist, no broadcast, nothing written.
+   *
+   * Powers the slots editor's preview iframe, which shows in-progress edits
+   * exactly as the kiosk would draw them, and follows the editor's plan switcher
+   * off the plan the screens are following.
+   *
+   * `target` names the board being previewed. Absent, or equal to the plan the
+   * screens follow, it resolves against the live roster this controller already
+   * holds. Another plan is resolved against THAT plan's roster, fetched here and
+   * deliberately never stored: `this.teamMembers` is what every screen resolves
+   * against, and a preview of next Sunday must not put next Sunday's people on a
+   * stage display. The type's DEFAULT side (`planId: null`) resolves against
+   * nobody at all — a default board is every week, so it has no roster to guess
+   * at, and it shows positions.
+   *
+   * Device statuses are always this rig's: the rig is the rig whatever week is
+   * on screen.
+   *
+   * A roster that cannot be read is reported, not thrown — the rows are still
+   * worth drawing, and the caller says so over the preview. Only a malformed
+   * request is an error, and that is refused at the route.
+   */
+  async resolveSlotsPreview(
+    slots: Slot[],
+    target?: SlotsPreviewTarget,
+  ): Promise<SlotsPreviewDTO> {
+    const live =
+      !target ||
+      (target.serviceTypeId === this.state.serviceTypeId && target.planId === this.state.planId);
+    if (live) {
+      return { slots: resolveSlots(slots, this.teamMembers, this.deviceStatuses), roster: "live" };
+    }
+    if (!target.planId) {
+      return { slots: resolveSlots(slots, [], this.deviceStatuses), roster: "none" };
+    }
+    const { members, reason } = await this.previewRoster(target.serviceTypeId, target.planId);
+    if (reason) {
+      return { slots: resolveSlots(slots, [], this.deviceStatuses), roster: "unavailable", reason };
+    }
+    return { slots: resolveSlots(slots, members, this.deviceStatuses), roster: "plan" };
   }
 
+  /**
+   * One plan's roster, for a preview only.
+   *
+   * Returns the failure rather than throwing it, and rather than logging it and
+   * pretending nobody was scheduled: the two read identically in the rows, and
+   * an operator looking at an empty board has to be told which it was.
+   */
+  private async previewRoster(
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<{ members: TeamMemberDTO[]; reason: string | null }> {
+    // ONE place builds the line and the reason, so the log-injection scan has one
+    // interpolation to see and the two failure branches cannot drift apart.
+    const unavailable = (raw: string) => {
+      console.warn(
+        `[stage-controller] preview roster for ${scrub(serviceTypeId)}:${scrub(planId)} unavailable: ${scrub(raw)}`,
+      );
+      return { members: [] as TeamMemberDTO[], reason: scrub(raw) };
+    };
+    if (!this.pcoAppId || !this.pcoSecret) return unavailable("Planning Center is not configured.");
+    try {
+      const members = await pcoService.listTeamMembers(
+        this.pcoAppId,
+        this.pcoSecret,
+        serviceTypeId,
+        planId,
+      );
+      return { members, reason: null };
+    } catch (err) {
+      // The MESSAGE, not scrubError's stack: this string is shown to an operator
+      // as a tooltip over the preview, and a stack trace there tells them nothing
+      // they can act on.
+      return unavailable(errorMessage(err));
+    }
+  }
+
+  /** Legacy alias — `target` is an output id (or empty for primary); routes to
+   *  that output's View. Kept for the /api/slots endpoint + phone control page. */
   async setSlots(target: string, slots: Slot[]): Promise<StageState> {
     return this.setViewSlots(this.viewIdForTarget(target), slots);
   }
@@ -2046,7 +2132,7 @@ export class StageController {
       // not in it; planLabel() falls back rather than inventing a date.
       serviceTypeName: isCurrent
         ? this.state.serviceTypeName
-        : (row?.serviceTypeName ?? (serviceTypeId === this.state.serviceTypeId ? this.state.serviceTypeName : null)),
+        : (row?.serviceTypeName ?? this.cachedTypeName(serviceTypeId)),
       planId,
       planDates: isCurrent ? this.state.planDates : (row?.dates ?? null),
       planSortDate: isCurrent ? this.currentPlanSortDate : (row?.sortDate ?? null),

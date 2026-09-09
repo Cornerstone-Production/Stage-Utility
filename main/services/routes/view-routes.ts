@@ -23,7 +23,7 @@ import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BY
 import { isLayoutShape } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
-import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsScope } from "../../types/stage.js";
+import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
 import { LayoutConflictError, SlotsNotFoundError, stageController } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
@@ -145,17 +145,42 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // POST /api/views/resolve-slots — { slots } → resolved Slot[] (no persist).
-    // Powers the Views page live draft preview: resolves in-progress edits against
-    // the current team + device state so the preview matches the kiosk, without
-    // saving. Must precede the /api/views/:id/slots matcher.
+    // POST /api/views/resolve-slots — { slots, target? } → { slots, roster, reason? }.
+    // Powers the slots editor's preview: resolves rows against a plan's roster and
+    // this rig's device state without saving anything. `target` names the board
+    // being previewed, for an editor the plan switcher has pointed at another
+    // week; absent, it is the plan the screens are following. Must precede the
+    // /api/views/:id/slots matcher.
     if (method === "POST" && pathname === "/api/views/resolve-slots") {
       const body = await readBody(req) as Record<string, unknown>;
       if (!Array.isArray(body.slots)) {
         error(res, "body.slots (array) required");
         return;
       }
-      json(res, stageController.resolveSlotsPreview(body.slots as Slot[]));
+      // Validated rather than coerced. A half-understood target would resolve
+      // against the WRONG WEEK's people under an ordinary 200, which is worse
+      // than a refusal: the operator has no way to tell whose names those are.
+      let target: SlotsPreviewTarget | undefined;
+      if (body.target !== undefined && body.target !== null) {
+        if (typeof body.target !== "object" || Array.isArray(body.target)) {
+          error(res, "body.target must be an object");
+          return;
+        }
+        const t = body.target as Record<string, unknown>;
+        if (typeof t.serviceTypeId !== "string" || t.serviceTypeId === "") {
+          error(res, "body.target.serviceTypeId must be a non-empty string");
+          return;
+        }
+        // Null is the type's DEFAULT board and is meaningful. An empty string is
+        // not a plan id, and coercing it to null would silently preview the
+        // default for a caller that meant to name a week.
+        if (t.planId !== null && (typeof t.planId !== "string" || t.planId === "")) {
+          error(res, "body.target.planId must be a non-empty string or null");
+          return;
+        }
+        target = { serviceTypeId: t.serviceTypeId, planId: t.planId };
+      }
+      json(res, await stageController.resolveSlotsPreview(body.slots as Slot[], target));
       return;
     }
 

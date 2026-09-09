@@ -588,9 +588,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     }
 
     case "views:resolveSlots":
-      // Resolve draft slots against live team + device state WITHOUT saving —
-      // powers the Views live draft preview. Returns resolved Slot[].
-      return post<T>("/api/views/resolve-slots", { slots: p.slots });
+      // Resolve slots against a plan's roster and this rig's device state WITHOUT
+      // saving — powers the slots editor's preview. `target` names the board being
+      // previewed; omitted, the server answers for the plan the screens follow.
+      // Returns { slots, roster, reason? }.
+      return post<T>("/api/views/resolve-slots", { slots: p.slots, target: p.target });
 
     case "layoutObjects:setSlots": {
       const id = p.id as string;

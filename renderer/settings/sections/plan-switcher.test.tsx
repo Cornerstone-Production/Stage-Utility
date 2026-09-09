@@ -52,6 +52,15 @@ let requests: { url: string; method: string; body: string | null }[] = [];
  *  were written against. */
 let datesKnown = false;
 
+/** Does the stubbed server know this TYPE's name?
+ *
+ *  The real one does for a type in its upcoming cache and does not for one that
+ *  has aged out or was never in it — getSlotTargets answers `serviceTypeName:
+ *  null` there rather than guessing. Default true, which is the ordinary case;
+ *  false is where the renderer's own fallback decides what an operator reads,
+ *  and where it used to substitute the LIVE type's name. */
+let typeNamesKnown = true;
+
 const PLANS: UpcomingPlan[] = [
   { serviceTypeId: YOUTH, serviceTypeName: "Youth", planId: "y1", title: "Youth night", sortDate: "2026-09-09T23:00:00Z", dates: "September 9, 2026", isCurrent: false },
   { serviceTypeId: SUN, serviceTypeName: "Sunday", planId: LIVE_PLAN, title: "Sunday", sortDate: "2026-09-13T14:00:00Z", dates: "September 13, 2026", isCurrent: true },
@@ -94,7 +103,7 @@ const STATE = {
       scope: "view",
       key: "v1",
       serviceTypeId: q.get("serviceTypeId"),
-      serviceTypeName: q.get("serviceTypeId") === SUN ? "Sunday" : "Youth",
+      serviceTypeName: typeNamesKnown ? (q.get("serviceTypeId") === SUN ? "Sunday" : "Youth") : null,
       planId: q.get("planId"),
       planDates: row?.dates ?? null,
       planSortDate: row?.sortDate ?? null,
@@ -207,6 +216,7 @@ beforeEach(() => {
   mode = "upcoming";
   unavailable = undefined;
   datesKnown = false;
+  typeNamesKnown = true;
 });
 afterEach(async () => {
   cleanup();
@@ -542,15 +552,23 @@ describe("the pill's date label", () => {
 });
 
 describe("the save toast", () => {
-  /** Which toast variant the last announceSaved() raised. */
+  /** Which toast variant the last announceSaved() raised, and what it said. */
   let raised: string[] = [];
+  let said: string[] = [];
   const realSuccess = toast.success;
   const realInfo = toast.info;
 
   beforeEach(() => {
     raised = [];
-    toast.success = () => void raised.push("success");
-    toast.info = () => void raised.push("info");
+    said = [];
+    toast.success = (m?: unknown) => {
+      raised.push("success");
+      said.push(String(m));
+    };
+    toast.info = (m?: unknown) => {
+      raised.push("info");
+      said.push(String(m));
+    };
   });
   after(() => {
     toast.success = realSuccess;
@@ -574,5 +592,39 @@ describe("the save toast", () => {
       ["info"],
       "a save that changed nothing on any screen must not read the same as one that changed the wall",
     );
+  });
+
+  // Naming a DEFAULT board is the case with no plan row to read a type name off,
+  // so it was named with the LIVE type's name: saving the Youth default reported
+  // "Saved the Sunday default". The same string names the board in the revert and
+  // promote confirmations, both of which delete or overwrite one.
+  test("names the service type BEING EDITED", async () => {
+    mount();
+    await settle();
+    await pick(encodeTarget({ serviceTypeId: YOUTH, planId: null }));
+    await press("save");
+    assert.deepEqual(said, ["Saved the Youth default"]);
+  });
+
+  test("says nothing rather than the LIVE type's name when the server names none", async () => {
+    typeNamesKnown = false;
+    mount();
+    await settle();
+    await pick(encodeTarget({ serviceTypeId: YOUTH, planId: null }));
+    await press("save");
+    assert.deepEqual(
+      said,
+      ["Saved the default"],
+      "falling back to the live type's name reported saving the Sunday default after saving the Youth one",
+    );
+  });
+
+  test("and still uses the live type's name when THAT is the one being edited", async () => {
+    typeNamesKnown = false;
+    mount();
+    await settle();
+    await pick(encodeTarget({ serviceTypeId: SUN, planId: null }));
+    await press("save");
+    assert.deepEqual(said, ["Saved the Sunday default"], "the fallback is right for the live type, and only for it");
   });
 });
