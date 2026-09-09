@@ -668,7 +668,7 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
 
 /** Hourly. Long enough that a Companion being edited settles, short enough that
  *  a button moved on Thursday is amber before Sunday. */
-const RECONCILE_EVERY_MS = 60 * 60 * 1000;
+export const RECONCILE_EVERY_MS = 60 * 60 * 1000;
 
 let timer: NodeJS.Timeout | null = null;
 
@@ -688,7 +688,11 @@ export function startCompanionReconcile(hasHost: boolean): void {
   timer.unref();
 }
 
-function stopCompanionReconcile(): void {
+/**
+ * Disarm it. Exported for the test that checks the lifecycle, and because
+ * "start(false)" is a strange way for anything else to say "stop".
+ */
+export function stopCompanionReconcile(): void {
   if (timer) {
     clearInterval(timer);
     timer = null;
