@@ -197,6 +197,37 @@ export function companionExportFixture(): Record<string, unknown> {
       // The pre-5.x spelling, so a 3.x export is not silently module-less.
       "conn-legacy": { label: "Old Thing", instance_type: "generic-tcp-udp" },
     },
+    // Custom variables, keyed by NAME with the definition as the value — the
+    // only part of this document a cue's state binding reads, and the part the
+    // 5.0.3 export this fixture was built from happened not to have at all
+    // (an install with none omits the key, which is why customVariableNames
+    // treats an absent map as an empty list rather than as an error).
+    //
+    // Two of these are here to be REFUSED: `not a name` and `state:projectors`
+    // are keys Companion's own value API could never answer for, and offering
+    // one in the import dialog would bind a cue to a permanent 404.
+    custom_variables: {
+      lobby_tvs: {
+        description: "on/off, set by the Lobby TVs buttons",
+        defaultValue: "off",
+        persistCurrentValue: true,
+        sortOrder: 0,
+      },
+      "rig.state": {
+        description: "on/off, set by the Rig Startup and Rig Shutdown buttons",
+        defaultValue: "off",
+        persistCurrentValue: true,
+        sortOrder: 1,
+      },
+      house_lights_state: {
+        description: "on/off",
+        defaultValue: "off",
+        persistCurrentValue: false,
+        sortOrder: 2,
+      },
+      "not a name": { description: "", defaultValue: "", persistCurrentValue: false, sortOrder: 3 },
+      "state:projectors": { description: "", defaultValue: "", persistCurrentValue: false, sortOrder: 4 },
+    },
     pages: {
       "1": page(1, FIXTURE_PAGES.screens, [
         // A clean pair.

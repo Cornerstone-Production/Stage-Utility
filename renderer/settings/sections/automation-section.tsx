@@ -1,5 +1,12 @@
 import { errorMessage } from "@main/services/errors";
-import { encodeAliases, parseAliases } from "@main/services/cue-aliases";
+import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
+import {
+  cuePairs,
+  stateBindingOf,
+  stateBindingParams,
+  STATE_OFF_DEFAULT,
+  STATE_ON_DEFAULT,
+} from "@main/services/cue-pairs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,7 +19,13 @@ import {
   InfoHint,
   Input,
   NumberInput,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Separator,
+  Status,
   Switch,
   toast,
 } from "../../components/ui";
@@ -23,9 +36,6 @@ import {
   CueButtonStatus,
   ImportPairsDialog,
 } from "./companion-cues";
-
-/** The one trigger that only ever runs because something CALLED it. */
-const CALL_TRIGGER_ID = "call.by-name";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
@@ -64,6 +74,16 @@ interface Rule {
   cooldownSec: number;
   oncePerService: boolean;
   confirmRequired?: boolean;
+}
+
+/** One bound pair's state, as `GET /api/cues/states` sends it. */
+interface CueStateRow {
+  on: string;
+  off: string;
+  variable: string;
+  value: string | null;
+  state: "on" | "off" | "unknown";
+  reason?: string;
 }
 
 interface LogEntry {
@@ -379,15 +399,178 @@ function FormerNamesField({
   );
 }
 
+/**
+ * One pair's row out of the states answer, or null when it has none.
+ *
+ * `Object.hasOwn` rather than `states[base]`: the key is the pair's base, which
+ * is half of a cue name, and a pair called `constructor_on`/`constructor_off`
+ * read `Object.prototype.constructor` straight off the prototype chain. That is
+ * a function, so it is truthy, so the row grew a pill — an amber dot with no
+ * word beside it, saying nothing at all about a pair that is simply not in the
+ * answer. `__proto__`, `prototype` and `toString` are the same shape.
+ */
+function cueStateFor(
+  states: Record<string, CueStateRow> | undefined,
+  base: string | null,
+): CueStateRow | null {
+  if (!states || base === null || !Object.hasOwn(states, base)) return null;
+  return states[base] ?? null;
+}
+
+/**
+ * What a bound pair's device is actually doing, on the `_on` half's row.
+ *
+ * The `_off` half shows nothing: one pair is one thing, and a second pill saying
+ * the same word twice reads as two devices. Renders nothing at all for an
+ * unbound pair or a cue that is not half of one — an "unknown" pill on every
+ * rule in the list would be noise nobody could act on.
+ */
+function CuePairState({ base, state }: { base: string; state: CueStateRow }) {
+  const variant = state.state === "on" ? "success" : state.state === "off" ? "neutral" : "warning";
+  return (
+    <span
+      className="flex min-w-0 items-center gap-1.5"
+      // The pair, always, beside the word. `data-cue-state` alone is not enough
+      // to see a pill that should not be there: a row that took its state off
+      // the prototype chain rendered a dot with no word AND no state attribute,
+      // so nothing could count it.
+      data-cue-pair={base}
+      data-cue-state={state.state}
+      // The reason on hover rather than on the row: it is a sentence, and the
+      // row already carries the rule name and the summary.
+      title={state.reason ? `${state.variable}: ${state.reason}` : state.variable}
+    >
+      <Status variant={variant}>{state.state}</Status>
+    </span>
+  );
+}
+
+/**
+ * The three state-binding fields, on the `_on` half of a pair and nowhere else.
+ *
+ * A binding on a cue with no partner reads a variable nothing ever shows, so the
+ * fields are not offered there at all rather than offered and ignored.
+ *
+ * The variable is a SELECT of what Companion has, with a text field as well
+ * whenever the export could not be read — otherwise an unreachable Companion
+ * would mean an existing binding could not even be seen, let alone cleared.
+ */
+function CueStateFields({
+  params,
+  base,
+  customVariables,
+  onChange,
+}: {
+  params: Record<string, string | number>;
+  base: string;
+  customVariables: string[];
+  onChange: (patch: Record<string, string>) => void;
+}) {
+  const binding = stateBindingOf(params);
+  const variable = String(params.stateVariable ?? "");
+  // A variable that is bound but no longer in Companion's export — renamed or
+  // deleted — is still offered, so the select shows what the rule actually says.
+  const options = [...new Set([...customVariables, ...(variable ? [variable] : [])])].sort();
+
+  /**
+   * Write the whole binding, all three params, through the module that owns the
+   * keys.
+   *
+   * The select used to patch `stateVariable` alone. Clearing it therefore left
+   * `stateOnValue` and `stateOffValue` behind, so a pair unbound and later bound
+   * to a different variable inherited the values typed for the old one — a
+   * switch reporting on for a device that is off, with nothing on screen saying
+   * where "POWER=ON" came from. The raw values are carried across rather than
+   * `binding`'s: `binding` resolves a blank to the default, and writing "on"
+   * and "off" out explicitly would turn a field the operator left alone into
+   * one they had filled in.
+   */
+  const setVariable = (next: string) =>
+    onChange(
+      stateBindingParams(
+        next.trim()
+          ? {
+              variable: next,
+              onValue: String(params.stateOnValue ?? ""),
+              offValue: String(params.stateOffValue ?? ""),
+            }
+          : null,
+      ),
+    );
+  return (
+    <>
+      <Row
+        label="State variable"
+        hint={`A Companion custom variable your ON/OFF buttons set. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`}
+      >
+        {options.length > 0 ? (
+          <Select value={variable} onValueChange={setVariable}>
+            <SelectTrigger className="w-full" aria-label="State variable">
+              <SelectValue placeholder="No state" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">No state</SelectItem>
+              {options.map((name) => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          // Companion could not be read and nothing is bound: a text field, so
+          // the binding can still be typed. Letters, digits, _, - and . are
+          // refused by the server otherwise, with the reason.
+          <Input
+            value={variable}
+            onChange={(e) => setVariable(e.target.value)}
+            placeholder="projectors_state"
+            aria-label="State variable"
+            className="h-7 text-footnote"
+          />
+        )}
+      </Row>
+      {binding && (
+        <>
+          <Row label="Value meaning on" hint={`What the variable holds when it is on. Blank means "${STATE_ON_DEFAULT}".`}>
+            <Input
+              value={String(params.stateOnValue ?? "")}
+              onChange={(e) => onChange({ stateOnValue: e.target.value })}
+              placeholder={STATE_ON_DEFAULT}
+              aria-label="Value meaning on"
+              className="h-7 text-footnote"
+            />
+          </Row>
+          <Row label="Value meaning off" hint={`What the variable holds when it is off. Blank means "${STATE_OFF_DEFAULT}".`}>
+            <Input
+              value={String(params.stateOffValue ?? "")}
+              onChange={(e) => onChange({ stateOffValue: e.target.value })}
+              placeholder={STATE_OFF_DEFAULT}
+              aria-label="Value meaning off"
+              className="h-7 text-footnote"
+            />
+          </Row>
+        </>
+      )}
+    </>
+  );
+}
+
 function RuleCard({
   rule,
   registry,
   dynamicOptions,
+  pairBase,
+  cueState,
+  customVariables,
   onChanged,
 }: {
   rule: Rule;
   registry: Registry;
   dynamicOptions: Record<string, { value: string; label: string }[]>;
+  /** The pair's base when this rule is its `_on` half, else null. */
+  pairBase: string | null;
+  /** This pair's state, when it has a binding and the route answered. */
+  cueState: CueStateRow | null;
+  customVariables: string[];
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -477,6 +660,11 @@ function RuleCard({
               editor and its picker. Renders nothing for any other action, and
               nothing for a rule that has never been reconciled. */}
           {rule.action.id === "companion.press" && <CueButtonStatus params={rule.action.params} />}
+          {/* What the device is actually doing, for a pair bound to a Companion
+              custom variable. Inside the row's own button like the status pill
+              above, so pressing the thing saying `unknown` opens the editor
+              that can fix it. */}
+          {cueState && pairBase !== null && <CuePairState base={pairBase} state={cueState} />}
         </button>
         <Button variant="transparent" size="small" onClick={() => void testFire()} aria-label="Test fire">
           <PlayIcon className="size-3.5" /> Test
@@ -523,7 +711,11 @@ function RuleCard({
             // chip per former name with a remove — a text field over a
             // comma-joined list of live URLs is a typo away from a switch in
             // Home Assistant that stops resolving.
-            .filter((p) => p.key !== "aliases")
+            // `aliases` is a list; the three `state*` params are rendered by
+            // CueStateFields below, and only for the `_on` half of a pair. Three
+            // text fields on every cue that cannot use them would read as three
+            // settings that do nothing.
+            .filter((p) => p.key !== "aliases" && !p.key.startsWith("state"))
             .map((p) => (
               <ParamField
                 key={p.key}
@@ -538,6 +730,16 @@ function RuleCard({
               params={draft.trigger.params}
               onChange={(aliases) =>
                 setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, aliases } } })
+              }
+            />
+          )}
+          {draft.trigger.id === CALL_TRIGGER_ID && pairBase !== null && (
+            <CueStateFields
+              params={draft.trigger.params}
+              base={pairBase}
+              customVariables={customVariables}
+              onChange={(patch) =>
+                setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, ...patch } } })
               }
             />
           )}
@@ -724,8 +926,50 @@ export function AutomationSection() {
     [rt, rtCmds, planItems],
   );
 
-  const rules = data?.rules ?? [];
+  // Memoised because the pair resolution below depends on it: `data?.rules ?? []`
+  // is a new array on every render, which would re-resolve every pair each time.
+  const rules = useMemo(() => data?.rules ?? [], [data]);
   const settings = data?.settings ?? { simulate: true, disarmed: false };
+
+  // The ON/OFF pairs among the rules, resolved by the same module the server
+  // generates the Home Assistant config from — so the row that offers a state
+  // binding is exactly the row that would get one.
+  const pairs = useMemo(() => cuePairs(rules), [rules]);
+  // The `_on` half's rule id to its pair's base, which is what decides both the
+  // row's state pill and whether the editor offers the three state fields at
+  // all: a binding on a cue with no partner reads a variable nothing ever shows,
+  // so it is not offered there rather than offered and ignored. One Map over the
+  // resolved pairs rather than a per-row lookup — 200 rules asking "am I half of
+  // a pair" is 200 passes over the whole rules list on every render.
+  const pairBases = useMemo(
+    () => new Map(pairs.map((p) => [p.on.id, p.base] as const)),
+    [pairs],
+  );
+  const anyBinding = useMemo(() => pairs.some((p) => p.binding !== null), [pairs]);
+
+  // The custom variables Companion has, for the editor's select. Read from the
+  // same offer the import dialog uses, and only worth asking for when there is
+  // a pair that could be bound.
+  const { data: companionPairs } = useQuery({
+    queryKey: ["companion:pairs"],
+    queryFn: () => invoke<{ customVariables?: string[] }>("companion:pairs"),
+    enabled: pairBases.size > 0,
+  });
+
+  /**
+   * Every bound pair's real state, while this page is OPEN.
+   *
+   * react-query's `refetchInterval` stops when the component unmounts, which is
+   * the whole gate: leave the Automation page and nothing polls Companion. The
+   * query is not enabled at all until some pair has a binding, so an install
+   * that does not use this never asks.
+   */
+  const { data: cueStateData, error: cueStateError } = useQuery({
+    queryKey: ["cues:states"],
+    queryFn: () => invoke<{ states: Record<string, CueStateRow> }>("cues:states"),
+    enabled: anyBinding,
+    refetchInterval: 10_000,
+  });
 
   async function setSettings(patch: Record<string, boolean>) {
     await invoke("automation:setSettings", patch);
@@ -791,6 +1035,17 @@ export function AutomationSection() {
 
       {registry && (
         <div className="flex flex-col gap-2">
+          {/* The route itself failed — not a pair reading unknown, which has its
+              own pill and its own reason. Without this the pills simply stopped
+              appearing, which looks exactly like a set of pairs with no
+              bindings. One muted line, above the list, because it is about all
+              of them at once; the pills are left alone rather than turned amber,
+              since nothing was read and a pill would be a guess. */}
+          {cueStateError !== null && anyBinding && (
+            <p className="text-caption1 text-fg-muted" data-cue-state-error="">
+              Cue state unavailable: {errorMessage(cueStateError)}
+            </p>
+          )}
           {rules.length === 0 ? (
             <p className="text-caption1 text-fg-muted">
               No rules yet. Start with the <span className="font-medium text-fg">Write a log message</span> action —
@@ -804,6 +1059,9 @@ export function AutomationSection() {
                 rule={r}
                 registry={registry}
                 dynamicOptions={dynamicOptions}
+                pairBase={pairBases.get(r.id) ?? null}
+                cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
+                customVariables={companionPairs?.customVariables ?? []}
                 onChanged={refresh}
               />
             ))

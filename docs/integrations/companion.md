@@ -154,6 +154,12 @@ different televisions, and crossing them is the kind of mistake found out during
 setup. When the same label does appear on two pages, both cues are named after
 their page so neither is lost.
 
+Each pair row has a **State** column: pick the Companion custom variable that
+holds what the device is actually doing, and the generated Home Assistant switch
+reports that rather than what it last asked for. See
+[Real state](#real-state) — a variable named after the pair (`projectors` or
+`projectors_state`) is picked for you.
+
 Each imported pair becomes two rules with **no service is live** and a two-second
 cooldown. They are ordinary rules afterwards — edit, disable or delete them like
 any other. Re-running the import skips names that already exist and tells you
@@ -264,9 +270,66 @@ commands of their own. Paste it into
 stage_utility_token: "Bearer su_..."
 ```
 
-and reload. The switches are `optimistic: true` — Stage Utility reports that it
-dispatched the press and nothing more, so Home Assistant shows what it asked for
-rather than what the device did.
+and reload. A switch is `optimistic: true` unless its pair has a **state
+variable** — Stage Utility reports that it dispatched the press and nothing more,
+so Home Assistant shows what it asked for rather than what the device did.
+
+### Real state
+
+Companion answers a press the moment it hands it to a control and never says what
+happened at the other end, so an optimistic switch still reads *on* for a
+projector somebody turned off at the wall. Bind the pair to a Companion **custom
+variable** and it reports the truth instead.
+
+In Companion:
+
+1. create a custom variable, one per pair — `projectors_state` is the name this
+   looks for by default, and so is `projectors`;
+2. add a **Set custom variable** action to the pair's ON button setting it to
+   `on`, and one to the OFF button setting it to `off`.
+
+In Stage Utility, either pick the variable in the **State** column when you import
+the pair, or open the pair's `_on` cue and set **State variable**. The `_off` half
+inherits it. If your buttons set something other than `on`/`off` — `POWER=ON`,
+`1` — set **Value meaning on** and **Value meaning off** to match; they may not be
+the same string.
+
+The comparison is **exact and case-sensitive**, after trimming whitespace from
+both ends: a variable holding `ON` does not match the default `on`, and reads
+*unknown*. Set **Value meaning on** to `ON` or have the button write `on`.
+
+The generated YAML then also carries one `rest` sensor polling
+`GET /api/cues/states` every ten seconds, with an attribute per bound pair, and
+each bound switch reads its own attribute off it instead of being optimistic. One
+sensor covers every pair. Unbound pairs are untouched and stay optimistic.
+
+Stage Utility only ever **reads** the variable. The state has to come from the
+buttons that did the work, or it is the same optimism one system further along.
+
+A pair reads **unknown** when the variable holds something that is neither value,
+when Companion does not have a variable by that name, or when Companion cannot be
+reached. The rule's row in Settings → Automation shows an amber `unknown` pill
+with the reason, `/api/cues/states` carries it as `reason`, and the log says so
+once per change:
+
+```
+[cues] state of projectors_state (projectors) unreadable: no such custom variable in Companion
+```
+
+In Home Assistant an unknown pair reads *off*, because a template switch has no
+third state — the reason is on the sensor's attribute and on the rule's row. It
+stays **pressable**: the generated switch carries no `availability_template`, on
+purpose, because an unavailable entity cannot be commanded and an unreachable
+Companion would then also stop you turning the device on. Pressing a cue never
+depends on the state variable.
+
+If the whole read fails rather than one pair — the server could not answer at all
+— Settings → Automation says so in one line above the rules list and shows no
+pills, rather than leaving them out silently.
+
+Nothing polls Companion in the background: the variables are read when
+`/api/cues/states` is called and the answer is served for five seconds, so an
+install nobody polls costs nothing.
 
 ## What the module exposes
 

@@ -29,6 +29,8 @@ import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, CALL_CHANNEL, CALL_TRIGGER_ID, isValidCueName, triggersForChannel } from "./automation-triggers.js";
+import { stateBindingProblem } from "./cue-pairs.js";
+import { cueStates } from "./cue-states.js";
 import { parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
@@ -121,7 +123,8 @@ class AutomationEngine {
   }
 
   /**
-   * Refuse a cue name that is blank, malformed or already taken.
+   * Refuse a cue whose name is blank, malformed or already taken — or whose
+   * state binding could never be read.
    *
    * A cue name IS a URL and a Home Assistant entity id, and two rules answering
    * to one name means `POST /api/cues/projectors_off` picks whichever happens to
@@ -136,7 +139,7 @@ class AutomationEngine {
    * refused — a name may not be another rule's former name, and a former name
    * may not be another rule's name.
    */
-  private assertCueNameFree(rule: Pick<Rule, "trigger">, exceptId: string | null): void {
+  private assertCueValid(rule: Pick<Rule, "trigger">, exceptId: string | null): void {
     if (rule.trigger?.id !== CALL_TRIGGER_ID) return;
     const name = String(rule.trigger.params?.name ?? "").trim().toLowerCase();
     if (!name) throw new Error("A called cue needs a name");
@@ -182,31 +185,52 @@ class AutomationEngine {
         );
       }
     }
+
+    // The state binding, refused here rather than at read time: a variable name
+    // Companion could not have is a switch that reads unknown forever, and
+    // nothing about that says which rule is wrong. See cue-pairs.ts.
+    const problem = stateBindingProblem(rule.trigger.params ?? {});
+    if (problem) throw new Error(problem);
+  }
+
+  /**
+   * The rules changed: tell the pages, and forget what a pair's state was.
+   *
+   * ONE method rather than the same two lines at three call sites — add, update
+   * and remove — because the cue-state cache is invisible from here and the
+   * copy that forgot to drop it is the one that reads five seconds stale. It
+   * matters on save: a binding the operator has just changed is read back
+   * through the OLD variable, and the row they are looking at contradicts what
+   * they typed until the window passes. See cue-states.ts.
+   */
+  private rulesChanged(): void {
+    broadcast("automation:rules", { rules: this.listRules() });
+    cueStates.invalidate();
   }
 
   async addRule(rule: Omit<Rule, "id">): Promise<Rule> {
-    this.assertCueNameFree(rule, null);
+    this.assertCueValid(rule, null);
     const next: Rule = { ...rule, id: randomUUID() };
     this.rules.push(next);
     await automationStore.saveRules(this.rules);
-    broadcast("automation:rules", { rules: this.listRules() });
+    this.rulesChanged();
     return next;
   }
 
   async updateRule(id: string, patch: Partial<Omit<Rule, "id">>): Promise<Rule[]> {
     const r = this.rules.find((x) => x.id === id);
     if (!r) throw new Error(`Automation: unknown rule ${id}`);
-    this.assertCueNameFree({ ...r, ...patch }, id);
+    this.assertCueValid({ ...r, ...patch }, id);
     Object.assign(r, patch);
     await automationStore.saveRules(this.rules);
-    broadcast("automation:rules", { rules: this.listRules() });
+    this.rulesChanged();
     return this.listRules();
   }
 
   async removeRule(id: string): Promise<Rule[]> {
     this.rules = this.rules.filter((r) => r.id !== id);
     await automationStore.saveRules(this.rules);
-    broadcast("automation:rules", { rules: this.listRules() });
+    this.rulesChanged();
     return this.listRules();
   }
 

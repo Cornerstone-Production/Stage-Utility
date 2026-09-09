@@ -60,7 +60,8 @@ function scripts(yaml: string): { name: string; alias: string }[] {
   if (start === -1) return [];
   const out: { name: string; alias: string }[] = [];
   for (let i = start + 1; i < lines.length; i++) {
-    const key = /^ {2}(\w+):$/.exec(lines[i]!);
+    // Quoted, like the switch keys: a script called `on` is a boolean key.
+    const key = /^ {2}"(\w+)":$/.exec(lines[i]!);
     if (!key) continue;
     const alias = /^ {4}alias: "((?:[^"\\\n\r\t]|\\.)*)"$/.exec(lines[i + 1] ?? "");
     assert.ok(alias, `alias is not a single well-formed quoted scalar: ${JSON.stringify(lines[i + 1])}`);
@@ -77,13 +78,66 @@ function comments(yaml: string): string[] {
     .filter((l) => l.startsWith("#"));
 }
 
+/**
+ * The `json_attributes` list under the rest sensor, in order, unquoted.
+ *
+ * The quotes are REQUIRED, and that is what this asserts. Home Assistant parses
+ * YAML 1.1, where a bare `no`, `on`, `off`, `yes`, `true` or `false` is a
+ * boolean — so a pair called `no_on`/`no_off` asked the sensor for the attribute
+ * `false`, which no answer has ever contained.
+ */
+function sensorAttributes(yaml: string): string[] {
+  const lines = yaml.split("\n");
+  const start = lines.indexOf("        json_attributes:");
+  if (start === -1) return [];
+  const out: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const m = /^ {10}- (.+)$/.exec(lines[i]!);
+    if (!m) break;
+    const quoted = /^"((?:[^"\\\n\r\t]|\\.)*)"$/.exec(m[1]!);
+    assert.ok(quoted, `a json_attributes item is not a quoted scalar: ${JSON.stringify(m[1])}`);
+    out.push(quoted[1]!);
+  }
+  return out;
+}
+
+/** Every switch key, with what it reports its state from. */
+function switchStates(yaml: string): { id: string; from: string }[] {
+  const lines = yaml.split("\n");
+  const start = lines.indexOf("    switches:");
+  if (start === -1) return [];
+  const out: { id: string; from: string }[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    // The key is QUOTED, for the same YAML 1.1 reason as the attribute list: a
+    // switch id of `no` is the boolean false as a mapping key.
+    const key = /^ {6}"(\w+)":$/.exec(lines[i]!);
+    if (!key) continue;
+    const block = lines.slice(i + 1, i + 6).join("\n");
+    const optimistic = / {8}optimistic: true/.test(block);
+    const template = / {8}value_template: (.+)/.exec(block);
+    out.push({
+      id: key[1]!,
+      // Both is a contradiction and neither is a switch with no state at all,
+      // so the two are reported as one answer rather than two booleans.
+      from: optimistic && template ? "BOTH" : optimistic ? "optimistic" : template ? template[1]! : "NEITHER",
+    });
+  }
+  return out;
+}
+
 /** One called cue, with only the fields the generator reads set meaningfully. */
-function cue(name: string, says: string, ruleName = name, aliases = ""): Rule {
+function cue(
+  name: string,
+  says: string,
+  ruleName = name,
+  aliases = "",
+  state: Record<string, string> = {},
+): Rule {
   return {
     id: `id-${name}`,
     name: ruleName,
     enabled: true,
-    trigger: { id: CALL_TRIGGER_ID, params: { name, says, aliases } },
+    trigger: { id: CALL_TRIGGER_ID, params: { name, says, aliases, ...state } },
     conditions: [],
     action: { id: "log.message", params: { message: "x" } },
     cooldownSec: 0,
@@ -314,5 +368,289 @@ describe("homeAssistantYaml", () => {
     // The header comments are always there; nothing about a rename is.
     const yaml = homeAssistantYaml([cue("screens_on", "Screens on")], BASE);
     assert.equal(comments(yaml).some((c) => c.includes("renamed from")), false);
+  });
+});
+
+// ── Real state ────────────────────────────────────────────────────────────────
+//
+// A pair that names a Companion custom variable gets the truth instead of
+// optimism. Two things here are silent when they go wrong and expensive when
+// they do:
+//
+//  - a sensor whose `json_attributes` does not list a pair the switches read
+//    from. The switch then reads an attribute that never appears, and reports
+//    off forever with nothing in any log.
+//  - a switch carrying `optimistic: true` AND a `value_template`. Optimistic
+//    means "believe the press and do not wait for the state", which is exactly
+//    what a state variable exists to replace, so a switch with both keeps
+//    reporting what it asked for while looking as if it reads the device.
+describe("a pair with a state variable", () => {
+  const bound = (name: string, says: string, variable: string) =>
+    cue(name, says, name, "", { stateVariable: variable });
+
+  test("emits ONE rest sensor listing exactly the bound pairs", () => {
+    const yaml = homeAssistantYaml(
+      [
+        bound("projectors_on", "Projectors on", "projectors_state"),
+        cue("projectors_off", "Projectors off"),
+        bound("amps_on", "Amps on", "amps_state"),
+        cue("amps_off", "Amps off"),
+        cue("lobby_tvs_on", "Lobby TVs on"),
+        cue("lobby_tvs_off", "Lobby TVs off"),
+      ],
+      BASE,
+    );
+    assert.equal((yaml.match(/^rest:$/gm) ?? []).length, 1, "one sensor for every pair, not one each");
+    assert.match(yaml, /^ {2}- resource: "http:\/\/192\.168\.1\.50:8788\/api\/cues\/states"$/m);
+    assert.match(yaml, /^ {4}scan_interval: 10$/m);
+    assert.match(yaml, /^ {8}json_attributes_path: "\$\.states"$/m);
+    // EXACT, and in the order the switches are emitted in. `lobby_tvs` has no
+    // variable, so it must not be here.
+    assert.deepEqual(sensorAttributes(yaml), ["amps", "projectors"]);
+  });
+
+  test("the bound switch reads the sensor, and is NOT optimistic", () => {
+    const yaml = homeAssistantYaml(
+      [
+        bound("projectors_on", "Projectors on", "projectors_state"),
+        cue("projectors_off", "Projectors off"),
+        cue("amps_on", "Amps on"),
+        cue("amps_off", "Amps off"),
+      ],
+      BASE,
+    );
+    assert.deepEqual(switchStates(yaml), [
+      { id: "amps", from: "optimistic" },
+      {
+        id: "projectors",
+        from: "\"{{ (state_attr('sensor.stage_utility_cues', 'projectors') or {}).get('state') == 'on' }}\"",
+      },
+    ]);
+    // Guarded as a count too: one `optimistic: true` in the document, for the
+    // one pair that has nothing to read.
+    assert.equal((yaml.match(/^ {8}optimistic: true$/gm) ?? []).length, 1);
+  });
+
+  test("nothing bound means no rest sensor at all", () => {
+    // An install with no state variables must generate the document it always
+    // did: a `rest` block with an empty attribute list is a sensor Home
+    // Assistant polls every ten seconds for nothing.
+    const yaml = homeAssistantYaml(
+      [cue("projectors_on", "Projectors on"), cue("projectors_off", "Projectors off")],
+      BASE,
+    );
+    assert.equal(yaml.includes("rest:\n"), false);
+    assert.equal(yaml.includes("/api/cues/states"), false);
+    assert.deepEqual(sensorAttributes(yaml), []);
+    assert.deepEqual(switchStates(yaml), [{ id: "projectors", from: "optimistic" }]);
+  });
+
+  test("a binding on a cue with no partner emits no sensor and no switch", () => {
+    // There is no pair, so there is nothing to report the state OF. The cue
+    // still gets its rest_command and its script.
+    const yaml = homeAssistantYaml([bound("house_lights_on", "House lights on", "hl_state")], BASE);
+    assert.equal(yaml.includes("rest:\n"), false);
+    assert.deepEqual(switchStates(yaml), []);
+    assert.deepEqual(commandKeys(yaml), ["su_house_lights_on"]);
+  });
+
+  test("a HALF-RENAMED bound pair keeps its switch, under the pasted base", () => {
+    // The ON button was relabelled and its cue renamed; the OFF button was not.
+    // Matched on current names only this is not a pair at all: the switch
+    // somebody already pasted disappears and turns into two scripts.
+    const yaml = homeAssistantYaml(
+      [
+        cue("screens_on", "Screens on", "Screens ON", "projectors_on", {
+          stateVariable: "projectors_state",
+        }),
+        cue("projectors_off", "Projectors off"),
+      ],
+      BASE,
+    );
+    assert.deepEqual(sensorAttributes(yaml), ["projectors"]);
+    assert.deepEqual(
+      switchStates(yaml).map((s) => s.id),
+      ["projectors"],
+    );
+    assert.match(yaml, /^ {10}action: rest_command\.su_screens_on$/m);
+    assert.deepEqual(scripts(yaml), [], "a half of a pair must never also be a script");
+  });
+
+  test("a base YAML 1.1 would read as a BOOLEAN is quoted everywhere", () => {
+    // Home Assistant parses YAML 1.1. `no`, `on`, `off`, `yes`, `true` and
+    // `false` bare are booleans there, so `- no` under json_attributes asked the
+    // sensor for the attribute `false` — an attribute no answer has ever
+    // carried, leaving the switch reading off forever with nothing in any log.
+    // The same word is also the switch's own mapping key, and a one-shot cue
+    // called `on` is a script's.
+    const yaml = homeAssistantYaml(
+      [
+        bound("no_on", "No on", "no_state"),
+        cue("no_off", "No off"),
+        cue("on", "just on"),
+      ],
+      BASE,
+    );
+    // The helpers require a quoted scalar and fail on a bare one.
+    assert.deepEqual(sensorAttributes(yaml), ["no"]);
+    assert.deepEqual(switchStates(yaml).map((x) => x.id), ["no"]);
+    assert.deepEqual(scripts(yaml).map((x) => x.name), ["on"]);
+    // And the exact lines, so a passing helper cannot be a helper that matched
+    // nothing.
+    assert.match(yaml, /^ {10}- "no"$/m);
+    assert.match(yaml, /^ {6}"no":$/m);
+    assert.match(yaml, /^ {2}"on":$/m);
+  });
+
+  test("the sensor says what an unknown pair does, and why it is not unavailable", () => {
+    // The one thing an operator cannot work out from the fragment: a pair that
+    // could not be read reads OFF, which is indistinguishable from a device that
+    // is off. Saying so beside the sensor is the only place it appears in Home
+    // Assistant. The availability_template note is there so nobody adds the
+    // obvious fix — an unavailable entity cannot be commanded, so it would also
+    // stop them turning the device on.
+    const yaml = homeAssistantYaml(
+      [bound("p_on", "P on", "p_state"), cue("p_off", "P off")],
+      BASE,
+    );
+    const said = comments(yaml);
+    assert.ok(
+      said.some((c) => c.includes("reads OFF here and stays PRESSABLE")),
+      `nothing says what an unknown pair does; got:\n  ${said.join("\n  ")}`,
+    );
+    assert.ok(
+      said.some((c) => c.includes("No availability_template on purpose")),
+      `nothing says why the switch is not made unavailable; got:\n  ${said.join("\n  ")}`,
+    );
+
+    // And not in a document with nothing bound: there is no sensor to talk about.
+    const without = homeAssistantYaml([cue("p_on", "P on"), cue("p_off", "P off")], BASE);
+    assert.equal(comments(without).some((c) => c.includes("availability_template")), false);
+  });
+
+  test("the header says the switches read real state only when one does", () => {
+    const withState = homeAssistantYaml(
+      [bound("p_on", "P on", "p_state"), cue("p_off", "P off")],
+      BASE,
+    );
+    assert.equal(
+      comments(withState).some((c) => c.includes("actually doing")),
+      true,
+    );
+    const without = homeAssistantYaml([cue("p_on", "P on"), cue("p_off", "P off")], BASE);
+    assert.equal(
+      comments(without).some((c) => c.includes("actually doing")),
+      false,
+    );
+    assert.equal(
+      comments(without).some((c) => c.includes("Switches are optimistic")),
+      true,
+    );
+  });
+});
+
+// ── The whole unbound document, pinned ────────────────────────────────────────
+//
+// Everything else here reads one thing out of the fragment, so a change to the
+// SHAPE of it — a key renamed, a comment dropped, a block reordered, an
+// indentation off by two — passes every one of them while quietly rewriting what
+// somebody has to re-paste into Home Assistant. This is the whole output for an
+// install with no state bindings, which is what every existing install is.
+//
+// It is not here to be right, it is here to be DELIBERATE: when it fails, read
+// the diff, decide whether the new output is what you meant, and only then
+// regenerate.
+describe("the document for an install with no bindings", () => {
+  /** A pair, a one-shot cue, and a renamed one-shot — every object this emits. */
+  const UNBOUND_FIXTURE = (): Rule[] => [
+    cue("projectors_on", "Projectors on"),
+    cue("projectors_off", "Projectors off"),
+    cue("take_screens", "take the screens"),
+    cue("screens_on", "Screens on", "Screens ON", "beamers_on"),
+  ];
+
+  const UNBOUND_YAML = [
+  "# Stage Utility cues \u2014 generated. Paste into configuration.yaml.",
+  "#",
+  "# Put the token you were shown when you minted it into secrets.yaml, WITH",
+  "# the scheme, because this is the whole Authorization header:",
+  "#",
+  "#   stage_utility_token: \"Bearer su_...\"",
+  "#",
+  "# Switches are optimistic: Stage Utility reports that it dispatched the",
+  "# press, never that the device did anything. Home Assistant shows what it",
+  "# asked for, not what happened.",
+  "",
+  "rest_command:",
+  "  su_projectors_on:",
+  "    url: \"http://192.168.1.50:8788/api/cues/projectors_on\"",
+  "    method: post",
+  "    headers:",
+  "      authorization: !secret stage_utility_token",
+  "    content_type: \"application/json\"",
+  "    payload: \"{}\"",
+  "  su_projectors_off:",
+  "    url: \"http://192.168.1.50:8788/api/cues/projectors_off\"",
+  "    method: post",
+  "    headers:",
+  "      authorization: !secret stage_utility_token",
+  "    content_type: \"application/json\"",
+  "    payload: \"{}\"",
+  "  su_take_screens:",
+  "    url: \"http://192.168.1.50:8788/api/cues/take_screens\"",
+  "    method: post",
+  "    headers:",
+  "      authorization: !secret stage_utility_token",
+  "    content_type: \"application/json\"",
+  "    payload: \"{}\"",
+  "  # renamed from su_beamers_on; the old rest_command keeps working until you re-paste",
+  "  su_screens_on:",
+  "    url: \"http://192.168.1.50:8788/api/cues/screens_on\"",
+  "    method: post",
+  "    headers:",
+  "      authorization: !secret stage_utility_token",
+  "    content_type: \"application/json\"",
+  "    payload: \"{}\"",
+  "",
+  "switch:",
+  "  - platform: template",
+  "    switches:",
+  "      \"projectors\":",
+  "        friendly_name: \"Projectors\"",
+  "        optimistic: true",
+  "        turn_on:",
+  "          action: rest_command.su_projectors_on",
+  "        turn_off:",
+  "          action: rest_command.su_projectors_off",
+  "",
+  "script:",
+  "  \"take_screens\":",
+  "    alias: \"take the screens\"",
+  "    sequence:",
+  "      - action: rest_command.su_take_screens",
+  "  \"screens_on\":",
+  "    alias: \"Screens on\"",
+  "    sequence:",
+  "      - action: rest_command.su_screens_on",
+  "",
+  ].join("\n");
+
+  test("is exactly this, to the character", () => {
+    const yaml = homeAssistantYaml(UNBOUND_FIXTURE(), BASE);
+    // TO REGENERATE, once you have decided the change is intended:
+    //   SU_PRINT_YAML=1 node --import tsx --test main/services/home-assistant-yaml.test.ts
+    // and paste the printed lines over UNBOUND_YAML above.
+    if (process.env.SU_PRINT_YAML) {
+      console.log(yaml.split("\n").map((l) => `    ${JSON.stringify(l)},`).join("\n"));
+    }
+    assert.equal(yaml, UNBOUND_YAML);
+  });
+
+  test("and nothing in it mentions state", () => {
+    // The cheap half of the same guard, said in one line: an unbound install must
+    // not grow a sensor it polls every ten seconds for nothing.
+    const yaml = homeAssistantYaml(UNBOUND_FIXTURE(), BASE);
+    assert.equal(yaml.includes("rest:"), false);
+    assert.equal(yaml.includes("state_attr"), false);
   });
 });

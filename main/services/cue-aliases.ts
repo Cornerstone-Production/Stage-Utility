@@ -22,6 +22,18 @@
 // place that knows the encoding.
 
 /**
+ * The trigger id that makes a rule a cue.
+ *
+ * Lives in this PURE module rather than in the trigger registry because the
+ * settings page needs it: automation-triggers.ts imports spl-recorder for its
+ * metric list, which reaches `node:url`, so a renderer module that pulled the
+ * registry in for one string crashed the whole app at load with
+ * "fileURLToPath is not a function" and an empty page. Re-exported from
+ * automation-triggers.ts, so every existing import site is unchanged.
+ */
+export const CALL_TRIGGER_ID = "call.by-name";
+
+/**
  * How many former names one cue keeps.
  *
  * Bounded because it is unbounded growth otherwise: a button somebody relabels

@@ -42,6 +42,7 @@ const { integrationManager } = await import("../integration-manager.js");
 const { AUTOMATION_TRIGGERS, CALL_TRIGGER_ID } = await import("../automation-triggers.js");
 const { readFingerprint } = await import("../companion-fingerprint.js");
 const { runCompanionReconcile } = await import("../companion-reconcile.js");
+const { cueStates } = await import("../cue-states.js");
 
 after(async () => {
   await fsp.rm(TMP, { recursive: true, force: true });
@@ -51,6 +52,15 @@ after(async () => {
 
 /** Every press the stubbed Companion received. */
 let presses: string[] = [];
+
+/**
+ * What the stubbed Companion's custom variables hold, and every read of one.
+ *
+ * A name that is not a key here answers 404, which is Companion's own answer
+ * for a variable that does not exist.
+ */
+let variables: Record<string, string> = {};
+let variableReads: string[] = [];
 
 /**
  * A live PCO service, or none.
@@ -122,17 +132,38 @@ function withCompanionRow(): () => void {
 
 let TOKEN = "";
 
-before(async () => {
-  companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
+/**
+ * The default Companion stub: the export, a press, and a custom variable read.
+ *
+ * A function rather than an inline assignment because two describes below
+ * replace `companionDeps.fetch` in their own `before` and never put it back —
+ * so a describe that needs the variable read has to reinstall this. Found by a
+ * custom-variable read being answered with the whole export document.
+ */
+function installCompanionStub(): void {
   companionDeps.fetch = async (input, init) => {
     const url = String(input);
     if (url.includes("/press")) {
       presses.push(url);
       return new Response("ok", { status: 200 });
     }
+    const variable = /\/api\/custom-variable\/([^/]+)\/value$/.exec(url);
+    if (variable) {
+      const name = decodeURIComponent(variable[1]!);
+      variableReads.push(name);
+      const value = variables[name];
+      return value === undefined
+        ? new Response("Not found", { status: 404 })
+        : new Response(value, { status: 200 });
+    }
     void init;
     return Response.json(companionExportFixture());
   };
+}
+
+before(async () => {
+  companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
+  installCompanionStub();
   await automationEngine.init();
   await automationEngine.setSettings({ simulate: false, disarmed: false });
   TOKEN = (await cueTokens.mint("Home Assistant")).secret;
@@ -175,6 +206,9 @@ const call = (name: string, opts: Record<string, unknown> = {}) =>
 
 beforeEach(() => {
   presses = [];
+  variables = {};
+  variableReads = [];
+  cueStates.invalidate();
   setQuiet();
   setPcoConfigured(true);
   companionApi.invalidate();
@@ -657,6 +691,172 @@ describe("cue names", () => {
   });
 });
 
+describe("a pair's state binding", () => {
+  /** One rule POST, with whatever trigger params the case needs. */
+  const post = (params: Record<string, string>) =>
+    callRoute(automationRoutes, "/api/automation/rules", {
+      method: "POST",
+      body: {
+        name: "Projectors ON",
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params },
+        conditions: [],
+        action: { id: "log.message", params: { message: "x" } },
+        cooldownSec: 0,
+        oncePerService: false,
+      },
+    });
+
+  test("a variable name Companion could not have is refused with 400", async () => {
+    // Accepted, it is a switch that reads unknown forever with nothing saying
+    // which rule is wrong — the state route would answer 404 for it every poll.
+    await withCue();
+    const r = await post({ name: "screens_on", stateVariable: "state:projectors" });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /not a Companion variable name/);
+    assert.equal(automationEngine.cueRules().length, 1, "the rule was saved anyway");
+  });
+
+  test("on and off values that are the same string are refused with 400", async () => {
+    await withCue();
+    const r = await post({
+      name: "screens_on",
+      stateVariable: "screens_state",
+      stateOnValue: "1",
+      stateOffValue: "1",
+    });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /could never be read/);
+  });
+
+  test("a good binding saves, and comes back on the rule", async () => {
+    await withCue();
+    const r = await post({ name: "screens_on", stateVariable: "screens_state" });
+    assert.equal(r.status, 201);
+    const saved = automationEngine.cueRules().find((x) => x.trigger.params.name === "screens_on");
+    assert.equal(String(saved?.trigger.params.stateVariable), "screens_state");
+  });
+});
+
+describe("GET /api/cues/states", () => {
+  /** A bound pair on the real engine, through the real addRule. */
+  async function withBoundPair(params: Record<string, string> = {}): Promise<void> {
+    for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+    for (const [name, extra] of [
+      ["projectors_on", { stateVariable: "projectors_state", ...params }],
+      ["projectors_off", {}],
+    ] as const) {
+      await automationEngine.addRule({
+        name,
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name, ...extra } },
+        conditions: [],
+        action: { id: "companion.press", params: { page: 1, row: 0, col: 1 } },
+        cooldownSec: 0,
+        oncePerService: false,
+      });
+    }
+  }
+
+  const states = async (): Promise<Record<string, Record<string, unknown>>> => {
+    const r = await callRoute(cueRoutes, "/api/cues/states");
+    assert.equal(r.status, 200);
+    return (r.json as { states: Record<string, Record<string, unknown>> }).states;
+  };
+
+  test("is an OPEN read — no token, like the YAML and the token list", async () => {
+    // The thing polling it is a Home Assistant `rest` sensor, which carries no
+    // token, and a same-origin GET sends no Origin to gate on.
+    await withBoundPair();
+    variables.projectors_state = "on";
+    const r = await callRoute(cueRoutes, "/api/cues/states");
+    assert.equal(r.status, 200);
+  });
+
+  test("answers on for the on value and off for the off value", async () => {
+    await withBoundPair();
+    variables.projectors_state = "on";
+    assert.equal(String((await states()).projectors!.state), "on");
+
+    cueStates.invalidate();
+    variables.projectors_state = "off";
+    assert.equal(String((await states()).projectors!.state), "off");
+  });
+
+  test("a variable Companion does not have is unknown, with the reason", async () => {
+    await withBoundPair();
+    const row = (await states()).projectors!;
+    assert.equal(String(row.state), "unknown");
+    assert.equal(String(row.reason), "no such custom variable in Companion");
+    assert.equal(row.value, null);
+  });
+
+  test("a value that is neither says what it read", async () => {
+    await withBoundPair();
+    variables.projectors_state = "WARMUP";
+    const row = (await states()).projectors!;
+    assert.equal(String(row.state), "unknown");
+    assert.equal(String(row.reason), 'value "WARMUP" matches neither "on" nor "off"');
+  });
+
+  test("an unbound pair is not in the answer at all", async () => {
+    await withCue();
+    assert.deepEqual(Object.keys(await states()), []);
+    assert.deepEqual(variableReads, [], "an unbound pair must not read anything");
+  });
+
+  test("a binding saved inside the window is read back through the NEW variable", async () => {
+    // The cache is five seconds and nothing dropped it when a rule changed, so
+    // the operator saved a binding, the row refreshed, and it still reported the
+    // old variable — for up to five seconds, contradicting what they had just
+    // typed. No injected clock here on purpose: this is the real engine, the
+    // real route and the real cache, inside the real window.
+    await withBoundPair();
+    variables.projectors_state = "on";
+    variables.amps_state = "off";
+    assert.equal(String((await states()).projectors!.variable), "projectors_state");
+
+    const on = automationEngine.listRules().find((r) => r.trigger.params.name === "projectors_on")!;
+    await automationEngine.updateRule(on.id, {
+      trigger: { id: CALL_TRIGGER_ID, params: { ...on.trigger.params, stateVariable: "amps_state" } },
+    });
+
+    const row = (await states()).projectors!;
+    assert.equal(String(row.variable), "amps_state", "the states answer is five seconds stale after a save");
+    assert.equal(String(row.state), "off");
+  });
+
+  test("a read that REJECTS is still a 200, with that pair unknown", async () => {
+    // getTarget reaches the config store, and its rejection escaped
+    // readCustomVariable — which under a batch read of every bound pair was a
+    // 500 here, taking out the Home Assistant sensor that covers all of them
+    // for one unreadable file.
+    await withBoundPair();
+    const real = companionDeps.getTarget;
+    companionDeps.getTarget = async () => {
+      throw new Error("secrets.bin is unreadable");
+    };
+    try {
+      const r = await callRoute(cueRoutes, "/api/cues/states");
+      assert.equal(r.status, 200);
+      const row = (r.json as { states: Record<string, Record<string, unknown>> }).states.projectors!;
+      assert.equal(String(row.state), "unknown");
+      assert.equal(String(row.reason), "secrets.bin is unreadable");
+    } finally {
+      companionDeps.getTarget = real;
+    }
+  });
+
+  test("the answer is cached, so a second poll does not read Companion again", async () => {
+    await withBoundPair();
+    variables.projectors_state = "on";
+    await states();
+    assert.deepEqual(variableReads, ["projectors_state"]);
+    await states();
+    assert.deepEqual(variableReads, ["projectors_state"], "the second poll went to Companion");
+  });
+});
+
 describe("a cue's former names", () => {
   /** The cue, renamed, still carrying the name Home Assistant was pasted with. */
   const renamed = () =>
@@ -869,6 +1069,18 @@ describe("the button and pair endpoints", () => {
       ["lobby_tvs", "room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
     );
     assert.equal(pairs.every((p) => !p.exists), true);
+  });
+
+  test("the offer carries Companion's custom variables, for the state select", async () => {
+    // EXACT. The fixture declares five and two of them are names Companion's own
+    // value API could never answer for — offering one would bind a cue to a
+    // permanent 404, chosen from a dropdown.
+    const r = await callRoute(cueRoutes, "/api/companion/pairs");
+    assert.deepEqual((r.json as { customVariables: string[] }).customVariables, [
+      "house_lights_state",
+      "lobby_tvs",
+      "rig.state",
+    ]);
   });
 
   test("the ticked-by-default pairs come from what the buttons DRIVE, not a page name", async () => {
@@ -1555,5 +1767,77 @@ describe("reconciling a cue's Companion button", () => {
 
     exportOk = true;
     companionApi.invalidate();
+  });
+});
+
+// ── Importing a state binding ─────────────────────────────────────────────────
+//
+// LAST IN THE FILE deliberately: both cases wipe the rules, and the import and
+// Home Assistant describes above share the four cues the first import creates.
+describe("importing a pair with a state variable", () => {
+  // The reconcile describe above replaces the Companion stub in its own `before`
+  // and never restores it, so the variable read has to be put back.
+  before(() => installCompanionStub());
+
+  test("a chosen state variable is written on the _on half only", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        pairs: { slug: string; on: unknown; off: unknown }[];
+      }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    assert.deepEqual((r.json as { created: string[] }).created, ["lobby_tvs_on", "lobby_tvs_off"]);
+
+    const byName = new Map(
+      automationEngine.cueRules().map((x) => [String(x.trigger.params.name), x]),
+    );
+    assert.equal(String(byName.get("lobby_tvs_on")?.trigger.params.stateVariable), "lobby_tvs");
+    // The `_off` half INHERITS it. A copy on both halves is two settings for one
+    // pair, and they would drift the first time one was edited.
+    assert.equal(byName.get("lobby_tvs_off")?.trigger.params.stateVariable, undefined);
+
+    // And the pair reads its state through it, end to end.
+    variables.lobby_tvs = "on";
+    cueStates.invalidate();
+    const states = (
+      (await callRoute(cueRoutes, "/api/cues/states")).json as {
+        states: Record<string, { state: string }>;
+      }
+    ).states;
+    assert.equal(states.lobby_tvs?.state, "on");
+  });
+
+  test("a state variable Companion could not have skips the pair, creating NEITHER half", async () => {
+    // Checked before either half is created: addRule would refuse the `_on` rule
+    // and create the `_off` one, leaving half a pair behind for a typo in a
+    // field that is not the cue's name.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "state:lobby" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.deepEqual(
+      skipped.map((x) => x.name),
+      ["lobby_tvs"],
+    );
+    assert.match(skipped[0]!.why, /not a Companion variable name/);
+    assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
   });
 });

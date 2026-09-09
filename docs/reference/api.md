@@ -197,6 +197,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET / POST | `/api/cues/tokens` | List callers (never a hash) / mint one (`{label}`). The secret is returned once and never again |
 | DELETE | `/api/cues/tokens/:id` | Revoke one caller |
 | GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml`, not JSON |
+| GET | `/api/cues/states` | What each bound ON/OFF pair's device is actually doing: `{ok, checkedAt, states}`, `states` keyed by the pair's base — `{on, off, variable, value, state, reason?}` with `state` one of `on`, `off`, `unknown`. `ok` is false when any pair is unknown. Open read. Reads the Companion custom variables on demand, in parallel, and serves the whole answer for 5 seconds; only pairs with a **State variable** are in it, and an install with none reads nothing at all |
 
 **Companion** — reading the connected Companion's own configuration.
 
@@ -204,7 +205,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 |--------|------|---------|
 | GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Each carries `page`, `pageId`, `pageName`, `row`, `col`, `label`, `drives` and `actionIds` — the page's opaque id and the button's sorted action ids are its identity, and survive being renumbered or dragged to another key. Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
 | POST | `/api/companion/buttons/refresh` | Drop the five-minute cache, re-read, and re-check every cue's button against it. `{ok, buttons, cachedAt, reconcile}`, where `reconcile` is `{applied, failed}` — `failed` names each cue whose new status could not be saved (`{ruleId, label, detail}`). Answers `ok: false` when any status failed to save, or `{ok: false, reason, buttons: []}` when Companion could not be read at all |
-| GET | `/api/companion/pairs` | The import dialog's whole offer: `{ok, pairs, buttons}` — ON/OFF pairs, and the labelled buttons that are not half of one — each with its proposed cue name and whether that name (or any cue's former name) already exists. One request, because deciding which buttons are unpaired needs the pairs, and because the two lists' proposed names are disambiguated against each other. Answers `200` with `{ok: false, reason, pairs: []}` when Companion is unreachable — no `buttons` key |
+| GET | `/api/companion/pairs` | The import dialog's whole offer: `{ok, pairs, buttons, customVariables}` — ON/OFF pairs, the labelled buttons that are not half of one, and the names of Companion's custom variables (what a pair's state can be bound to; empty on an install with none) — each offer with its proposed cue name and whether that name (or any cue's former name) already exists. One request, because deciding which buttons are unpaired needs the pairs, and because the two lists' proposed names are disambiguated against each other. Answers `200` with `{ok: false, reason, pairs: []}` when Companion is unreachable — no `buttons` key |
 
 **ProPresenter & ProdCom**
 | Method | Path | Purpose |

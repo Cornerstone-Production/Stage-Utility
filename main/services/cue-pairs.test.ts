@@ -1,0 +1,251 @@
+// Which cues are two halves of one thing, and what reads its state.
+//
+// Pure functions over rules, and the guards here are all about the two ways a
+// pair goes wrong silently:
+//
+//  - a pair that stops being a pair. One half of a Companion pair relabelled
+//    renames its cue and keeps the old name as an alias, which leaves
+//    `screens_on` beside `projectors_off`. Matched on current names only, that
+//    is not a pair at all: the Home Assistant switch somebody already pasted
+//    disappears from the generated config and turns into two scripts, and
+//    nothing anywhere says why.
+//  - a binding that can never read anything. A variable name Companion could not
+//    have answers 404 forever, and on/off values that are the same string make a
+//    switch that says "on" whatever the projector is doing. Both look like a
+//    saved setting from the operator's side.
+
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+
+import {
+  boundCuePairs,
+  cuePairs,
+  defaultStateVariable,
+  stateBindingOf,
+  stateBindingParams,
+  stateBindingProblem,
+  STATE_OFF_DEFAULT,
+  STATE_ON_DEFAULT,
+} from "./cue-pairs.js";
+import { CALL_TRIGGER_ID } from "./automation-triggers.js";
+import type { Rule } from "../types/automation.js";
+
+/** One called cue, with only the fields these functions read set meaningfully. */
+function cue(name: string, params: Record<string, string | number> = {}): Rule {
+  return {
+    id: `id-${name}`,
+    name,
+    enabled: true,
+    trigger: { id: CALL_TRIGGER_ID, params: { name, ...params } },
+    conditions: [],
+    action: { id: "log.message", params: { message: "x" } },
+    cooldownSec: 0,
+    oncePerService: false,
+  };
+}
+
+/** A rule that is not a cue at all. */
+const timed: Rule = {
+  id: "id-timed",
+  name: "Ten minutes before",
+  enabled: true,
+  trigger: { id: "pco.item-due", params: { title: "Welcome" } },
+  conditions: [],
+  action: { id: "log.message", params: { message: "x" } },
+  cooldownSec: 0,
+  oncePerService: false,
+};
+
+/** The pairs as `<base>: <on>/<off>`, which is all a name-level assert needs. */
+const shape = (rules: Rule[]): string[] =>
+  cuePairs(rules).map((p) => `${p.base}: ${p.onName}/${p.offName}`);
+
+describe("cuePairs", () => {
+  test("an _on and its _off are one pair, and nothing else is", () => {
+    const rules = [
+      cue("projectors_on"),
+      cue("projectors_off"),
+      cue("house_lights_on"),
+      cue("take_screens"),
+      timed,
+    ];
+    assert.deepEqual(shape(rules), ["projectors: projectors_on/projectors_off"]);
+  });
+
+  test("pairs come back sorted by base, whatever order the rules are in", () => {
+    const rules = [cue("screens_off"), cue("amps_on"), cue("screens_on"), cue("amps_off")];
+    assert.deepEqual(shape(rules), ["amps: amps_on/amps_off", "screens: screens_on/screens_off"]);
+  });
+
+  test("a HALF-RENAMED pair is still a pair, under the base already pasted", () => {
+    // The Companion ON button was relabelled and its cue renamed; the OFF button
+    // was not touched. Nothing pairs by current name. The base is the FORMER one
+    // because that is the switch id in the Home Assistant config somebody has
+    // already got, and the whole point of keeping former names is that it keeps
+    // working until they re-paste.
+    const rules = [cue("screens_on", { aliases: "projectors_on" }), cue("projectors_off")];
+    assert.deepEqual(shape(rules), ["projectors: screens_on/projectors_off"]);
+    assert.deepEqual(cuePairs(rules).map((p) => p.viaFormerName), [true]);
+  });
+
+  test("the _off half may be the one carrying the former name", () => {
+    const rules = [cue("projectors_on"), cue("screens_off", { aliases: "projectors_off" })];
+    assert.deepEqual(shape(rules), ["projectors: projectors_on/screens_off"]);
+  });
+
+  test("a pair that matches by name is NOT reported as found through an alias", () => {
+    const rules = [
+      cue("projectors_on", { aliases: "beamers_on" }),
+      cue("projectors_off", { aliases: "beamers_off" }),
+    ];
+    assert.deepEqual(shape(rules), ["projectors: projectors_on/projectors_off"]);
+    assert.deepEqual(cuePairs(rules).map((p) => p.viaFormerName), [false]);
+  });
+
+  test("a current name beats a former one when both could pair", () => {
+    // `screens_on`/`screens_off` are both live names; `screens_on` also answers
+    // to `projectors_on`, and a `projectors_off` exists. The live pair wins and
+    // no cue ends up in two pairs — two switches sharing a turn_off would be an
+    // assistant turning off a device the operator did not name.
+    const rules = [
+      cue("screens_on", { aliases: "projectors_on" }),
+      cue("screens_off"),
+      cue("projectors_off"),
+    ];
+    assert.deepEqual(shape(rules), ["screens: screens_on/screens_off"]);
+  });
+
+  test("an _on with no _off is not a pair, and neither is a lone _off", () => {
+    assert.deepEqual(shape([cue("house_lights_on")]), []);
+    assert.deepEqual(shape([cue("house_lights_off")]), []);
+    // `_on` on its own with nothing before it is not a base.
+    assert.deepEqual(shape([cue("_on"), cue("_off")]), []);
+  });
+
+  test("a duplicate cue name is read first-wins, not twice", () => {
+    // The engine refuses duplicates; a hand-built list or a restored file may
+    // still hold one, and the generated config reads the first.
+    const rules = [cue("projectors_on"), cue("projectors_on"), cue("projectors_off")];
+    assert.equal(cuePairs(rules).length, 1);
+    assert.equal(cuePairs(rules)[0]!.on.id, "id-projectors_on");
+  });
+
+  test("a rule that is not a called cue is invisible here", () => {
+    assert.deepEqual(shape([timed]), []);
+  });
+});
+
+describe("a pair's state binding", () => {
+  const bound = () => [
+    cue("projectors_on", { stateVariable: "projectors_state" }),
+    cue("projectors_off"),
+  ];
+
+  test("the _on half carries it and the _off half inherits it", () => {
+    const pairs = cuePairs(bound());
+    assert.deepEqual(pairs[0]!.binding, {
+      variable: "projectors_state",
+      onValue: STATE_ON_DEFAULT,
+      offValue: STATE_OFF_DEFAULT,
+    });
+  });
+
+  test("on and off values override the defaults", () => {
+    const pairs = cuePairs([
+      cue("projectors_on", { stateVariable: "p", stateOnValue: "POWER=ON", stateOffValue: "STANDBY" }),
+      cue("projectors_off"),
+    ]);
+    assert.deepEqual(pairs[0]!.binding, {
+      variable: "p",
+      onValue: "POWER=ON",
+      offValue: "STANDBY",
+    });
+  });
+
+  test("a binding hand-written on the _off half is honoured, not silently ignored", () => {
+    // The editor only offers it on the `_on` half. A rules file edited by hand
+    // is otherwise a setting that saves and does nothing.
+    const pairs = cuePairs([cue("projectors_on"), cue("projectors_off", { stateVariable: "p_state" })]);
+    assert.equal(pairs[0]!.binding?.variable, "p_state");
+  });
+
+  test("a blank stateVariable is NO binding, not a binding to nothing", () => {
+    // Clearing the select writes the key with an empty value rather than
+    // deleting it. Read as a binding, every such pair would be unknown forever.
+    const pairs = cuePairs([
+      cue("projectors_on", { stateVariable: "", stateOnValue: "on" }),
+      cue("projectors_off"),
+    ]);
+    assert.equal(pairs[0]!.binding, null);
+    assert.equal(stateBindingOf({ stateVariable: "   " }), null);
+  });
+
+  test("boundCuePairs is the bound ones and only those", () => {
+    const rules = [...bound(), cue("amps_on"), cue("amps_off")];
+    assert.deepEqual(cuePairs(rules).map((p) => p.base), ["amps", "projectors"]);
+    assert.deepEqual(boundCuePairs(rules).map((p) => p.base), ["projectors"]);
+  });
+
+  test("the stored form writes every key, so clearing one saves", () => {
+    assert.deepEqual(stateBindingParams({ variable: "p_state" }), {
+      stateVariable: "p_state",
+      stateOnValue: "",
+      stateOffValue: "",
+    });
+    assert.deepEqual(stateBindingParams(null), {
+      stateVariable: "",
+      stateOnValue: "",
+      stateOffValue: "",
+    });
+  });
+});
+
+describe("stateBindingProblem", () => {
+  test("no binding is no problem", () => {
+    assert.equal(stateBindingProblem({}), null);
+    assert.equal(stateBindingProblem({ stateVariable: "" }), null);
+    assert.equal(stateBindingProblem({ stateVariable: "projectors_state" }), null);
+  });
+
+  test("a name Companion could not have is refused", () => {
+    const why = stateBindingProblem({ stateVariable: "state:projectors" });
+    assert.equal(typeof why, "string");
+    assert.match(String(why), /not a Companion variable name/);
+    assert.match(String(stateBindingProblem({ stateVariable: "../../x" })), /not a Companion/);
+  });
+
+  test("on and off values that are the same string are refused", () => {
+    // A switch that reads "on" whatever the projector is doing is worse than an
+    // optimistic one, because it looks like it knows.
+    const why = stateBindingProblem({
+      stateVariable: "p",
+      stateOnValue: "1",
+      stateOffValue: "1",
+    });
+    assert.match(String(why), /could never be read/);
+    // The defaults differ, so an unset pair of values is fine.
+    assert.equal(stateBindingProblem({ stateVariable: "p" }), null);
+  });
+});
+
+describe("defaultStateVariable", () => {
+  const NAMES = ["house_lights_state", "lobby_tvs", "projectors_last_error", "rig.state"];
+
+  test("<base> and <base>_state match, and nothing looser does", () => {
+    assert.equal(defaultStateVariable("lobby_tvs", NAMES), "lobby_tvs");
+    assert.equal(defaultStateVariable("house_lights", NAMES), "house_lights_state");
+    // `projectors_last_error` CONTAINS the slug. Binding to it would report the
+    // wrong thing with nobody having chosen it.
+    assert.equal(defaultStateVariable("projectors", NAMES), "");
+  });
+
+  test("the match is case-insensitive and the real spelling comes back", () => {
+    assert.equal(defaultStateVariable("lobby_tvs", ["Lobby_TVs"]), "Lobby_TVs");
+  });
+
+  test("nothing matching is \"\", and an empty slug matches nothing", () => {
+    assert.equal(defaultStateVariable("amps", NAMES), "");
+    assert.equal(defaultStateVariable("", NAMES), "");
+    assert.equal(defaultStateVariable("", ["_state"]), "");
+  });
+});

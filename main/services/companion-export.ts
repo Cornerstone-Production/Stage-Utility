@@ -538,3 +538,47 @@ export function slugForCue(text: string): string {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
 }
+
+/**
+ * What Companion accepts as a CUSTOM VARIABLE name.
+ *
+ * Letters, digits, `_`, `-` and `.`, which is Companion's own rule for the name
+ * inside `$(custom:…)`. Bounded in length because the name is pasted into a URL
+ * path (`/api/custom-variable/<name>/value`) — that is this app's reason for a
+ * cap, not Companion's rule, and 100 is longer than any name a person types.
+ *
+ * Lives here rather than beside the cue that binds one, because this is the
+ * module that knows what Companion's document says. cue-pairs.ts validates a
+ * binding with it and companion-api.ts refuses to fetch a name it rejects.
+ */
+const COMPANION_VARIABLE_RE = /^[A-Za-z0-9_.-]{1,100}$/;
+
+/** Is this a name Companion could have as a custom variable? */
+export function isCompanionVariableName(name: string): boolean {
+  return COMPANION_VARIABLE_RE.test(name.trim());
+}
+
+/**
+ * The names of every custom variable in an export, sorted.
+ *
+ * `custom_variables` is a top-level object keyed by NAME, whose values carry the
+ * description, the default and the sort order — none of which this app has any
+ * use for. Only the keys are read.
+ *
+ * An export with no custom variables omits the key entirely on some builds (the
+ * 5.0.3 document this was written against has no `custom_variables` at all), so
+ * an absent map is an empty list and never an error. An array of
+ * `{ name }` objects is read too, so a hand-built or future document does not
+ * come back silently empty.
+ *
+ * Names Companion itself could not have are dropped: a key that is not a legal
+ * variable name cannot be read back through the value API, and offering it in
+ * the import dialog would bind a cue to a variable that answers 404 forever.
+ */
+export function customVariableNames(raw: unknown): string[] {
+  const cv = rec(raw).custom_variables;
+  const names = Array.isArray(cv)
+    ? cv.map((entry) => str(rec(entry).name))
+    : Object.keys(rec(cv));
+  return [...new Set(names.map((n) => n.trim()).filter(isCompanionVariableName))].sort();
+}

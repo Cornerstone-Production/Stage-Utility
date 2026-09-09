@@ -846,6 +846,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "companion:refreshButtons": return post("/api/companion/buttons/refresh");
     case "companion:pairs": return apiFetch("/api/companion/pairs");
     case "cues:tokens": return apiFetch("/api/cues/tokens");
+    // Read on demand and cached for five seconds server-side, so the rules list
+    // polling this while it is open costs one round of Companion reads.
+    case "cues:states": return apiFetch("/api/cues/states");
     case "cues:mintToken": return post("/api/cues/tokens", params);
     case "cues:revokeToken": return del(`/api/cues/tokens/${encodeURIComponent(String(p.id))}`);
     // YAML, not JSON — the one text response in this file, so it cannot go

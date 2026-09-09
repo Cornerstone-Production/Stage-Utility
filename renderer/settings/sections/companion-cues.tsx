@@ -20,6 +20,7 @@
 // buttons.
 
 import { errorMessage } from "@main/services/errors";
+import { defaultStateVariable } from "@main/services/cue-pairs";
 import {
   type ButtonFingerprint,
   fingerprintParams,
@@ -40,6 +41,11 @@ import {
   DialogRoot,
   Input,
   NumberInput,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Separator,
   Status,
   toast,
@@ -100,6 +106,8 @@ interface PairsReply {
   reason?: string;
   pairs: Pair[];
   buttons: Single[];
+  /** Companion's custom variable names — what a pair's state can be bound to. */
+  customVariables?: string[];
 }
 
 interface TokenSummary {
@@ -512,11 +520,24 @@ export function ImportPairsDialog({
   });
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const [pickedButtons, setPickedButtons] = useState<Set<string>>(new Set());
+  /**
+   * The state variable chosen per pair, by pair key.
+   *
+   * Only what the operator TOUCHED, like `picked`: everything else falls back to
+   * the default below on every render, so a refetch cannot re-suggest a variable
+   * somebody has just set to None. "" is a real entry here — it is how None is
+   * remembered — which is why the lookup uses `??` and not `||`.
+   */
+  const [stateVars, setStateVars] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
 
   const pairs = data?.pairs ?? [];
   const singles = data?.buttons ?? [];
+  // Empty on a Companion with no custom variables, which is not an error — the
+  // State column is simply not offered, rather than offering a dropdown whose
+  // only entry is None.
+  const customVariables = data?.customVariables ?? [];
 
   // DERIVED, not synchronised. `picked` is null until the operator touches a
   // box, and until then the selection is computed from the server's own
@@ -528,6 +549,8 @@ export function ImportPairsDialog({
 
   const key = (p: Pair) => `${p.page}:${p.slug}`;
   const buttonKey = (b: Single) => `${b.page}:${b.row}:${b.col}`;
+  /** The variable this pair will be bound to: what was chosen, else the guess. */
+  const stateVarFor = (p: Pair) => stateVars[key(p)] ?? defaultStateVariable(p.slug, customVariables);
 
   // Single buttons are NEVER pre-ticked, and this is not an oversight. A pair is
   // plainly a thing being turned on and off; a single button is whatever
@@ -538,7 +561,11 @@ export function ImportPairsDialog({
   async function run() {
     setBusy(true);
     try {
-      const send = pairs.filter((p) => chosen.has(key(p)));
+      // The binding travels with the pair, so the `_on` rule is created with it
+      // rather than needing a second edit. Blank is an optimistic pair.
+      const send = pairs
+        .filter((p) => chosen.has(key(p)))
+        .map((p) => ({ ...p, stateVariable: stateVarFor(p) }));
       const sendButtons = singles.filter((b) => pickedButtons.has(buttonKey(b)));
       const r = await invoke<{ created: string[]; skipped: { name: string; why: string }[] }>(
         "automation:importPairs",
@@ -568,6 +595,7 @@ export function ImportPairsDialog({
         if (!v) {
           setPicked(null);
           setPickedButtons(new Set());
+          setStateVars({});
           setSearch("");
         }
         onOpenChange(v);
@@ -593,35 +621,69 @@ export function ImportPairsDialog({
             <p className="pb-1 text-caption2 text-fg-subtle">
               Buttons whose labels differ only by ON/OFF. Each becomes two cues and one Home Assistant
               switch.
+              {customVariables.length > 0 && (
+                <>
+                  {" "}
+                  Pick a <span className="text-fg">state</span> variable and the switch reports what the
+                  device is doing rather than what it was asked to do.
+                </>
+              )}
             </p>
             {pairs.length === 0 && !isFetching && (
               <p className="py-2 text-caption1 text-fg-muted">No ON/OFF pairs on this Companion.</p>
             )}
             {pairs.map((p) => (
-              <label
-                key={key(p)}
-                className="flex items-center gap-2 border-b border-line py-1.5"
-              >
-                <Checkbox
-                  checked={chosen.has(key(p))}
-                  disabled={p.exists}
-                  aria-label={`${p.base} · ${p.pageName}`}
-                  onCheckedChange={(v) => {
-                    const next = new Set(chosen);
-                    if (v) next.add(key(p));
-                    else next.delete(key(p));
-                    setPicked(next);
-                  }}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-footnote text-fg">{p.base}</span>
-                  <span className="block truncate text-caption2 text-fg-subtle">
-                    {p.pageName} · {p.slug}_on / {p.slug}_off
-                    {p.exists ? " · already imported" : ""}
+              // A DIV with the label around the checkbox and the words only.
+              // With the whole row as one <label>, every click on the State
+              // select also toggled the checkbox — choosing a variable
+              // unticked the pair it was for.
+              <div key={key(p)} className="flex items-center gap-2 border-b border-line py-1.5">
+                <label className="flex min-w-0 flex-1 items-center gap-2">
+                  <Checkbox
+                    checked={chosen.has(key(p))}
+                    disabled={p.exists}
+                    aria-label={`${p.base} · ${p.pageName}`}
+                    onCheckedChange={(v) => {
+                      const next = new Set(chosen);
+                      if (v) next.add(key(p));
+                      else next.delete(key(p));
+                      setPicked(next);
+                    }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-footnote text-fg">{p.base}</span>
+                    <span className="block truncate text-caption2 text-fg-subtle">
+                      {p.pageName} · {p.slug}_on / {p.slug}_off
+                      {p.exists ? " · already imported" : ""}
+                    </span>
                   </span>
-                </span>
+                </label>
+                {/* Offered only when Companion HAS custom variables, and never
+                    for a pair that is already imported — its cues exist, and
+                    the binding is an edit to the rule from here on. */}
+                {customVariables.length > 0 && !p.exists && (
+                  <Select value={stateVarFor(p)} onValueChange={(v) => setStateVars({ ...stateVars, [key(p)]: v })}>
+                    {/* The PAGE is in the accessible name, exactly as the
+                        checkbox's is: the fixture Companion has "Projectors" on
+                        two pages, and two selects called "State variable for
+                        Projectors" are indistinguishable to a screen reader and
+                        to anything driving the page. */}
+                    <SelectTrigger
+                      className="w-40 shrink-0"
+                      aria-label={`State variable for ${p.base} · ${p.pageName}`}
+                    >
+                      <SelectValue placeholder="No state" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">No state</SelectItem>
+                      {customVariables.map((name) => (
+                        <SelectItem key={name} value={name}>{name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 <KindTag kind="switch" />
-              </label>
+              </div>
             ))}
 
             <div className="mt-3">

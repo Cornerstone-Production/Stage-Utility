@@ -158,6 +158,7 @@ start, and when Planning Center cannot be read.
 | **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
+| **State variable** | on the `_on` half of an ON/OFF pair: a Companion custom variable your own buttons set to `on`/`off`, so the generated Home Assistant switch reports what the device is doing rather than what it was asked to do. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
 | **Once per service** | honoured on a call as well as on a trigger: a second call in the same service occurrence is refused `once-per-service` |
 

@@ -6,8 +6,9 @@
 //
 // Two endpoints, and nothing else:
 //
-//   POST /api/location/<page>/<row>/<col>/press   presses a button
-//   GET  /int/export/full?format=json             the whole configuration
+//   POST /api/location/<page>/<row>/<col>/press      presses a button
+//   GET  /int/export/full?format=json                the whole configuration
+//   GET  /api/custom-variable/<name>/value           one custom variable's value
 //
 // Companion answers the press with 200 and the body `ok` when the coordinate
 // exists. An INVALID coordinate answers 204 and presses nothing — so 2xx alone is
@@ -25,8 +26,10 @@ import { scrub } from "./scrub.js";
 import {
   type CompanionButton,
   type CompanionPair,
+  customVariableNames,
   exportBuild,
   findPairs,
+  isCompanionVariableName,
   parseButtons,
 } from "./companion-export.js";
 
@@ -34,6 +37,15 @@ import {
 export const DEFAULT_COMPANION_PORT = 8000;
 
 const REQUEST_TIMEOUT_MS = 8000;
+/**
+ * A custom variable read, which a Home Assistant sensor is waiting on.
+ *
+ * Shorter than a press on purpose: `GET /api/cues/states` reads every bound
+ * pair before it answers, and Home Assistant polls it on a schedule. Three
+ * seconds is long enough for a Companion on the same LAN and short enough that
+ * an unplugged one reports unknown rather than holding the request open.
+ */
+export const VARIABLE_TIMEOUT_MS = 3000;
 /** The export is 4 MB on a real install; give it longer than a press. */
 const EXPORT_TIMEOUT_MS = 20_000;
 const EXPORT_CACHE_MS = 5 * 60 * 1000;
@@ -82,11 +94,30 @@ interface ExportCache {
   buttons: CompanionButton[];
   pairs: CompanionPair[];
   build: string | null;
+  /** The names of Companion's custom variables — what a pair's state can bind to. */
+  customVariables: string[];
 }
 
 export type ExportResult =
-  | { ok: true; buttons: CompanionButton[]; pairs: CompanionPair[]; build: string | null; cachedAt: number }
+  | {
+      ok: true;
+      buttons: CompanionButton[];
+      pairs: CompanionPair[];
+      build: string | null;
+      customVariables: string[];
+      cachedAt: number;
+    }
   | { ok: false; reason: string };
+
+/**
+ * One custom variable read: the value, or why there is not one.
+ *
+ * A failure is RETURNED, never thrown and never flattened into "": a variable
+ * holding "" and a Companion that could not be reached are the same screen
+ * otherwise, and the whole point of reading state is to stop showing a state
+ * nobody confirmed.
+ */
+export type VariableResult = { value: string } | { error: string };
 
 class CompanionApi {
   private cache: ExportCache | null = null;
@@ -135,13 +166,17 @@ class CompanionApi {
         detail: `p${loc.page} r${loc.row} c${loc.col} is not a Companion coordinate — whole numbers, none negative`,
       };
     }
-    const base = await this.baseUrl();
-    if (!base) {
-      return { ok: false, status: null, detail: "Companion host is not configured" };
-    }
     const where = `p${loc.page} r${loc.row} c${loc.col}`;
-    const url = `${base}/api/location/${loc.page}/${loc.row}/${loc.col}/press`;
+    // Inside the try, like the other two: getTarget reaches the config store,
+    // and a rejection out of a method the engine calls stops the engine.
+    let base = "";
     try {
+      const resolved = await this.baseUrl();
+      if (!resolved) {
+        return { ok: false, status: null, detail: "Companion host is not configured" };
+      }
+      base = resolved;
+      const url = `${base}/api/location/${loc.page}/${loc.row}/${loc.col}/press`;
       const res = await companionDeps.fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -160,7 +195,9 @@ class CompanionApi {
       }
       return { ok: true, status: res.status, detail: where };
     } catch (e) {
-      const detail = CompanionApi.why(e, `${loc.page}/${loc.row}/${loc.col} at ${base}`);
+      // `base` is "" when getTarget itself failed, and "17/2/6 at " reads as a
+      // truncated sentence — the coordinate alone is what is left to say.
+      const detail = CompanionApi.why(e, base ? `${loc.page}/${loc.row}/${loc.col} at ${base}` : where);
       console.warn(`[companion] press ${where} failed: ${scrub(detail)}`);
       return { ok: false, status: null, detail };
     }
@@ -177,7 +214,14 @@ class CompanionApi {
     const now = Date.now();
     if (!opts.force && this.cache && now - this.cache.at < EXPORT_CACHE_MS) {
       const c = this.cache;
-      return { ok: true, buttons: c.buttons, pairs: c.pairs, build: c.build, cachedAt: c.at };
+      return {
+        ok: true,
+        buttons: c.buttons,
+        pairs: c.pairs,
+        build: c.build,
+        customVariables: c.customVariables,
+        cachedAt: c.at,
+      };
     }
     if (this.inFlight) return this.inFlight;
     this.inFlight = this.fetchExportOnce().finally(() => {
@@ -187,13 +231,18 @@ class CompanionApi {
   }
 
   private async fetchExportOnce(): Promise<ExportResult> {
-    const base = await this.baseUrl();
-    if (!base) {
-      const reason = "Companion host is not configured";
-      console.warn(`[companion] export unavailable: ${reason}`);
-      return { ok: false, reason };
-    }
+    // Inside the try, like the other two: getTarget reaches the config store,
+    // and a rejection here would reject the shared in-flight promise for every
+    // picker waiting on it.
+    let base = "";
     try {
+      const resolved = await this.baseUrl();
+      if (!resolved) {
+        const reason = "Companion host is not configured";
+        console.warn(`[companion] export unavailable: ${reason}`);
+        return { ok: false, reason };
+      }
+      base = resolved;
       const res = await companionDeps.fetch(`${base}/int/export/full?format=json`, {
         signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS),
       });
@@ -211,14 +260,66 @@ class CompanionApi {
       const buttons = parseButtons(raw);
       const pairs = findPairs(buttons);
       const build = exportBuild(raw);
+      const customVariables = customVariableNames(raw);
       const pages = new Set(buttons.map((b) => b.page)).size;
-      console.log(`[companion] export fetched: ${pages} pages, ${buttons.length} buttons`);
-      this.cache = { at: Date.now(), buttons, pairs, build };
-      return { ok: true, buttons, pairs, build, cachedAt: this.cache.at };
+      console.log(
+        `[companion] export fetched: ${pages} pages, ${buttons.length} buttons, ` +
+          `${customVariables.length} custom variables`,
+      );
+      this.cache = { at: Date.now(), buttons, pairs, build, customVariables };
+      return { ok: true, buttons, pairs, build, customVariables, cachedAt: this.cache.at };
     } catch (e) {
       const reason = CompanionApi.why(e, base);
       console.warn(`[companion] export unavailable: ${scrub(reason)}`);
       return { ok: false, reason };
+    }
+  }
+
+  /**
+   * Read one custom variable's current value.
+   *
+   * NEVER throws, and never caches: this is what `GET /api/cues/states` calls,
+   * and the value is the one thing in Companion that changes every time somebody
+   * presses a button. The five-second cache is over the whole ANSWER, one level
+   * up in cue-states.ts, so a Home Assistant sensor polling every ten seconds
+   * costs one round of reads and a burst of pollers costs the same.
+   *
+   * A 404 is Companion's answer for a variable that does not exist, which is the
+   * ordinary case when somebody binds a cue before creating the variable — so it
+   * comes back as its own sentence rather than as "HTTP 404".
+   */
+  async readCustomVariable(name: string): Promise<VariableResult> {
+    const variable = name.trim();
+    // Refused rather than sent: the name goes into a URL path, and a name
+    // Companion could not have is a request that cannot succeed.
+    if (!isCompanionVariableName(variable)) {
+      return { error: `"${variable}" is not a Companion variable name` };
+    }
+    // `baseUrl()` is INSIDE the try. It awaits getTarget, which reaches the
+    // integration manager and its config store, and a rejection there escaped a
+    // method documented as never throwing — which under the caller's batch read
+    // was every other pair's state gone as well. See cue-states.ts.
+    let base = "";
+    try {
+      const resolved = await this.baseUrl();
+      if (!resolved) return { error: "Companion host is not configured" };
+      base = resolved;
+      const url = `${base}/api/custom-variable/${encodeURIComponent(variable)}/value`;
+      const res = await companionDeps.fetch(url, {
+        signal: AbortSignal.timeout(VARIABLE_TIMEOUT_MS),
+      });
+      if (res.status === 404) return { error: "no such custom variable in Companion" };
+      if (!res.ok) return { error: `Companion answered HTTP ${res.status}` };
+      // Companion answers with the value as text. Trimmed, because a variable an
+      // operator set from a button expression can carry a trailing newline and
+      // "on\n" matching neither value would read as unknown.
+      return { value: (await res.text()).trim() };
+    } catch (e) {
+      // `base` is "" when getTarget itself failed. `why` appends the target only
+      // when the message does not already name it, and every message contains
+      // "", so an unknown host reads as the failure alone rather than as
+      // "... ()".
+      return { error: CompanionApi.why(e, base) };
     }
   }
 
