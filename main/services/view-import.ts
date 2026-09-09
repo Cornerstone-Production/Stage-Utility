@@ -419,7 +419,14 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       } else {
         outcome = assignedNow === entry.variant.id ? "kept" : "assigned";
       }
-      sheet.assignments.byServiceType[targetType] = entry.variant.id;
+      // Rebuilt through Object.fromEntries rather than written with a computed
+      // property: the key is request-derived, and defining own properties from
+      // an entries list is not a property write on an object somebody else
+      // names. Same shape as slots-store.ts; the on-disk record is unchanged.
+      sheet.assignments.byServiceType = Object.fromEntries([
+        ...Object.entries(sheet.assignments.byServiceType).filter(([k]) => k !== targetType),
+        [targetType, entry.variant.id],
+      ]);
       changed = true;
       // A clash reaching here is Replace — Keep returned above. Whether the
       // file's variant was new or overwritten, what the operator has to be told
