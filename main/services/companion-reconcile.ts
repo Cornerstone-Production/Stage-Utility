@@ -34,6 +34,7 @@
 // downgraded every cue to `missing` because a switch was rebooting would refuse
 // every cue in the building.
 
+import { errorMessage } from "./errors.js";
 import { scrub, scrubError } from "./scrub.js";
 import { automationEngine } from "./automation-engine.js";
 import { companionApi } from "./companion-api.js";
@@ -652,8 +653,17 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
       // console or log-injection.test.ts cannot see it, and a value laundered
       // through a helper or a local is exactly the shape that scan refuses. It
       // caught this being hoisted. See scrub.ts.
+      // The RETURNED detail is the message; the LOGGED one is the stack.
+      // `failed` goes into an HTTP body on a LAN-visible endpoint and into a
+      // toast, and driving this against a read-only data directory put four
+      // lines of absolute filesystem paths in both. The stack belongs in the
+      // log, where an operator debugging at 9am wants it.
       const detail = scrubError(err);
-      failed.push({ ruleId: change.ruleId, label: change.label, detail: scrub(detail, LOG_MAX) });
+      failed.push({
+        ruleId: change.ruleId,
+        label: change.label,
+        detail: scrub(errorMessage(err), LOG_MAX),
+      });
       console.error(
         "[companion] could not record a button status:",
         scrub(change.label),
