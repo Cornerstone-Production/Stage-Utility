@@ -43,6 +43,7 @@ export function ScreensRoute() {
       <OutputsSection
         stageState={s.stageState}
         handlers={s.handlers}
+        serviceTypes={s.serviceTypes}
         onEditLayout={(viewId) => {
           // Select it too, so the editor's slot state resolves against the right
           // view the moment it mounts.

@@ -6,27 +6,52 @@
 // The review runs the SAME collectRefs the server uses rather than a second walk
 // of its own, so what this screen promises and what import actually does cannot
 // drift apart.
+//
+// A PLAN file is the same three states with two more decisions in the middle:
+// which service type on this machine its boards land under, and what to do where
+// its patch variant or a preset collides with one already here. Slot rows cannot
+// collide at all — an imported view gets a fresh id, so its boards are keys this
+// machine has never used.
 
 import { useRef, useState } from "react";
 import { errorMessage } from "@main/services/errors";
 import { useRouter } from "@tanstack/react-router";
 
 import { invoke } from "../../lib/api";
-import { Button } from "../../components/ui";
+import {
+  Button,
+  ButtonGroup,
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { collectRefs } from "@main/services/view-refs";
+import { collectRefsFrom } from "@main/services/view-refs";
 import type { ViewBundle, ImportReport, UnresolvableRef } from "@main/types/view-bundle";
+import type { ServiceTypeDTO } from "@main/types/pco";
 
 /** What the review screen shows, derived from the file alone. */
 interface Review {
   bundle: ViewBundle;
   rootName: string;
-  dependencies: string[];
+  /** Every top-level view. One for a view export; one per board for a plan.
+   *  Carries the id as well as the name, because two views may share a name and
+   *  a name is not a React key. */
+  roots: { id: string; name: string }[];
+  /** Views that came along only because something embeds them. */
+  embedded: { id: string; name: string }[];
   slotSets: number;
   notes: number;
   images: number;
   targets: number;
   rebind: UnresolvableRef[];
+  /** Plan exports only. Counted from the file, not promised by it. */
+  boards: number;
+  rows: number;
+  patchVariants: { sheetName: string; variantName: string }[];
+  presets: number;
 }
 
 const KIND_LABEL: Record<UnresolvableRef["kind"], string> = {
@@ -40,11 +65,27 @@ const KIND_LABEL: Record<UnresolvableRef["kind"], string> = {
 
 function review(bundle: ViewBundle): Review {
   const root = bundle.views[0];
-  const refs = collectRefs(bundle.views, root.id);
+  // Every root, matching what the server walks. A plan export has one root per
+  // view the service type has a board on, and walking the first alone would
+  // promise a shorter rebind list than the import produces.
+  const refs = collectRefsFrom(bundle.views, bundle.roots?.length ? bundle.roots : [root.id]);
+  const slots = bundle.sideData?.slots ?? {};
+  const boardSets = Object.values(slots).flatMap((byType) => Object.values(byType ?? {}));
+  const rootIds = new Set(bundle.roots?.length ? bundle.roots : [root.id]);
   return {
+    roots: bundle.views.filter((v) => rootIds.has(v.id)).map((v) => ({ id: v.id, name: v.name })),
+    boards: boardSets.length,
+    rows: boardSets.reduce((n, rows) => n + (rows?.length ?? 0), 0),
+    patchVariants: (bundle.sideData?.patchVariants ?? []).map((p) => ({
+      sheetName: p.sheetName, variantName: p.variant.name,
+    })),
+    presets: bundle.sideData?.presets?.length ?? 0,
     bundle,
     rootName: root.name,
-    dependencies: bundle.views.slice(1).map((v) => v.name),
+    // By ROOT, not by position. A plan export has one root per view the service
+    // type has a board on, and "comes with it — the layout embeds this" on five
+    // of six roots is a straight untruth about where they came from.
+    embedded: bundle.views.filter((v) => !rootIds.has(v.id)).map((v) => ({ id: v.id, name: v.name })),
     slotSets: Object.keys(bundle.sideData?.slots ?? {}).length,
     notes: Object.keys(bundle.sideData?.notes ?? {}).length,
     images: Object.keys(bundle.images ?? {}).length,
@@ -53,13 +94,25 @@ function review(bundle: ViewBundle): Review {
   };
 }
 
-export function ImportLayout() {
+export function ImportLayout({ serviceTypes = [], currentServiceTypeId = null }: {
+  /** This machine's service types, for the plan file's type picker. Empty when
+   *  Planning Center is not configured, which is also when no plan file can be
+   *  landed usefully. */
+  serviceTypes?: ServiceTypeDTO[];
+  currentServiceTypeId?: string | null;
+} = {}) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<Review | null>(null);
   const [report, setReport] = useState<ImportReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [landUnder, setLandUnder] = useState<string>("");
+  const [onClash, setOnClash] = useState<"keep" | "replace">("keep");
+
+  const plan = pending?.bundle.plan;
+  const fileTypeIsHere = !!plan && serviceTypes.some((t) => t.id === plan.serviceTypeId);
+  const canClash = !!pending && (pending.patchVariants.length > 0 || pending.presets > 0);
 
   async function take(file: File): Promise<void> {
     setError(null);
@@ -75,7 +128,16 @@ export function ImportLayout() {
       if (!Array.isArray(parsed.views) || parsed.views.length === 0) {
         throw new Error("That file has no views in it.");
       }
-      setPending(review(parsed));
+      const next = review(parsed);
+      // Default to the id the file names when this machine has it, else to
+      // whatever type the machine is on — a picker that starts on nothing is a
+      // Confirm that does something the operator did not choose.
+      const here = parsed.plan && serviceTypes.some((t) => t.id === parsed.plan!.serviceTypeId)
+        ? parsed.plan.serviceTypeId
+        : currentServiceTypeId ?? serviceTypes[0]?.id ?? "";
+      setLandUnder(here);
+      setOnClash("keep");
+      setPending(next);
     } catch (err) {
       setPending(null);
       setError(errorMessage(err));
@@ -86,7 +148,12 @@ export function ImportLayout() {
     if (!pending) return;
     setBusy(true);
     try {
-      setReport(await invoke<ImportReport>("views:import", { bundle: pending.bundle }));
+      setReport(await invoke<ImportReport>("views:import", {
+        bundle: pending.bundle,
+        // Only for a plan file. The server ignores them otherwise, but sending
+        // them would still read as a choice that was made.
+        ...(plan ? { serviceTypeId: landUnder || undefined, onClash } : {}),
+      }));
       setPending(null);
       setError(null);
     } catch (err) {
@@ -136,24 +203,68 @@ export function ImportLayout() {
       {pending && (
         <section className="mt-3 basis-full overflow-hidden rounded-xl border border-line-strong bg-surface">
           <header className="border-b border-line px-4 py-3">
-            <h3 className="text-callout font-semibold text-fg">Import layout</h3>
+            <h3 className="text-callout font-semibold text-fg">
+              {plan ? `Import "${plan.serviceTypeName}"` : "Import layout"}
+            </h3>
             <p className="mt-0.5 text-caption1 text-fg-subtle">
-              {pending.rootName}
+              {plan ? `Stage Utility ${pending.bundle.appVersion}` : pending.rootName}
               {pending.bundle.source?.server ? ` · from ${pending.bundle.source.server}` : ""}
             </p>
           </header>
 
           <div className="flex flex-col gap-3 px-4 py-3">
+            {plan && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-footnote text-fg">Import as service type</span>
+                  <Select
+                    value={landUnder}
+                    onValueChange={setLandUnder}
+                    disabled={serviceTypes.length === 0}
+                  >
+                    <SelectTrigger className="w-52">
+                      <SelectValue placeholder={serviceTypes.length === 0 ? "No types here" : "Select…"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {serviceTypes.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-caption2 text-fg-subtle">
+                  {fileTypeIsHere
+                    ? "The file's type id matches one here."
+                    : "No type here has that id; pick one."}
+                </p>
+              </div>
+            )}
+
             <Group title="Views">
-              <Row label={pending.rootName} sub="the layout you picked" />
-              {pending.dependencies.map((n) => (
-                <Row key={n} label={n} sub="comes with it — the layout embeds this" tag="embedded" />
+              {pending.roots.map((v) => (
+                <Row
+                  key={v.id}
+                  label={v.name}
+                  sub={plan ? "has a board for this service type" : "the layout you picked"}
+                />
+              ))}
+              {pending.embedded.map((v) => (
+                <Row key={v.id} label={v.name} sub="comes with it — the layout embeds this" tag="embedded" />
               ))}
             </Group>
 
-            {(pending.slotSets > 0 || pending.notes > 0 || pending.images > 0 || pending.targets > 0) && (
+            {(pending.slotSets > 0 || pending.notes > 0 || pending.images > 0 || pending.targets > 0
+              || pending.patchVariants.length > 0 || pending.presets > 0) && (
               <Group title="Comes with it">
-                {pending.slotSets > 0 && <Row label="Slot rows" sub="every service type" tag={String(pending.slotSets)} />}
+                {pending.slotSets > 0 && (
+                  plan
+                    ? <Row label="Slot rows" sub={`${pending.boards} board${pending.boards === 1 ? "" : "s"}, ${pending.rows} row${pending.rows === 1 ? "" : "s"}`} tag={String(pending.slotSets)} />
+                    : <Row label="Slot rows" sub="every service type" tag={String(pending.slotSets)} />
+                )}
+                {pending.patchVariants.map((p) => (
+                  <Row key={`${p.sheetName}:${p.variantName}`} label={`Patch variant "${p.variantName}"`} sub={`on ${p.sheetName} — the rig itself stays here`} />
+                ))}
+                {pending.presets > 0 && <Row label="Slot presets" sub="saved arrangements, global" tag={String(pending.presets)} />}
                 {pending.notes > 0 && <Row label="Notes and checklists" sub="keyed to their objects" tag={String(pending.notes)} />}
                 {pending.images > 0 && <Row label="Images" sub="identical ones are shared, not duplicated" tag={String(pending.images)} />}
                 {pending.targets > 0 && <Row label="OSC and RossTalk targets" sub="a local one of the same id is kept" tag={String(pending.targets)} />}
@@ -161,6 +272,33 @@ export function ImportLayout() {
             )}
 
             {pending.rebind.length > 0 && <RebindList list={pending.rebind} />}
+
+            {canClash && (
+              <div className="flex flex-col gap-1.5">
+                <ButtonGroup role="group" aria-label="What to do where they clash">
+                  <Button
+                    variant={onClash === "keep" ? "accent" : "filled"}
+                    aria-pressed={onClash === "keep"}
+                    size="small"
+                    onClick={() => setOnClash("keep")}
+                  >
+                    Keep mine where they clash
+                  </Button>
+                  <Button
+                    variant={onClash === "replace" ? "accent" : "filled"}
+                    aria-pressed={onClash === "replace"}
+                    size="small"
+                    onClick={() => setOnClash("replace")}
+                  >
+                    Replace mine
+                  </Button>
+                </ButtonGroup>
+                <p className="text-caption2 text-fg-subtle">
+                  Only the patch assignment and presets can clash. Imported views always arrive as
+                  new views, so their slot rows never do.
+                </p>
+              </div>
+            )}
           </div>
 
           <footer className="flex justify-end gap-2 border-t border-line bg-fill/40 px-4 py-3">
@@ -174,7 +312,13 @@ export function ImportLayout() {
         </section>
       )}
 
-      {report && <ImportResult report={report} onClose={() => setReport(null)} />}
+      {report && (
+        <ImportResult
+          report={report}
+          nameOfType={(id) => serviceTypes.find((t) => t.id === id)?.name ?? id}
+          onClose={() => setReport(null)}
+        />
+      )}
     </>
   );
 }
@@ -258,8 +402,33 @@ function RebindList({ list, onOpen }: { list: UnresolvableRef[]; onOpen?: (u: Un
   );
 }
 
+type PatchRow = ImportReport["patchVariants"][number];
+
+/** One line each, in the operator's words rather than the wire's. "reassigned"
+ *  is not here: it has to name the variant the assignment came off, so it is
+ *  built per row by patchLine below. */
+const PATCH_OUTCOME: Record<Exclude<PatchRow["outcome"], "reassigned">, string> = {
+  added: "added to that sheet, and this type now uses it",
+  assigned: "already here — yours was kept, and this type now points at it",
+  kept: "nothing changed — the sheet and its assignment are yours",
+  replaced: "overwritten with the file's copy, and this type now uses it",
+  "no-such-sheet": "no sheet here matches by id or name — nothing was written",
+};
+
+function patchLine(p: PatchRow): string {
+  return p.outcome === "reassigned"
+    ? `this type pointed at "${p.previousVariantName}" — it now uses the file's variant instead`
+    : PATCH_OUTCOME[p.outcome];
+}
+
 /** What landed, and what is left to do. */
-function ImportResult({ report, onClose }: { report: ImportReport; onClose: () => void }) {
+function ImportResult({ report, nameOfType, onClose }: {
+  report: ImportReport;
+  /** A PCO service type id means nothing to a human. Resolved here rather than
+   *  on the server, which knows the FILE's type name and not this machine's. */
+  nameOfType: (id: string) => string;
+  onClose: () => void;
+}) {
   const router = useRouter();
   return (
     <section className="mt-3 basis-full overflow-hidden rounded-xl border border-line-strong bg-surface">
@@ -269,6 +438,43 @@ function ImportResult({ report, onClose }: { report: ImportReport; onClose: () =
         </h3>
       </header>
       <div className="flex flex-col gap-3 px-4 py-3">
+        {report.plan && (
+          <Group title="Service type">
+            <Row
+              label={nameOfType(report.plan.serviceTypeId)}
+              sub={report.plan.retypedFrom
+                ? `the file was exported from "${report.plan.serviceTypeName}" — landed here under this type instead`
+                : "the type the file names, and the one it landed under"}
+            />
+            <Row
+              label="Slot boards"
+              sub={`${report.slotBoards} board${report.slotBoards === 1 ? "" : "s"}, ${report.slotRows} row${report.slotRows === 1 ? "" : "s"}`}
+            />
+          </Group>
+        )}
+
+        {report.patchVariants.length > 0 && (
+          <Group title="Patch variants">
+            {report.patchVariants.map((p) => (
+              <Row
+                key={`${p.sheetName}:${p.variantName}`}
+                label={`"${p.variantName}" on ${p.sheetName}`}
+                sub={patchLine(p)}
+                warn={p.outcome === "no-such-sheet"}
+              />
+            ))}
+          </Group>
+        )}
+
+        {(report.presets.added + report.presets.kept + report.presets.replaced) > 0 && (
+          <Group title="Slot presets">
+            <Row
+              label={`${report.presets.added} added, ${report.presets.kept} kept, ${report.presets.replaced} replaced`}
+              sub="matched by id; a kept one is yours, untouched"
+            />
+          </Group>
+        )}
+
         <Group title="Added">
           {report.views.map((v) => (
             <Row

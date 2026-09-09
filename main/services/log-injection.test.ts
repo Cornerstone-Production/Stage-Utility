@@ -74,6 +74,8 @@ const REQUEST_FACING = [
   "log-routes.ts",
   "operator-paths.ts",
   "pco-service.ts",
+  "plan-export.ts",
+  "plan-routes.ts",
   "preset-routes.ts",
   "proxy-routes.ts",
   "rosstalk-routes.ts",
@@ -83,6 +85,7 @@ const REQUEST_FACING = [
   "state-routes.ts",
   "status-routes.ts",
   "system-routes.ts",
+  "view-import.ts",
   "view-routes.ts",
 ];
 
@@ -214,6 +217,14 @@ function requestFacingFiles(): string[] {
     // A cue token's LABEL is typed into an HTTP body ("Home Assistant") and is
     // logged when the token is minted.
     path.join(HERE, "cue-tokens.ts"),
+    // A plan export's log line names the service type, which comes from Planning
+    // Center over HTTP; the query that asks for it is an HTTP request.
+    path.join(HERE, "plan-export.ts"),
+    // Every value on its three log lines comes out of an UPLOADED FILE — the
+    // service type name and id, a patch sheet's name, a variant's name. It
+    // logged nothing at all before the plan import, which is when it acquired
+    // the exposure.
+    path.join(HERE, "view-import.ts"),
     ...inRoutes,
   ];
 }

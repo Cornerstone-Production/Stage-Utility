@@ -7,7 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { buildViewBundle } from "../view-export.js";
-import { applyViewBundle } from "../view-import.js";
+import { applyViewBundle, type ImportOptions } from "../view-import.js";
 import {
   listLayoutTemplates,
   saveLayoutTemplate,
@@ -52,15 +52,20 @@ function isSelectionList(v: unknown): v is CalendarSelection[] {
 }
 
 /**
- * `stage-utility-view-left-mic-display-2026-08-17.json`.
+ * Operator-supplied text, safe to put in a quoted Content-Disposition value.
  *
- * The name is operator-supplied text going into a quoted header value, so the
- * slug keeps only [a-z0-9-] — a quote or a path separator surviving here would
- * be a header injection, not a cosmetic problem. Bounded because some
- * filesystems cap a path component at 255 bytes.
+ * Keeps only [a-z0-9-]: a quote or a path separator surviving here would be a
+ * header injection, not a cosmetic problem. Bounded because some filesystems cap
+ * a path component at 255 bytes. Exported so the plan export names its file the
+ * same way rather than growing a fifth copy of this line.
  */
+export function filenameSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+}
+
+/** `stage-utility-view-left-mic-display-2026-08-17.json`. */
 export function exportFilename(name: string, now: Date): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  const slug = filenameSlug(name);
   // The app's zone, not the server's clock: a UTC box dates a file exported at
   // 22:30 in Chicago as the next day. patch-export.ts fixed the same line first;
   // this and the config and archive exports are the other three copies.
@@ -268,7 +273,20 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         // A bundle carries base64 images, so the ordinary JSON ceiling would
         // refuse a file this app exported — the same reason /api/config/import
         // uses this limit.
-        const report = await applyViewBundle(await readBody(req, MAX_CONFIG_BODY_BYTES));
+        // Two body shapes. The bundle posted verbatim is what every published
+        // version of this app sends, so it stays the default; a plan import
+        // wraps it to carry the chosen service type and the clash choice.
+        // Detected by the ABSENCE of `kind`, which every bundle has and no
+        // wrapper does.
+        const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
+        const wrapped = body?.kind === undefined && !!body?.bundle;
+        const opts: ImportOptions = wrapped
+          ? {
+            ...(typeof body.serviceTypeId === "string" ? { serviceTypeId: body.serviceTypeId } : {}),
+            ...(body.onClash === "keep" || body.onClash === "replace" ? { onClash: body.onClash } : {}),
+          }
+          : {};
+        const report = await applyViewBundle(wrapped ? body.bundle : body, opts);
 
         // Telling the managers is the ROUTE's job, not the merge service's.
         // Both hold their targets in memory and write that array back on the
