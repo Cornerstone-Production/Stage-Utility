@@ -481,13 +481,14 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       const tally = `${presets.added} added, ${presets.kept} kept, ${presets.replaced} replaced`;
       console.log(`[view-import] presets: ${scrub(tally)}`);
     } catch (err) {
-      // Same rule as the patch save above: returned to the caller, and the tally
-      // zeroed rather than reporting presets that are not on disk.
+      // Same rule as the patch save above: returned to the caller, and the
+      // writes struck from the tally rather than reporting presets that are not
+      // on disk. `kept` stays — a kept preset was never touched and is exactly
+      // where it was.
       const msg = errorMessage(err);
       skipped.push(`presets — could not be saved: ${msg}`);
       console.error(`[view-import] presets failed: ${scrub(msg)}`);
       presets.added = 0;
-      presets.kept = 0;
       presets.replaced = 0;
     }
   }

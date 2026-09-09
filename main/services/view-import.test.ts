@@ -593,19 +593,24 @@ describe("presets", () => {
     assert.equal(saved[0]!.name, "From the file");
   });
 
-  test("a save that fails late is reported, and the tally claims nothing", async () => {
-    await presetsStore.save([] as never);
+  test("a save that fails late is reported, and the tally claims no write", async () => {
+    // p1 is already here, so it is KEPT — and a kept preset is untouched by a
+    // save that never happened, so it must still be counted. p2 would have been
+    // added, and was not.
+    await presetsStore.save([p("p1", "Mine")] as never);
     const store = presetsStore as unknown as { save: unknown };
     const real = store.save;
     store.save = async () => { throw new Error("disk full"); };
     try {
-      const report = await applyViewBundle(withPresets());
+      const report = await applyViewBundle(
+        planBundle({}, { slots: {}, presets: [p("p1", "From the file"), p("p2", "New")] }),
+      );
       assert.equal(report.views.length, 1, "the views were rolled back over a preset save");
       assert.ok(
         report.skipped.some((k) => k === "presets — could not be saved: disk full"),
         `the failure was swallowed: ${JSON.stringify(report.skipped)}`,
       );
-      assert.deepEqual(report.presets, { added: 0, kept: 0, replaced: 0 });
+      assert.deepEqual(report.presets, { added: 0, kept: 1, replaced: 0 });
     } finally {
       store.save = real;
     }
