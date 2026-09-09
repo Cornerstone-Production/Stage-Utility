@@ -6,7 +6,7 @@
 //  - a `says` with a line break in it. A literal newline cannot appear inside a
 //    double-quoted YAML scalar, so Home Assistant rejects the WHOLE document and
 //    every cue disappears, not just the one with the bad name.
-//  - two switches with the same `friendly_name`. Home Assistant takes both, the
+//  - two switches with the same spoken `name`. Home Assistant takes both, the
 //    operator says "turn on the projectors", and which room answers is a coin
 //    toss found out during a service.
 
@@ -20,7 +20,34 @@ import type { Rule } from "../types/automation.js";
 const BASE = "http://192.168.1.50:8788";
 
 /**
- * The `friendly_name` of every generated switch, in order.
+ * The lines of the ONE `template:` block, or [] when there is none.
+ *
+ * Everything about the switches is read off this rather than off the whole
+ * document, because `- name:` at six spaces is ALSO how the `rest` sensor names
+ * itself: a scan of the raw text found that sensor and called it a switch.
+ *
+ * Asserts there is exactly one `template:` key while it is here. Two of them in
+ * one file is a duplicate mapping key — YAML keeps the last, so half the
+ * switches would silently not exist in Home Assistant.
+ */
+function templateBlock(yaml: string): string[] {
+  const lines = yaml.split("\n");
+  const starts = lines.flatMap((l, i) => (l === "template:" ? [i] : []));
+  assert.ok(starts.length <= 1, `${starts.length} top-level template: keys; a second one is a duplicate`);
+  if (starts.length === 0) return [];
+  const out: string[] = [];
+  for (let i = starts[0]! + 1; i < lines.length; i++) {
+    // A top-level key or a blank line ends the block; everything inside it is
+    // indented.
+    if (lines[i] === "" || /^\S/.test(lines[i]!)) break;
+    out.push(lines[i]!);
+  }
+  assert.equal(out[0], "  - switch:", `template: does not open with one switch list; got ${JSON.stringify(out[0])}`);
+  return out;
+}
+
+/**
+ * The spoken `name` of every generated template switch, in order.
  *
  * There is no YAML parser in this project's dependency tree and one is not worth
  * adding for a test, so the line is matched as YAML defines a double-quoted
@@ -29,14 +56,14 @@ const BASE = "http://192.168.1.50:8788";
  * the line without a closing quote and matches nothing, exactly as it would break
  * a real parse.
  */
-const QUOTED = /^ {8}friendly_name: "((?:[^"\\\n\r\t]|\\.)*)"$/;
+const QUOTED = /^ {6}- name: "((?:[^"\\\n\r\t]|\\.)*)"$/;
 
 function friendlyNames(yaml: string): string[] {
-  const declared = yaml.split("\n").filter((l) => l.trimStart().startsWith("friendly_name:"));
+  const declared = templateBlock(yaml).filter((l) => l.trimStart().startsWith("- name:"));
   const parsed: string[] = [];
   for (const line of declared) {
     const m = QUOTED.exec(line);
-    assert.ok(m, `friendly_name is not a single well-formed quoted scalar: ${JSON.stringify(line)}`);
+    assert.ok(m, `switch name is not a single well-formed quoted scalar: ${JSON.stringify(line)}`);
     parsed.push(m[1]!.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t").replace(/\\"/g, '"').replace(/\\\\/g, "\\"));
   }
   return parsed;
@@ -101,22 +128,22 @@ function sensorAttributes(yaml: string): string[] {
   return out;
 }
 
-/** Every switch key, with what it reports its state from. */
+/** Every switch's unique_id, with what it reports its state from. */
 function switchStates(yaml: string): { id: string; from: string }[] {
-  const lines = yaml.split("\n");
-  const start = lines.indexOf("    switches:");
-  if (start === -1) return [];
+  const lines = templateBlock(yaml);
   const out: { id: string; from: string }[] = [];
-  for (let i = start + 1; i < lines.length; i++) {
-    // The key is QUOTED, for the same YAML 1.1 reason as the attribute list: a
-    // switch id of `no` is the boolean false as a mapping key.
-    const key = /^ {6}"(\w+)":$/.exec(lines[i]!);
-    if (!key) continue;
-    const block = lines.slice(i + 1, i + 6).join("\n");
-    const optimistic = / {8}optimistic: true/.test(block);
-    const template = / {8}value_template: (.+)/.exec(block);
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^ {6}- name: /.test(lines[i]!)) continue;
+    // The id is QUOTED, for the same YAML 1.1 reason as the attribute list: a
+    // bare `no` or `on` is a boolean there. It is prefixed too, so quoting it is
+    // belt and braces rather than the only thing holding it up.
+    const id = /^ {8}unique_id: "stage_utility_(\w+)"$/.exec(lines[i + 1] ?? "");
+    assert.ok(id, `switch has no quoted, prefixed unique_id: ${JSON.stringify(lines[i + 1])}`);
+    const block = lines.slice(i + 2, i + 8).join("\n");
+    const optimistic = /^ {8}optimistic: true$/m.test(block);
+    const template = /^ {8}state: (.+)$/m.exec(block);
     out.push({
-      id: key[1]!,
+      id: id[1]!,
       // Both is a contradiction and neither is a switch with no state at all,
       // so the two are reported as one answer rather than two booleans.
       from: optimistic && template ? "BOTH" : optimistic ? "optimistic" : template ? template[1]! : "NEITHER",
@@ -166,8 +193,8 @@ describe("homeAssistantYaml", () => {
     // A raw line break here ends the line with the quote unclosed, which is what
     // makes Home Assistant reject the whole file — friendlyNames refuses it.
     assert.deepEqual(friendlyNames(yaml), ["Lobby:\nTVs"]);
-    assert.match(yaml, /friendly_name: "Lobby:\\nTVs"/);
-    assert.equal(yaml.includes('friendly_name: "Lobby:\n'), false, "a raw newline is inside the quotes");
+    assert.match(yaml, /- name: "Lobby:\\nTVs"/);
+    assert.equal(yaml.includes('- name: "Lobby:\n'), false, "a raw newline is inside the quotes");
   });
 
   test("a tab and a carriage return survive the same way", () => {
@@ -183,7 +210,7 @@ describe("homeAssistantYaml", () => {
     assert.deepEqual(friendlyNames(yaml), ['The "back\\slash" room']);
   });
 
-  test("two pairs that would share a friendly_name are separated by their cue name", () => {
+  test("two pairs that would share a spoken name are separated by their cue name", () => {
     // Hand-written cues have no page to name them after — the Companion import
     // does that on the way in — so the cue name, which the engine already
     // guarantees is unique, is what separates them. Two identical switches in
@@ -282,7 +309,7 @@ describe("homeAssistantYaml", () => {
 
   test("a switch and a script that would say the same thing are separated too", () => {
     // Across the KINDS, which no amount of disambiguating each list on its own
-    // would catch. To a voice assistant a switch's friendly_name and a script's
+    // would catch. To a voice assistant a switch's spoken name and a script's
     // alias are one namespace: the words somebody says out loud.
     const yaml = homeAssistantYaml(
       [
@@ -315,7 +342,7 @@ describe("homeAssistantYaml", () => {
   });
 
   test("a newline in a script's alias does not break the document either", () => {
-    // The same failure as a switch's friendly_name: one bad scalar and Home
+    // The same failure as a switch's name: one bad scalar and Home
     // Assistant rejects the WHOLE file, so every cue disappears.
     const yaml = homeAssistantYaml([cue("odd", "Take:\nScreens")], BASE);
     assert.deepEqual(scripts(yaml), [{ name: "odd", alias: "Take:\\nScreens" }]);
@@ -380,7 +407,7 @@ describe("homeAssistantYaml", () => {
 //  - a sensor whose `json_attributes` does not list a pair the switches read
 //    from. The switch then reads an attribute that never appears, and reports
 //    off forever with nothing in any log.
-//  - a switch carrying `optimistic: true` AND a `value_template`. Optimistic
+//  - a switch carrying `optimistic: true` AND a `state` template. Optimistic
 //    means "believe the press and do not wait for the state", which is exactly
 //    what a state variable exists to replace, so a switch with both keeps
 //    reporting what it asked for while looking as if it reads the device.
@@ -481,8 +508,9 @@ describe("a pair with a state variable", () => {
     // `false` bare are booleans there, so `- no` under json_attributes asked the
     // sensor for the attribute `false` — an attribute no answer has ever
     // carried, leaving the switch reading off forever with nothing in any log.
-    // The same word is also the switch's own mapping key, and a one-shot cue
-    // called `on` is a script's.
+    // The same word is inside the switch's own `unique_id` — prefixed, so it
+    // cannot be a bare boolean there — and a one-shot cue called `on` is a
+    // script's mapping key, where it still can be.
     const yaml = homeAssistantYaml(
       [
         bound("no_on", "No on", "no_state"),
@@ -498,7 +526,7 @@ describe("a pair with a state variable", () => {
     // And the exact lines, so a passing helper cannot be a helper that matched
     // nothing.
     assert.match(yaml, /^ {10}- "no"$/m);
-    assert.match(yaml, /^ {6}"no":$/m);
+    assert.match(yaml, /^ {8}unique_id: "stage_utility_no"$/m);
     assert.match(yaml, /^ {2}"on":$/m);
   });
 
@@ -506,7 +534,7 @@ describe("a pair with a state variable", () => {
     // The one thing an operator cannot work out from the fragment: a pair that
     // could not be read reads OFF, which is indistinguishable from a device that
     // is off. Saying so beside the sensor is the only place it appears in Home
-    // Assistant. The availability_template note is there so nobody adds the
+    // Assistant. The availability note is there so nobody adds the
     // obvious fix — an unavailable entity cannot be commanded, so it would also
     // stop them turning the device on.
     const yaml = homeAssistantYaml(
@@ -519,13 +547,13 @@ describe("a pair with a state variable", () => {
       `nothing says what an unknown pair does; got:\n  ${said.join("\n  ")}`,
     );
     assert.ok(
-      said.some((c) => c.includes("No availability_template on purpose")),
+      said.some((c) => c.includes("No availability template on purpose")),
       `nothing says why the switch is not made unavailable; got:\n  ${said.join("\n  ")}`,
     );
 
     // And not in a document with nothing bound: there is no sensor to talk about.
     const without = homeAssistantYaml([cue("p_on", "P on"), cue("p_off", "P off")], BASE);
-    assert.equal(comments(without).some((c) => c.includes("availability_template")), false);
+    assert.equal(comments(without).some((c) => c.includes("availability template")), false);
   });
 
   test("the header says the switches read real state only when one does", () => {
@@ -546,6 +574,111 @@ describe("a pair with a state variable", () => {
       comments(without).some((c) => c.includes("Switches are optimistic")),
       true,
     );
+  });
+});
+
+// ── The template integration's modern shape ──────────────────────────
+//
+// This generated the LEGACY spelling — `switch:` with `- platform: template` and
+// a `switches:` map under it — and current Home Assistant refuses it outright:
+//
+//   Unsupported YAML configuration for the template integration: configuring the
+//   template integration by adding `platform: template` under the `switch:` key
+//   is not supported. The template integration must be configured under its own
+//   `template:` key instead.
+//
+// Every switch in a pasted fragment was gone, and the fragment itself parsed
+// fine — so nothing in this file caught it. These are the four things that make
+// it the modern shape, checked over every kind of document the generator emits.
+describe("the template integration's modern shape", () => {
+  const bound = (name: string, says: string, variable: string) =>
+    cue(name, says, name, "", { stateVariable: variable });
+
+  /** Every kind of document this can produce, named for the failure message. */
+  const DOCUMENTS: Record<string, Rule[]> = {
+    "no cues": [],
+    "one unbound pair": [cue("projectors_on", "Projectors on"), cue("projectors_off", "Projectors off")],
+    "one bound pair": [bound("projectors_on", "Projectors on", "projectors_state"), cue("projectors_off", "Projectors off")],
+    "scripts only": [cue("take_screens", "take the screens")],
+    "three pairs, one bound, plus a script": [
+      bound("projectors_on", "Projectors on", "projectors_state"),
+      cue("projectors_off", "Projectors off"),
+      cue("amps_on", "Amps on"),
+      cue("amps_off", "Amps off"),
+      cue("lobby_tvs_on", "Lobby TVs on"),
+      cue("lobby_tvs_off", "Lobby TVs off"),
+      cue("take_screens", "take the screens"),
+    ],
+  };
+
+  test("no `platform: template` in ANY document", () => {
+    // The exact bug. Read off the CODE, not the raw text: the fragment names the
+    // legacy spelling in a comment so an operator re-pasting knows why, and a
+    // scan of the raw text called that comment the bug. Dropping whole-line
+    // comments is safe here and nothing else is dropped — this generator never
+    // writes a trailing comment after a value, which the second assertion pins.
+    for (const [what, rules] of Object.entries(DOCUMENTS)) {
+      const yaml = homeAssistantYaml(rules, BASE);
+      const lines = yaml.split("\n");
+      const code = lines.filter((l) => !l.trimStart().startsWith("#"));
+      // A filter that ate the document would pass everything below it.
+      assert.equal(
+        code.some((l) => l.trim() !== ""),
+        rules.length > 0,
+        `${what}: dropping comments left nothing to check`,
+      );
+      const text = code.join("\n");
+      assert.equal(
+        /platform:\s*template/.test(text),
+        false,
+        `${what}: Home Assistant refuses \`platform: template\` under \`switch:\``,
+      );
+      // And no legacy `switch:` block of any kind, which is the only place it
+      // could have gone. These three cannot appear in prose, so they are checked
+      // against the whole document.
+      assert.equal(/^switch:$/m.test(yaml), false, `${what}: a top-level switch: key`);
+      assert.equal(/^ {4}switches:$/m.test(yaml), false, `${what}: a legacy switches: map`);
+      assert.equal(/^\s*friendly_name:/m.test(yaml), false, `${what}: friendly_name is the legacy key`);
+    }
+  });
+
+  test("ONE top-level `template:` key, with every switch in the list under it", () => {
+    // A second top-level `template:` is a duplicate mapping key in one file:
+    // YAML keeps the last, so the pairs before it would silently not exist.
+    const yaml = homeAssistantYaml(DOCUMENTS["three pairs, one bound, plus a script"]!, BASE);
+    assert.equal((yaml.match(/^template:$/gm) ?? []).length, 1);
+    // One `- switch:` under it, not one per pair.
+    assert.equal((yaml.match(/^ {2}- switch:$/gm) ?? []).length, 1);
+    assert.deepEqual(
+      switchStates(yaml).map((x) => x.id),
+      ["amps", "lobby_tvs", "projectors"],
+    );
+    // The other three top-level keys are single too, for the same reason.
+    for (const key of ["rest_command:", "rest:", "script:"]) {
+      assert.equal(
+        (yaml.match(new RegExp(`^${key}$`, "gm")) ?? []).length,
+        1,
+        `${key} is not a single top-level key`,
+      );
+    }
+  });
+
+  test("a bound switch carries `state:` and NOT `optimistic:`", () => {
+    // Optimistic means "believe the press and do not wait for the state", which
+    // is exactly what a state variable exists to replace.
+    const yaml = homeAssistantYaml(DOCUMENTS["one bound pair"]!, BASE);
+    const block = templateBlock(yaml).join("\n");
+    assert.match(block, /^ {8}state: "\{\{ \(state_attr\('sensor\.stage_utility_cues', 'projectors'\)/m);
+    assert.equal(/optimistic:/.test(block), false, "a bound switch is optimistic as well as read");
+  });
+
+  test("an unbound switch carries NO `state:` at all", () => {
+    // Which is what makes it optimistic per the docs — the switch assumes its
+    // commands succeeded. `optimistic: true` is spelled out beside it anyway.
+    const yaml = homeAssistantYaml(DOCUMENTS["one unbound pair"]!, BASE);
+    const block = templateBlock(yaml).join("\n");
+    assert.equal(/^ {8}state:/m.test(block), false, "an unbound switch has a state template");
+    assert.match(block, /^ {8}optimistic: true$/m);
   });
 });
 
@@ -612,11 +745,15 @@ describe("the document for an install with no bindings", () => {
   "    content_type: \"application/json\"",
   "    payload: \"{}\"",
   "",
-  "switch:",
-  "  - platform: template",
-  "    switches:",
-  "      \"projectors\":",
-  "        friendly_name: \"Projectors\"",
+  "# Template switches, under the template integration's own key. Home",
+  "# Assistant refuses `platform: template` under `switch:` \u2014 the spelling",
+  "# these used to be generated in \u2014 so re-paste this over an older copy.",
+  "# Each entity id now follows the switch's name rather than the cue's, so an",
+  "# automation of your own naming an old `switch.\u2026` may need its id updating.",
+  "template:",
+  "  - switch:",
+  "      - name: \"Projectors\"",
+  "        unique_id: \"stage_utility_projectors\"",
   "        optimistic: true",
   "        turn_on:",
   "          action: rest_command.su_projectors_on",
