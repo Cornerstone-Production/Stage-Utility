@@ -6,8 +6,9 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
+import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
 import type { Slot } from "../../types/stage.js";
-import { stageController } from "../stage-controller.js";
+import { SlotsNotFoundError, stageController } from "../stage-controller.js";
 
 export async function presetRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -78,10 +79,26 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
           : typeof body.displayId === "string"
             ? body.displayId
             : "";
-      const { state, viewId } = await stageController.applyPreset(target, id);
-      // The caller needs to know WHICH view was written, so it can read the right
-      // slots back — and notice when that is not the view it was showing.
-      json(res, { ...state, appliedViewId: viewId });
+      // Which BOARD it lands on: the editor sends the target it is showing, so
+      // recalling an arrangement while looking at this week does not rewrite the
+      // service type's standing board. Absent = wherever a plain save goes.
+      const slotsTarget = readSlotsTarget(body.target);
+      if (slotsTarget === INVALID_TARGET) {
+        error(res, TARGET_ERROR);
+        return;
+      }
+      try {
+        const { state, viewId } = await stageController.applyPreset(target, id, slotsTarget);
+        // The caller needs to know WHICH view was written, so it can read the
+        // right slots back — and notice when that is not the view it was showing.
+        json(res, { ...state, appliedViewId: viewId });
+      } catch (err) {
+        // Recalling an arrangement is a slot write and can be refused for the
+        // same reasons one is: an unknown view, a plan target naming another
+        // service type. Anything else goes up to the dispatcher as a 500.
+        if (!(err instanceof SlotsNotFoundError)) throw err;
+        error(res, err.message, err.status);
+      }
       return;
     }
 

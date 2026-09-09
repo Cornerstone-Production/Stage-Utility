@@ -65,13 +65,16 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET | `/api/views` | List views |
 | POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201` |
 | PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `scriptViewLayoutId`, `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
-| POST | `/api/views/:id/slots` | Save a slots-view's slots |
+| POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
 | POST | `/api/views/resolve-slots` | Resolve a slot set against the current plan without saving it — what the editor previews with |
-| POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines |
+| POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |
+| GET | `/api/views/:id/slot-targets` | The service type's default board and the current plan's own, plus the plan it belongs to. Also `/api/layout-objects/:id/slot-targets` |
+| DELETE | `/api/views/:id/slots/override/:planId` | Revert that plan to the default. `404` when the plan had no board of its own. Also `/api/layout-objects/:id/slots/override/:planId` |
+| POST | `/api/views/:id/slots/promote` | Make a plan's board the service type's default (`{planId}`), clearing the plan's own. `404` when it had none. Also `/api/layout-objects/:id/slots/promote` |
 | POST | `/api/views/:id/duplicate` | Duplicate a view |
 | GET | `/api/views/:id/export` | Download the view and anything it embeds as one file |
 | POST | `/api/views/import` | Merge an exported view in; returns what landed and what needs rebinding |
-| POST | `/api/views/:id/copy-slots` | Copy slots from another view |
+| POST | `/api/views/:id/copy-slots` | Copy slots from another view onto one board (`{fromViewId, target?}`) |
 | POST | `/api/views/reorder` | Reorder views |
 | DELETE | `/api/views/:id` | Delete a view |
 | GET | `/api/outputs` | List physical displays |
@@ -87,6 +90,22 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET / POST | `/api/layout-groups` | List / save a reusable object group (`{name, object}`) |
 | DELETE | `/api/layout-groups/:id` | Delete a group |
 
+**`target` on a slot write.** Optional, and picks which of a service type's two
+boards the write lands on. Read by `POST /api/views/:id/slots`, `POST
+/api/layout-objects/:objectId/slots`, `POST /api/views/:id/copy-slots` and `POST
+/api/presets/:id/apply`. `POST /api/slots` does not read it.
+
+| `target` | Lands on |
+|---|---|
+| omitted | the current plan's board if a plan is selected, else the type's default |
+| `{"kind":"default","serviceTypeId":"…"}` | that service type's default |
+| `{"kind":"plan","planId":"…","serviceTypeId":"…"}` | that plan's board only |
+
+A `target` that is present but malformed is a `400`, not a fall back to the
+default, and a `{"kind":"plan"}` target naming a service type the plan does not
+belong to is a `400` as well. An unknown view, layout object or plan is a `404`.
+See [Mic slots](../slots.md#defaults-and-this-week).
+
 `GET /api/displays` returns each output joined with its routed view's kind, for
 clients that want a flat list. `POST /api/displays/refresh` reloads connected
 screens (`{id?}`; omit it for all of them). `GET /api/displays/presence` returns
@@ -97,7 +116,8 @@ stale read from a fresh one.
 
 **Presets** — `GET /api/presets`, `POST /api/presets` (snapshot the current
 slots under a name), `POST /api/presets/import`, `POST /api/presets/reorder`,
-`POST /api/presets/:id/apply` (onto a view or display), `PATCH /api/presets/:id`
+`POST /api/presets/:id/apply` (onto a view or display, taking the same optional
+`target` as a slot save), `PATCH /api/presets/:id`
 (rename, replace its slots, or overwrite it from a display) and
 `DELETE /api/presets/:id`.
 

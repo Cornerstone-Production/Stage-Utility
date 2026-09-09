@@ -37,6 +37,7 @@ import type { SectionHandlers, WirelessChannel } from "../types";
 import { PositionRangeEditor } from "./position-picker";
 import { useStageState } from "../../main/use-stage-state";
 import { useSortableRow } from "../../lib/use-sortable-row";
+import { SlotsTargetPill } from "./slots-target-pill";
 
 // ---- slot row (sortable) ----------------------------------------------------
 
@@ -646,6 +647,11 @@ interface SlotEditorProps {
   slotsDirty: boolean;
   isSavingSlots: boolean;
   slotPresets: SlotPreset[];
+  /** Which of the view's two boards is being edited, and how it is labelled. */
+  slotsTargetSide: "default" | "plan";
+  slotsTargetLabel: string;
+  slotsTargetHasPlan: boolean;
+  slotsTargetHasOverride: boolean;
   handlers: Pick<
     SectionHandlers,
     | "updateSlot"
@@ -653,6 +659,9 @@ interface SlotEditorProps {
     | "addSpacer"
     | "removeSlot"
     | "saveSlots"
+    | "setSlotsTargetSide"
+    | "revertSlotsOverride"
+    | "promoteSlotsOverride"
     | "handleSetViewSlotsLayout"
     | "handleSavePreset"
     | "handleApplyPreset"
@@ -675,9 +684,16 @@ export function SlotEditor({
   slotsDirty,
   isSavingSlots,
   slotPresets,
+  slotsTargetSide,
+  slotsTargetLabel,
+  slotsTargetHasPlan,
+  slotsTargetHasOverride,
   handlers,
 }: SlotEditorProps) {
   const layout = view.slotsLayout ?? null;
+  // Read here rather than plumbed as a fifth slotsTarget* prop: the inline
+  // editor's copy of this pill reads the same thing from the same hook.
+  const serviceTypeId = useStageState().state?.serviceTypeId ?? null;
 
   // Group slots into stacked columns (a lead slot + its `stackWithPrevious`
   // followers). Each group is dragged as a single sortable unit.
@@ -690,9 +706,22 @@ export function SlotEditor({
   const sharesWith = makeSharesWith(localSlots);
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-headline font-semibold text-gray-12 flex-1">Slots</span>
+    <div className="flex flex-col gap-3" data-slots-target={slotsTargetSide}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-headline font-semibold text-gray-12">Slots</span>
+        <SlotsTargetPill
+          side={slotsTargetSide}
+          label={slotsTargetLabel}
+          hasPlan={slotsTargetHasPlan}
+          hasOverride={slotsTargetHasOverride}
+          // Inert with no service type, the same as the inline editor's copy:
+          // there is no board to save to, so every control on it is a no-op.
+          disabled={!serviceTypeId}
+          onSwitch={(next) => void handlers.setSlotsTargetSide(next)}
+          onRevert={() => void handlers.revertSlotsOverride()}
+          onPromote={() => void handlers.promoteSlotsOverride()}
+        />
+        <div className="flex-1" />
         {slotsDirty && <span className="text-caption2 text-amber-10">Unsaved changes</span>}
         <Button
           variant="accent"

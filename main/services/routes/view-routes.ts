@@ -23,8 +23,9 @@ import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BY
 import { isLayoutShape } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
-import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
-import { LayoutConflictError, stageController } from "../stage-controller.js";
+import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsScope } from "../../types/stage.js";
+import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
+import { LayoutConflictError, SlotsNotFoundError, stageController } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { zonedDateKey } from "../app-timezone.js";
@@ -64,6 +65,22 @@ export function exportFilename(name: string, now: Date): string {
   // 22:30 in Chicago as the next day. patch-export.ts fixed the same line first;
   // this and the config and archive exports are the other three copies.
   return `stage-utility-view-${slug ? `${slug}-` : ""}${zonedDateKey(now.getTime())}.json`;
+}
+
+/**
+ * Answer a slots failure the controller RAISED DELIBERATELY, and rethrow
+ * anything else.
+ *
+ * Every slots route here used to wrap its whole call in `catch → 404`, so a
+ * store write that failed for any other reason — a full disk, a TypeError from
+ * an unsafe key — reached the operator as "there was nothing to revert" and left
+ * no 500 in the log to find later. `SlotsNotFoundError` carries the status it
+ * deserves (404 for a thing that is not there, 400 for a target that cannot be
+ * true); everything else goes up to the dispatcher, which answers 500 and logs.
+ */
+function slotsFailure(res: RouteCtx["res"], err: unknown): void {
+  if (!(err instanceof SlotsNotFoundError)) throw err;
+  error(res, err.message, err.status);
 }
 
 export async function viewRoutes(c: RouteCtx): Promise<void> {
@@ -137,7 +154,64 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // POST /api/views/:id/slots — { slots }
+    // GET /api/views/:id/slot-targets and /api/layout-objects/:id/slot-targets —
+    // the type's default board and the current plan's override, in one read. Must
+    // precede the /slots matchers only in the sense that these paths differ; kept
+    // together with them because they are the same pair of surfaces.
+    const targetsMatch = pathname.match(/^\/api\/(views|layout-objects)\/([^/]+)\/slot-targets$/);
+    if (method === "GET" && targetsMatch) {
+      const scope: SlotsScope = targetsMatch[1] === "views" ? "view" : "object";
+      try {
+        json(res, await stageController.getSlotTargets(scope, decodeURIComponent(targetsMatch[2])));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
+      return;
+    }
+
+    // DELETE /api/views/:id/slots/override/:planId (and the layout-object form) —
+    // "Revert to default". 404 when there was no override, so the client can tell
+    // a revert that happened from one that had nothing to do.
+    const overrideMatch = pathname.match(
+      /^\/api\/(views|layout-objects)\/([^/]+)\/slots\/override\/([^/]+)$/,
+    );
+    if (method === "DELETE" && overrideMatch) {
+      const scope: SlotsScope = overrideMatch[1] === "views" ? "view" : "object";
+      try {
+        json(res, await stageController.clearSlotsOverride(
+          scope,
+          decodeURIComponent(overrideMatch[2]),
+          decodeURIComponent(overrideMatch[3]),
+        ));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
+      return;
+    }
+
+    // POST /api/views/:id/slots/promote — { planId } — "Set as default": copy the
+    // plan's board onto the service type's default and drop the override.
+    const promoteMatch = pathname.match(/^\/api\/(views|layout-objects)\/([^/]+)\/slots\/promote$/);
+    if (method === "POST" && promoteMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.planId !== "string") {
+        error(res, "body.planId (string) required");
+        return;
+      }
+      const scope: SlotsScope = promoteMatch[1] === "views" ? "view" : "object";
+      try {
+        json(res, await stageController.promoteSlotsOverride(
+          scope,
+          decodeURIComponent(promoteMatch[2]),
+          body.planId,
+        ));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
+      return;
+    }
+
+    // POST /api/views/:id/slots — { slots, target? }
     const viewSlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/slots$/);
     if (method === "POST" && viewSlotsMatch) {
       const body = await readBody(req) as Record<string, unknown>;
@@ -145,12 +219,20 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.slots (array) required");
         return;
       }
-      const state = await stageController.setViewSlots(viewSlotsMatch[1], body.slots as Slot[]);
-      json(res, state);
+      const target = readSlotsTarget(body.target);
+      if (target === INVALID_TARGET) {
+        error(res, TARGET_ERROR);
+        return;
+      }
+      try {
+        json(res, await stageController.setViewSlots(viewSlotsMatch[1], body.slots as Slot[], target));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
       return;
     }
 
-    // POST /api/layout-objects/:objectId/slots — { slots } (inline mic-slots grid)
+    // POST /api/layout-objects/:objectId/slots — { slots, target? } (inline grid)
     const objectSlotsMatch = pathname.match(/^\/api\/layout-objects\/([^/]+)\/slots$/);
     if (method === "POST" && objectSlotsMatch) {
       const body = await readBody(req) as Record<string, unknown>;
@@ -158,8 +240,16 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.slots (array) required");
         return;
       }
-      const state = await stageController.setLayoutObjectSlots(objectSlotsMatch[1], body.slots as Slot[]);
-      json(res, state);
+      const target = readSlotsTarget(body.target);
+      if (target === INVALID_TARGET) {
+        error(res, TARGET_ERROR);
+        return;
+      }
+      try {
+        json(res, await stageController.setLayoutObjectSlots(objectSlotsMatch[1], body.slots as Slot[], target));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
       return;
     }
 
@@ -258,7 +348,13 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // POST /api/views/:id/copy-slots — { fromViewId }
+    // POST /api/views/:id/copy-slots — { fromViewId, target? }
+    //
+    // `target` is the SAME optional field a slot save takes, read through the
+    // same validator, and it names one board on both sides of the copy. Without
+    // it this wrote the source's default over the destination's default whichever
+    // side the editor was on, and deleted the destination's board for the current
+    // plan on the way past.
     const viewCopySlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/copy-slots$/);
     if (method === "POST" && viewCopySlotsMatch) {
       const body = await readBody(req) as Record<string, unknown>;
@@ -266,8 +362,16 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.fromViewId (string) required");
         return;
       }
-      const state = await stageController.copyViewSlots(viewCopySlotsMatch[1], body.fromViewId);
-      json(res, state);
+      const target = readSlotsTarget(body.target);
+      if (target === INVALID_TARGET) {
+        error(res, TARGET_ERROR);
+        return;
+      }
+      try {
+        json(res, await stageController.copyViewSlots(viewCopySlotsMatch[1], body.fromViewId, target));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
       return;
     }
 

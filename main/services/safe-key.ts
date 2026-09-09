@@ -12,7 +12,9 @@
 // property, and because the map is persisted, it comes back on restart.
 //
 // Reachable from the LAN today: POST /api/slots takes body.displayId as an
-// arbitrary string, and it reaches slotsStore.setSlots unchanged.
+// arbitrary string, and POST /api/views/:id/slots takes body.target.planId, both
+// of which reach slotsStore.setDefault / setOverride unchanged. The DELETE and
+// promote routes take a planId straight out of the path.
 //
 // Rejecting is the right response rather than sanitising: no legitimate display,
 // view or service type is called "__proto__", so a request using one is not a

@@ -90,6 +90,10 @@ export function ViewEditorRoute() {
           isSavingSlots={s.isSavingSlots}
           resolvedDraftSlots={s.resolvedDraftSlots}
           slotPresets={s.slotPresets}
+          slotsTargetSide={s.slotsTargetSide}
+          slotsTargetLabel={s.slotsTargetLabel}
+          slotsTargetHasPlan={s.slotsTargetHasPlan}
+          slotsTargetHasOverride={s.slotsTargetHasOverride}
           canDelete={views.length > 1}
           handlers={s.handlers}
         />

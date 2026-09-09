@@ -253,3 +253,33 @@ export interface SlotPreset {
   slots: Slot[];
   createdAt: string;
 }
+
+/**
+ * What a slot board is keyed by: a slots-kind VIEW's id, or the id of an inline
+ * `slots-grid` layout OBJECT on a custom layout. The two are stored in the same
+ * file and behave identically, so every operation on a board takes the scope
+ * beside the key rather than existing twice.
+ */
+export type SlotsScope = "view" | "object";
+
+/**
+ * The two boards one key can have right now — the service type's default, and
+ * the current plan's override when it has one.
+ *
+ * `overrideSlots` is null when the current plan has no board of its own, which is
+ * also what the editor badges "edited" from.
+ */
+export interface SlotTargetsDTO {
+  scope: SlotsScope;
+  key: string;
+  serviceTypeId: string | null;
+  serviceTypeName: string | null;
+  planId: string | null;
+  /** The plan's dates as Planning Center words them, for a label. */
+  planDates: string | null;
+  /** The plan's PCO `sort_date` (ISO), for a short "Wed Sep 13" label. Null on a
+   *  cold start before the first plan selection, when `planDates` is the label. */
+  planSortDate: string | null;
+  defaultSlots: Slot[];
+  overrideSlots: Slot[] | null;
+}

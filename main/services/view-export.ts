@@ -39,7 +39,11 @@ export async function buildViewBundle(rootId: string): Promise<ViewBundle> {
   // Slot rows are keyed by view id (a slots view) or by layout object id (an
   // inline slots-grid). Both are collected, for EVERY service type: the
   // destination may run different ones, and dropping them loses real work.
-  const slotsFile = await slotsStore.all();
+  //
+  // DEFAULTS only. A per-plan override is one week's exception, keyed by a
+  // Planning Center plan id that means nothing on the far end — so the bundle
+  // format is unchanged and overrides do not travel.
+  const slotsFile = await slotsStore.allDefaults();
   const slots: ViewBundle["sideData"]["slots"] = {};
   for (const key of [...views.map((v) => v.id), ...refs.objectIds]) {
     if (slotsFile[key]) slots[key] = slotsFile[key];
