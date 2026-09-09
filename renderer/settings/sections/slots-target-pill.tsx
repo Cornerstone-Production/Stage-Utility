@@ -14,6 +14,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, ButtonGroup, toast, confirm } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
+import { useEditingTarget } from "./editing-target";
 
 /** Which board the editor is showing. Not the wire shape — see `SlotsTarget`. */
 export type SlotsTargetSide = "default" | "plan";
@@ -54,6 +55,23 @@ export function savedMessage(side: SlotsTargetSide, label: string, serviceTypeNa
 }
 
 /**
+ * "Switching loses what is in the buffer — still switch?"
+ *
+ * ONE copy, because there are four callers: the pill's two sides, the plan
+ * switcher's arrows, its dropdown and its Now button, in two editors. The same
+ * question asked in four slightly different words is how one of them ends up not
+ * asking it at all.
+ */
+export async function confirmDiscardSlotEdits(): Promise<boolean> {
+  return confirm({
+    title: "Discard unsaved slot changes?",
+    message: "Switching boards re-reads the saved slots, so anything unsaved here is lost.",
+    confirmLabel: "Discard",
+    destructive: true,
+  });
+}
+
+/**
  * The service type and plan are IN the key.
  *
  * A board is plan- and type-dependent, so when the plan advances under an open
@@ -74,13 +92,19 @@ const targetsKey = (scope: SlotsScope, key: string, serviceTypeId: string | null
 export function useSlotsTarget(scope: SlotsScope, key: string) {
   const { state } = useStageState();
   const queryClient = useQueryClient();
+  // Which BOARD is being edited — the machine's own plan until the switcher is
+  // moved. The machine's plan is still `editing.live`, and nothing here writes it.
+  const editing = useEditingTarget();
 
-  const serviceTypeId = state?.serviceTypeId ?? null;
-  const planId = state?.planId ?? null;
+  const serviceTypeId = editing.target.serviceTypeId;
+  const planId = editing.target.planId;
 
   const { data: targets } = useQuery({
     queryKey: targetsKey(scope, key, serviceTypeId, planId),
-    queryFn: () => ipc<SlotTargetsDTO>("slots:targets", { scope, key }),
+    // The target is IN the request. Without it the server answers for the plan
+    // the machine is on, so stepping the switcher would relabel the pill and
+    // leave the grid showing the previous week's rows.
+    queryFn: () => ipc<SlotTargetsDTO>("slots:targets", { scope, key, serviceTypeId, planId }),
     enabled: !!key,
   });
 
@@ -93,14 +117,26 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
   // Opens on the current plan when there is one, because that is the board the
   // screens are showing and so the one an edit almost always means.
   const [ownSide, setOwnSide] = useState<SlotsTargetSide | null>(null);
+  // The chosen side SURVIVES a target change, deliberately. Resetting it when the
+  // type or plan changes also fires when stage state first hydrates — null ids
+  // becoming real ones is a change — and that put the editor back on the plan
+  // side one frame after an operator had pressed Default. A plan target with no
+  // plan is corrected by `effectiveSide` below, which is the only case that has
+  // to be handled at all.
   const side: SlotsTargetSide = ownSide ?? (hasPlan ? "plan" : "default");
   // A plan side with no plan is not selectable — an operator who was on it when
   // the plan cleared must not be left saving to a target that does not exist.
   const effectiveSide: SlotsTargetSide = side === "plan" && !hasPlan ? "default" : side;
 
+  // The date of the plan BEING EDITED. Stage state is a fallback only while the
+  // editor is on the machine's own plan, where it is the same plan and covers a
+  // cold start before the first slot-targets read lands. Off it, that fallback
+  // put the LIVE plan's date on the pill while another week was being edited —
+  // and on a Default target, which has no plan at all, it named a date on a
+  // disabled button.
   const label = planLabel(
     targets?.planSortDate ?? null,
-    targets?.planDates ?? state?.planDates ?? null,
+    targets?.planDates ?? (editing.onLive ? (state?.planDates ?? null) : null),
     state?.timezone ?? null,
   );
 
@@ -113,23 +149,27 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
 
   /** The wire target for a save on the current side. */
   function wireTarget(): Record<string, unknown> | undefined {
-    // The LIVE type and plan, so a save cannot land on a plan that has since
-    // advanced. Omitted with no service type, which is the server's own "there is
-    // nowhere to persist to".
+    // The type and plan being EDITED, which is the machine's own until the
+    // switcher moves it. Omitted with no service type, which is the server's own
+    // "there is nowhere to persist to".
     if (!serviceTypeId) return undefined;
     if (effectiveSide === "plan" && planId) {
-      return { kind: "plan", planId, serviceTypeId };
+      // The plan's date travels with the save. The server fills it in for the
+      // CURRENT plan and cannot for any other, and an override with no date is
+      // one the 30-day prune can never age out.
+      return { kind: "plan", planId, serviceTypeId, sortDate: targets?.planSortDate ?? null };
     }
     return { kind: "default", serviceTypeId };
   }
 
   function announceSaved(): void {
-    // The amber case — a target that is not the plan the screens follow — cannot
-    // happen yet: the pill only offers the CURRENT plan. The variant is chosen
-    // here so the plan switcher can make it reachable without touching a toast
-    // call site. `toast.info` because there is no amber variant to reach for.
-    const offTarget = false;
-    const message = savedMessage(effectiveSide, label, state?.serviceTypeName ?? null);
+    // Amber whenever the editor is not on the plan the machine is following: the
+    // save was real, and it changed nothing on any screen. Judged on the SWITCHER
+    // target, not on the side — saving the default of the live plan's own type is
+    // an ordinary thing to do and reads green, as it did before the switcher
+    // existed. `toast.info` because there is no amber variant to reach for.
+    const offTarget = !editing.onLive;
+    const message = savedMessage(effectiveSide, label, targets?.serviceTypeName ?? state?.serviceTypeName ?? null);
     if (offTarget) toast.info(message);
     else toast.success(message);
   }
@@ -145,7 +185,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
     if (!planId) return false;
     const ok = await confirm({
       title: `Revert ${label} to the default?`,
-      message: `The slots saved for ${label} are deleted and this screen goes back to the ${state?.serviceTypeName ?? "service type"} default.`,
+      message: `The slots saved for ${label} are deleted and this screen goes back to the ${targets?.serviceTypeName ?? "service type"} default.`,
       confirmLabel: "Revert",
       destructive: true,
     });
@@ -168,7 +208,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
     if (!planId) return false;
     const ok = await confirm({
       title: `Make ${label} the default?`,
-      message: `The ${state?.serviceTypeName ?? "service type"} default is replaced by the slots saved for ${label}, and ${label} stops being an exception.`,
+      message: `The ${targets?.serviceTypeName ?? "service type"} default is replaced by the slots saved for ${label}, and ${label} stops being an exception.`,
       confirmLabel: "Set as default",
       destructive: true,
     });
@@ -178,7 +218,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
       queryClient.setQueryData(["stage:getState"], next);
       await invalidate();
       setOwnSide("default");
-      toast.success(`${label} is now the ${state?.serviceTypeName ?? "service type"} default.`);
+      toast.success(`${label} is now the ${targets?.serviceTypeName ?? "service type"} default.`);
       return true;
     } catch (err) {
       toast.error(`Failed to set as default: ${String(err)}`);
@@ -188,6 +228,8 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
 
   return {
     targets,
+    /** Where the editor is pointed, and whether that is the machine's own plan. */
+    editing,
     side: effectiveSide,
     setSide: setOwnSide,
     hasPlan,

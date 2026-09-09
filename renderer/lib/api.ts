@@ -335,6 +335,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:setAllowedServiceTypes":
       return post<T>("/api/allowed-service-types", p);
 
+    case "stage:setPlanSwitcherMode":
+      return post<T>("/api/plan-switcher-mode", p);
+
+    case "plans:upcoming":
+      return apiFetch<T>(`/api/plans/upcoming?days=${encodeURIComponent(String(p.days ?? 60))}`);
+
     case "stage:setShowQr":
       return post<T>("/api/show-qr", p);
 
@@ -557,7 +563,14 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     // OBJECT's id name boards in the same file under the same rules.
     case "slots:targets": {
       const base = p.scope === "view" ? "views" : "layout-objects";
-      return apiFetch<T>(`/api/${base}/${encodeURIComponent(p.key as string)}/slot-targets`);
+      // Which board pair to read. Sent whenever a service type is known, so a
+      // switcher pointed at another week gets that week's rows rather than the
+      // machine's; the server falls back to its own plan when it is absent.
+      const q = new URLSearchParams();
+      if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
+      if (p.planId) q.set("planId", String(p.planId));
+      const tail = q.size > 0 ? `?${q}` : "";
+      return apiFetch<T>(`/api/${base}/${encodeURIComponent(p.key as string)}/slot-targets${tail}`);
     }
 
     case "slots:clearOverride": {

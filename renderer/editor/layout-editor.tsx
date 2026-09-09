@@ -108,6 +108,7 @@ import {
 } from "./inspector-rows";
 export { dashboardTemplate, confidenceMonitorTemplate };
 import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
+import { PlanSwitcher } from "../settings/sections/plan-switcher";
 import { UnsavedWorkProvider, useUnsavedWork } from "../components/unsaved-work";
 import { canvasRowFlexClass } from "./canvas-row-fit";
 
@@ -2249,6 +2250,13 @@ export function LayoutEditor({
             autoFocus
           />
         </Dialog>
+
+        {/* Which plan's mic board the inline grid below the canvas is editing.
+            Here as well as in that grid's own header because the grid is a full
+            canvas-height scroll away, and an operator comparing two weeks on the
+            canvas should not have to leave it to change week. Only while a grid
+            is selected — nothing else in this editor is plan-dependent. */}
+        {inlineGrid && <PlanSwitcher />}
 
         <div className="flex-1" />
         {/* Save/Discard live in the floating unsaved pill when dirty — no separate

@@ -84,6 +84,47 @@ plan, nothing of that service type is pruned.
 Exporting a view carries the defaults for every service type. Per-plan boards do
 not travel — a plan id means nothing on the far end.
 
+### Switching plans in the editor
+
+The slot editors carry a plan switcher — `‹ name ▾ ›` and a **Now** button — in
+the slots view's header, in an inline grid's header, and in the layout editor's
+toolbar while a mic-slots object is selected. It changes **which board you are
+editing** and nothing else: what the screens follow is still set on the Plan page.
+
+A badge says which you are looking at. **live** means the editor is on the plan
+the screens are following; **editing** means it is on some other week or some
+other service type, and a save there changes nothing on any screen until that
+plan comes round. The save toast is the ordinary one while live and a quieter
+one while not.
+
+**Now** returns to the plan the screens are following, and the editor follows it
+forward from then on — including when auto mode advances it mid-session.
+
+Two modes, set on the Plan page:
+
+| Mode | The middle | The arrows |
+|---|---|---|
+| **Within a type** | a dropdown of the active service types | that type's plans, Default first and then each upcoming date |
+| **Upcoming plans** | the date and the type, e.g. "Wed Sep 10 · Cornerstone Youth" | every active type's plans in date order |
+
+In **Upcoming plans** the middle's dropdown lists the next ten plans and a
+**Defaults…** group with each active type's default board. The arrows do not
+wrap: at either end of the list the arrow is simply disabled.
+
+A board that is not on the list — a type's default while in **Upcoming plans**,
+or a plan old enough to have dropped out of the window — sits immediately before
+its own service type's first listed plan, so **›** from it lands on that type's
+earliest listed plan rather than on the top of the week.
+
+The list covers the last seven days and the next sixty, refreshed from Planning
+Center at most every five minutes. When Planning Center cannot be reached the
+switcher shows the plan the screens are following, disables the arrows and says
+"Planning Center unreachable" — the board on screen is still editable.
+
+Switching with unsaved slot edits asks first, the same question leaving the page
+asks. A new tab, or a reload, always opens on the plan the screens are
+following: where the switcher was pointed is never remembered.
+
 ### Presets
 
 Slot presets are global and can be recalled onto any service type. Position names

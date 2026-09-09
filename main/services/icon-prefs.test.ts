@@ -66,8 +66,8 @@ describe("what the operator set is still there after a restart", () => {
     // setting moving either number is the moment to check that boot reads it.
     assert.equal(
       keys.length,
-      26,
-      `expected 26 keys patched into settings.json, found ${keys.length}: ${keys.join(", ")}`,
+      27,
+      `expected 27 keys patched into settings.json, found ${keys.length}: ${keys.join(", ")}`,
     );
     assert.equal(
       dynamic,

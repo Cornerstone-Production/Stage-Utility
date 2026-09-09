@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Loader2Icon, PlusIcon } from "lucide-react";
-import { Button, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Separator, toast, confirm } from "../../components/ui";
+import { Button, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Separator, toast } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStageState } from "../../main/use-stage-state";
@@ -10,7 +10,9 @@ import { SortableSlotGroup, AlignmentPanel, PresetsPanel, makeSharesWith, type P
 import type { WirelessChannel } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useReportUnsavedWork } from "../../components/unsaved-work";
-import { SlotsTargetPill, useSlotsTarget } from "./slots-target-pill";
+import { SlotsTargetPill, confirmDiscardSlotEdits, useSlotsTarget } from "./slots-target-pill";
+import { registerTargetGuard } from "./editing-target";
+import { PlanSwitcher } from "./plan-switcher";
 
 function freshSlotId(): string {
   return `slot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -77,17 +79,25 @@ export function InlineSlotsEditor({
   async function switchSide(next: "default" | "plan") {
     if (next === slotsTarget.side) return;
     if (dirty) {
-      const ok = await confirm({
-        title: "Discard unsaved slot changes?",
-        message: "Switching boards re-reads the saved slots, so anything unsaved here is lost.",
-        confirmLabel: "Discard",
-        destructive: true,
-      });
-      if (!ok) return;
+      if (!(await confirmDiscardSlotEdits())) return;
       setDirty(false);
     }
     slotsTarget.setSide(next);
   }
+
+  // The plan switcher asks the same question, from a control this component does
+  // not own — its arrows live in the layout editor's toolbar as well as in this
+  // header. Registered while dirty and withdrawn when clean, so a switch with an
+  // empty buffer costs nothing.
+  useEffect(() => {
+    if (!dirty) return;
+    registerTargetGuard(`object:${objectId}`, async () => {
+      if (!(await confirmDiscardSlotEdits())) return false;
+      setDirty(false);
+      return true;
+    });
+    return () => registerTargetGuard(`object:${objectId}`, null);
+  }, [dirty, objectId]);
 
   // Mouse and touch separately - see the note in settings-view.tsx. A single
   // PointerSensor claims the gesture on touch-down, which stops the list
@@ -282,6 +292,9 @@ export function InlineSlotsEditor({
     <div className="flex flex-col gap-3" data-slots-target={slotsTarget.side}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-headline font-semibold text-gray-12">Mic slots</span>
+        {/* Which BOARD, then which SIDE of it. The switcher moves the editor
+            only — what the screens follow is still the Plan page's business. */}
+        <PlanSwitcher disabled={!serviceTypeId} />
         <SlotsTargetPill
           side={slotsTarget.side}
           label={slotsTarget.label}

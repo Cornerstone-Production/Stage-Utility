@@ -104,6 +104,9 @@ declare global {
   type TeamMemberDTO = Stage.TeamMemberDTO;
   type TeamPositionDTO = Stage.TeamPositionDTO;
   type TranscriptLineDTO = Stage.TranscriptLineDTO;
+  type UpcomingPlan = Stage.UpcomingPlan;
+  type UpcomingPlansDTO = Stage.UpcomingPlansDTO;
+  type PlanSwitcherMode = Stage.PlanSwitcherMode;
   type UpdateStatus = Stage.UpdateStatus;
   type View = Stage.View;
   type ViewKind = Stage.ViewKind;

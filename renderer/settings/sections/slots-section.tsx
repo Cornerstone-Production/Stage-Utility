@@ -38,6 +38,7 @@ import { PositionRangeEditor } from "./position-picker";
 import { useStageState } from "../../main/use-stage-state";
 import { useSortableRow } from "../../lib/use-sortable-row";
 import { SlotsTargetPill } from "./slots-target-pill";
+import { PlanSwitcher } from "./plan-switcher";
 
 // ---- slot row (sortable) ----------------------------------------------------
 
@@ -709,6 +710,9 @@ export function SlotEditor({
     <div className="flex flex-col gap-3" data-slots-target={slotsTargetSide}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-headline font-semibold text-gray-12">Slots</span>
+        {/* Which BOARD, then which SIDE of it. Moves the editor only — what the
+            screens follow is still decided on the Plan page. */}
+        <PlanSwitcher disabled={!serviceTypeId} />
         <SlotsTargetPill
           side={slotsTargetSide}
           label={slotsTargetLabel}

@@ -263,6 +263,40 @@ describe("GET /api/views/:id/slot-targets", () => {
     assert.equal((r.json as SlotTargetsDTO).overrideSlots, null);
   });
 
+  // ?serviceTypeId=&planId= is how the editor's plan switcher asks for a week the
+  // machine is not on. A server that dropped the query answered for the LIVE plan
+  // and looked entirely healthy doing it — same status, same shape, wrong board.
+  it("answers for the plan named in the query, not the current one", async () => {
+    await slotsStore.setDefault(VIEW, TYPE, [slot("standing")]);
+    await slotsStore.setOverride(VIEW, PLAN, TYPE, [slot("this-week")], null);
+    await slotsStore.setOverride(VIEW, "plan-next", TYPE, [slot("next-week")], null);
+
+    const r = await callRoute(
+      viewRoutes,
+      `/api/views/${VIEW}/slot-targets?serviceTypeId=${TYPE}&planId=plan-next`,
+    );
+    assert.equal(r.status, 200);
+    const dto = r.json as SlotTargetsDTO;
+    assert.equal(dto.planId, "plan-next");
+    assert.equal(
+      dto.overrideSlots?.[0]?.id,
+      "next-week",
+      "the current plan's board here is last week's rows under next week's heading",
+    );
+  });
+
+  it("with a service type and no plan answers that type's default, with planId null", async () => {
+    await slotsStore.setDefault(VIEW, "st-youth", [slot("youth-standing")]);
+    await slotsStore.setOverride(VIEW, PLAN, TYPE, [slot("this-week")], null);
+
+    const r = await callRoute(viewRoutes, `/api/views/${VIEW}/slot-targets?serviceTypeId=st-youth`);
+    const dto = r.json as SlotTargetsDTO;
+    assert.equal(dto.serviceTypeId, "st-youth");
+    assert.equal(dto.planId, null, "a Default target has no plan, and inventing one badges a board nobody chose");
+    assert.equal(dto.defaultSlots[0]?.id, "youth-standing");
+    assert.equal(dto.overrideSlots, null);
+  });
+
   it("scopes a layout object as an object", async () => {
     const r = await callRoute(viewRoutes, `/api/layout-objects/${OBJECT}/slot-targets`);
     assert.equal((r.json as SlotTargetsDTO).scope, "object");

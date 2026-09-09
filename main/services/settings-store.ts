@@ -41,6 +41,9 @@ export interface SettingsData {
   idFloors?: { view?: number; output?: number };
   /** Allowlisted service type IDs for auto mode. Empty = all allowed. */
   allowedServiceTypeIds: string[];
+  /** How the slot editor's plan switcher steps. Editor-only; changes nothing the
+   *  screens follow. See docs/slots.md. */
+  planSwitcherMode: "within-type" | "upcoming";
   /** Polling/metering interval (ms) applied to all wireless gear. */
   wirelessMeterRateMs: number;
   /** Customizable brand name shown in the sidebar header and on the kiosk. */
@@ -178,6 +181,9 @@ export const DEFAULT_SETTINGS: SettingsData = {
   // Empty, which every reader treats as "all allowed". Seeding it with ids
   // restricts a fresh install to service types that exist in no other org.
   allowedServiceTypeIds: [],
+  // Dates, not types. Most installs run two or three service types in the same
+  // week, so walking the week is the shorter path to the board being edited.
+  planSwitcherMode: "upcoming",
   wirelessMeterRateMs: 1000,
   appName: "Stage Utility",
   kioskDiscovery: false,
