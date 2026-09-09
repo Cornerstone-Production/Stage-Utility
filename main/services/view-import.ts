@@ -9,10 +9,13 @@ import { randomUUID } from "node:crypto";
 import { errorMessage } from "./errors.js";
 
 import { remapBundle } from "./view-remap.js";
-import { collectRefs } from "./view-refs.js";
+import { collectRefsFrom } from "./view-refs.js";
 import { viewsStore } from "./views-store.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore } from "./slots-store.js";
+import { patchStore } from "./patch-store.js";
+import { presetsStore } from "./presets-store.js";
+import { scrub } from "./scrub.js";
 import { notesStore } from "./notes-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { oscStore } from "./osc-store.js";
@@ -67,6 +70,63 @@ function assertBundle(b: unknown): asserts b is ViewBundle {
       if (!Array.isArray(rows)) throw new Error(`import — slot rows for ${key}/${st} are not a list`);
     }
   }
+
+  // The plan-export sections. All optional — a view export has none of them, and
+  // an older file is read exactly as it always was. Present and the wrong shape
+  // refuses the WHOLE file, like everything above: half a plan landed is worse
+  // than none, because the operator is told it worked.
+  const plan = o.plan as Record<string, unknown> | undefined;
+  if (plan != null) {
+    if (typeof plan !== "object" || Array.isArray(plan)) throw new Error("import — plan is not an object");
+    if (typeof plan.serviceTypeId !== "string" || !plan.serviceTypeId) {
+      throw new Error("import — the plan section has no service type id");
+    }
+    if (typeof plan.serviceTypeName !== "string") throw new Error("import — the plan section has no service type name");
+    if (plan.slotsScope !== "type" && plan.slotsScope !== "all") {
+      throw new Error(`import — the plan section has an unknown slots scope "${String(plan.slotsScope)}"`);
+    }
+  }
+
+  if (o.roots != null) {
+    if (!Array.isArray(o.roots) || o.roots.some((r) => typeof r !== "string" || !r)) {
+      throw new Error("import — roots is not a list of view ids");
+    }
+  }
+
+  if (sd?.patchVariants != null) {
+    if (!Array.isArray(sd.patchVariants)) throw new Error("import — patchVariants is not a list");
+    for (const raw of sd.patchVariants as unknown[]) {
+      const e = raw as Record<string, unknown> | null;
+      if (!e || typeof e !== "object") throw new Error("import — a patch variant entry is not an object");
+      if (typeof e.sheetId !== "string" || typeof e.sheetName !== "string") {
+        throw new Error("import — a patch variant entry does not name its sheet");
+      }
+      const v = e.variant as Record<string, unknown> | null;
+      if (!v || typeof v !== "object" || Array.isArray(v)) {
+        throw new Error(`import — the patch variant for "${e.sheetName}" is not an object`);
+      }
+      if (typeof v.id !== "string" || !v.id || typeof v.name !== "string") {
+        throw new Error(`import — the patch variant for "${e.sheetName}" has no id or name`);
+      }
+      // An `overrides` that is not a record would be written straight onto the
+      // operator's sheet and read back by the patch editor as the endpoint map.
+      if (v.overrides == null || typeof v.overrides !== "object" || Array.isArray(v.overrides)) {
+        throw new Error(`import — the patch variant "${v.name}" has no override map`);
+      }
+    }
+  }
+
+  if (sd?.presets != null) {
+    if (!Array.isArray(sd.presets)) throw new Error("import — presets is not a list");
+    for (const raw of sd.presets as unknown[]) {
+      const p = raw as Record<string, unknown> | null;
+      if (!p || typeof p !== "object") throw new Error("import — a preset is not an object");
+      if (typeof p.id !== "string" || !p.id || typeof p.name !== "string") {
+        throw new Error("import — a preset has no id or name");
+      }
+      if (!Array.isArray(p.slots)) throw new Error(`import — preset "${p.name}" has no slot list`);
+    }
+  }
 }
 
 /** `Left Display` -> `Left Display (imported)` when taken. */
@@ -78,9 +138,33 @@ function freeName(name: string, taken: Set<string>): string {
   return candidate;
 }
 
-export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
+export interface ImportOptions {
+  /** Which service type on THIS machine the plan's boards and patch assignment
+   *  land under. Ignored when the file is not a plan export — a view export
+   *  carries every type's boards and re-keying them would be a guess. */
+  serviceTypeId?: string;
+  /** What to do where the file and this machine both have something: the patch
+   *  variant and its assignment, and a preset of the same id. Nothing else in a
+   *  bundle can clash. Defaults to keeping what is here. */
+  onClash?: "keep" | "replace";
+}
+
+export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): Promise<ImportReport> {
   assertBundle(raw);
   const bundle = raw;
+
+  // Retyping. Only a plan export names a service type, so only a plan export can
+  // be landed under a different one; for a view export the choice has no
+  // meaning and is ignored rather than half-applied.
+  const planned = bundle.plan;
+  const targetType = planned ? (opts.serviceTypeId || planned.serviceTypeId) : null;
+  const retypedFrom = planned && targetType && targetType !== planned.serviceTypeId
+    ? planned.serviceTypeId
+    : undefined;
+  const onClash = opts.onClash ?? "keep";
+  if (planned && retypedFrom) {
+    console.log(`[view-import] plan ${planned.serviceTypeName} retyped from ${retypedFrom} to ${targetType}`);
+  }
 
   const existing = await viewsStore.load();
 
@@ -115,17 +199,28 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
   // Side data, re-keyed. A key may be a layout OBJECT id (an inline slots-grid)
   // or a VIEW id (a slots view), so both maps are consulted.
   const skipped: string[] = [];
+  let slotBoards = 0;
+  let slotRows = 0;
   for (const [oldKey, byServiceType] of Object.entries(bundle.sideData?.slots ?? {})) {
     const newKey = objectIdMap.get(oldKey) ?? viewIdMap.get(oldKey);
     if (!newKey) continue;
-    for (const [serviceTypeId, rows] of Object.entries(byServiceType ?? {})) {
+    // The source type LAST, so that on a retyped "all"-scope plan its board is
+    // the one that survives under the chosen type: two entries in the file can
+    // land on the same key here, and the board the operator chose to export is
+    // the one they meant.
+    const entries = Object.entries(byServiceType ?? {})
+      .sort((a, b) => Number(a[0] === retypedFrom) - Number(b[0] === retypedFrom));
+    for (const [serviceTypeId, rows] of entries) {
+      // Retyping moves ONLY the board the file's plan was exported for. Another
+      // type's board (scope "all") belongs to that type on both machines.
+      const landing = retypedFrom && serviceTypeId === retypedFrom ? targetType! : serviceTypeId;
       // A service type id is a KEY in the file, so it is whatever the file says.
       // slotsStore refuses a prototype-reaching key by throwing, which mid-import
       // would abort having already written the views — the operator would be told
       // it failed when it half-succeeded. Dropped and named instead, which is
       // what safe-key.ts prescribes for a bundle.
-      if (!isSafeKey(serviceTypeId)) {
-        skipped.push(`slot rows for service type "${serviceTypeId}"`);
+      if (!isSafeKey(landing)) {
+        skipped.push(`slot rows for service type "${landing}"`);
         continue;
       }
       // Fresh slot ids, matching what duplicateView does: two views must never
@@ -134,7 +229,14 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
       // The bundle carries defaults only (see view-export), so this is where
       // they land — an imported view starts on its default board, with no
       // per-plan exception to inherit.
-      await slotsStore.setDefault(newKey, serviceTypeId, fresh);
+      //
+      // NO CLASH BRANCH HERE, deliberately. `newKey` is a freshly minted view or
+      // object id, so every board written here is a key nothing on this machine
+      // has ever used. There is nothing of the operator's to overwrite, and the
+      // Keep/Replace choice on the import screen says as much.
+      await slotsStore.setDefault(newKey, landing, fresh);
+      slotBoards++;
+      slotRows += fresh.length;
     }
   }
 
@@ -228,11 +330,120 @@ export async function applyViewBundle(raw: unknown): Promise<ImportReport> {
     skipped.push(`${ref} — the layout points at it, but it was missing when exported`);
   }
 
-  // The rebind list, from the same walk — and computed the same way the review
-  // sheet computes it, from the root, so what was promised and what landed
-  // cannot disagree. Walking from the root covers every view in the bundle,
-  // because export built the bundle by walking from the root.
-  const rebind = collectRefs(named, named[0].id).unresolvable;
+  // ── Patch variants ────────────────────────────────────────────────────────
+  //
+  // The variant only, never the rig. A sheet's devices and endpoints are the
+  // building's; a variant is an overlay of overrides on top of whatever this
+  // machine's own patch says.
+  const patchOutcomes: ImportReport["patchVariants"] = [];
+  const incomingPatch = bundle.sideData?.patchVariants ?? [];
+  if (incomingPatch.length && targetType) {
+    // A CLONE. patchStore.load() hands back the DataStore's own cached object,
+    // so mutating it and then deciding not to save (every "kept" outcome does)
+    // would leave the running server holding a patch file that is not on disk.
+    const file = structuredClone(await patchStore.load());
+    let changed = false;
+    for (const entry of incomingPatch) {
+      // By id, then by name: a destination that built its own "Analog" sheet has
+      // a different id for the same surface, and refusing on that alone would
+      // make the section useless on every machine but a clone.
+      const sheet = file.sheets.find((s) => s.id === entry.sheetId)
+        ?? file.sheets.find((s) => s.name === entry.sheetName);
+      const say = (outcome: ImportReport["patchVariants"][number]["outcome"]): void => {
+        patchOutcomes.push({ sheetName: sheet?.name ?? entry.sheetName, variantName: entry.variant.name, outcome });
+        console.log(`[view-import] patch variant "${scrub(entry.variant.name)}" on ${scrub(sheet?.name ?? entry.sheetName)}: ${outcome}`);
+      };
+      if (!sheet) {
+        // Reported, not fatal: the views and boards are already correct, and a
+        // refusal here would throw them away over one sheet.
+        say("no-such-sheet");
+        continue;
+      }
+      if (!isSafeKey(targetType)) {
+        skipped.push(`the patch assignment for service type "${targetType}"`);
+        continue;
+      }
+      sheet.assignments ??= { byServiceType: {}, byPlan: {} };
+      const assignedNow = Object.hasOwn(sheet.assignments.byServiceType, targetType)
+        ? sheet.assignments.byServiceType[targetType]
+        : undefined;
+      const clash = !!assignedNow && assignedNow !== entry.variant.id;
+      if (clash && onClash === "keep") {
+        // Nothing written at all — not even the variant. A variant nothing
+        // points at is clutter in the patch editor, not a useful spare.
+        say("kept");
+        continue;
+      }
+      const at = sheet.variants.findIndex((v) => v.id === entry.variant.id);
+      let outcome: ImportReport["patchVariants"][number]["outcome"];
+      if (at === -1) {
+        sheet.variants.push(entry.variant);
+        outcome = "added";
+      } else if (onClash === "replace") {
+        sheet.variants[at] = entry.variant;
+        outcome = "replaced";
+      } else {
+        outcome = assignedNow === entry.variant.id ? "kept" : "assigned";
+      }
+      sheet.assignments.byServiceType[targetType] = entry.variant.id;
+      changed = true;
+      say(outcome);
+    }
+    // One write for the whole file: patchStore.save replaces it wholesale, so
+    // saving per sheet would be several read-modify-writes over the same bytes.
+    if (changed) await patchStore.save(file);
+  }
 
-  return { views: reportViews, targetsAdded, targetsKept, images, rebind, skipped };
+  // ── Presets ───────────────────────────────────────────────────────────────
+  //
+  // Global, matched by id. The slot ids INSIDE a preset stay as they are: a
+  // preset is a template that mints fresh rows when it is applied, not a board,
+  // so nothing on any screen shares an identity with them.
+  const presets = { added: 0, kept: 0, replaced: 0 };
+  const incomingPresets = bundle.sideData?.presets ?? [];
+  if (incomingPresets.length) {
+    const current = await presetsStore.load();
+    const byId = new Map(current.map((p) => [p.id, p]));
+    for (const p of incomingPresets) {
+      if (!byId.has(p.id)) {
+        byId.set(p.id, p);
+        presets.added++;
+      } else if (onClash === "replace") {
+        byId.set(p.id, p);
+        presets.replaced++;
+      } else {
+        presets.kept++;
+      }
+    }
+    await presetsStore.save([...byId.values()]);
+    console.log(`[view-import] presets: ${presets.added} added, ${presets.kept} kept, ${presets.replaced} replaced`);
+  }
+
+  // The rebind list, from the same walk — and computed the same way the review
+  // sheet computes it, so what was promised and what landed cannot disagree.
+  //
+  // EVERY root, not just the first. A view export has one root and `views[0]` is
+  // it; a plan export has as many roots as the type has boards on, and walking
+  // only the first under-reported every other root's hardware bindings — the
+  // operator would find them on a Sunday instead of in the report.
+  const rootIds = (bundle.roots?.length ? bundle.roots : [bundle.views[0]!.id])
+    .map((id) => viewIdMap.get(id) ?? id)
+    .filter((id) => named.some((v) => v.id === id));
+  const rebind = collectRefsFrom(named, rootIds).unresolvable;
+
+  return {
+    views: reportViews,
+    targetsAdded,
+    targetsKept,
+    images,
+    rebind,
+    skipped,
+    ...(planned
+      ? { plan: { serviceTypeId: targetType!, serviceTypeName: planned.serviceTypeName, ...(retypedFrom ? { retypedFrom } : {}) } }
+      : {}),
+    slotBoards,
+    slotRows,
+    patchVariants: patchOutcomes,
+    presets,
+  };
 }
