@@ -30,6 +30,7 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 afterEach(cleanup);
 after(() => {
   cleanup();
+  for (const c of clients) c.clear();
   teardown();
 });
 
@@ -49,17 +50,32 @@ const PREVIEW = {
  *  the api layer, so the real invoke() and the real query hook both run. */
 function stubFetch(body: unknown, ok = true): () => void {
   const before = globalThis.fetch;
+  // api.ts arms AbortSignal.timeout(15000) on every request. The stub never
+  // reads the signal, but the TIMER outlives the test, and firing it after
+  // installDom's teardown threw "parameter 1 is not of type Event" out of a
+  // finished test. A controller's signal never fires and holds no timer.
+  const beforeTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = () => new AbortController().signal;
   globalThis.fetch = (async () => ({
     ok,
     status: ok ? 200 : 400,
     statusText: ok ? "OK" : "Bad Request",
     json: async () => body,
   })) as unknown as typeof fetch;
-  return () => { globalThis.fetch = before; };
+  return () => {
+    globalThis.fetch = before;
+    AbortSignal.timeout = beforeTimeout;
+  };
 }
 
+const clients: InstanceType<typeof QueryClient>[] = [];
+
 function open(types = [{ id: "st-1", name: "Sunday AM", itemTypeColors: [] }]) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // gcTime 0. The default is five minutes, and react-query holds a timer for it
+  // — so the node process could not exit and the whole FILE was killed at
+  // 300 s ("duration_ms: 301013") in the full suite while passing on its own.
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  clients.push(client);
   return render(
     React.createElement(
       QueryClientProvider,
@@ -184,6 +200,10 @@ describe("the counts", () => {
       "a Download link that navigates to a 400 is worse than none",
     );
     unmount();
+    // Let the failed query finish settling before the test returns. Without it
+    // node:test reports "asynchronous activity after the test ended" from inside
+    // react-query's error path and fails the whole FILE.
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
     restore();
   });
 });

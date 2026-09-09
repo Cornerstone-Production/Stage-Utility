@@ -163,7 +163,12 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     : undefined;
   const onClash = opts.onClash ?? "keep";
   if (planned && retypedFrom) {
-    console.log(`[view-import] plan ${planned.serviceTypeName} retyped from ${retypedFrom} to ${targetType}`);
+    // scrub() on all three: every one of them comes out of the uploaded FILE or
+    // the request body, and /log is one record per line — a newline in any of
+    // them forges an entry the operator cannot tell from one the server wrote.
+    console.log(
+      `[view-import] plan ${scrub(planned.serviceTypeName)} retyped from ${scrub(retypedFrom)} to ${scrub(targetType)}`,
+    );
   }
 
   const existing = await viewsStore.load();
@@ -351,7 +356,10 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
         ?? file.sheets.find((s) => s.name === entry.sheetName);
       const say = (outcome: ImportReport["patchVariants"][number]["outcome"]): void => {
         patchOutcomes.push({ sheetName: sheet?.name ?? entry.sheetName, variantName: entry.variant.name, outcome });
-        console.log(`[view-import] patch variant "${scrub(entry.variant.name)}" on ${scrub(sheet?.name ?? entry.sheetName)}: ${outcome}`);
+        console.log(
+          `[view-import] patch variant "${scrub(entry.variant.name)}" ` +
+          `on ${scrub(sheet?.name ?? entry.sheetName)}: ${scrub(outcome)}`,
+        );
       };
       if (!sheet) {
         // Reported, not fatal: the views and boards are already correct, and a
@@ -416,7 +424,9 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       }
     }
     await presetsStore.save([...byId.values()]);
-    console.log(`[view-import] presets: ${presets.added} added, ${presets.kept} kept, ${presets.replaced} replaced`);
+    // Scrubbed as one string: see the note on the same shape in plan-export.
+    const tally = `${presets.added} added, ${presets.kept} kept, ${presets.replaced} replaced`;
+    console.log(`[view-import] presets: ${scrub(tally)}`);
   }
 
   // The rebind list, from the same walk — and computed the same way the review

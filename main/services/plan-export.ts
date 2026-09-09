@@ -157,10 +157,14 @@ export async function buildPlanBundle(
 ): Promise<ViewBundle> {
   const { bundle, boards } = await buildPlan(opts, deps);
   const patch = bundle.sideData.patchVariants?.length ?? 0;
-  console.log(
-    `[plan-export] ${scrub(bundle.plan!.serviceTypeName)}: ${bundle.views.length} views, ` +
-    `${boards} boards, patch ${patch ? "yes" : "no"}, presets ${bundle.sideData.presets?.length ?? 0}`,
-  );
+  // The counts are built first and scrubbed as one string rather than
+  // interpolated raw. They are numbers and cannot forge a line, but the log
+  // scan's barrier is syntactic on purpose — an exemption for "obviously safe"
+  // is how a scan stops being a scan.
+  const counts =
+    `${bundle.views.length} views, ${boards} boards, ` +
+    `patch ${patch ? "yes" : "no"}, presets ${bundle.sideData.presets?.length ?? 0}`;
+  console.log(`[plan-export] ${scrub(bundle.plan!.serviceTypeName)}: ${scrub(counts)}`);
   return bundle;
 }
 
