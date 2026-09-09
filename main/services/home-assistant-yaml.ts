@@ -294,6 +294,13 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
       "# Real state, read from the Companion custom variables your ON/OFF buttons",
       "# set. One sensor for every pair; the switches below read their attribute",
       "# off it. Nothing here writes a variable.",
+      "#",
+      "# An `unknown` pair — Companion unreachable, the variable missing, or a value",
+      "# matching neither of the two — reads OFF here and stays PRESSABLE; the reason",
+      "# is on this sensor's attribute for that pair, and on the rule's row in Stage",
+      "# Utility. No availability_template on purpose: an unavailable switch cannot",
+      "# be commanded, so an unreachable Companion would also stop you turning the",
+      "# device on.",
       "rest:",
       `  - resource: ${q(`${base}/api/cues/states`)}`,
       "    scan_interval: 10",
@@ -333,6 +340,13 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
         // `unknown` pair reads OFF here, because the legacy template switch has
         // no third state; the reason is on the sensor's own attribute and on the
         // rule's row in Stage Utility.
+        //
+        // And NO `availability_template`, which is the obvious way to say
+        // "unknown" and the wrong one: an unavailable entity cannot be
+        // commanded. An unreachable Companion would then also stop the operator
+        // turning the device ON — the press path does not depend on the state
+        // variable at all, so a read failure must never take the switch away.
+        // Reading off and staying pressable is the trade taken deliberately.
         ...(p.binding
           ? [
               `        value_template: "{{ (state_attr('${SENSOR_ENTITY}', '${p.base}') or {}).get('state') == 'on' }}"`,

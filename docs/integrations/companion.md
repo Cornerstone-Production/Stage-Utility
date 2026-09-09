@@ -294,6 +294,10 @@ inherits it. If your buttons set something other than `on`/`off` — `POWER=ON`,
 `1` — set **Value meaning on** and **Value meaning off** to match; they may not be
 the same string.
 
+The comparison is **exact and case-sensitive**, after trimming whitespace from
+both ends: a variable holding `ON` does not match the default `on`, and reads
+*unknown*. Set **Value meaning on** to `ON` or have the button write `on`.
+
 The generated YAML then also carries one `rest` sensor polling
 `GET /api/cues/states` every ten seconds, with an attribute per bound pair, and
 each bound switch reads its own attribute off it instead of being optimistic. One
@@ -313,7 +317,15 @@ once per change:
 ```
 
 In Home Assistant an unknown pair reads *off*, because a template switch has no
-third state — the reason is on the sensor's attribute and on the rule's row.
+third state — the reason is on the sensor's attribute and on the rule's row. It
+stays **pressable**: the generated switch carries no `availability_template`, on
+purpose, because an unavailable entity cannot be commanded and an unreachable
+Companion would then also stop you turning the device on. Pressing a cue never
+depends on the state variable.
+
+If the whole read fails rather than one pair — the server could not answer at all
+— Settings → Automation says so in one line above the rules list and shows no
+pills, rather than leaving them out silently.
 
 Nothing polls Companion in the background: the variables are read when
 `/api/cues/states` is called and the answer is served for five seconds, so an

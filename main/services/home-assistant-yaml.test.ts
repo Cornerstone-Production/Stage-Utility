@@ -502,6 +502,32 @@ describe("a pair with a state variable", () => {
     assert.match(yaml, /^ {2}"on":$/m);
   });
 
+  test("the sensor says what an unknown pair does, and why it is not unavailable", () => {
+    // The one thing an operator cannot work out from the fragment: a pair that
+    // could not be read reads OFF, which is indistinguishable from a device that
+    // is off. Saying so beside the sensor is the only place it appears in Home
+    // Assistant. The availability_template note is there so nobody adds the
+    // obvious fix — an unavailable entity cannot be commanded, so it would also
+    // stop them turning the device on.
+    const yaml = homeAssistantYaml(
+      [bound("p_on", "P on", "p_state"), cue("p_off", "P off")],
+      BASE,
+    );
+    const said = comments(yaml);
+    assert.ok(
+      said.some((c) => c.includes("reads OFF here and stays PRESSABLE")),
+      `nothing says what an unknown pair does; got:\n  ${said.join("\n  ")}`,
+    );
+    assert.ok(
+      said.some((c) => c.includes("No availability_template on purpose")),
+      `nothing says why the switch is not made unavailable; got:\n  ${said.join("\n  ")}`,
+    );
+
+    // And not in a document with nothing bound: there is no sensor to talk about.
+    const without = homeAssistantYaml([cue("p_on", "P on"), cue("p_off", "P off")], BASE);
+    assert.equal(comments(without).some((c) => c.includes("availability_template")), false);
+  });
+
   test("the header says the switches read real state only when one does", () => {
     const withState = homeAssistantYaml(
       [bound("p_on", "P on", "p_state"), cue("p_off", "P off")],
