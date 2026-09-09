@@ -82,6 +82,8 @@ const cue = (name: string, params: Record<string, string | number> = {}): StubRu
 let RULES: StubRule[] = [];
 let STATES: Record<string, unknown> = {};
 let CUSTOM_VARIABLES: string[] = [];
+/** When set, /api/cues/states answers this status with this `error` body. */
+let STATES_FAILS: { status: number; error: string } | null = null;
 /** Every URL the stub was asked for, so the gate can be asserted. */
 let urls: string[] = [];
 let requests: { url: string; body: string | null }[] = [];
@@ -101,7 +103,19 @@ let requests: { url: string; body: string | null }[] = [];
   else if (url.includes("/api/rosstalk/targets")) body = { targets: [] };
   else if (url.includes("/api/rosstalk/commands")) body = [];
   else if (url.includes("/api/cues/tokens")) body = { tokens: [] };
-  else if (url.includes("/api/cues/states")) body = { ok: true, checkedAt: "x", states: STATES };
+  else if (url.includes("/api/cues/states")) {
+    if (STATES_FAILS) {
+      const failure = STATES_FAILS;
+      return {
+        ok: false,
+        status: failure.status,
+        statusText: "Internal Server Error",
+        json: async () => ({ error: failure.error }),
+        text: async () => JSON.stringify({ error: failure.error }),
+      };
+    }
+    body = { ok: true, checkedAt: "x", states: STATES };
+  }
   else if (url.includes("/api/companion/pairs")) {
     body = { ok: true, pairs: [], buttons: [], customVariables: CUSTOM_VARIABLES };
   } else if (url.includes("/api/companion/buttons")) body = { ok: true, buttons: [] };
@@ -179,6 +193,7 @@ beforeEach(() => {
   RULES = [];
   STATES = {};
   CUSTOM_VARIABLES = [];
+  STATES_FAILS = null;
   urls = [];
   requests = [];
 });
@@ -311,6 +326,30 @@ describe("the poll is gated on there being a binding", () => {
     RULES = [cue("projectors_on", { stateVariable: "projectors_state" }), cue("projectors_off")];
     await mount();
     assert.equal(urls.filter((u) => u.includes("/api/cues/states")).length, 1);
+  });
+});
+
+describe("when the states route itself fails", () => {
+  test("one muted line says so, and no pill guesses", async () => {
+    // Not a pair reading unknown — that has its own amber pill and its own
+    // reason. The route failing showed NOTHING: the pills stopped appearing,
+    // which looks exactly like a set of pairs with no bindings at all.
+    RULES = [cue("projectors_on", { stateVariable: "projectors_state" }), cue("projectors_off")];
+    STATES_FAILS = { status: 500, error: "Companion is unreachable" };
+    await mount();
+    const line = document.querySelector("[data-cue-state-error]");
+    assert.equal(line === null, false, "a failed cue-state read said nothing at all");
+    assert.equal(line?.textContent, "Cue state unavailable: Companion is unreachable");
+    assert.deepEqual(pairPills(), [], "a pill appeared for a state nobody read");
+  });
+
+  test("no bindings means no line, whatever the route would have said", async () => {
+    // The query is not even enabled, so there is nothing to report and a line
+    // would be a failure invented for an install that does not use this.
+    RULES = [cue("projectors_on"), cue("projectors_off")];
+    STATES_FAILS = { status: 500, error: "Companion is unreachable" };
+    await mount();
+    assert.equal(document.querySelector("[data-cue-state-error]"), null);
   });
 });
 

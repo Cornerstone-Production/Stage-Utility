@@ -931,7 +931,7 @@ export function AutomationSection() {
    * query is not enabled at all until some pair has a binding, so an install
    * that does not use this never asks.
    */
-  const { data: cueStateData } = useQuery({
+  const { data: cueStateData, error: cueStateError } = useQuery({
     queryKey: ["cues:states"],
     queryFn: () => invoke<{ states: Record<string, CueStateRow> }>("cues:states"),
     enabled: anyBinding,
@@ -1002,6 +1002,17 @@ export function AutomationSection() {
 
       {registry && (
         <div className="flex flex-col gap-2">
+          {/* The route itself failed — not a pair reading unknown, which has its
+              own pill and its own reason. Without this the pills simply stopped
+              appearing, which looks exactly like a set of pairs with no
+              bindings. One muted line, above the list, because it is about all
+              of them at once; the pills are left alone rather than turned amber,
+              since nothing was read and a pill would be a guess. */}
+          {cueStateError !== null && anyBinding && (
+            <p className="text-caption1 text-fg-muted" data-cue-state-error="">
+              Cue state unavailable: {errorMessage(cueStateError)}
+            </p>
+          )}
           {rules.length === 0 ? (
             <p className="text-caption1 text-fg-muted">
               No rules yet. Start with the <span className="font-medium text-fg">Write a log message</span> action —
