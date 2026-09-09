@@ -652,10 +652,17 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
     }
   }
 
-  console.log(
-    `[companion] reconciled ${scrub(checked)} cues: ${scrub(counts["in-place"])} in place, ` +
-      `${scrub(counts.moved)} moved, ${scrub(counts.missing)} missing`,
-  );
+  // Only when something HAPPENED. This runs hourly and logs to the same /log
+  // page an operator reads on a Sunday morning, so a summary of a pass that
+  // changed nothing is 24 lines a day burying the ones that matter. Every
+  // actual decision already has its own line above; this one exists to give
+  // those a total.
+  if (applied > 0 || failed.length > 0) {
+    console.log(
+      `[companion] reconciled ${scrub(checked)} cues: ${scrub(counts["in-place"])} in place, ` +
+        `${scrub(counts.moved)} moved, ${scrub(counts.missing)} missing`,
+    );
+  }
   return { checked, applied, counts, failed };
 }
 

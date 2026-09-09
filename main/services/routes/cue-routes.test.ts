@@ -1465,6 +1465,43 @@ describe("reconciling a cue's Companion button", () => {
     assert.match(automationEngine.cueNameOf(after), /^screens_(on|off)$/);
   });
 
+  test("an hourly pass that changed nothing logs no summary line", async () => {
+    // 24 lines a day saying "4 in place" on the same /log page an operator
+    // reads on a Sunday morning, burying the lines that matter. Every actual
+    // decision already logs itself; the summary exists to total those.
+    await importPageOne();
+    const realLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      const first = await runCompanionReconcile();
+      assert.equal(first?.applied, 0, "the import left something for the pass to write");
+      assert.deepEqual(
+        lines.filter((l) => l.includes("reconciled")),
+        [],
+        "an unchanged pass logged a summary",
+      );
+
+      // And a pass that DID change something still says so.
+      const d = exportDoc as unknown as Doc;
+      const control = d.pages["1"]!.controls["0"]!["1"];
+      delete d.pages["1"]!.controls["0"]!["1"];
+      d.pages["1"]!.controls["4"] = { "6": control };
+      companionApi.invalidate();
+      lines.length = 0;
+      await runCompanionReconcile();
+      assert.equal(
+        lines.filter((l) => l.includes("reconciled")).length,
+        1,
+        `a pass that moved a cue logged no summary; got ${lines.join(" | ")}`,
+      );
+    } finally {
+      console.log = realLog;
+    }
+  });
+
   test("a clean refresh says so, with nothing failed", async () => {
     await importPageOne();
     const r = await callRoute(cueRoutes, "/api/companion/buttons/refresh", {
