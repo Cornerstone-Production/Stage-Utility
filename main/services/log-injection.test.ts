@@ -65,6 +65,9 @@ const REQUEST_FACING = [
   "companion-reconcile.ts",
   "context.ts",
   "cue-routes.ts",
+  // Logs the Companion variable name a cue is bound to, which arrives as a rule
+  // param over HTTP.
+  "cue-states.ts",
   "cue-tokens.ts",
   "display-settings-routes.ts",
   "history-routes.ts",
@@ -218,6 +221,10 @@ function requestFacingFiles(): string[] {
     // A cue token's LABEL is typed into an HTTP body ("Home Assistant") and is
     // logged when the token is minted.
     path.join(HERE, "cue-tokens.ts"),
+    // Its lines name the Companion custom variable a cue pair is bound to and
+    // the pair's base — a rule param typed into an HTTP body — and the value
+    // Companion sent back.
+    path.join(HERE, "cue-states.ts"),
     // Every value on its lines is either a cue name — typed into an HTTP body
     // — or a Companion page name out of the export. Both reach `/log`.
     path.join(HERE, "companion-reconcile.ts"),

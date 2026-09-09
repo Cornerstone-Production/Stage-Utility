@@ -42,6 +42,7 @@ const { integrationManager } = await import("../integration-manager.js");
 const { AUTOMATION_TRIGGERS, CALL_TRIGGER_ID } = await import("../automation-triggers.js");
 const { readFingerprint } = await import("../companion-fingerprint.js");
 const { runCompanionReconcile } = await import("../companion-reconcile.js");
+const { cueStates } = await import("../cue-states.js");
 
 after(async () => {
   await fsp.rm(TMP, { recursive: true, force: true });
@@ -51,6 +52,15 @@ after(async () => {
 
 /** Every press the stubbed Companion received. */
 let presses: string[] = [];
+
+/**
+ * What the stubbed Companion's custom variables hold, and every read of one.
+ *
+ * A name that is not a key here answers 404, which is Companion's own answer
+ * for a variable that does not exist.
+ */
+let variables: Record<string, string> = {};
+let variableReads: string[] = [];
 
 /**
  * A live PCO service, or none.
@@ -130,6 +140,15 @@ before(async () => {
       presses.push(url);
       return new Response("ok", { status: 200 });
     }
+    const variable = /\/api\/custom-variable\/([^/]+)\/value$/.exec(url);
+    if (variable) {
+      const name = decodeURIComponent(variable[1]!);
+      variableReads.push(name);
+      const value = variables[name];
+      return value === undefined
+        ? new Response("Not found", { status: 404 })
+        : new Response(value, { status: 200 });
+    }
     void init;
     return Response.json(companionExportFixture());
   };
@@ -175,6 +194,9 @@ const call = (name: string, opts: Record<string, unknown> = {}) =>
 
 beforeEach(() => {
   presses = [];
+  variables = {};
+  variableReads = [];
+  cueStates.invalidate();
   setQuiet();
   setPcoConfigured(true);
   companionApi.invalidate();
@@ -704,6 +726,83 @@ describe("a pair's state binding", () => {
   });
 });
 
+describe("GET /api/cues/states", () => {
+  /** A bound pair on the real engine, through the real addRule. */
+  async function withBoundPair(params: Record<string, string> = {}): Promise<void> {
+    for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+    for (const [name, extra] of [
+      ["projectors_on", { stateVariable: "projectors_state", ...params }],
+      ["projectors_off", {}],
+    ] as const) {
+      await automationEngine.addRule({
+        name,
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name, ...extra } },
+        conditions: [],
+        action: { id: "companion.press", params: { page: 1, row: 0, col: 1 } },
+        cooldownSec: 0,
+        oncePerService: false,
+      });
+    }
+  }
+
+  const states = async (): Promise<Record<string, Record<string, unknown>>> => {
+    const r = await callRoute(cueRoutes, "/api/cues/states");
+    assert.equal(r.status, 200);
+    return (r.json as { states: Record<string, Record<string, unknown>> }).states;
+  };
+
+  test("is an OPEN read — no token, like the YAML and the token list", async () => {
+    // The thing polling it is a Home Assistant `rest` sensor, which carries no
+    // token, and a same-origin GET sends no Origin to gate on.
+    await withBoundPair();
+    variables.projectors_state = "on";
+    const r = await callRoute(cueRoutes, "/api/cues/states");
+    assert.equal(r.status, 200);
+  });
+
+  test("answers on for the on value and off for the off value", async () => {
+    await withBoundPair();
+    variables.projectors_state = "on";
+    assert.equal(String((await states()).projectors!.state), "on");
+
+    cueStates.invalidate();
+    variables.projectors_state = "off";
+    assert.equal(String((await states()).projectors!.state), "off");
+  });
+
+  test("a variable Companion does not have is unknown, with the reason", async () => {
+    await withBoundPair();
+    const row = (await states()).projectors!;
+    assert.equal(String(row.state), "unknown");
+    assert.equal(String(row.reason), "no such custom variable in Companion");
+    assert.equal(row.value, null);
+  });
+
+  test("a value that is neither says what it read", async () => {
+    await withBoundPair();
+    variables.projectors_state = "WARMUP";
+    const row = (await states()).projectors!;
+    assert.equal(String(row.state), "unknown");
+    assert.equal(String(row.reason), 'value "WARMUP" matches neither "on" nor "off"');
+  });
+
+  test("an unbound pair is not in the answer at all", async () => {
+    await withCue();
+    assert.deepEqual(Object.keys(await states()), []);
+    assert.deepEqual(variableReads, [], "an unbound pair must not read anything");
+  });
+
+  test("the answer is cached, so a second poll does not read Companion again", async () => {
+    await withBoundPair();
+    variables.projectors_state = "on";
+    await states();
+    assert.deepEqual(variableReads, ["projectors_state"]);
+    await states();
+    assert.deepEqual(variableReads, ["projectors_state"], "the second poll went to Companion");
+  });
+});
+
 describe("a cue's former names", () => {
   /** The cue, renamed, still carrying the name Home Assistant was pasted with. */
   const renamed = () =>
@@ -916,6 +1015,18 @@ describe("the button and pair endpoints", () => {
       ["lobby_tvs", "room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
     );
     assert.equal(pairs.every((p) => !p.exists), true);
+  });
+
+  test("the offer carries Companion's custom variables, for the state select", async () => {
+    // EXACT. The fixture declares five and two of them are names Companion's own
+    // value API could never answer for — offering one would bind a cue to a
+    // permanent 404, chosen from a dropdown.
+    const r = await callRoute(cueRoutes, "/api/companion/pairs");
+    assert.deepEqual((r.json as { customVariables: string[] }).customVariables, [
+      "house_lights_state",
+      "lobby_tvs",
+      "rig.state",
+    ]);
   });
 
   test("the ticked-by-default pairs come from what the buttons DRIVE, not a page name", async () => {

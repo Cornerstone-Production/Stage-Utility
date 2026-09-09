@@ -46,6 +46,7 @@ import { runCompanionReconcile } from "../companion-reconcile.js";
 import { bearerOf, cueTokens, isSameOriginBrowser } from "../cue-tokens.js";
 import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
+import { cueStates } from "../cue-states.js";
 import { stageController } from "../stage-controller.js";
 import type { Rule } from "../../types/automation.js";
 
@@ -134,6 +135,19 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // GET /api/automation/rules already serves to anyone on the LAN — and refers
     // to the token as `!secret stage_utility_token`, never by value.
     text(c, homeAssistantYaml(automationEngine.listRules(), baseUrlFor(c)));
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/cues/states") {
+    // Open, like the YAML and the token list: it carries cue names, the
+    // Companion variable names the operator chose, and on/off. Gating it would
+    // need a header a same-origin GET does not send, and the thing polling it
+    // is a Home Assistant `rest` sensor that carries no token.
+    //
+    // Reads Companion on demand and serves the answer for five seconds
+    // (cue-states.ts), so a sensor polling every ten seconds costs one round of
+    // reads and an install nobody polls costs nothing.
+    json(res, await cueStates.read());
     return;
   }
 
@@ -264,7 +278,10 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
       const slug = slugs.buttons.get(`${b.page}:${b.row}:${b.col}`) ?? "";
       return { ...b, slug, exists: !!slug && taken.has(slug) };
     });
-    json(res, { ok: true, pairs, buttons });
+    // The custom variables Companion has, so the import dialog can offer a pair
+    // a state binding without a second request. Empty on an install with none,
+    // which is not an error — see customVariableNames.
+    json(res, { ok: true, pairs, buttons, customVariables: result.customVariables });
     return;
   }
 
