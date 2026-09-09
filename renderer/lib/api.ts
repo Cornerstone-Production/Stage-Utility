@@ -771,6 +771,24 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "automation:setSettings": return post("/api/automation/settings", params);
     case "automation:log": return apiFetch("/api/automation/log");
     case "automation:clearLog": return del("/api/automation/log");
+    case "automation:importPairs": return post("/api/automation/rules/import-pairs", params);
+
+    // Cues — a rule called by name, and the tokens that may call one.
+    case "companion:buttons": return apiFetch("/api/companion/buttons");
+    case "companion:refreshButtons": return post("/api/companion/buttons/refresh");
+    case "companion:pairs": return apiFetch("/api/companion/pairs");
+    case "cues:tokens": return apiFetch("/api/cues/tokens");
+    case "cues:mintToken": return post("/api/cues/tokens", params);
+    case "cues:revokeToken": return del(`/api/cues/tokens/${encodeURIComponent(String(p.id))}`);
+    // YAML, not JSON — the one text response in this file, so it cannot go
+    // through apiFetch's res.json().
+    case "cues:homeAssistantYaml": {
+      const res = await fetch("/api/cues/home-assistant.yaml", {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`Could not build the Home Assistant config (HTTP ${res.status})`);
+      return { yaml: await res.text() } as T;
+    }
     case "rosstalk:targets": return apiFetch("/api/rosstalk/targets");
     case "rosstalk:addTarget": return post("/api/rosstalk/targets", params);
     case "rosstalk:updateTarget": return patch(`/api/rosstalk/targets/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);

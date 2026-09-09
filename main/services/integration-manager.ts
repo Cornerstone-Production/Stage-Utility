@@ -7,6 +7,7 @@ import type { IntegrationDescriptor, IntegrationState } from "../types/integrati
 import { scrub, scrubError } from "./scrub.js";
 import type { PeopleCountDTO } from "../types/stage.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
+import { DEFAULT_COMPANION_PORT, companionApi } from "./companion-api.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService, configComplete, type YouTubeConfig } from "./youtube-service.js";
@@ -96,19 +97,46 @@ const WIRELESS_DESCRIPTOR: IntegrationDescriptor = {
   configSchema: [],
 };
 
-// Companion integration descriptor. There is nothing for the app to dial — the
-// Bitfocus Companion module connects TO this app's HTTP/SSE API. So this carries
-// no config; the settings panel (CompanionInfoPanel) shows the URL to point
-// Companion at and a live connected-client count instead.
+// Companion integration descriptor. It runs in BOTH directions, which is why it
+// is the only descriptor that is `inbound` and still carries config:
+//
+//  - inbound, and unconfigurable: the Companion module opens an HTTP/SSE
+//    connection to this app, and the row counts the clients attached. Nothing
+//    here gates that, which is why there is still no enable switch.
+//  - outbound, and optional: with a host and port filled in, this app can press
+//    a named Companion button (see companion-api.ts) so a rule — or a voice
+//    call — can turn the projectors on.
+//
+// The host is left blank on purpose. Empty means "we do not dial Companion", and
+// every outbound path answers "Companion host is not configured" rather than
+// guessing at localhost.
 const COMPANION_DESCRIPTOR: IntegrationDescriptor = {
   id: "companion",
   kind: "control",
   label: "Bitfocus Companion",
   description:
-    "Lets a Bitfocus Companion surface — a Stream Deck — control Stage and read its state. Nothing to set up here: the module dials in, and this row counts the clients attached.",
+    "Lets a Bitfocus Companion surface — a Stream Deck — control Stage and read its state. The module dials in on its own; fill in the host to let rules press Companion buttons back.",
   docs: "companion",
   inbound: true,
-  configSchema: [],
+  configSchema: [
+    {
+      key: "host",
+      label: "Companion Host",
+      type: "text",
+      placeholder: "192.168.1.100",
+      help:
+        "Only needed to press Companion buttons FROM Stage Utility. Leave blank and the module still connects as before.",
+    },
+    {
+      key: "port",
+      label: "API Port",
+      type: "number",
+      default: DEFAULT_COMPANION_PORT,
+      min: 1,
+      max: 65535,
+      help: "Companion's web and HTTP API port. Settings -> Protocols -> HTTP must be on.",
+    },
+  ],
 };
 
 // ProPresenter integration — reads live slide/item status from the 7.9+ local
@@ -1042,6 +1070,13 @@ class IntegrationManager {
     this.states.set(id, { ...state, config: maskedConfig });
 
     // Side-effects for specific integrations.
+    if (id === "companion") {
+      // The cached export belongs to the OLD host. Keeping it would have the
+      // picker offer another Companion's buttons at coordinates this one will
+      // press regardless.
+      companionApi.invalidate();
+    }
+
     if (id === "planning-center") {
       await this.applyPcoCredentials();
       // Restart auto-refresh with the (possibly updated) interval.
@@ -1136,13 +1171,30 @@ class IntegrationManager {
         const n = this.companionClients;
         // Companion can't resolve DNS — report the raw LAN IP URL.
         const url = stageController.getState().lanUrl ?? stageController.getState().remoteUrl;
-        const msg =
+        const inbound =
           n > 0
             ? `${n} Companion client(s) connected`
-            : `Ready — point Companion at ${url ?? "this server's LAN address"}`;
-        this.setConnectionState("companion", n > 0 ? "connected" : "disconnected", msg);
+            : `No clients yet — point Companion at ${url ?? "this server's LAN address"}`;
+
+        // Two directions, two answers, and the row must not read "connected"
+        // because only one of them worked. With no host set there is nothing
+        // outbound to test and the inbound count is the whole answer, exactly as
+        // before this integration gained config.
+        if (!this.getCompanionTarget()) {
+          this.setConnectionState("companion", n > 0 ? "connected" : "disconnected", inbound);
+          this.broadcastStates();
+          return { ok: true, message: inbound };
+        }
+
+        const outbound = await companionApi.testConnection();
+        const msg = `${inbound}. ${outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`}`;
+        this.setConnectionState(
+          "companion",
+          outbound.ok ? "connected" : "error",
+          msg,
+        );
         this.broadcastStates();
-        return { ok: true, message: msg };
+        return { ok: outbound.ok, message: msg };
       }
 
       if (id === "propresenter") {
@@ -1347,6 +1399,25 @@ class IntegrationManager {
     const cfg = this.states.get("propresenter")?.config ?? {};
     const defaultName = typeof cfg.name === "string" ? cfg.name : null;
     propresenterManager.apply(defaultName, enabled ? parsePropInstances(cfg.instances) : []);
+  }
+
+  /**
+   * Where to dial Companion, or null when the operator has not said.
+   *
+   * PUBLIC, unlike every other target getter here, because companion-api reads
+   * it — and it returns null rather than a default host, so the outbound half
+   * stays switched off until somebody turns it on. The PORT defaults, because
+   * Companion's is always 8000 unless it was changed, and a blank port with a
+   * filled-in host is a form half-completed rather than a decision.
+   */
+  getCompanionTarget(): { host: string; port: number } | null {
+    const cfg = this.states.get("companion")?.config ?? {};
+    const host = typeof cfg.host === "string" ? cfg.host.trim() : "";
+    if (!host) return null;
+    const raw = cfg.port;
+    const port =
+      typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? parseInt(raw, 10) : NaN;
+    return { host, port: Number.isFinite(port) && port > 0 ? port : DEFAULT_COMPANION_PORT };
   }
 
   private getProdcomTarget(): { host: string | null; port: number | null } {

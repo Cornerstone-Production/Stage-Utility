@@ -9,10 +9,16 @@ The module is a separate repository:
 
 ## How it connects
 
-The direction is reversed from every other integration: Stage Utility dials out
-to nothing. The Companion module connects **to** this app's existing HTTP/SSE
-server on port 8788, so the in-app integration carries no config fields and
-stores no secret.
+Companion runs in **both directions**, and they are independent:
+
+| | |
+|---|---|
+| **In** | the Companion module connects to this app's HTTP/SSE server on port 8788. Nothing to set up here; the row counts the clients attached |
+| **Out** | with a host and port filled in, this app can press a named Companion button — for a rule, or for a cue called by voice |
+
+The inbound half needs no config and no enable switch. The outbound half is off
+until you fill in the host: blank means "we do not dial Companion", and every
+outbound path says so rather than guessing at an address.
 
 The module marks its event stream with an `X-Companion-Module` header (or
 `?client=companion`). The server counts those streams and reports the total to
@@ -39,6 +45,131 @@ like a broken download rather than a version mismatch.
 LAN IP and port split into separate copyable fields, because Companion takes host
 and port separately and cannot resolve a DNS name. A live connected-client count
 sits alongside them.
+
+### To press Companion buttons from here
+
+| Field | |
+|---|---|
+| **Companion Host** | Companion's IP. Leave blank and nothing outbound happens |
+| **API Port** | Companion's web and HTTP API port, `8000` by default. Companion's **Settings → Protocols → HTTP** must be on |
+
+**Test** reads Companion's configuration and reports its build and how many
+buttons it found. It never presses anything.
+
+Everything outbound comes from Companion's own configuration export
+(`/int/export/full`), which is unauthenticated **unless the Companion admin has
+set a password** — with one set, the button picker says so instead of showing an
+empty list.
+
+## Pressing a button
+
+The automation action **Press a Companion button** presses one button at a page,
+row and column, exactly as a finger would. Build it under Settings → Automation
+and pick the button from the list rather than typing coordinates; the three
+numbers stay visible and editable for a button that is not in the export.
+
+Two things it does not do:
+
+**It reports "dispatched", never "on".** Companion answers the moment it hands
+the press to a control. Nothing in the chain reads the projector back, so the log
+says what was sent, not what happened.
+
+**One action is one press.** For a sequence, make a Companion button that runs the
+sequence and press that. A rule that half-ran a chain would be worse than one that
+did nothing.
+
+## Calling a cue by name
+
+**Scope: setup and teardown, not for cues during a service.** These are the
+things somebody walks in and turns on, and walks out and turns off. Every
+imported cue carries the condition **no service is live**, which fails closed: it
+refuses while a service is running or about to start, and when Planning Center
+cannot be read — each with a sentence a voice assistant can read out.
+
+A cue is an ordinary automation rule whose trigger is **Called by name**. It has
+a `name` in `lower_snake_case`, unique across rules, and runs only when something
+calls it:
+
+```
+POST /api/cues/<name>
+Authorization: Bearer su_...
+```
+
+It never fires from anything happening in the building — no state change, no
+snapshot, no schedule reaches it.
+
+| Answer | |
+|---|---|
+| `200` | dispatched. `{ok, detail}`, plus `simulated: true` while the engine is in simulate mode — the call succeeded and nothing reached a device |
+| `202` | this cue is set to **Ask twice**. `{confirm, expiresInSec}`; call again within 30 s with `?confirm=<token>`, or in the body. A confirmation is **single use** and lapses after 30 s — replaying one is answered with a fresh confirmation, never a second press |
+| `401` | no token, or a revoked one |
+| `404` | no cue by that name |
+| `409` | refused. `{error, reason}`; `error` is a sentence to read out, like *"The Gospel Way is live"* |
+
+| `reason` | |
+|---|---|
+| `service-live` | a service is running, or starts within the hour. Carries `plan` when the plan has a title |
+| `planning-center-unknown` | Planning Center is configured and cannot be read, so we will not guess. Also on a `[cues]` line in the server log |
+| `condition-not-met` | one of the rule's other conditions did not hold |
+| `cooldown` | the cue ran within its cooldown |
+| `once-per-service` | the cue is set to run once per service and already has, this occurrence |
+| `disabled` | the rule's own switch is off |
+| `disarmed` | automation is disarmed |
+
+Every call, allowed or refused, lands in the automation Activity log with the
+calling token's label, and on a `[cues]` line in the server log.
+
+### Tokens
+
+Settings → Automation → **Calling cues** mints one token per caller. The token is
+shown **once** — only a SHA-256 of it is stored — so a lost one is replaced, not
+recovered. Revoke them individually, which is why each has a label.
+
+The same token is required by `POST /api/action/invoke`, and by minting or revoking
+a token, for anything that is not a browser request from this server's own pages —
+a script or a Companion `generic-http` action calling it needs one. The app's own
+pages are unaffected.
+
+**What the token is, and what it is not.** It identifies the caller in the activity
+log, and it keeps the call route closed to anything that has not been handed one. It
+is not a perimeter: anyone with write access to the app over the LAN can change any
+setting, including the cue rules and the tokens themselves, as they always could.
+The perimeter is the network — do not expose Stage Utility beyond the LAN or
+Tailscale. Companion's own HTTP API is unauthenticated in the same way, and the
+mitigation there is the same: an ACL on the switch port Companion is on.
+
+### Importing ON/OFF pairs
+
+Settings → Automation → **Import from Companion…** finds, per page, buttons whose
+labels differ only by a trailing `ON`/`OFF` (or `Startup`/`Shutdown`) and offers
+each pair as two cues, `<name>_on` and `<name>_off`. A pair whose buttons drive a
+utility device — a projector, a television, a smart plug or bulb, a lighting console
+— is ticked by default; everything else is offered unticked, because a cue that
+presses it is a cue somebody can say by accident.
+
+Pairs are matched **within a page**: "Conf TVs ON" on two auditoriums' pages are
+different televisions, and crossing them is the kind of mistake found out during
+setup. When the same label does appear on two pages, both cues are named after
+their page so neither is lost.
+
+Each imported pair becomes two rules with **no service is live** and a two-second
+cooldown. They are ordinary rules afterwards — edit, disable or delete them like
+any other. Re-running the import skips names that already exist and tells you
+which.
+
+### Home Assistant
+
+**Copy YAML** in the same panel produces the whole configuration fragment: one
+`rest_command` per cue, and a template `switch` per ON/OFF pair. Paste it into
+`configuration.yaml`, put the token in `secrets.yaml` **with the scheme**:
+
+```yaml
+stage_utility_token: "Bearer su_..."
+```
+
+and reload. The switches are `optimistic: true` — Stage Utility reports that it
+dispatched the press and nothing more, so Home Assistant shows what it asked for
+rather than what the device did.
 
 ## What the module exposes
 

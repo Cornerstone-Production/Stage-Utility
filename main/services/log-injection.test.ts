@@ -63,6 +63,8 @@ const REQUEST_FACING = [
   "calendar-routes.ts",
   "checklist-ticks-store.ts",
   "context.ts",
+  "cue-routes.ts",
+  "cue-tokens.ts",
   "display-settings-routes.ts",
   "history-routes.ts",
   "integration-manager.ts",
@@ -145,6 +147,7 @@ const NOT_SCANNED = new Map<string, string>([
   ["reaper-service.ts", DEVICE],
   ["remote-server.ts", DEVICE],
   ["resi-service.ts", DEVICE],
+  ["companion-api.ts", DEVICE],
   ["rosstalk-manager.ts", DEVICE],
   ["scores-service.ts", DEVICE],
   ["sensource-service.ts", DEVICE],
@@ -208,6 +211,9 @@ function requestFacingFiles(): string[] {
     // half caught it on its first run against a tree that had it — which is the
     // whole reason that half exists.
     path.join(HERE, "checklist-ticks-store.ts"),
+    // A cue token's LABEL is typed into an HTTP body ("Home Assistant") and is
+    // logged when the token is minted.
+    path.join(HERE, "cue-tokens.ts"),
     ...inRoutes,
   ];
 }
