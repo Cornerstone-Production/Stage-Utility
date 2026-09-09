@@ -33,6 +33,46 @@ export interface PlanDTO {
   past?: boolean;
 }
 
+/**
+ * One row of the editor's plan switcher.
+ *
+ * Flattened across service types on purpose: the switcher walks plans by DATE,
+ * not by type, so the type has to travel with each plan rather than be implied
+ * by which list the row came from.
+ */
+export interface UpcomingPlan {
+  serviceTypeId: string;
+  serviceTypeName: string;
+  planId: string;
+  title: string;
+  /** PCO `sort_date` (ISO). Null only for a plan PCO could not date; those sort
+   *  last and the arrows still reach them. */
+  sortDate: string | null;
+  /** The dates as Planning Center words them, for a label PCO itself would use. */
+  dates: string | null;
+  /** True for the plan the machine is following right now. */
+  isCurrent: boolean;
+}
+
+/** What GET /api/plans/upcoming answers. */
+export interface UpcomingPlansDTO {
+  plans: UpcomingPlan[];
+  /** How old this list is, in milliseconds. 0 on a fresh read from Planning
+   *  Center; up to the cache lifetime otherwise. */
+  cacheAgeMs: number;
+  /**
+   * Why the list could not be refreshed, when it could not be.
+   *
+   * Present WITH plans when a cached list was served instead, and with an empty
+   * list when there was no cache. A 200 either way: the editor can still edit
+   * the plan the machine is on, and a 5xx would make it look broken.
+   */
+  unavailable?: string;
+}
+
+/** How the editor's plan switcher steps. See docs/slots.md. */
+export type PlanSwitcherMode = "within-type" | "upcoming";
+
 /** One line-item of a PCO plan (song / header / media / item). */
 export interface PlanItemDTO {
   id: string;
@@ -252,4 +292,59 @@ export interface SlotPreset {
   name: string;
   slots: Slot[];
   createdAt: string;
+}
+
+/**
+ * What a slot board is keyed by: a slots-kind VIEW's id, or the id of an inline
+ * `slots-grid` layout OBJECT on a custom layout. The two are stored in the same
+ * file and behave identically, so every operation on a board takes the scope
+ * beside the key rather than existing twice.
+ */
+export type SlotsScope = "view" | "object";
+
+/**
+ * The two boards one key can have right now — the service type's default, and
+ * the current plan's override when it has one.
+ *
+ * `overrideSlots` is null when the current plan has no board of its own, which is
+ * also what the editor badges "edited" from.
+ */
+export interface SlotTargetsDTO {
+  scope: SlotsScope;
+  key: string;
+  serviceTypeId: string | null;
+  serviceTypeName: string | null;
+  planId: string | null;
+  /** The plan's dates as Planning Center words them, for a label. */
+  planDates: string | null;
+  /** The plan's PCO `sort_date` (ISO), for a short "Wed Sep 13" label. Null on a
+   *  cold start before the first plan selection, when `planDates` is the label. */
+  planSortDate: string | null;
+  defaultSlots: Slot[];
+  overrideSlots: Slot[] | null;
+}
+
+/**
+ * Which week's people a slot preview was resolved against.
+ *
+ * The slots editor's plan switcher moves the editor off the plan the screens are
+ * following, and the preview beside it follows. The rows alone cannot say whose
+ * roster filled them, and "no names" has three very different causes — a default
+ * board has no week, a future plan may have nobody scheduled yet, and Planning
+ * Center may simply be unreachable. The caption over the preview reads this.
+ */
+export type SlotsPreviewRoster = "live" | "plan" | "none" | "unavailable";
+
+/** What `POST /api/views/resolve-slots` answers with. */
+export interface SlotsPreviewDTO {
+  slots: Slot[];
+  roster: SlotsPreviewRoster;
+  /** One sentence, only when `roster` is "unavailable". */
+  reason?: string;
+}
+
+/** The board a slot preview is asked for. `planId: null` = the type's default. */
+export interface SlotsPreviewTarget {
+  serviceTypeId: string;
+  planId: string | null;
 }

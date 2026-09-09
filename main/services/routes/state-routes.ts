@@ -9,6 +9,7 @@ import { type RouteCtx, json, error } from "./context.js";
 import { errorMessage } from "../errors.js";
 import { stageController } from "../stage-controller.js";
 import { SERVER_VERSION } from "../server-version.js";
+import { UPCOMING_DEFAULT_DAYS, UPCOMING_MAX_DAYS } from "../upcoming-plans.js";
 
 export async function stateRoutes(c: RouteCtx): Promise<void> {
   const { res, pathname, url, method } = c;
@@ -52,6 +53,26 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
       } catch (err) {
         error(res, errorMessage(err), 502);
       }
+      return;
+    }
+
+    // Every allowed service type's plans in one dated list, for the editor's plan
+    // switcher. Deliberately 200 even when Planning Center is unreachable: the
+    // body carries `unavailable` and the editor stays usable on the plan the
+    // machine is already on, where a 502 would read as "this app is broken".
+    if (method === "GET" && pathname === "/api/plans/upcoming") {
+      // FLOOR FIRST, then test the range. `?days=0.5` passed `> 0` and floored to
+      // zero afterwards, so the window was one day and the switcher could offer
+      // nothing past tonight — a nonsense value that read as a working list.
+      // Anything under a whole day now falls back to the default rather than
+      // being rounded up, the same answer `?days=banana` gets.
+      const raw = Math.floor(Number(url.searchParams.get("days")));
+      const days =
+        Number.isFinite(raw) && raw > 0 ? Math.min(raw, UPCOMING_MAX_DAYS) : UPCOMING_DEFAULT_DAYS;
+      const dto = await stageController.getUpcomingPlanList(days);
+      // Also a header, so a proxy or a curl can see the age without parsing.
+      res.setHeader("X-Plans-Cache-Age-Ms", String(dto.cacheAgeMs));
+      json(res, dto);
       return;
     }
 

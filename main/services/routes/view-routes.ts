@@ -7,7 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { buildViewBundle } from "../view-export.js";
-import { applyViewBundle } from "../view-import.js";
+import { applyViewBundle, type ImportOptions } from "../view-import.js";
 import {
   listLayoutTemplates,
   saveLayoutTemplate,
@@ -23,8 +23,9 @@ import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BY
 import { isLayoutShape } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
-import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout } from "../../types/stage.js";
-import { LayoutConflictError, stageController } from "../stage-controller.js";
+import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
+import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
+import { LayoutConflictError, SlotsNotFoundError, stageController } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { zonedDateKey } from "../app-timezone.js";
@@ -51,23 +52,44 @@ function isSelectionList(v: unknown): v is CalendarSelection[] {
 }
 
 /**
- * `stage-utility-view-left-mic-display-2026-08-17.json`.
+ * Operator-supplied text, safe to put in a quoted Content-Disposition value.
  *
- * The name is operator-supplied text going into a quoted header value, so the
- * slug keeps only [a-z0-9-] — a quote or a path separator surviving here would
- * be a header injection, not a cosmetic problem. Bounded because some
- * filesystems cap a path component at 255 bytes.
+ * Keeps only [a-z0-9-]: a quote or a path separator surviving here would be a
+ * header injection, not a cosmetic problem. Bounded because some filesystems cap
+ * a path component at 255 bytes. Exported so the plan export names its file the
+ * same way rather than growing a fifth copy of this line.
  */
+export function filenameSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+}
+
+/** `stage-utility-view-left-mic-display-2026-08-17.json`. */
 export function exportFilename(name: string, now: Date): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  const slug = filenameSlug(name);
   // The app's zone, not the server's clock: a UTC box dates a file exported at
   // 22:30 in Chicago as the next day. patch-export.ts fixed the same line first;
   // this and the config and archive exports are the other three copies.
   return `stage-utility-view-${slug ? `${slug}-` : ""}${zonedDateKey(now.getTime())}.json`;
 }
 
+/**
+ * Answer a slots failure the controller RAISED DELIBERATELY, and rethrow
+ * anything else.
+ *
+ * Every slots route here used to wrap its whole call in `catch → 404`, so a
+ * store write that failed for any other reason — a full disk, a TypeError from
+ * an unsafe key — reached the operator as "there was nothing to revert" and left
+ * no 500 in the log to find later. `SlotsNotFoundError` carries the status it
+ * deserves (404 for a thing that is not there, 400 for a target that cannot be
+ * true); everything else goes up to the dispatcher, which answers 500 and logs.
+ */
+function slotsFailure(res: RouteCtx["res"], err: unknown): void {
+  if (!(err instanceof SlotsNotFoundError)) throw err;
+  error(res, err.message, err.status);
+}
+
 export async function viewRoutes(c: RouteCtx): Promise<void> {
-  const { req, res, pathname, method } = c;
+  const { req, res, pathname, method, url } = c;
     if (method === "GET" && pathname === "/api/displays") {
       json(res, stageController.getDisplays());
       return;
@@ -123,21 +145,112 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // POST /api/views/resolve-slots — { slots } → resolved Slot[] (no persist).
-    // Powers the Views page live draft preview: resolves in-progress edits against
-    // the current team + device state so the preview matches the kiosk, without
-    // saving. Must precede the /api/views/:id/slots matcher.
+    // POST /api/views/resolve-slots — { slots, target? } → { slots, roster, reason? }.
+    // Powers the slots editor's preview: resolves rows against a plan's roster and
+    // this rig's device state without saving anything. `target` names the board
+    // being previewed, for an editor the plan switcher has pointed at another
+    // week; absent, it is the plan the screens are following. Must precede the
+    // /api/views/:id/slots matcher.
     if (method === "POST" && pathname === "/api/views/resolve-slots") {
       const body = await readBody(req) as Record<string, unknown>;
       if (!Array.isArray(body.slots)) {
         error(res, "body.slots (array) required");
         return;
       }
-      json(res, stageController.resolveSlotsPreview(body.slots as Slot[]));
+      // Validated rather than coerced. A half-understood target would resolve
+      // against the WRONG WEEK's people under an ordinary 200, which is worse
+      // than a refusal: the operator has no way to tell whose names those are.
+      let target: SlotsPreviewTarget | undefined;
+      if (body.target !== undefined && body.target !== null) {
+        if (typeof body.target !== "object" || Array.isArray(body.target)) {
+          error(res, "body.target must be an object");
+          return;
+        }
+        const t = body.target as Record<string, unknown>;
+        if (typeof t.serviceTypeId !== "string" || t.serviceTypeId === "") {
+          error(res, "body.target.serviceTypeId must be a non-empty string");
+          return;
+        }
+        // Null is the type's DEFAULT board and is meaningful. An empty string is
+        // not a plan id, and coercing it to null would silently preview the
+        // default for a caller that meant to name a week.
+        if (t.planId !== null && (typeof t.planId !== "string" || t.planId === "")) {
+          error(res, "body.target.planId must be a non-empty string or null");
+          return;
+        }
+        target = { serviceTypeId: t.serviceTypeId, planId: t.planId };
+      }
+      json(res, await stageController.resolveSlotsPreview(body.slots as Slot[], target));
       return;
     }
 
-    // POST /api/views/:id/slots — { slots }
+    // GET /api/views/:id/slot-targets and /api/layout-objects/:id/slot-targets —
+    // the type's default board and the current plan's override, in one read. Must
+    // precede the /slots matchers only in the sense that these paths differ; kept
+    // together with them because they are the same pair of surfaces.
+    const targetsMatch = pathname.match(/^\/api\/(views|layout-objects)\/([^/]+)\/slot-targets$/);
+    if (method === "GET" && targetsMatch) {
+      const scope: SlotsScope = targetsMatch[1] === "views" ? "view" : "object";
+      // ?serviceTypeId=&planId= names WHICH board pair to read, for an editor
+      // the plan switcher has pointed at another week. Absent, it is the
+      // machine's own type and plan, which is what every caller before the
+      // switcher asked for. A serviceTypeId with no planId is that type's
+      // default and nothing else — see getSlotTargets.
+      const wantType = url.searchParams.get("serviceTypeId");
+      const want = wantType
+        ? { serviceTypeId: wantType, planId: url.searchParams.get("planId") }
+        : undefined;
+      try {
+        json(res, await stageController.getSlotTargets(scope, decodeURIComponent(targetsMatch[2]), want));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
+      return;
+    }
+
+    // DELETE /api/views/:id/slots/override/:planId (and the layout-object form) —
+    // "Revert to default". 404 when there was no override, so the client can tell
+    // a revert that happened from one that had nothing to do.
+    const overrideMatch = pathname.match(
+      /^\/api\/(views|layout-objects)\/([^/]+)\/slots\/override\/([^/]+)$/,
+    );
+    if (method === "DELETE" && overrideMatch) {
+      const scope: SlotsScope = overrideMatch[1] === "views" ? "view" : "object";
+      try {
+        json(res, await stageController.clearSlotsOverride(
+          scope,
+          decodeURIComponent(overrideMatch[2]),
+          decodeURIComponent(overrideMatch[3]),
+        ));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
+      return;
+    }
+
+    // POST /api/views/:id/slots/promote — { planId } — "Set as default": copy the
+    // plan's board onto the service type's default and drop the override.
+    const promoteMatch = pathname.match(/^\/api\/(views|layout-objects)\/([^/]+)\/slots\/promote$/);
+    if (method === "POST" && promoteMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (typeof body.planId !== "string") {
+        error(res, "body.planId (string) required");
+        return;
+      }
+      const scope: SlotsScope = promoteMatch[1] === "views" ? "view" : "object";
+      try {
+        json(res, await stageController.promoteSlotsOverride(
+          scope,
+          decodeURIComponent(promoteMatch[2]),
+          body.planId,
+        ));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
+      return;
+    }
+
+    // POST /api/views/:id/slots — { slots, target? }
     const viewSlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/slots$/);
     if (method === "POST" && viewSlotsMatch) {
       const body = await readBody(req) as Record<string, unknown>;
@@ -145,12 +258,20 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.slots (array) required");
         return;
       }
-      const state = await stageController.setViewSlots(viewSlotsMatch[1], body.slots as Slot[]);
-      json(res, state);
+      const target = readSlotsTarget(body.target);
+      if (target === INVALID_TARGET) {
+        error(res, TARGET_ERROR);
+        return;
+      }
+      try {
+        json(res, await stageController.setViewSlots(viewSlotsMatch[1], body.slots as Slot[], target));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
       return;
     }
 
-    // POST /api/layout-objects/:objectId/slots — { slots } (inline mic-slots grid)
+    // POST /api/layout-objects/:objectId/slots — { slots, target? } (inline grid)
     const objectSlotsMatch = pathname.match(/^\/api\/layout-objects\/([^/]+)\/slots$/);
     if (method === "POST" && objectSlotsMatch) {
       const body = await readBody(req) as Record<string, unknown>;
@@ -158,8 +279,16 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.slots (array) required");
         return;
       }
-      const state = await stageController.setLayoutObjectSlots(objectSlotsMatch[1], body.slots as Slot[]);
-      json(res, state);
+      const target = readSlotsTarget(body.target);
+      if (target === INVALID_TARGET) {
+        error(res, TARGET_ERROR);
+        return;
+      }
+      try {
+        json(res, await stageController.setLayoutObjectSlots(objectSlotsMatch[1], body.slots as Slot[], target));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
       return;
     }
 
@@ -169,7 +298,20 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         // A bundle carries base64 images, so the ordinary JSON ceiling would
         // refuse a file this app exported — the same reason /api/config/import
         // uses this limit.
-        const report = await applyViewBundle(await readBody(req, MAX_CONFIG_BODY_BYTES));
+        // Two body shapes. The bundle posted verbatim is what every published
+        // version of this app sends, so it stays the default; a plan import
+        // wraps it to carry the chosen service type and the clash choice.
+        // Detected by the ABSENCE of `kind`, which every bundle has and no
+        // wrapper does.
+        const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
+        const wrapped = body?.kind === undefined && !!body?.bundle;
+        const opts: ImportOptions = wrapped
+          ? {
+            ...(typeof body.serviceTypeId === "string" ? { serviceTypeId: body.serviceTypeId } : {}),
+            ...(body.onClash === "keep" || body.onClash === "replace" ? { onClash: body.onClash } : {}),
+          }
+          : {};
+        const report = await applyViewBundle(wrapped ? body.bundle : body, opts);
 
         // Telling the managers is the ROUTE's job, not the merge service's.
         // Both hold their targets in memory and write that array back on the
@@ -258,7 +400,13 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // POST /api/views/:id/copy-slots — { fromViewId }
+    // POST /api/views/:id/copy-slots — { fromViewId, target? }
+    //
+    // `target` is the SAME optional field a slot save takes, read through the
+    // same validator, and it names one board on both sides of the copy. Without
+    // it this wrote the source's default over the destination's default whichever
+    // side the editor was on, and deleted the destination's board for the current
+    // plan on the way past.
     const viewCopySlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/copy-slots$/);
     if (method === "POST" && viewCopySlotsMatch) {
       const body = await readBody(req) as Record<string, unknown>;
@@ -266,8 +414,16 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.fromViewId (string) required");
         return;
       }
-      const state = await stageController.copyViewSlots(viewCopySlotsMatch[1], body.fromViewId);
-      json(res, state);
+      const target = readSlotsTarget(body.target);
+      if (target === INVALID_TARGET) {
+        error(res, TARGET_ERROR);
+        return;
+      }
+      try {
+        json(res, await stageController.copyViewSlots(viewCopySlotsMatch[1], body.fromViewId, target));
+      } catch (err) {
+        slotsFailure(res, err);
+      }
       return;
     }
 
@@ -528,6 +684,18 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     if (method === "DELETE" && outputDeleteMatch) {
       const state = await stageController.removeOutput(outputDeleteMatch[1]);
       json(res, state);
+      return;
+    }
+
+    // How the editor's plan switcher steps. Beside the allowlist because they are
+    // edited together on the Plan page and neither changes what the screens show.
+    if (method === "POST" && pathname === "/api/plan-switcher-mode") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (body.mode !== "within-type" && body.mode !== "upcoming") {
+        error(res, 'body.mode must be "within-type" or "upcoming"');
+        return;
+      }
+      json(res, await stageController.setPlanSwitcherMode(body.mode));
       return;
     }
 

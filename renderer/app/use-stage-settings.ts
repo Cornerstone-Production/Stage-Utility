@@ -30,6 +30,9 @@ import { errorMessage } from "@main/services/errors";
 import { writeOptimistic } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { confirmDiscardSlotEdits, useSlotsTarget } from "../settings/sections/slots-target-pill";
+import { registerTargetGuard } from "../settings/sections/editing-target";
+import { useSlotsPreview } from "../settings/sections/slots-preview-target";
 import type { SectionHandlers } from "../settings/types";
 import {
   useStageStateQuery,
@@ -203,36 +206,28 @@ export function useStageSettings(pinnedViewId?: string) {
   const [isSavingSlots, setIsSavingSlots] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Mirror the selected View's resolved slots into the editor (unless dirty).
-  useResyncOn([stageState, selectedViewId, slotsDirty], () => {
-    if (!stageState || slotsDirty) return;
-    const viewSlots = stageState.slotsByView?.[selectedViewId] ?? [];
-    setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
+  // Which of the view's two boards the editor is on — the service type's default
+  // or the current plan's own. Owns the read AND the save target, so the two can
+  // never disagree about which board an edit lands on.
+  const slotsTarget = useSlotsTarget("view", selectedViewId);
+
+  // Mirror the selected board into the editor (unless dirty).
+  //
+  // The RAW rows for the selected side, not `stageState.slotsByView` — that is
+  // the board currently in effect, so editing the default while a plan override
+  // was live would have shown, and then saved back, the override's rows.
+  useResyncOn([slotsTarget.slotsForSide, selectedViewId, slotsDirty, slotsTarget.side], () => {
+    if (slotsDirty) return;
+    const rows = slotsTarget.slotsForSide ?? [];
+    setLocalSlots([...rows].sort((a, b) => a.order - b.order));
   });
 
-  // Live draft preview: while slots are dirty, resolve the in-progress edits
-  // server-side (no save) so the preview iframe can show the draft exactly as the
-  // kiosk would. Debounced to avoid a request per keystroke; cleared when clean.
-  const [resolvedDraftSlots, setResolvedDraftSlots] = useState<Slot[] | null>(null);
-  useResyncOn([slotsDirty], () => {
-    if (!slotsDirty) setResolvedDraftSlots(null);
-  });
-
-  useEffect(() => {
-    if (!slotsDirty) return;
-    let cancelled = false;
-    const t = setTimeout(() => {
-      ipc<Slot[]>("views:resolveSlots", { slots: localSlots.map((s, i) => ({ ...s, order: i })) })
-        .then((resolved) => {
-          if (!cancelled) setResolvedDraftSlots(resolved);
-        })
-        .catch((err) => console.error("[settings:resolveDraftSlots]", err));
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [slotsDirty, localSlots]);
+  // The preview iframe's rows. Resolved server-side (no save) so the preview
+  // shows the board being EDITED — unsaved edits, and whichever plan the switcher
+  // is on — exactly as the kiosk would draw it. Null while the editor is on the
+  // live plan with nothing unsaved, which leaves the iframe showing the kiosk.
+  // See slots-preview-target.tsx for the rules and the debounce.
+  const slotsPreview = useSlotsPreview(localSlots, slotsDirty);
   // DnD sensors — mouse and touch deliberately separate.
   //
   // A single PointerSensor treats them identically: it claims the gesture on
@@ -381,6 +376,12 @@ export function useStageSettings(pinnedViewId?: string) {
     await writeState("stage:setAllowedServiceTypes", { ids }, { fail: "Failed to update allowed service types" });
   }
 
+  /** How the slot editors' plan switcher steps. Editor-only — it changes nothing
+   *  the screens follow. */
+  async function handleSetPlanSwitcherMode(mode: PlanSwitcherMode) {
+    await writeState("stage:setPlanSwitcherMode", { mode }, { fail: "Failed to change how the plan switcher steps" });
+  }
+
   async function handleSetBranding(partial: {
     name?: string;
     accentColor?: string | null;
@@ -464,16 +465,49 @@ export function useStageSettings(pinnedViewId?: string) {
     setIsSavingSlots(true);
     try {
       const slots = localSlots.map((s, i) => ({ ...s, order: i }));
-      const next = await ipc<StageState>("views:setSlots", { id: selectedViewId, slots });
+      const next = await ipc<StageState>("views:setSlots", {
+        id: selectedViewId,
+        slots,
+        target: slotsTarget.wireTarget(),
+      });
       queryClient.setQueryData(["stage:getState"], next);
+      await slotsTarget.invalidate();
       setSlotsDirty(false);
-      toast.success("Slots saved.");
+      // Names the board it landed on. "Slots saved." was true of either, which is
+      // the one thing this editor must not be ambiguous about.
+      slotsTarget.announceSaved();
     } catch (err) {
       toast.error(`Failed to save slots: ${String(err)}`);
     } finally {
       setIsSavingSlots(false);
     }
   }
+
+  /**
+   * Move the editor to the other board, asking first when there are edits in the
+   * buffer — the same question leaving the page asks. Switching silently would
+   * discard them, because the mirror re-seeds from the new side.
+   */
+  async function setSlotsTargetSide(next: "default" | "plan") {
+    if (next === slotsTarget.side) return;
+    if (slotsDirty) {
+      if (!(await confirmDiscardSlotEdits())) return;
+      setSlotsDirty(false);
+    }
+    slotsTarget.setSide(next);
+  }
+
+  // The plan switcher asks the same question from its own header. Registered
+  // while dirty only, so a switch with an empty buffer is silent.
+  useEffect(() => {
+    if (!slotsDirty) return;
+    registerTargetGuard(`view:${selectedViewId}`, async () => {
+      if (!(await confirmDiscardSlotEdits())) return false;
+      setSlotsDirty(false);
+      return true;
+    });
+    return () => registerTargetGuard(`view:${selectedViewId}`, null);
+  }, [slotsDirty, selectedViewId]);
 
   // Drop unsaved slot edits: clearing dirty lets the mirror effect re-seed
   // localSlots from the saved server state, and the preview clears its draft.
@@ -593,11 +627,19 @@ export function useStageSettings(pinnedViewId?: string) {
 
   async function handleCopySlots(targetViewId: string, fromViewId: string) {
     try {
-      const next = await ipc<StageState>("views:copySlots", { id: targetViewId, fromViewId });
+      const next = await ipc<StageState>("views:copySlots", {
+        id: targetViewId,
+        fromViewId,
+        // The side the editor is on, so the copy reads and writes THAT board.
+        target: slotsTarget.wireTarget(),
+      });
       queryClient.setQueryData(["stage:getState"], next);
-      const viewSlots = next.slotsByView?.[targetViewId] ?? [];
-      setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
+      // Clearing dirty and letting the mirror re-seed, rather than seeding from
+      // `next.slotsByView` — that is the board in EFFECT, which on the Default
+      // side with a live override is the override's rows, shown as saved. The
+      // invalidate is awaited, so the refetched targets are what seeds.
       setSlotsDirty(false);
+      await slotsTarget.invalidate();
       toast.success("Slots copied.");
     } catch (err) {
       toast.error(`Failed to copy slots: ${String(err)}`);
@@ -622,6 +664,7 @@ export function useStageSettings(pinnedViewId?: string) {
       const next = await ipc<StageState & { appliedViewId?: string }>("presets:apply", {
         id,
         viewId: selectedViewId,
+        target: slotsTarget.wireTarget(),
       });
       queryClient.setQueryData(["stage:getState"], next);
       // Read back the view the SERVER says it wrote, not the one we asked for.
@@ -633,9 +676,12 @@ export function useStageSettings(pinnedViewId?: string) {
         toast.error(`Arrangement went to "${appliedTo}", not the view you are editing. Nothing was changed here.`);
         return;
       }
-      const viewSlots = next.slotsByView?.[appliedTo] ?? [];
-      setLocalSlots([...viewSlots].sort((a, b) => a.order - b.order));
+      // As in handleCopySlots: the mirror re-seeds from the refetched targets for
+      // the side being edited. `next.slotsByView` is the board in effect, so on
+      // the Default side with a live override it showed the override's rows and
+      // marked them saved.
       setSlotsDirty(false);
+      await slotsTarget.invalidate();
       toast.success("Arrangement applied.");
     } catch (err) {
       toast.error(`Failed to apply arrangement: ${String(err)}`);
@@ -674,7 +720,10 @@ export function useStageSettings(pinnedViewId?: string) {
     try {
       // Persist any pending editor edits first so the preset captures what's on screen.
       if (slotsDirty) await saveSlots();
-      const presets = await ipc<SlotPreset[]>("presets:overwrite", { id, displayId: selectedViewId });
+      // The rows ON SCREEN, not the view's in-effect board: the editor may be on
+      // the service type's default while a plan override is what the server would
+      // read back, and an arrangement must capture what the operator is looking at.
+      const presets = await ipc<SlotPreset[]>("presets:overwrite", { id, slots: localSlots });
       queryClient.setQueryData(["presets:list"], presets);
       toast.success("Arrangement overwritten with current slots.");
     } catch (err) {
@@ -833,6 +882,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetTimezone,
     handleSetHourCycle,
     handleSetAllowedServiceTypes,
+    handleSetPlanSwitcherMode,
     handleSetBranding,
     updateSlot,
     addSlot,
@@ -840,6 +890,9 @@ export function useStageSettings(pinnedViewId?: string) {
     removeSlot,
     saveSlots,
     discardSlots,
+    setSlotsTargetSide,
+    revertSlotsOverride: slotsTarget.revert,
+    promoteSlotsOverride: slotsTarget.promote,
     handleSetViewSlotsLayout,
     handleAddView,
     handleRenameView,
@@ -888,7 +941,12 @@ export function useStageSettings(pinnedViewId?: string) {
     slotsDirty,
     isSavingSlots,
     isRefreshing,
-    resolvedDraftSlots,
+    slotsPreview,
+    slotsTargetSide: slotsTarget.side,
+    slotsTargetTypeName: slotsTarget.typeName,
+    slotsTargetLabel: slotsTarget.label,
+    slotsTargetHasPlan: slotsTarget.hasPlan,
+    slotsTargetHasOverride: slotsTarget.hasOverride,
     handleDismissOnboarding,
     handlers,
   };

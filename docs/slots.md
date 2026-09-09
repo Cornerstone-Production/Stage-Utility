@@ -46,6 +46,105 @@ has two devices and needs to see both.
 The editor flags any slot sharing its set with another, since adding one position
 changes the grouping.
 
+## Defaults and this week
+
+Every service type has a **default** board — the lineup it comes back to every
+week. A change made while a Planning Center plan is selected is saved against
+**that plan only**, and the next plan of that type shows the default again.
+
+The editor's pill picks which of the two you are editing:
+
+| Side | What it is |
+|---|---|
+| **Default** | the service type's standing board |
+| the plan's date | that plan's board. Carries an **edited** badge once it has one |
+
+Two actions appear once a plan has a board of its own:
+
+- **Revert to default** deletes that plan's board, so the screens go back to the
+  service type's default.
+- **Set as default** makes that plan's board the service type's default, and the
+  plan stops being an exception.
+
+Both discard something, so both ask first. Saving the default while a plan's own
+board is in effect changes nothing on any screen — the plan's board still wins
+until it is reverted or the plan advances.
+
+Everything that writes slots lands on the side you are editing: a save, recalling
+an arrangement, and copying slots from another view. A copy reads the source's
+board for that same side and writes it to yours, and never deletes the board on
+the other side. Copying onto the plan side from a view that has no board for the
+plan copies that view's default into your plan's board, so your screen matches it
+without your default changing.
+
+A plan's board is deleted automatically once the plan is more than 30 days past.
+Defaults are never pruned. When Planning Center cannot be reached to date a
+plan, nothing of that service type is pruned.
+
+Exporting a view carries the defaults for every service type. Per-plan boards do
+not travel — a plan id means nothing on the far end.
+
+To move one service type's whole setup — every board it has, on every view — use
+the plan export instead: **Settings → Plan → Export plan…**. See
+[Moving a view between installs](moving-a-view.md#moving-a-plan).
+
+### Switching plans in the editor
+
+The slot editors carry a plan switcher — `‹ name ▾ ›` and a **Now** button — in
+the slots view's header, in an inline grid's header, and in the layout editor's
+toolbar while a mic-slots object is selected. It changes **which board you are
+editing** and nothing else: what the screens follow is still set on the Plan page.
+
+A badge says which you are looking at. **live** means the editor is on the plan
+the screens are following; **editing** means it is on some other week or some
+other service type, and a save there changes nothing on any screen until that
+plan comes round. The save toast is the ordinary one while live and a quieter
+one while not.
+
+**Now** returns to the plan the screens are following, and the editor follows it
+forward from then on — including when auto mode advances it mid-session.
+
+The preview beside the editor follows the switcher too: step to next Sunday and
+the preview draws next Sunday's board with next Sunday's people in it, and a line
+under it names the board — "Previewing Sun, Sep 20 · 6 of 8 positions filled".
+On a **Default** target it reads "positions only, no plan": a default board is
+every week, so it has no roster and the rows show the positions they are linked
+to rather than guessing at a week's names. If Planning Center cannot be read the
+line says so and the rows again show positions only, with the reason on hover.
+The line is absent while the editor is on the live plan, where the preview is
+simply the kiosk.
+
+Only the slot rows follow the switcher. Everything else the preview draws — the
+view's top bar, the series and plan title — still comes from the plan the screens
+are following, so a preview of another week is headed with the live plan's title.
+An inline mic-slots object inside a custom layout previews on the layout editor's
+own canvas, which does not follow the switcher.
+
+Two modes, set on the Plan page:
+
+| Mode | The middle | The arrows |
+|---|---|---|
+| **Within a type** | a dropdown of the active service types | that type's plans, Default first and then each upcoming date |
+| **Upcoming plans** | the date and the type, e.g. "Wed Sep 10 · Cornerstone Youth" | every active type's plans in date order |
+
+In **Upcoming plans** the middle's dropdown lists the next ten plans and a
+**Defaults…** group with each active type's default board. The arrows do not
+wrap: at either end of the list the arrow is simply disabled.
+
+A board that is not on the list — a type's default while in **Upcoming plans**,
+or a plan old enough to have dropped out of the window — sits immediately before
+its own service type's first listed plan, so **›** from it lands on that type's
+earliest listed plan rather than on the top of the week.
+
+The list covers the last seven days and the next sixty, refreshed from Planning
+Center at most every five minutes. When Planning Center cannot be reached the
+switcher shows the plan the screens are following, disables the arrows and says
+"Planning Center unreachable" — the board on screen is still editable.
+
+Switching with unsaved slot edits asks first, the same question leaving the page
+asks. A new tab, or a reload, always opens on the plan the screens are
+following: where the switcher was pointed is never remembered.
+
 ### Presets
 
 Slot presets are global and can be recalled onto any service type. Position names

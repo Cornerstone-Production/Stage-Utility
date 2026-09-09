@@ -9,7 +9,7 @@ import { type RouteCtx, json, error, readBody } from "./context.js";
 import { errorMessage } from "../errors.js";
 import type { PatchFile, ScriptViewLayout, Slot } from "../../types/stage.js";
 import type { CategoryRole } from "../../types/scriptview-roles.js";
-import { stageController } from "../stage-controller.js";
+import { SlotsNotFoundError, stageController } from "../stage-controller.js";
 import { patchStore } from "../patch-store.js";
 import { parseXlsx } from "../patch-xlsx.js";
 import { exportFilename, exportRows } from "../patch-export.js";
@@ -266,8 +266,16 @@ export async function scriptviewRoutes(c: RouteCtx): Promise<void> {
       }
       // Optional displayId — defaults to primary display if omitted.
       const displayId = typeof body.displayId === "string" ? body.displayId : "";
-      const state = await stageController.setSlots(displayId, body.slots as Slot[]);
-      json(res, state);
+      try {
+        json(res, await stageController.setSlots(displayId, body.slots as Slot[]));
+      } catch (err) {
+        // The legacy target resolver falls back to "already a view id, or an id
+        // we do not know", so an unknown displayId used to write a board nothing
+        // would ever read and answer 200. It is a 404 now; anything else here is
+        // a real fault and goes up to the dispatcher as a 500.
+        if (!(err instanceof SlotsNotFoundError)) throw err;
+        error(res, err.message, err.status);
+      }
       return;
     }
 

@@ -26,6 +26,7 @@ import type { SectionProps } from "../types";
 import { SlotEditor } from "./slots-section";
 import { LayoutEditor } from "../../editor/layout-editor";
 import { ViewPreview } from "./view-preview";
+import { SlotsPreviewNote } from "./slots-preview-target";
 import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
 import { CalendarSources } from "./calendar-sources";
 import { viewSurface } from "@main/types/views";
@@ -49,14 +50,19 @@ export function ViewDetail({
   localSlots,
   slotsDirty,
   isSavingSlots,
-  resolvedDraftSlots,
+  slotsPreview,
+  slotsTargetTypeName,
   slotPresets,
   layoutTemplates,
+  slotsTargetSide,
+  slotsTargetLabel,
+  slotsTargetHasPlan,
+  slotsTargetHasOverride,
   canDelete,
   handlers,
 }: Pick<
   SectionProps,
-  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "resolvedDraftSlots" | "slotPresets" | "layoutTemplates" | "handlers"
+  "stageState" | "wirelessChannels" | "teamPositions" | "localSlots" | "slotsDirty" | "isSavingSlots" | "slotsPreview" | "slotsTargetTypeName" | "slotPresets" | "layoutTemplates" | "slotsTargetSide" | "slotsTargetLabel" | "slotsTargetHasPlan" | "slotsTargetHasOverride" | "handlers"
 > & { view: View; canDelete: boolean; startEditing?: boolean }) {
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
@@ -255,8 +261,22 @@ export function ViewDetail({
           <ViewPreview
             viewId={view.id}
             aspect={previewAspect}
-            draftSlots={view.kind === "slots" && slotsDirty ? resolvedDraftSlots : null}
+            // Whenever there ARE resolved rows, not only while dirty. A clean
+            // editor pointed at another week has rows of its own, and gating on
+            // dirtiness is what left the preview showing this Sunday's board
+            // under next Sunday's switcher.
+            draftSlots={view.kind === "slots" ? (slotsPreview?.slots ?? null) : null}
           />
+          {/* Says which board this is a picture of, and why it may have no names
+              in it. Silent while the editor is live, where the preview IS the
+              kiosk. */}
+          {view.kind === "slots" && (
+            <SlotsPreviewNote
+              resolution={slotsPreview}
+              planLabel={slotsTargetLabel}
+              serviceTypeName={slotsTargetTypeName}
+            />
+          )}
         </div>
       )}
 
@@ -294,6 +314,10 @@ export function ViewDetail({
             slotsDirty={slotsDirty}
             isSavingSlots={isSavingSlots}
             slotPresets={slotPresets}
+            slotsTargetSide={slotsTargetSide}
+            slotsTargetLabel={slotsTargetLabel}
+            slotsTargetHasPlan={slotsTargetHasPlan}
+            slotsTargetHasOverride={slotsTargetHasOverride}
             handlers={handlers}
           />
         </>

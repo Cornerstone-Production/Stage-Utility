@@ -223,6 +223,13 @@ A slot can bind to a wireless channel so the screen shows that pack's RF and
 battery beside the person, and slots can stack into a shared column — mirroring two
 people on a dual-bay charger.
 
+Slots are stored in two halves, keyed by the slots view's id or the inline
+slots-grid object's id. A **default** per service type is what that type comes
+back to. An **override** is a board saved against one Planning Center plan, used
+only while that plan is the current one and deleted 30 days after it. For a
+screen: the current plan's override if it has one, else the service type's
+default, else nothing.
+
 Details in [slots](../slots.md).
 
 ## Custom layouts

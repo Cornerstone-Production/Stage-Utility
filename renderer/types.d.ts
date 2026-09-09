@@ -92,6 +92,11 @@ declare global {
   type SlotPositionMatch = Stage.SlotPositionMatch;
   type SlotPreset = Stage.SlotPreset;
   type SlotsLayout = Stage.SlotsLayout;
+  type SlotsPreviewDTO = Stage.SlotsPreviewDTO;
+  type SlotsPreviewRoster = Stage.SlotsPreviewRoster;
+  type SlotsPreviewTarget = Stage.SlotsPreviewTarget;
+  type SlotsScope = Stage.SlotsScope;
+  type SlotTargetsDTO = Stage.SlotTargetsDTO;
   type SplItemHistory = Stage.SplItemHistory;
   type SplMeterDTO = Stage.SplMeterDTO;
   type SplMetricsDTO = Stage.SplMetricsDTO;
@@ -102,6 +107,9 @@ declare global {
   type TeamMemberDTO = Stage.TeamMemberDTO;
   type TeamPositionDTO = Stage.TeamPositionDTO;
   type TranscriptLineDTO = Stage.TranscriptLineDTO;
+  type UpcomingPlan = Stage.UpcomingPlan;
+  type UpcomingPlansDTO = Stage.UpcomingPlansDTO;
+  type PlanSwitcherMode = Stage.PlanSwitcherMode;
   type UpdateStatus = Stage.UpdateStatus;
   type View = Stage.View;
   type ViewKind = Stage.ViewKind;

@@ -110,13 +110,17 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
         </Field>
       )}
 
-      <Field orientation="horizontal">
+      {/* Label above, message below. The message grew a second sentence once
+          Companion gained an outbound half ("… — 508 button(s), 39 on/off
+          pair(s)"), and as the right-hand cell of a horizontal row it ran back
+          over the label instead of wrapping. */}
+      <Field orientation="vertical">
         <FieldContent>
           <FieldLabel>Status</FieldLabel>
+          <FieldDescription className="break-words" data-testid="companion-status">
+            {connectedCount ?? "No Companion clients connected yet."}
+          </FieldDescription>
         </FieldContent>
-        <span className="text-caption1 text-gray-10">
-          {connectedCount ?? "No Companion clients connected yet."}
-        </span>
       </Field>
     </FieldGroup>
   );

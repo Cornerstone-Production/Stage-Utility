@@ -8,6 +8,7 @@ import type { ReleaseSection } from "../services/update/release-notes.js";
 // re-exported from stage.ts, so no import anywhere had to change.
 
 import type { BaptismAutoStart } from "./baptism.js";
+import type { PlanSwitcherMode } from "./pco.js";
 
 export interface StageState {
   serviceTypeId: string | null;
@@ -59,6 +60,9 @@ export interface StageState {
   kioskDiscovery: boolean;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];
+  /** How the slot editor's plan switcher steps. Editor-only — it never changes
+   *  which plan the screens follow. */
+  planSwitcherMode: PlanSwitcherMode;
   /** Plan-note categories/teams feeding the pre-service checklist (names). */
   checklistNoteCategories: string[];
   checklistNoteTeams: string[];

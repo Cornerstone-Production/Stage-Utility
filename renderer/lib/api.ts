@@ -335,6 +335,12 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "stage:setAllowedServiceTypes":
       return post<T>("/api/allowed-service-types", p);
 
+    case "stage:setPlanSwitcherMode":
+      return post<T>("/api/plan-switcher-mode", p);
+
+    case "plans:upcoming":
+      return apiFetch<T>(`/api/plans/upcoming?days=${encodeURIComponent(String(p.days ?? 60))}`);
+
     case "stage:setShowQr":
       return post<T>("/api/show-qr", p);
 
@@ -465,6 +471,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
       return post<T>(`/api/presets/${encodeURIComponent(id)}/apply`, {
         viewId: p.viewId,
         displayId: p.displayId,
+        // Recalling an arrangement lands on the board the editor is showing, not
+        // always the service type's default.
+        target: p.target,
       });
     }
 
@@ -541,17 +550,55 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
 
     case "views:setSlots": {
       const id = p.id as string;
-      return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, { slots: p.slots });
+      // `target` omitted = whichever board a plain save goes to (the current plan
+      // if one is selected, else the service type's default). Sent only when the
+      // editor has an explicit one, so every other caller keeps working.
+      const body: Record<string, unknown> = { slots: p.slots };
+      if (p.target) body.target = p.target;
+      return post<T>(`/api/views/${encodeURIComponent(id)}/slots`, body);
+    }
+
+    // ── Slot targets (the type's default vs one plan's board) ──────────────
+    // One path shape for both scopes: a slots View's id and an inline slots-grid
+    // OBJECT's id name boards in the same file under the same rules.
+    case "slots:targets": {
+      const base = p.scope === "view" ? "views" : "layout-objects";
+      // Which board pair to read. Sent whenever a service type is known, so a
+      // switcher pointed at another week gets that week's rows rather than the
+      // machine's; the server falls back to its own plan when it is absent.
+      const q = new URLSearchParams();
+      if (p.serviceTypeId) q.set("serviceTypeId", String(p.serviceTypeId));
+      if (p.planId) q.set("planId", String(p.planId));
+      const tail = q.size > 0 ? `?${q}` : "";
+      return apiFetch<T>(`/api/${base}/${encodeURIComponent(p.key as string)}/slot-targets${tail}`);
+    }
+
+    case "slots:clearOverride": {
+      const base = p.scope === "view" ? "views" : "layout-objects";
+      return del<T>(
+        `/api/${base}/${encodeURIComponent(p.key as string)}/slots/override/${encodeURIComponent(p.planId as string)}`,
+      );
+    }
+
+    case "slots:promoteOverride": {
+      const base = p.scope === "view" ? "views" : "layout-objects";
+      return post<T>(`/api/${base}/${encodeURIComponent(p.key as string)}/slots/promote`, {
+        planId: p.planId,
+      });
     }
 
     case "views:resolveSlots":
-      // Resolve draft slots against live team + device state WITHOUT saving —
-      // powers the Views live draft preview. Returns resolved Slot[].
-      return post<T>("/api/views/resolve-slots", { slots: p.slots });
+      // Resolve slots against a plan's roster and this rig's device state WITHOUT
+      // saving — powers the slots editor's preview. `target` names the board being
+      // previewed; omitted, the server answers for the plan the screens follow.
+      // Returns { slots, roster, reason? }.
+      return post<T>("/api/views/resolve-slots", { slots: p.slots, target: p.target });
 
     case "layoutObjects:setSlots": {
       const id = p.id as string;
-      return post<T>(`/api/layout-objects/${encodeURIComponent(id)}/slots`, { slots: p.slots });
+      const body: Record<string, unknown> = { slots: p.slots };
+      if (p.target) body.target = p.target;
+      return post<T>(`/api/layout-objects/${encodeURIComponent(id)}/slots`, body);
     }
 
     case "views:duplicate": {
@@ -564,16 +611,37 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "update:dismissNotice":
       return post<T>("/api/update/notices/dismiss", p);
 
-    // The bundle IS the payload — a view export file, posted verbatim.
+    // The bundle IS the payload — a view export file, posted verbatim — unless
+    // the caller also names a service type or a clash choice, which only a plan
+    // file can carry. Then it is wrapped, and the server tells the two apart by
+    // the `kind` a bundle always has.
     case "views:import":
-      return post<T>("/api/views/import", p.bundle);
+      return post<T>(
+        "/api/views/import",
+        p.serviceTypeId || p.onClash
+          ? { bundle: p.bundle, serviceTypeId: p.serviceTypeId, onClash: p.onClash }
+          : p.bundle,
+      );
+
+    // `slots` too: the scope changes the counts, and a preview that ignored it
+    // described a different file than the Download link points at.
+    case "plans:exportPreview":
+      return apiFetch<T>(
+        `/api/plans/export/preview?serviceTypeId=${encodeURIComponent(String(p.serviceTypeId ?? ""))}`
+        + `&slots=${encodeURIComponent(String(p.slots ?? "type"))}`,
+      );
 
     case "views:reorder":
       return post<T>("/api/views/reorder", { ids: p.ids });
 
     case "views:copySlots": {
       const id = p.id as string;
-      return post<T>(`/api/views/${encodeURIComponent(id)}/copy-slots`, { fromViewId: p.fromViewId });
+      // `target` names ONE board on both sides of the copy: the source's rows for
+      // that board go to the destination's same board. Omitted = wherever a plain
+      // save would go.
+      const body: Record<string, unknown> = { fromViewId: p.fromViewId };
+      if (p.target) body.target = p.target;
+      return post<T>(`/api/views/${encodeURIComponent(id)}/copy-slots`, body);
     }
 
     case "views:remove": {
@@ -771,6 +839,27 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "automation:setSettings": return post("/api/automation/settings", params);
     case "automation:log": return apiFetch("/api/automation/log");
     case "automation:clearLog": return del("/api/automation/log");
+    case "automation:importPairs": return post("/api/automation/rules/import-pairs", params);
+
+    // Cues — a rule called by name, and the tokens that may call one.
+    case "companion:buttons": return apiFetch("/api/companion/buttons");
+    case "companion:refreshButtons": return post("/api/companion/buttons/refresh");
+    case "companion:pairs": return apiFetch("/api/companion/pairs");
+    case "cues:tokens": return apiFetch("/api/cues/tokens");
+    // Read on demand and cached for five seconds server-side, so the rules list
+    // polling this while it is open costs one round of Companion reads.
+    case "cues:states": return apiFetch("/api/cues/states");
+    case "cues:mintToken": return post("/api/cues/tokens", params);
+    case "cues:revokeToken": return del(`/api/cues/tokens/${encodeURIComponent(String(p.id))}`);
+    // YAML, not JSON — the one text response in this file, so it cannot go
+    // through apiFetch's res.json().
+    case "cues:homeAssistantYaml": {
+      const res = await fetch("/api/cues/home-assistant.yaml", {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`Could not build the Home Assistant config (HTTP ${res.status})`);
+      return { yaml: await res.text() } as T;
+    }
     case "rosstalk:targets": return apiFetch("/api/rosstalk/targets");
     case "rosstalk:addTarget": return post("/api/rosstalk/targets", params);
     case "rosstalk:updateTarget": return patch(`/api/rosstalk/targets/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);

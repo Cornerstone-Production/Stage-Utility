@@ -10,6 +10,8 @@ import { AUTOMATION_CONDITIONS } from "../automation-conditions.js";
 import { automationEngine } from "../automation-engine.js";
 import { automationLog } from "../automation-log.js";
 import { AUTOMATION_TRIGGERS } from "../automation-triggers.js";
+import { bearerOf, cueTokens, isSameOriginBrowser } from "../cue-tokens.js";
+import { scrub } from "../scrub.js";
 import { stageController } from "../stage-controller.js";
 
 /** Strip functions — didFire/holds/run cannot cross the wire. */
@@ -23,6 +25,21 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
   // An operator pressed a control on a console. The SAME registry the automation
   // engine fires from: one place to add a capability, two ways to reach it.
   if (method === "POST" && pathname === "/api/action/invoke") {
+    // A write from the app's own pages carries an Origin naming this server, and
+    // remote-server has already refused it if that Origin was somebody else's —
+    // so a browser here is an operator at the console and passes as it always
+    // has. Anything else is curl, a script, or a voice assistant, and this route
+    // runs actions that press buttons on real gear: it needs the same bearer
+    // token a cue call needs. See isSameOriginBrowser. docs/reference/api.md.
+    if (!isSameOriginBrowser(req.headers)) {
+      const caller = await cueTokens.verify(bearerOf(req.headers.authorization));
+      if (!caller) {
+        console.warn(`[cues] refused POST /api/action/invoke: no valid token`);
+        error(res, "A bearer token is required for a request with no Origin", 401);
+        return;
+      }
+      console.log(`[cues] action/invoke by ${scrub(caller.label)}`);
+    }
     const body = await readBody(req) as Record<string, unknown>;
     if (typeof body.actionId !== "string") {
       error(res, "body.actionId (string) required");
@@ -70,14 +87,23 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
       error(res, "body.name, body.trigger and body.action are required");
       return;
     }
-    json(res, await automationEngine.addRule(body as never), 201);
+    try {
+      json(res, await automationEngine.addRule(body as never), 201);
+    } catch (err) {
+      // A duplicate or malformed cue name is the caller's problem, not a 500.
+      error(res, errorMessage(err), 400);
+    }
     return;
   }
 
   const idMatch = pathname.match(/^\/api\/automation\/rules\/([^/]+)$/);
   if (method === "PATCH" && idMatch) {
     const body = (await readBody(req)) as Record<string, unknown>;
-    json(res, await automationEngine.updateRule(idMatch[1], body as never));
+    try {
+      json(res, await automationEngine.updateRule(idMatch[1], body as never));
+    } catch (err) {
+      error(res, errorMessage(err), 400);
+    }
     return;
   }
   if (method === "DELETE" && idMatch) {

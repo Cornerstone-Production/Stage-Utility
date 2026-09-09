@@ -439,8 +439,122 @@ const DISPLAY_NAME: ParamDef = {
   help: "Leave blank for any.",
 };
 
+/**
+ * The channel of a trigger that only ever fires because somebody CALLED it.
+ *
+ * Nothing broadcasts this, and nothing may. A rule triggered by `call.by-name`
+ * runs when `POST /api/cues/<name>` arrives and at no other moment — a cue that
+ * could also fire itself off a state change would be a light switch that
+ * sometimes flips on its own, in a room with a service running in it.
+ *
+ * Enforced in three places rather than trusted to one:
+ *  - `didFire` below returns false unconditionally,
+ *  - automation-engine skips any rule whose trigger declares this channel
+ *    before it evaluates anything,
+ *  - the demand loop does not register a source for it, so nothing starts
+ *    producing on a channel that has no producer.
+ *
+ * automation-coverage.test.ts exempts it from "every trigger watches a channel
+ * something broadcasts", and asserts it is NOT in that set — adding it there
+ * would make the exemption a lie the moment somebody broadcast on it.
+ */
+export const CALL_CHANNEL = "cue:call";
+
+/**
+ * The one trigger on CALL_CHANNEL. Named so callers do not spell it twice.
+ *
+ * DEFINED in cue-aliases.ts and re-exported here, where every caller already
+ * imports it from. This file reaches node:url through spl-recorder's metric
+ * list, so the settings page cannot import it — see the comment on the
+ * definition.
+ */
+export { CALL_TRIGGER_ID } from "./cue-aliases.js";
+
+/** Snake_case, so the name survives being said out loud and pasted into YAML. */
+const CUE_NAME_RE = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
+
+/** Is this a usable cue name? Exported so the rules route can answer 400. */
+export function isValidCueName(name: string): boolean {
+  return CUE_NAME_RE.test(name);
+}
+
 export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
   ...Object.assign({}, ...INTEGRATIONS.map((i) => connectionTriggers(i.id, i.label))),
+
+  "call.by-name": def({
+    id: "call.by-name",
+    label: "Called by name (voice or HTTP)",
+    channel: CALL_CHANNEL,
+    help:
+      "Runs only when something calls POST /api/cues/<name> with a token — a voice assistant, " +
+      "a script, Home Assistant. It never fires on its own, whatever happens in the building.",
+    params: [
+      {
+        key: "name",
+        label: "Cue name",
+        type: "string",
+        help: "lower_snake_case, unique across rules. This is the URL: /api/cues/<name>.",
+      },
+      {
+        key: "aliases",
+        label: "Former names",
+        type: "string",
+        optional: true,
+        help:
+          "Names this cue also answers to, comma-separated. Written when a Companion button is " +
+          "relabelled and the cue is renamed to match, so an already-pasted Home Assistant " +
+          "config keeps working. Remove one and that URL stops resolving.",
+      },
+      {
+        key: "says",
+        label: "Spoken as",
+        type: "string",
+        optional: true,
+        help: "What you say to the assistant. Becomes the friendly name in the generated Home Assistant config.",
+      },
+      {
+        key: "room",
+        label: "Room",
+        type: "string",
+        optional: true,
+        help: "Where the thing this cue drives is. Shown in the log; not used to route anything.",
+      },
+      // The state binding, on the `_on` half of a pair. Declared here so the
+      // registry documents it and the rules route validates it, but rendered by
+      // its own editor rather than by the generic loop — three text fields on
+      // every cue, most of which cannot use them, would read as three settings
+      // that do nothing. See cue-pairs.ts.
+      {
+        key: "stateVariable",
+        label: "State variable",
+        type: "string",
+        optional: true,
+        help:
+          "A Companion custom variable your ON/OFF buttons set. Set it on the _on half of a pair and " +
+          "the generated Home Assistant switch reports what the device is actually doing instead of " +
+          "what it was asked to do. Blank leaves the switch optimistic.",
+      },
+      {
+        key: "stateOnValue",
+        label: "Value meaning on",
+        type: "string",
+        optional: true,
+        help: 'What the variable holds when the thing is on. Blank means "on".',
+      },
+      {
+        key: "stateOffValue",
+        label: "Value meaning off",
+        type: "string",
+        optional: true,
+        help: 'What the variable holds when the thing is off. Blank means "off".',
+      },
+    ],
+    // Never. A called cue has no edge to read, and the engine refuses to
+    // evaluate it at all — this is the second of the three guards described on
+    // CALL_CHANNEL above, not the only one.
+    didFire: () => false,
+  }),
+
   ...obsOutputTriggers("streaming", "streaming", "streaming"),
   ...obsOutputTriggers("virtualCam", "virtualcam", "the virtual camera"),
 

@@ -34,6 +34,7 @@ export interface SectionHandlers {
   handleSetTimezone: (tz: string | null) => Promise<void>;
   handleSetHourCycle: (cycle: "12h" | "24h") => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
+  handleSetPlanSwitcherMode: (mode: PlanSwitcherMode) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
     accentColor?: string | null;
@@ -56,6 +57,13 @@ export interface SectionHandlers {
   saveSlots: () => Promise<void>;
   /** Drop unsaved slot edits and revert the editor + preview to saved state. */
   discardSlots: () => void;
+  /** Move the editor between the service type's default board and the current
+   *  plan's own, asking about unsaved edits first. */
+  setSlotsTargetSide: (side: "default" | "plan") => Promise<void>;
+  /** Delete the current plan's board, so the screen goes back to the default. */
+  revertSlotsOverride: () => Promise<boolean>;
+  /** Make the current plan's board the service type's default. */
+  promoteSlotsOverride: () => Promise<boolean>;
   handleSetViewSlotsLayout: (id: string, slotsLayout: SlotsLayout | null) => Promise<void>;
   // Views (content)
   handleAddView: (name: string, kind: ViewKind, surface?: "display" | "console") => Promise<string | null>;
@@ -112,8 +120,21 @@ export interface SectionProps {
   localSlots: Slot[];
   slotsDirty: boolean;
   isSavingSlots: boolean;
-  /** Draft slots resolved server-side (no save) for the live preview; null when clean. */
-  resolvedDraftSlots: Slot[] | null;
+  /**
+   * The preview iframe's rows, resolved server-side (no save) for the board the
+   * editor is pointed at, plus whose roster filled them. Null while the editor is
+   * on the live plan with nothing unsaved — then the iframe shows the kiosk.
+   */
+  slotsPreview: SlotsPreviewDTO | null;
+  /** Which of the selected view's two boards the slot editor is on. */
+  slotsTargetSide: "default" | "plan";
+  /** The service type being EDITED, named — for the default board's caption. */
+  slotsTargetTypeName: string | null;
+  /** The current plan's short date, e.g. "Wed Sep 13". */
+  slotsTargetLabel: string;
+  slotsTargetHasPlan: boolean;
+  /** True when the current plan has a board of its own (the "edited" badge). */
+  slotsTargetHasOverride: boolean;
   isRefreshing: boolean;
   slotPresets: SlotPreset[];
   updateStatus: UpdateStatus | null;

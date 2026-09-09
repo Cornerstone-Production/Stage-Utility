@@ -41,6 +41,7 @@ export const DEFAULT_STAGE_STATE: StageState = {
   showQr: false,
   kioskDiscovery: false,
   allowedServiceTypeIds: [],
+  planSwitcherMode: "upcoming",
   checklistNoteCategories: [],
   checklistNoteTeams: [],
   appName: "",

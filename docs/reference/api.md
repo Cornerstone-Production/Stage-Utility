@@ -20,13 +20,22 @@ broke, and only that.
 ## What is protected, and what is not
 
 The app is a LAN appliance with no user accounts, and **every route below is
-reachable unauthenticated** unless it says otherwise. Three things do gate:
+reachable unauthenticated** unless it says otherwise. Four things do gate:
 
 | | |
 |---|---|
 | **Cross-origin writes** | Any `POST`/`PUT`/`PATCH`/`DELETE` carrying an `Origin` whose hostname is not the request's `Host` is refused `403`. A request with no `Origin` is allowed, and reads are never gated. Ports are ignored so the dev proxy works |
 | **The log** | `/log` and `/api/log` require `?token=…` when `STAGE_UTILITY_LOG_TOKEN` is set, and answer `401` without it. Unset means open |
 | **Device enrolment** | `/enroll` authorises a `device` id against the secret that device was issued. An unrecognised device gets a holding screen rather than somebody else's screen |
+| **Cue calls** | `POST /api/cues/:name` always requires `Authorization: Bearer su_…`, browser or not, and answers `401` without one. `POST /api/action/invoke`, the cue token **writes** (mint, revoke), `import-pairs` and `buttons/refresh` require the same token **unless the request is a same-origin browser write** — an `Origin` naming this server, which a browser sends on every `POST`/`DELETE` and a page on any other origin cannot forge. `Sec-Fetch-Site` is not required (browsers send it only to HTTPS or localhost, and this app is plain HTTP on a LAN address), but when present it must say `same-origin`. Reads are open, including the token list and the Home Assistant fragment: a same-origin `GET` sends no `Origin`, and neither carries a secret |
+
+The cue token identifies the caller in the activity log and keeps the call route
+closed to anything that has not been handed one. **It is not a perimeter.** Anyone
+with write access to the app over the LAN can change any setting, including the cue
+rules and the tokens themselves, as they always could — the rule routes are ungated
+like every other settings route. The perimeter is the network: do not expose the app
+beyond the LAN or Tailscale, and restrict Companion's own unauthenticated API port
+with a switch ACL. See [SECURITY.md](../../SECURITY.md).
 
 Put it behind your own network. Do not expose it to the internet.
 
@@ -46,6 +55,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET  | `/api/service-types` | PCO service types |
 | GET  | `/api/team-positions` | Team positions for the active plan |
 | GET  | `/api/plans?serviceTypeId=…` | Plans for a service type |
+| GET  | `/api/plans/upcoming?days=…` | Every allowed service type's plans from the last 7 days to `days` ahead (whole days; default 60, capped at 365, and anything that is not a whole day above zero takes the default), sorted by date, each with `{serviceTypeId, serviceTypeName, planId, title, sortDate, dates, isCurrent}`. Cached for five minutes; `cacheAgeMs` and the `X-Plans-Cache-Age-Ms` header say how old the list is. Always `200` — when Planning Center cannot be reached the body carries `unavailable` with the reason, and the last good list if there is one |
 | GET  | `/api/pco/attachments` | Files on the active plan (plan + item level) |
 | GET  | `/api/pco/attachment?match=…` | Stream the active plan's file matching a filename substring (proxied + cached) |
 | POST | `/api/service-type` | Set active service type |
@@ -56,6 +66,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer) |
 | POST | `/api/live/previous` | PCO Services Live: go to the previous item |
 | POST | `/api/allowed-service-types` | Set the allowlist |
+| POST | `/api/plan-switcher-mode` | How the slot editors' plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
 | POST | `/api/slots` | Save a display's slots (`{slots, displayId?}`) |
 | POST | `/api/show-qr` | Toggle the connect QR on the display |
 
@@ -65,13 +76,18 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET | `/api/views` | List views |
 | POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201` |
 | PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `scriptViewLayoutId`, `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
-| POST | `/api/views/:id/slots` | Save a slots-view's slots |
-| POST | `/api/views/resolve-slots` | Resolve a slot set against the current plan without saving it — what the editor previews with |
-| POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines |
+| POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
+| POST | `/api/views/resolve-slots` | Resolve a slot set without saving it — what the editor previews with. Body `{ slots, target? }`, where `target` is `{ serviceTypeId, planId }` and `planId: null` names the type's default board. Answers `{ slots, roster, reason? }`; `roster` is `live`, `plan`, `none` (a default board, resolved against nobody) or `unavailable` (Planning Center could not be read, and `reason` says why) |
+| POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |
+| GET | `/api/views/:id/slot-targets` | The service type's default board and a plan's own, plus the plan it belongs to. `?serviceTypeId=&planId=` names which pair to read (a `serviceTypeId` with no `planId` is that type's default); absent, it is the active type and plan. Also `/api/layout-objects/:id/slot-targets` |
+| DELETE | `/api/views/:id/slots/override/:planId` | Revert that plan to the default. `404` when the plan had no board of its own. Also `/api/layout-objects/:id/slots/override/:planId` |
+| POST | `/api/views/:id/slots/promote` | Make a plan's board the service type's default (`{planId}`), clearing the plan's own. `404` when it had none. Also `/api/layout-objects/:id/slots/promote` |
 | POST | `/api/views/:id/duplicate` | Duplicate a view |
 | GET | `/api/views/:id/export` | Download the view and anything it embeds as one file |
-| POST | `/api/views/import` | Merge an exported view in; returns what landed and what needs rebinding |
-| POST | `/api/views/:id/copy-slots` | Copy slots from another view |
+| POST | `/api/views/import` | Merge an exported view or plan in; returns what landed and what needs rebinding. Body is the bundle, or `{bundle, serviceTypeId?, onClash?}` to land a plan export under a chosen service type (`onClash` is `keep`, the default, or `replace`) |
+| GET | `/api/plans/export?serviceTypeId=…[&slots=type\|all&patch=1\|0&presets=1\|0]` | Download one service type's setup as one file — its slot boards, the views and layouts holding them, optionally the patch variant it is assigned to and the slot presets. `slots=all` also carries other types' boards on those views. Missing or unknown type, a bad flag, or Planning Center not being configured, is `400` |
+| GET | `/api/plans/export/preview?serviceTypeId=…[&slots=type\|all]` | What that file would contain at that scope, for the export dialog's counts. `400` as above |
+| POST | `/api/views/:id/copy-slots` | Copy slots from another view onto one board (`{fromViewId, target?}`) |
 | POST | `/api/views/reorder` | Reorder views |
 | DELETE | `/api/views/:id` | Delete a view |
 | GET | `/api/outputs` | List physical displays |
@@ -79,13 +95,29 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | PATCH | `/api/outputs/:id` | Set `name`, `viewId` (routing), `blackout`, `locked`, `hideTopBar` (show or hide this display's kiosk top bar), `slug` (`""` clears; validated against the reserved list — see [Display URLs](../display-urls.md)), or `mode` (`display`\|`panel`). A console view on a display screen is refused, with the reason, as `400` |
 | POST | `/api/outputs/reorder` | Reorder displays |
 | DELETE | `/api/outputs/:id` | Remove a display |
-| POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does |
+| POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does. Needs a cue bearer token unless the request is a same-origin browser request |
 | POST | `/api/notes` | Save a notes/checklist object's content (`{objectId, content}`) |
 | POST | `/api/bar-items` | Set the context bar's items and order. `{items}` for the desktop bar, `{mobileItems}` for the phone's own set (empty = follow the desktop bar). Either may be omitted and is then left as it stands |
 | GET / POST | `/api/layout-templates` | List / save a custom-layout template |
 | PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
 | GET / POST | `/api/layout-groups` | List / save a reusable object group (`{name, object}`) |
 | DELETE | `/api/layout-groups/:id` | Delete a group |
+
+**`target` on a slot write.** Optional, and picks which of a service type's two
+boards the write lands on. Read by `POST /api/views/:id/slots`, `POST
+/api/layout-objects/:objectId/slots`, `POST /api/views/:id/copy-slots` and `POST
+/api/presets/:id/apply`. `POST /api/slots` does not read it.
+
+| `target` | Lands on |
+|---|---|
+| omitted | the current plan's board if a plan is selected, else the type's default |
+| `{"kind":"default","serviceTypeId":"…"}` | that service type's default |
+| `{"kind":"plan","planId":"…","serviceTypeId":"…"}` | that plan's board only |
+
+A `target` that is present but malformed is a `400`, not a fall back to the
+default, and a `{"kind":"plan"}` target naming a service type the plan does not
+belong to is a `400` as well. An unknown view, layout object or plan is a `404`.
+See [Mic slots](../slots.md#defaults-and-this-week).
 
 `GET /api/displays` returns each output joined with its routed view's kind, for
 clients that want a flat list. `POST /api/displays/refresh` reloads connected
@@ -97,7 +129,8 @@ stale read from a fresh one.
 
 **Presets** — `GET /api/presets`, `POST /api/presets` (snapshot the current
 slots under a name), `POST /api/presets/import`, `POST /api/presets/reorder`,
-`POST /api/presets/:id/apply` (onto a view or display), `PATCH /api/presets/:id`
+`POST /api/presets/:id/apply` (onto a view or display, taking the same optional
+`target` as a slot save), `PATCH /api/presets/:id`
 (rename, replace its slots, or overwrite it from a display) and
 `DELETE /api/presets/:id`.
 
@@ -153,6 +186,26 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | POST | `/api/automation/rules/:id/test` | Fire the action now, ignoring the trigger. Honours simulate; a refusal is `400` with the reason |
 | GET / POST | `/api/automation/settings` | `simulate` and `disarmed` |
 | GET / DELETE | `/api/automation/log` | Read / clear the Activity log |
+| POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
+
+**Cues** — an automation rule called by name. See
+[Companion](../integrations/companion.md#calling-a-cue-by-name).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/cues/:name` | Run the cue. `:name` is the cue's current name or any of its former names (see [When a button is renamed](../integrations/companion.md#when-a-button-is-renamed)); a current name always wins. `200` dispatched, `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
+| GET / POST | `/api/cues/tokens` | List callers (never a hash) / mint one (`{label}`). The secret is returned once and never again |
+| DELETE | `/api/cues/tokens/:id` | Revoke one caller |
+| GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml`, not JSON |
+| GET | `/api/cues/states` | What each bound ON/OFF pair's device is actually doing: `{ok, checkedAt, states}`, `states` keyed by the pair's base — `{on, off, variable, value, state, reason?}` with `state` one of `on`, `off`, `unknown`. `ok` is false when any pair is unknown. Open read. Reads the Companion custom variables on demand, in parallel, and serves the whole answer for 5 seconds; only pairs with a **State variable** are in it, and an install with none reads nothing at all |
+
+**Companion** — reading the connected Companion's own configuration.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Each carries `page`, `pageId`, `pageName`, `row`, `col`, `label`, `drives` and `actionIds` — the page's opaque id and the button's sorted action ids are its identity, and survive being renumbered or dragged to another key. Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
+| POST | `/api/companion/buttons/refresh` | Drop the five-minute cache, re-read, and re-check every cue's button against it. `{ok, buttons, cachedAt, reconcile}`, where `reconcile` is `{applied, failed}` — `failed` names each cue whose new status could not be saved (`{ruleId, label, detail}`). Answers `ok: false` when any status failed to save, or `{ok: false, reason, buttons: []}` when Companion could not be read at all |
+| GET | `/api/companion/pairs` | The import dialog's whole offer: `{ok, pairs, buttons, customVariables}` — ON/OFF pairs, the labelled buttons that are not half of one, and the names of Companion's custom variables (what a pair's state can be bound to; empty on an install with none) — each offer with its proposed cue name and whether that name (or any cue's former name) already exists. One request, because deciding which buttons are unpaired needs the pairs, and because the two lists' proposed names are disambiguated against each other. Answers `200` with `{ok: false, reason, pairs: []}` when Companion is unreachable — no `buttons` key |
 
 **ProPresenter & ProdCom**
 | Method | Path | Purpose |

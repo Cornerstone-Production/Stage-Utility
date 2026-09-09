@@ -13,10 +13,10 @@
 export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   {
     "id": "planning-center",
-    "docs": "planning-center",
     "kind": "lineup",
     "label": "Planning Center",
     "description": "Pulls your Planning Center service plans into Stage — the live rundown, item order and pre-service countdown.",
+    "docs": "planning-center",
     "configSchema": [
       {
         "key": "appId",
@@ -82,27 +82,44 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "wireless",
-    "docs": "wireless",
     "kind": "wireless",
     "label": "Wireless Gear",
     "description": "Puts your wireless mics' RF, audio and battery on a stage display, one channel per slot. Shure and Sennheiser receivers.",
+    "docs": "wireless",
     "configSchema": []
   },
   {
     "id": "companion",
-    "docs": "companion",
     "kind": "control",
     "label": "Bitfocus Companion",
-    "description": "Lets a Bitfocus Companion surface — a Stream Deck — control Stage and read its state. Nothing to set up here: the module dials in, and this row counts the clients attached.",
+    "description": "Lets a Bitfocus Companion surface — a Stream Deck — control Stage and read its state. The module dials in on its own; fill in the host to let rules press Companion buttons back.",
+    "docs": "companion",
     "inbound": true,
-    "configSchema": []
+    "configSchema": [
+      {
+        "key": "host",
+        "label": "Companion Host",
+        "type": "text",
+        "placeholder": "192.168.1.100",
+        "help": "Only needed to press Companion buttons FROM Stage Utility. Leave blank and the module still connects as before."
+      },
+      {
+        "key": "port",
+        "label": "API Port",
+        "type": "number",
+        "default": 8000,
+        "min": 1,
+        "max": 65535,
+        "help": "Companion's web and HTTP API port. Settings -> Protocols -> HTTP must be on."
+      }
+    ]
   },
   {
     "id": "propresenter",
-    "docs": "propresenter",
     "kind": "control",
     "label": "ProPresenter",
     "description": "Shows ProPresenter's current and next slide, its section, and slide thumbnails.",
+    "docs": "propresenter",
     "configSchema": [
       {
         "key": "name",
@@ -132,10 +149,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "prodcom",
-    "docs": "prodcom",
     "kind": "lineup",
     "label": "ProdCom",
     "description": "Puts live production transcription — captions — on a stage display.",
+    "docs": "prodcom",
     "configSchema": [
       {
         "key": "host",
@@ -159,10 +176,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "smaart",
-    "docs": "smaart",
     "kind": "control",
     "label": "Smaart (SPL)",
     "description": "Puts FOH sound-level (SPL) readings from Smaart on a stage display.",
+    "docs": "smaart",
     "configSchema": [
       {
         "key": "host",
@@ -186,10 +203,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "obs",
-    "docs": "obs",
     "kind": "control",
     "label": "OBS Studio",
     "description": "Shows whether OBS is recording, streaming, or running its virtual camera.",
+    "docs": "obs",
     "configSchema": [
       {
         "key": "host",
@@ -213,10 +230,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "reaper",
-    "docs": "reaper",
     "kind": "control",
     "label": "REAPER",
     "description": "Shows whether REAPER is recording.",
+    "docs": "reaper",
     "configSchema": [
       {
         "key": "host",
@@ -234,10 +251,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "pvp",
-    "docs": "provideoplayer",
     "kind": "control",
     "label": "ProVideoPlayer",
     "description": "Shows what ProVideoPlayer has on each layer, and lets automation rules fire cues and clear, hide, mute and fade layers. Names, states and times — PVP offers no preview image of any kind.",
+    "docs": "provideoplayer",
     "configSchema": [
       {
         "key": "host",
@@ -274,15 +291,22 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "label": "API Token",
         "type": "password",
         "help": "Only if Require Authentication is on in PVP."
+      },
+      {
+        "key": "imageDurationSec",
+        "label": "Image duration",
+        "type": "number",
+        "default": 20,
+        "help": "From PVP's Preferences → Import → Image Duration. The hold a still counts down from, on widgets that ask."
       }
     ]
   },
   {
     "id": "resi",
-    "docs": "resi",
     "kind": "control",
     "label": "Resi",
     "description": "Shows whether Resi is streaming, wherever the recording widgets appear. Signs in with your Resi account, because Resi's own API cannot see a stream that started on a schedule.",
+    "docs": "resi",
     "configSchema": [
       {
         "key": "username",
@@ -305,10 +329,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "youtube",
-    "docs": "youtube",
     "kind": "control",
     "label": "YouTube",
     "description": "Shows whether you are live on YouTube and for how long, with the start time YouTube itself reports.",
+    "docs": "youtube",
     "configSchema": [
       {
         "key": "mode",
@@ -378,26 +402,26 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "osc",
-    "docs": "osc",
     "kind": "control",
     "label": "OSC",
     "description": "Adds layout buttons that send OSC to gear on your LAN — consoles, media servers — and reflect that gear's state back.",
+    "docs": "osc",
     "configSchema": []
   },
   {
     "id": "rosstalk",
-    "docs": "rosstalk",
     "kind": "control",
     "label": "RossTalk (Carbonite / Ultrix)",
     "description": "Sends RossTalk commands to Ross gear: custom controls and switching on a Carbonite, routing and salvos on an Ultrix.",
+    "docs": "rosstalk",
     "configSchema": []
   },
   {
     "id": "sensource",
-    "docs": "sensource",
     "kind": "control",
     "label": "SenSource Vea",
     "description": "Brings live attendance and room occupancy from SenSource Vea onto displays and graphs.",
+    "docs": "sensource",
     "configSchema": [
       {
         "key": "clientId",
@@ -434,10 +458,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "ross-tsl",
-    "docs": "ross-tsl",
     "kind": "control",
     "label": "Ross MultiViewer (TSL UMD)",
     "description": "Puts a people count onto a Ross multiviewer tile as on-tile text, over TSL UMD.",
+    "docs": "ross-tsl",
     "configSchema": [
       {
         "key": "host",
@@ -455,10 +479,11 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
   },
   {
     "id": "scores",
-    "docs": "scores",
     "kind": "control",
     "label": "Live scores",
     "description": "Follows your teams' live scores from ESPN and shows them in the context bar, on Home, and on a stage display.",
+    "docs": "scores",
     "configSchema": []
   }
 ];
+

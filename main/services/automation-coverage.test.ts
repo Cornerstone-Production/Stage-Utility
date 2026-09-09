@@ -7,44 +7,78 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { readFileSync, readdirSync } from "node:fs";
+import * as path from "node:path";
 
 import { AUTOMATION_CONDITIONS } from "./automation-conditions.js";
-import { AUTOMATION_TRIGGERS, INTEGRATIONS } from "./automation-triggers.js";
+import { AUTOMATION_TRIGGERS, CALL_CHANNEL, INTEGRATIONS } from "./automation-triggers.js";
 import { INTEGRATION_IDS } from "./integration-ids.js";
 
 /**
- * Channels something actually broadcasts.
+ * Channels something actually broadcasts, READ OFF THE SOURCE.
  *
- * Most are `broadcast("...")` call sites; the integration channels
- * (`obs:status`, `reaper:status`, `resi:status`, `youtube:status`,
- * `spl:metrics`, `people:count`) are passed to the IntegrationBase constructor
- * and published from there, so grepping for a literal will not find them.
+ * This was a hand-maintained literal set, and the test below that asks whether
+ * anything publishes the call channel was green with a real
+ * `broadcast("cue:call", …)` added to stage-controller — the set simply did not
+ * know. It is now scanned: every `broadcast("<channel>"` and
+ * `sseWrite(res, "<channel>"` under main/services, walked recursively, tests
+ * excluded.
+ *
+ * A source scan is the weaker kind of guard (a comment can satisfy one), so two
+ * things keep this one honest: the pattern matches a CALL with its opening paren
+ * and a string literal, which prose does not contain, and SCAN_SANITY below
+ * fails if the walk or the pattern ever stops finding the channels we know are
+ * there.
+ *
+ * The integration channels (`obs:status`, `reaper:status`, `resi:status`,
+ * `youtube:status`, `spl:metrics`, `people:count`) are passed to the
+ * IntegrationBase constructor and published from there, so no literal reaches
+ * either call. They are added explicitly, and are the only hand-written entries
+ * left.
  */
-const BROADCAST_CHANNELS = new Set([
-  "attendance:history",
-  "baptism:state",
-  "calendar:grid",
-  "displays:presence",
-  "integrations:state-changed",
+const INTEGRATION_BASE_CHANNELS = [
   "obs:status",
-  "osc:feedback",
-  "patch:updated",
-  "pco:live",
   "people:count",
-  "prodcom:transcript",
-  "propresenter:instances",
-  "pvp:status",
   "reaper:status",
   "resi:status",
-  "scores:status",
-  "service-timeline:history",
-  "slots:devices",
-  "spl:history",
   "spl:metrics",
-  "stage:state-changed",
-  "update:status",
   "youtube:status",
-]);
+];
+
+/** Every .ts under a directory except tests, recursively. */
+function sourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...sourceFiles(full));
+    } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+function scanBroadcastChannels(): Set<string> {
+  const found = new Set<string>(INTEGRATION_BASE_CHANNELS);
+  const patterns = [
+    /\bbroadcast\(\s*"([^"]+)"/g,
+    /\bsseWrite\(\s*res\s*,\s*"([^"]+)"/g,
+  ];
+  for (const file of sourceFiles(path.join(import.meta.dirname, "..", "services"))) {
+    const text = readFileSync(file, "utf8");
+    for (const pattern of patterns) {
+      for (const m of text.matchAll(pattern)) found.add(m[1]!);
+    }
+  }
+  return found;
+}
+
+const BROADCAST_CHANNELS = scanBroadcastChannels();
+
+/** Channels the scan MUST find. If it stops finding these, the walk or the
+ *  pattern is broken and every assertion below is passing on an empty set. */
+const SCAN_SANITY = ["pco:live", "stage:state-changed", "slots:devices", "prodcom:transcript"];
 
 describe("automation coverage", () => {
   test("every integration appears in at least one trigger or condition", () => {
@@ -78,12 +112,45 @@ describe("automation coverage", () => {
   test("every registered trigger names a channel that something broadcasts", () => {
     // A typo'd channel is a trigger that can never fire, and nothing else
     // would ever say so.
+    //
+    // CALL_CHANNEL is the one exemption, and the assertion below is what keeps
+    // the exemption honest: a called cue is SUPPOSED to have no producer.
     for (const t of Object.values(AUTOMATION_TRIGGERS)) {
+      if (t.channel === CALL_CHANNEL) continue;
       assert.ok(
         BROADCAST_CHANNELS.has(t.channel),
         `${t.id} watches unknown channel "${t.channel}"`,
       );
     }
+  });
+
+  test("the scan actually reads the source", () => {
+    // Without this the two tests below pass on an empty set, which is how a
+    // source-reading guard goes quietly vacuous.
+    for (const channel of SCAN_SANITY) {
+      assert.ok(
+        BROADCAST_CHANNELS.has(channel),
+        `the broadcast scan found no "${channel}" — the walk or the pattern is broken`,
+      );
+    }
+    assert.ok(BROADCAST_CHANNELS.size >= 20, `only ${BROADCAST_CHANNELS.size} channels scanned`);
+  });
+
+  test("nothing broadcasts the call channel", () => {
+    assert.equal(
+      BROADCAST_CHANNELS.has(CALL_CHANNEL),
+      false,
+      `${CALL_CHANNEL} is broadcast somewhere under main/services now — a called ` +
+        "cue could fire itself. Either stop broadcasting it, or give call.by-name a " +
+        "channel nothing publishes.",
+    );
+  });
+
+  test("exactly one trigger is call-only", () => {
+    // An EXACT count, not a floor. A second trigger on this channel is a second
+    // thing the engine's skip has to cover, and the skip is written once.
+    const callOnly = Object.values(AUTOMATION_TRIGGERS).filter((t) => t.channel === CALL_CHANNEL);
+    assert.deepEqual(callOnly.map((t) => t.id), ["call.by-name"]);
   });
 
   test("no two entries share an id", () => {

@@ -1,4 +1,5 @@
-import { Loader2Icon, RefreshCwIcon } from "lucide-react";
+import { useState } from "react";
+import { DownloadIcon, Loader2Icon, RefreshCwIcon } from "lucide-react";
 import {
   FieldSet,
   FieldGroup,
@@ -18,6 +19,7 @@ import {
 } from "../../components/ui";
 import type { SectionProps } from "../types";
 import { ChecklistSources } from "./checklist-sources";
+import { ExportPlanDialog } from "./export-plan-dialog";
 
 export function PlanSection({
   stageState,
@@ -26,6 +28,7 @@ export function PlanSection({
   isRefreshing,
   handlers,
 }: Pick<SectionProps, "stageState" | "serviceTypes" | "plans" | "isRefreshing" | "handlers">) {
+  const [exporting, setExporting] = useState(false);
   const allowed = stageState.allowedServiceTypeIds ?? [];
   const visibleServiceTypes =
     allowed.length === 0 ? serviceTypes : serviceTypes.filter((st) => allowed.includes(st.id));
@@ -193,7 +196,10 @@ export function PlanSection({
         return (
           <FieldSet>
             <FieldGroup>
-              <Field orientation="vertical">
+              {/* Export sits with the types it exports, rather than under
+                  Advanced beside the whole-machine snapshot: this is one
+                  service type's setup, and the type is chosen here. */}
+              <Field orientation="horizontal">
                 <FieldContent>
                   <FieldLabel>Active Service Types</FieldLabel>
                   <FieldDescription>
@@ -201,8 +207,55 @@ export function PlanSection({
                     them. Turning all off is the same as having them all active.
                   </FieldDescription>
                 </FieldContent>
+                <Button variant="filled" size="small" onClick={() => setExporting(true)}>
+                  <DownloadIcon className="size-3.5" /> Export plan…
+                </Button>
               </Field>
+              {/* Mounted only while open, so the picker seeds from the types and
+                  the current plan as they are NOW. Mounted permanently it seeded
+                  once, before Planning Center had answered, and opened on nothing. */}
+              {exporting && (
+                <ExportPlanDialog
+                  open
+                  onOpenChange={setExporting}
+                  serviceTypes={visibleServiceTypes}
+                  defaultServiceTypeId={stageState.serviceTypeId ?? null}
+                />
+              )}
               {active.map(row)}
+              {/* The slot editors' plan switcher walks these types. Beside the
+                  allowlist because it is the same decision continued: which
+                  types, and then in what order the editor steps through them.
+                  It moves the EDITOR only; nothing here changes what the screens
+                  follow. */}
+              <Field orientation="vertical">
+                <FieldContent>
+                  <FieldLabel>Plan switcher in the slot editors</FieldLabel>
+                  <FieldDescription>
+                    {stageState.planSwitcherMode === "within-type"
+                      ? "Within a type: the middle is a dropdown of the allowed types; the arrows walk that type's plans, Default first and then each upcoming date."
+                      : "Upcoming plans: the arrows walk every allowed type's plans in date order; the middle names the date and the type."}
+                  </FieldDescription>
+                </FieldContent>
+                <ButtonGroup role="group" aria-label="How the plan switcher steps">
+                  <Button
+                    variant={stageState.planSwitcherMode === "within-type" ? "accent" : "filled"}
+                    aria-pressed={stageState.planSwitcherMode === "within-type"}
+                    size="small"
+                    onClick={() => { handlers.handleSetPlanSwitcherMode("within-type").catch(() => {}); }}
+                  >
+                    Within a type
+                  </Button>
+                  <Button
+                    variant={stageState.planSwitcherMode === "upcoming" ? "accent" : "filled"}
+                    aria-pressed={stageState.planSwitcherMode === "upcoming"}
+                    size="small"
+                    onClick={() => { handlers.handleSetPlanSwitcherMode("upcoming").catch(() => {}); }}
+                  >
+                    Upcoming plans
+                  </Button>
+                </ButtonGroup>
+              </Field>
               {inactive.length > 0 && (
                 <Collapsible
                   label="Inactive service types"

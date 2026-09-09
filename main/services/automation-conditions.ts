@@ -14,6 +14,55 @@ import { hasContent, type PvpLayerDTO } from "../types/pvp.js";
 import { zonedMinuteOfDay, zonedParts } from "./app-timezone.js";
 import { INTEGRATIONS } from "./automation-triggers.js";
 
+/**
+ * How long before a service starts the building counts as "in a service" for a
+ * cue, and how long after a start PCO may sit in preservice before we stop
+ * assuming the service is running.
+ *
+ * The lead is an hour because that is when setup finishes and people arrive. The
+ * grace is short on purpose and is the one real hole: PCO reports `preservice`
+ * from the moment a plan has a service time — days out, per PCO's own "6 days"
+ * countdown — so it cannot be treated as "a service is happening" without an
+ * anchor. Half an hour past the start covers a late start; past that, an
+ * undriven PCO Live is indistinguishable from a service that has finished, and
+ * refusing every teardown cue all afternoon is the worse failure.
+ */
+export const CUE_SERVICE_LEAD_MS = 60 * 60_000;
+export const CUE_SERVICE_GRACE_MS = 30 * 60_000;
+
+/**
+ * What Planning Center says about right now, for the one condition that has to
+ * fail closed.
+ *
+ *  - `quiet`   — nothing is running and nothing is about to. The only answer that
+ *                lets a cue through.
+ *  - `live`    — a plan item is live.
+ *  - `starting` — preservice, with the countdown target within the hour (or
+ *                already passed, or unknown).
+ *  - `unknown` — the Planning Center integration is CONFIGURED and we have no
+ *                live state at all. Fails closed: an unreadable PCO is not
+ *                evidence that the building is empty.
+ *
+ * With Planning Center not configured there is nothing to check and the answer is
+ * `quiet` — an install with no PCO would otherwise have every cue refused
+ * forever, which is the same bug in the other direction.
+ */
+export type ServiceQuietness = "quiet" | "live" | "starting" | "unknown";
+
+export function serviceQuietness(ctx: ConditionCtx, now: number): ServiceQuietness {
+  if (!ctx.pcoConfigured) return "quiet";
+  if (!ctx.pcoLive) return "unknown";
+  if (ctx.pcoLive.mode === "item") return "live";
+  if (ctx.pcoLive.mode !== "preservice") return "quiet";
+  const startsAt = ctx.pcoLive.startsAtMs;
+  // Preservice with no time to anchor to: fail closed.
+  if (startsAt === null) return "starting";
+  const untilStart = startsAt - now;
+  return untilStart <= CUE_SERVICE_LEAD_MS && -untilStart <= CUE_SERVICE_GRACE_MS
+    ? "starting"
+    : "quiet";
+}
+
 /** "HH:MM" -> minutes since midnight, or null. */
 function hhmm(v: unknown): number | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(v ?? "").trim());
@@ -187,6 +236,28 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
     holds: (ctx) => ctx.pcoLive?.mode === "item",
   },
 
+  /**
+   * NOT the negation of `service.is-live`, and that is the whole point.
+   *
+   * Conditions cannot be negated — `allConditionsHold` ANDs a flat list, there is
+   * no `not` flag on a stored rule — so this exists as its own entry. It is the
+   * condition every imported cue carries, so "projectors off" cannot be said
+   * mid-service, and it FAILS CLOSED: a wrong cue during setup is worse than a
+   * cue that does not fire.
+   *
+   * `mode !== "item"` was not that. It held ten minutes before a service, and it
+   * held whenever Planning Center could not be read at all — the two moments a
+   * lighting shutdown is most likely to be asked for by mistake. See
+   * serviceQuietness for the four answers.
+   */
+  "service.is-not-live": {
+    id: "service.is-not-live",
+    label: "No service is live",
+    channel: null,
+    params: [],
+    holds: (ctx, _params, now) => serviceQuietness(ctx, now) === "quiet",
+  },
+
   "service.type-is": {
     id: "service.type-is",
     label: "Service type is",
@@ -240,17 +311,36 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
   },
 };
 
-/** Every condition must hold. An unknown id fails CLOSED: a rule referencing a
- *  condition this build does not have must not fire. */
+/**
+ * The FIRST condition that does not hold, or null when they all do.
+ *
+ * A called cue has to say why it refused — "no" down a phone line is useless —
+ * so the caller needs the identity of the condition that blocked it, not just a
+ * boolean. `allConditionsHold` is written in terms of this rather than beside
+ * it: two loops over the same list is how one of them ends up failing open on an
+ * unknown id.
+ *
+ * An unknown id fails CLOSED and reports itself: a rule referencing a condition
+ * this build does not have must not fire.
+ */
+export function firstFailingCondition(
+  list: { id: string; params: Record<string, string | number> }[],
+  ctx: ConditionCtx,
+  now: number,
+): string | null {
+  for (const c of list) {
+    const def = AUTOMATION_CONDITIONS[c.id];
+    if (!def) return c.id;
+    if (!def.holds(ctx, c.params, now)) return c.id;
+  }
+  return null;
+}
+
+/** Every condition must hold. */
 export function allConditionsHold(
   list: { id: string; params: Record<string, string | number> }[],
   ctx: ConditionCtx,
   now: number,
 ): boolean {
-  for (const c of list) {
-    const def = AUTOMATION_CONDITIONS[c.id];
-    if (!def) return false;
-    if (!def.holds(ctx, c.params, now)) return false;
-  }
-  return true;
+  return firstFailingCondition(list, ctx, now) === null;
 }

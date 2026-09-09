@@ -10,6 +10,8 @@ import type { ActionDef, ActionResult } from "../types/automation.js";
 import type { PcoLiveDTO } from "../types/stage.js";
 import { advanceGuard } from "./automation-pco-items.js";
 import { broadcast } from "./broadcaster.js";
+import { companionApi } from "./companion-api.js";
+import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
 import { oscManager } from "./osc-manager.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
 import { stageController } from "./stage-controller.js";
@@ -110,6 +112,68 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
       if (ctx.simulate) return ok(`SIMULATED ${detail}`);
       await signalStore.set(signal, value);
       return ok(detail);
+    },
+  },
+
+  "companion.press": {
+    id: "companion.press",
+    label: "Press a Companion button",
+    help:
+      "Presses ONE button at a page/row/column, exactly as a finger would. Companion confirms it " +
+      "delivered the press, never that the device did anything — so this reports \"dispatched\", not \"on\". " +
+      "For a sequence, make a Companion button that runs the sequence and press that: one action is one press, " +
+      "so a rule can never half-run a chain.",
+    params: [
+      { key: "page", label: "Page", type: "number", min: 1, max: 999 },
+      { key: "row", label: "Row", type: "number", min: 0, max: 99 },
+      { key: "col", label: "Column", type: "number", min: 0, max: 99 },
+      {
+        key: "label",
+        label: "Button label",
+        type: "string",
+        optional: true,
+        help: "What the button said when it was picked. Recorded in the log so a moved button is obvious.",
+      },
+      // pageId, actionIds, status, lastSeenAt and movedFrom are also stored on
+      // this action and are deliberately NOT ParamDefs: they are written by the
+      // picker and by the reconcile, never typed. A form field for "action ids"
+      // is a field whose only use is to break the identity. See
+      // companion-fingerprint.ts.
+    ],
+    run: async (params, ctx) => {
+      const page = Number(params.page);
+      const row = Number(params.row);
+      const col = Number(params.col);
+      if (![page, row, col].every(Number.isFinite)) {
+        return fail("no Companion button chosen");
+      }
+      // Whole, non-negative numbers only. Every one of these goes into the press
+      // URL as a path segment, so "1.5" is a coordinate Companion cannot have and
+      // "../.." is a different request altogether. companionApi.press refuses the
+      // same shapes for callers that do not come through here.
+      if (![page, row, col].every((n) => Number.isInteger(n) && n >= 0)) {
+        return fail(`p${page} r${row} c${col} is not a Companion coordinate — whole numbers, none negative`);
+      }
+      // The last reconcile could not find this button in Companion's export.
+      // REFUSED, not pressed: the coordinates now hold either nothing or
+      // somebody else's button, and Companion answers 204 for the first and a
+      // cheerful 200 for the second. See companion-reconcile.ts.
+      //
+      // Here rather than only in the call route, because a rule can fire from
+      // any trigger and from the editor's Test button, and a guard on one path
+      // is a guard the other three walk around.
+      const fingerprint = readFingerprint(params as Record<string, string | number>);
+      if (fingerprint.status === "missing") {
+        return fail(`${missingSentence(fingerprint)} — re-pick the button on this rule`);
+      }
+      const label = String(params.label ?? "").trim();
+      const named = `p${page} r${row} c${col}${label ? ` "${label}"` : ""}`;
+      if (ctx.simulate) return ok(`would press ${named}`);
+      const result = await companionApi.press({ page, row, col });
+      // "dispatched", never "on": Companion answers 200 the moment it hands the
+      // press to the control. Whether the projector woke up is not in that answer
+      // and must not be implied by this wording.
+      return result.ok ? ok(`dispatched ${named}`) : fail(`${named}: ${result.detail}`);
     },
   },
 

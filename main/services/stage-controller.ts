@@ -19,8 +19,17 @@ import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../t
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
-import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, zonedParts } from "./app-timezone.js";
+import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
+import { errorMessage } from "./errors.js";
+import {
+  planWindow,
+  sameIds,
+  sortUpcoming,
+  switcherTypes,
+  toUpcoming,
+  UPCOMING_CACHE_MS,
+} from "./upcoming-plans.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
 import type {
   CalendarGrid,
@@ -29,7 +38,8 @@ import type {
   CalendarTagDTO,
 } from "../types/calendar.js";
 
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
+import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -37,7 +47,7 @@ import { presetsStore } from "./presets-store.js";
 import { resolveSlots } from "./slot-resolver.js";
 import { migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
-import { slotsStore } from "./slots-store.js";
+import { slotsStore, describeSlotsTarget, type SlotsTarget } from "./slots-store.js";
 import { viewsStore } from "./views-store.js";
 import { scriptViewLayoutsStore } from "./scriptview-layouts-store.js";
 import { scriptViewConfigStore } from "./scriptview-config-store.js";
@@ -173,6 +183,29 @@ function normalizeBaseUrl(url: string | null): string | null {
  * a failure, it is two people editing the same view, and the caller has a real
  * choice to make between reloading and overwriting.
  */
+/**
+ * A slots request named something that is not there, or a board that is not the
+ * one it says it is.
+ *
+ * Its own type, carrying the status it deserves, so the routes can answer 404 or
+ * 400 for exactly these and let everything else surface as a 500. The revert and
+ * promote routes used to wrap their whole call in `catch → 404`, so a store
+ * write failing mid-way — a full disk, a TypeError — read to the operator as
+ * "there was nothing to revert" and the real fault never reached the log.
+ */
+export class SlotsNotFoundError extends Error {
+  readonly code = "slots-target";
+  constructor(
+    message: string,
+    /** 404 for "no such view / object / override", 400 for a target that cannot
+     *  be true (a plan target naming another service type). */
+    readonly status: 404 | 400 = 404,
+  ) {
+    super(message);
+    this.name = "SlotsNotFoundError";
+  }
+}
+
 export class LayoutConflictError extends Error {
   readonly code = "layout-conflict";
   constructor(
@@ -265,6 +298,7 @@ export class StageController {
     showQr: true,
     kioskDiscovery: false,
     allowedServiceTypeIds: [],
+    planSwitcherMode: "upcoming",
     checklistNoteCategories: [],
     checklistNoteTeams: [],
     appName: "Stage Utility",
@@ -308,11 +342,30 @@ export class StageController {
     // reads the roster through.
     return Array.isArray(this.teamMembers) ? this.teamMembers.map((m) => ({ ...m })) : [];
   }
-  // Raw (un-resolved) slot configs per VIEW id for the ACTIVE service type.
+  // Raw (un-resolved) slot configs per VIEW id, resolved for the ACTIVE service
+  // type AND the current plan (a board can be saved against one plan).
   private rawSlotsByView = new Map<string, Slot[]>();
   // Raw (unresolved) slots for inline mic-slots objects, keyed by layout object id,
-  // for the active service type. Resolved into state.slotsByLayoutObject.
+  // for the same target. Resolved into state.slotsByLayoutObject.
   private rawSlotsByObject = new Map<string, Slot[]>();
+  /** The current plan's PCO `sort_date`, stamped onto any override saved for it
+   *  so pruning can date the override without asking PCO. Set by applyPlan, so
+   *  it is null between a cold start and the first plan selection or refresh —
+   *  an override saved in that window simply prunes by PCO lookup instead. */
+  private currentPlanSortDate: string | null = null;
+
+  /**
+   * The last upcoming-plan list read from Planning Center.
+   *
+   * Kept for two reasons: the switcher is opened over and over while an operator
+   * edits three service types in a row, and when PCO goes down mid-edit the last
+   * good list is a far better answer than an empty one.
+   */
+  private upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[] } | null = null;
+  /** Daily sweep for overrides whose plan is long past. */
+  private slotsPruneTimer: ReturnType<typeof setInterval> | null = null;
+  /** The one-shot sweep shortly after boot, held so it can be cancelled too. */
+  private slotsPruneBootTimer: ReturnType<typeof setTimeout> | null = null;
   // In-flight background plan re-selection, and whether the selection changed
   // again while it was running. See scheduleGlobalReselect.
   private reselectInFlight: Promise<void> | null = null;
@@ -442,6 +495,7 @@ export class StageController {
       showQr,
       kioskDiscovery,
       allowedServiceTypeIds,
+      planSwitcherMode: settings.planSwitcherMode === "within-type" ? "within-type" : "upcoming",
       checklistNoteCategories: settings.checklistNoteCategories ?? [],
       checklistNoteTeams: settings.checklistNoteTeams ?? [],
       appName: settings.appName ?? "Stage Utility",
@@ -472,8 +526,9 @@ export class StageController {
     this.applyRemoteUrl();
     serviceWindow.setSchedule(this.state.reconnectSchedule);
     this.startUpdateChecks();
+    this.startSlotsPruning();
 
-    await this.loadAllViewRawSlots(settings.serviceTypeId);
+    await this.loadAllViewRawSlots(settings.serviceTypeId, settings.planId);
     this.recomputeResolved();
 
     console.log(
@@ -749,8 +804,9 @@ export class StageController {
     };
     this.teamMembers = [];
 
-    // Reload raw slots for every view with the new service type.
-    await this.loadAllViewRawSlots(id);
+    // Reload raw slots for every view with the new service type. No plan yet —
+    // the board is the new type's default until selectNextPlan lands one.
+    await this.loadAllViewRawSlots(id, null);
 
     await settingsStore.patch({
       serviceTypeId: id,
@@ -794,6 +850,121 @@ export class StageController {
       ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
       ...future,
     ];
+  }
+
+  /**
+   * Every allowed service type's plans in one dated list, for the editor's plan
+   * switcher.
+   *
+   * NOT `listPlans` per type at the call site: the switcher walks plans by date
+   * across types, and a client stitching several lists together would have to
+   * repeat the window, the ordering and the "never drop the current plan" rule.
+   *
+   * Never throws and never 5xx's. When Planning Center cannot be reached the last
+   * good list is returned with `unavailable` set, and an empty list with
+   * `unavailable` when there was no cache — the editor can still edit the plan
+   * the machine is already on, and the switcher says why it cannot offer more.
+   *
+   * A type that fails on its own does NOT fail the list: its plans are missing
+   * and the failure is logged, because one unreachable service type is not
+   * evidence about the other five.
+   */
+  async getUpcomingPlanList(days: number): Promise<UpcomingPlansDTO> {
+    const now = Date.now();
+    const cached = this.upcomingCache;
+    // Keyed on the ALLOWLIST as well as the window. The list is built from it, so
+    // an entry made under a different allowlist answers for service types the
+    // operator has since turned on or off. setAllowedServiceTypes drops the cache
+    // outright; this is the second half of that, for anything that changes the
+    // allowlist without going through it.
+    if (
+      cached &&
+      cached.days === days &&
+      sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
+      now - cached.at < UPCOMING_CACHE_MS
+    ) {
+      return { plans: cached.plans, cacheAgeMs: now - cached.at };
+    }
+
+    let types: ServiceTypeDTO[];
+    try {
+      types = switcherTypes(await this.listServiceTypes(), this.state.allowedServiceTypeIds);
+    } catch (err) {
+      return this.upcomingUnavailable(errorMessage(err), now);
+    }
+
+    const w = planWindow(now, days);
+    const currentPlanId = this.state.planId;
+    const failures: string[] = [];
+    const perType = await Promise.all(
+      types.map(async (t) => {
+        try {
+          return toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+        } catch (err) {
+          // Returned to the caller as a shortfall in the list, not swallowed: a
+          // total failure below becomes `unavailable`, and a partial one is
+          // logged so an operator with a missing type has something to read.
+          failures.push(`${t.name}: ${errorMessage(err)}`);
+          return [] as UpcomingPlan[];
+        }
+      }),
+    );
+
+    if (types.length > 0 && failures.length === types.length) {
+      return this.upcomingUnavailable(failures[0]!, now);
+    }
+
+    const plans = sortUpcoming(perType.flat());
+    this.upcomingCache = { at: now, days, allowed: [...this.state.allowedServiceTypeIds], plans };
+    console.log(
+      `[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`,
+    );
+    if (failures.length > 0) {
+      console.warn(
+        `[plans] upcoming list incomplete: ${scrub(failures.length)} of ${scrub(types.length)} types could not be read — ${scrub(failures.join("; "))}`,
+      );
+    }
+    return { plans, cacheAgeMs: 0 };
+  }
+
+  /** The unavailable answer: the last good list when there is one, else nothing. */
+  private upcomingUnavailable(reason: string, now: number): UpcomingPlansDTO {
+    console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}`);
+    const cached = this.upcomingCache;
+    if (cached) return { plans: cached.plans, cacheAgeMs: now - cached.at, unavailable: reason };
+    return { plans: [], cacheAgeMs: 0, unavailable: reason };
+  }
+
+  /** One switcher row from the cached list, for labelling a target that is not
+   *  the machine's own plan. Never reaches for the network. */
+  private cachedUpcoming(planId: string | null): UpcomingPlan | null {
+    if (!planId) return null;
+    return this.upcomingCache?.plans.find((p) => p.planId === planId) ?? null;
+  }
+
+  /**
+   * A service type's name from the switcher's own cached list.
+   *
+   * The DEFAULT side of a board has no plan, so there is no plan row to read a
+   * type name off — and the type is not necessarily the one the screens are on.
+   * Without this, another type's default was named with the LIVE type's name, in
+   * the save toast ("Saved the Cornerstone Youth default" for a Weekend board)
+   * and in the revert and promote confirmations.
+   */
+  private cachedTypeName(serviceTypeId: string | null): string | null {
+    if (!serviceTypeId) return null;
+    if (serviceTypeId === this.state.serviceTypeId) return this.state.serviceTypeName;
+    return this.upcomingCache?.plans.find((p) => p.serviceTypeId === serviceTypeId)?.serviceTypeName ?? null;
+  }
+
+  /** How the editor's plan switcher steps. Operator setting; changes nothing the
+   *  machine follows. */
+  async setPlanSwitcherMode(mode: PlanSwitcherMode): Promise<StageState> {
+    console.log(`[plans] plan switcher mode → ${scrub(mode)}`);
+    this.state = { ...this.state, planSwitcherMode: mode };
+    await settingsStore.patch({ planSwitcherMode: mode });
+    this.broadcast();
+    return this.state;
   }
 
   async listTeamPositions(): Promise<TeamPositionDTO[]> {
@@ -1392,7 +1563,10 @@ export class StageController {
       console.log("[stage-controller] selectNextPlan: no upcoming plans");
       this.state = { ...this.state, planId: null, planTitle: null, planSeriesTitle: null, planDates: null };
       this.teamMembers = [];
+      this.currentPlanSortDate = null;
       await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null, planDates: null });
+      // No plan means no override applies — back to the service type's default.
+      await this.loadAllViewRawSlots(this.state.serviceTypeId, null);
       await this.reResolveAll();
       this.broadcast();
       return this.state;
@@ -1501,7 +1675,10 @@ export class StageController {
         lastRefreshedAt: new Date().toISOString(),
       };
       this.teamMembers = [];
+      this.currentPlanSortDate = null;
       await settingsStore.patch({ planId: null, planTitle: null, planSeriesTitle: null, planDates: null });
+      // No plan means no override applies — back to the service type's default.
+      await this.loadAllViewRawSlots(this.state.serviceTypeId, null);
       await this.reResolveAll();
       this.broadcast();
       return this.state;
@@ -1526,7 +1703,7 @@ export class StageController {
         planSeriesTitle: null,
       };
       this.teamMembers = [];
-      await this.loadAllViewRawSlots(best.type.id);
+      await this.loadAllViewRawSlots(best.type.id, null);
       await settingsStore.patch({
         serviceTypeId: best.type.id,
         serviceTypeName: best.type.name,
@@ -1542,6 +1719,12 @@ export class StageController {
     this.state = { ...this.state, allowedServiceTypeIds: ids };
     await settingsStore.patch({ allowedServiceTypeIds: ids });
     broadcast("settings:allowedServiceTypeIds-changed", { value: ids });
+    // The switcher's plan list is BUILT from this allowlist and cached for five
+    // minutes. Left alone, a type added here was missing from the switcher for up
+    // to five minutes, and a type just removed lingered in it — where stepping
+    // onto one of its plans wrote a real override for a service type the operator
+    // had turned off, under an ordinary success toast.
+    this.upcomingCache = null;
     this.broadcast();
 
     // Returns NOW. The re-selection sweep used to be awaited here, which froze the
@@ -1598,49 +1781,461 @@ export class StageController {
 
   // ── Slots ─────────────────────────────────────────────────────────────
 
-  /** Legacy alias — `target` is an output id (or empty for primary); routes to
-   *  that output's View. Kept for the /api/slots endpoint + phone control page. */
-  /** Resolve raw draft slots against the current team + device state WITHOUT
-   *  persisting or broadcasting. Powers the Views page live draft preview: the
-   *  settings UI resolves in-progress (unsaved) edits so the preview matches what
-   *  the kiosk would show, exactly as recomputeResolved() does for saved slots. */
-  resolveSlotsPreview(slots: Slot[]): Slot[] {
-    return resolveSlots(slots, this.teamMembers, this.deviceStatuses);
+  /**
+   * Resolve raw slots for a PREVIEW — no persist, no broadcast, nothing written.
+   *
+   * Powers the slots editor's preview iframe, which shows in-progress edits
+   * exactly as the kiosk would draw them, and follows the editor's plan switcher
+   * off the plan the screens are following.
+   *
+   * `target` names the board being previewed. Absent, or equal to the plan the
+   * screens follow, it resolves against the live roster this controller already
+   * holds. Another plan is resolved against THAT plan's roster, fetched here and
+   * deliberately never stored: `this.teamMembers` is what every screen resolves
+   * against, and a preview of next Sunday must not put next Sunday's people on a
+   * stage display. The type's DEFAULT side (`planId: null`) resolves against
+   * nobody at all — a default board is every week, so it has no roster to guess
+   * at, and it shows positions.
+   *
+   * Device statuses are always this rig's: the rig is the rig whatever week is
+   * on screen.
+   *
+   * A roster that cannot be read is reported, not thrown — the rows are still
+   * worth drawing, and the caller says so over the preview. Only a malformed
+   * request is an error, and that is refused at the route.
+   */
+  async resolveSlotsPreview(
+    slots: Slot[],
+    target?: SlotsPreviewTarget,
+  ): Promise<SlotsPreviewDTO> {
+    const live =
+      !target ||
+      (target.serviceTypeId === this.state.serviceTypeId && target.planId === this.state.planId);
+    if (live) {
+      return { slots: resolveSlots(slots, this.teamMembers, this.deviceStatuses), roster: "live" };
+    }
+    if (!target.planId) {
+      return { slots: resolveSlots(slots, [], this.deviceStatuses), roster: "none" };
+    }
+    const { members, reason } = await this.previewRoster(target.serviceTypeId, target.planId);
+    if (reason) {
+      return { slots: resolveSlots(slots, [], this.deviceStatuses), roster: "unavailable", reason };
+    }
+    return { slots: resolveSlots(slots, members, this.deviceStatuses), roster: "plan" };
   }
 
+  /**
+   * One plan's roster, for a preview only.
+   *
+   * Returns the failure rather than throwing it, and rather than logging it and
+   * pretending nobody was scheduled: the two read identically in the rows, and
+   * an operator looking at an empty board has to be told which it was.
+   */
+  private async previewRoster(
+    serviceTypeId: string,
+    planId: string,
+  ): Promise<{ members: TeamMemberDTO[]; reason: string | null }> {
+    // ONE place builds the line and the reason, so the log-injection scan has one
+    // interpolation to see and the two failure branches cannot drift apart.
+    const unavailable = (raw: string) => {
+      console.warn(
+        `[stage-controller] preview roster for ${scrub(serviceTypeId)}:${scrub(planId)} unavailable: ${scrub(raw)}`,
+      );
+      return { members: [] as TeamMemberDTO[], reason: scrub(raw) };
+    };
+    if (!this.pcoAppId || !this.pcoSecret) return unavailable("Planning Center is not configured.");
+    try {
+      const members = await pcoService.listTeamMembers(
+        this.pcoAppId,
+        this.pcoSecret,
+        serviceTypeId,
+        planId,
+      );
+      return { members, reason: null };
+    } catch (err) {
+      // The MESSAGE, not scrubError's stack: this string is shown to an operator
+      // as a tooltip over the preview, and a stack trace there tells them nothing
+      // they can act on.
+      return unavailable(errorMessage(err));
+    }
+  }
+
+  /** Legacy alias — `target` is an output id (or empty for primary); routes to
+   *  that output's View. Kept for the /api/slots endpoint + phone control page. */
   async setSlots(target: string, slots: Slot[]): Promise<StageState> {
     return this.setViewSlots(this.viewIdForTarget(target), slots);
   }
 
-  /** Persist + apply a slots-kind View's slot configuration for the active
-   *  service type, then re-resolve and broadcast. */
-  async setViewSlots(viewId: string, slots: Slot[]): Promise<StageState> {
-    if (!this.state.serviceTypeId) {
-      console.log("[stage-controller] setViewSlots: no active service type — slots not persisted");
-    } else {
-      console.log(`[stage-controller] setViewSlots (${scrub(slots.length)} slots) for view=${scrub(viewId)} serviceType=${scrub(this.state.serviceTypeId)}`);
-      await slotsStore.setSlots(viewId, this.state.serviceTypeId, slots);
+  /**
+   * Where a slot save with no explicit target lands.
+   *
+   * The CURRENT PLAN as an override when one is selected, else the service type's
+   * default. That is what the operator sees on screen when they press Save, so it
+   * is what a plain save must change — and it keeps every existing client (the
+   * phone control page, Companion, /api/slots) working without sending a target.
+   *
+   * Null when there is no service type at all, in which case there is nowhere to
+   * persist to.
+   */
+  private defaultSlotsTarget(): SlotsTarget | null {
+    const serviceTypeId = this.state.serviceTypeId;
+    if (!serviceTypeId) return null;
+    if (this.state.planId) {
+      return {
+        kind: "plan",
+        planId: this.state.planId,
+        serviceTypeId,
+        sortDate: this.currentPlanSortDate,
+      };
     }
-    this.rawSlotsByView.set(viewId, slots);
+    return { kind: "default", serviceTypeId };
+  }
+
+  /**
+   * Throw unless `key` names something that exists.
+   *
+   * Every slots route took an arbitrary id and answered 200, so `POST
+   * /api/views/typo/slots` wrote a board under a key nothing would ever read and
+   * reported success. A view id is checked against the view list; an object id
+   * against every inline slots-grid on every custom layout, which is the only
+   * place an inline board legitimately comes from.
+   */
+  private assertSlotsKey(scope: SlotsScope, key: string): void {
+    if (scope === "view") {
+      if (!this.state.views.some((v) => v.id === key)) {
+        throw new SlotsNotFoundError(`There is no view ${key}.`);
+      }
+      return;
+    }
+    let found = false;
+    forEachInlineSlotsGrid(this.state.views, (oid) => {
+      if (oid === key) found = true;
+    });
+    if (!found) {
+      throw new SlotsNotFoundError(`There is no inline mic-slots object ${key} on any layout.`);
+    }
+  }
+
+  /**
+   * Throw unless a plan target names the plan's OWN service type.
+   *
+   * An override is only ever honoured for the type it was saved against (see
+   * slotsStore.resolve), so a mismatched pair writes a board no screen can
+   * display, no editor can show, and pruning cannot date — it asks PCO about the
+   * wrong service type, never finds the plan and so leaves it forever.
+   *
+   * Only the CURRENT plan's type is known without a network call. For any other
+   * plan this asks PCO, whose window is the last 30 days plus the next 25 plans —
+   * wide enough for anything the app itself writes. When PCO cannot answer, the
+   * target is ACCEPTED and the reason is logged: an unreachable integration is
+   * not evidence that a plan is the wrong one.
+   */
+  private async assertTargetPlanBelongs(target: SlotsTarget): Promise<void> {
+    if (target.kind !== "plan") return;
+    if (target.planId === this.state.planId) {
+      if (this.state.serviceTypeId && target.serviceTypeId !== this.state.serviceTypeId) {
+        throw new SlotsNotFoundError(
+          `Plan ${target.planId} belongs to service type ${this.state.serviceTypeId}, not ${target.serviceTypeId}.`,
+          400,
+        );
+      }
+      return;
+    }
+    let plans: PlanDTO[];
+    try {
+      plans = await this.listPlans(target.serviceTypeId);
+    } catch (err) {
+      console.warn(
+        "[slots] could not check which service type a plan belongs to, so the save was allowed:",
+        scrub(target.planId),
+        scrubError(err),
+      );
+      return;
+    }
+    if (!plans.some((p) => p.id === target.planId)) {
+      throw new SlotsNotFoundError(
+        `Planning Center has no plan ${target.planId} in service type ${target.serviceTypeId}.`,
+      );
+    }
+  }
+
+  /**
+   * Persist a slot set to one target, then re-read what the screens should show.
+   *
+   * The in-memory rows are RE-RESOLVED from the store rather than set to what was
+   * just written: saving the service type's default while a plan override is in
+   * effect must not change a single screen, and assigning the written rows
+   * straight into the map is exactly how it would have.
+   *
+   * One body for both the view-keyed and object-keyed cases — they were two
+   * copies of this that had already drifted in their log lines.
+   */
+  private async persistSlots(
+    scope: SlotsScope,
+    key: string,
+    slots: Slot[],
+    target: SlotsTarget | null,
+  ): Promise<StageState> {
+    this.assertSlotsKey(scope, key);
+    if (target) await this.assertTargetPlanBelongs(target);
+    const map = scope === "view" ? this.rawSlotsByView : this.rawSlotsByObject;
+    if (!target) {
+      // Two whole literals rather than one line with `${label}` spliced in. The
+      // method name and the scope are ours, not a request's — but log-injection's
+      // scan reads source and cannot know that, and a guard whose only failures
+      // are false ones stops being read. Every VALUE here still goes through
+      // scrub().
+      if (scope === "view") {
+        console.log("[stage-controller] setViewSlots: no active service type — slots not persisted");
+      } else {
+        console.log("[stage-controller] setLayoutObjectSlots: no active service type — slots not persisted");
+      }
+      map.set(key, slots);
+    } else {
+      // scrub() is spelled out INSIDE each interpolation, not hoisted into a
+      // local. log-injection.test.ts reads source and only recognises the
+      // barrier in that shape, and a guard whose failures are all false ones
+      // stops being read.
+      if (scope === "view") {
+        console.log(
+          `[stage-controller] setViewSlots (${scrub(slots.length)} slots) for view=${scrub(key)} target=${scrub(describeSlotsTarget(target))}`,
+        );
+      } else {
+        console.log(
+          `[stage-controller] setLayoutObjectSlots (${scrub(slots.length)} slots) for object=${scrub(key)} target=${scrub(describeSlotsTarget(target))}`,
+        );
+      }
+      if (target.kind === "default") {
+        await slotsStore.setDefault(key, target.serviceTypeId, slots);
+      } else {
+        // A client naming the current plan does not know its PCO sort_date, and
+        // an override with no date is one pruning can never age out — so fill it
+        // in here, where it is known, rather than trusting the request for it.
+        const sortDate =
+          target.sortDate ??
+          (target.planId === this.state.planId ? this.currentPlanSortDate : null);
+        if (sortDate === null) {
+          // Recoverable, not lost: the daily prune dates an undated override by
+          // asking Planning Center about the plan. Said out loud because the
+          // alternative is an operator finding an override that never ages out
+          // and having nothing at all to read about why.
+          console.log(
+            `[slots] override for plan ${scrub(target.planId)} saved without a date; prune will ask Planning Center for it`,
+          );
+        }
+        await slotsStore.setOverride(key, target.planId, target.serviceTypeId, slots, sortDate);
+      }
+      map.set(key, await slotsStore.resolve(key, this.state.serviceTypeId, this.state.planId));
+    }
     this.recomputeResolved();
     this.broadcast();
     return this.state;
   }
 
+  /** Persist + apply a slots-kind View's slot configuration, then re-resolve and
+   *  broadcast. `target` defaults to the current plan, else the type's default. */
+  async setViewSlots(viewId: string, slots: Slot[], target?: SlotsTarget): Promise<StageState> {
+    return this.persistSlots("view", viewId, slots, target ?? this.defaultSlotsTarget());
+  }
+
   /** Persist + apply an inline mic-slots object's slot configuration (a custom
-   *  layout `slots-grid` with source "inline") for the active service type, keyed
-   *  by the layout object's id, then re-resolve and broadcast. */
-  async setLayoutObjectSlots(objectId: string, slots: Slot[]): Promise<StageState> {
-    if (!this.state.serviceTypeId) {
-      console.log("[stage-controller] setLayoutObjectSlots: no active service type — slots not persisted");
-    } else {
-      console.log(`[stage-controller] setLayoutObjectSlots (${scrub(slots.length)} slots) for object=${scrub(objectId)} serviceType=${scrub(this.state.serviceTypeId)}`);
-      await slotsStore.setSlots(objectId, this.state.serviceTypeId, slots);
+   *  layout `slots-grid` with source "inline"), keyed by the layout object's id. */
+  async setLayoutObjectSlots(objectId: string, slots: Slot[], target?: SlotsTarget): Promise<StageState> {
+    return this.persistSlots("object", objectId, slots, target ?? this.defaultSlotsTarget());
+  }
+
+  /** Drop one plan's override, so the key falls back to the type's default
+   *  ("Revert to default"). Rejects when there was nothing to revert, rather than
+   *  reporting a revert that changed nothing. */
+  async clearSlotsOverride(scope: SlotsScope, key: string, planId: string): Promise<StageState> {
+    this.assertSlotsKey(scope, key);
+    const cleared = await slotsStore.clearOverride(key, planId);
+    if (!cleared) {
+      throw new SlotsNotFoundError(
+        `No slots are saved for that plan on ${scope} ${key}, so there is nothing to revert.`,
+      );
     }
-    this.rawSlotsByObject.set(objectId, slots);
+    if (scope === "view") {
+      console.log(
+        `[stage-controller] clearSlotsOverride for view=${scrub(key)} target=${scrub(`plan:${planId}`)}`,
+      );
+    } else {
+      console.log(
+        `[stage-controller] clearSlotsOverride for object=${scrub(key)} target=${scrub(`plan:${planId}`)}`,
+      );
+    }
+    return this.refreshRawSlotsFor(scope, key);
+  }
+
+  /** Make a plan's override the service type's default and drop the override
+   *  ("Set as default"). */
+  async promoteSlotsOverride(scope: SlotsScope, key: string, planId: string): Promise<StageState> {
+    this.assertSlotsKey(scope, key);
+    const promoted = await slotsStore.promoteOverride(key, planId);
+    if (!promoted) {
+      throw new SlotsNotFoundError(
+        `No slots are saved for that plan on ${scope} ${key}, so there is nothing to promote.`,
+      );
+    }
+    if (scope === "view") {
+      console.log(
+        `[stage-controller] promoteSlotsOverride (${scrub(promoted.slots.length)} slots) for view=${scrub(key)} target=${scrub(`default:${promoted.serviceTypeId}`)}`,
+      );
+    } else {
+      console.log(
+        `[stage-controller] promoteSlotsOverride (${scrub(promoted.slots.length)} slots) for object=${scrub(key)} target=${scrub(`default:${promoted.serviceTypeId}`)}`,
+      );
+    }
+    return this.refreshRawSlotsFor(scope, key);
+  }
+
+  /** Re-read one key's rows from the store and broadcast. */
+  private async refreshRawSlotsFor(scope: SlotsScope, key: string): Promise<StageState> {
+    const map = scope === "view" ? this.rawSlotsByView : this.rawSlotsByObject;
+    map.set(key, await slotsStore.resolve(key, this.state.serviceTypeId, this.state.planId));
     this.recomputeResolved();
     this.broadcast();
     return this.state;
+  }
+
+  /**
+   * Both boards for a key, so the editor can show either without a second call:
+   * the service type's default, and the current plan's override when it has one.
+   *
+   * One request rather than a route per target — the editor needs the pair at
+   * once anyway, to know whether to badge the plan side as edited.
+   */
+  async getSlotTargets(
+    scope: SlotsScope,
+    key: string,
+    want?: { serviceTypeId?: string | null; planId?: string | null },
+  ): Promise<SlotTargetsDTO> {
+    this.assertSlotsKey(scope, key);
+    // Absent `want` means the machine's own type and plan — what every caller
+    // did before the editor could be pointed somewhere else. A `want` naming a
+    // type and no plan is the type's DEFAULT board, not "fall back to the
+    // current plan": the editor asks for exactly one target and guessing here
+    // would read a board it is not showing.
+    const asked = want !== undefined;
+    const serviceTypeId = asked ? (want.serviceTypeId ?? null) : this.state.serviceTypeId;
+    const planId = asked ? (want.planId ?? null) : this.state.planId;
+    const isCurrent = planId !== null && planId === this.state.planId;
+    const row = isCurrent ? null : this.cachedUpcoming(planId);
+    const override = serviceTypeId && planId ? await slotsStore.getOverride(key, planId) : null;
+    return {
+      scope,
+      key,
+      serviceTypeId,
+      // The switcher's own list is the only place a NON-current plan's name and
+      // date are known without another Planning Center request, and the editor
+      // is opened far more often than that list changes. Null when the target is
+      // not in it; planLabel() falls back rather than inventing a date.
+      serviceTypeName: isCurrent
+        ? this.state.serviceTypeName
+        : (row?.serviceTypeName ?? this.cachedTypeName(serviceTypeId)),
+      planId,
+      planDates: isCurrent ? this.state.planDates : (row?.dates ?? null),
+      planSortDate: isCurrent ? this.currentPlanSortDate : (row?.sortDate ?? null),
+      defaultSlots: serviceTypeId ? await slotsStore.getDefault(key, serviceTypeId) : [],
+      // A record saved against a DIFFERENT service type is not this type's
+      // override, and offering it as one would let a revert discard a board the
+      // operator cannot see.
+      overrideSlots: override && override.serviceTypeId === serviceTypeId ? override.slots : null,
+    };
+  }
+
+  /** How long an override outlives its plan before the daily sweep drops it. */
+  private static readonly OVERRIDE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+  /**
+   * Delete overrides whose plan is more than 30 days past.
+   *
+   * A plan's date comes from the override itself when it was recorded there, and
+   * otherwise from PCO. When PCO cannot answer for a service type, nothing of
+   * that type is pruned and nothing is logged — an unreachable integration is not
+   * evidence that a plan is old.
+   *
+   * Resolves with how many went, so the caller (and a test) can see it.
+   */
+  async pruneSlotOverrides(): Promise<number> {
+    const overrides = await slotsStore.allOverrides();
+    // No overrides at all: no PCO request, no log line, nothing.
+    if (Object.keys(overrides).length === 0) return 0;
+
+    // PCO is asked ONLY about service types with an override carrying no date of
+    // its own. Every override this build writes records the plan's sort_date, so
+    // in practice this set is empty and pruning needs no network at all.
+    const needsLookup = new Set<string>();
+    for (const byPlan of Object.values(overrides)) {
+      for (const o of Object.values(byPlan)) {
+        if (!o.sortDate) needsLookup.add(o.serviceTypeId);
+      }
+    }
+    const dates = new Map<string, string | null>();
+    const unreachable = new Set<string>();
+    for (const typeId of needsLookup) {
+      try {
+        for (const plan of await this.listPlans(typeId)) dates.set(plan.id, plan.sortDate);
+      } catch (err) {
+        // Not swallowed: the type is recorded as unresolvable, which is what
+        // stops anything of that type being pruned below.
+        unreachable.add(typeId);
+        console.warn(
+          "[slots] could not date plans for a service type, so its overrides are left alone:",
+          scrub(typeId),
+          scrubError(err),
+        );
+      }
+    }
+
+    // "More than 30 days ago" is a question about the CALENDAR, so both sides are
+    // reduced to a day in the app's zone before they are compared. On a UTC box
+    // in Chicago the host rolls its date at 19:00 local, and every "is this old
+    // yet?" in this app that used the host clock has eventually been a bug —
+    // here it only ever moved a deletion by a few hours, which is exactly why it
+    // would never have been noticed.
+    const cutoff = startOfZonedDay(zonedDateKey(Date.now())) - StageController.OVERRIDE_TTL_MS;
+    const pruned = await slotsStore.pruneOverrides((planId, serviceTypeId, sortDate) => {
+      if (unreachable.has(serviceTypeId)) return false;
+      const iso = sortDate ?? dates.get(planId) ?? null;
+      if (!iso) return false; // no date for it — do not guess
+      const at = Date.parse(iso);
+      if (!Number.isFinite(at)) return false;
+      return startOfZonedDay(zonedDateKey(at)) < cutoff;
+    });
+    if (pruned > 0) {
+      console.log(`[slots] pruned ${scrub(pruned)} override(s) for plans older than 30 days`);
+    }
+    return pruned;
+  }
+
+  /** Prune once shortly after boot, then daily. */
+  private startSlotsPruning(): void {
+    this.stopSlotsPruning();
+    const tick = () =>
+      void this.pruneSlotOverrides().catch((err) =>
+        console.error("[slots] prune failed:", scrubError(err)),
+      );
+    // Both handles are kept. The boot one was not, so a restore that paused
+    // background work still had a prune fire ten seconds in — deleting overrides
+    // out of the very file being restored, on a timer nobody could cancel.
+    // unref: a housekeeping sweep must never be what keeps the process alive —
+    // it held every test file that boots the controller open forever.
+    this.slotsPruneBootTimer = setTimeout(tick, 10_000);
+    this.slotsPruneBootTimer.unref();
+    this.slotsPruneTimer = setInterval(tick, 24 * 60 * 60 * 1000);
+    this.slotsPruneTimer.unref();
+  }
+
+  stopSlotsPruning(): void {
+    if (this.slotsPruneBootTimer) {
+      clearTimeout(this.slotsPruneBootTimer);
+      this.slotsPruneBootTimer = null;
+    }
+    if (this.slotsPruneTimer) {
+      clearInterval(this.slotsPruneTimer);
+      this.slotsPruneTimer = null;
+    }
   }
 
   // ── QR visibility ─────────────────────────────────────────────────────
@@ -2025,7 +2620,11 @@ export class StageController {
    * is what let a misdirected apply look like a success — nine slots written to
    * another view, and a toast saying "Arrangement applied".
    */
-  async applyPreset(target: string, id: string): Promise<{ state: StageState; viewId: string }> {
+  async applyPreset(
+    target: string,
+    id: string,
+    slotsTarget?: SlotsTarget,
+  ): Promise<{ state: StageState; viewId: string }> {
     const viewId = this.viewIdForTarget(target);
     const presets = await presetsStore.load();
     const preset = presets.find((p) => p.id === id);
@@ -2046,7 +2645,9 @@ export class StageController {
 
     // Deep-clone with fresh slot ids so applied slots are independent of the preset.
     const slots: Slot[] = preset.slots.map((s) => ({ ...s, id: randomUUID() }));
-    const state = await this.setViewSlots(viewId, slots);
+    // Lands on whichever target the editor is showing: recalling an arrangement
+    // while looking at this week's board must not rewrite the type's default.
+    const state = await this.setViewSlots(viewId, slots, slotsTarget);
     return { state, viewId };
   }
 
@@ -2219,10 +2820,7 @@ export class StageController {
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     if (kind === "slots" && !this.rawSlotsByView.has(id)) {
-      const raw = this.state.serviceTypeId
-        ? await slotsStore.getSlots(id, this.state.serviceTypeId)
-        : [];
-      this.rawSlotsByView.set(id, raw);
+      this.rawSlotsByView.set(id, await this.rawFor(id));
     }
     this.recomputeResolved();
     this.broadcast();
@@ -2329,7 +2927,7 @@ export class StageController {
     forEachInlineSlotsGrid(this.state.views, (oid) => inlineIds.add(oid));
     if (this.state.serviceTypeId) {
       for (const oid of inlineIds) {
-        if (!this.rawSlotsByObject.has(oid)) this.rawSlotsByObject.set(oid, await slotsStore.getSlots(oid, this.state.serviceTypeId));
+        if (!this.rawSlotsByObject.has(oid)) this.rawSlotsByObject.set(oid, await this.rawFor(oid));
       }
     }
     for (const key of [...this.rawSlotsByObject.keys()]) if (!inlineIds.has(key)) this.rawSlotsByObject.delete(key);
@@ -2367,14 +2965,14 @@ export class StageController {
     this.state = { ...this.state, views };
     await viewsStore.save(views);
 
-    // Deep-copy slot config (active service type) with fresh slot ids.
+    // Deep-copy slot config with fresh slot ids, through the same copyKey the
+    // inline objects below use: EVERY service type's default and every per-plan
+    // override, not just the active type's rows. Copying one type's board by hand
+    // is what this did before, and a duplicate of a view configured for three
+    // service types came back configured for one.
     if (src.kind === "slots") {
-      const srcSlots = this.rawSlotsByView.get(id) ?? [];
-      const slots = srcSlots.map((s) => ({ ...s, id: randomUUID() }));
-      this.rawSlotsByView.set(newId, slots);
-      if (this.state.serviceTypeId) {
-        await slotsStore.setSlots(newId, this.state.serviceTypeId, slots);
-      }
+      await slotsStore.copyKey(id, newId, () => randomUUID());
+      this.rawSlotsByView.set(newId, await this.rawFor(newId));
     }
     // Copy each inline mic-slots object's slots (all service types) to the cloned
     // object ids, so the duplicated layout keeps its lineups.
@@ -2385,7 +2983,7 @@ export class StageController {
         const mapped = cloned.idMap.get(oldId);
         if (!mapped) continue;
         await slotsStore.copyKey(oldId, mapped, () => randomUUID());
-        if (this.state.serviceTypeId) this.rawSlotsByObject.set(mapped, await slotsStore.getSlots(mapped, this.state.serviceTypeId));
+        if (this.state.serviceTypeId) this.rawSlotsByObject.set(mapped, await this.rawFor(mapped));
       }
     }
     this.recomputeResolved();
@@ -2393,15 +2991,53 @@ export class StageController {
     return this.state;
   }
 
-  /** Copy another View's slot config into this one (the "recall a saved
-   *  arrangement" workflow, replacing presets). */
-  async copyViewSlots(targetViewId: string, fromViewId: string): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === targetViewId)) {
-      throw new Error(`views:copySlots — view ${targetViewId} not found`);
+  /**
+   * Copy another View's slot config into this one, onto ONE board.
+   *
+   * `target` is the board the editor is showing, the same one a slot save takes,
+   * and both sides of the copy use it: the source is read from that board and
+   * the destination is written to that board. Nothing else is read and NOTHING
+   * is deleted.
+   *
+   * It used to write the source's DEFAULT into the destination's default
+   * whichever side the editor was on, and then `clearOverride` the destination's
+   * board for the current plan — an unconfirmed, unlogged delete of an
+   * operator's week, next to a Revert action that confirms and logs the very
+   * same deletion.
+   *
+   * On the plan side with no override on the source, the source's default is
+   * copied into the destination's OVERRIDE: the point of the action is that the
+   * destination ends up showing what the source shows, and rewriting the
+   * destination's standing board to get there is not something the operator
+   * asked for.
+   */
+  async copyViewSlots(targetViewId: string, fromViewId: string, target?: SlotsTarget): Promise<StageState> {
+    this.assertSlotsKey("view", targetViewId);
+    this.assertSlotsKey("view", fromViewId);
+    const effective = target ?? this.defaultSlotsTarget();
+    // No service type means nothing is persisted anywhere, so there is only the
+    // in-memory board to copy — the same thing this did before targets existed.
+    if (!effective) {
+      const src = this.rawSlotsByView.get(fromViewId) ?? [];
+      return this.setViewSlots(targetViewId, src.map((s) => ({ ...s, id: randomUUID() })));
     }
-    const src = this.rawSlotsByView.get(fromViewId) ?? [];
-    const slots = src.map((s) => ({ ...s, id: randomUUID() }));
-    return this.setViewSlots(targetViewId, slots);
+
+    const fresh = (rows: Slot[]) => rows.map((s) => ({ ...s, id: randomUUID() }));
+    if (effective.kind === "default") {
+      const rows = await slotsStore.getDefault(fromViewId, effective.serviceTypeId);
+      return this.persistSlots("view", targetViewId, fresh(rows), effective);
+    }
+
+    // The plan side. The source's own board for this plan when it has one, and
+    // otherwise the source's DEFAULT copied INTO the destination's override —
+    // which is what makes "copy slots from another view" show what the other
+    // view shows, without touching the destination's default.
+    const override = await slotsStore.getOverride(fromViewId, effective.planId);
+    const rows =
+      override && override.serviceTypeId === effective.serviceTypeId
+        ? override.slots
+        : await slotsStore.getDefault(fromViewId, effective.serviceTypeId);
+    return this.persistSlots("view", targetViewId, fresh(rows), effective);
   }
 
   async deleteView(id: string): Promise<StageState> {
@@ -2838,7 +3474,7 @@ export class StageController {
     if (this.state.serviceTypeId) {
       for (const v of views) {
         if (v.kind === "slots" && !this.rawSlotsByView.has(v.id)) {
-          this.rawSlotsByView.set(v.id, await slotsStore.getSlots(v.id, this.state.serviceTypeId));
+          this.rawSlotsByView.set(v.id, await this.rawFor(v.id));
         }
       }
     }
@@ -2849,7 +3485,7 @@ export class StageController {
     if (this.state.serviceTypeId) {
       for (const oid of inlineIds) {
         if (!this.rawSlotsByObject.has(oid)) {
-          this.rawSlotsByObject.set(oid, await slotsStore.getSlots(oid, this.state.serviceTypeId));
+          this.rawSlotsByObject.set(oid, await this.rawFor(oid));
         }
       }
     }
@@ -2925,11 +3561,16 @@ export class StageController {
   pauseBackgroundWork(): () => void {
     const refreshMs = this.autoRefreshTimer ? this.autoRefreshIntervalMs : null;
     const hadUpdateChecks = this.updateCheckTimer !== null;
+    const hadSlotsPruning = this.slotsPruneTimer !== null;
     this.stopAutoRefresh();
     this.stopUpdateChecks();
+    // A prune mid-restore would delete overrides out of the very file being
+    // restored, and it fires on a timer nobody is watching.
+    this.stopSlotsPruning();
     return () => {
       if (refreshMs != null) this.startAutoRefresh(refreshMs);
       if (hadUpdateChecks) this.startUpdateChecks();
+      if (hadSlotsPruning) this.startSlotsPruning();
     };
   }
 
@@ -3191,6 +3832,9 @@ export class StageController {
       planSeriesTitle: plan.seriesTitle,
       planDates: plan.dates,
     };
+    // Recorded so an override saved for this plan carries the plan's date, which
+    // is the only thing pruning can judge a stale override by without asking PCO.
+    this.currentPlanSortDate = plan.sortDate ?? null;
     await settingsStore.patch({
       planId: plan.id,
       planTitle: plan.title,
@@ -3201,6 +3845,12 @@ export class StageController {
     if (this.state.serviceTypeId) {
       await this.fetchTeamMembers(this.state.serviceTypeId, plan.id);
     }
+
+    // A board can be saved against one plan, so the rows every screen shows are
+    // plan-dependent and have to be re-read here — not only when the SERVICE TYPE
+    // changes. Without this, moving to next week's plan kept showing the board
+    // saved for last week's.
+    await this.loadAllViewRawSlots(this.state.serviceTypeId, plan.id);
 
     await this.reResolveAll();
     this.state = { ...this.state, lastRefreshedAt: new Date().toISOString() };
@@ -3262,16 +3912,29 @@ export class StageController {
     }
   }
 
-  /** Load raw slots for every slots-kind View for the given service type. The
-   *  primary View additionally adopts the legacy "default" bucket if present. */
-  private async loadAllViewRawSlots(serviceTypeId: string | null): Promise<void> {
+  /**
+   * Load raw slots for every slots-kind View and inline slots-grid object.
+   *
+   * Both the service type AND the plan are arguments rather than read off
+   * `this.state`: the callers that switch either one call this while the state is
+   * mid-change, and reading the half-updated state is how a reload would land on
+   * the previous week's board.
+   *
+   * The plan matters because a board can be saved against ONE plan (see
+   * slots-store), so this must re-run when the plan changes even though the
+   * service type did not. The primary View additionally adopts the legacy
+   * "default" bucket if present.
+   */
+  private async loadAllViewRawSlots(serviceTypeId: string | null, planId: string | null): Promise<void> {
     this.rawSlotsByView.clear();
     this.rawSlotsByObject.clear();
     // Inline mic-slots objects (custom layouts) — keyed by object id.
     if (serviceTypeId) {
       const inlineIds: string[] = [];
       forEachInlineSlotsGrid(this.state.views, (oid) => inlineIds.push(oid));
-      for (const oid of inlineIds) this.rawSlotsByObject.set(oid, await slotsStore.getSlots(oid, serviceTypeId));
+      for (const oid of inlineIds) {
+        this.rawSlotsByObject.set(oid, await slotsStore.resolve(oid, serviceTypeId, planId));
+      }
     }
     const primaryViewId = this.primaryViewId();
     for (const view of this.state.views) {
@@ -3282,10 +3945,17 @@ export class StageController {
       }
       const slots =
         view.id === primaryViewId
-          ? await slotsStore.adoptDefaultInto(view.id, serviceTypeId)
-          : await slotsStore.getSlots(view.id, serviceTypeId);
+          ? await slotsStore.adoptDefaultInto(view.id, serviceTypeId, planId)
+          : await slotsStore.resolve(view.id, serviceTypeId, planId);
       this.rawSlotsByView.set(view.id, slots);
     }
+  }
+
+  /** One key's rows for what is in effect NOW — the current plan's override if it
+   *  has one, else the active service type's default. The single read used by
+   *  every path that needs a key's rows without reloading all of them. */
+  private rawFor(key: string): Promise<Slot[]> {
+    return slotsStore.resolve(key, this.state.serviceTypeId, this.state.planId);
   }
 
   /** @deprecated Async shim kept for the many `await this.reResolveAll()` call

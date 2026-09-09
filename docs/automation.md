@@ -57,6 +57,7 @@ poll after.
 | A ProVideoPlayer clip stops rolling | a clip has stopped, ended or been paused |
 | A ProVideoPlayer layer is hidden / unhidden | the layer's hidden flag flips |
 | A ProVideoPlayer layer is muted / unmuted | the layer's mute flag flips |
+| Called by name | something called `POST /api/cues/<name>` with a token. This one NEVER fires by itself — see [Cues](#cues) |
 
 Every trigger fires on an **edge** — the moment something changes — never on a
 state that merely persists. The channels carry state snapshots, re-sent
@@ -76,7 +77,7 @@ value as a position rather than a name.
 
 ## Conditions
 
-**A service is live**, **service type is**, **day of week**, **time is between**,
+**A service is live**, **no service is live**, **service type is**, **day of week**, **time is between**,
 **baptism phase is**, **OBS is recording**, **REAPER is recording**, **Resi is
 streaming**, **YouTube is streaming**, **a ProVideoPlayer layer has content**,
 **is playing a video**, **is hidden** or **is muted**, **ProVideoPlayer has
@@ -85,6 +86,15 @@ selected conditions must hold.
 
 They keep triggers simple: "when occupancy rises above 50" would also fire for a
 Tuesday meeting, so you add "and a service is live".
+
+Conditions cannot be negated — the list is a plain AND — which is why **a service
+is live** and **no service is live** are two separate entries rather than one with
+a switch. They are not opposites. **No service is live** fails closed: it holds only
+when Planning Center says nothing is on, so it refuses while a service is running or
+about to start (within the hour before it), and when Planning Center is configured
+and cannot be read at all. With no Planning Center configured there is nothing to
+check and it holds. It is what a cue carries so it cannot be run during setup or
+mid-service.
 
 Conditions only **hold** or don't — unlike a trigger they never fire on their own.
 "OBS is recording" qualifies a rule that some other trigger started; it is not a
@@ -110,6 +120,7 @@ for "idle", because before it runs we do not know that it is idle.
 | Advance PCO Live one item | steps the live plan forward once |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
+| Press a Companion button | presses one button at a page/row/column. Reports "dispatched", never "on" — see [Pressing a button](integrations/companion.md#pressing-a-button) |
 | Fire a ProVideoPlayer cue | a cue from a playlist. ProVideoPlayer always plays it on the cue's own layer |
 | Clear a ProVideoPlayer layer | takes whatever is on that layer off screen |
 | Clear every ProVideoPlayer layer | blanks every screen PVP is driving |
@@ -127,6 +138,46 @@ for "idle", because before it runs we do not know that it is idle.
 > argument and ignores it, playing the cue on its own configured layer. Which
 > layer a cue uses is set in ProVideoPlayer, not here. See
 > [ProVideoPlayer](integrations/provideoplayer.md).
+
+## Cues
+
+A **cue** is a rule triggered by **Called by name** rather than by anything
+happening in the building. It runs only when something calls
+`POST /api/cues/<name>` with a bearer token, so it is how a voice assistant, a
+script or Home Assistant reaches Stage Utility.
+
+**For setup and teardown, not for cues during a service.** Turning the projectors
+on before a rehearsal, turning the foyer televisions off after. Every cue imported
+from Companion carries the **no service is live** condition, and refuses with a
+sentence — *"The Gospel Way is live"* — while a service is running or about to
+start, and when Planning Center cannot be read.
+
+| | |
+|---|---|
+| **Cue name** | `lower_snake_case`, unique across rules — and across every cue's former names. This is the URL |
+| **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
+| **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
+| **Room** | where the thing is. Recorded in the log; nothing routes on it |
+| **State variable** | on the `_on` half of an ON/OFF pair: a Companion custom variable your own buttons set to `on`/`off`, so the generated Home Assistant switch reports what the device is doing rather than what it was asked to do. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) |
+| **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
+| **Once per service** | honoured on a call as well as on a trigger: a second call in the same service occurrence is refused `once-per-service` |
+
+The rule's own conditions, cooldown and enable switch all apply to a call exactly
+as they do to a trigger — a cue is a rule, not a second path through the engine.
+Every call, allowed or refused, is in the Activity log with the calling token's
+label.
+
+A cue that presses a Companion button remembers which button, not just where it
+was: if somebody moves it, the coordinates follow it and the rule's row says so;
+if it is gone, the cue answers `button-missing` and presses nothing rather than
+pressing whatever is now at those coordinates; if it is RELABELLED, the cue is
+renamed to match and the old name keeps answering. See
+[When a button moves](integrations/companion.md#when-a-button-moves) and
+[When a button is renamed](integrations/companion.md#when-a-button-is-renamed).
+
+Set the whole thing up under [Companion](integrations/companion.md#calling-a-cue-by-name):
+the button picker, the ON/OFF and single-button import, the tokens and the Home
+Assistant paste.
 
 ## Firing an item on time
 
