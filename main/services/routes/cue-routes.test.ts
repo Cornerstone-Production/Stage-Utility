@@ -1187,8 +1187,13 @@ describe("the Home Assistant config", () => {
     // Both fixture pages have a "Projectors" pair, so the switch has to name
     // the page too — otherwise Home Assistant gets two switches called
     // "Projectors" and the operator picks one at random.
-    assert.match(yaml, /friendly_name: "Room A: Screens Projectors"/);
-    assert.match(yaml, /friendly_name: "Lobby: TVs"/);
+    assert.match(yaml, /^ {6}- name: "Room A: Screens Projectors"$/m);
+    assert.match(yaml, /^ {6}- name: "Lobby: TVs"$/m);
+    // Under the template integration's own key, once. The legacy
+    // `switch: - platform: template` spelling this used to serve is refused by
+    // current Home Assistant, so every switch in a pasted fragment vanished.
+    assert.equal((yaml.match(/^template:$/gm) ?? []).length, 1);
+    assert.equal(/^switch:$/m.test(yaml), false, "the legacy switch: block is back");
   });
 
   test("it is an open read, and never contains a token", async () => {
