@@ -1979,8 +1979,12 @@ export class StageController {
     // Both handles are kept. The boot one was not, so a restore that paused
     // background work still had a prune fire ten seconds in — deleting overrides
     // out of the very file being restored, on a timer nobody could cancel.
+    // unref: a housekeeping sweep must never be what keeps the process alive —
+    // it held every test file that boots the controller open forever.
     this.slotsPruneBootTimer = setTimeout(tick, 10_000);
+    this.slotsPruneBootTimer.unref();
     this.slotsPruneTimer = setInterval(tick, 24 * 60 * 60 * 1000);
+    this.slotsPruneTimer.unref();
   }
 
   stopSlotsPruning(): void {
