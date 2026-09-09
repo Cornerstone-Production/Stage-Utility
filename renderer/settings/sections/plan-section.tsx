@@ -211,12 +211,17 @@ export function PlanSection({
                   <DownloadIcon className="size-3.5" /> Export plan…
                 </Button>
               </Field>
-              <ExportPlanDialog
-                open={exporting}
-                onOpenChange={setExporting}
-                serviceTypes={visibleServiceTypes}
-                defaultServiceTypeId={stageState.serviceTypeId ?? null}
-              />
+              {/* Mounted only while open, so the picker seeds from the types and
+                  the current plan as they are NOW. Mounted permanently it seeded
+                  once, before Planning Center had answered, and opened on nothing. */}
+              {exporting && (
+                <ExportPlanDialog
+                  open
+                  onOpenChange={setExporting}
+                  serviceTypes={visibleServiceTypes}
+                  defaultServiceTypeId={stageState.serviceTypeId ?? null}
+                />
+              )}
               {active.map(row)}
               {/* The slot editors' plan switcher walks these types. Beside the
                   allowlist because it is the same decision continued: which
