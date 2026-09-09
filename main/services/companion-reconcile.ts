@@ -41,8 +41,6 @@ import {
 } from "./companion-fingerprint.js";
 import type { Rule } from "../types/automation.js";
 
-export const PRESS_ACTION_ID = "companion.press";
-
 /** Room for a whole sentence: scrub()'s 200-character default would cut a moved
  *  line off mid-coordinate, and these lines are what an operator reads. */
 const LOG_MAX = 600;
@@ -77,7 +75,10 @@ export interface ReconcileResult {
 export function pressEntries(rules: readonly Rule[]): PressEntry[] {
   const out: PressEntry[] = [];
   for (const rule of rules) {
-    if (rule.action.id !== PRESS_ACTION_ID) continue;
+    // The literal, as every other action id is written in this app — there is
+    // no shared constant for any of them and inventing one for this alone would
+    // be two conventions.
+    if (rule.action.id !== "companion.press") continue;
     out.push({
       ruleId: rule.id,
       label: automationEngine.cueNameOf(rule) || rule.name,
@@ -351,7 +352,7 @@ export function startCompanionReconcile(hasHost: boolean): void {
   timer.unref();
 }
 
-export function stopCompanionReconcile(): void {
+function stopCompanionReconcile(): void {
   if (timer) {
     clearInterval(timer);
     timer = null;

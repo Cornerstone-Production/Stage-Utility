@@ -57,12 +57,12 @@ export interface ButtonFingerprint extends ButtonLocation {
 }
 
 /** `p17 r2 c6`. One format, written and read in this file only. */
-export function encodeLocation(at: ButtonLocation): string {
+function encodeLocation(at: ButtonLocation): string {
   return `p${at.page} r${at.row} c${at.col}`;
 }
 
 /** The inverse, or null for anything that is not one — including "". */
-export function decodeLocation(text: unknown): ButtonLocation | null {
+function decodeLocation(text: unknown): ButtonLocation | null {
   const m = /^p(\d+) r(\d+) c(\d+)$/.exec(String(text ?? "").trim());
   if (!m) return null;
   return { page: Number(m[1]), row: Number(m[2]), col: Number(m[3]) };
@@ -71,11 +71,6 @@ export function decodeLocation(text: unknown): ButtonLocation | null {
 /** `r2c6` — the coordinate as the pill and the log line say it, page implied. */
 export function shortLocation(at: ButtonLocation): string {
   return `r${at.row}c${at.col}`;
-}
-
-/** Is this a press action that has never been reconciled? */
-export function isUnfingerprinted(f: ButtonFingerprint): boolean {
-  return f.status === null;
 }
 
 /**
