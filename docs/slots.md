@@ -114,6 +114,12 @@ line says so and the rows again show positions only, with the reason on hover.
 The line is absent while the editor is on the live plan, where the preview is
 simply the kiosk.
 
+Only the slot rows follow the switcher. Everything else the preview draws — the
+view's top bar, the series and plan title — still comes from the plan the screens
+are following, so a preview of another week is headed with the live plan's title.
+An inline mic-slots object inside a custom layout previews on the layout editor's
+own canvas, which does not follow the switcher.
+
 Two modes, set on the Plan page:
 
 | Mode | The middle | The arrows |
