@@ -17,13 +17,14 @@ import { describe, test } from "node:test";
 
 import {
   collapse,
+  cueSlugs,
   exportBuild,
   findPairs,
   isSuggestedPair,
   isUtilityModule,
   parseButtons,
+  singleButtons,
   slugForCue,
-  slugsForPairs,
   UTILITY_MODULES,
 } from "./companion-export.js";
 import {
@@ -188,26 +189,72 @@ describe("slugForCue", () => {
   });
 });
 
-describe("slugsForPairs", () => {
+describe("cueSlugs", () => {
   const pairs = findPairs(BUTTONS);
-  const slugs = slugsForPairs(pairs);
+  const singles = singleButtons(BUTTONS, pairs);
+  const slugs = cueSlugs(pairs, singles);
 
   test("a base used on one page keeps its plain name", () => {
-    assert.equal(slugs.get("1:lobby_tvs"), "lobby_tvs");
-    assert.equal(slugs.get("2:rig"), "rig");
+    assert.equal(slugs.pairs.get("1:lobby_tvs"), "lobby_tvs");
+    assert.equal(slugs.pairs.get("2:rig"), "rig");
   });
 
   test("a base used on TWO pages is prefixed with the page, on both", () => {
     // Found on the real Companion this was built against: "Conf TVs ON" exists
     // on two auditoriums' pages driving different televisions. Without this the
     // second import is refused as a duplicate and one room quietly has no cue.
-    assert.equal(slugs.get("1:projectors"), "room_a_screens_projectors");
-    assert.equal(slugs.get("2:projectors"), "room_a_lighting_projectors");
+    assert.equal(slugs.pairs.get("1:projectors"), "room_a_screens_projectors");
+    assert.equal(slugs.pairs.get("2:projectors"), "room_a_lighting_projectors");
   });
 
-  test("no two pairs end up with the same name", () => {
-    const names = [...slugs.values()];
+  test("no two offers end up with the same cue name", () => {
+    const names = [
+      ...[...slugs.pairs.values()].filter(Boolean).flatMap((b) => [`${b}_on`, `${b}_off`]),
+      ...[...slugs.buttons.values()].filter(Boolean),
+    ];
     assert.equal(new Set(names).size, names.length);
+  });
+
+  test("a single button and a PAIR half that would share a name are both qualified", () => {
+    // Counted per family this is invisible: "House Lights ON" is the only
+    // single called that, and the pair is the only pair called that, so each is
+    // unique in its own list and both come out `house_lights_on`. The import
+    // then creates one and refuses the other, and a room quietly has no cue.
+    const together = [
+      // A lone ON, offered as a script.
+      at(1, 2, 1)!,
+      // A whole pair on another page, offered as a switch.
+      { ...at(1, 2, 1)!, page: 2, pageName: FIXTURE_PAGES.lights, row: 5, col: 0 },
+      {
+        ...at(1, 2, 1)!,
+        page: 2,
+        pageName: FIXTURE_PAGES.lights,
+        row: 5,
+        col: 1,
+        label: "House Lights OFF",
+      },
+    ];
+    const p = findPairs(together);
+    assert.equal(p.length, 1, "the fixture for this case is not a pair");
+    const s = cueSlugs(p, singleButtons(together, p));
+
+    assert.equal(s.buttons.get("1:2:1"), "room_a_screens_house_lights_on");
+    assert.equal(s.pairs.get("2:house_lights"), "room_a_lighting_house_lights");
+  });
+
+  test("a pair is NOT qualified by a single button whose name collides with neither half", () => {
+    // `projectors` and `projectors_on`/`projectors_off` are three different cue
+    // names. Counting bases rather than names would page-qualify the pair over
+    // a button that never clashed with it.
+    const together = [
+      at(1, 0, 1)!,
+      at(1, 0, 2)!,
+      { ...at(1, 2, 3)!, label: "Projectors" },
+    ];
+    const p = findPairs(together);
+    const s = cueSlugs(p, singleButtons(together, p));
+    assert.equal(s.pairs.get("1:projectors"), "projectors");
+    assert.equal(s.buttons.get("1:2:3"), "projectors");
   });
 });
 

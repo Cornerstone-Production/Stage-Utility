@@ -36,11 +36,10 @@ import { scrub } from "../scrub.js";
 import { automationEngine } from "../automation-engine.js";
 import { companionApi } from "../companion-api.js";
 import {
+  cueSlugs,
   isSuggestedPair,
   singleButtons,
   slugForCue,
-  slugsForButtons,
-  slugsForPairs,
 } from "../companion-export.js";
 import { fingerprintParams } from "../companion-fingerprint.js";
 import { runCompanionReconcile } from "../companion-reconcile.js";
@@ -209,11 +208,15 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     const taken = new Set(automationEngine.listRules().map((r) => automationEngine.cueNameOf(r)).filter(Boolean));
-    // Slugs are resolved across the WHOLE list, not per pair, because uniqueness
-    // is a property of the set — see slugsForPairs.
-    const slugs = slugsForPairs(result.pairs);
+    // The single buttons are worked out HERE rather than below, because the cue
+    // names of the pairs and of the singles are resolved together: uniqueness is
+    // a property of the whole offer, and counted per family a lone "House Lights
+    // ON" and a "House Lights ON/OFF" pair on another page both come out
+    // `house_lights_on`. See cueSlugs.
+    const singles = singleButtons(result.buttons, result.pairs);
+    const slugs = cueSlugs(result.pairs, singles);
     const pairs = result.pairs.map((p) => {
-      const slug = slugs.get(`${p.page}:${slugForCue(p.base)}`) ?? "";
+      const slug = slugs.pairs.get(`${p.page}:${slugForCue(p.base)}`) ?? "";
       return {
         ...p,
         slug,
@@ -234,10 +237,8 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // thing being turned on and off; a single button is whatever somebody put on
     // a Companion page, and pre-ticking those would arm cues for camera shots
     // and playback macros. The dialog ticks nothing in this section.
-    const singles = singleButtons(result.buttons, result.pairs);
-    const singleSlugs = slugsForButtons(singles);
     const buttons = singles.map((b) => {
-      const slug = singleSlugs.get(`${b.page}:${b.row}:${b.col}`) ?? "";
+      const slug = slugs.buttons.get(`${b.page}:${b.row}:${b.col}`) ?? "";
       return { ...b, slug, exists: !!slug && taken.has(slug) };
     });
     json(res, { ok: true, pairs, buttons });
@@ -359,7 +360,7 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
       continue;
     }
 
-    // When the slug had to be disambiguated by page (see slugsForPairs), the
+    // When the slug had to be disambiguated by page (see cueSlugs), the
     // WORDS have to be disambiguated too — otherwise two rules read "Projectors
     // ON" in the list and Home Assistant gets two switches both called
     // "Projectors", which is the same collision moved one system along.
