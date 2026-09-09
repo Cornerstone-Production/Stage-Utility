@@ -25,13 +25,12 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
   // An operator pressed a control on a console. The SAME registry the automation
   // engine fires from: one place to add a capability, two ways to reach it.
   if (method === "POST" && pathname === "/api/action/invoke") {
-    // A write from the app's own pages carries BOTH `Sec-Fetch-Site: same-origin`
-    // and an Origin naming this server, and remote-server has already refused it
-    // if that Origin was somebody else's — so a browser here is an operator at
-    // the console and passes as it always has. Anything else is curl, a script,
-    // or a voice assistant, and this route runs actions that press buttons on
-    // real gear: it needs the same bearer token a cue call needs. Either header
-    // alone is NOT enough — see isSameOriginBrowser. docs/reference/api.md.
+    // A write from the app's own pages carries an Origin naming this server, and
+    // remote-server has already refused it if that Origin was somebody else's —
+    // so a browser here is an operator at the console and passes as it always
+    // has. Anything else is curl, a script, or a voice assistant, and this route
+    // runs actions that press buttons on real gear: it needs the same bearer
+    // token a cue call needs. See isSameOriginBrowser. docs/reference/api.md.
     if (!isSameOriginBrowser(req.headers)) {
       const caller = await cueTokens.verify(bearerOf(req.headers.authorization));
       if (!caller) {

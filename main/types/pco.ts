@@ -323,3 +323,28 @@ export interface SlotTargetsDTO {
   defaultSlots: Slot[];
   overrideSlots: Slot[] | null;
 }
+
+/**
+ * Which week's people a slot preview was resolved against.
+ *
+ * The slots editor's plan switcher moves the editor off the plan the screens are
+ * following, and the preview beside it follows. The rows alone cannot say whose
+ * roster filled them, and "no names" has three very different causes — a default
+ * board has no week, a future plan may have nobody scheduled yet, and Planning
+ * Center may simply be unreachable. The caption over the preview reads this.
+ */
+export type SlotsPreviewRoster = "live" | "plan" | "none" | "unavailable";
+
+/** What `POST /api/views/resolve-slots` answers with. */
+export interface SlotsPreviewDTO {
+  slots: Slot[];
+  roster: SlotsPreviewRoster;
+  /** One sentence, only when `roster` is "unavailable". */
+  reason?: string;
+}
+
+/** The board a slot preview is asked for. `planId: null` = the type's default. */
+export interface SlotsPreviewTarget {
+  serviceTypeId: string;
+  planId: string | null;
+}

@@ -70,15 +70,19 @@ function summarise(t: CueTokenRecord): CueTokenSummary {
 /**
  * Is this WRITE from a page THIS server served?
  *
- * BOTH signals are required, and the "or" this used to be was a hole: curl with
- * a hand-written `Sec-Fetch-Site: same-origin` minted itself a token (201) and
- * called a cue with it (200). Now:
+ * The signal is an `Origin` naming this server, checked by the same
+ * `isCrossOrigin` the cross-origin write gate in remote-server uses — hostname,
+ * so the friendly port 80, port 8788 and the Vite dev proxy on 3000 all still
+ * work. A page on another origin cannot forge it, which is the confused-deputy
+ * case this exists to close.
  *
- *  - `Sec-Fetch-Site: same-origin`, which every current browser sends on every
- *    request and page script cannot set, AND
- *  - an `Origin` naming this server, checked by the same `isCrossOrigin` the
- *    cross-origin write gate in remote-server uses — hostname, so the friendly
- *    port 80, port 8788 and the Vite dev proxy on 3000 all still work.
+ * `Sec-Fetch-Site` is NOT required, and it used to be. Browsers send the
+ * Fetch-metadata headers only to a "potentially trustworthy" destination — HTTPS
+ * or localhost — and this app runs on plain HTTP on a LAN address, so a real
+ * operator's browser never sent it and the settings page answered 401 to its own
+ * import. It passed every test because the tests drove localhost. When the
+ * header IS present it must still say `same-origin`; a browser that volunteers
+ * `cross-site` is telling the truth about itself.
  *
  * Only WRITES may use this. A same-origin **GET** carries no `Origin` header at
  * all (Fetch sends one only for non-GET/HEAD or CORS), so the app's own settings
@@ -86,13 +90,14 @@ function summarise(t: CueTokenRecord): CueTokenSummary {
  * therefore not gated at all rather than gated on a header curl can type — see
  * cue-routes.ts.
  *
- * This is still a BROWSER convenience, not a boundary: curl can set both headers
- * as easily as one. It closes the confused-deputy case (a page on another origin
- * cannot forge either) and nothing more. The boundary is the network — see
- * SECURITY.md.
+ * This is still a BROWSER convenience, not a boundary: curl can type an Origin
+ * as easily as a browser sends one, exactly as it can for every other write in
+ * the app. It closes the confused-deputy case and nothing more. The boundary is
+ * the network — see SECURITY.md.
  */
 export function isSameOriginBrowser(headers: Record<string, string | string[] | undefined>): boolean {
-  if (headerValue(headers, "sec-fetch-site").toLowerCase() !== "same-origin") return false;
+  const site = headerValue(headers, "sec-fetch-site").toLowerCase();
+  if (site && site !== "same-origin") return false;
   const origin = headerValue(headers, "origin");
   if (!origin) return false;
   return !isCrossOrigin(origin, headerValue(headers, "host"));

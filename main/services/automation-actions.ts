@@ -11,6 +11,7 @@ import type { PcoLiveDTO } from "../types/stage.js";
 import { advanceGuard } from "./automation-pco-items.js";
 import { broadcast } from "./broadcaster.js";
 import { companionApi } from "./companion-api.js";
+import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
 import { oscManager } from "./osc-manager.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
 import { stageController } from "./stage-controller.js";
@@ -133,6 +134,11 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
         optional: true,
         help: "What the button said when it was picked. Recorded in the log so a moved button is obvious.",
       },
+      // pageId, actionIds, status, lastSeenAt and movedFrom are also stored on
+      // this action and are deliberately NOT ParamDefs: they are written by the
+      // picker and by the reconcile, never typed. A form field for "action ids"
+      // is a field whose only use is to break the identity. See
+      // companion-fingerprint.ts.
     ],
     run: async (params, ctx) => {
       const page = Number(params.page);
@@ -147,6 +153,18 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
       // same shapes for callers that do not come through here.
       if (![page, row, col].every((n) => Number.isInteger(n) && n >= 0)) {
         return fail(`p${page} r${row} c${col} is not a Companion coordinate — whole numbers, none negative`);
+      }
+      // The last reconcile could not find this button in Companion's export.
+      // REFUSED, not pressed: the coordinates now hold either nothing or
+      // somebody else's button, and Companion answers 204 for the first and a
+      // cheerful 200 for the second. See companion-reconcile.ts.
+      //
+      // Here rather than only in the call route, because a rule can fire from
+      // any trigger and from the editor's Test button, and a guard on one path
+      // is a guard the other three walk around.
+      const fingerprint = readFingerprint(params as Record<string, string | number>);
+      if (fingerprint.status === "missing") {
+        return fail(`${missingSentence(fingerprint)} — re-pick the button on this rule`);
       }
       const label = String(params.label ?? "").trim();
       const named = `p${page} r${row} c${col}${label ? ` "${label}"` : ""}`;

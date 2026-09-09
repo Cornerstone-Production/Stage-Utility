@@ -904,6 +904,21 @@ class IntegrationManager {
     const { automationEngine } = await import("./automation-engine.js");
     await automationEngine.init();
 
+    // Now that the rules are loaded, check that each cue's Companion button is
+    // still where it was. Only with a host configured: without one there is
+    // nothing to read, and a timer would ask a service that is switched off.
+    // Dynamically imported for the same reason automation-engine is — it reaches
+    // back through the engine, and a static import would close a cycle.
+    if (this.getCompanionTarget()) {
+      const { runCompanionReconcile, startCompanionReconcile } = await import("./companion-reconcile.js");
+      // Not awaited: it dials Companion, and boot must not wait on a box that
+      // may be off. Its own failure is reported on a [companion] line.
+      void runCompanionReconcile().catch((err) =>
+        console.error("[companion] reconcile failed:", scrubError(err)),
+      );
+      startCompanionReconcile(true);
+    }
+
     console.log("[integration-manager] init complete", scrub(Array.from(this.states.keys()).join(", ")));
   }
 
@@ -1075,6 +1090,11 @@ class IntegrationManager {
       // picker offer another Companion's buttons at coordinates this one will
       // press regardless.
       companionApi.invalidate();
+      // And the hourly reconcile follows the host: added here it starts without
+      // a restart, and cleared here it stops rather than dialling an address
+      // nobody has configured. Boot is the only other place it is started.
+      const { startCompanionReconcile } = await import("./companion-reconcile.js");
+      startCompanionReconcile(this.getCompanionTarget() !== null);
     }
 
     if (id === "planning-center") {
@@ -1187,7 +1207,21 @@ class IntegrationManager {
         }
 
         const outbound = await companionApi.testConnection();
-        const msg = `${inbound}. ${outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`}`;
+        // Test forced a fresh export, so this reads what Companion says NOW —
+        // which is the moment an operator wants to be told a cue's button has
+        // moved. No second fetch: it reads the cache Test just filled.
+        // A pass whose writes failed is carried into the row's message rather
+        // than logged away: Test is where an operator looks to find out whether
+        // this integration works, and "connected" over a rules file that could
+        // not be written is the answer that costs a Sunday.
+        let unsaved = 0;
+        if (outbound.ok) {
+          const { runCompanionReconcile } = await import("./companion-reconcile.js");
+          unsaved = (await runCompanionReconcile())?.failed.length ?? 0;
+        }
+        const msg =
+          `${inbound}. ${outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`}` +
+          (unsaved > 0 ? ` ${unsaved} cue status(es) could not be saved.` : "");
         this.setConnectionState(
           "companion",
           outbound.ok ? "connected" : "error",

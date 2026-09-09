@@ -7,7 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { buildViewBundle } from "../view-export.js";
-import { applyViewBundle } from "../view-import.js";
+import { applyViewBundle, type ImportOptions } from "../view-import.js";
 import {
   listLayoutTemplates,
   saveLayoutTemplate,
@@ -23,7 +23,7 @@ import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BY
 import { isLayoutShape } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
-import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsScope } from "../../types/stage.js";
+import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
 import { LayoutConflictError, SlotsNotFoundError, stageController } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
@@ -52,15 +52,20 @@ function isSelectionList(v: unknown): v is CalendarSelection[] {
 }
 
 /**
- * `stage-utility-view-left-mic-display-2026-08-17.json`.
+ * Operator-supplied text, safe to put in a quoted Content-Disposition value.
  *
- * The name is operator-supplied text going into a quoted header value, so the
- * slug keeps only [a-z0-9-] — a quote or a path separator surviving here would
- * be a header injection, not a cosmetic problem. Bounded because some
- * filesystems cap a path component at 255 bytes.
+ * Keeps only [a-z0-9-]: a quote or a path separator surviving here would be a
+ * header injection, not a cosmetic problem. Bounded because some filesystems cap
+ * a path component at 255 bytes. Exported so the plan export names its file the
+ * same way rather than growing a fifth copy of this line.
  */
+export function filenameSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+}
+
+/** `stage-utility-view-left-mic-display-2026-08-17.json`. */
 export function exportFilename(name: string, now: Date): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  const slug = filenameSlug(name);
   // The app's zone, not the server's clock: a UTC box dates a file exported at
   // 22:30 in Chicago as the next day. patch-export.ts fixed the same line first;
   // this and the config and archive exports are the other three copies.
@@ -140,17 +145,42 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // POST /api/views/resolve-slots — { slots } → resolved Slot[] (no persist).
-    // Powers the Views page live draft preview: resolves in-progress edits against
-    // the current team + device state so the preview matches the kiosk, without
-    // saving. Must precede the /api/views/:id/slots matcher.
+    // POST /api/views/resolve-slots — { slots, target? } → { slots, roster, reason? }.
+    // Powers the slots editor's preview: resolves rows against a plan's roster and
+    // this rig's device state without saving anything. `target` names the board
+    // being previewed, for an editor the plan switcher has pointed at another
+    // week; absent, it is the plan the screens are following. Must precede the
+    // /api/views/:id/slots matcher.
     if (method === "POST" && pathname === "/api/views/resolve-slots") {
       const body = await readBody(req) as Record<string, unknown>;
       if (!Array.isArray(body.slots)) {
         error(res, "body.slots (array) required");
         return;
       }
-      json(res, stageController.resolveSlotsPreview(body.slots as Slot[]));
+      // Validated rather than coerced. A half-understood target would resolve
+      // against the WRONG WEEK's people under an ordinary 200, which is worse
+      // than a refusal: the operator has no way to tell whose names those are.
+      let target: SlotsPreviewTarget | undefined;
+      if (body.target !== undefined && body.target !== null) {
+        if (typeof body.target !== "object" || Array.isArray(body.target)) {
+          error(res, "body.target must be an object");
+          return;
+        }
+        const t = body.target as Record<string, unknown>;
+        if (typeof t.serviceTypeId !== "string" || t.serviceTypeId === "") {
+          error(res, "body.target.serviceTypeId must be a non-empty string");
+          return;
+        }
+        // Null is the type's DEFAULT board and is meaningful. An empty string is
+        // not a plan id, and coercing it to null would silently preview the
+        // default for a caller that meant to name a week.
+        if (t.planId !== null && (typeof t.planId !== "string" || t.planId === "")) {
+          error(res, "body.target.planId must be a non-empty string or null");
+          return;
+        }
+        target = { serviceTypeId: t.serviceTypeId, planId: t.planId };
+      }
+      json(res, await stageController.resolveSlotsPreview(body.slots as Slot[], target));
       return;
     }
 
@@ -268,7 +298,20 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         // A bundle carries base64 images, so the ordinary JSON ceiling would
         // refuse a file this app exported — the same reason /api/config/import
         // uses this limit.
-        const report = await applyViewBundle(await readBody(req, MAX_CONFIG_BODY_BYTES));
+        // Two body shapes. The bundle posted verbatim is what every published
+        // version of this app sends, so it stays the default; a plan import
+        // wraps it to carry the chosen service type and the clash choice.
+        // Detected by the ABSENCE of `kind`, which every bundle has and no
+        // wrapper does.
+        const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
+        const wrapped = body?.kind === undefined && !!body?.bundle;
+        const opts: ImportOptions = wrapped
+          ? {
+            ...(typeof body.serviceTypeId === "string" ? { serviceTypeId: body.serviceTypeId } : {}),
+            ...(body.onClash === "keep" || body.onClash === "replace" ? { onClash: body.onClash } : {}),
+          }
+          : {};
+        const report = await applyViewBundle(wrapped ? body.bundle : body, opts);
 
         // Telling the managers is the ROUTE's job, not the merge service's.
         // Both hold their targets in memory and write that array back on the

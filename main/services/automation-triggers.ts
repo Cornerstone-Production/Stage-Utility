@@ -460,8 +460,15 @@ const DISPLAY_NAME: ParamDef = {
  */
 export const CALL_CHANNEL = "cue:call";
 
-/** The one trigger on CALL_CHANNEL. Named so callers do not spell it twice. */
-export const CALL_TRIGGER_ID = "call.by-name";
+/**
+ * The one trigger on CALL_CHANNEL. Named so callers do not spell it twice.
+ *
+ * DEFINED in cue-aliases.ts and re-exported here, where every caller already
+ * imports it from. This file reaches node:url through spl-recorder's metric
+ * list, so the settings page cannot import it — see the comment on the
+ * definition.
+ */
+export { CALL_TRIGGER_ID } from "./cue-aliases.js";
 
 /** Snake_case, so the name survives being said out loud and pasted into YAML. */
 const CUE_NAME_RE = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
@@ -489,6 +496,16 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
         help: "lower_snake_case, unique across rules. This is the URL: /api/cues/<name>.",
       },
       {
+        key: "aliases",
+        label: "Former names",
+        type: "string",
+        optional: true,
+        help:
+          "Names this cue also answers to, comma-separated. Written when a Companion button is " +
+          "relabelled and the cue is renamed to match, so an already-pasted Home Assistant " +
+          "config keeps working. Remove one and that URL stops resolving.",
+      },
+      {
         key: "says",
         label: "Spoken as",
         type: "string",
@@ -501,6 +518,35 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
         type: "string",
         optional: true,
         help: "Where the thing this cue drives is. Shown in the log; not used to route anything.",
+      },
+      // The state binding, on the `_on` half of a pair. Declared here so the
+      // registry documents it and the rules route validates it, but rendered by
+      // its own editor rather than by the generic loop — three text fields on
+      // every cue, most of which cannot use them, would read as three settings
+      // that do nothing. See cue-pairs.ts.
+      {
+        key: "stateVariable",
+        label: "State variable",
+        type: "string",
+        optional: true,
+        help:
+          "A Companion custom variable your ON/OFF buttons set. Set it on the _on half of a pair and " +
+          "the generated Home Assistant switch reports what the device is actually doing instead of " +
+          "what it was asked to do. Blank leaves the switch optimistic.",
+      },
+      {
+        key: "stateOnValue",
+        label: "Value meaning on",
+        type: "string",
+        optional: true,
+        help: 'What the variable holds when the thing is on. Blank means "on".',
+      },
+      {
+        key: "stateOffValue",
+        label: "Value meaning off",
+        type: "string",
+        optional: true,
+        help: 'What the variable holds when the thing is off. Blank means "off".',
       },
     ],
     // Never. A called cue has no edge to read, and the engine refuses to

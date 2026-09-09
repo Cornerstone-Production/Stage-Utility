@@ -15,6 +15,7 @@ import { scrub } from "./scrub.js";
 import type { AutomationSettings, ConditionCtx, Rule } from "../types/automation.js";
 import { addBroadcastListener, addChannelDemandSource, broadcast } from "./broadcaster.js";
 import { AUTOMATION_ACTIONS } from "./automation-actions.js";
+import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
 import { AUTOMATION_CONDITIONS, allConditionsHold, firstFailingCondition, serviceQuietness } from "./automation-conditions.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { automationLog } from "./automation-log.js";
@@ -28,6 +29,9 @@ import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, CALL_CHANNEL, CALL_TRIGGER_ID, isValidCueName, triggersForChannel } from "./automation-triggers.js";
+import { stateBindingProblem } from "./cue-pairs.js";
+import { cueStates } from "./cue-states.js";
+import { parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 
@@ -39,7 +43,8 @@ export type CueBlockReason =
   | "planning-center-unknown"
   | "once-per-service"
   | "condition-not-met"
-  | "cooldown";
+  | "cooldown"
+  | "button-missing";
 
 /**
  * What a call answers with. A STATUS plus a body, decided here rather than in
@@ -118,47 +123,114 @@ class AutomationEngine {
   }
 
   /**
-   * Refuse a cue name that is blank, malformed or already taken.
+   * Refuse a cue whose name is blank, malformed or already taken — or whose
+   * state binding could never be read.
    *
    * A cue name IS a URL and a Home Assistant entity id, and two rules answering
    * to one name means `POST /api/cues/projectors_off` picks whichever happens to
    * be first in the file. Checked on the way in, where it can still be a 400,
    * rather than resolved at call time where it would be a coin toss.
+   *
+   * FORMER NAMES ARE IN THE SAME NAMESPACE. A cue renamed after its Companion
+   * button was relabelled keeps its old name as an alias, and that alias is a
+   * live URL: a second rule allowed to claim it would take over an already
+   * pasted Home Assistant switch, so `POST /api/cues/projectors_off` would start
+   * driving something else with nothing anywhere saying so. Both directions are
+   * refused — a name may not be another rule's former name, and a former name
+   * may not be another rule's name.
    */
-  private assertCueNameFree(rule: Pick<Rule, "trigger">, exceptId: string | null): void {
+  private assertCueValid(rule: Pick<Rule, "trigger">, exceptId: string | null): void {
     if (rule.trigger?.id !== CALL_TRIGGER_ID) return;
     const name = String(rule.trigger.params?.name ?? "").trim().toLowerCase();
     if (!name) throw new Error("A called cue needs a name");
     if (!isValidCueName(name)) {
       throw new Error(`"${name}" is not a usable cue name — use lower_snake_case`);
     }
-    const clash = this.rules.find((r) => r.id !== exceptId && this.cueNameOf(r) === name);
-    if (clash) throw new Error(`The cue name "${name}" is already used by "${clash.name}"`);
+
+    // One index of everything the OTHER rules answer to, so both checks below
+    // read the same set. Names are written after the aliases, so a name wins the
+    // wording when one rule's name is another's former name.
+    const held = new Map<string, { rule: Rule; former: boolean }>();
+    const others = this.rules.filter((r) => r.id !== exceptId);
+    for (const r of others) {
+      for (const alias of this.cueAliasesOf(r)) held.set(alias, { rule: r, former: true });
+    }
+    for (const r of others) {
+      const n = this.cueNameOf(r);
+      if (n) held.set(n, { rule: r, former: false });
+    }
+
+    const clash = held.get(name);
+    if (clash) {
+      throw new Error(
+        clash.former
+          ? `The cue name "${name}" is a former name of "${clash.rule.name}"`
+          : `The cue name "${name}" is already used by "${clash.rule.name}"`,
+      );
+    }
+
+    for (const alias of parseAliases(rule.trigger.params ?? {})) {
+      if (!isValidCueName(alias)) {
+        throw new Error(`"${alias}" is not a usable former cue name — use lower_snake_case`);
+      }
+      if (alias === name) {
+        throw new Error(`"${alias}" is this cue's own name, not a former one`);
+      }
+      const takenBy = held.get(alias);
+      if (takenBy) {
+        throw new Error(
+          takenBy.former
+            ? `The former name "${alias}" is already a former name of "${takenBy.rule.name}"`
+            : `The former name "${alias}" is already used by "${takenBy.rule.name}"`,
+        );
+      }
+    }
+
+    // The state binding, refused here rather than at read time: a variable name
+    // Companion could not have is a switch that reads unknown forever, and
+    // nothing about that says which rule is wrong. See cue-pairs.ts.
+    const problem = stateBindingProblem(rule.trigger.params ?? {});
+    if (problem) throw new Error(problem);
+  }
+
+  /**
+   * The rules changed: tell the pages, and forget what a pair's state was.
+   *
+   * ONE method rather than the same two lines at three call sites — add, update
+   * and remove — because the cue-state cache is invisible from here and the
+   * copy that forgot to drop it is the one that reads five seconds stale. It
+   * matters on save: a binding the operator has just changed is read back
+   * through the OLD variable, and the row they are looking at contradicts what
+   * they typed until the window passes. See cue-states.ts.
+   */
+  private rulesChanged(): void {
+    broadcast("automation:rules", { rules: this.listRules() });
+    cueStates.invalidate();
   }
 
   async addRule(rule: Omit<Rule, "id">): Promise<Rule> {
-    this.assertCueNameFree(rule, null);
+    this.assertCueValid(rule, null);
     const next: Rule = { ...rule, id: randomUUID() };
     this.rules.push(next);
     await automationStore.saveRules(this.rules);
-    broadcast("automation:rules", { rules: this.listRules() });
+    this.rulesChanged();
     return next;
   }
 
   async updateRule(id: string, patch: Partial<Omit<Rule, "id">>): Promise<Rule[]> {
     const r = this.rules.find((x) => x.id === id);
     if (!r) throw new Error(`Automation: unknown rule ${id}`);
-    this.assertCueNameFree({ ...r, ...patch }, id);
+    this.assertCueValid({ ...r, ...patch }, id);
     Object.assign(r, patch);
     await automationStore.saveRules(this.rules);
-    broadcast("automation:rules", { rules: this.listRules() });
+    this.rulesChanged();
     return this.listRules();
   }
 
   async removeRule(id: string): Promise<Rule[]> {
     this.rules = this.rules.filter((r) => r.id !== id);
     await automationStore.saveRules(this.rules);
-    broadcast("automation:rules", { rules: this.listRules() });
+    this.rulesChanged();
     return this.listRules();
   }
 
@@ -183,6 +255,12 @@ class AutomationEngine {
     return String(rule.trigger.params.name ?? "").trim().toLowerCase();
   }
 
+  /** The former names a rule also answers to, oldest first. See cue-aliases.ts. */
+  cueAliasesOf(rule: Rule): string[] {
+    if (rule.trigger.id !== CALL_TRIGGER_ID) return [];
+    return parseAliases(rule.trigger.params);
+  }
+
   /**
    * Fire a cue by name, on behalf of an identified caller.
    *
@@ -199,7 +277,21 @@ class AutomationEngine {
   ): Promise<CueCallResult> {
     const now = opts.now ?? Date.now();
     const wanted = name.trim().toLowerCase();
-    const rule = this.rules.find((r) => this.cueNameOf(r) === wanted && wanted !== "");
+    // NAMES FIRST, then former names. A live name always wins: a rule that is
+    // called by its own name must never be shadowed by another rule that used to
+    // be called that.
+    const rule =
+      wanted === ""
+        ? undefined
+        : (this.rules.find((r) => this.cueNameOf(r) === wanted) ??
+          this.rules.find((r) => this.cueAliasesOf(r).includes(wanted)));
+
+    // What the log line calls this call. A call through a former name says both,
+    // with an arrow — otherwise the only trace of a Home Assistant still holding
+    // a stale name is a line naming a cue nobody can find in the rules list.
+    // Scrubbed as one string at each log site below; see scrub.ts.
+    const canonical = rule ? this.cueNameOf(rule) : wanted;
+    const said = canonical === wanted ? wanted : `${wanted} → ${canonical}`;
 
     if (!rule) {
       console.warn(`[cues] ${scrub(wanted)} by ${scrub(opts.caller)}: blocked (unknown)`);
@@ -222,7 +314,7 @@ class AutomationEngine {
           ? "condition-not-met"
           : "suppressed";
       this.log(rule, outcome, sentence, opts.caller);
-      console.warn(`[cues] ${scrub(wanted)} by ${scrub(opts.caller)}: blocked (${scrub(reason)})`);
+      console.warn(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: blocked (${scrub(reason)})`);
       return { status: 409, body: { error: sentence, reason, ...extra } };
     };
 
@@ -231,6 +323,16 @@ class AutomationEngine {
     }
     if (this.settings.disarmed) {
       return blocked("disarmed", "Automation is disarmed, so nothing will run");
+    }
+    // The button this cue presses is not in Companion's export any more. Refused
+    // before the conditions, because it is the one refusal that no amount of
+    // waiting fixes — a caller told "not right now" would try again all morning.
+    // The action itself refuses too, for every other way a rule can fire.
+    if (rule.action.id === "companion.press") {
+      const f = readFingerprint(rule.action.params);
+      if (f.status === "missing") {
+        return blocked("button-missing", missingSentence(f));
+      }
     }
 
     const ctx = this.conditionCtx();
@@ -255,7 +357,7 @@ class AutomationEngine {
             // Logged as well as answered: an operator hearing "I cannot tell"
             // needs somewhere to find out that PCO is the thing that is broken.
             console.warn(
-              `[cues] ${scrub(wanted)} by ${scrub(opts.caller)}: Planning Center state is unreadable, refusing`,
+              `[cues] ${scrub(said)} by ${scrub(opts.caller)}: Planning Center state is unreadable, refusing`,
             );
             return blocked(
               "planning-center-unknown",
@@ -298,7 +400,7 @@ class AutomationEngine {
         const token = randomUUID();
         this.pendingConfirm.set(rule.id, { token, expiresAt: now + CONFIRM_WINDOW_MS });
         this.log(rule, "suppressed", `awaiting confirmation (${CONFIRM_WINDOW_MS / 1000}s)`, opts.caller);
-        console.log(`[cues] ${scrub(wanted)} by ${scrub(opts.caller)}: blocked (confirm-required)`);
+        console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: blocked (confirm-required)`);
         return { status: 202, body: { confirm: token, expiresInSec: CONFIRM_WINDOW_MS / 1000 } };
       }
       this.pendingConfirm.delete(rule.id);
@@ -311,7 +413,7 @@ class AutomationEngine {
     }
     const result = await this.runAction(rule, `call by ${opts.caller}`, opts.caller);
     const verdict = result.ok ? "dispatched" : "blocked (action-failed)";
-    console.log(`[cues] ${scrub(wanted)} by ${scrub(opts.caller)}: ${scrub(verdict)}`);
+    console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: ${scrub(verdict)}`);
     // Simulate is on by default on a fresh install, and a call that answers a
     // plain 200 while nothing reached a device is a switch in Home Assistant
     // that flips with the projectors still off. The flag is how a caller can

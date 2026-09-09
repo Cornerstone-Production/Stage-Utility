@@ -588,9 +588,11 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     }
 
     case "views:resolveSlots":
-      // Resolve draft slots against live team + device state WITHOUT saving —
-      // powers the Views live draft preview. Returns resolved Slot[].
-      return post<T>("/api/views/resolve-slots", { slots: p.slots });
+      // Resolve slots against a plan's roster and this rig's device state WITHOUT
+      // saving — powers the slots editor's preview. `target` names the board being
+      // previewed; omitted, the server answers for the plan the screens follow.
+      // Returns { slots, roster, reason? }.
+      return post<T>("/api/views/resolve-slots", { slots: p.slots, target: p.target });
 
     case "layoutObjects:setSlots": {
       const id = p.id as string;
@@ -609,9 +611,25 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "update:dismissNotice":
       return post<T>("/api/update/notices/dismiss", p);
 
-    // The bundle IS the payload — a view export file, posted verbatim.
+    // The bundle IS the payload — a view export file, posted verbatim — unless
+    // the caller also names a service type or a clash choice, which only a plan
+    // file can carry. Then it is wrapped, and the server tells the two apart by
+    // the `kind` a bundle always has.
     case "views:import":
-      return post<T>("/api/views/import", p.bundle);
+      return post<T>(
+        "/api/views/import",
+        p.serviceTypeId || p.onClash
+          ? { bundle: p.bundle, serviceTypeId: p.serviceTypeId, onClash: p.onClash }
+          : p.bundle,
+      );
+
+    // `slots` too: the scope changes the counts, and a preview that ignored it
+    // described a different file than the Download link points at.
+    case "plans:exportPreview":
+      return apiFetch<T>(
+        `/api/plans/export/preview?serviceTypeId=${encodeURIComponent(String(p.serviceTypeId ?? ""))}`
+        + `&slots=${encodeURIComponent(String(p.slots ?? "type"))}`,
+      );
 
     case "views:reorder":
       return post<T>("/api/views/reorder", { ids: p.ids });
@@ -828,6 +846,9 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "companion:refreshButtons": return post("/api/companion/buttons/refresh");
     case "companion:pairs": return apiFetch("/api/companion/pairs");
     case "cues:tokens": return apiFetch("/api/cues/tokens");
+    // Read on demand and cached for five seconds server-side, so the rules list
+    // polling this while it is open costs one round of Companion reads.
+    case "cues:states": return apiFetch("/api/cues/states");
     case "cues:mintToken": return post("/api/cues/tokens", params);
     case "cues:revokeToken": return del(`/api/cues/tokens/${encodeURIComponent(String(p.id))}`);
     // YAML, not JSON — the one text response in this file, so it cannot go

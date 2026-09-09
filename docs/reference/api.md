@@ -27,7 +27,7 @@ reachable unauthenticated** unless it says otherwise. Four things do gate:
 | **Cross-origin writes** | Any `POST`/`PUT`/`PATCH`/`DELETE` carrying an `Origin` whose hostname is not the request's `Host` is refused `403`. A request with no `Origin` is allowed, and reads are never gated. Ports are ignored so the dev proxy works |
 | **The log** | `/log` and `/api/log` require `?token=…` when `STAGE_UTILITY_LOG_TOKEN` is set, and answer `401` without it. Unset means open |
 | **Device enrolment** | `/enroll` authorises a `device` id against the secret that device was issued. An unrecognised device gets a holding screen rather than somebody else's screen |
-| **Cue calls** | `POST /api/cues/:name` always requires `Authorization: Bearer su_…`, browser or not, and answers `401` without one. `POST /api/action/invoke`, the cue token **writes** (mint, revoke), `import-pairs` and `buttons/refresh` require the same token **unless the request is a same-origin browser write** — `Sec-Fetch-Site: same-origin` **and** an `Origin` naming this server, both of which a browser sends on a `POST`/`DELETE`. Either alone is refused. Reads are open, including the token list and the Home Assistant fragment: a same-origin `GET` sends no `Origin`, and neither carries a secret |
+| **Cue calls** | `POST /api/cues/:name` always requires `Authorization: Bearer su_…`, browser or not, and answers `401` without one. `POST /api/action/invoke`, the cue token **writes** (mint, revoke), `import-pairs` and `buttons/refresh` require the same token **unless the request is a same-origin browser write** — an `Origin` naming this server, which a browser sends on every `POST`/`DELETE` and a page on any other origin cannot forge. `Sec-Fetch-Site` is not required (browsers send it only to HTTPS or localhost, and this app is plain HTTP on a LAN address), but when present it must say `same-origin`. Reads are open, including the token list and the Home Assistant fragment: a same-origin `GET` sends no `Origin`, and neither carries a secret |
 
 The cue token identifies the caller in the activity log and keeps the call route
 closed to anything that has not been handed one. **It is not a perimeter.** Anyone
@@ -77,14 +77,16 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201` |
 | PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `scriptViewLayoutId`, `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view is refused, naming the screens. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
-| POST | `/api/views/resolve-slots` | Resolve a slot set against the current plan without saving it — what the editor previews with |
+| POST | `/api/views/resolve-slots` | Resolve a slot set without saving it — what the editor previews with. Body `{ slots, target? }`, where `target` is `{ serviceTypeId, planId }` and `planId: null` names the type's default board. Answers `{ slots, roster, reason? }`; `roster` is `live`, `plan`, `none` (a default board, resolved against nobody) or `unavailable` (Planning Center could not be read, and `reason` says why) |
 | POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |
 | GET | `/api/views/:id/slot-targets` | The service type's default board and a plan's own, plus the plan it belongs to. `?serviceTypeId=&planId=` names which pair to read (a `serviceTypeId` with no `planId` is that type's default); absent, it is the active type and plan. Also `/api/layout-objects/:id/slot-targets` |
 | DELETE | `/api/views/:id/slots/override/:planId` | Revert that plan to the default. `404` when the plan had no board of its own. Also `/api/layout-objects/:id/slots/override/:planId` |
 | POST | `/api/views/:id/slots/promote` | Make a plan's board the service type's default (`{planId}`), clearing the plan's own. `404` when it had none. Also `/api/layout-objects/:id/slots/promote` |
 | POST | `/api/views/:id/duplicate` | Duplicate a view |
 | GET | `/api/views/:id/export` | Download the view and anything it embeds as one file |
-| POST | `/api/views/import` | Merge an exported view in; returns what landed and what needs rebinding |
+| POST | `/api/views/import` | Merge an exported view or plan in; returns what landed and what needs rebinding. Body is the bundle, or `{bundle, serviceTypeId?, onClash?}` to land a plan export under a chosen service type (`onClash` is `keep`, the default, or `replace`) |
+| GET | `/api/plans/export?serviceTypeId=…[&slots=type\|all&patch=1\|0&presets=1\|0]` | Download one service type's setup as one file — its slot boards, the views and layouts holding them, optionally the patch variant it is assigned to and the slot presets. `slots=all` also carries other types' boards on those views. Missing or unknown type, a bad flag, or Planning Center not being configured, is `400` |
+| GET | `/api/plans/export/preview?serviceTypeId=…[&slots=type\|all]` | What that file would contain at that scope, for the export dialog's counts. `400` as above |
 | POST | `/api/views/:id/copy-slots` | Copy slots from another view onto one board (`{fromViewId, target?}`) |
 | POST | `/api/views/reorder` | Reorder views |
 | DELETE | `/api/views/:id` | Delete a view |
@@ -184,25 +186,26 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | POST | `/api/automation/rules/:id/test` | Fire the action now, ignoring the trigger. Honours simulate; a refusal is `400` with the reason |
 | GET / POST | `/api/automation/settings` | `simulate` and `disarmed` |
 | GET / DELETE | `/api/automation/log` | Read / clear the Activity log |
-| POST | `/api/automation/rules/import-pairs` | Create two cues per Companion ON/OFF pair (`{pairs}`). Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
+| POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
 
 **Cues** — an automation rule called by name. See
 [Companion](../integrations/companion.md#calling-a-cue-by-name).
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/cues/:name` | Run the cue. `200` dispatched, `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}` |
+| POST | `/api/cues/:name` | Run the cue. `:name` is the cue's current name or any of its former names (see [When a button is renamed](../integrations/companion.md#when-a-button-is-renamed)); a current name always wins. `200` dispatched, `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
 | GET / POST | `/api/cues/tokens` | List callers (never a hash) / mint one (`{label}`). The secret is returned once and never again |
 | DELETE | `/api/cues/tokens/:id` | Revoke one caller |
 | GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml`, not JSON |
+| GET | `/api/cues/states` | What each bound ON/OFF pair's device is actually doing: `{ok, checkedAt, states}`, `states` keyed by the pair's base — `{on, off, variable, value, state, reason?}` with `state` one of `on`, `off`, `unknown`. `ok` is false when any pair is unknown. Open read. Reads the Companion custom variables on demand, in parallel, and serves the whole answer for 5 seconds; only pairs with a **State variable** are in it, and an install with none reads nothing at all |
 
 **Companion** — reading the connected Companion's own configuration.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
-| POST | `/api/companion/buttons/refresh` | Drop the five-minute cache and re-read |
-| GET | `/api/companion/pairs` | ON/OFF pairs with their proposed cue names, and whether each already exists |
+| GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Each carries `page`, `pageId`, `pageName`, `row`, `col`, `label`, `drives` and `actionIds` — the page's opaque id and the button's sorted action ids are its identity, and survive being renumbered or dragged to another key. Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
+| POST | `/api/companion/buttons/refresh` | Drop the five-minute cache, re-read, and re-check every cue's button against it. `{ok, buttons, cachedAt, reconcile}`, where `reconcile` is `{applied, failed}` — `failed` names each cue whose new status could not be saved (`{ruleId, label, detail}`). Answers `ok: false` when any status failed to save, or `{ok: false, reason, buttons: []}` when Companion could not be read at all |
+| GET | `/api/companion/pairs` | The import dialog's whole offer: `{ok, pairs, buttons, customVariables}` — ON/OFF pairs, the labelled buttons that are not half of one, and the names of Companion's custom variables (what a pair's state can be bound to; empty on an install with none) — each offer with its proposed cue name and whether that name (or any cue's former name) already exists. One request, because deciding which buttons are unpaired needs the pairs, and because the two lists' proposed names are disambiguated against each other. Answers `200` with `{ok: false, reason, pairs: []}` when Companion is unreachable — no `buttons` key |
 
 **ProPresenter & ProdCom**
 | Method | Path | Purpose |

@@ -5,15 +5,29 @@
 // settings and is about rules in general. Everything here is about one action
 // and one trigger.
 //
-// NOT unit-tested, deliberately, and this is the honest reason: every one of
-// these is a dialog whose failure modes are visual — a picker whose list does
-// not scroll, a dialog that opens behind the overlay, a button that renders and
-// does nothing. jsdom loads no stylesheet and reports every offsetHeight as 0,
-// so a test here would assert that a <button> exists, which is exactly the
-// assurance this repo has been burned by. They were driven in a browser instead;
-// the server side they call is covered in main/services/routes/cue-routes.test.ts.
+// Mostly NOT unit-tested, deliberately, and this is the honest reason: these are
+// dialogs whose failure modes are visual — a picker whose list does not scroll, a
+// dialog that opens behind the overlay. jsdom loads no stylesheet and reports
+// every offsetHeight as 0, so a test for those would assert that a <button>
+// exists, which is exactly the assurance this repo has been burned by. They were
+// driven in a browser instead; the server side they call is covered in
+// main/services/routes/cue-routes.test.ts.
+//
+// The IMPORT dialog is the exception, in companion-import.test.tsx, because what
+// it decides is not visual: which boxes are ticked before anybody touches one,
+// and whether the second section's picks reach the request at all. Both are
+// assertable as strings, and a wrong default there creates cues that press real
+// buttons.
 
 import { errorMessage } from "@main/services/errors";
+import { defaultStateVariable } from "@main/services/cue-pairs";
+import {
+  type ButtonFingerprint,
+  fingerprintParams,
+  missingSentence,
+  readFingerprint,
+  shortLocation,
+} from "@main/services/companion-fingerprint";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
@@ -27,7 +41,13 @@ import {
   DialogRoot,
   Input,
   NumberInput,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Separator,
+  Status,
   toast,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
@@ -36,17 +56,32 @@ import { copyText } from "../../lib/clipboard";
 
 export interface CompanionButton {
   page: number;
+  /** The page's opaque id, which survives a renumber. See companion-export.ts. */
+  pageId: string;
   pageName: string;
   row: number;
   col: number;
   label: string;
   drives: string[];
+  /** The button's sorted action ids — its identity when somebody moves it. */
+  actionIds: string[];
 }
 
 interface ButtonsReply {
   ok: boolean;
   reason?: string;
   buttons: CompanionButton[];
+}
+
+/**
+ * What `POST /api/companion/buttons/refresh` answers.
+ *
+ * `ok: false` with a `reason` means Companion could not be read at all;
+ * `ok: false` with `reconcile.failed` means it was read and the statuses could
+ * not be written. Two different sentences for the operator.
+ */
+interface RefreshReply extends ButtonsReply {
+  reconcile?: { applied: number; failed: { ruleId: string; label: string; detail: string }[] };
 }
 
 interface Pair {
@@ -60,10 +95,19 @@ interface Pair {
   exists: boolean;
 }
 
+/** A labelled button that is not half of a pair, as the import offers it. */
+interface Single extends CompanionButton {
+  slug: string;
+  exists: boolean;
+}
+
 interface PairsReply {
   ok: boolean;
   reason?: string;
   pairs: Pair[];
+  buttons: Single[];
+  /** Companion's custom variable names — what a pair's state can be bound to. */
+  customVariables?: string[];
 }
 
 interface TokenSummary {
@@ -76,14 +120,127 @@ interface TokenSummary {
 const rowCls = "flex items-center gap-3 py-1";
 const labelCls = "w-36 shrink-0 text-caption1 text-fg-muted";
 
+// ── The button's status ───────────────────────────────────────────────────────
+
+/**
+ * "just now" / "14 minutes ago" / "3 hours ago" / "2 days ago". PURE.
+ *
+ * Deliberately coarse: this reads under an amber pill saying a button moved, and
+ * the useful fact is "since Thursday", never the second it happened.
+ */
+export function relativeSince(iso: string | null, nowMs: number): string {
+  if (!iso) return "";
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return "";
+  const secs = Math.max(0, Math.round((nowMs - at) / 1000));
+  if (secs < 90) return "just now";
+  const units: [number, string][] = [
+    [60, "minute"],
+    [3600, "hour"],
+    [86400, "day"],
+  ];
+  let best = units[0]!;
+  for (const unit of units) if (secs >= unit[0]) best = unit;
+  const n = Math.round(secs / best[0]);
+  return `${n} ${best[1]}${n === 1 ? "" : "s"} ago`;
+}
+
+/** The pill's words, PURE — one place, so the row and the editor cannot disagree. */
+export function buttonStatusText(
+  f: ButtonFingerprint,
+  nowMs: number,
+): { variant: "neutral" | "warning" | "error"; pill: string; detail: string } | null {
+  // Never reconciled (a rule from before this existed, or one written by hand)
+  // and a rule with no button chosen both show nothing. A grey "unknown" pill on
+  // every old rule would be noise, and the first reconcile adopts them.
+  if (f.status === null || f.page < 1) return null;
+  if (f.status === "in-place") {
+    return { variant: "neutral", pill: "in place", detail: "" };
+  }
+  if (f.status === "moved") {
+    const from = f.movedFrom ? `${shortLocation(f.movedFrom)} \u2192 ${shortLocation(f)}` : shortLocation(f);
+    const when = relativeSince(f.lastSeenAt, nowMs);
+    return { variant: "warning", pill: "moved", detail: when ? `${from} \u00b7 updated ${when}` : from };
+  }
+  return {
+    variant: "error",
+    pill: "button missing",
+    detail: `${missingSentence(f)}. Open this rule and pick the button again.`,
+  };
+}
+
+/**
+ * What the last reconcile found about this rule's button.
+ *
+ * Rendered on the rules list row, where an operator is looking at the cue rather
+ * than at Companion. A `missing` cue refuses to press rather than guessing, so
+ * this pill is the only warning there is.
+ */
+export function CueButtonStatus({ params }: { params: Record<string, string | number> }) {
+  // A lazy state initializer, not a bare `Date.now()` in the body: reading the
+  // clock during render is impure and the lint rule refuses it. The wording is
+  // coarse enough ("3 hours ago") that a value fixed at mount is right for as
+  // long as the page is open.
+  const [nowMs] = useState(() => Date.now());
+  const said = buttonStatusText(readFingerprint(params), nowMs);
+  if (!said) return null;
+  return (
+    <span
+      className="flex min-w-0 items-center gap-1.5"
+      data-cue-button-status={said.pill}
+      title={said.detail || undefined}
+    >
+      <Status variant={said.variant}>{said.pill}</Status>
+      {said.detail && (
+        <span className="min-w-0 truncate text-caption2 text-fg-subtle">{said.detail}</span>
+      )}
+    </span>
+  );
+}
+
 // ── The button picker ─────────────────────────────────────────────────────────
+
+/**
+ * The params to merge when somebody TYPES a coordinate, PURE.
+ *
+ * The coordinate they typed, and "" for every field that described the button
+ * the cue used to point at. All five have to go, and each one is a way the
+ * escape hatch was not one:
+ *
+ *  - `status`, because `"missing"` makes the action refuse the press outright,
+ *    so a cue rescued by hand went on failing (automation-actions.ts).
+ *  - `pageId` and `actionIds`, because the next reconcile matches on them and
+ *    would answer `missing` again — or, worse, follow the OLD button to
+ *    wherever it now is and overwrite what was just typed.
+ *  - `movedFrom`, because "moved from r2c6" under a hand-typed coordinate is a
+ *    move nobody made.
+ *  - `label`, because the old label is no longer known to be the right one, and
+ *    a wrong name on the row is what the operator would act on next.
+ *
+ * Written as "" rather than left out: these are MERGED over the stored params,
+ * so an omitted key keeps yesterday's value. Same reason fingerprintParams
+ * writes an empty `movedFrom`.
+ */
+export function typedCoordinate(
+  coordinate: { page: number } | { row: number } | { col: number },
+): Record<string, string | number> {
+  return { ...coordinate, pageId: "", actionIds: "", status: "", movedFrom: "", label: "" };
+}
 
 /**
  * The `companion.press` action's params, as a picker rather than three numbers.
  *
  * The three numbers stay: they are what is stored, they are what shows when
- * Companion is unreachable, and they are the escape hatch when a button is not
- * in the export. Picking fills them in — it does not replace them.
+ * Companion is unreachable, and they are how an operator rescues a cue whose
+ * button is not in the export. Picking fills them in — it does not replace them.
+ *
+ * TYPING A COORDINATE CLEARS THE IDENTITY. The stored `pageId`, `actionIds`,
+ * `label` and `status` all describe a button the operator has just said is
+ * somewhere else, and a `status: "missing"` left beside a hand-typed coordinate
+ * makes the action go on REFUSING to press (automation-actions.ts) with nothing
+ * on screen saying why — so the numbers looked like an escape hatch and were
+ * not one. Cleared, the next reconcile adopts whatever is at the coordinates
+ * through its legacy branch, exactly as it adopts a rule written by hand.
  */
 export function CompanionPressFields({
   params,
@@ -120,10 +277,11 @@ export function CompanionPressFields({
         <span className={labelCls}>Page</span>
         <span className="min-w-0 flex-1">
           <NumberInput
+            aria-label="Page"
             value={page}
             min={1}
             max={999}
-            onChange={(n) => onChange({ page: n })}
+            onChange={(n) => onChange(typedCoordinate({ page: n }))}
             className="h-7 text-footnote"
           />
         </span>
@@ -132,10 +290,11 @@ export function CompanionPressFields({
         <span className={labelCls}>Row</span>
         <span className="min-w-0 flex-1">
           <NumberInput
+            aria-label="Row"
             value={row}
             min={0}
             max={99}
-            onChange={(n) => onChange({ row: n })}
+            onChange={(n) => onChange(typedCoordinate({ row: n }))}
             className="h-7 text-footnote"
           />
         </span>
@@ -144,10 +303,11 @@ export function CompanionPressFields({
         <span className={labelCls}>Column</span>
         <span className="min-w-0 flex-1">
           <NumberInput
+            aria-label="Column"
             value={col}
             min={0}
             max={99}
-            onChange={(n) => onChange({ col: n })}
+            onChange={(n) => onChange(typedCoordinate({ col: n }))}
             className="h-7 text-footnote"
           />
         </span>
@@ -157,7 +317,24 @@ export function CompanionPressFields({
         open={open}
         onOpenChange={setOpen}
         onPick={(b) => {
-          onChange({ page: b.page, row: b.row, col: b.col, label: b.label || `p${b.page} r${b.row} c${b.col}` });
+          // The fingerprint is written HERE, not left for the next reconcile:
+          // re-picking is what an operator does about a `button missing` cue,
+          // and it has to clear that status in the same save. See
+          // companion-fingerprint.ts.
+          onChange(
+            fingerprintParams(
+              {
+                page: b.page,
+                row: b.row,
+                col: b.col,
+                pageId: b.pageId,
+                label: b.label || `p${b.page} r${b.row} c${b.col}`,
+                actionIds: b.actionIds,
+              },
+              "in-place",
+              new Date().toISOString(),
+            ),
+          );
           setOpen(false);
         }}
       />
@@ -195,8 +372,19 @@ function ButtonPickerDialog({
 
   async function refresh() {
     try {
-      await invoke("companion:refreshButtons");
+      // The refresh answers `ok: false` when it read Companion but could not
+      // SAVE what it found — a read-only rules file, most likely. Surfaced
+      // rather than dropped: the statuses on screen would still be the last
+      // good pass's, so nothing here would look wrong.
+      const r = await invoke<RefreshReply>("companion:refreshButtons");
       await qc.invalidateQueries({ queryKey: ["companion:buttons"] });
+      const failed = r.reconcile?.failed ?? [];
+      if (failed.length > 0) {
+        toast.error(
+          `Read Companion, but could not save ${failed.length} cue status(es): ` +
+            `${failed.map((f) => f.label).join(", ")}`,
+        );
+      }
     } catch (e) {
       toast.error(errorMessage(e));
     }
@@ -265,7 +453,56 @@ function ButtonPickerDialog({
   );
 }
 
-// ── Importing ON/OFF pairs ────────────────────────────────────────────────────
+// ── Importing pairs and single buttons ────────────────────────────────────────
+
+/**
+ * The footer's label. PURE, and tested — the grammar is the part that reads
+ * wrong on a real install.
+ *
+ * A zero side is omitted rather than written out: "Import 0 pairs and 1 button"
+ * is a sentence nobody would type, and the dialog's footer is the last thing
+ * read before something presses real buttons.
+ */
+export function importFooterLabel(pairs: number, buttons: number): string {
+  const parts: string[] = [];
+  if (pairs > 0) parts.push(`${pairs} pair${pairs === 1 ? "" : "s"}`);
+  if (buttons > 0) parts.push(`${buttons} button${buttons === 1 ? "" : "s"}`);
+  return parts.length === 0 ? "Import" : `Import ${parts.join(" and ")}`;
+}
+
+/**
+ * Does this single button match what was typed? PURE.
+ *
+ * The cue NAME is searched as well as the label and the page, because the name is
+ * what an operator will say out loud and is often the only part they remember —
+ * `take_screens` for a button labelled "Take Screens".
+ */
+export function matchesButtonSearch(b: Single, search: string): boolean {
+  const needle = search.trim().toLowerCase();
+  if (!needle) return true;
+  return `${b.pageName} ${b.label} ${b.slug}`.toLowerCase().includes(needle);
+}
+
+/** `switch` / `script` — which Home Assistant object this offer becomes. */
+function KindTag({ kind }: { kind: "switch" | "script" }) {
+  return (
+    <span
+      className="shrink-0 rounded bg-field px-1 font-mono text-caption2 text-fg-subtle"
+      data-cue-kind={kind}
+    >
+      {kind}
+    </span>
+  );
+}
+
+function SectionHeading({ title, count }: { title: string; count: number }) {
+  return (
+    <div className="sticky top-0 z-10 flex items-baseline gap-2 bg-bg py-1">
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">{title}</span>
+      <span className="text-caption2 text-fg-subtle">{count}</span>
+    </div>
+  );
+}
 
 export function ImportPairsDialog({
   open,
@@ -282,9 +519,25 @@ export function ImportPairsDialog({
     enabled: open,
   });
   const [picked, setPicked] = useState<Set<string> | null>(null);
+  const [pickedButtons, setPickedButtons] = useState<Set<string>>(new Set());
+  /**
+   * The state variable chosen per pair, by pair key.
+   *
+   * Only what the operator TOUCHED, like `picked`: everything else falls back to
+   * the default below on every render, so a refetch cannot re-suggest a variable
+   * somebody has just set to None. "" is a real entry here — it is how None is
+   * remembered — which is why the lookup uses `??` and not `||`.
+   */
+  const [stateVars, setStateVars] = useState<Record<string, string>>({});
+  const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
 
   const pairs = data?.pairs ?? [];
+  const singles = data?.buttons ?? [];
+  // Empty on a Companion with no custom variables, which is not an error — the
+  // State column is simply not offered, rather than offering a dropdown whose
+  // only entry is None.
+  const customVariables = data?.customVariables ?? [];
 
   // DERIVED, not synchronised. `picked` is null until the operator touches a
   // box, and until then the selection is computed from the server's own
@@ -295,14 +548,28 @@ export function ImportPairsDialog({
     picked ?? new Set(pairs.filter((p) => p.suggested && !p.exists).map((p) => `${p.page}:${p.slug}`));
 
   const key = (p: Pair) => `${p.page}:${p.slug}`;
+  const buttonKey = (b: Single) => `${b.page}:${b.row}:${b.col}`;
+  /** The variable this pair will be bound to: what was chosen, else the guess. */
+  const stateVarFor = (p: Pair) => stateVars[key(p)] ?? defaultStateVariable(p.slug, customVariables);
+
+  // Single buttons are NEVER pre-ticked, and this is not an oversight. A pair is
+  // plainly a thing being turned on and off; a single button is whatever
+  // somebody put on a Companion page, and a ticked-by-default camera shot or
+  // playback macro is a cue somebody can say by accident.
+  const shown = singles.filter((b) => matchesButtonSearch(b, search));
 
   async function run() {
     setBusy(true);
     try {
-      const send = pairs.filter((p) => chosen.has(key(p)));
+      // The binding travels with the pair, so the `_on` rule is created with it
+      // rather than needing a second edit. Blank is an optimistic pair.
+      const send = pairs
+        .filter((p) => chosen.has(key(p)))
+        .map((p) => ({ ...p, stateVariable: stateVarFor(p) }));
+      const sendButtons = singles.filter((b) => pickedButtons.has(buttonKey(b)));
       const r = await invoke<{ created: string[]; skipped: { name: string; why: string }[] }>(
         "automation:importPairs",
-        { pairs: send },
+        { pairs: send, buttons: sendButtons },
       );
       // Both halves reported. "12 created" alone hides the four that clashed.
       if (r.created.length) toast.success(`Created ${r.created.length} cue${r.created.length === 1 ? "" : "s"}`);
@@ -317,60 +584,164 @@ export function ImportPairsDialog({
     }
   }
 
+  const total = chosen.size + pickedButtons.size;
+
   return (
     <DialogRoot
       open={open}
       onOpenChange={(v) => {
         // Cleared on close rather than in an effect, so re-opening starts from
         // the suggestion again instead of last time's half-made choice.
-        if (!v) setPicked(null);
+        if (!v) {
+          setPicked(null);
+          setPickedButtons(new Set());
+          setStateVars({});
+          setSearch("");
+        }
         onOpenChange(v);
       }}
     >
       <DialogContent className="max-w-2xl">
         <h2 className="text-subheadline font-semibold text-fg">Import from Companion</h2>
         <p className="mb-2 mt-1 text-caption1 text-fg-muted">
-          Buttons whose labels differ only by ON/OFF. Each pair becomes two cues you can call by name.
-          Every one is created with <span className="text-fg">no service is live</span> on it and a two
-          second cooldown. Pairs that drive a projector, television, plug or lighting console are
-          ticked for you; tick anything else you want.
+          Every cue is created with <span className="text-fg">no service is live</span> on it and a two
+          second cooldown. Pairs that drive a projector, television, plug or lighting console are ticked
+          for you; nothing else is.
         </p>
 
         {data && !data.ok ? (
           <p className="text-caption1 text-fg-muted">Could not read Companion&rsquo;s configuration: {data.reason}</p>
         ) : (
           <div className="max-h-[50vh] overflow-y-auto">
-            {isFetching && pairs.length === 0 && <p className="py-4 text-caption1 text-fg-muted">Reading Companion…</p>}
+            {isFetching && pairs.length === 0 && singles.length === 0 && (
+              <p className="py-4 text-caption1 text-fg-muted">Reading Companion…</p>
+            )}
+
+            <SectionHeading title="ON/OFF pairs" count={pairs.length} />
+            <p className="pb-1 text-caption2 text-fg-subtle">
+              Buttons whose labels differ only by ON/OFF. Each becomes two cues and one Home Assistant
+              switch.
+              {customVariables.length > 0 && (
+                <>
+                  {" "}
+                  Pick a <span className="text-fg">state</span> variable and the switch reports what the
+                  device is doing rather than what it was asked to do.
+                </>
+              )}
+            </p>
+            {pairs.length === 0 && !isFetching && (
+              <p className="py-2 text-caption1 text-fg-muted">No ON/OFF pairs on this Companion.</p>
+            )}
             {pairs.map((p) => (
-              <label
-                key={key(p)}
-                className="flex items-center gap-2 border-b border-line py-1.5 last:border-0"
-              >
-                <Checkbox
-                  checked={chosen.has(key(p))}
-                  disabled={p.exists}
-                  onCheckedChange={(v) => {
-                    const next = new Set(chosen);
-                    if (v) next.add(key(p));
-                    else next.delete(key(p));
-                    setPicked(next);
-                  }}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-footnote text-fg">{p.base}</span>
-                  <span className="block truncate text-caption2 text-fg-subtle">
-                    {p.pageName} · {p.slug}_on / {p.slug}_off
-                    {p.exists ? " · already imported" : ""}
+              // A DIV with the label around the checkbox and the words only.
+              // With the whole row as one <label>, every click on the State
+              // select also toggled the checkbox — choosing a variable
+              // unticked the pair it was for.
+              <div key={key(p)} className="flex items-center gap-2 border-b border-line py-1.5">
+                <label className="flex min-w-0 flex-1 items-center gap-2">
+                  <Checkbox
+                    checked={chosen.has(key(p))}
+                    disabled={p.exists}
+                    aria-label={`${p.base} · ${p.pageName}`}
+                    onCheckedChange={(v) => {
+                      const next = new Set(chosen);
+                      if (v) next.add(key(p));
+                      else next.delete(key(p));
+                      setPicked(next);
+                    }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-footnote text-fg">{p.base}</span>
+                    <span className="block truncate text-caption2 text-fg-subtle">
+                      {p.pageName} · {p.slug}_on / {p.slug}_off
+                      {p.exists ? " · already imported" : ""}
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+                {/* Offered only when Companion HAS custom variables, and never
+                    for a pair that is already imported — its cues exist, and
+                    the binding is an edit to the rule from here on. */}
+                {customVariables.length > 0 && !p.exists && (
+                  <Select value={stateVarFor(p)} onValueChange={(v) => setStateVars({ ...stateVars, [key(p)]: v })}>
+                    {/* The PAGE is in the accessible name, exactly as the
+                        checkbox's is: the fixture Companion has "Projectors" on
+                        two pages, and two selects called "State variable for
+                        Projectors" are indistinguishable to a screen reader and
+                        to anything driving the page. */}
+                    <SelectTrigger
+                      className="w-40 shrink-0"
+                      aria-label={`State variable for ${p.base} · ${p.pageName}`}
+                    >
+                      <SelectValue placeholder="No state" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">No state</SelectItem>
+                      {customVariables.map((name) => (
+                        <SelectItem key={name} value={name}>{name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <KindTag kind="switch" />
+              </div>
             ))}
+
+            <div className="mt-3">
+              <SectionHeading title="Single buttons" count={singles.length} />
+              <p className="pb-1 text-caption2 text-fg-subtle">
+                Every other labelled button. Each becomes one cue and one Home Assistant script — nothing
+                here is ticked for you.
+              </p>
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search buttons, pages and cue names…"
+                className="mb-1 h-7 text-footnote"
+                aria-label="Search single buttons"
+              />
+              {shown.length === 0 && !isFetching && (
+                <p className="py-2 text-caption1 text-fg-muted">
+                  {singles.length === 0 ? "Every labelled button is part of a pair." : "Nothing matches."}
+                </p>
+              )}
+              {shown.map((b) => (
+                <label
+                  key={buttonKey(b)}
+                  className="flex items-center gap-2 border-b border-line py-1.5"
+                >
+                  <Checkbox
+                    checked={pickedButtons.has(buttonKey(b))}
+                    disabled={b.exists}
+                    aria-label={`${b.label} · ${b.pageName}`}
+                    onCheckedChange={(v) => {
+                      const next = new Set(pickedButtons);
+                      if (v) next.add(buttonKey(b));
+                      else next.delete(buttonKey(b));
+                      setPickedButtons(next);
+                    }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-footnote text-fg">{b.label}</span>
+                    <span className="block truncate text-caption2 text-fg-subtle">
+                      {b.pageName} · {b.slug}
+                      {b.exists ? " · already imported" : ""}
+                    </span>
+                  </span>
+                  <KindTag kind="script" />
+                </label>
+              ))}
+            </div>
           </div>
         )}
 
         <div className="mt-3 flex items-center gap-2">
-          <Button variant="accent" size="small" disabled={busy || chosen.size === 0} onClick={() => void run()}>
-            {busy ? "Importing…" : `Import ${chosen.size} pair${chosen.size === 1 ? "" : "s"}`}
+          <Button
+            variant="accent"
+            size="small"
+            disabled={busy || total === 0}
+            onClick={() => void run()}
+          >
+            {busy ? "Importing…" : importFooterLabel(chosen.size, pickedButtons.size)}
           </Button>
           <Button variant="transparent" size="small" onClick={() => onOpenChange(false)}>
             Cancel

@@ -92,13 +92,28 @@ describe("all sixteen dialogs", () => {
 });
 
 describe("the dialog footer", () => {
-  test("an inbound integration gets no switch and no Save", async () => {
+  test("an inbound integration gets no switch", async () => {
     const content = await open("companion");
     assertAbsent(
       content.querySelector('[aria-label="Enable Bitfocus Companion"]'),
       "the inbound integration's dialog offered an enable switch",
     );
-    assert.deepEqual(labels(content).filter((l) => l === "Save" || l === "Discard"), []);
+  });
+
+  test("Companion shows its address to copy AND the two outbound fields with Save and Test", async () => {
+    // Two halves in one dialog. The info panel is the inbound half (what to type
+    // into Companion); the form is the outbound half (where this server dials
+    // Companion to press buttons). As a bespoke panel the info REPLACED the form,
+    // so the host and port the server declared were never on screen, and the
+    // fixture's empty schema let the "declares N fields and rendered none" guard
+    // above pass over it.
+    const content = await open("companion");
+    assert.match(content.textContent ?? "", /IP \/ Host/, "the copyable address is gone");
+    const fields = [...content.querySelectorAll("[data-config-field]")].map((f) => f.getAttribute("data-config-field"));
+    assert.deepEqual(fields, ["host", "port"], "the outbound host and port fields are not rendered");
+    const l = labels(content);
+    assert.ok(l.includes("Test connection"), "no Test for the outbound half");
+    assert.ok(l.includes("Save"), "no Save for the outbound half");
   });
 
   test("Planning Center keeps Refresh now and its synced label", async () => {
@@ -126,9 +141,10 @@ describe("the dialog footer", () => {
   });
 
   test("a panel that saves its own list gets no Save, Discard or Test", async () => {
-    // wireless, osc, rosstalk, scores and companion each save as they are edited
-    // and had none of these in the row either.
-    for (const id of ["wireless", "osc", "rosstalk", "scores", "companion"]) {
+    // wireless, osc, rosstalk and scores each save as they are edited and had
+    // none of these in the row either. Companion is not in this list: its info
+    // panel sits ABOVE a real form, which keeps all three.
+    for (const id of ["wireless", "osc", "rosstalk", "scores"]) {
       const content = await open(id);
       const l = labels(content);
       for (const gone of ["Save", "Discard", "Test connection"]) {

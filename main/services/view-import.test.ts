@@ -247,3 +247,389 @@ describe("a bundle carrying two ScriptView presets with one id", () => {
     assert.equal(dupes[0].name, "First", "the first one wins, like a target does");
   });
 });
+
+// ── Plan exports ────────────────────────────────────────────────────────────
+//
+// A plan file is the same bundle with a service type on it, so everything above
+// still applies. What is new is the three things it can do that a view export
+// cannot: land under a different service type, carry a patch variant, and carry
+// presets. Only the last two can clash with anything already here.
+
+const { slotsStore } = await import("./slots-store.js");
+const { patchStore } = await import("./patch-store.js");
+const { presetsStore } = await import("./presets-store.js");
+
+const slotRow = (id: string) => ({ id, label: id, link: { kind: "static" as const } });
+const slotsView = (id: string, name: string) => ({ id, name, kind: "slots", createdAt: 0, layout: null });
+
+/** A plan bundle over one slots view, with the type's board on it. */
+const planBundle = (over: Record<string, unknown> = {}, sideOver: Record<string, unknown> = {}) => bundle({
+  plan: { serviceTypeId: "st-src", serviceTypeName: "Sunday AM", slotsScope: "type" },
+  roots: ["view-1"],
+  views: [slotsView("view-1", "Mic Board")],
+  sideData: {
+    slots: { "view-1": { "st-src": [slotRow("r1"), slotRow("r2")] } },
+    notes: {}, scriptviewLayouts: [],
+    ...sideOver,
+  },
+  ...over,
+});
+
+const sheet = (over: Record<string, unknown> = {}) => ({
+  id: "analog", name: "Analog", kind: "analog", devices: [], endpoints: [],
+  variants: [], assignments: { byServiceType: {}, byPlan: {} }, ...over,
+});
+
+async function blankPatch(over: Record<string, unknown> = {}): Promise<void> {
+  await patchStore.save({ sheets: [sheet(over)], updatedAt: "" } as never);
+}
+
+describe("landing a plan under a different service type", () => {
+  beforeEach(async () => {
+    await viewsStore.save([] as never);
+    await presetsStore.save([] as never);
+    await blankPatch();
+  });
+
+  test("the boards move to the chosen type, and the report says where from", async () => {
+    const report = await applyViewBundle(planBundle(), { serviceTypeId: "st-dst" });
+    const key = report.views[0]!.id;
+    const landed = (await slotsStore.allDefaults())[key]!;
+    assert.deepEqual(Object.keys(landed), ["st-dst"], "the board stayed under the file's own type id");
+    assert.equal(landed["st-dst"]!.length, 2);
+    assert.equal(report.plan?.retypedFrom, "st-src");
+    assert.equal(report.plan?.serviceTypeId, "st-dst");
+    assert.equal(report.slotBoards, 1);
+    assert.equal(report.slotRows, 2);
+  });
+
+  test("choosing the type the file already names is not a retype", async () => {
+    const report = await applyViewBundle(planBundle(), { serviceTypeId: "st-src" });
+    assert.equal(report.plan?.retypedFrom, undefined);
+    assert.equal(report.plan?.serviceTypeId, "st-src");
+  });
+
+  test('at scope "all" the source type is re-keyed and other types land as they are', async () => {
+    const b = planBundle(
+      { plan: { serviceTypeId: "st-src", serviceTypeName: "Sunday AM", slotsScope: "all" } },
+      { slots: { "view-1": { "st-src": [slotRow("a")], "st-other": [slotRow("b"), slotRow("c")] } } },
+    );
+    const report = await applyViewBundle(b, { serviceTypeId: "st-dst" });
+    const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
+    assert.deepEqual(Object.keys(landed).sort(), ["st-dst", "st-other"]);
+    assert.equal(landed["st-dst"]!.length, 1, "st-dst got the wrong type's board");
+    assert.equal(landed["st-other"]!.length, 2);
+  });
+
+  test("retyping onto a type the file ALSO carries a board for keeps the exported one", async () => {
+    // Scope "all" over a file that already holds st-dst's board: two entries
+    // land on one key, and the board the operator chose to export is the one
+    // they meant.
+    const b = planBundle(
+      { plan: { serviceTypeId: "st-src", serviceTypeName: "Sunday AM", slotsScope: "all" } },
+      { slots: { "view-1": { "st-src": [slotRow("a")], "st-dst": [slotRow("b"), slotRow("c")] } } },
+    );
+    const report = await applyViewBundle(b, { serviceTypeId: "st-dst" });
+    const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
+    assert.equal(landed["st-dst"]!.length, 1, "the file's own st-dst board overwrote the exported one");
+    // And the report counts what is ON DISK, not what was written. Counting
+    // writes reported two boards and three rows for one board of one row —
+    // the second write landed on the first's key and replaced it.
+    assert.equal(report.slotBoards, 1, "a board that was overwritten was still counted");
+    assert.equal(report.slotRows, 1, "the overwritten board's rows were still counted");
+  });
+
+  test("a view export ignores the chosen type rather than re-keying a guess", async () => {
+    // A view export carries every type's boards and names no plan. Re-keying one
+    // of them would be picking which, and the file does not say.
+    const report = await applyViewBundle(
+      bundle({ sideData: { slots: { "view-1": { "st-src": [slotRow("r")] } }, notes: {}, scriptviewLayouts: [] } }),
+      { serviceTypeId: "st-dst" },
+    );
+    const landed = (await slotsStore.allDefaults())[report.views[0]!.id]!;
+    assert.deepEqual(Object.keys(landed), ["st-src"]);
+    assert.equal(report.plan, undefined);
+  });
+});
+
+describe("the rebind list walks every root", () => {
+  beforeEach(async () => { await viewsStore.save([] as never); });
+
+  test("a root naming a view the file does not contain refuses the whole file", async () => {
+    // Filtered out instead, the walk started from nothing: the report promised
+    // no hardware to re-point on a file whose roots the importer could not find.
+    await assert.rejects(
+      () => applyViewBundle(planBundle({ roots: ["view-1", "ghost"] })),
+      /roots names a view that is not in the file: ghost/,
+    );
+    assert.deepEqual(await viewsStore.load(), [], "a view landed from a file that was refused");
+  });
+
+  test("not just the first one", async () => {
+    // A plan export has as many roots as the service type has boards on. Walking
+    // views[0] alone under-reported every other root's hardware, and the
+    // operator would find it live instead of in the report.
+    const wireless = (objId: string, channel: string) => ({
+      id: objId, x: 0, y: 0, w: 1, h: 1, z: 0, style: {},
+      config: { type: "wireless-channel", channelId: channel, label: channel },
+    });
+    const custom = (id: string, name: string, objects: unknown[]) => ({
+      id, name, kind: "custom", createdAt: 0,
+      layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects },
+    });
+    const report = await applyViewBundle(planBundle({
+      roots: ["view-1", "view-2"],
+      views: [custom("view-1", "One", [wireless("o1", "hh-1")]), custom("view-2", "Two", [wireless("o2", "hh-2")])],
+    }, { slots: {} }));
+    assert.deepEqual(report.rebind.map((r) => r.value).sort(), ["hh-1", "hh-2"]);
+  });
+
+  test("and never lists a shared embedded view's work twice", async () => {
+    const embed = (objId: string, viewId: string) => ({
+      id: objId, x: 0, y: 0, w: 1, h: 1, z: 0, style: {},
+      config: { type: "view-embed", viewId },
+    });
+    const custom = (id: string, name: string, objects: unknown[]) => ({
+      id, name, kind: "custom", createdAt: 0,
+      layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects },
+    });
+    const report = await applyViewBundle(planBundle({
+      roots: ["view-1", "view-2"],
+      views: [
+        custom("view-1", "One", [embed("e1", "view-3")]),
+        custom("view-2", "Two", [embed("e2", "view-3")]),
+        custom("view-3", "Shared", [{
+          id: "o3", x: 0, y: 0, w: 1, h: 1, z: 0, style: {},
+          config: { type: "spl-meter", meterId: "Smaart::Main" },
+        }]),
+      ],
+    }, { slots: {} }));
+    assert.equal(report.rebind.length, 1, `the shared view's meter was listed ${report.rebind.length} times`);
+  });
+});
+
+describe("patch variants", () => {
+  const withVariant = (over: Record<string, unknown> = {}) => planBundle(over, {
+    slots: {},
+    patchVariants: [{
+      sheetId: "analog", sheetName: "Analog",
+      variant: { id: "var-1", name: "Sunday rig", overrides: { "r:in:1": { label: "Kick" } } },
+    }],
+  });
+
+  beforeEach(async () => { await viewsStore.save([] as never); });
+
+  test("a variant that is not here is added and the type assigned to it", async () => {
+    await blankPatch();
+    const report = await applyViewBundle(withVariant());
+    assert.deepEqual(report.patchVariants, [{ sheetName: "Analog", variantName: "Sunday rig", outcome: "added" }]);
+    const s = (await patchStore.load()).sheets[0]!;
+    assert.deepEqual(s.variants.map((v) => v.id), ["var-1"]);
+    assert.equal(s.assignments.byServiceType["st-src"], "var-1");
+  });
+
+  test("a variant already here is left alone, and the assignment points at it", async () => {
+    await blankPatch({ variants: [{ id: "var-1", name: "Mine", overrides: {} }] });
+    const report = await applyViewBundle(withVariant());
+    assert.equal(report.patchVariants[0]!.outcome, "assigned");
+    const s = (await patchStore.load()).sheets[0]!;
+    assert.equal(s.variants[0]!.name, "Mine", "the local variant was overwritten under Keep");
+    assert.equal(s.assignments.byServiceType["st-src"], "var-1");
+  });
+
+  test("Replace overwrites it", async () => {
+    await blankPatch({ variants: [{ id: "var-1", name: "Mine", overrides: {} }] });
+    const report = await applyViewBundle(withVariant(), { onClash: "replace" });
+    assert.equal(report.patchVariants[0]!.outcome, "replaced");
+    assert.equal((await patchStore.load()).sheets[0]!.variants[0]!.name, "Sunday rig");
+  });
+
+  test("a DIFFERENT variant already assigned to the type is kept, and nothing is written", async () => {
+    await blankPatch({
+      variants: [{ id: "var-mine", name: "Mine", overrides: {} }],
+      assignments: { byServiceType: { "st-src": "var-mine" }, byPlan: {} },
+    });
+    const report = await applyViewBundle(withVariant());
+    assert.equal(report.patchVariants[0]!.outcome, "kept");
+    const s = (await patchStore.load()).sheets[0]!;
+    assert.equal(s.assignments.byServiceType["st-src"], "var-mine");
+    assert.deepEqual(s.variants.map((v) => v.id), ["var-mine"],
+      "an unassigned import is clutter in the patch editor, not a spare");
+  });
+
+  test("Replace takes the assignment off the local variant, and says which", async () => {
+    // Reported as "added" this said only that the file's variant arrived — the
+    // operator was never told the variant their type used had been dropped.
+    await blankPatch({
+      variants: [{ id: "var-mine", name: "Mine", overrides: {} }],
+      assignments: { byServiceType: { "st-src": "var-mine" }, byPlan: {} },
+    });
+    const report = await applyViewBundle(withVariant(), { onClash: "replace" });
+    assert.deepEqual(report.patchVariants, [{
+      sheetName: "Analog", variantName: "Sunday rig",
+      outcome: "reassigned", previousVariantName: "Mine",
+    }]);
+    assert.equal((await patchStore.load()).sheets[0]!.assignments.byServiceType["st-src"], "var-1");
+  });
+
+  test("Replace onto a clash whose variant is also here overwrites AND reassigns", async () => {
+    // Both halves at once: the file's variant is on the sheet already, and the
+    // type points at a different one. "replaced" alone would be as silent about
+    // the assignment as "added" was.
+    await blankPatch({
+      variants: [
+        { id: "var-mine", name: "Mine", overrides: {} },
+        { id: "var-1", name: "Stale copy", overrides: {} },
+      ],
+      assignments: { byServiceType: { "st-src": "var-mine" }, byPlan: {} },
+    });
+    const report = await applyViewBundle(withVariant(), { onClash: "replace" });
+    assert.deepEqual(report.patchVariants, [{
+      sheetName: "Analog", variantName: "Sunday rig",
+      outcome: "reassigned", previousVariantName: "Mine",
+    }]);
+    const s = (await patchStore.load()).sheets[0]!;
+    assert.equal(s.variants.find((v) => v.id === "var-1")!.name, "Sunday rig");
+  });
+
+  test("no clash at all is still a plain add", async () => {
+    // The other side of the guard: "reassigned" must not swallow the case where
+    // nothing of the operator's was pointed at in the first place.
+    await blankPatch();
+    const report = await applyViewBundle(withVariant(), { onClash: "replace" });
+    assert.deepEqual(report.patchVariants, [{
+      sheetName: "Analog", variantName: "Sunday rig", outcome: "added",
+    }]);
+  });
+
+  test("the assignment follows a retype", async () => {
+    await blankPatch();
+    await applyViewBundle(withVariant(), { serviceTypeId: "st-dst" });
+    const assigned = (await patchStore.load()).sheets[0]!.assignments.byServiceType;
+    assert.equal(assigned["st-dst"], "var-1");
+    assert.equal(assigned["st-src"], undefined, "the file's own type id was assigned on this machine");
+  });
+
+  test("a sheet this machine does not have is reported, not fatal", async () => {
+    // The views and boards are already correct; refusing here would throw them
+    // away over one sheet.
+    await patchStore.save({ sheets: [sheet({ id: "dante", name: "Dante", kind: "dante" })], updatedAt: "" } as never);
+    const report = await applyViewBundle(withVariant());
+    assert.equal(report.patchVariants[0]!.outcome, "no-such-sheet");
+    assert.equal(report.views.length, 1, "the views did not land");
+  });
+
+  test("a sheet with a different id but the same name is found by name", async () => {
+    await patchStore.save({ sheets: [sheet({ id: "locally-made-id", name: "Analog" })], updatedAt: "" } as never);
+    const report = await applyViewBundle(withVariant());
+    assert.equal(report.patchVariants[0]!.outcome, "added");
+  });
+
+  test("a save that fails late is reported, and claims nothing landed", async () => {
+    // patchStore.save runs after the views, boards, notes, images and targets
+    // are already committed. A throw there used to fail the whole import, and
+    // reporting "added" for a variant that never reached disk is the other half
+    // of the same lie.
+    await blankPatch();
+    const store = patchStore as unknown as { save: unknown };
+    const real = store.save;
+    store.save = async () => { throw new Error("disk full"); };
+    try {
+      const report = await applyViewBundle(withVariant());
+      assert.equal(report.views.length, 1, "the views were rolled back over a patch save");
+      assert.ok(
+        report.skipped.some((k) => k === "patch variants — could not be saved: disk full"),
+        `the failure was swallowed: ${JSON.stringify(report.skipped)}`,
+      );
+      assert.ok(
+        !report.patchVariants.some((p) => p.outcome === "added"),
+        "the report claims a variant was added that was never saved",
+      );
+    } finally {
+      store.save = real;
+    }
+  });
+
+  test("a malformed variant refuses the whole file before anything is written", async () => {
+    await blankPatch();
+    await assert.rejects(
+      () => applyViewBundle(planBundle({}, {
+        slots: {},
+        patchVariants: [{ sheetId: "analog", sheetName: "Analog", variant: { id: "v", name: "V", overrides: "nope" } }],
+      })),
+      /override map/,
+    );
+    assert.deepEqual(await viewsStore.load(), [], "a view landed from a file that was refused");
+    assert.deepEqual((await patchStore.load()).sheets[0]!.variants, []);
+  });
+});
+
+describe("presets", () => {
+  const p = (id: string, name: string) => ({ id, name, slots: [slotRow("s")], createdAt: "" });
+  const withPresets = () => planBundle({}, { slots: {}, presets: [p("p1", "From the file")] });
+
+  beforeEach(async () => { await viewsStore.save([] as never); });
+
+  test("one that is not here is added", async () => {
+    await presetsStore.save([] as never);
+    const report = await applyViewBundle(withPresets());
+    assert.deepEqual(report.presets, { added: 1, kept: 0, replaced: 0 });
+    assert.equal((await presetsStore.load())[0]!.name, "From the file");
+  });
+
+  test("Keep leaves the local one of the same id alone", async () => {
+    await presetsStore.save([p("p1", "Mine")] as never);
+    const report = await applyViewBundle(withPresets());
+    assert.deepEqual(report.presets, { added: 0, kept: 1, replaced: 0 });
+    assert.equal((await presetsStore.load())[0]!.name, "Mine");
+  });
+
+  test("Replace overwrites it, and does not duplicate the id", async () => {
+    await presetsStore.save([p("p1", "Mine")] as never);
+    const report = await applyViewBundle(withPresets(), { onClash: "replace" });
+    assert.deepEqual(report.presets, { added: 0, kept: 0, replaced: 1 });
+    const saved = await presetsStore.load();
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0]!.name, "From the file");
+  });
+
+  test("a save that fails late is reported, and the tally claims no write", async () => {
+    // p1 is already here, so it is KEPT — and a kept preset is untouched by a
+    // save that never happened, so it must still be counted. p2 would have been
+    // added, and was not.
+    await presetsStore.save([p("p1", "Mine")] as never);
+    const store = presetsStore as unknown as { save: unknown };
+    const real = store.save;
+    store.save = async () => { throw new Error("disk full"); };
+    try {
+      const report = await applyViewBundle(
+        planBundle({}, { slots: {}, presets: [p("p1", "From the file"), p("p2", "New")] }),
+      );
+      assert.equal(report.views.length, 1, "the views were rolled back over a preset save");
+      assert.ok(
+        report.skipped.some((k) => k === "presets — could not be saved: disk full"),
+        `the failure was swallowed: ${JSON.stringify(report.skipped)}`,
+      );
+      assert.deepEqual(report.presets, { added: 0, kept: 1, replaced: 0 });
+    } finally {
+      store.save = real;
+    }
+  });
+
+  test("a malformed preset refuses the whole file before anything is written", async () => {
+    await presetsStore.save([] as never);
+    await assert.rejects(
+      () => applyViewBundle(planBundle({}, { slots: {}, presets: [{ id: "p", name: "P" }] })),
+      /slot list/,
+    );
+    assert.deepEqual(await viewsStore.load(), []);
+    assert.deepEqual(await presetsStore.load(), []);
+  });
+});
+
+// NOT GUARDED HERE, deliberately: view-import clones the patch file before
+// touching it, because patchStore.load() hands back the DataStore's own cached
+// object. A test for that clone could not be made to fail — as the code stands
+// every branch that mutates a sheet also saves, and every branch that does not
+// save never mutates. The clone stays as insurance against the next branch;
+// the test that could not go red does not.

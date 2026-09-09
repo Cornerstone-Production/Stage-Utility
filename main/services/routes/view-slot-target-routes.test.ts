@@ -503,3 +503,63 @@ describe("POST /api/views/:id/copy-slots — target", () => {
     assert.match(String((r.json as { error?: string }).error), /body\.target must be/);
   });
 });
+
+// POST /api/views/resolve-slots — { slots, target? }
+//
+// The preview's target is read-only, so a wrong one writes nothing. It is still
+// worth refusing: a half-understood target resolves against the WRONG WEEK's
+// people under an ordinary 200, and the operator has no way to tell whose names
+// those are. Only the validation and the pass-through live here; whose roster
+// each target resolves against is stage-controller.slot-preview.test.ts.
+describe("POST /api/views/resolve-slots — target", () => {
+  it("with no target answers for the plan the screens are following", async () => {
+    const r = await callRoute(viewRoutes, "/api/views/resolve-slots", {
+      method: "POST",
+      body: { slots: [slot("s1")] },
+    });
+    assert.equal(r.status, 200);
+    assert.equal((r.json as { roster?: string }).roster, "live");
+    assert.equal((r.json as { slots?: Slot[] }).slots?.length, 1, "the rows come back under .slots now, not as the body");
+  });
+
+  it("passes a valid target through to the controller", async () => {
+    const r = await callRoute(viewRoutes, "/api/views/resolve-slots", {
+      method: "POST",
+      body: { slots: [slot("s1")], target: { serviceTypeId: TYPE, planId: null } },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(
+      (r.json as { roster?: string }).roster,
+      "none",
+      "a target the route dropped would answer `live` — the default side is how that shows",
+    );
+  });
+
+  it("refuses a malformed target rather than guessing at a week", async () => {
+    for (const [target, field] of [
+      [{ planId: PLAN }, "serviceTypeId"],
+      [{ serviceTypeId: "", planId: null }, "serviceTypeId"],
+      [{ serviceTypeId: 7, planId: null }, "serviceTypeId"],
+      [{ serviceTypeId: TYPE, planId: 7 }, "planId"],
+      [{ serviceTypeId: TYPE, planId: "" }, "planId"],
+      ["st-sun", "target"],
+      [[TYPE, PLAN], "target"],
+    ] as [unknown, string][]) {
+      const r = await callRoute(viewRoutes, "/api/views/resolve-slots", {
+        method: "POST",
+        body: { slots: [], target },
+      });
+      assert.equal(r.status, 400, `target ${JSON.stringify(target)} must be a client error`);
+      assert.match(
+        String((r.json as { error?: string }).error),
+        new RegExp(`body\\.target(\\.${field})?`),
+        `the 400 must name the field that was wrong (${field})`,
+      );
+    }
+  });
+
+  it("still refuses a body with no slots", async () => {
+    const r = await callRoute(viewRoutes, "/api/views/resolve-slots", { method: "POST", body: {} });
+    assert.equal(r.status, 400);
+  });
+});

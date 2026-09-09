@@ -28,6 +28,20 @@ export function walkLayoutObjects(
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
+  return collectRefsFrom(all, [rootId]);
+}
+
+/**
+ * The same walk over SEVERAL roots at once — what a plan export needs, since a
+ * service type's boards can live on any number of unrelated views.
+ *
+ * One walk, not one per root unioned afterwards: two roots that embed the same
+ * view would otherwise list its objects twice, and its unresolvable bindings
+ * twice, so the import report would tell an operator to rebind the same object
+ * two times. `seen` starts with every root, so a root is never listed as another
+ * root's embedded dependency.
+ */
+export function collectRefsFrom(all: readonly View[], rootIds: readonly string[]): ViewRefs {
   const byId = new Map(all.map((v) => [v.id, v]));
   const embedded: string[] = [];
   const objectIds: string[] = [];
@@ -36,10 +50,10 @@ export function collectRefs(all: readonly View[], rootId: string): ViewRefs {
   const ross: string[] = [];
   const unresolvable: UnresolvableRef[] = [];
 
-  // Breadth-first over the embed graph. `seen` starts with the root, so a cycle
-  // terminates and the root never lists itself as its own dependency.
-  const seen = new Set<string>([rootId]);
-  const queue = [rootId];
+  // Breadth-first over the embed graph. `seen` starts with the roots, so a cycle
+  // terminates and a root never lists itself as its own dependency.
+  const seen = new Set<string>(rootIds);
+  const queue = [...rootIds];
 
   while (queue.length) {
     const v = byId.get(queue.shift() as string);

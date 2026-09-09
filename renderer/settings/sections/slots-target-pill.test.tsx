@@ -41,7 +41,7 @@ after(() => {
   cleanup();
   teardown();
 });
-const { SlotsTargetPill, planLabel, savedMessage } = await import("./slots-target-pill.js");
+const { SlotsTargetPill, planLabel, savedMessage, namedType } = await import("./slots-target-pill.js");
 
 function pill(props: Partial<Parameters<typeof SlotsTargetPill>[0]> = {}) {
   return render(
@@ -166,5 +166,24 @@ describe("labelling", () => {
   test("and still says something without a service type name", () => {
     assert.equal(savedMessage("plan", "Wed Sep 13", null), "Saved slots for Wed Sep 13");
     assert.equal(savedMessage("default", "Wed Sep 13", null), "Saved the default");
+  });
+
+  // A service type's name is whatever somebody typed into Planning Center, and
+  // "The Salt Company" is a real one — five strings that named a default board
+  // read "the The Salt Company default".
+  test("a type name that already opens with an article does not get a second one", () => {
+    assert.equal(namedType("The Salt Company"), "The Salt Company");
+    assert.equal(namedType("Weekend"), "the Weekend");
+    assert.equal(namedType(null), "the service type");
+    assert.equal(
+      savedMessage("default", "Wed Sep 13", "The Salt Company"),
+      "Saved The Salt Company default",
+    );
+  });
+
+  test("and it capitalises for a sentence that opens with it", () => {
+    assert.equal(namedType("Weekend", true), "The Weekend");
+    assert.equal(namedType("the midweek", true), "The midweek");
+    assert.equal(namedType(null, true), "The service type");
   });
 });

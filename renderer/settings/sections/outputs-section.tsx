@@ -636,7 +636,11 @@ export function OutputsSection({
   stageState,
   handlers,
   onEditLayout,
+  serviceTypes = [],
 }: Pick<SectionProps, "stageState" | "handlers"> & {
+  /** For a plan import's service type picker. Defaulted so the one other
+   *  caller — none today — is not forced to thread it. */
+  serviceTypes?: SectionProps["serviceTypes"];
   /** Open the layout editor for a view. Absent when there is nowhere to open. */
   onEditLayout?: (viewId: string) => void;
 }) {
@@ -824,7 +828,7 @@ export function OutputsSection({
         </Button>
         {/* Beside New view because an imported view IS a new view — it arrives
             where you would look for one. */}
-        <ImportLayout />
+        <ImportLayout serviceTypes={serviceTypes} currentServiceTypeId={stageState.serviceTypeId ?? null} />
         {outputs.length > 0 && (
           <Button
             variant="transparent"

@@ -120,10 +120,16 @@ export interface SectionProps {
   localSlots: Slot[];
   slotsDirty: boolean;
   isSavingSlots: boolean;
-  /** Draft slots resolved server-side (no save) for the live preview; null when clean. */
-  resolvedDraftSlots: Slot[] | null;
+  /**
+   * The preview iframe's rows, resolved server-side (no save) for the board the
+   * editor is pointed at, plus whose roster filled them. Null while the editor is
+   * on the live plan with nothing unsaved — then the iframe shows the kiosk.
+   */
+  slotsPreview: SlotsPreviewDTO | null;
   /** Which of the selected view's two boards the slot editor is on. */
   slotsTargetSide: "default" | "plan";
+  /** The service type being EDITED, named — for the default board's caption. */
+  slotsTargetTypeName: string | null;
   /** The current plan's short date, e.g. "Wed Sep 13". */
   slotsTargetLabel: string;
   slotsTargetHasPlan: boolean;
