@@ -100,14 +100,14 @@ When reporting, please include:
 
   The same token is required by `POST /api/action/invoke` and by the cue-token *writes*
   (mint, revoke), by `import-pairs` and by `buttons/refresh`, **unless the request is a
-  same-origin browser write** — which means `Sec-Fetch-Site: same-origin` **and** an `Origin`
-  naming this server, both of which a page on this app's own origin sends on every `POST` and
-  `DELETE`. Either header alone is refused: they are checked together because `curl` with one
-  of them is not a browser.
+  same-origin browser write** — which means an `Origin` naming this server, which a page on
+  this app's own origin sends on every `POST` and `DELETE` and a page on any other origin
+  cannot forge. `Sec-Fetch-Site` is not required: browsers send it only to HTTPS or localhost,
+  and this app is plain HTTP on a LAN address. When it is present it must say `same-origin`.
 
-  That exemption is a **browser convenience, not a boundary**: `curl` can set both headers as
-  easily as one. What it closes is the confused-deputy case — a page on another origin can
-  forge neither.
+  That exemption is a **browser convenience, not a boundary**: `curl` can type an `Origin` as
+  easily as a browser sends one. What it closes is the confused-deputy case — a page on another
+  origin cannot forge it.
 
   Reads are unchanged and remain open to the LAN: the token *list* (labels, ids and last-use
   times — never a hash), the generated Home Assistant fragment (which refers to the token as
