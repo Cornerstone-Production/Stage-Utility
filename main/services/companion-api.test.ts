@@ -368,3 +368,45 @@ describe("readCustomVariable", () => {
     assert.equal(calls.length, 2, "a cached value here would freeze every switch in Home Assistant");
   });
 });
+
+// ── The host, resolved inside the try ─────────────────────────────────────────
+//
+// Every one of these three is documented as never throwing, and each resolved
+// its base URL BEFORE its try: `baseUrl()` awaits getTarget, which reaches the
+// integration manager and its config store. A rejection there escaped all three.
+//
+// It matters most for the variable read, because its caller reads every bound
+// pair in one batch — one rejection took out every other pair's state and the
+// `GET /api/cues/states` route with it. For `press` it is worse in kind: an
+// automation action that throws stops the engine.
+describe("a getTarget failure", () => {
+  const boom = () => {
+    companionDeps.getTarget = async () => {
+      throw new Error("secrets.bin is unreadable");
+    };
+  };
+
+  test("readCustomVariable returns it rather than throwing", async () => {
+    boom();
+    stub(() => new Response("on", { status: 200 }));
+    assert.deepEqual(await companionApi.readCustomVariable("projectors_state"), {
+      error: "secrets.bin is unreadable",
+    });
+  });
+
+  test("press returns it rather than throwing", async () => {
+    boom();
+    stub(() => new Response("ok", { status: 200 }));
+    const r = await companionApi.press({ page: 17, row: 2, col: 6 });
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /secrets\.bin is unreadable/);
+  });
+
+  test("fetchExport returns it rather than throwing", async () => {
+    boom();
+    stub(() => new Response("{}", { status: 200 }));
+    const r = await companionApi.fetchExport({ force: true });
+    assert.equal(r.ok, false);
+    assert.match(r.ok === false ? r.reason : "", /secrets\.bin is unreadable/);
+  });
+});

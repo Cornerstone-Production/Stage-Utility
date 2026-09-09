@@ -167,6 +167,27 @@ describe("cueStates.read", () => {
     assert.deepEqual(reads, []);
   });
 
+  test("a read that REJECTS is that pair's unknown, not everybody's", async () => {
+    // `read` is documented as never throwing and the one implementation of it
+    // means to be — but under Promise.all one rejection rejected the batch, so
+    // `cueStates.read()` threw despite saying it never does and the route
+    // answered 500 for every pair over one of them.
+    rules = [...pair("ok_one"), ...pair("thrower"), ...pair("ok_two")];
+    values.ok_one_state = { value: "on" };
+    values.ok_two_state = { value: "off" };
+    const answered = cueStatesDeps.read;
+    cueStatesDeps.read = async (variable) => {
+      if (variable === "thrower_state") throw new Error("secrets.bin is unreadable");
+      return answered(variable);
+    };
+    const answer = await cueStates.read();
+    assert.equal(answer.states.ok_one!.state, "on");
+    assert.equal(answer.states.ok_two!.state, "off");
+    assert.equal(answer.states.thrower!.state, "unknown");
+    assert.equal(answer.states.thrower!.reason, "secrets.bin is unreadable");
+    assert.equal(answer.ok, false);
+  });
+
   test("one pair unknown does not make another pair unknown", async () => {
     rules = [...pair("good"), ...pair("bad")];
     values.good_state = { value: "on" };

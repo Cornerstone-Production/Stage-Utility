@@ -166,13 +166,17 @@ class CompanionApi {
         detail: `p${loc.page} r${loc.row} c${loc.col} is not a Companion coordinate — whole numbers, none negative`,
       };
     }
-    const base = await this.baseUrl();
-    if (!base) {
-      return { ok: false, status: null, detail: "Companion host is not configured" };
-    }
     const where = `p${loc.page} r${loc.row} c${loc.col}`;
-    const url = `${base}/api/location/${loc.page}/${loc.row}/${loc.col}/press`;
+    // Inside the try, like the other two: getTarget reaches the config store,
+    // and a rejection out of a method the engine calls stops the engine.
+    let base = "";
     try {
+      const resolved = await this.baseUrl();
+      if (!resolved) {
+        return { ok: false, status: null, detail: "Companion host is not configured" };
+      }
+      base = resolved;
+      const url = `${base}/api/location/${loc.page}/${loc.row}/${loc.col}/press`;
       const res = await companionDeps.fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -191,7 +195,9 @@ class CompanionApi {
       }
       return { ok: true, status: res.status, detail: where };
     } catch (e) {
-      const detail = CompanionApi.why(e, `${loc.page}/${loc.row}/${loc.col} at ${base}`);
+      // `base` is "" when getTarget itself failed, and "17/2/6 at " reads as a
+      // truncated sentence — the coordinate alone is what is left to say.
+      const detail = CompanionApi.why(e, base ? `${loc.page}/${loc.row}/${loc.col} at ${base}` : where);
       console.warn(`[companion] press ${where} failed: ${scrub(detail)}`);
       return { ok: false, status: null, detail };
     }
@@ -225,13 +231,18 @@ class CompanionApi {
   }
 
   private async fetchExportOnce(): Promise<ExportResult> {
-    const base = await this.baseUrl();
-    if (!base) {
-      const reason = "Companion host is not configured";
-      console.warn(`[companion] export unavailable: ${reason}`);
-      return { ok: false, reason };
-    }
+    // Inside the try, like the other two: getTarget reaches the config store,
+    // and a rejection here would reject the shared in-flight promise for every
+    // picker waiting on it.
+    let base = "";
     try {
+      const resolved = await this.baseUrl();
+      if (!resolved) {
+        const reason = "Companion host is not configured";
+        console.warn(`[companion] export unavailable: ${reason}`);
+        return { ok: false, reason };
+      }
+      base = resolved;
       const res = await companionDeps.fetch(`${base}/int/export/full?format=json`, {
         signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS),
       });
@@ -284,10 +295,16 @@ class CompanionApi {
     if (!isCompanionVariableName(variable)) {
       return { error: `"${variable}" is not a Companion variable name` };
     }
-    const base = await this.baseUrl();
-    if (!base) return { error: "Companion host is not configured" };
-    const url = `${base}/api/custom-variable/${encodeURIComponent(variable)}/value`;
+    // `baseUrl()` is INSIDE the try. It awaits getTarget, which reaches the
+    // integration manager and its config store, and a rejection there escaped a
+    // method documented as never throwing — which under the caller's batch read
+    // was every other pair's state gone as well. See cue-states.ts.
+    let base = "";
     try {
+      const resolved = await this.baseUrl();
+      if (!resolved) return { error: "Companion host is not configured" };
+      base = resolved;
+      const url = `${base}/api/custom-variable/${encodeURIComponent(variable)}/value`;
       const res = await companionDeps.fetch(url, {
         signal: AbortSignal.timeout(VARIABLE_TIMEOUT_MS),
       });
@@ -298,6 +315,10 @@ class CompanionApi {
       // "on\n" matching neither value would read as unknown.
       return { value: (await res.text()).trim() };
     } catch (e) {
+      // `base` is "" when getTarget itself failed. `why` appends the target only
+      // when the message does not already name it, and every message contains
+      // "", so an unknown host reads as the failure alone rather than as
+      // "... ()".
       return { error: CompanionApi.why(e, base) };
     }
   }

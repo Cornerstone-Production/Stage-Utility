@@ -27,6 +27,7 @@
 // given up on.
 
 import { boundCuePairs } from "./cue-pairs.js";
+import { errorMessage } from "./errors.js";
 import { companionApi, type VariableResult } from "./companion-api.js";
 import { scrub } from "./scrub.js";
 import type { Rule } from "../types/automation.js";
@@ -126,10 +127,18 @@ class CueStates {
   private async readOnce(): Promise<CueStatesAnswer> {
     const pairs = boundCuePairs(await cueStatesDeps.rules());
     const variables = [...new Set(pairs.map((p) => p.binding!.variable))];
+    // allSettled, not all. `read` is documented as never throwing and every
+    // implementation of it means to be, but one rejection under Promise.all
+    // rejects the whole batch and takes `read()` — and with it the route, and
+    // with it every OTHER pair's state — down with it. That is the failure this
+    // module exists to avoid, one level up: a rejected read is that variable's
+    // `{ error }` and nobody else's problem.
+    const settled = await Promise.allSettled(variables.map((v) => cueStatesDeps.read(v)));
     const read = new Map<string, VariableResult>(
-      await Promise.all(
-        variables.map(async (v) => [v, await cueStatesDeps.read(v)] as const),
-      ),
+      variables.map((v, i) => {
+        const result = settled[i]!;
+        return [v, result.status === "fulfilled" ? result.value : { error: errorMessage(result.reason) }];
+      }),
     );
 
     // A MAP, not a plain record. The key is the pair's base, which comes from a

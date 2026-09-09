@@ -805,6 +805,27 @@ describe("GET /api/cues/states", () => {
     assert.deepEqual(variableReads, [], "an unbound pair must not read anything");
   });
 
+  test("a read that REJECTS is still a 200, with that pair unknown", async () => {
+    // getTarget reaches the config store, and its rejection escaped
+    // readCustomVariable — which under a batch read of every bound pair was a
+    // 500 here, taking out the Home Assistant sensor that covers all of them
+    // for one unreadable file.
+    await withBoundPair();
+    const real = companionDeps.getTarget;
+    companionDeps.getTarget = async () => {
+      throw new Error("secrets.bin is unreadable");
+    };
+    try {
+      const r = await callRoute(cueRoutes, "/api/cues/states");
+      assert.equal(r.status, 200);
+      const row = (r.json as { states: Record<string, Record<string, unknown>> }).states.projectors!;
+      assert.equal(String(row.state), "unknown");
+      assert.equal(String(row.reason), "secrets.bin is unreadable");
+    } finally {
+      companionDeps.getTarget = real;
+    }
+  });
+
   test("the answer is cached, so a second poll does not read Companion again", async () => {
     await withBoundPair();
     variables.projectors_state = "on";
