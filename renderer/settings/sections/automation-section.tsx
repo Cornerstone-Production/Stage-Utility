@@ -7,6 +7,7 @@ import {
   STATE_OFF_DEFAULT,
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
+import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -446,6 +447,59 @@ function CuePairState({ base, state }: { base: string; state: CueStateRow }) {
 }
 
 /**
+ * "service-safe" (quiet) when the cue carries `service.is-not-live`, or a
+ * clearly visible amber "any time" when it does not — so the cues that can
+ * fire mid-service stand out in a long list rather than needing the editor
+ * opened one at a time.
+ *
+ * Only for a cue (`call.by-name`): the condition means nothing on a rule that
+ * cannot be called.
+ */
+function ServiceGuardBadge({ conditions }: { conditions: Rule["conditions"] }) {
+  const guarded = hasServiceGuard(conditions);
+  return (
+    <span
+      data-service-guard={guarded ? "on" : "off"}
+      className={
+        "inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-caption2 " +
+        (guarded ? "text-fg-subtle" : "border border-amber-7 bg-amber-3 font-medium text-amber-11")
+      }
+    >
+      {guarded ? "service-safe" : "any time"}
+    </span>
+  );
+}
+
+/**
+ * The one switch over the `service.is-not-live` condition — see
+ * service-guard.ts for what flipping it does to the condition list.
+ *
+ * Only for a cue: the condition, and the switch reading it, mean nothing on a
+ * rule with any other trigger.
+ */
+function ServiceGuardField({
+  conditions,
+  onChange,
+}: {
+  conditions: Rule["conditions"];
+  onChange: (next: Rule["conditions"]) => void;
+}) {
+  const allowed = !hasServiceGuard(conditions);
+  return (
+    <Row
+      label="Allowed during a service"
+      hint='Off: refused while a service is live or about to start (the imported default). On: fires whenever it is called.'
+    >
+      <Switch
+        checked={allowed}
+        onCheckedChange={(v) => onChange(withServiceGuard(conditions, !v))}
+        aria-label="Allowed during a service"
+      />
+    </Row>
+  );
+}
+
+/**
  * The three state-binding fields, on the `_on` half of a pair and nowhere else.
  *
  * A binding on a cue with no partner reads a variable nothing ever shows, so the
@@ -652,6 +706,7 @@ function RuleCard({
                 was {formerNames.join(", ")}
               </span>
             )}
+            {rule.trigger.id === CALL_TRIGGER_ID && <ServiceGuardBadge conditions={rule.conditions} />}
           </div>
           <div className="truncate text-caption1 text-fg-muted">{summary}</div>
           {/* What the last reconcile found about this rule's Companion button.
@@ -746,6 +801,16 @@ function RuleCard({
 
           <Separator />
           <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">If</span>
+          {/* The single switch over `service.is-not-live`, for a cue only — the
+              condition means nothing on a rule with any other trigger. A view
+              on the condition below, not a replacement for it: the condition
+              is still there in the list and still removable by hand. */}
+          {draft.trigger.id === CALL_TRIGGER_ID && (
+            <ServiceGuardField
+              conditions={draft.conditions}
+              onChange={(conditions) => setDraft({ ...draft, conditions })}
+            />
+          )}
           {draft.conditions.length === 0 && (
             <p className="text-caption1 text-fg-subtle">No conditions — the rule fires whenever its trigger does.</p>
           )}
