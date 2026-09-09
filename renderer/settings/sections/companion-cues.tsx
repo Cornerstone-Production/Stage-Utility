@@ -30,7 +30,7 @@ import {
 } from "@main/services/companion-fingerprint";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CopyIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
+import { CopyIcon, DownloadIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
 import {
@@ -873,6 +873,15 @@ export function CueAccessCard() {
           </p>
           <Button variant="transparent" size="small" onClick={() => void showYaml()}>
             <CopyIcon className="size-3.5" /> Copy YAML
+          </Button>
+          {/* Clipboard writes are a secure-context API and fail on the plain-HTTP
+              LAN address every real install answers on — see prod-insecure-context
+              notes. A plain anchor download works there, so it stays even though
+              Copy YAML does not always. */}
+          <Button variant="transparent" size="small" asChild>
+            <a href="/api/cues/home-assistant.yaml" download>
+              <DownloadIcon className="size-3.5" /> Download YAML
+            </a>
           </Button>
         </div>
       </div>

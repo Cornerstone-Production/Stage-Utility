@@ -259,12 +259,29 @@ pair's spoken name is composed by the import and never follows.
 
 ### Home Assistant
 
-**Copy YAML** in the same panel produces the whole configuration fragment: one
-`rest_command` per cue, a template `switch` per ON/OFF pair, and a `script` per
-cue that is not half of a pair. A cue that has been renamed carries a comment
-naming the `rest_command` it used to be; former names are never emitted as
-commands of their own. Paste it into
-`configuration.yaml`, put the token in `secrets.yaml` **with the scheme**:
+**Copy YAML** and **Download YAML** in the same panel both produce the whole
+configuration fragment: one `rest_command` per cue, a template `switch` per
+ON/OFF pair, and a `script` per cue that is not half of a pair. A cue that has
+been renamed carries a comment naming the `rest_command` it used to be; former
+names are never emitted as commands of their own. Copy YAML writes it to the
+clipboard, which needs a secure browsing context and fails on the plain-HTTP LAN
+address most installs run on — use **Download YAML** there instead.
+
+Save the download as `packages/stage_utility.yaml` in Home Assistant's config
+folder, and add this to `configuration.yaml` once:
+
+```yaml
+homeassistant:
+  packages: !include_dir_named packages
+```
+
+A package rather than a direct paste, because the fragment carries top-level
+`script:` and `switch:` keys, and a default `configuration.yaml` already has
+`script: !include scripts.yaml` — pasting the fragment in as-is would be a
+duplicate key. `secrets.yaml` sits in the same config folder; the File editor
+add-on is the easiest way to reach both it and the packages folder.
+
+Put the token in `secrets.yaml` **with the scheme**:
 
 ```yaml
 stage_utility_token: "Bearer su_..."

@@ -1173,6 +1173,9 @@ describe("the Home Assistant config", () => {
     const r = await callRoute(cueRoutes, "/api/cues/home-assistant.yaml", { headers: browser });
     assert.equal(r.status, 200);
     assert.match(r.headers["Content-Type"] ?? "", /yaml/);
+    // The download button relies on this exact filename — the docs tell the
+    // operator to save it as packages/stage_utility.yaml.
+    assert.equal(r.headers["Content-Disposition"], 'attachment; filename="stage_utility.yaml"');
     const yaml = r.body;
 
     // Four cues from the import above -> four commands, two pairs -> two switches.
