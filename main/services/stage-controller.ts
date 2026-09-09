@@ -942,6 +942,21 @@ export class StageController {
     return this.upcomingCache?.plans.find((p) => p.planId === planId) ?? null;
   }
 
+  /**
+   * A service type's name from the switcher's own cached list.
+   *
+   * The DEFAULT side of a board has no plan, so there is no plan row to read a
+   * type name off — and the type is not necessarily the one the screens are on.
+   * Without this, another type's default was named with the LIVE type's name, in
+   * the save toast ("Saved the Cornerstone Youth default" for a Weekend board)
+   * and in the revert and promote confirmations.
+   */
+  private cachedTypeName(serviceTypeId: string | null): string | null {
+    if (!serviceTypeId) return null;
+    if (serviceTypeId === this.state.serviceTypeId) return this.state.serviceTypeName;
+    return this.upcomingCache?.plans.find((p) => p.serviceTypeId === serviceTypeId)?.serviceTypeName ?? null;
+  }
+
   /** How the editor's plan switcher steps. Operator setting; changes nothing the
    *  machine follows. */
   async setPlanSwitcherMode(mode: PlanSwitcherMode): Promise<StageState> {
@@ -2117,7 +2132,7 @@ export class StageController {
       // not in it; planLabel() falls back rather than inventing a date.
       serviceTypeName: isCurrent
         ? this.state.serviceTypeName
-        : (row?.serviceTypeName ?? (serviceTypeId === this.state.serviceTypeId ? this.state.serviceTypeName : null)),
+        : (row?.serviceTypeName ?? this.cachedTypeName(serviceTypeId)),
       planId,
       planDates: isCurrent ? this.state.planDates : (row?.dates ?? null),
       planSortDate: isCurrent ? this.currentPlanSortDate : (row?.sortDate ?? null),

@@ -46,12 +46,29 @@ export function planLabel(
   return planDates ?? "This plan";
 }
 
+/**
+ * "the Weekend" / "The Salt Company" / "the service type".
+ *
+ * A service type's name is whatever somebody typed into Planning Center, and
+ * some of them open with an article — five different strings said "the The Salt
+ * Company default". `capital` is for a sentence that starts with it.
+ *
+ * ONE copy, because there are five callers: the save toast, the revert
+ * confirmation, the promote confirmation, the promote toast and the preview
+ * caption. The same phrase written five times is how one of them stays wrong.
+ */
+export function namedType(serviceTypeName: string | null, capital = false): string {
+  const name = serviceTypeName ?? "service type";
+  if (/^the\s/i.test(name)) return capital ? name.charAt(0).toUpperCase() + name.slice(1) : name;
+  return `${capital ? "The" : "the"} ${name}`;
+}
+
 /** "Saved slots for Wed Sep 13 · Cornerstone Youth" / "Saved the … default". */
 export function savedMessage(side: SlotsTargetSide, label: string, serviceTypeName: string | null): string {
   if (side === "plan") {
     return serviceTypeName ? `Saved slots for ${label} · ${serviceTypeName}` : `Saved slots for ${label}`;
   }
-  return serviceTypeName ? `Saved the ${serviceTypeName} default` : "Saved the default";
+  return serviceTypeName ? `Saved ${namedType(serviceTypeName)} default` : "Saved the default";
 }
 
 /**
@@ -140,6 +157,16 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
     state?.timezone ?? null,
   );
 
+  /**
+   * The service type BEING EDITED, named. Stage state is a fallback only while
+   * the editor is on the machine's own type, for the same reason `label` above
+   * treats it that way: off it, the fallback named another type's default board
+   * with the live type's name.
+   */
+  const typeName =
+    targets?.serviceTypeName ??
+    (serviceTypeId === (state?.serviceTypeId ?? null) ? (state?.serviceTypeName ?? null) : null);
+
   /** The rows the grid should show for the current side. */
   const slotsForSide: Slot[] | null = !targets
     ? null
@@ -169,7 +196,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
     // an ordinary thing to do and reads green, as it did before the switcher
     // existed. `toast.info` because there is no amber variant to reach for.
     const offTarget = !editing.onLive;
-    const message = savedMessage(effectiveSide, label, targets?.serviceTypeName ?? state?.serviceTypeName ?? null);
+    const message = savedMessage(effectiveSide, label, typeName);
     if (offTarget) toast.info(message);
     else toast.success(message);
   }
@@ -185,7 +212,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
     if (!planId) return false;
     const ok = await confirm({
       title: `Revert ${label} to the default?`,
-      message: `The slots saved for ${label} are deleted and this screen goes back to the ${targets?.serviceTypeName ?? "service type"} default.`,
+      message: `The slots saved for ${label} are deleted and this screen goes back to ${namedType(typeName)} default.`,
       confirmLabel: "Revert",
       destructive: true,
     });
@@ -208,7 +235,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
     if (!planId) return false;
     const ok = await confirm({
       title: `Make ${label} the default?`,
-      message: `The ${targets?.serviceTypeName ?? "service type"} default is replaced by the slots saved for ${label}, and ${label} stops being an exception.`,
+      message: `${namedType(typeName, true)} default is replaced by the slots saved for ${label}, and ${label} stops being an exception.`,
       confirmLabel: "Set as default",
       destructive: true,
     });
@@ -218,7 +245,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
       queryClient.setQueryData(["stage:getState"], next);
       await invalidate();
       setOwnSide("default");
-      toast.success(`${label} is now the ${targets?.serviceTypeName ?? "service type"} default.`);
+      toast.success(`${label} is now ${namedType(typeName)} default.`);
       return true;
     } catch (err) {
       toast.error(`Failed to set as default: ${String(err)}`);
@@ -235,6 +262,7 @@ export function useSlotsTarget(scope: SlotsScope, key: string) {
     hasPlan,
     hasOverride,
     label,
+    typeName,
     slotsForSide,
     wireTarget,
     announceSaved,

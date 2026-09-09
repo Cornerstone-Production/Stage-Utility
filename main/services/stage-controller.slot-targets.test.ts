@@ -44,6 +44,7 @@ type Mutable = {
   applyPlan: (plan: { id: string; title: string; seriesTitle: string | null; sortDate: string | null; dates: string | null }) => Promise<void>;
   fetchTeamMembers: (serviceTypeId: string, planId: string) => Promise<void>;
   rawSlotsByView: Map<string, Slot[]>;
+  upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[] } | null;
 };
 const ctl = stageController as unknown as Mutable;
 
@@ -285,6 +286,41 @@ describe("the editor's two boards", () => {
     targets = await stageController.getSlotTargets("view", VIEW);
     assert.equal(targets.overrideSlots?.[0]?.id, "week");
     assert.equal(targets.defaultSlots[0]?.id, "standing", "and the default is still readable behind it");
+  });
+
+  // The DEFAULT side of another service type's board has no plan, so there is no
+  // plan row to read a type name off. It used to be named with the LIVE type's
+  // name, which reached the operator as "Saved the Cornerstone Youth default"
+  // after saving a Weekend board, and named the wrong type in the revert and
+  // promote confirmations — both of which delete or overwrite a board.
+  it("names the service type of a DEFAULT target it is not currently on", async () => {
+    ctl.upcomingCache = {
+      at: Date.now(),
+      days: 60,
+      allowed: [TYPE, OTHER_TYPE],
+      plans: [
+        { serviceTypeId: OTHER_TYPE, serviceTypeName: "Youth", planId: "y1", title: "Youth", sortDate: null, dates: null, isCurrent: false },
+      ] as unknown as UpcomingPlan[],
+    };
+    const targets = await stageController.getSlotTargets("view", VIEW, {
+      serviceTypeId: OTHER_TYPE,
+      planId: null,
+    });
+    assert.equal(
+      targets.serviceTypeName,
+      "Youth",
+      "naming another type's default with the live type's name mislabels a save that deletes a board",
+    );
+    ctl.upcomingCache = null;
+  });
+
+  it("says nothing rather than guessing when the type is in no list at all", async () => {
+    ctl.upcomingCache = null;
+    const targets = await stageController.getSlotTargets("view", VIEW, {
+      serviceTypeId: "st-never-seen",
+      planId: null,
+    });
+    assert.equal(targets.serviceTypeName, null, "an unknown type is unnamed, not named after the live one");
   });
 
   // The editor's plan switcher points at a week the machine is not on, and the

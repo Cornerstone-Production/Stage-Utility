@@ -943,7 +943,7 @@ export function useStageSettings(pinnedViewId?: string) {
     isRefreshing,
     slotsPreview,
     slotsTargetSide: slotsTarget.side,
-    slotsTargetTypeName: slotsTarget.targets?.serviceTypeName ?? stageState?.serviceTypeName ?? null,
+    slotsTargetTypeName: slotsTarget.typeName,
     slotsTargetLabel: slotsTarget.label,
     slotsTargetHasPlan: slotsTarget.hasPlan,
     slotsTargetHasOverride: slotsTarget.hasOverride,

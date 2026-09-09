@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import { invoke as ipc } from "../../lib/api";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { useEditingTarget } from "./editing-target";
+import { namedType } from "./slots-target-pill";
 
 /** How long to wait after the last keystroke before asking the server. */
 const DEBOUNCE_MS = 250;
@@ -108,8 +109,9 @@ export function previewNote(
 ): { text: string; title?: string } | null {
   if (!resolution || resolution.roster === "live") return null;
   if (resolution.roster === "none") {
-    const type = serviceTypeName ?? "service type";
-    return { text: `Previewing the ${type} default — positions only, no plan` };
+    // `namedType` and not "the ${name}": some Planning Center type names open
+    // with an article, and "the The Salt Company default" is a real one.
+    return { text: `Previewing ${namedType(serviceTypeName)} default — positions only, no plan` };
   }
   if (resolution.roster === "unavailable") {
     return {
