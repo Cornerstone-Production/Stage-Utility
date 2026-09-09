@@ -40,6 +40,8 @@ type CompanionButton = import("../companion-export.js").CompanionButton;
 const { stageController } = await import("../stage-controller.js");
 const { integrationManager } = await import("../integration-manager.js");
 const { AUTOMATION_TRIGGERS, CALL_TRIGGER_ID } = await import("../automation-triggers.js");
+const { readFingerprint } = await import("../companion-fingerprint.js");
+const { runCompanionReconcile } = await import("../companion-reconcile.js");
 
 after(async () => {
   await fsp.rm(TMP, { recursive: true, force: true });
@@ -1060,5 +1062,128 @@ describe("importing single buttons", () => {
     });
     assert.equal(onlyPairs.status, 200);
     assert.deepEqual(onlyPairs.json, { created: [], skipped: [] });
+  });
+});
+
+// ── A cue whose button moved ──────────────────────────────────────────────────
+
+describe("reconciling a cue's Companion button", () => {
+  /** The whole export, mutated by a case, served to the stub. */
+  let exportDoc: Record<string, unknown> = companionExportFixture();
+  let exportOk = true;
+
+  /** Every rule's press params, keyed by cue name. */
+  const paramsOf = (name: string) =>
+    automationEngine.cueRules().find((r) => automationEngine.cueNameOf(r) === name)!.action.params;
+
+  type Doc = {
+    pages: Record<string, { controls: Record<string, Record<string, unknown>> }>;
+  };
+
+  /** Import the page-1 pair, then reconcile against whatever the case set up. */
+  async function importPageOne(): Promise<void> {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    exportDoc = companionExportFixture();
+    exportOk = true;
+    companionApi.invalidate();
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { page: number }[] }
+    ).pairs.filter((p) => p.page === 1);
+    await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+  }
+
+  before(() => {
+    companionDeps.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/press")) {
+        presses.push(url);
+        return new Response("ok", { status: 200 });
+      }
+      if (!exportOk) throw new Error("EHOSTUNREACH");
+      return Response.json(exportDoc);
+    };
+  });
+
+  test("an import records the fingerprint straight away, without waiting for a pass", async () => {
+    await importPageOne();
+    const f = readFingerprint(paramsOf("room_a_screens_projectors_on"));
+    assert.equal(f.status, "in-place");
+    assert.equal(f.pageId, FIXTURE_PAGE_IDS[1]);
+    assert.deepEqual(f.actionIds, [fixtureActionId(1, 0, 1, 0)]);
+  });
+
+  test("buttons/refresh follows a moved button, and the cue presses the NEW coordinates", async () => {
+    await importPageOne();
+    const d = exportDoc as unknown as Doc;
+    const control = d.pages["1"]!.controls["0"]!["1"];
+    delete d.pages["1"]!.controls["0"]!["1"];
+    d.pages["1"]!.controls["4"] = { "6": control };
+
+    const r = await callRoute(cueRoutes, "/api/companion/buttons/refresh", {
+      method: "POST",
+      headers: browser,
+    });
+    assert.equal(r.status, 200);
+    const f = readFingerprint(paramsOf("room_a_screens_projectors_on"));
+    assert.equal(f.status, "moved");
+    assert.deepEqual([f.page, f.row, f.col], [1, 4, 6]);
+
+    presses = [];
+    assert.equal((await call("room_a_screens_projectors_on")).status, 200);
+    assert.deepEqual(presses, ["http://10.0.0.5:8000/api/location/1/4/6/press"]);
+  });
+
+  test("a deleted button answers 409 button-missing and presses NOTHING", async () => {
+    await importPageOne();
+    const d = exportDoc as unknown as Doc;
+    delete d.pages["1"]!.controls["0"]!["1"];
+    await callRoute(cueRoutes, "/api/companion/buttons/refresh", { method: "POST", headers: browser });
+    assert.equal(readFingerprint(paramsOf("room_a_screens_projectors_on")).status, "missing");
+
+    presses = [];
+    const r = await call("room_a_screens_projectors_on");
+    assert.equal(r.status, 409);
+    const body = r.json as { error: string; reason: string };
+    assert.equal(body.reason, "button-missing");
+    assert.equal(body.error, "Projectors ON is no longer on Companion page 1");
+    assert.deepEqual(presses, [], "a cue whose button is gone must not press a coordinate");
+  });
+
+  test("and the engine refuses it from any other path too — the test-fire button", async () => {
+    // The 409 lives in the call route's engine path. A rule can also fire from a
+    // trigger and from the editor's Test, and a guard on one path is a guard the
+    // other two walk around.
+    await importPageOne();
+    const d = exportDoc as unknown as Doc;
+    delete d.pages["1"]!.controls["0"]!["1"];
+    await callRoute(cueRoutes, "/api/companion/buttons/refresh", { method: "POST", headers: browser });
+
+    presses = [];
+    const rule = automationEngine
+      .cueRules()
+      .find((x) => automationEngine.cueNameOf(x) === "room_a_screens_projectors_on")!;
+    const fired = await automationEngine.testFire(rule.id);
+    assert.equal(fired.ok, false);
+    assert.match(fired.detail, /no longer on Companion page 1/);
+    assert.deepEqual(presses, []);
+  });
+
+  test("an unreachable Companion changes NO status", async () => {
+    // A pass that downgraded every cue to `missing` because a switch was
+    // rebooting would refuse every cue in the building until somebody noticed.
+    await importPageOne();
+    const before = JSON.stringify(paramsOf("room_a_screens_projectors_on"));
+    exportOk = false;
+    companionApi.invalidate();
+
+    assert.equal(await runCompanionReconcile(), null);
+    assert.equal(JSON.stringify(paramsOf("room_a_screens_projectors_on")), before);
+
+    exportOk = true;
+    companionApi.invalidate();
   });
 });

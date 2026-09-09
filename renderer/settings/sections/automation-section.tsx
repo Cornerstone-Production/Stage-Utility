@@ -16,7 +16,12 @@ import {
   toast,
 } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
-import { CompanionPressFields, CueAccessCard, ImportPairsDialog } from "./companion-cues";
+import {
+  CompanionPressFields,
+  CueAccessCard,
+  CueButtonStatus,
+  ImportPairsDialog,
+} from "./companion-cues";
 
 /** The one trigger that only ever runs because something CALLED it. */
 const CALL_TRIGGER_ID = "call.by-name";
@@ -398,6 +403,12 @@ function RuleCard({
         >
           <div className="truncate text-footnote font-medium text-fg">{rule.name}</div>
           <div className="truncate text-caption1 text-fg-muted">{summary}</div>
+          {/* What the last reconcile found about this rule's Companion button.
+              Inside the row's own button, so the way to act on a `button
+              missing` pill is to press the thing saying it — which opens the
+              editor and its picker. Renders nothing for any other action, and
+              nothing for a rule that has never been reconciled. */}
+          {rule.action.id === "companion.press" && <CueButtonStatus params={rule.action.params} />}
         </button>
         <Button variant="transparent" size="small" onClick={() => void testFire()} aria-label="Test fire">
           <PlayIcon className="size-3.5" /> Test

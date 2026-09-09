@@ -165,8 +165,15 @@ as they do to a trigger — a cue is a rule, not a second path through the engin
 Every call, allowed or refused, is in the Activity log with the calling token's
 label.
 
+A cue that presses a Companion button remembers which button, not just where it
+was: if somebody moves it, the coordinates follow it and the rule's row says so;
+if it is gone, the cue answers `button-missing` and presses nothing rather than
+pressing whatever is now at those coordinates. See
+[When a button moves](integrations/companion.md#when-a-button-moves).
+
 Set the whole thing up under [Companion](integrations/companion.md#calling-a-cue-by-name):
-the button picker, the ON/OFF import, the tokens and the Home Assistant paste.
+the button picker, the ON/OFF and single-button import, the tokens and the Home
+Assistant paste.
 
 ## Firing an item on time
 

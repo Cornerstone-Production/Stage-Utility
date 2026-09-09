@@ -42,6 +42,8 @@ import {
   slugsForButtons,
   slugsForPairs,
 } from "../companion-export.js";
+import { fingerprintParams } from "../companion-fingerprint.js";
+import { runCompanionReconcile } from "../companion-reconcile.js";
 import { bearerOf, cueTokens, isSameOriginBrowser } from "../cue-tokens.js";
 import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
@@ -179,6 +181,10 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
       json(res, { ok: false, reason: result.reason, buttons: [] });
       return;
     }
+    // Refresh means "read Companion again", and the cues are the reason anybody
+    // presses it. Reads the export just cached rather than fetching a second
+    // time. Awaited so the answer is not overtaken by the statuses it changed.
+    await runCompanionReconcile();
     json(res, { ok: true, buttons: result.buttons, cachedAt: result.cachedAt });
     return;
   }
@@ -271,9 +277,11 @@ interface ImportButton {
   row: number;
   col: number;
   label?: string;
+  pageId: string;
+  actionIds: string[];
 }
 
-/** Narrow one untrusted `{page,row,col,label}` from the request body. */
+/** Narrow one untrusted button offer from the request body. */
 function asButton(v: unknown): ImportButton | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
@@ -281,7 +289,39 @@ function asButton(v: unknown): ImportButton | null {
   const row = Number(o.row);
   const col = Number(o.col);
   if (![page, row, col].every((n) => Number.isFinite(n))) return null;
-  return { page, row, col, label: typeof o.label === "string" ? o.label : undefined };
+  return {
+    page,
+    row,
+    col,
+    label: typeof o.label === "string" ? o.label : undefined,
+    // The identity travels with the offer, so an imported cue knows its button
+    // from the moment it is created rather than waiting for the first reconcile.
+    // Absent from a hand-built request, which the first reconcile then adopts.
+    pageId: typeof o.pageId === "string" ? o.pageId : "",
+    actionIds: Array.isArray(o.actionIds) ? o.actionIds.filter((x): x is string => typeof x === "string") : [],
+  };
+}
+
+/**
+ * The `companion.press` params for an imported button: the coordinates, the
+ * label, and the fingerprint that lets a reconcile follow it.
+ *
+ * ONE copy, for the pairs import and the single-button import both — this is
+ * exactly the shape that lived in one of two places and drifted.
+ */
+function pressParamsFor(button: ImportButton, fallbackLabel: string): Record<string, string | number> {
+  return fingerprintParams(
+    {
+      page: button.page,
+      row: button.row,
+      col: button.col,
+      pageId: button.pageId,
+      label: button.label ?? fallbackLabel,
+      actionIds: button.actionIds,
+    },
+    "in-place",
+    new Date().toISOString(),
+  );
 }
 
 /**
@@ -338,12 +378,7 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
         conditions: [{ id: "service.is-not-live", params: {} }],
         action: {
           id: "companion.press",
-          params: {
-            page: button.page,
-            row: button.row,
-            col: button.col,
-            label: button.label ?? `${base} ${suffix.toUpperCase()}`,
-          },
+          params: pressParamsFor(button, `${base} ${suffix.toUpperCase()}`),
         },
         cooldownSec: 2,
         oncePerService: false,
@@ -399,10 +434,7 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
       enabled: true,
       trigger: { id: CALL_TRIGGER_ID, params: { name: slug, says: spoken } },
       conditions: [{ id: "service.is-not-live", params: {} }],
-      action: {
-        id: "companion.press",
-        params: { page: button.page, row: button.row, col: button.col, label: button.label ?? label },
-      },
+      action: { id: "companion.press", params: pressParamsFor(button, label) },
       cooldownSec: 2,
       oncePerService: false,
     };

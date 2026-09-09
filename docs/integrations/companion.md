@@ -111,6 +111,7 @@ snapshot, no schedule reaches it.
 |---|---|
 | `service-live` | a service is running, or starts within the hour. Carries `plan` when the plan has a title |
 | `planning-center-unknown` | Planning Center is configured and cannot be read, so we will not guess. Also on a `[cues]` line in the server log |
+| `button-missing` | the Companion button this cue presses is not in the export any more. Nothing is pressed — see [When a button moves](#when-a-button-moves) |
 | `condition-not-met` | one of the rule's other conditions did not hold |
 | `cooldown` | the cue ran within its cooldown |
 | `once-per-service` | the cue is set to run once per service and already has, this occurrence |
@@ -173,6 +174,55 @@ They carry the same **no service is live** condition and two-second cooldown as 
 pair's halves, and the same page-naming rule applies when the same label is on two
 pages. In Home Assistant a single button becomes a `script` rather than a switch —
 there is no on and no off to give a switch a state.
+
+### When a button moves
+
+Coordinates are the one thing about a Companion button that does not last.
+Somebody drags a button one key over, or inserts a page ahead of it, and a cue
+built on `p17 r2 c6` presses whatever is there now — Companion answers `204` for
+an empty coordinate and a cheerful `200` for the wrong button, so nothing says
+so.
+
+So every **Press a Companion button** action stores the button's identity beside
+its coordinates: the page's own opaque id, which a renumber does not change, and
+the ids of the actions the button runs. A control in Companion has no id of its
+own; its actions do, and they travel with the button when it is moved. The label
+is stored too and refreshed whenever the button is confirmed.
+
+It is checked on startup, whenever you press **Test** on the Companion
+integration, whenever you press **Refresh** in the button picker, and hourly —
+always against the same cached configuration export the picker reads, never a
+second request. Three outcomes, each a pill on the rule's row under Settings →
+Automation:
+
+| | |
+|---|---|
+| **in place** | the button at those coordinates still runs those actions |
+| **moved** | exactly one button on that page runs them, and it is somewhere else. The coordinates are updated, the pill says where it went, and it stays amber until you re-pick the button — the point of it is telling you about a move you did not make |
+| **button missing** | none on that page runs them, or more than one does, or the page is gone |
+
+**A missing button refuses.** The cue answers `409 button-missing` and presses
+nothing; so does the rule firing from any other trigger, and the editor's Test.
+It does not fall back to the coordinates and it does not pick the closest label —
+a cue that presses the wrong button during setup is worse than one that says it
+cannot. More than one match is refused for the same reason: two buttons carrying
+one identity is a Companion somebody duplicated, and guessing between them is a
+coin toss on real gear. Open the rule and pick the button again to clear it.
+
+A button that runs no actions at all has no identity but its coordinates, and is
+reported in place while something is there and missing when it is not. It is
+never searched for.
+
+**When Companion cannot be reached, nothing changes.** No status is touched and
+no cue is refused — a pass that downgraded every cue while a switch was
+rebooting would refuse every cue in the building. The failure is on a
+`[companion] export unavailable` line in the server log; every move, adoption
+and disappearance is on a `[companion] cue <name>:` line, and each run ends with
+`[companion] reconciled N cues: N in place, N moved, N missing`.
+
+Cues imported from Companion and buttons chosen with the picker are fingerprinted
+as they are created. A rule that predates this has no fingerprint, shows no pill,
+and is adopted at its own coordinates by the first check.
 
 ### Home Assistant
 

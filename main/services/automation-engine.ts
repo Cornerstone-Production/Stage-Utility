@@ -15,6 +15,7 @@ import { scrub } from "./scrub.js";
 import type { AutomationSettings, ConditionCtx, Rule } from "../types/automation.js";
 import { addBroadcastListener, addChannelDemandSource, broadcast } from "./broadcaster.js";
 import { AUTOMATION_ACTIONS } from "./automation-actions.js";
+import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
 import { AUTOMATION_CONDITIONS, allConditionsHold, firstFailingCondition, serviceQuietness } from "./automation-conditions.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { automationLog } from "./automation-log.js";
@@ -39,7 +40,8 @@ export type CueBlockReason =
   | "planning-center-unknown"
   | "once-per-service"
   | "condition-not-met"
-  | "cooldown";
+  | "cooldown"
+  | "button-missing";
 
 /**
  * What a call answers with. A STATUS plus a body, decided here rather than in
@@ -231,6 +233,16 @@ class AutomationEngine {
     }
     if (this.settings.disarmed) {
       return blocked("disarmed", "Automation is disarmed, so nothing will run");
+    }
+    // The button this cue presses is not in Companion's export any more. Refused
+    // before the conditions, because it is the one refusal that no amount of
+    // waiting fixes — a caller told "not right now" would try again all morning.
+    // The action itself refuses too, for every other way a rule can fire.
+    if (rule.action.id === "companion.press") {
+      const f = readFingerprint(rule.action.params);
+      if (f.status === "missing") {
+        return blocked("button-missing", missingSentence(f));
+      }
     }
 
     const ctx = this.conditionCtx();

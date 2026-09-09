@@ -210,7 +210,7 @@ describe("fetchExport", () => {
 
     const first = await companionApi.fetchExport();
     assert.equal(first.ok, true);
-    assert.ok(first.ok && first.buttons.length === 12);
+    assert.ok(first.ok && first.buttons.length === 13);
 
     await companionApi.fetchExport();
     assert.equal(calls.length, 1, "the second read came from the cache");
@@ -272,7 +272,7 @@ describe("testConnection", () => {
     const r = await companionApi.testConnection();
     assert.equal(r.ok, true);
     assert.match(r.message, /Companion 5\.0\.3/);
-    assert.match(r.message, /12 button\(s\)/);
+    assert.match(r.message, /13 button\(s\)/);
     assert.match(r.message, /4 on\/off pair\(s\)/);
   });
 

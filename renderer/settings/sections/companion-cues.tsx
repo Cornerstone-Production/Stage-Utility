@@ -20,6 +20,13 @@
 // buttons.
 
 import { errorMessage } from "@main/services/errors";
+import {
+  type ButtonFingerprint,
+  fingerprintParams,
+  missingSentence,
+  readFingerprint,
+  shortLocation,
+} from "@main/services/companion-fingerprint";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
@@ -34,6 +41,7 @@ import {
   Input,
   NumberInput,
   Separator,
+  Status,
   toast,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
@@ -92,6 +100,84 @@ interface TokenSummary {
 
 const rowCls = "flex items-center gap-3 py-1";
 const labelCls = "w-36 shrink-0 text-caption1 text-fg-muted";
+
+// ── The button's status ───────────────────────────────────────────────────────
+
+/**
+ * "just now" / "14 minutes ago" / "3 hours ago" / "2 days ago". PURE.
+ *
+ * Deliberately coarse: this reads under an amber pill saying a button moved, and
+ * the useful fact is "since Thursday", never the second it happened.
+ */
+export function relativeSince(iso: string | null, nowMs: number): string {
+  if (!iso) return "";
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return "";
+  const secs = Math.max(0, Math.round((nowMs - at) / 1000));
+  if (secs < 90) return "just now";
+  const units: [number, string][] = [
+    [60, "minute"],
+    [3600, "hour"],
+    [86400, "day"],
+  ];
+  let best = units[0]!;
+  for (const unit of units) if (secs >= unit[0]) best = unit;
+  const n = Math.round(secs / best[0]);
+  return `${n} ${best[1]}${n === 1 ? "" : "s"} ago`;
+}
+
+/** The pill's words, PURE — one place, so the row and the editor cannot disagree. */
+export function buttonStatusText(
+  f: ButtonFingerprint,
+  nowMs: number,
+): { variant: "neutral" | "warning" | "error"; pill: string; detail: string } | null {
+  // Never reconciled (a rule from before this existed, or one written by hand)
+  // and a rule with no button chosen both show nothing. A grey "unknown" pill on
+  // every old rule would be noise, and the first reconcile adopts them.
+  if (f.status === null || f.page < 1) return null;
+  if (f.status === "in-place") {
+    return { variant: "neutral", pill: "in place", detail: "" };
+  }
+  if (f.status === "moved") {
+    const from = f.movedFrom ? `${shortLocation(f.movedFrom)} \u2192 ${shortLocation(f)}` : shortLocation(f);
+    const when = relativeSince(f.lastSeenAt, nowMs);
+    return { variant: "warning", pill: "moved", detail: when ? `${from} \u00b7 updated ${when}` : from };
+  }
+  return {
+    variant: "error",
+    pill: "button missing",
+    detail: `${missingSentence(f)}. Open this rule and pick the button again.`,
+  };
+}
+
+/**
+ * What the last reconcile found about this rule's button.
+ *
+ * Rendered on the rules list row, where an operator is looking at the cue rather
+ * than at Companion. A `missing` cue refuses to press rather than guessing, so
+ * this pill is the only warning there is.
+ */
+export function CueButtonStatus({ params }: { params: Record<string, string | number> }) {
+  // A lazy state initializer, not a bare `Date.now()` in the body: reading the
+  // clock during render is impure and the lint rule refuses it. The wording is
+  // coarse enough ("3 hours ago") that a value fixed at mount is right for as
+  // long as the page is open.
+  const [nowMs] = useState(() => Date.now());
+  const said = buttonStatusText(readFingerprint(params), nowMs);
+  if (!said) return null;
+  return (
+    <span
+      className="flex min-w-0 items-center gap-1.5"
+      data-cue-button-status={said.pill}
+      title={said.detail || undefined}
+    >
+      <Status variant={said.variant}>{said.pill}</Status>
+      {said.detail && (
+        <span className="min-w-0 truncate text-caption2 text-fg-subtle">{said.detail}</span>
+      )}
+    </span>
+  );
+}
 
 // ── The button picker ─────────────────────────────────────────────────────────
 
@@ -174,7 +260,24 @@ export function CompanionPressFields({
         open={open}
         onOpenChange={setOpen}
         onPick={(b) => {
-          onChange({ page: b.page, row: b.row, col: b.col, label: b.label || `p${b.page} r${b.row} c${b.col}` });
+          // The fingerprint is written HERE, not left for the next reconcile:
+          // re-picking is what an operator does about a `button missing` cue,
+          // and it has to clear that status in the same save. See
+          // companion-fingerprint.ts.
+          onChange(
+            fingerprintParams(
+              {
+                page: b.page,
+                row: b.row,
+                col: b.col,
+                pageId: b.pageId,
+                label: b.label || `p${b.page} r${b.row} c${b.col}`,
+                actionIds: b.actionIds,
+              },
+              "in-place",
+              new Date().toISOString(),
+            ),
+          );
           setOpen(false);
         }}
       />
