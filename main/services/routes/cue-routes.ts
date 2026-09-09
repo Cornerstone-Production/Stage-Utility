@@ -11,10 +11,11 @@
 //  - `POST /api/cues/<name>` ALWAYS needs a bearer token, browser or not. There
 //    is no operator-at-the-console case for it; the console has a Test button.
 //  - the management WRITES (mint, revoke, import-pairs, buttons/refresh) need one
-//    unless the request is a same-origin browser write — `Sec-Fetch-Site:
-//    same-origin` AND an `Origin` naming this server, both of which a page on
-//    this app's own origin always sends on a POST or DELETE. Either alone is
-//    refused: curl setting one header used to be enough to mint a token.
+//    unless the request is a same-origin browser write — an `Origin` naming
+//    this server, which a page on this app's own origin always sends on a POST
+//    or DELETE and a page anywhere else cannot forge. (Not `Sec-Fetch-Site`:
+//    browsers send that only to HTTPS or localhost, and this app is plain HTTP
+//    on a LAN address. See isSameOriginBrowser.)
 //  - the management READS (the token LIST and the Home Assistant fragment) are
 //    not gated at all, like every other read in this app. A same-origin GET sends
 //    no `Origin`, so the only thing they could be gated on is a header curl can
@@ -52,7 +53,7 @@ function text(c: RouteCtx, body: string, contentType = "text/yaml; charset=utf-8
  * Identify the caller, or answer 401 and return null.
  *
  * `allowSameOrigin` covers the app's own pages on a WRITE, where the browser
- * sends both `Sec-Fetch-Site` and `Origin`. See isSameOriginBrowser.
+ * sends an `Origin` naming this server. See isSameOriginBrowser.
  */
 async function requireCaller(
   c: RouteCtx,

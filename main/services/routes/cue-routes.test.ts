@@ -108,13 +108,13 @@ before(async () => {
 /** A function, not a constant: TOKEN is minted in `before`, which runs after
  *  module scope. Captured as a constant it is "Bearer " and every case 401s. */
 const auth = (): Record<string, string> => ({ authorization: `Bearer ${TOKEN}` });
-/** What a browser on this server's own page sends on a POST or DELETE. BOTH
- *  headers: either one alone is refused, and curl with one of them used to be
- *  able to mint itself a token. */
+/** What a browser on this server's own page sends on a POST or DELETE over plain
+ *  HTTP on a LAN address: an Origin, and NO Sec-Fetch-Site — browsers send the
+ *  Fetch-metadata headers only to HTTPS or localhost. This is what the operator's
+ *  browser actually sends to a real install. */
 const browser = {
   origin: "http://stage.local:8788",
   host: "stage.local:8788",
-  "sec-fetch-site": "same-origin",
 };
 
 /** Wipe the rules and the log, then install one cue. */
@@ -197,10 +197,14 @@ describe("the token gate on a call", () => {
 
 // ── The same-origin exemption on the management writes ────────────────────────
 
-describe("the browser exemption needs BOTH headers", () => {
-  // Driven live against a real server before this was written: curl with only
-  // `Sec-Fetch-Site: same-origin` minted a token (201) and then called a cue with
-  // it (200). Either header alone is now refused.
+describe("the browser exemption is an Origin naming this server", () => {
+  // Two mistakes, in order. First the exemption accepted `Sec-Fetch-Site:
+  // same-origin` ALONE, and curl with that header minted a token. Then it
+  // required Sec-Fetch-Site AND Origin — and a real operator's browser on a
+  // plain-HTTP LAN install never sends Sec-Fetch-Site at all (browsers send it
+  // only to HTTPS or localhost), so the settings page answered 401 to its own
+  // import. The rule now: an Origin naming this server, and if Sec-Fetch-Site
+  // is present it must agree.
   const mint = (headers: Record<string, string>) =>
     callRoute(cueRoutes, "/api/cues/tokens", {
       method: "POST",
@@ -213,13 +217,17 @@ describe("the browser exemption needs BOTH headers", () => {
     assert.equal(r.status, 401);
   });
 
-  test("an Origin alone is 401", async () => {
-    const r = await mint({ origin: "http://stage.local:8788", host: "stage.local:8788" });
-    assert.equal(r.status, 401);
+  test("a matching Origin with no Sec-Fetch-Site is allowed — that is a browser on plain HTTP", async () => {
+    const r = await mint(browser);
+    assert.equal(r.status, 201, "the settings page on a LAN install answered 401 to its own write");
+    await callRoute(cueRoutes, `/api/cues/tokens/${(r.json as { token: { id: string } }).token.id}`, {
+      method: "DELETE",
+      headers: browser,
+    });
   });
 
-  test("both, matching, is allowed", async () => {
-    const r = await mint(browser);
+  test("a matching Origin with Sec-Fetch-Site: same-origin is allowed — a browser on localhost or HTTPS", async () => {
+    const r = await mint({ ...browser, "sec-fetch-site": "same-origin" });
     assert.equal(r.status, 201);
     await callRoute(cueRoutes, `/api/cues/tokens/${(r.json as { token: { id: string } }).token.id}`, {
       method: "DELETE",
@@ -234,6 +242,15 @@ describe("the browser exemption needs BOTH headers", () => {
     const r = await mint({
       "sec-fetch-site": "same-origin",
       origin: "https://evil.example",
+      host: "stage.local:8788",
+    });
+    assert.equal(r.status, 401);
+  });
+
+  test("a browser that says cross-site is believed, whatever its Origin says", async () => {
+    const r = await mint({
+      "sec-fetch-site": "cross-site",
+      origin: "http://stage.local:8788",
       host: "stage.local:8788",
     });
     assert.equal(r.status, 401);
