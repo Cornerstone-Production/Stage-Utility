@@ -10,10 +10,19 @@
 // became every following week's board. An override expires by itself: the next
 // plan of that type falls back to the default.
 //
-// Storage shape (v3):
+// Storage shape on disk (v3):
 //   { version: 3,
 //     defaults:  Record<key, Record<serviceTypeId, Slot[]>>,
 //     overrides: Record<key, Record<planId, { serviceTypeId, sortDate, slots }>> }
+//
+// IN MEMORY those two halves are nested Maps, not records. The keys are request
+// derived — a view id, a layout object id, a service type id, a plan id — and
+// `obj[key] = value` with a key from a request is a property write onto an
+// object somebody else chooses the name of. `Map.prototype.set` is not a
+// property write at all, so the whole class of prototype-pollution question
+// stops being asked. normaliseSlotsFile() builds the Maps on load and
+// serialiseSlotsFile() turns them back into the records above on every write:
+// the bytes on disk are unchanged.
 //
 // Migration from v2:  Record<key, Record<serviceTypeId, Slot[]>>  → `defaults`
 // Migration from v1:  Record<serviceTypeId, Slot[]>               → defaults["display-1"]
@@ -53,7 +62,8 @@ export function migrateSlotLink(link: unknown): SlotLink {
   return { kind: "pco", matchBy: "position", positions: [] };
 }
 
-/** Outer key = view id or layout object id, inner key = serviceTypeId. */
+/** SERIALISED defaults — the on-disk and API shape. Outer key = view id or
+ *  layout object id, inner key = serviceTypeId. */
 export type SlotsDefaults = Record<string, Record<string, Slot[]>>;
 
 /** One plan's board. `sortDate` is the plan's PCO `sort_date`, recorded at save
@@ -65,10 +75,21 @@ export interface SlotsOverride {
   slots: Slot[];
 }
 
-/** Outer key = view id or layout object id, inner key = planId. */
+/** SERIALISED overrides — the on-disk and API shape. Outer key = view id or
+ *  layout object id, inner key = planId. */
 export type SlotsOverrides = Record<string, Record<string, SlotsOverride>>;
 
+/** The file as this module holds it: same two halves, as Maps. */
 export interface SlotsFile {
+  version: 3;
+  /** key -> serviceTypeId -> slots */
+  defaults: Map<string, Map<string, Slot[]>>;
+  /** key -> planId -> override */
+  overrides: Map<string, Map<string, SlotsOverride>>;
+}
+
+/** The v3 envelope as it is written to disk. */
+export interface SerialisedSlotsFile {
   version: 3;
   defaults: SlotsDefaults;
   overrides: SlotsOverrides;
@@ -89,11 +110,28 @@ export function describeSlotsTarget(target: SlotsTarget): string {
 const store = new DataStore<unknown>("slots.json", {}, "config");
 
 function emptyFile(): SlotsFile {
-  return { version: 3, defaults: {}, overrides: {} };
+  return { version: 3, defaults: new Map(), overrides: new Map() };
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Turn the in-memory Maps back into the v3 record envelope written to disk.
+ *
+ * `Object.fromEntries` DEFINES each own property rather than assigning it, so
+ * even a key that survived from a hand-edited file cannot reach the prototype
+ * chain on the way out.
+ */
+export function serialiseSlotsFile(file: SlotsFile): SerialisedSlotsFile {
+  const defaults: SlotsDefaults = Object.fromEntries(
+    [...file.defaults].map(([key, byType]) => [key, Object.fromEntries(byType)]),
+  );
+  const overrides: SlotsOverrides = Object.fromEntries(
+    [...file.overrides].map(([key, byPlan]) => [key, Object.fromEntries(byPlan)]),
+  );
+  return { version: 3, defaults, overrides };
 }
 
 /** Rewrite every slot's link into the positions-range shape. Cheap and
@@ -113,6 +151,31 @@ function migrateLinks(sets: Slot[][]): boolean {
   return changed;
 }
 
+/** One half of a record envelope as a nested Map. Inner values that are not
+ *  objects are dropped: nothing but a `serviceTypeId -> Slot[]` (or
+ *  `planId -> override`) map is a readable inner half, and carrying junk
+ *  forward only re-persists it. */
+function toNestedMap<V>(half: unknown): Map<string, Map<string, V>> {
+  const out = new Map<string, Map<string, V>>();
+  if (!isRecord(half)) return out;
+  for (const [key, inner] of Object.entries(half)) {
+    if (!isRecord(inner)) {
+      console.warn(`[slots-store] ${scrub(key)}: not a board map, dropped (${typeof inner})`);
+      continue;
+    }
+    out.set(key, new Map(Object.entries(inner) as [string, V][]));
+  }
+  return out;
+}
+
+/** Every Slot[] in the file, for the link migration to walk. */
+function allSlotSets(file: SlotsFile): Slot[][] {
+  const sets: Slot[][] = [];
+  for (const byType of file.defaults.values()) sets.push(...byType.values());
+  for (const byPlan of file.overrides.values()) for (const o of byPlan.values()) sets.push(o?.slots);
+  return sets;
+}
+
 /**
  * Decide which shape `raw` is and return it as a v3 file.
  *
@@ -126,15 +189,21 @@ function migrateLinks(sets: Slot[][]): boolean {
 export function normaliseSlotsFile(raw: unknown): { file: SlotsFile; migrated: string | null } {
   // v0: flat Slot[] at root.
   if (Array.isArray(raw)) {
-    const file: SlotsFile = { version: 3, defaults: { "display-1": { default: raw as Slot[] } }, overrides: {} };
-    migrateLinks([file.defaults["display-1"].default]);
+    const slots = raw as Slot[];
+    const file: SlotsFile = {
+      version: 3,
+      defaults: new Map([["display-1", new Map([["default", slots]])]]),
+      overrides: new Map(),
+    };
+    migrateLinks([slots]);
     return { file, migrated: "v0 (flat array) → defaults/display-1/default" };
   }
 
   if (!isRecord(raw)) return { file: emptyFile(), migrated: null };
 
-  // v3: already the envelope. Halves are rebuilt rather than trusted, so a
-  // hand-edited file with a `defaults` that is not an object cannot poison a write.
+  // v3: already the envelope. Halves are rebuilt into Maps rather than trusted,
+  // so a hand-edited file with a `defaults` that is not an object cannot poison
+  // a write.
   //
   // A record carrying BOTH halves is v3 whatever the stamp says. The stamp is
   // one integer somebody hand-editing the file (or a truncated write) can lose,
@@ -145,17 +214,10 @@ export function normaliseSlotsFile(raw: unknown): { file: SlotsFile; migrated: s
   if (raw.version === 3 || (isRecord(raw.defaults) && isRecord(raw.overrides))) {
     const file: SlotsFile = {
       version: 3,
-      defaults: isRecord(raw.defaults) ? (raw.defaults as SlotsDefaults) : {},
-      overrides: isRecord(raw.overrides) ? (raw.overrides as SlotsOverrides) : {},
+      defaults: toNestedMap<Slot[]>(raw.defaults),
+      overrides: toNestedMap<SlotsOverride>(raw.overrides),
     };
-    const sets: Slot[][] = [];
-    for (const byType of Object.values(file.defaults)) {
-      if (isRecord(byType)) sets.push(...Object.values(byType));
-    }
-    for (const byPlan of Object.values(file.overrides)) {
-      if (isRecord(byPlan)) for (const o of Object.values(byPlan)) sets.push(o?.slots);
-    }
-    const linksChanged = migrateLinks(sets);
+    const linksChanged = migrateLinks(allSlotSets(file));
     // A restamp is worth persisting and worth a line: it means the file on disk
     // had lost its version, and the next reader would otherwise have to work the
     // shape out again.
@@ -166,24 +228,21 @@ export function normaliseSlotsFile(raw: unknown): { file: SlotsFile; migrated: s
   // v1: Record<serviceTypeId, Slot[]> — at least one value is an array directly.
   const values = Object.values(raw);
   if (values.length > 0 && Array.isArray(values[0])) {
+    const byType = new Map(Object.entries(raw) as [string, Slot[]][]);
     const file: SlotsFile = {
       version: 3,
-      defaults: { "display-1": raw as Record<string, Slot[]> },
-      overrides: {},
+      defaults: new Map([["display-1", byType]]),
+      overrides: new Map(),
     };
-    migrateLinks(Object.values(file.defaults["display-1"]));
+    migrateLinks([...byType.values()]);
     return { file, migrated: "v1 (serviceType map) → defaults/display-1" };
   }
 
-  // v2: Record<key, Record<serviceTypeId, Slot[]>>. Becomes the DEFAULTS, byte for
-  // byte, with no overrides — the day this lands, nothing on any screen changes.
-  const defaults = raw as SlotsDefaults;
-  const sets: Slot[][] = [];
-  for (const byType of Object.values(defaults)) {
-    if (isRecord(byType)) sets.push(...Object.values(byType));
-  }
-  const linksChanged = migrateLinks(sets);
-  const file: SlotsFile = { version: 3, defaults, overrides: {} };
+  // v2: Record<key, Record<serviceTypeId, Slot[]>>. Becomes the DEFAULTS, board
+  // for board, with no overrides — the day this lands, nothing on any screen
+  // changes.
+  const file: SlotsFile = { version: 3, defaults: toNestedMap<Slot[]>(raw), overrides: new Map() };
+  const linksChanged = migrateLinks(allSlotSets(file));
   // An empty file is not a migration — a first run must not write and log.
   if (values.length === 0) return { file, migrated: null };
   return { file, migrated: linksChanged ? "v2 → v3 (defaults + links)" : "v2 → v3 (defaults)" };
@@ -193,7 +252,7 @@ export function normaliseSlotsFile(raw: unknown): { file: SlotsFile; migrated: s
 async function loadNormalised(): Promise<SlotsFile> {
   const { file, migrated } = normaliseSlotsFile(await store.load());
   if (migrated) {
-    await store.save(file);
+    await store.save(serialiseSlotsFile(file));
     console.log(`[slots-store] migrated ${migrated}`);
   }
   return file;
@@ -204,7 +263,8 @@ async function loadNormalised(): Promise<SlotsFile> {
 async function mutate(fn: (file: SlotsFile) => SlotsFile | null): Promise<void> {
   await store.update((current) => {
     const { file } = normaliseSlotsFile(current);
-    return fn(file) ?? current;
+    const next = fn(file);
+    return next ? serialiseSlotsFile(next) : current;
   });
 }
 
@@ -217,32 +277,35 @@ export const slotsStore = {
    * bundle format is unchanged for that reason.
    */
   async allDefaults(): Promise<SlotsDefaults> {
-    return (await loadNormalised()).defaults;
+    return serialiseSlotsFile(await loadNormalised()).defaults;
   },
 
   /** Every key's overrides — for pruning and for diagnostics. */
   async allOverrides(): Promise<SlotsOverrides> {
-    return (await loadNormalised()).overrides;
+    return serialiseSlotsFile(await loadNormalised()).overrides;
   },
 
   async getDefault(key: string, serviceTypeId: string): Promise<Slot[]> {
-    // A read, but still request-reachable: `defaults["__proto__"]["constructor"]`
-    // is the Object constructor, and this signature says it returns Slot[].
+    // A read, but still request-reachable, and the caller of a rejected key is
+    // confused about something: this signature says it returns Slot[].
     assertSafeKey(key, "key");
     assertSafeKey(serviceTypeId, "serviceTypeId");
     const file = await loadNormalised();
-    return file.defaults[key]?.[serviceTypeId] ?? [];
+    return file.defaults.get(key)?.get(serviceTypeId) ?? [];
   },
 
   async setDefault(key: string, serviceTypeId: string, slots: Slot[]): Promise<void> {
-    // Both keys arrive from a request. `map["__proto__"]` is truthy, so a
-    // `if (!map[k])` guard would pass and the write would land on
-    // Object.prototype.
+    // Both keys arrive from a request. Rejected rather than sanitised: no
+    // legitimate view or service type is called "__proto__".
     assertSafeKey(key, "key");
     assertSafeKey(serviceTypeId, "serviceTypeId");
     await mutate((file) => {
-      if (!file.defaults[key]) file.defaults[key] = {};
-      file.defaults[key][serviceTypeId] = slots;
+      let byType = file.defaults.get(key);
+      if (!byType) {
+        byType = new Map();
+        file.defaults.set(key, byType);
+      }
+      byType.set(serviceTypeId, slots);
       return file;
     });
   },
@@ -250,17 +313,16 @@ export const slotsStore = {
   /**
    * One plan's board, or null.
    *
-   * Both keys are asserted on the READ as well as the write. `map["__proto__"]`
-   * is Object.prototype, which is truthy, so without this an unsafe planId comes
-   * back as a "SlotsOverride" whose `slots` is undefined — and the callers that
-   * branch on "is there an override?" (clearOverride, promoteOverride,
-   * getSlotTargets) all read it as yes.
+   * Both keys are asserted on the READ as well as the write. A caller that got
+   * here with "__proto__" is confused, and the callers that branch on "is there
+   * an override?" (clearOverride, promoteOverride, getSlotTargets) would read a
+   * junk answer as yes.
    */
   async getOverride(key: string, planId: string): Promise<SlotsOverride | null> {
     assertSafeKey(key, "key");
     assertSafeKey(planId, "planId");
     const file = await loadNormalised();
-    return file.overrides[key]?.[planId] ?? null;
+    return file.overrides.get(key)?.get(planId) ?? null;
   },
 
   async setOverride(
@@ -274,8 +336,12 @@ export const slotsStore = {
     assertSafeKey(planId, "planId");
     assertSafeKey(serviceTypeId, "serviceTypeId");
     await mutate((file) => {
-      if (!file.overrides[key]) file.overrides[key] = {};
-      file.overrides[key][planId] = { serviceTypeId, sortDate, slots };
+      let byPlan = file.overrides.get(key);
+      if (!byPlan) {
+        byPlan = new Map();
+        file.overrides.set(key, byPlan);
+      }
+      byPlan.set(planId, { serviceTypeId, sortDate, slots });
       return file;
     });
   },
@@ -290,10 +356,10 @@ export const slotsStore = {
     const existing = await this.getOverride(key, planId);
     if (!existing) return false;
     await mutate((file) => {
-      const byPlan = file.overrides[key];
-      if (!byPlan?.[planId]) return null;
-      delete byPlan[planId];
-      if (Object.keys(byPlan).length === 0) delete file.overrides[key];
+      const byPlan = file.overrides.get(key);
+      if (!byPlan?.has(planId)) return null;
+      byPlan.delete(planId);
+      if (byPlan.size === 0) file.overrides.delete(key);
       return file;
     });
     return true;
@@ -308,21 +374,26 @@ export const slotsStore = {
    * is how a promote could land on the wrong type's board.
    */
   async promoteOverride(key: string, planId: string): Promise<SlotsOverride | null> {
-    // Before the read, not after it: an unsafe planId used to reach
-    // `delete file.overrides[key][planId]` on Object.prototype and throw a
-    // TypeError, which the route turned into a 404.
+    // Before the read, not after it: an unsafe planId used to reach the delete
+    // below on Object.prototype and throw a TypeError, which the route turned
+    // into a 404.
     assertSafeKey(key, "key");
     assertSafeKey(planId, "planId");
     const existing = await this.getOverride(key, planId);
     if (!existing) return null;
     assertSafeKey(existing.serviceTypeId, "serviceTypeId");
     await mutate((file) => {
-      const override = file.overrides[key]?.[planId];
-      if (!override) return null;
-      if (!file.defaults[key]) file.defaults[key] = {};
-      file.defaults[key][override.serviceTypeId] = override.slots;
-      delete file.overrides[key][planId];
-      if (Object.keys(file.overrides[key]).length === 0) delete file.overrides[key];
+      const byPlan = file.overrides.get(key);
+      const override = byPlan?.get(planId);
+      if (!byPlan || !override) return null;
+      let byType = file.defaults.get(key);
+      if (!byType) {
+        byType = new Map();
+        file.defaults.set(key, byType);
+      }
+      byType.set(override.serviceTypeId, override.slots);
+      byPlan.delete(planId);
+      if (byPlan.size === 0) file.overrides.delete(key);
       return file;
     });
     return existing;
@@ -344,10 +415,10 @@ export const slotsStore = {
     if (!isSafeKey(key) || !isSafeKey(serviceTypeId)) return [];
     const file = await loadNormalised();
     if (planId && isSafeKey(planId)) {
-      const override = file.overrides[key]?.[planId];
+      const override = file.overrides.get(key)?.get(planId);
       if (override && override.serviceTypeId === serviceTypeId) return override.slots;
     }
-    return file.defaults[key]?.[serviceTypeId] ?? [];
+    return file.defaults.get(key)?.get(serviceTypeId) ?? [];
   },
 
   /**
@@ -362,10 +433,10 @@ export const slotsStore = {
   ): Promise<number> {
     let pruned = 0;
     await mutate((file) => {
-      for (const byPlan of Object.values(file.overrides)) {
-        for (const [planId, override] of Object.entries(byPlan)) {
+      for (const byPlan of file.overrides.values()) {
+        for (const [planId, override] of byPlan) {
           if (!isExpired(planId, override.serviceTypeId, override.sortDate ?? null)) continue;
-          delete byPlan[planId];
+          byPlan.delete(planId);
           pruned++;
         }
       }
@@ -373,8 +444,8 @@ export const slotsStore = {
       // already-empty map) and then returning null would leave the store's cache
       // disagreeing with the disk.
       if (pruned === 0) return null;
-      for (const [key, byPlan] of Object.entries(file.overrides)) {
-        if (Object.keys(byPlan).length === 0) delete file.overrides[key];
+      for (const [key, byPlan] of file.overrides) {
+        if (byPlan.size === 0) file.overrides.delete(key);
       }
       return file;
     });
@@ -389,13 +460,13 @@ export const slotsStore = {
     assertSafeKey(serviceTypeId, "serviceTypeId");
     let adopted = 0;
     await mutate((file) => {
-      const byType = file.defaults[key] ?? {};
-      const existing = byType[serviceTypeId] ?? [];
-      const fallback = byType["default"] ?? [];
+      const byType = file.defaults.get(key) ?? new Map<string, Slot[]>();
+      const existing = byType.get(serviceTypeId) ?? [];
+      const fallback = byType.get("default") ?? [];
       if (existing.length > 0 || fallback.length === 0) return null;
-      byType[serviceTypeId] = fallback;
-      delete byType["default"];
-      file.defaults[key] = byType;
+      byType.set(serviceTypeId, fallback);
+      byType.delete("default");
+      file.defaults.set(key, byType);
       adopted = fallback.length;
       return file;
     });
@@ -419,22 +490,22 @@ export const slotsStore = {
     assertSafeKey(destKey, "destKey");
     let copied = false;
     await mutate((file) => {
-      const srcDefaults = file.defaults[srcKey];
-      const srcOverrides = file.overrides[srcKey];
+      const srcDefaults = file.defaults.get(srcKey);
+      const srcOverrides = file.overrides.get(srcKey);
       if (!srcDefaults && !srcOverrides) return null;
       if (srcDefaults) {
-        const copy: Record<string, Slot[]> = {};
-        for (const [serviceTypeId, slots] of Object.entries(srcDefaults)) {
-          copy[serviceTypeId] = slots.map((s) => ({ ...s, id: freshId() }));
+        const copy = new Map<string, Slot[]>();
+        for (const [serviceTypeId, slots] of srcDefaults) {
+          copy.set(serviceTypeId, slots.map((s) => ({ ...s, id: freshId() })));
         }
-        file.defaults[destKey] = copy;
+        file.defaults.set(destKey, copy);
       }
       if (srcOverrides) {
-        const copy: Record<string, SlotsOverride> = {};
-        for (const [planId, override] of Object.entries(srcOverrides)) {
-          copy[planId] = { ...override, slots: override.slots.map((s) => ({ ...s, id: freshId() })) };
+        const copy = new Map<string, SlotsOverride>();
+        for (const [planId, override] of srcOverrides) {
+          copy.set(planId, { ...override, slots: override.slots.map((s) => ({ ...s, id: freshId() })) });
         }
-        file.overrides[destKey] = copy;
+        file.overrides.set(destKey, copy);
       }
       copied = true;
       return file;
@@ -444,14 +515,14 @@ export const slotsStore = {
 
   /** Forget a key entirely — both halves. */
   async removeDisplay(key: string): Promise<void> {
-    // `"__proto__" in {}` is true, so without this a delete of a key that never
-    // existed reported (and logged) a removal.
+    // Rejected rather than treated as a miss: a delete of "__proto__" once
+    // reported (and logged) a removal of a key that never existed.
     assertSafeKey(key, "key");
     let removed = false;
     await mutate((file) => {
-      if (!(key in file.defaults) && !(key in file.overrides)) return null;
-      delete file.defaults[key];
-      delete file.overrides[key];
+      if (!file.defaults.has(key) && !file.overrides.has(key)) return null;
+      file.defaults.delete(key);
+      file.overrides.delete(key);
       removed = true;
       return file;
     });

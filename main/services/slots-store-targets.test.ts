@@ -19,7 +19,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-slots-targets-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { slotsStore, normaliseSlotsFile } = await import("./slots-store.js");
+const { slotsStore, normaliseSlotsFile, serialiseSlotsFile } = await import("./slots-store.js");
 
 after(() => {
   fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
@@ -61,13 +61,16 @@ describe("slots.json v3: normalising what is on disk", () => {
     const rows = [slot("s1", "01"), slot("s2", "02")];
     const { file, migrated } = normaliseSlotsFile({ "display-1": { st9: rows } });
 
-    assert.equal(file.version, 3);
+    // Asserted through serialiseSlotsFile: the file is nested Maps in memory,
+    // and what has to be right is the record envelope that reaches disk.
+    const disk = serialiseSlotsFile(file);
+    assert.equal(disk.version, 3);
     assert.deepEqual(
-      file.defaults,
+      disk.defaults,
       { "display-1": { st9: rows } },
       "a v2 file's boards are the service type's DEFAULTS — the day this lands nothing on any screen may change",
     );
-    assert.deepEqual(file.overrides, {}, "a v2 file has no per-plan exceptions to inherit");
+    assert.deepEqual(disk.overrides, {}, "a v2 file has no per-plan exceptions to inherit");
     assert.ok(migrated, "converting v2 is a migration and is logged as one");
   });
 
@@ -78,26 +81,26 @@ describe("slots.json v3: normalising what is on disk", () => {
       overrides: { v1: { p7: { serviceTypeId: "st9", sortDate: "2026-09-10", slots: [slot("b", "02")] } } },
     };
     const { file, migrated } = normaliseSlotsFile(structuredClone(on_disk));
-    assert.deepEqual(file, on_disk);
+    assert.deepEqual(serialiseSlotsFile(file), on_disk, "a v3 file round-trips byte for byte");
     assert.equal(migrated, null, "an already-v3 file is not re-migrated on every load");
   });
 
   it("a v1 service-type map lands under display-1's defaults", () => {
-    const { file } = normaliseSlotsFile({ st9: [slot("a", "01")] });
-    assert.deepEqual(Object.keys(file.defaults), ["display-1"]);
-    assert.deepEqual(Object.keys(file.defaults["display-1"]), ["st9"]);
-    assert.deepEqual(file.overrides, {});
+    const { defaults, overrides } = serialiseSlotsFile(normaliseSlotsFile({ st9: [slot("a", "01")] }).file);
+    assert.deepEqual(Object.keys(defaults), ["display-1"]);
+    assert.deepEqual(Object.keys(defaults["display-1"]), ["st9"]);
+    assert.deepEqual(overrides, {});
   });
 
   it("a v0 flat array lands under display-1/default", () => {
-    const { file } = normaliseSlotsFile([slot("a", "01")]);
-    assert.equal(file.defaults["display-1"].default.length, 1);
-    assert.deepEqual(file.overrides, {});
+    const { defaults, overrides } = serialiseSlotsFile(normaliseSlotsFile([slot("a", "01")]).file);
+    assert.equal(defaults["display-1"].default.length, 1);
+    assert.deepEqual(overrides, {});
   });
 
   it("an empty file is not reported as a migration", () => {
     const { file, migrated } = normaliseSlotsFile({});
-    assert.deepEqual(file, { version: 3, defaults: {}, overrides: {} });
+    assert.deepEqual(serialiseSlotsFile(file), { version: 3, defaults: {}, overrides: {} });
     assert.equal(migrated, null, "a first run must not write and log a migration of nothing");
   });
 
@@ -109,9 +112,10 @@ describe("slots.json v3: normalising what is on disk", () => {
       overrides: { v1: { p7: { serviceTypeId: "st9", sortDate: null, slots: [{ ...slot("b", "02"), link: legacy }] } } },
     });
     const expected = { kind: "pco", matchBy: "position", positions: [{ name: "Keys", notesStartsWith: "2" }] };
-    assert.deepEqual(file.defaults.v1.st9[0].link, expected);
+    const disk = serialiseSlotsFile(file);
+    assert.deepEqual(disk.defaults.v1.st9[0].link, expected);
     assert.deepEqual(
-      file.overrides.v1.p7.slots[0].link,
+      disk.overrides.v1.p7.slots[0].link,
       expected,
       "an override's slots go through the link migration too — it is the only half a live board may be reading",
     );
@@ -304,11 +308,12 @@ describe("a v3 envelope with no version stamp", () => {
     };
 
     const { file, migrated } = normaliseSlotsFile(raw);
+    const disk = serialiseSlotsFile(file);
 
-    assert.equal(file.defaults["display-1"]?.st9?.[0]?.id, "standing");
-    assert.equal(file.overrides["display-1"]?.p1?.slots[0]?.id, "week");
+    assert.equal(disk.defaults["display-1"]?.st9?.[0]?.id, "standing");
+    assert.equal(disk.overrides["display-1"]?.p1?.slots[0]?.id, "week");
     assert.equal(
-      (file.defaults as Record<string, unknown>).defaults,
+      (disk.defaults as Record<string, unknown>).defaults,
       undefined,
       "the v2 branch would have nested the envelope inside itself and blanked every wall",
     );
@@ -316,9 +321,11 @@ describe("a v3 envelope with no version stamp", () => {
   });
 
   it("still reads a real v2 file as v2", () => {
-    const { file } = normaliseSlotsFile({ "display-1": { st9: [slot("standing", "01")] } });
-    assert.equal(file.defaults["display-1"]?.st9?.[0]?.id, "standing");
-    assert.deepEqual(file.overrides, {}, "a v2 file has no overrides half at all");
+    const { defaults, overrides } = serialiseSlotsFile(
+      normaliseSlotsFile({ "display-1": { st9: [slot("standing", "01")] } }).file,
+    );
+    assert.equal(defaults["display-1"]?.st9?.[0]?.id, "standing");
+    assert.deepEqual(overrides, {}, "a v2 file has no overrides half at all");
   });
 });
 
