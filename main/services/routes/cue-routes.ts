@@ -44,7 +44,7 @@ import {
 } from "../companion-export.js";
 import { fingerprintParams } from "../companion-fingerprint.js";
 import { runCompanionReconcile } from "../companion-reconcile.js";
-import { bearerOf, cueTokens, isSameOriginBrowser } from "../cue-tokens.js";
+import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-tokens.js";
 import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
 import { cueStates } from "../cue-states.js";
@@ -77,12 +77,17 @@ async function requireCaller(
   }
   const caller = await cueTokens.verify(bearerOf(c.req.headers.authorization));
   if (!caller) {
-    console.warn(`[cues] refused ${scrub(c.method)} ${scrub(c.pathname)}: no valid token`);
+    // WHICH way it failed, because "no valid token" is what the log said for
+    // an hour while a Home Assistant install had the right token and the wrong
+    // header. Never the token itself: a near-miss in the log is a token in the
+    // log.
+    console.warn(`[cues] refused ${scrub(c.method)} ${scrub(c.pathname)}: ${scrub(refusalReason(c.req.headers.authorization))}`);
     error(c.res, "A bearer token is required", 401);
     return null;
   }
   return caller;
 }
+
 
 /** Where Home Assistant should send its calls. A LAN IP, never a name. */
 function baseUrlFor(c: RouteCtx): string {
