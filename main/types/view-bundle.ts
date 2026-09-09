@@ -5,7 +5,8 @@
 // resolves anyway, needs rebinding — so no caller has to re-derive them.
 
 import type { View } from "./views.js";
-import type { Slot, ScriptViewLayout } from "./pco.js";
+import type { Slot, ScriptViewLayout, SlotPreset } from "./pco.js";
+import type { PatchVariant } from "./patch.js";
 import type { OscTargetConfig } from "./osc.js";
 import type { RossTalkTargetConfig } from "./rosstalk.js";
 
@@ -43,6 +44,23 @@ export interface ViewBundle {
   appVersion: string;
   createdAt: string;
   source: { server: string };
+  /**
+   * Present only on a PLAN export — one service type's whole setup rather than
+   * one layout. Absent on a view export, and every field below that a plan
+   * export adds is optional for the same reason: a view export is byte for byte
+   * what it always was, and an older install's importer ignores what it does
+   * not know.
+   */
+  plan?: {
+    serviceTypeId: string;
+    serviceTypeName: string;
+    /** "type": slot boards for this type only. "all": every type's board on the
+     *  exported views. */
+    slotsScope: "type" | "all";
+  };
+  /** Ids of the top-level views. Absent on a view export, where `views[0]` is
+   *  the one root and everything after it is embedded. */
+  roots?: string[];
   views: View[];
   sideData: {
     /** slots.json key -> serviceTypeId -> rows. Key is a view id or object id. */
@@ -51,6 +69,14 @@ export interface ViewBundle {
      *  in a service module, and this type is imported by the renderer. */
     notes: Record<string, unknown>;
     scriptviewLayouts: ScriptViewLayout[];
+    /** The patch variant this service type is assigned to, per sheet that
+     *  assigns one. The RIG — devices, endpoints, the default patch — is not
+     *  exported: it is the building's, and a variant is an overlay of overrides
+     *  on top of whatever the destination's own patch says. */
+    patchVariants?: { sheetId: string; sheetName: string; variant: PatchVariant }[];
+    /** Saved slot arrangements. Global rather than per type, so they travel by
+     *  choice and not because the type was picked. */
+    presets?: SlotPreset[];
   };
   targets: { osc: OscTargetConfig[]; rosstalk: RossTalkTargetConfig[] };
   /** `<dir>/<file>` -> base64, matching ConfigSnapshot.images. */
@@ -71,4 +97,33 @@ export interface ImportReport {
   skipped: string[];
   /** The work list. Objects whose bindings name absent hardware. */
   rebind: UnresolvableRef[];
+  /** Present only when the file was a plan export. `retypedFrom` is set when the
+   *  importer landed the boards under a different service type than the file
+   *  named — the id they came from, so the report can say so. */
+  plan?: { serviceTypeId: string; serviceTypeName: string; retypedFrom?: string };
+  /** How many (key, service type) slot boards landed, and how many rows across
+   *  them. Boards never clash — see the note in view-import.ts. */
+  slotBoards: number;
+  slotRows: number;
+  /**
+   * What happened to each patch variant in the file. One entry per variant, one
+   * outcome each:
+   *
+   *   added          not here; added to the sheet and this type assigned to it
+   *   assigned       already here and left as it is; this type now points at it
+   *   kept           nothing written — the sheet and its assignment are untouched
+   *   replaced       overwritten with the file's copy and this type assigned to it
+   *   no-such-sheet  no sheet here matches by id or by name; nothing written
+   *
+   * "kept" covers the clash: the type already has a DIFFERENT variant on that
+   * sheet and the operator chose to keep theirs. The variant is not added in
+   * that case either, because a variant nothing points at is clutter in the
+   * patch editor rather than a useful spare.
+   */
+  patchVariants: {
+    sheetName: string;
+    variantName: string;
+    outcome: "added" | "assigned" | "kept" | "replaced" | "no-such-sheet";
+  }[];
+  presets: { added: number; kept: number; replaced: number };
 }
