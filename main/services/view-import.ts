@@ -376,10 +376,10 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       // used, not only that something was.
       const say = (row: ImportReport["patchVariants"][number]): void => {
         patchOutcomes.push(row);
-        const off = row.outcome === "reassigned" ? ` (was "${scrub(row.previousVariantName)}")` : "";
+        const off = row.outcome === "reassigned" ? ` (was "${row.previousVariantName}")` : "";
         console.log(
           `[view-import] patch variant "${scrub(row.variantName)}" ` +
-          `on ${scrub(row.sheetName)}: ${scrub(row.outcome)}${off}`,
+          `on ${scrub(row.sheetName)}: ${scrub(row.outcome)}${scrub(off)}`,
         );
       };
       if (!sheet) {
