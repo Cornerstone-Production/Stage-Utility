@@ -60,7 +60,8 @@ function scripts(yaml: string): { name: string; alias: string }[] {
   if (start === -1) return [];
   const out: { name: string; alias: string }[] = [];
   for (let i = start + 1; i < lines.length; i++) {
-    const key = /^ {2}(\w+):$/.exec(lines[i]!);
+    // Quoted, like the switch keys: a script called `on` is a boolean key.
+    const key = /^ {2}"(\w+)":$/.exec(lines[i]!);
     if (!key) continue;
     const alias = /^ {4}alias: "((?:[^"\\\n\r\t]|\\.)*)"$/.exec(lines[i + 1] ?? "");
     assert.ok(alias, `alias is not a single well-formed quoted scalar: ${JSON.stringify(lines[i + 1])}`);
@@ -77,16 +78,25 @@ function comments(yaml: string): string[] {
     .filter((l) => l.startsWith("#"));
 }
 
-/** The `json_attributes` list under the rest sensor, in order. */
+/**
+ * The `json_attributes` list under the rest sensor, in order, unquoted.
+ *
+ * The quotes are REQUIRED, and that is what this asserts. Home Assistant parses
+ * YAML 1.1, where a bare `no`, `on`, `off`, `yes`, `true` or `false` is a
+ * boolean — so a pair called `no_on`/`no_off` asked the sensor for the attribute
+ * `false`, which no answer has ever contained.
+ */
 function sensorAttributes(yaml: string): string[] {
   const lines = yaml.split("\n");
   const start = lines.indexOf("        json_attributes:");
   if (start === -1) return [];
   const out: string[] = [];
   for (let i = start + 1; i < lines.length; i++) {
-    const m = /^ {10}- (\S+)$/.exec(lines[i]!);
+    const m = /^ {10}- (.+)$/.exec(lines[i]!);
     if (!m) break;
-    out.push(m[1]!);
+    const quoted = /^"((?:[^"\\\n\r\t]|\\.)*)"$/.exec(m[1]!);
+    assert.ok(quoted, `a json_attributes item is not a quoted scalar: ${JSON.stringify(m[1])}`);
+    out.push(quoted[1]!);
   }
   return out;
 }
@@ -98,7 +108,9 @@ function switchStates(yaml: string): { id: string; from: string }[] {
   if (start === -1) return [];
   const out: { id: string; from: string }[] = [];
   for (let i = start + 1; i < lines.length; i++) {
-    const key = /^ {6}(\w+):$/.exec(lines[i]!);
+    // The key is QUOTED, for the same YAML 1.1 reason as the attribute list: a
+    // switch id of `no` is the boolean false as a mapping key.
+    const key = /^ {6}"(\w+)":$/.exec(lines[i]!);
     if (!key) continue;
     const block = lines.slice(i + 1, i + 6).join("\n");
     const optimistic = / {8}optimistic: true/.test(block);
@@ -462,6 +474,32 @@ describe("a pair with a state variable", () => {
     );
     assert.match(yaml, /^ {10}action: rest_command\.su_screens_on$/m);
     assert.deepEqual(scripts(yaml), [], "a half of a pair must never also be a script");
+  });
+
+  test("a base YAML 1.1 would read as a BOOLEAN is quoted everywhere", () => {
+    // Home Assistant parses YAML 1.1. `no`, `on`, `off`, `yes`, `true` and
+    // `false` bare are booleans there, so `- no` under json_attributes asked the
+    // sensor for the attribute `false` — an attribute no answer has ever
+    // carried, leaving the switch reading off forever with nothing in any log.
+    // The same word is also the switch's own mapping key, and a one-shot cue
+    // called `on` is a script's.
+    const yaml = homeAssistantYaml(
+      [
+        bound("no_on", "No on", "no_state"),
+        cue("no_off", "No off"),
+        cue("on", "just on"),
+      ],
+      BASE,
+    );
+    // The helpers require a quoted scalar and fail on a bare one.
+    assert.deepEqual(sensorAttributes(yaml), ["no"]);
+    assert.deepEqual(switchStates(yaml).map((x) => x.id), ["no"]);
+    assert.deepEqual(scripts(yaml).map((x) => x.name), ["on"]);
+    // And the exact lines, so a passing helper cannot be a helper that matched
+    // nothing.
+    assert.match(yaml, /^ {10}- "no"$/m);
+    assert.match(yaml, /^ {6}"no":$/m);
+    assert.match(yaml, /^ {2}"on":$/m);
   });
 
   test("the header says the switches read real state only when one does", () => {

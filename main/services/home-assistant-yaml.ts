@@ -303,7 +303,14 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
       '        value_template: "{{ value_json.checkedAt }}"',
       '        json_attributes_path: "$.states"',
       "        json_attributes:",
-      ...bound.map((p) => `          - ${p.base}`),
+      // QUOTED, all three of the places a cue name or a base becomes a YAML
+      // scalar of its own. Home Assistant parses YAML 1.1, which reads a bare
+      // `no`, `on`, `off`, `yes`, `true` and `false` (and, in the 1.1 spec,
+      // `y` and `n`) as a BOOLEAN — so a pair called `no_on`/`no_off` asked the
+      // sensor for the attribute `false` and gave the switch block a key that
+      // was not a string. `su_` prefixed keys are exempt: a prefixed name cannot
+      // be one of those words.
+      ...bound.map((p) => `          - ${q(p.base)}`),
     );
   }
 
@@ -311,7 +318,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     lines.push("", "switch:", "  - platform: template", "    switches:");
     for (const p of pairs) {
       lines.push(
-        `      ${p.base}:`,
+        `      ${q(p.base)}:`,
         `        friendly_name: ${q(spoken.get(`switch:${p.base}`) ?? p.friendly)}`,
         // A bound pair reads its state; an unbound one can only report what it
         // asked for. `optimistic: true` is dropped for a bound pair rather than
@@ -346,7 +353,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     lines.push("", "script:");
     for (const cue of scripts) {
       lines.push(
-        `  ${cue.name}:`,
+        `  ${q(cue.name)}:`,
         `    alias: ${q(spoken.get(`script:${cue.name}`) ?? cue.friendly)}`,
         "    sequence:",
         `      - action: rest_command.su_${cue.name}`,
