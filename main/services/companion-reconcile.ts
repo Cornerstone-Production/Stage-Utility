@@ -585,8 +585,22 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
       if (change.renameLog) console.warn(scrub(change.renameLog, LOG_MAX));
       continue;
     }
-    const rule = rules.find((r) => r.id === change.ruleId);
-    if (!rule) continue;
+    // RE-READ, immediately before the write, never from the snapshot above.
+    // `rules` was taken before Companion was even dialled, and the write below
+    // is `{ ...rule.action, params: { ...rule.action.params, ...patch } }` — so
+    // every OTHER field of the action and the trigger goes back as it was when
+    // the pass started. An operator who saved the rule while it ran (a `room`
+    // typed in, a says edited, the action swapped for another) had that change
+    // silently reverted by a housekeeping sweep they never asked for.
+    const rule = automationEngine.listRules().find((r) => r.id === change.ruleId);
+    if (!rule) {
+      // Deleted while the pass was running. Not an error, but not silent
+      // either: the log is where a status that never appeared is explained.
+      console.warn(
+        `[companion] cue ${scrub(change.label, LOG_MAX)}: deleted while reconciling; status not saved`,
+      );
+      continue;
+    }
     try {
       // ONE save for both halves of what this pass decided about the rule. Two
       // updateRule calls would broadcast twice and could leave the name renamed

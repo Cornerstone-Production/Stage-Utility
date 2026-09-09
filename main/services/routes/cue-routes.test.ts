@@ -1416,6 +1416,55 @@ describe("reconciling a cue's Companion button", () => {
     }
   });
 
+  test("an operator's save DURING the pass survives it", async () => {
+    // The pass snapshotted listRules() once and later wrote
+    // `{ ...rule.action, params }` from that snapshot, so every other field of
+    // the action and the trigger went back as it was when the pass started. An
+    // hourly housekeeping sweep reverting an edit the operator had just saved is
+    // the worst kind of bug: nothing failed, and the change is simply gone.
+    await importPageOne();
+    relabel("0", "1", "Screens ON");
+    relabel("0", "2", "Screens OFF");
+    const halves = automationEngine
+      .cueRules()
+      .filter((x) => automationEngine.cueNameOf(x).startsWith("room_a_screens_projectors_"))
+      .map((x) => x.id);
+    assert.equal(halves.length, 2, "the fixture for this case is not a pair");
+
+    const realUpdate = automationEngine.updateRule.bind(automationEngine);
+    let edited: string | null = null;
+    automationEngine.updateRule = async (id, patch) => {
+      const result = await realUpdate(id, patch);
+      if (edited === null) {
+        // Between the pass's first write and its second: the operator saves the
+        // OTHER half with a room typed in. Nothing in the pass touches `room`.
+        edited = halves.find((x) => x !== id) ?? null;
+        if (edited) {
+          const live = automationEngine.listRules().find((r) => r.id === edited)!;
+          await realUpdate(edited, {
+            trigger: { ...live.trigger, params: { ...live.trigger.params, room: "South Auditorium" } },
+          });
+        }
+      }
+      return result;
+    };
+    try {
+      await callRoute(cueRoutes, "/api/companion/buttons/refresh", { method: "POST", headers: browser });
+    } finally {
+      automationEngine.updateRule = realUpdate;
+    }
+
+    assert.ok(edited, "the pass wrote nothing, so nothing was raced");
+    const after = automationEngine.listRules().find((r) => r.id === edited)!;
+    assert.equal(
+      String(after.trigger.params.room),
+      "South Auditorium",
+      "the reconcile reverted an edit the operator saved while it was running",
+    );
+    // And the pass still did its own job on that rule.
+    assert.match(automationEngine.cueNameOf(after), /^screens_(on|off)$/);
+  });
+
   test("a clean refresh says so, with nothing failed", async () => {
     await importPageOne();
     const r = await callRoute(cueRoutes, "/api/companion/buttons/refresh", {
