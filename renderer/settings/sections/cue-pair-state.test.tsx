@@ -143,6 +143,20 @@ const pills = (): string[] =>
     (el) => el.getAttribute("data-cue-state") ?? "",
   );
 
+/**
+ * Every state pill on the list, by the pair it belongs to.
+ *
+ * By `data-cue-pair` rather than `data-cue-state`, because the failure this
+ * catches renders a pill with NO state: a row that read its state off the
+ * prototype chain got `Object.prototype.constructor`, which is truthy, and
+ * React drops an attribute whose value is undefined — so counting states could
+ * not see it at all.
+ */
+const pairPills = (): string[] =>
+  [...document.querySelectorAll("[data-cue-pair]")].map(
+    (el) => el.getAttribute("data-cue-pair") ?? "",
+  );
+
 /** The pills' titles, which is where the reason lives. */
 const titles = (): string[] =>
   [...document.querySelectorAll("[data-cue-state]")].map((el) => el.getAttribute("title") ?? "");
@@ -225,6 +239,59 @@ describe("the state pill on the rules list", () => {
     STATES = {};
     await mount();
     assert.deepEqual(pills(), []);
+  });
+});
+
+describe("a pair whose base is a prototype key", () => {
+  test("an UNBOUND constructor pair shows no pill while another pair does", async () => {
+    // The base is half of a cue name, so `states["constructor"]` reached
+    // Object.prototype and came back with a function. Truthy, so the row grew a
+    // pill: an amber dot with no word, for a pair the route said nothing about.
+    // Another pair IS bound, so the query runs and the answer is real.
+    RULES = [
+      cue("constructor_on"),
+      cue("constructor_off"),
+      cue("projectors_on", { stateVariable: "projectors_state" }),
+      cue("projectors_off"),
+    ];
+    STATES = {
+      projectors: {
+        on: "projectors_on",
+        off: "projectors_off",
+        variable: "projectors_state",
+        value: "on",
+        state: "on",
+      },
+    };
+    await mount();
+    assert.deepEqual(pairPills(), ["projectors"]);
+    assert.deepEqual(pills(), ["on"]);
+  });
+
+  test("a BOUND __proto__ pair the route answered for does show its pill", async () => {
+    // The other half of the same bug: the key has to be usable, not refused.
+    RULES = [
+      cue("__proto___on", { stateVariable: "proto_state" }),
+      cue("__proto___off"),
+    ];
+    // Object.fromEntries, NOT `{ __proto__: … }`: an object literal with that
+    // key sets the prototype instead of adding a property, which is the very
+    // bug one level down. This is the shape JSON.parse gives the real page.
+    STATES = Object.fromEntries([
+      [
+        "__proto__",
+        {
+          on: "__proto___on",
+          off: "__proto___off",
+          variable: "proto_state",
+          value: "off",
+          state: "off",
+        },
+      ],
+    ]);
+    await mount();
+    assert.deepEqual(pairPills(), ["__proto__"]);
+    assert.deepEqual(pills(), ["off"]);
   });
 });
 

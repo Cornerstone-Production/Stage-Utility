@@ -399,6 +399,24 @@ function FormerNamesField({
 }
 
 /**
+ * One pair's row out of the states answer, or null when it has none.
+ *
+ * `Object.hasOwn` rather than `states[base]`: the key is the pair's base, which
+ * is half of a cue name, and a pair called `constructor_on`/`constructor_off`
+ * read `Object.prototype.constructor` straight off the prototype chain. That is
+ * a function, so it is truthy, so the row grew a pill — an amber dot with no
+ * word beside it, saying nothing at all about a pair that is simply not in the
+ * answer. `__proto__`, `prototype` and `toString` are the same shape.
+ */
+function cueStateFor(
+  states: Record<string, CueStateRow> | undefined,
+  base: string | null,
+): CueStateRow | null {
+  if (!states || base === null || !Object.hasOwn(states, base)) return null;
+  return states[base] ?? null;
+}
+
+/**
  * What a bound pair's device is actually doing, on the `_on` half's row.
  *
  * The `_off` half shows nothing: one pair is one thing, and a second pill saying
@@ -406,11 +424,16 @@ function FormerNamesField({
  * unbound pair or a cue that is not half of one — an "unknown" pill on every
  * rule in the list would be noise nobody could act on.
  */
-function CuePairState({ state }: { state: CueStateRow }) {
+function CuePairState({ base, state }: { base: string; state: CueStateRow }) {
   const variant = state.state === "on" ? "success" : state.state === "off" ? "neutral" : "warning";
   return (
     <span
       className="flex min-w-0 items-center gap-1.5"
+      // The pair, always, beside the word. `data-cue-state` alone is not enough
+      // to see a pill that should not be there: a row that took its state off
+      // the prototype chain rendered a dot with no word AND no state attribute,
+      // so nothing could count it.
+      data-cue-pair={base}
       data-cue-state={state.state}
       // The reason on hover rather than on the row: it is a sentence, and the
       // row already carries the rule name and the summary.
@@ -614,7 +637,7 @@ function RuleCard({
               custom variable. Inside the row's own button like the status pill
               above, so pressing the thing saying `unknown` opens the editor
               that can fix it. */}
-          {cueState && <CuePairState state={cueState} />}
+          {cueState && pairBase !== null && <CuePairState base={pairBase} state={cueState} />}
         </button>
         <Button variant="transparent" size="small" onClick={() => void testFire()} aria-label="Test fire">
           <PlayIcon className="size-3.5" /> Test
@@ -993,7 +1016,7 @@ export function AutomationSection() {
                 registry={registry}
                 dynamicOptions={dynamicOptions}
                 pairBase={pairBases.get(r.id) ?? null}
-                cueState={cueStateData?.states[pairBases.get(r.id) ?? ""] ?? null}
+                cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
                 customVariables={companionPairs?.customVariables ?? []}
                 onChanged={refresh}
               />
