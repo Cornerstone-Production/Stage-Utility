@@ -258,8 +258,32 @@ describe("a button that cannot be identified", () => {
     assert.equal(r.changes[0]!.status, "missing");
     assert.equal(
       r.changes[0]!.log,
-      "[companion] cue projectors_on: button not found on page 1 (no such page)",
+      "[companion] cue projectors_on: button not found — page 1, as it was numbered then, " +
+        "is no longer in Companion's export",
     );
+  });
+
+  test("and it names NO page when another page has taken that number", () => {
+    // The stored page number is what the page was called WHEN THE BUTTON WAS
+    // LAST SEEN, and pages renumber. Looking it up in the export names whatever
+    // page is at that number now — so the line read "button not found on page 1
+    // (Room A: Lighting)" for a cue whose button had been on the screens page,
+    // and an operator would go and look at the wrong page.
+    const d = doc();
+    delete d.pages["1"];
+    const lighting = d.pages["2"]!;
+    delete d.pages["2"];
+    d.pages["1"] = lighting;
+
+    const r = only([entry()], parse(d));
+    assert.equal(r.changes[0]!.status, "missing");
+    const log = r.changes[0]!.log ?? "";
+    assert.equal(
+      log.includes(FIXTURE_PAGES.lights),
+      false,
+      `the line named the page that took the number: ${log}`,
+    );
+    assert.match(log, /page 1, as it was numbered then, is no longer in Companion's export/);
   });
 
   test("moved to ANOTHER page is missing — the search is within a page, on purpose", () => {

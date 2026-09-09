@@ -427,6 +427,23 @@ function decide(
     return `button not found on page ${pageNum} (${name})`;
   };
 
+  /**
+   * The page this cue's fingerprint names is not in the export at all.
+   *
+   * Names NO page, deliberately. `was.page` is the number the page had when the
+   * button was last seen, and pages renumber — so looking that number up in the
+   * export names whatever page is there NOW, which is a different page. The line
+   * read "button not found on page 3 (Room A: Lighting)" while the cue's button
+   * had been on the cameras page, and an operator would go and look at the
+   * lighting page.
+   *
+   * "no longer in the export" rather than "deleted": a page whose buttons have
+   * all been removed has no pressable controls, so it is not in the parsed list
+   * either, and this cannot tell the two apart.
+   */
+  const pageGone = (): string =>
+    `button not found — page ${was.page}, as it was numbered then, is no longer in Companion's export`;
+
   // No page id: a rule created before the fingerprint existed, or written by
   // hand. ADOPTED at its own coordinates rather than refused — an upgrade must
   // not break every working cue on the box.
@@ -442,7 +459,7 @@ function decide(
   }
 
   const page = byPageId.get(was.pageId);
-  if (!page) return missing(notFoundHere(was.page));
+  if (!page) return missing(pageGone());
 
   const wanted = keyOf(was.actionIds);
   const here = page.buttons.find((b) => b.row === was.row && b.col === was.col);
