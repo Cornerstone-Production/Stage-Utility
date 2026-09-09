@@ -52,9 +52,13 @@ import { stageController } from "../stage-controller.js";
 import type { Rule } from "../../types/automation.js";
 
 /** Answer plain text (the Home Assistant config is not JSON). */
-function text(c: RouteCtx, body: string, contentType = "text/yaml; charset=utf-8"): void {
+function text(
+  c: RouteCtx,
+  body: string,
+  headers: Record<string, string> = { "Content-Type": "text/yaml; charset=utf-8" },
+): void {
   if (c.res.headersSent || c.res.writableEnded) return;
-  c.res.writeHead(200, { "Content-Type": contentType });
+  c.res.writeHead(200, headers);
   c.res.end(body);
 }
 
@@ -135,7 +139,15 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // Open, like every other read here. It contains cue names — which
     // GET /api/automation/rules already serves to anyone on the LAN — and refers
     // to the token as `!secret stage_utility_token`, never by value.
-    text(c, homeAssistantYaml(automationEngine.listRules(), baseUrlFor(c)));
+    //
+    // Content-Disposition names the file the download button saves, fixed on
+    // purpose: the docs tell the operator to save it as
+    // packages/stage_utility.yaml, and a filename that drifted with the server's
+    // own name would make that instruction wrong.
+    text(c, homeAssistantYaml(automationEngine.listRules(), baseUrlFor(c)), {
+      "Content-Type": "text/yaml; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="stage_utility.yaml"',
+    });
     return;
   }
 

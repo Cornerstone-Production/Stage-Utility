@@ -335,6 +335,111 @@ describe("the import dialog", () => {
   });
 });
 
+// ── Select all / Clear, per section ─────────────────────────────────────────
+//
+// Each section's own pair, acting only on what THAT section shows — a pairs
+// Select all must not touch the singles, and a singles Select all with a
+// search active must not reach past what the search is hiding. An
+// already-imported row (`exists: true`) is never selected, because it is
+// disabled for the same reason: its cue already exists.
+describe("Select all / Clear per section", () => {
+  test("pairs Select all ticks every pair not already existing, and leaves singles untouched", async () => {
+    PAIRS.push({ ...PAIRS[0]!, page: 2, slug: "lighting_projectors", base: "Lighting", exists: true });
+    try {
+      await mount();
+      // Untick the one suggested pair first, so Select all is doing the work.
+      await act(async () => {
+        screen.getByLabelText("Projectors · Room A: Screens").click();
+      });
+      assert.equal(footer(), "Import");
+
+      await act(async () => {
+        screen.getByRole("button", { name: "Select all pairs" }).click();
+      });
+      assert.deepEqual(boxes(), [
+        { name: "Projectors · Room A: Screens", checked: "true", disabled: false },
+        { name: "Lighting · Room A: Screens", checked: "false", disabled: true },
+        { name: "Take Screens · Room A: Screens", checked: "false", disabled: false },
+        { name: "House Lights ON · Room A: Screens", checked: "false", disabled: false },
+        { name: "Cam 1 · Room A: Cameras", checked: "false", disabled: false },
+      ]);
+      assert.equal(footer(), "Import 1 pair", "the already-imported pair must not have been ticked");
+    } finally {
+      PAIRS.length = 1;
+    }
+  });
+
+  test("pairs Clear unticks only the pairs section", async () => {
+    await mount();
+    await act(async () => {
+      screen.getByLabelText("Cam 1 · Room A: Cameras").click();
+    });
+    assert.equal(footer(), "Import 1 pair and 1 button");
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Clear pairs" }).click();
+    });
+    assert.deepEqual(
+      boxes().map((b) => b.checked),
+      ["false", "false", "false", "true"],
+    );
+    assert.equal(footer(), "Import 1 button", "clearing pairs must not touch the ticked single button");
+  });
+
+  test("singles Select all with a search active ticks only the shown rows", async () => {
+    await mount();
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Search single buttons"), { target: { value: "cam" } });
+    });
+    assert.deepEqual(singleRowNames(), ["Cam 1"]);
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Select all 1 shown" }).click();
+    });
+    // Take Screens and House Lights ON are hidden by the search, so they are
+    // not even rendered here — the assertion that they were never ticked is
+    // in the request the footer's count implies: 1 pair + 1 button, not 3.
+    assert.deepEqual(
+      boxes().map((b) => ({ name: b.name, checked: b.checked })),
+      [
+        { name: "Projectors · Room A: Screens", checked: "true" },
+        { name: "Cam 1 · Room A: Cameras", checked: "true" },
+      ],
+    );
+    assert.equal(footer(), "Import 1 pair and 1 button");
+
+    // Clear the search and confirm the two hidden rows were never ticked.
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Search single buttons"), { target: { value: "" } });
+    });
+    assert.deepEqual(
+      boxes().map((b) => b.checked),
+      ["true", "false", "false", "true"],
+      "a hidden row was ticked by Select all",
+    );
+  });
+
+  test("singles Clear unticks that section only", async () => {
+    await mount();
+    await act(async () => {
+      screen.getByLabelText("Take Screens · Room A: Screens").click();
+    });
+    await act(async () => {
+      screen.getByLabelText("Cam 1 · Room A: Cameras").click();
+    });
+    assert.equal(footer(), "Import 1 pair and 2 buttons");
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Clear single buttons" }).click();
+    });
+    assert.deepEqual(
+      boxes().map((b) => b.checked),
+      ["true", "false", "false", "false"],
+    );
+    assert.equal(footer(), "Import 1 pair", "the pair must survive a singles Clear");
+  });
+});
+
 // ── The State select ──────────────────────────────────────────────────────────
 //
 // Chosen here, the binding is written onto the `_on` rule as it is created. Three
