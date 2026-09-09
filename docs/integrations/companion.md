@@ -23,8 +23,9 @@ outbound path says so rather than guessing at an address.
 The module marks its event stream with an `X-Companion-Module` header (or
 `?client=companion`). The server counts those streams and reports the total to
 the integration manager, which is what the settings panel's "N connected" shows.
-The in-app integration is therefore presence and guidance only — there is nothing
-to enable or test. It carries **no enable switch** for that reason: the server
+The inbound half is therefore presence and guidance only — there is nothing to
+enable, and Test only reads Companion once a host is filled in below. It carries
+**no enable switch** for that reason: the server
 listens either way, so a switch would have said "off" while the module went on
 connecting and controlling the app. Its row reads **No clients yet** until a
 Companion connects, which is a listener at rest rather than a fault, and it is
