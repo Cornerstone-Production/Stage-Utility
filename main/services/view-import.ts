@@ -430,7 +430,28 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     }
     // One write for the whole file: patchStore.save replaces it wholesale, so
     // saving per sheet would be several read-modify-writes over the same bytes.
-    if (changed) await patchStore.save(file);
+    //
+    // A throw here used to fail the WHOLE import, which by this point has
+    // already committed the views, the boards, the notes, the images and the
+    // targets. The failure is returned in `skipped` instead, and the outcomes
+    // that claimed a write are dropped: a report saying "added" for a variant
+    // that is not on disk is worse than one that says nothing landed.
+    if (changed) {
+      try {
+        await patchStore.save(file);
+      } catch (err) {
+        const msg = errorMessage(err);
+        skipped.push(`patch variants — could not be saved: ${msg}`);
+        console.error(`[view-import] patch variants failed: ${scrub(msg)}`);
+        // "kept" and "no-such-sheet" wrote nothing either way, so they are still
+        // true. Everything else described a write that did not happen.
+        const survived = patchOutcomes.filter(
+          (o) => o.outcome === "kept" || o.outcome === "no-such-sheet",
+        );
+        patchOutcomes.length = 0;
+        patchOutcomes.push(...survived);
+      }
+    }
   }
 
   // ── Presets ───────────────────────────────────────────────────────────────
@@ -454,10 +475,21 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
         presets.kept++;
       }
     }
-    await presetsStore.save([...byId.values()]);
-    // Scrubbed as one string: see the note on the same shape in plan-export.
-    const tally = `${presets.added} added, ${presets.kept} kept, ${presets.replaced} replaced`;
-    console.log(`[view-import] presets: ${scrub(tally)}`);
+    try {
+      await presetsStore.save([...byId.values()]);
+      // Scrubbed as one string: see the note on the same shape in plan-export.
+      const tally = `${presets.added} added, ${presets.kept} kept, ${presets.replaced} replaced`;
+      console.log(`[view-import] presets: ${scrub(tally)}`);
+    } catch (err) {
+      // Same rule as the patch save above: returned to the caller, and the tally
+      // zeroed rather than reporting presets that are not on disk.
+      const msg = errorMessage(err);
+      skipped.push(`presets — could not be saved: ${msg}`);
+      console.error(`[view-import] presets failed: ${scrub(msg)}`);
+      presets.added = 0;
+      presets.kept = 0;
+      presets.replaced = 0;
+    }
   }
 
   // The rebind list, from the same walk — and computed the same way the review

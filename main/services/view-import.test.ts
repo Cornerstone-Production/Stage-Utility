@@ -525,6 +525,31 @@ describe("patch variants", () => {
     assert.equal(report.patchVariants[0]!.outcome, "added");
   });
 
+  test("a save that fails late is reported, and claims nothing landed", async () => {
+    // patchStore.save runs after the views, boards, notes, images and targets
+    // are already committed. A throw there used to fail the whole import, and
+    // reporting "added" for a variant that never reached disk is the other half
+    // of the same lie.
+    await blankPatch();
+    const store = patchStore as unknown as { save: unknown };
+    const real = store.save;
+    store.save = async () => { throw new Error("disk full"); };
+    try {
+      const report = await applyViewBundle(withVariant());
+      assert.equal(report.views.length, 1, "the views were rolled back over a patch save");
+      assert.ok(
+        report.skipped.some((k) => k === "patch variants — could not be saved: disk full"),
+        `the failure was swallowed: ${JSON.stringify(report.skipped)}`,
+      );
+      assert.ok(
+        !report.patchVariants.some((p) => p.outcome === "added"),
+        "the report claims a variant was added that was never saved",
+      );
+    } finally {
+      store.save = real;
+    }
+  });
+
   test("a malformed variant refuses the whole file before anything is written", async () => {
     await blankPatch();
     await assert.rejects(
@@ -566,6 +591,24 @@ describe("presets", () => {
     const saved = await presetsStore.load();
     assert.equal(saved.length, 1);
     assert.equal(saved[0]!.name, "From the file");
+  });
+
+  test("a save that fails late is reported, and the tally claims nothing", async () => {
+    await presetsStore.save([] as never);
+    const store = presetsStore as unknown as { save: unknown };
+    const real = store.save;
+    store.save = async () => { throw new Error("disk full"); };
+    try {
+      const report = await applyViewBundle(withPresets());
+      assert.equal(report.views.length, 1, "the views were rolled back over a preset save");
+      assert.ok(
+        report.skipped.some((k) => k === "presets — could not be saved: disk full"),
+        `the failure was swallowed: ${JSON.stringify(report.skipped)}`,
+      );
+      assert.deepEqual(report.presets, { added: 0, kept: 0, replaced: 0 });
+    } finally {
+      store.save = real;
+    }
   });
 
   test("a malformed preset refuses the whole file before anything is written", async () => {
