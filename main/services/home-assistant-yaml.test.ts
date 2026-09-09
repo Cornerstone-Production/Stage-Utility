@@ -548,3 +548,109 @@ describe("a pair with a state variable", () => {
     );
   });
 });
+
+// ── The whole unbound document, pinned ────────────────────────────────────────
+//
+// Everything else here reads one thing out of the fragment, so a change to the
+// SHAPE of it — a key renamed, a comment dropped, a block reordered, an
+// indentation off by two — passes every one of them while quietly rewriting what
+// somebody has to re-paste into Home Assistant. This is the whole output for an
+// install with no state bindings, which is what every existing install is.
+//
+// It is not here to be right, it is here to be DELIBERATE: when it fails, read
+// the diff, decide whether the new output is what you meant, and only then
+// regenerate.
+describe("the document for an install with no bindings", () => {
+  /** A pair, a one-shot cue, and a renamed one-shot — every object this emits. */
+  const UNBOUND_FIXTURE = (): Rule[] => [
+    cue("projectors_on", "Projectors on"),
+    cue("projectors_off", "Projectors off"),
+    cue("take_screens", "take the screens"),
+    cue("screens_on", "Screens on", "Screens ON", "beamers_on"),
+  ];
+
+  const UNBOUND_YAML = [
+  "# Stage Utility cues \u2014 generated. Paste into configuration.yaml.",
+  "#",
+  "# Put the token you were shown when you minted it into secrets.yaml, WITH",
+  "# the scheme, because this is the whole Authorization header:",
+  "#",
+  "#   stage_utility_token: \"Bearer su_...\"",
+  "#",
+  "# Switches are optimistic: Stage Utility reports that it dispatched the",
+  "# press, never that the device did anything. Home Assistant shows what it",
+  "# asked for, not what happened.",
+  "",
+  "rest_command:",
+  "  su_projectors_on:",
+  "    url: \"http://192.168.1.50:8788/api/cues/projectors_on\"",
+  "    method: post",
+  "    headers:",
+  "      authorization: !secret stage_utility_token",
+  "    content_type: \"application/json\"",
+  "    payload: \"{}\"",
+  "  su_projectors_off:",
+  "    url: \"http://192.168.1.50:8788/api/cues/projectors_off\"",
+  "    method: post",
+  "    headers:",
+  "      authorization: !secret stage_utility_token",
+  "    content_type: \"application/json\"",
+  "    payload: \"{}\"",
+  "  su_take_screens:",
+  "    url: \"http://192.168.1.50:8788/api/cues/take_screens\"",
+  "    method: post",
+  "    headers:",
+  "      authorization: !secret stage_utility_token",
+  "    content_type: \"application/json\"",
+  "    payload: \"{}\"",
+  "  # renamed from su_beamers_on; the old rest_command keeps working until you re-paste",
+  "  su_screens_on:",
+  "    url: \"http://192.168.1.50:8788/api/cues/screens_on\"",
+  "    method: post",
+  "    headers:",
+  "      authorization: !secret stage_utility_token",
+  "    content_type: \"application/json\"",
+  "    payload: \"{}\"",
+  "",
+  "switch:",
+  "  - platform: template",
+  "    switches:",
+  "      \"projectors\":",
+  "        friendly_name: \"Projectors\"",
+  "        optimistic: true",
+  "        turn_on:",
+  "          action: rest_command.su_projectors_on",
+  "        turn_off:",
+  "          action: rest_command.su_projectors_off",
+  "",
+  "script:",
+  "  \"take_screens\":",
+  "    alias: \"take the screens\"",
+  "    sequence:",
+  "      - action: rest_command.su_take_screens",
+  "  \"screens_on\":",
+  "    alias: \"Screens on\"",
+  "    sequence:",
+  "      - action: rest_command.su_screens_on",
+  "",
+  ].join("\n");
+
+  test("is exactly this, to the character", () => {
+    const yaml = homeAssistantYaml(UNBOUND_FIXTURE(), BASE);
+    // TO REGENERATE, once you have decided the change is intended:
+    //   SU_PRINT_YAML=1 node --import tsx --test main/services/home-assistant-yaml.test.ts
+    // and paste the printed lines over UNBOUND_YAML above.
+    if (process.env.SU_PRINT_YAML) {
+      console.log(yaml.split("\n").map((l) => `    ${JSON.stringify(l)},`).join("\n"));
+    }
+    assert.equal(yaml, UNBOUND_YAML);
+  });
+
+  test("and nothing in it mentions state", () => {
+    // The cheap half of the same guard, said in one line: an unbound install must
+    // not grow a sensor it polls every ten seconds for nothing.
+    const yaml = homeAssistantYaml(UNBOUND_FIXTURE(), BASE);
+    assert.equal(yaml.includes("rest:"), false);
+    assert.equal(yaml.includes("state_attr"), false);
+  });
+});
