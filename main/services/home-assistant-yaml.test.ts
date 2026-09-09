@@ -47,13 +47,43 @@ function commandKeys(yaml: string): string[] {
   return [...yaml.matchAll(/^ {2}(su_\w+):$/gm)].map((m) => m[1]!);
 }
 
+/**
+ * The `script:` keys and their aliases, in order.
+ *
+ * Read off the block rather than by matching `^ {2}\w+:$` anywhere, because the
+ * `rest_command` keys sit at the same indent and a scan that could not tell them
+ * apart would report every cue as having a script.
+ */
+function scripts(yaml: string): { name: string; alias: string }[] {
+  const lines = yaml.split("\n");
+  const start = lines.indexOf("script:");
+  if (start === -1) return [];
+  const out: { name: string; alias: string }[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const key = /^ {2}(\w+):$/.exec(lines[i]!);
+    if (!key) continue;
+    const alias = /^ {4}alias: "((?:[^"\\\n\r\t]|\\.)*)"$/.exec(lines[i + 1] ?? "");
+    assert.ok(alias, `alias is not a single well-formed quoted scalar: ${JSON.stringify(lines[i + 1])}`);
+    out.push({ name: key[1]!, alias: alias[1]! });
+  }
+  return out;
+}
+
+/** Every comment line, trimmed — the renamed-from notes live here. */
+function comments(yaml: string): string[] {
+  return yaml
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("#"));
+}
+
 /** One called cue, with only the fields the generator reads set meaningfully. */
-function cue(name: string, says: string, ruleName = name): Rule {
+function cue(name: string, says: string, ruleName = name, aliases = ""): Rule {
   return {
     id: `id-${name}`,
     name: ruleName,
     enabled: true,
-    trigger: { id: CALL_TRIGGER_ID, params: { name, says } },
+    trigger: { id: CALL_TRIGGER_ID, params: { name, says, aliases } },
     conditions: [],
     action: { id: "log.message", params: { message: "x" } },
     cooldownSec: 0,
@@ -138,9 +168,151 @@ describe("homeAssistantYaml", () => {
     assert.deepEqual(friendlyNames(yaml), []);
   });
 
+  test("a cue that is not half of a pair gets a script, aliased from `says`", () => {
+    const yaml = homeAssistantYaml([cue("take_screens", "take the screens")], BASE);
+    assert.deepEqual(scripts(yaml), [{ name: "take_screens", alias: "take the screens" }]);
+    assert.match(yaml, /^ {6}- action: rest_command\.su_take_screens$/m);
+    // No switch: a one-shot button has no on and no off, and a switch for it
+    // would sit in Home Assistant claiming a state it never had.
+    assert.deepEqual(friendlyNames(yaml), []);
+  });
+
+  test("a pair is a switch and NEITHER half is also a script", () => {
+    // Both objects for one cue is two things in Home Assistant fighting over
+    // one Companion button.
+    const yaml = homeAssistantYaml(
+      [cue("projectors_on", "Projectors on"), cue("projectors_off", "Projectors off")],
+      BASE,
+    );
+    assert.deepEqual(friendlyNames(yaml), ["Projectors"]);
+    assert.deepEqual(scripts(yaml), []);
+  });
+
+  test("an `_on` with no partner is not a pair, so it is a script", () => {
+    // The rule for what a pair IS lives in one place; this is the boundary of it.
+    const yaml = homeAssistantYaml([cue("house_lights_on", "House lights on")], BASE);
+    assert.deepEqual(scripts(yaml), [{ name: "house_lights_on", alias: "House lights on" }]);
+    assert.deepEqual(friendlyNames(yaml), []);
+  });
+
+  test("a pair and a single in one document each get their own object, and only that", () => {
+    const yaml = homeAssistantYaml(
+      [
+        cue("projectors_on", "Projectors on"),
+        cue("projectors_off", "Projectors off"),
+        cue("take_screens", "take the screens"),
+      ],
+      BASE,
+    );
+    assert.deepEqual(commandKeys(yaml), ["su_projectors_on", "su_projectors_off", "su_take_screens"]);
+    assert.deepEqual(friendlyNames(yaml), ["Projectors"]);
+    assert.deepEqual(
+      scripts(yaml).map((x) => x.name),
+      ["take_screens"],
+    );
+  });
+
+  test("two scripts whose cues say the same thing get DIFFERENT aliases", () => {
+    // The switches were disambiguated and the scripts were not, so two one-shot
+    // cues with the same `says` put two scripts called "the screens" into Home
+    // Assistant. An assistant asked to run "the screens" then picks one at
+    // random, which is the same failure as two identical switches.
+    const yaml = homeAssistantYaml(
+      [cue("main_screens", "the screens"), cue("south_screens", "the screens")],
+      BASE,
+    );
+    const aliases = scripts(yaml).map((x) => x.alias);
+    assert.deepEqual(aliases, ["Main Screens", "South Screens"]);
+    assert.equal(new Set(aliases).size, aliases.length, "two scripts share an alias");
+  });
+
+  test("a switch and a script that would say the same thing are separated too", () => {
+    // Across the KINDS, which no amount of disambiguating each list on its own
+    // would catch. To a voice assistant a switch's friendly_name and a script's
+    // alias are one namespace: the words somebody says out loud.
+    const yaml = homeAssistantYaml(
+      [
+        cue("projectors_on", "Projectors on"),
+        cue("projectors_off", "Projectors off"),
+        cue("take_screens", "Projectors"),
+      ],
+      BASE,
+    );
+    const said = [...friendlyNames(yaml), ...scripts(yaml).map((x) => x.alias)];
+    assert.deepEqual(said, ["Projectors", "Take Screens"]);
+    assert.equal(new Set(said).size, said.length, "a switch and a script share a spoken name");
+  });
+
+  test("a pair and a one-shot cue on the SAME base are separated by their domain", () => {
+    // The one case humanising the id cannot separate: `switch.projectors` and
+    // `script.projectors` are two different Home Assistant entities whose ids
+    // humanise identically, so the domain goes into the words.
+    const yaml = homeAssistantYaml(
+      [
+        cue("projectors_on", "Projectors on"),
+        cue("projectors_off", "Projectors off"),
+        cue("projectors", "Projectors"),
+      ],
+      BASE,
+    );
+    const said = [...friendlyNames(yaml), ...scripts(yaml).map((x) => x.alias)];
+    assert.deepEqual(said, ["Projectors (switch)", "Projectors (script)"]);
+    assert.equal(new Set(said).size, said.length, "a switch and a script share a spoken name");
+  });
+
+  test("a newline in a script's alias does not break the document either", () => {
+    // The same failure as a switch's friendly_name: one bad scalar and Home
+    // Assistant rejects the WHOLE file, so every cue disappears.
+    const yaml = homeAssistantYaml([cue("odd", "Take:\nScreens")], BASE);
+    assert.deepEqual(scripts(yaml), [{ name: "odd", alias: "Take:\\nScreens" }]);
+  });
+
   test("no cues yields a comment, not a half-written document", () => {
     const yaml = homeAssistantYaml([], BASE);
     assert.match(yaml, /No cues yet/);
     assert.deepEqual(commandKeys(yaml), []);
+  });
+
+  test("a renamed cue is called out in a comment, and its former name is NOT a command", () => {
+    // The former name is a live URL by design — that is what keeps an already
+    // pasted config working. Emitting it as a second `rest_command` would leave
+    // Home Assistant with two names for one cue forever, so the comment is the
+    // whole of it: it tells the operator to re-paste, and nothing more.
+    const yaml = homeAssistantYaml(
+      [cue("screens_on", "Screens on", "Screens ON", "projectors_on")],
+      BASE,
+    );
+    assert.deepEqual(commandKeys(yaml), ["su_screens_on"]);
+    assert.equal(
+      yaml.includes("su_projectors_on:"),
+      false,
+      "a former name was emitted as a command of its own",
+    );
+    assert.ok(
+      comments(yaml).includes(
+        "# renamed from su_projectors_on; the old rest_command keeps working until you re-paste",
+      ),
+      `no renamed-from comment; got:\n  ${comments(yaml).join("\n  ")}`,
+    );
+  });
+
+  test("two former names are named together, and the grammar follows", () => {
+    const yaml = homeAssistantYaml(
+      [cue("screens_on", "Screens on", "Screens ON", "projectors_on,beamers_on")],
+      BASE,
+    );
+    assert.ok(
+      comments(yaml).includes(
+        "# renamed from su_projectors_on, su_beamers_on; the old rest_commands keep working " +
+          "until you re-paste",
+      ),
+      `wrong wording for two former names; got:\n  ${comments(yaml).join("\n  ")}`,
+    );
+  });
+
+  test("a cue that was never renamed gets no comment of its own", () => {
+    // The header comments are always there; nothing about a rename is.
+    const yaml = homeAssistantYaml([cue("screens_on", "Screens on")], BASE);
+    assert.equal(comments(yaml).some((c) => c.includes("renamed from")), false);
   });
 });

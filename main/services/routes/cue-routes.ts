@@ -35,7 +35,14 @@ import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
 import { automationEngine } from "../automation-engine.js";
 import { companionApi } from "../companion-api.js";
-import { isSuggestedPair, slugForCue, slugsForPairs } from "../companion-export.js";
+import {
+  cueSlugs,
+  isSuggestedPair,
+  singleButtons,
+  slugForCue,
+} from "../companion-export.js";
+import { fingerprintParams } from "../companion-fingerprint.js";
+import { runCompanionReconcile } from "../companion-reconcile.js";
 import { bearerOf, cueTokens, isSameOriginBrowser } from "../cue-tokens.js";
 import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
@@ -173,7 +180,22 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
       json(res, { ok: false, reason: result.reason, buttons: [] });
       return;
     }
-    json(res, { ok: true, buttons: result.buttons, cachedAt: result.cachedAt });
+    // Refresh means "read Companion again", and the cues are the reason anybody
+    // presses it. Reads the export just cached rather than fetching a second
+    // time. Awaited so the answer is not overtaken by the statuses it changed.
+    const run = await runCompanionReconcile();
+    // A pass that could not write a status is NOT a successful refresh. It
+    // answered `ok: true` while a read-only rules file meant nothing had been
+    // saved, and the pill on the row still showed what the last good pass found
+    // — so there was nothing on screen to notice. `reconcile` carries which
+    // cues, so the caller can name them rather than say "something failed".
+    const failed = run?.failed ?? [];
+    json(res, {
+      ok: failed.length === 0,
+      buttons: result.buttons,
+      cachedAt: result.cachedAt,
+      reconcile: { applied: run?.applied ?? 0, failed },
+    });
     return;
   }
 
@@ -196,12 +218,28 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
       json(res, { ok: false, reason: result.reason, pairs: [] });
       return;
     }
-    const taken = new Set(automationEngine.listRules().map((r) => automationEngine.cueNameOf(r)).filter(Boolean));
-    // Slugs are resolved across the WHOLE list, not per pair, because uniqueness
-    // is a property of the set — see slugsForPairs.
-    const slugs = slugsForPairs(result.pairs);
+    // Names AND FORMER NAMES. The engine treats the two as one namespace — no
+    // rule may take either from another — so an offer whose proposed name is
+    // somebody's former name would be shown as available, ticked, and then
+    // refused by addRule with the operator having been told it was free. That
+    // is the ordinary case after a relabel: a button renamed "Screens ON" and
+    // then back to "Projectors ON" is offered as `projectors_on`, which is now
+    // the cue's former name.
+    const taken = new Set<string>();
+    for (const rule of automationEngine.listRules()) {
+      const name = automationEngine.cueNameOf(rule);
+      if (name) taken.add(name);
+      for (const alias of automationEngine.cueAliasesOf(rule)) taken.add(alias);
+    }
+    // The single buttons are worked out HERE rather than below, because the cue
+    // names of the pairs and of the singles are resolved together: uniqueness is
+    // a property of the whole offer, and counted per family a lone "House Lights
+    // ON" and a "House Lights ON/OFF" pair on another page both come out
+    // `house_lights_on`. See cueSlugs.
+    const singles = singleButtons(result.buttons, result.pairs);
+    const slugs = cueSlugs(result.pairs, singles);
     const pairs = result.pairs.map((p) => {
-      const slug = slugs.get(`${p.page}:${slugForCue(p.base)}`) ?? "";
+      const slug = slugs.pairs.get(`${p.page}:${slugForCue(p.base)}`) ?? "";
       return {
         ...p,
         slug,
@@ -213,7 +251,20 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
         exists: !!slug && (taken.has(`${slug}_on`) || taken.has(`${slug}_off`)),
       };
     });
-    json(res, { ok: true, pairs });
+
+    // The single buttons come back from the same request, because deciding
+    // which buttons are NOT half of a pair needs the pairs — a second endpoint
+    // would compute them twice and could disagree with this one.
+    //
+    // Nothing here is `suggested`. A pair is two buttons that are plainly a
+    // thing being turned on and off; a single button is whatever somebody put on
+    // a Companion page, and pre-ticking those would arm cues for camera shots
+    // and playback macros. The dialog ticks nothing in this section.
+    const buttons = singles.map((b) => {
+      const slug = slugs.buttons.get(`${b.page}:${b.row}:${b.col}`) ?? "";
+      return { ...b, slug, exists: !!slug && taken.has(slug) };
+    });
+    json(res, { ok: true, pairs, buttons });
     return;
   }
 
@@ -222,12 +273,25 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
   if (method === "POST" && pathname === "/api/automation/rules/import-pairs") {
     if (!(await requireCaller(c, { allowSameOrigin: true }))) return;
     const body = (await readBody(req)) as Record<string, unknown>;
+    // Either key, or both, in ONE request: the dialog offers pairs and single
+    // buttons in one list and a single Import button, and two requests would
+    // report two half-results for one press.
     const pairs = Array.isArray(body.pairs) ? body.pairs : null;
-    if (!pairs) {
-      error(res, "body.pairs (array) required");
+    const buttons = Array.isArray(body.buttons) ? body.buttons : null;
+    if (!pairs && !buttons) {
+      error(res, "body.pairs or body.buttons (array) required");
       return;
     }
-    json(res, await importPairs(pairs));
+    const fromPairs = await importPairs(pairs ?? []);
+    const fromButtons = await importButtons(buttons ?? []);
+    const created = [...fromPairs.created, ...fromButtons.created];
+    const skipped = [...fromPairs.skipped, ...fromButtons.skipped];
+    // ONE line for the whole import, not one per kind: the operator pressed one
+    // button, and two lines reading "0 created" and "3 created" is a puzzle.
+    console.log(
+      `[cues] import from Companion: ${scrub(created.length)} created, ${scrub(skipped.length)} skipped`,
+    );
+    json(res, { created, skipped });
     return;
   }
 }
@@ -237,9 +301,11 @@ interface ImportButton {
   row: number;
   col: number;
   label?: string;
+  pageId: string;
+  actionIds: string[];
 }
 
-/** Narrow one untrusted `{page,row,col,label}` from the request body. */
+/** Narrow one untrusted button offer from the request body. */
 function asButton(v: unknown): ImportButton | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
@@ -247,7 +313,39 @@ function asButton(v: unknown): ImportButton | null {
   const row = Number(o.row);
   const col = Number(o.col);
   if (![page, row, col].every((n) => Number.isFinite(n))) return null;
-  return { page, row, col, label: typeof o.label === "string" ? o.label : undefined };
+  return {
+    page,
+    row,
+    col,
+    label: typeof o.label === "string" ? o.label : undefined,
+    // The identity travels with the offer, so an imported cue knows its button
+    // from the moment it is created rather than waiting for the first reconcile.
+    // Absent from a hand-built request, which the first reconcile then adopts.
+    pageId: typeof o.pageId === "string" ? o.pageId : "",
+    actionIds: Array.isArray(o.actionIds) ? o.actionIds.filter((x): x is string => typeof x === "string") : [],
+  };
+}
+
+/**
+ * The `companion.press` params for an imported button: the coordinates, the
+ * label, and the fingerprint that lets a reconcile follow it.
+ *
+ * ONE copy, for the pairs import and the single-button import both — this is
+ * exactly the shape that lived in one of two places and drifted.
+ */
+function pressParamsFor(button: ImportButton, fallbackLabel: string): Record<string, string | number> {
+  return fingerprintParams(
+    {
+      page: button.page,
+      row: button.row,
+      col: button.col,
+      pageId: button.pageId,
+      label: button.label ?? fallbackLabel,
+      actionIds: button.actionIds,
+    },
+    "in-place",
+    new Date().toISOString(),
+  );
 }
 
 /**
@@ -263,10 +361,12 @@ function asButton(v: unknown): ImportButton | null {
  * the import after adding a button to Companion is the ordinary case, and it
  * must not rewrite rules somebody has since edited.
  */
-async function importPairs(raw: unknown[]): Promise<{
+interface ImportResult {
   created: string[];
   skipped: { name: string; why: string }[];
-}> {
+}
+
+async function importPairs(raw: unknown[]): Promise<ImportResult> {
   const created: string[] = [];
   const skipped: { name: string; why: string }[] = [];
 
@@ -283,7 +383,7 @@ async function importPairs(raw: unknown[]): Promise<{
       continue;
     }
 
-    // When the slug had to be disambiguated by page (see slugsForPairs), the
+    // When the slug had to be disambiguated by page (see cueSlugs), the
     // WORDS have to be disambiguated too — otherwise two rules read "Projectors
     // ON" in the list and Home Assistant gets two switches both called
     // "Projectors", which is the same collision moved one system along.
@@ -302,12 +402,7 @@ async function importPairs(raw: unknown[]): Promise<{
         conditions: [{ id: "service.is-not-live", params: {} }],
         action: {
           id: "companion.press",
-          params: {
-            page: button.page,
-            row: button.row,
-            col: button.col,
-            label: button.label ?? `${base} ${suffix.toUpperCase()}`,
-          },
+          params: pressParamsFor(button, `${base} ${suffix.toUpperCase()}`),
         },
         cooldownSec: 2,
         oncePerService: false,
@@ -324,8 +419,58 @@ async function importPairs(raw: unknown[]): Promise<{
     }
   }
 
-  console.log(
-    `[cues] import from Companion: ${scrub(created.length)} created, ${scrub(skipped.length)} skipped`,
-  );
+  return { created, skipped };
+}
+
+/**
+ * Turn chosen single buttons into ONE cue each.
+ *
+ * The same defaults as a pair's two halves — `service.is-not-live` and a two
+ * second cooldown — for the same reason: a cue somebody can say during a
+ * service, twice, is the failure mode this feature has to not have.
+ *
+ * Unlike a pair there is no ON/OFF to speak, so the cue's name, its spoken
+ * words and its `says` are all the button's own label. A slug that had to be
+ * disambiguated by page carries the page name in the WORDS too, exactly as a
+ * pair's do — otherwise two cues both read "Record" in the rules list and Home
+ * Assistant gets two scripts with one alias.
+ */
+async function importButtons(raw: unknown[]): Promise<ImportResult> {
+  const created: string[] = [];
+  const skipped: { name: string; why: string }[] = [];
+
+  for (const entry of raw) {
+    const button = asButton(entry);
+    const o = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
+    const label = String(o.label ?? "").trim();
+    const slug = typeof o.slug === "string" && o.slug ? slugForCue(o.slug) : slugForCue(label);
+
+    if (!button || !slug) {
+      skipped.push({ name: label || "(unnamed)", why: "no usable cue name for this button" });
+      continue;
+    }
+
+    const pageName = String(o.pageName ?? "").trim();
+    const spoken = slug !== slugForCue(label) && pageName ? `${pageName} ${label}` : label;
+
+    const rule: Omit<Rule, "id"> = {
+      name: spoken,
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: slug, says: spoken } },
+      conditions: [{ id: "service.is-not-live", params: {} }],
+      action: { id: "companion.press", params: pressParamsFor(button, label) },
+      cooldownSec: 2,
+      oncePerService: false,
+    };
+    try {
+      // addRule enforces uniqueness, so a name already in use is refused by the
+      // same check the rule editor goes through.
+      await automationEngine.addRule(rule);
+      created.push(slug);
+    } catch (err) {
+      skipped.push({ name: slug, why: errorMessage(err) });
+    }
+  }
+
   return { created, skipped };
 }

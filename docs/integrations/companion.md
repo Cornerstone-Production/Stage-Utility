@@ -111,6 +111,7 @@ snapshot, no schedule reaches it.
 |---|---|
 | `service-live` | a service is running, or starts within the hour. Carries `plan` when the plan has a title |
 | `planning-center-unknown` | Planning Center is configured and cannot be read, so we will not guess. Also on a `[cues]` line in the server log |
+| `button-missing` | the Companion button this cue presses is not in the export any more. Nothing is pressed — see [When a button moves](#when-a-button-moves) |
 | `condition-not-met` | one of the rule's other conditions did not hold |
 | `cooldown` | the cue ran within its cooldown |
 | `once-per-service` | the cue is set to run once per service and already has, this occurrence |
@@ -158,10 +159,105 @@ cooldown. They are ordinary rules afterwards — edit, disable or delete them li
 any other. Re-running the import skips names that already exist and tells you
 which.
 
+### Single buttons
+
+Under the pairs, the same dialog lists **Single buttons** — every other labelled
+button, one cue each, named after the button's own label. A button with no label
+is left out: a cue called nothing cannot be called.
+
+**Nothing in this section is ticked for you.** A pair is plainly a thing being
+turned on and off; a single button is whatever somebody put on a Companion page,
+and a pre-ticked camera shot or playback macro is a cue somebody can say by
+accident. Search by label, page or cue name and tick what you want.
+
+They carry the same **no service is live** condition and two-second cooldown as a
+pair's halves, and the same page-naming rule applies when the same label is on two
+pages. In Home Assistant a single button becomes a `script` rather than a switch —
+there is no on and no off to give a switch a state.
+
+### When a button moves
+
+Coordinates are the one thing about a Companion button that does not last.
+Somebody drags a button one key over, or inserts a page ahead of it, and a cue
+built on `p17 r2 c6` presses whatever is there now — Companion answers `204` for
+an empty coordinate and a cheerful `200` for the wrong button, so nothing says
+so.
+
+So every **Press a Companion button** action stores the button's identity beside
+its coordinates: the page's own opaque id, which a renumber does not change, and
+the ids of the actions the button runs. A control in Companion has no id of its
+own; its actions do, and they travel with the button when it is moved. The label
+is stored too and refreshed whenever the button is confirmed.
+
+It is checked on startup, whenever you press **Test** on the Companion
+integration, whenever you press **Refresh** in the button picker, and hourly —
+always against the same cached configuration export the picker reads, never a
+second request. Three outcomes, each a pill on the rule's row under Settings →
+Automation:
+
+| | |
+|---|---|
+| **in place** | the button at those coordinates still runs those actions |
+| **moved** | exactly one button on that page runs them, and it is somewhere else. The coordinates are updated, the pill says where it went, and it stays amber until you re-pick the button — the point of it is telling you about a move you did not make |
+| **button missing** | none on that page runs them, or more than one does, or the page is gone |
+
+**A missing button refuses.** The cue answers `409 button-missing` and presses
+nothing; so does the rule firing from any other trigger, and the editor's Test.
+It does not fall back to the coordinates and it does not pick the closest label —
+a cue that presses the wrong button during setup is worse than one that says it
+cannot. More than one match is refused for the same reason: two buttons carrying
+one identity is a Companion somebody duplicated, and guessing between them is a
+coin toss on real gear. Open the rule and pick the button again to clear it.
+
+A button that runs no actions at all has no identity but its coordinates, and is
+reported in place while something is there and missing when it is not. It is
+never searched for.
+
+**When Companion cannot be reached, nothing changes.** No status is touched and
+no cue is refused — a pass that downgraded every cue while a switch was
+rebooting would refuse every cue in the building. The failure is on a
+`[companion] export unavailable` line in the server log; every move, adoption
+and disappearance is on a `[companion] cue <name>:` line, and each run ends with
+`[companion] reconciled N cues: N in place, N moved, N missing`.
+
+Cues imported from Companion and buttons chosen with the picker are fingerprinted
+as they are created. A rule that predates this has no fingerprint, shows no pill,
+and is adopted at its own coordinates by the first check.
+
+### When a button is renamed
+
+Relabel a button in Companion and the cue named after it is renamed to match, so
+`projectors_on` becomes `screens_on` when the button starts saying "Screens ON".
+The old name **keeps answering**: `POST /api/cues/projectors_on` still fires the
+cue, so a Home Assistant config already pasted into `configuration.yaml` — and
+any HomeKit switch made from it — carries on working. Re-paste the YAML when
+convenient; the generated fragment names each renamed cue in a comment.
+
+A cue keeps up to five former names, oldest dropped first, and they share one
+namespace with live names: no other cue may take a name or a former name that is
+already in use. Remove one in the rule editor and that URL stops resolving.
+
+Four cases where the name is kept, each on a `[companion] cue <name>:` line:
+
+| | |
+|---|---|
+| **you named the cue yourself** | a name that is not the one the import would have produced from the button's old label is never touched. A Companion label is not authority over a name you typed into Home Assistant |
+| **the new name is taken** | by another cue's name, by another cue's former name, or by another cue being renamed in the same check |
+| **one half of an ON/OFF pair** | a pair renames together or not at all. Renaming one half leaves a Home Assistant switch with no off |
+| **the button is missing** | its label is whatever it said the last time anybody could see it |
+
+The label on the rule's action is refreshed either way — that is what the button
+says, not what the cue is called. **Spoken as** is left alone unless it was the
+button's label exactly, so words you chose for an assistant survive a relabel; a
+pair's spoken name is composed by the import and never follows.
+
 ### Home Assistant
 
 **Copy YAML** in the same panel produces the whole configuration fragment: one
-`rest_command` per cue, and a template `switch` per ON/OFF pair. Paste it into
+`rest_command` per cue, a template `switch` per ON/OFF pair, and a `script` per
+cue that is not half of a pair. A cue that has been renamed carries a comment
+naming the `rest_command` it used to be; former names are never emitted as
+commands of their own. Paste it into
 `configuration.yaml`, put the token in `secrets.yaml` **with the scheme**:
 
 ```yaml

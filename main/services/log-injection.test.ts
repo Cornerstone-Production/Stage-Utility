@@ -62,6 +62,7 @@ const REQUEST_FACING = [
   "branding-routes.ts",
   "calendar-routes.ts",
   "checklist-ticks-store.ts",
+  "companion-reconcile.ts",
   "context.ts",
   "cue-routes.ts",
   "cue-tokens.ts",
@@ -217,6 +218,9 @@ function requestFacingFiles(): string[] {
     // A cue token's LABEL is typed into an HTTP body ("Home Assistant") and is
     // logged when the token is minted.
     path.join(HERE, "cue-tokens.ts"),
+    // Every value on its lines is either a cue name — typed into an HTTP body
+    // — or a Companion page name out of the export. Both reach `/log`.
+    path.join(HERE, "companion-reconcile.ts"),
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),
