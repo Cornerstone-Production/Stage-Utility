@@ -37,6 +37,7 @@ import { automationEngine } from "../automation-engine.js";
 import { companionApi } from "../companion-api.js";
 import {
   cueSlugs,
+  isCompanionVariableName,
   isSuggestedPair,
   singleButtons,
   slugForCue,
@@ -394,9 +395,23 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
     const on = asButton(p.on);
     const off = asButton(p.off);
     const slug = typeof p.slug === "string" && p.slug ? slugForCue(p.slug) : slugForCue(base);
+    // The Companion custom variable this pair's state is read from, chosen in
+    // the dialog. Optional; blank is an optimistic pair, as every pair was
+    // before this existed.
+    const stateVariable = String(p.stateVariable ?? "").trim();
 
     if (!slug || !on || !off) {
       skipped.push({ name: base || "(unnamed)", why: "incomplete pair" });
+      continue;
+    }
+    // Checked BEFORE either half is created: addRule would refuse the `_on`
+    // rule and create the `_off` one, leaving half a pair behind for a typo in
+    // a field that is not even the cue's name.
+    if (stateVariable && !isCompanionVariableName(stateVariable)) {
+      skipped.push({
+        name: slug,
+        why: `"${stateVariable}" is not a Companion variable name`,
+      });
       continue;
     }
 
@@ -414,7 +429,15 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
         enabled: true,
         trigger: {
           id: CALL_TRIGGER_ID,
-          params: { name, says: `${spoken} ${suffix}` },
+          params: {
+            name,
+            says: `${spoken} ${suffix}`,
+            // On the `_on` half only; the `_off` half inherits it by name. See
+            // cue-pairs.ts. The on/off VALUES are not offered here — the
+            // defaults are what a Companion button sets, and anything else is
+            // an edit to the rule.
+            ...(suffix === "on" && stateVariable ? { stateVariable } : {}),
+          },
         },
         conditions: [{ id: "service.is-not-live", params: {} }],
         action: {

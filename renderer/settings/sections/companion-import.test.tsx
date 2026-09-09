@@ -73,6 +73,8 @@ const PAIRS = [
 ];
 
 let SINGLES: StubButton[] = [];
+/** What Companion has, for the per-pair State select. */
+let CUSTOM_VARIABLES: string[] = [];
 let ok = true;
 
 /** Every request the stub was handed, so the payload can be read back. */
@@ -90,7 +92,9 @@ let requests: { url: string; method: string; body: string | null }[] = [];
   });
   let body: unknown = {};
   if (url.includes("/api/companion/pairs")) {
-    body = ok ? { ok: true, pairs: PAIRS, buttons: SINGLES } : { ok: false, reason: "EHOSTUNREACH", pairs: [], buttons: [] };
+    body = ok
+      ? { ok: true, pairs: PAIRS, buttons: SINGLES, customVariables: CUSTOM_VARIABLES }
+      : { ok: false, reason: "EHOSTUNREACH", pairs: [], buttons: [] };
   } else if (url.includes("import-pairs")) {
     body = { created: ["x"], skipped: [] };
   }
@@ -133,6 +137,7 @@ async function mount() {
 beforeEach(() => {
   requests = [];
   ok = true;
+  CUSTOM_VARIABLES = [];
   SINGLES = [
     button({ row: 2, col: 3, label: "Take Screens", slug: "take_screens" }),
     button({ row: 2, col: 1, label: "House Lights ON", slug: "house_lights_on" }),
@@ -327,5 +332,134 @@ describe("the import dialog", () => {
     await mount();
     assert.ok((document.body.textContent ?? "").includes("EHOSTUNREACH"));
     assert.equal(screen.queryAllByRole("checkbox").length, 0);
+  });
+});
+
+// ── The State select ──────────────────────────────────────────────────────────
+//
+// Chosen here, the binding is written onto the `_on` rule as it is created. Three
+// things are silent when they break:
+//
+//  - the DEFAULT. A variable named after the pair is the one the operator meant;
+//    guessing more loosely would bind `projectors` to `projectors_last_error`
+//    and report the wrong thing with nobody having chosen it.
+//  - the REQUEST. A select that renders and does not reach the request is this
+//    repo's named scar, and the resulting cues look right until Home Assistant
+//    reports what it asked for rather than what happened.
+//
+// NOT unit-tested, and driven in a headless browser instead: that clicking the
+// select does not toggle the pair's checkbox. The pair row used to be one
+// <label> wrapping everything, and in a real browser a click on a control
+// inside a label activates that label's control — so choosing a variable
+// unticked the pair it was for. jsdom's fireEvent.change does not synthesise
+// label activation at all: a test for it passed with the row restored to a
+// single <label>, which is a vacuous guard, so it was deleted rather than
+// shipped. The row is a <div> with the label around the checkbox and the words
+// only.
+//
+describe("the per-pair State select", () => {
+  const importNow = async () => {
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((b) => (b.textContent ?? "").startsWith("Import"))!
+        .click();
+    });
+    await settle();
+    return JSON.parse(requests.find((r) => r.url.includes("import-pairs"))!.body ?? "{}") as {
+      pairs: { slug: string; stateVariable?: string }[];
+    };
+  };
+
+  const stateSelect = (): HTMLSelectElement | null =>
+    document.querySelector('select[aria-label="State variable for Projectors · Room A: Screens"]');
+
+  test("the accessible name carries the PAGE, so two pairs with one base differ", async () => {
+    // The real Companion this was built against has "Projectors" on two pages.
+    // Two selects with the same accessible name are indistinguishable to a
+    // screen reader and to anything driving the page.
+    CUSTOM_VARIABLES = ["projectors_state"];
+    PAIRS.push({
+      ...PAIRS[0]!,
+      page: 2,
+      pageName: "Room A: Lighting",
+      slug: "room_a_lighting_projectors",
+    });
+    try {
+      await mount();
+      assert.deepEqual(
+        [...document.querySelectorAll("select")].map((el) => el.getAttribute("aria-label")),
+        [
+          "State variable for Projectors · Room A: Screens",
+          "State variable for Projectors · Room A: Lighting",
+        ],
+      );
+    } finally {
+      PAIRS.length = 1;
+    }
+  });
+
+  test("is not offered at all when Companion has no custom variables", async () => {
+    // A dropdown whose only entry is None is a control that does nothing.
+    CUSTOM_VARIABLES = [];
+    await mount();
+    assert.equal(stateSelect() === null, true);
+    const body = await importNow();
+    assert.deepEqual(
+      body.pairs.map((p) => p.stateVariable),
+      [""],
+    );
+  });
+
+  test("defaults to the variable named after the pair", async () => {
+    CUSTOM_VARIABLES = ["house_lights_state", "projectors_state", "amps"];
+    await mount();
+    assert.equal(stateSelect()?.value, "projectors_state");
+    const body = await importNow();
+    assert.deepEqual(
+      body.pairs.map((p) => `${p.slug}=${p.stateVariable}`),
+      ["projectors=projectors_state"],
+    );
+  });
+
+  test("defaults to nothing when no variable is named after the pair", async () => {
+    // `projectors_last_error` contains the slug and is deliberately NOT a match.
+    CUSTOM_VARIABLES = ["projectors_last_error", "amps_state"];
+    await mount();
+    assert.equal(stateSelect()?.value, "");
+    const body = await importNow();
+    assert.deepEqual(
+      body.pairs.map((p) => p.stateVariable),
+      [""],
+    );
+  });
+
+  test("what is chosen reaches the request", async () => {
+    CUSTOM_VARIABLES = ["projectors_state", "amps_state"];
+    await mount();
+    await act(async () => {
+      fireEvent.change(stateSelect()!, { target: { value: "amps_state" } });
+    });
+    assert.equal(stateSelect()?.value, "amps_state");
+    const body = await importNow();
+    assert.deepEqual(
+      body.pairs.map((p) => p.stateVariable),
+      ["amps_state"],
+    );
+  });
+
+  test("choosing None on a suggested pair sticks, and is sent as blank", async () => {
+    // "" is a real choice and has to survive a re-render, or the default
+    // re-suggests the variable the operator has just declined.
+    CUSTOM_VARIABLES = ["projectors_state"];
+    await mount();
+    await act(async () => {
+      fireEvent.change(stateSelect()!, { target: { value: "" } });
+    });
+    assert.equal(stateSelect()?.value, "");
+    const body = await importNow();
+    assert.deepEqual(
+      body.pairs.map((p) => p.stateVariable),
+      [""],
+    );
   });
 });

@@ -460,8 +460,15 @@ const DISPLAY_NAME: ParamDef = {
  */
 export const CALL_CHANNEL = "cue:call";
 
-/** The one trigger on CALL_CHANNEL. Named so callers do not spell it twice. */
-export const CALL_TRIGGER_ID = "call.by-name";
+/**
+ * The one trigger on CALL_CHANNEL. Named so callers do not spell it twice.
+ *
+ * DEFINED in cue-aliases.ts and re-exported here, where every caller already
+ * imports it from. This file reaches node:url through spl-recorder's metric
+ * list, so the settings page cannot import it — see the comment on the
+ * definition.
+ */
+export { CALL_TRIGGER_ID } from "./cue-aliases.js";
 
 /** Snake_case, so the name survives being said out loud and pasted into YAML. */
 const CUE_NAME_RE = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;

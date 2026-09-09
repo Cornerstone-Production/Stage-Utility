@@ -132,8 +132,15 @@ function withCompanionRow(): () => void {
 
 let TOKEN = "";
 
-before(async () => {
-  companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
+/**
+ * The default Companion stub: the export, a press, and a custom variable read.
+ *
+ * A function rather than an inline assignment because two describes below
+ * replace `companionDeps.fetch` in their own `before` and never put it back —
+ * so a describe that needs the variable read has to reinstall this. Found by a
+ * custom-variable read being answered with the whole export document.
+ */
+function installCompanionStub(): void {
   companionDeps.fetch = async (input, init) => {
     const url = String(input);
     if (url.includes("/press")) {
@@ -152,6 +159,11 @@ before(async () => {
     void init;
     return Response.json(companionExportFixture());
   };
+}
+
+before(async () => {
+  companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
+  installCompanionStub();
   await automationEngine.init();
   await automationEngine.setSettings({ simulate: false, disarmed: false });
   TOKEN = (await cueTokens.mint("Home Assistant")).secret;
@@ -1713,5 +1725,77 @@ describe("reconciling a cue's Companion button", () => {
 
     exportOk = true;
     companionApi.invalidate();
+  });
+});
+
+// ── Importing a state binding ─────────────────────────────────────────────────
+//
+// LAST IN THE FILE deliberately: both cases wipe the rules, and the import and
+// Home Assistant describes above share the four cues the first import creates.
+describe("importing a pair with a state variable", () => {
+  // The reconcile describe above replaces the Companion stub in its own `before`
+  // and never restores it, so the variable read has to be put back.
+  before(() => installCompanionStub());
+
+  test("a chosen state variable is written on the _on half only", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        pairs: { slug: string; on: unknown; off: unknown }[];
+      }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    assert.deepEqual((r.json as { created: string[] }).created, ["lobby_tvs_on", "lobby_tvs_off"]);
+
+    const byName = new Map(
+      automationEngine.cueRules().map((x) => [String(x.trigger.params.name), x]),
+    );
+    assert.equal(String(byName.get("lobby_tvs_on")?.trigger.params.stateVariable), "lobby_tvs");
+    // The `_off` half INHERITS it. A copy on both halves is two settings for one
+    // pair, and they would drift the first time one was edited.
+    assert.equal(byName.get("lobby_tvs_off")?.trigger.params.stateVariable, undefined);
+
+    // And the pair reads its state through it, end to end.
+    variables.lobby_tvs = "on";
+    cueStates.invalidate();
+    const states = (
+      (await callRoute(cueRoutes, "/api/cues/states")).json as {
+        states: Record<string, { state: string }>;
+      }
+    ).states;
+    assert.equal(states.lobby_tvs?.state, "on");
+  });
+
+  test("a state variable Companion could not have skips the pair, creating NEITHER half", async () => {
+    // Checked before either half is created: addRule would refuse the `_on` rule
+    // and create the `_off` one, leaving half a pair behind for a typo in a
+    // field that is not the cue's name.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "state:lobby" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.deepEqual(
+      skipped.map((x) => x.name),
+      ["lobby_tvs"],
+    );
+    assert.match(skipped[0]!.why, /not a Companion variable name/);
+    assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
   });
 });

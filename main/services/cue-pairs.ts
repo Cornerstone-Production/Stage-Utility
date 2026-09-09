@@ -25,8 +25,9 @@
 // only ever reads it.
 
 import { isCompanionVariableName } from "./companion-export.js";
-import { CALL_TRIGGER_ID } from "./automation-triggers.js";
-import { parseAliases } from "./cue-aliases.js";
+// From cue-aliases, NOT from the trigger registry: the registry reaches
+// node:url, and this module is imported by the settings page.
+import { CALL_TRIGGER_ID, parseAliases } from "./cue-aliases.js";
 import type { Rule } from "../types/automation.js";
 
 /** The values a bound pair's variable is expected to hold, absent anything else. */
