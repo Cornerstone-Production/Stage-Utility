@@ -526,11 +526,30 @@ function atCoordinates(
 
 // ── Running it ────────────────────────────────────────────────────────────────
 
+/** One cue whose new status could not be written. */
+export interface ReconcileFailure {
+  ruleId: string;
+  /** The cue name, or the rule's name when it is not a cue. */
+  label: string;
+  /** Why the save failed, scrubbed and ready to put in an answer. */
+  detail: string;
+}
+
 /** The summary of one run, or null when Companion could not be read. */
 export interface ReconcileRun {
   checked: number;
   applied: number;
   counts: Record<CueButtonStatus, number>;
+  /**
+   * The cues whose status could not be saved. Empty on a clean run.
+   *
+   * RETURNED, not only logged. A pass that caught its own write failures and
+   * answered `ok: true` told the operator their buttons had been reconciled
+   * while a read-only rules file meant nothing had been written — and the pill
+   * on the row would still say what the last successful pass found, so there
+   * was nothing on screen to notice.
+   */
+  failed: ReconcileFailure[];
 }
 
 /**
@@ -559,6 +578,7 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
   const { changes, counts, checked } = reconcileCues(pressEntries(rules), result.buttons, nowIso, cues);
 
   let applied = 0;
+  const failed: ReconcileFailure[] = [];
   for (const change of changes) {
     // A refusal to rename has no patch and still has something to say.
     if (!change.patch && !change.triggerPatch) {
@@ -587,20 +607,17 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
       if (change.log) console.warn(scrub(change.log, LOG_MAX));
       if (change.renameLog) console.warn(scrub(change.renameLog, LOG_MAX));
     } catch (err) {
-      // Rethrowing would abandon the rest of the rules over one of them, and
-      // swallowing it would leave a cue silently unreconciled. Reported, and the
-      // pass carries on to the others.
-      // ONE template, no trailing argument: a cue label can contain a `%`, and
-      // `console.error(fmt, arg)` would read it as a format specifier and eat
-      // the reason. See log-injection.test.ts.
+      // Rethrowing would abandon the rest of the rules over one of them, so this
+      // COLLECTS the failure and carries on — and returns it, because a caller
+      // that answered `ok: true` over a rules file it could not write is how a
+      // failed save reads as saved. See ReconcileRun.failed.
+      //
       // A literal format string with the values in an argument: a cue label can
       // contain a `%`, and `console.error(fmt, arg)` reads that as a format
       // specifier and eats the reason after it.
-      console.error(
-        "[companion] could not record a button status:",
-        scrub(change.label),
-        scrub(scrubError(err), LOG_MAX),
-      );
+      const detail = scrub(scrubError(err), LOG_MAX);
+      failed.push({ ruleId: change.ruleId, label: change.label, detail });
+      console.error("[companion] could not record a button status:", scrub(change.label), detail);
     }
   }
 
@@ -608,7 +625,7 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
     `[companion] reconciled ${scrub(checked)} cues: ${scrub(counts["in-place"])} in place, ` +
       `${scrub(counts.moved)} moved, ${scrub(counts.missing)} missing`,
   );
-  return { checked, applied, counts };
+  return { checked, applied, counts, failed };
 }
 
 /** Hourly. Long enough that a Companion being edited settles, short enough that

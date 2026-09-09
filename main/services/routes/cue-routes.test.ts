@@ -92,6 +92,34 @@ function setPcoConfigured(configured: boolean): void {
   };
 }
 
+/**
+ * A configured Companion row on the integration manager, for the duration of
+ * one case.
+ *
+ * `integrationManager.test(id)` throws "Unknown integration" until the manager
+ * has been initialised, and initialising it here would start every service in
+ * the app. The row is seeded directly instead — the same reason the PCO state
+ * above is written directly rather than through a production seam that exists
+ * only for a test. Returns its own undo.
+ */
+function withCompanionRow(): () => void {
+  const states = (integrationManager as unknown as { states: Map<string, unknown> }).states;
+  const had = states.has("companion");
+  const before = states.get("companion");
+  states.set("companion", {
+    id: "companion",
+    connection: "disconnected",
+    message: null,
+    enabled: true,
+    configured: true,
+    config: { host: "10.0.0.5", port: 8000 },
+  });
+  return () => {
+    if (had) states.set("companion", before);
+    else states.delete("companion");
+  };
+}
+
 let TOKEN = "";
 
 before(async () => {
@@ -1296,6 +1324,107 @@ describe("reconciling a cue's Companion button", () => {
     assert.ok(names.includes("big_screens_please"), `a typed name was overwritten: ${names.join(", ")}`);
     // The label is still refreshed on the action — that is not the name.
     assert.equal(readFingerprint(paramsOf("big_screens_please")).label, "Screens ON");
+  });
+
+  test("a status that could not be SAVED comes back in the answer, not as ok:true", async () => {
+    // The catch used to log and carry on, and the route answered ok:true — so a
+    // read-only rules file read as a successful refresh, with the pills on the
+    // rows still showing what the last good pass found. There was nothing on
+    // screen to notice.
+    await importPageOne();
+    const d = exportDoc as unknown as Doc;
+    const control = d.pages["1"]!.controls["0"]!["1"];
+    delete d.pages["1"]!.controls["0"]!["1"];
+    d.pages["1"]!.controls["4"] = { "6": control };
+
+    const target = automationEngine
+      .cueRules()
+      .find((x) => automationEngine.cueNameOf(x) === "room_a_screens_projectors_on")!;
+    const real = automationEngine.updateRule.bind(automationEngine);
+    // ONE rule's save throws. The rest of the pass must still run — abandoning
+    // every other cue over one of them is the other half of this being wrong.
+    automationEngine.updateRule = async (id, patch) => {
+      if (id === target.id) throw new Error("EROFS: read-only file system");
+      return real(id, patch);
+    };
+    try {
+      const r = await callRoute(cueRoutes, "/api/companion/buttons/refresh", {
+        method: "POST",
+        headers: browser,
+      });
+      assert.equal(r.status, 200);
+      const body = r.json as {
+        ok: boolean;
+        reconcile: { applied: number; failed: { label: string; detail: string }[] };
+      };
+      assert.equal(body.ok, false, "a refresh that could not save a status answered ok:true");
+      assert.equal(body.reconcile.failed.length, 1);
+      assert.equal(body.reconcile.failed[0]!.label, "room_a_screens_projectors_on");
+      assert.match(body.reconcile.failed[0]!.detail, /read-only file system/);
+    } finally {
+      automationEngine.updateRule = real;
+    }
+
+    // And the status on disk is still the OLD one, which is why the answer has
+    // to say so — the cue now presses a coordinate the button has left.
+    assert.deepEqual(
+      [readFingerprint(paramsOf("room_a_screens_projectors_on")).row, readFingerprint(paramsOf("room_a_screens_projectors_on")).col],
+      [0, 1],
+    );
+  });
+
+  test("the integration row's Test says how many statuses could not be saved", async () => {
+    // Test is where an operator looks to find out whether Companion works, and
+    // "connected" over a rules file that could not be written is the answer
+    // that costs a Sunday. Driven through integrationManager.test, not through
+    // a helper: the message is composed at the call site and a test of the
+    // wording alone would not notice the count never reaching it.
+    await importPageOne();
+    const d = exportDoc as unknown as Doc;
+    const control = d.pages["1"]!.controls["0"]!["1"];
+    delete d.pages["1"]!.controls["0"]!["1"];
+    d.pages["1"]!.controls["4"] = { "6": control };
+
+    const target = automationEngine
+      .cueRules()
+      .find((x) => automationEngine.cueNameOf(x) === "room_a_screens_projectors_on")!;
+    const realUpdate = automationEngine.updateRule.bind(automationEngine);
+    automationEngine.updateRule = async (id, patch) => {
+      if (id === target.id) throw new Error("EROFS: read-only file system");
+      return realUpdate(id, patch);
+    };
+    const restore = withCompanionRow();
+    try {
+      companionApi.invalidate();
+      const r = await integrationManager.test("companion");
+      assert.match(r.message ?? "", /1 cue status\(es\) could not be saved\./);
+    } finally {
+      automationEngine.updateRule = realUpdate;
+      restore();
+    }
+  });
+
+  test("and says nothing of the sort when every status saved", async () => {
+    await importPageOne();
+    const restore = withCompanionRow();
+    try {
+      companionApi.invalidate();
+      const r = await integrationManager.test("companion");
+      assert.equal(/could not be saved/.test(r.message ?? ""), false, r.message);
+    } finally {
+      restore();
+    }
+  });
+
+  test("a clean refresh says so, with nothing failed", async () => {
+    await importPageOne();
+    const r = await callRoute(cueRoutes, "/api/companion/buttons/refresh", {
+      method: "POST",
+      headers: browser,
+    });
+    const body = r.json as { ok: boolean; reconcile: { failed: unknown[] } };
+    assert.equal(body.ok, true);
+    assert.deepEqual(body.reconcile.failed, []);
   });
 
   test("an unreachable Companion changes NO status", async () => {

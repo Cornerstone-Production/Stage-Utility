@@ -183,8 +183,19 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // Refresh means "read Companion again", and the cues are the reason anybody
     // presses it. Reads the export just cached rather than fetching a second
     // time. Awaited so the answer is not overtaken by the statuses it changed.
-    await runCompanionReconcile();
-    json(res, { ok: true, buttons: result.buttons, cachedAt: result.cachedAt });
+    const run = await runCompanionReconcile();
+    // A pass that could not write a status is NOT a successful refresh. It
+    // answered `ok: true` while a read-only rules file meant nothing had been
+    // saved, and the pill on the row still showed what the last good pass found
+    // — so there was nothing on screen to notice. `reconcile` carries which
+    // cues, so the caller can name them rather than say "something failed".
+    const failed = run?.failed ?? [];
+    json(res, {
+      ok: failed.length === 0,
+      buttons: result.buttons,
+      cachedAt: result.cachedAt,
+      reconcile: { applied: run?.applied ?? 0, failed },
+    });
     return;
   }
 

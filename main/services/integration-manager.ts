@@ -1210,11 +1210,18 @@ class IntegrationManager {
         // Test forced a fresh export, so this reads what Companion says NOW —
         // which is the moment an operator wants to be told a cue's button has
         // moved. No second fetch: it reads the cache Test just filled.
+        // A pass whose writes failed is carried into the row's message rather
+        // than logged away: Test is where an operator looks to find out whether
+        // this integration works, and "connected" over a rules file that could
+        // not be written is the answer that costs a Sunday.
+        let unsaved = 0;
         if (outbound.ok) {
           const { runCompanionReconcile } = await import("./companion-reconcile.js");
-          await runCompanionReconcile();
+          unsaved = (await runCompanionReconcile())?.failed.length ?? 0;
         }
-        const msg = `${inbound}. ${outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`}`;
+        const msg =
+          `${inbound}. ${outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`}` +
+          (unsaved > 0 ? ` ${unsaved} cue status(es) could not be saved.` : "");
         this.setConnectionState(
           "companion",
           outbound.ok ? "connected" : "error",

@@ -67,6 +67,17 @@ interface ButtonsReply {
   buttons: CompanionButton[];
 }
 
+/**
+ * What `POST /api/companion/buttons/refresh` answers.
+ *
+ * `ok: false` with a `reason` means Companion could not be read at all;
+ * `ok: false` with `reconcile.failed` means it was read and the statuses could
+ * not be written. Two different sentences for the operator.
+ */
+interface RefreshReply extends ButtonsReply {
+  reconcile?: { applied: number; failed: { ruleId: string; label: string; detail: string }[] };
+}
+
 interface Pair {
   base: string;
   slug: string;
@@ -353,8 +364,19 @@ function ButtonPickerDialog({
 
   async function refresh() {
     try {
-      await invoke("companion:refreshButtons");
+      // The refresh answers `ok: false` when it read Companion but could not
+      // SAVE what it found — a read-only rules file, most likely. Surfaced
+      // rather than dropped: the statuses on screen would still be the last
+      // good pass's, so nothing here would look wrong.
+      const r = await invoke<RefreshReply>("companion:refreshButtons");
       await qc.invalidateQueries({ queryKey: ["companion:buttons"] });
+      const failed = r.reconcile?.failed ?? [];
+      if (failed.length > 0) {
+        toast.error(
+          `Read Companion, but could not save ${failed.length} cue status(es): ` +
+            `${failed.map((f) => f.label).join(", ")}`,
+        );
+      }
     } catch (e) {
       toast.error(errorMessage(e));
     }
