@@ -24,12 +24,15 @@
 // it does not have.
 
 import { CALL_TRIGGER_ID } from "./automation-triggers.js";
+import { parseAliases } from "./cue-aliases.js";
 import type { Rule } from "../types/automation.js";
 
 /** One cue, reduced to what the config needs. */
 interface Cue {
   name: string;
   friendly: string;
+  /** Names it used to have and still answers to. See cue-aliases.ts. */
+  formerNames: string[];
 }
 
 /** A cue set the assistant can turn on and off. */
@@ -131,7 +134,11 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     if (rule.trigger.id !== CALL_TRIGGER_ID) continue;
     const name = String(rule.trigger.params.name ?? "").trim().toLowerCase();
     if (!name || cues.has(name)) continue;
-    cues.set(name, { name, friendly: friendlyOf(rule) });
+    cues.set(name, {
+      name,
+      friendly: friendlyOf(rule),
+      formerNames: parseAliases(rule.trigger.params),
+    });
   }
 
   const base = baseUrl.replace(/\/+$/, "");
@@ -156,6 +163,19 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
 
   lines.push("rest_command:");
   for (const cue of cues.values()) {
+    // A renamed cue is CALLED OUT, and its former names are deliberately not
+    // emitted as commands of their own. They exist so that the copy of this file
+    // somebody pasted before the rename keeps working; generating them here
+    // would put a second command on one cue and leave Home Assistant with two
+    // names for one thing forever.
+    if (cue.formerNames.length > 0) {
+      const was = cue.formerNames.map((n) => `su_${n}`).join(", ");
+      lines.push(
+        cue.formerNames.length === 1
+          ? `  # renamed from ${was}; the old rest_command keeps working until you re-paste`
+          : `  # renamed from ${was}; the old rest_commands keep working until you re-paste`,
+      );
+    }
     lines.push(
       `  su_${cue.name}:`,
       `    url: ${q(`${base}/api/cues/${cue.name}`)}`,

@@ -69,13 +69,21 @@ function scripts(yaml: string): { name: string; alias: string }[] {
   return out;
 }
 
+/** Every comment line, trimmed — the renamed-from notes live here. */
+function comments(yaml: string): string[] {
+  return yaml
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("#"));
+}
+
 /** One called cue, with only the fields the generator reads set meaningfully. */
-function cue(name: string, says: string, ruleName = name): Rule {
+function cue(name: string, says: string, ruleName = name, aliases = ""): Rule {
   return {
     id: `id-${name}`,
     name: ruleName,
     enabled: true,
-    trigger: { id: CALL_TRIGGER_ID, params: { name, says } },
+    trigger: { id: CALL_TRIGGER_ID, params: { name, says, aliases } },
     conditions: [],
     action: { id: "log.message", params: { message: "x" } },
     cooldownSec: 0,
@@ -215,5 +223,48 @@ describe("homeAssistantYaml", () => {
     const yaml = homeAssistantYaml([], BASE);
     assert.match(yaml, /No cues yet/);
     assert.deepEqual(commandKeys(yaml), []);
+  });
+
+  test("a renamed cue is called out in a comment, and its former name is NOT a command", () => {
+    // The former name is a live URL by design — that is what keeps an already
+    // pasted config working. Emitting it as a second `rest_command` would leave
+    // Home Assistant with two names for one cue forever, so the comment is the
+    // whole of it: it tells the operator to re-paste, and nothing more.
+    const yaml = homeAssistantYaml(
+      [cue("screens_on", "Screens on", "Screens ON", "projectors_on")],
+      BASE,
+    );
+    assert.deepEqual(commandKeys(yaml), ["su_screens_on"]);
+    assert.equal(
+      yaml.includes("su_projectors_on:"),
+      false,
+      "a former name was emitted as a command of its own",
+    );
+    assert.ok(
+      comments(yaml).includes(
+        "# renamed from su_projectors_on; the old rest_command keeps working until you re-paste",
+      ),
+      `no renamed-from comment; got:\n  ${comments(yaml).join("\n  ")}`,
+    );
+  });
+
+  test("two former names are named together, and the grammar follows", () => {
+    const yaml = homeAssistantYaml(
+      [cue("screens_on", "Screens on", "Screens ON", "projectors_on,beamers_on")],
+      BASE,
+    );
+    assert.ok(
+      comments(yaml).includes(
+        "# renamed from su_projectors_on, su_beamers_on; the old rest_commands keep working " +
+          "until you re-paste",
+      ),
+      `wrong wording for two former names; got:\n  ${comments(yaml).join("\n  ")}`,
+    );
+  });
+
+  test("a cue that was never renamed gets no comment of its own", () => {
+    // The header comments are always there; nothing about a rename is.
+    const yaml = homeAssistantYaml([cue("screens_on", "Screens on")], BASE);
+    assert.equal(comments(yaml).some((c) => c.includes("renamed from")), false);
   });
 });
