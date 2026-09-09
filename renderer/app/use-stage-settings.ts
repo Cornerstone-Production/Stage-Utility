@@ -30,7 +30,8 @@ import { errorMessage } from "@main/services/errors";
 import { writeOptimistic } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { useSlotsTarget } from "../settings/sections/slots-target-pill";
+import { confirmDiscardSlotEdits, useSlotsTarget } from "../settings/sections/slots-target-pill";
+import { registerTargetGuard } from "../settings/sections/editing-target";
 import type { SectionHandlers } from "../settings/types";
 import {
   useStageStateQuery,
@@ -391,6 +392,12 @@ export function useStageSettings(pinnedViewId?: string) {
     await writeState("stage:setAllowedServiceTypes", { ids }, { fail: "Failed to update allowed service types" });
   }
 
+  /** How the slot editors' plan switcher steps. Editor-only — it changes nothing
+   *  the screens follow. */
+  async function handleSetPlanSwitcherMode(mode: PlanSwitcherMode) {
+    await writeState("stage:setPlanSwitcherMode", { mode }, { fail: "Failed to change how the plan switcher steps" });
+  }
+
   async function handleSetBranding(partial: {
     name?: string;
     accentColor?: string | null;
@@ -500,17 +507,23 @@ export function useStageSettings(pinnedViewId?: string) {
   async function setSlotsTargetSide(next: "default" | "plan") {
     if (next === slotsTarget.side) return;
     if (slotsDirty) {
-      const ok = await confirm({
-        title: "Discard unsaved slot changes?",
-        message: "Switching boards re-reads the saved slots, so anything unsaved here is lost.",
-        confirmLabel: "Discard",
-        destructive: true,
-      });
-      if (!ok) return;
+      if (!(await confirmDiscardSlotEdits())) return;
       setSlotsDirty(false);
     }
     slotsTarget.setSide(next);
   }
+
+  // The plan switcher asks the same question from its own header. Registered
+  // while dirty only, so a switch with an empty buffer is silent.
+  useEffect(() => {
+    if (!slotsDirty) return;
+    registerTargetGuard(`view:${selectedViewId}`, async () => {
+      if (!(await confirmDiscardSlotEdits())) return false;
+      setSlotsDirty(false);
+      return true;
+    });
+    return () => registerTargetGuard(`view:${selectedViewId}`, null);
+  }, [slotsDirty, selectedViewId]);
 
   // Drop unsaved slot edits: clearing dirty lets the mirror effect re-seed
   // localSlots from the saved server state, and the preview clears its draft.
@@ -885,6 +898,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetTimezone,
     handleSetHourCycle,
     handleSetAllowedServiceTypes,
+    handleSetPlanSwitcherMode,
     handleSetBranding,
     updateSlot,
     addSlot,

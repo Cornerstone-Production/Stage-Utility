@@ -46,6 +46,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET  | `/api/service-types` | PCO service types |
 | GET  | `/api/team-positions` | Team positions for the active plan |
 | GET  | `/api/plans?serviceTypeId=…` | Plans for a service type |
+| GET  | `/api/plans/upcoming?days=…` | Every allowed service type's plans from the last 7 days to `days` ahead (whole days; default 60, capped at 365, and anything that is not a whole day above zero takes the default), sorted by date, each with `{serviceTypeId, serviceTypeName, planId, title, sortDate, dates, isCurrent}`. Cached for five minutes; `cacheAgeMs` and the `X-Plans-Cache-Age-Ms` header say how old the list is. Always `200` — when Planning Center cannot be reached the body carries `unavailable` with the reason, and the last good list if there is one |
 | GET  | `/api/pco/attachments` | Files on the active plan (plan + item level) |
 | GET  | `/api/pco/attachment?match=…` | Stream the active plan's file matching a filename substring (proxied + cached) |
 | POST | `/api/service-type` | Set active service type |
@@ -56,6 +57,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer) |
 | POST | `/api/live/previous` | PCO Services Live: go to the previous item |
 | POST | `/api/allowed-service-types` | Set the allowlist |
+| POST | `/api/plan-switcher-mode` | How the slot editors' plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
 | POST | `/api/slots` | Save a display's slots (`{slots, displayId?}`) |
 | POST | `/api/show-qr` | Toggle the connect QR on the display |
 
@@ -68,7 +70,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
 | POST | `/api/views/resolve-slots` | Resolve a slot set against the current plan without saving it — what the editor previews with |
 | POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |
-| GET | `/api/views/:id/slot-targets` | The service type's default board and the current plan's own, plus the plan it belongs to. Also `/api/layout-objects/:id/slot-targets` |
+| GET | `/api/views/:id/slot-targets` | The service type's default board and a plan's own, plus the plan it belongs to. `?serviceTypeId=&planId=` names which pair to read (a `serviceTypeId` with no `planId` is that type's default); absent, it is the active type and plan. Also `/api/layout-objects/:id/slot-targets` |
 | DELETE | `/api/views/:id/slots/override/:planId` | Revert that plan to the default. `404` when the plan had no board of its own. Also `/api/layout-objects/:id/slots/override/:planId` |
 | POST | `/api/views/:id/slots/promote` | Make a plan's board the service type's default (`{planId}`), clearing the plan's own. `404` when it had none. Also `/api/layout-objects/:id/slots/promote` |
 | POST | `/api/views/:id/duplicate` | Duplicate a view |

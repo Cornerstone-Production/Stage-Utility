@@ -203,6 +203,39 @@ export function PlanSection({
                 </FieldContent>
               </Field>
               {active.map(row)}
+              {/* The slot editors' plan switcher walks these types. Beside the
+                  allowlist because it is the same decision continued: which
+                  types, and then in what order the editor steps through them.
+                  It moves the EDITOR only; nothing here changes what the screens
+                  follow. */}
+              <Field orientation="vertical">
+                <FieldContent>
+                  <FieldLabel>Plan switcher in the slot editors</FieldLabel>
+                  <FieldDescription>
+                    {stageState.planSwitcherMode === "within-type"
+                      ? "Within a type: the middle is a dropdown of the allowed types; the arrows walk that type's plans, Default first and then each upcoming date."
+                      : "Upcoming plans: the arrows walk every allowed type's plans in date order; the middle names the date and the type."}
+                  </FieldDescription>
+                </FieldContent>
+                <ButtonGroup role="group" aria-label="How the plan switcher steps">
+                  <Button
+                    variant={stageState.planSwitcherMode === "within-type" ? "accent" : "filled"}
+                    aria-pressed={stageState.planSwitcherMode === "within-type"}
+                    size="small"
+                    onClick={() => { handlers.handleSetPlanSwitcherMode("within-type").catch(() => {}); }}
+                  >
+                    Within a type
+                  </Button>
+                  <Button
+                    variant={stageState.planSwitcherMode === "upcoming" ? "accent" : "filled"}
+                    aria-pressed={stageState.planSwitcherMode === "upcoming"}
+                    size="small"
+                    onClick={() => { handlers.handleSetPlanSwitcherMode("upcoming").catch(() => {}); }}
+                  >
+                    Upcoming plans
+                  </Button>
+                </ButtonGroup>
+              </Field>
               {inactive.length > 0 && (
                 <Collapsible
                   label="Inactive service types"

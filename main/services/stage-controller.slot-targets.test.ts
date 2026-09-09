@@ -159,6 +159,34 @@ describe("saving a board", () => {
     assert.equal((await slotsStore.getDefault(VIEW, TYPE))[0]?.id, "s1");
   });
 
+  // An override with no sortDate is not lost — the daily prune dates it by asking
+  // Planning Center — but until this line the only evidence was a row in the
+  // store that never aged out, and nothing anywhere said why.
+  it("says so when an override is saved with no date to prune it by", async () => {
+    await stageController.setViewSlots(VIEW, [slot("s1", "07")], {
+      kind: "plan",
+      planId: PLAN_B,
+      serviceTypeId: TYPE,
+    });
+
+    assert.equal((await slotsStore.getOverride(VIEW, PLAN_B))?.sortDate, null, "the date really is missing");
+    assert.equal(
+      logs.filter((l) =>
+        l.includes(`[slots] override for plan ${PLAN_B} saved without a date; prune will ask Planning Center for it`),
+      ).length,
+      1,
+    );
+  });
+
+  it("and says nothing when the date was known", async () => {
+    await stageController.setViewSlots(VIEW, [slot("s1", "07")]);
+    assert.equal(
+      logs.filter((l) => l.includes("saved without a date")).length,
+      0,
+      "logging every ordinary save is how the line stops being read",
+    );
+  });
+
   it("names the target on the log line", async () => {
     await stageController.setViewSlots(VIEW, [slot("s1", "07")]);
     await stageController.setViewSlots(VIEW, [slot("s2", "08")], { kind: "default", serviceTypeId: TYPE });
@@ -257,6 +285,47 @@ describe("the editor's two boards", () => {
     targets = await stageController.getSlotTargets("view", VIEW);
     assert.equal(targets.overrideSlots?.[0]?.id, "week");
     assert.equal(targets.defaultSlots[0]?.id, "standing", "and the default is still readable behind it");
+  });
+
+  // The editor's plan switcher points at a week the machine is not on, and the
+  // read has to follow it. Ignoring the asked-for target answered for the LIVE
+  // plan instead: the pill relabelled, the grid showed this week's rows under
+  // next week's heading, and a save from there wrote an override for the wrong
+  // plan. Nothing caught that, because every caller before the switcher asked
+  // for the current plan and got the right answer by accident.
+  it("answers for the plan it is ASKED about, not the one the machine is on", async () => {
+    await slotsStore.setDefault(VIEW, TYPE, [slot("standing", "01")]);
+    await slotsStore.setOverride(VIEW, PLAN_A, TYPE, [slot("this-week", "02")], null);
+    await slotsStore.setOverride(VIEW, PLAN_B, TYPE, [slot("next-week", "03")], null);
+
+    const targets = await stageController.getSlotTargets("view", VIEW, {
+      serviceTypeId: TYPE,
+      planId: PLAN_B,
+    });
+
+    assert.equal(targets.planId, PLAN_B);
+    assert.equal(
+      targets.overrideSlots?.[0]?.id,
+      "next-week",
+      "the switcher is on PLAN_B, so PLAN_A's board here is the wrong week's rows under the right week's label",
+    );
+    assert.equal(targets.defaultSlots[0]?.id, "standing");
+  });
+
+  it("a service type with no plan is that type's DEFAULT, not a fallback to the current plan", async () => {
+    await slotsStore.setDefault(VIEW, OTHER_TYPE, [slot("youth-standing", "04")]);
+    await slotsStore.setOverride(VIEW, PLAN_A, TYPE, [slot("this-week", "02")], null);
+
+    const targets = await stageController.getSlotTargets("view", VIEW, { serviceTypeId: OTHER_TYPE });
+
+    assert.equal(
+      targets.planId,
+      null,
+      "guessing a plan here puts an override the operator never chose behind the Default side",
+    );
+    assert.equal(targets.serviceTypeId, OTHER_TYPE);
+    assert.equal(targets.defaultSlots[0]?.id, "youth-standing");
+    assert.equal(targets.overrideSlots, null, "a default target has no override to badge as edited");
   });
 
   it("does not offer an override belonging to another service type", async () => {

@@ -21,6 +21,15 @@ import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
+import { errorMessage } from "./errors.js";
+import {
+  planWindow,
+  sameIds,
+  sortUpcoming,
+  switcherTypes,
+  toUpcoming,
+  UPCOMING_CACHE_MS,
+} from "./upcoming-plans.js";
 import { pcoCalendarService } from "./pco-calendar-service.js";
 import type {
   CalendarGrid,
@@ -29,6 +38,7 @@ import type {
   CalendarTagDTO,
 } from "../types/calendar.js";
 
+import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
 import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ScriptViewConfig, ScriptViewLayout, ScriptViewRundownDTO, ServiceTypeDTO, Slot, SlotPreset, SlotsLayout, SlotsScope, SlotTargetsDTO, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, View, ViewKind } from "../types/stage.js";
 import { WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
@@ -288,6 +298,7 @@ export class StageController {
     showQr: true,
     kioskDiscovery: false,
     allowedServiceTypeIds: [],
+    planSwitcherMode: "upcoming",
     checklistNoteCategories: [],
     checklistNoteTeams: [],
     appName: "Stage Utility",
@@ -342,6 +353,15 @@ export class StageController {
    *  it is null between a cold start and the first plan selection or refresh —
    *  an override saved in that window simply prunes by PCO lookup instead. */
   private currentPlanSortDate: string | null = null;
+
+  /**
+   * The last upcoming-plan list read from Planning Center.
+   *
+   * Kept for two reasons: the switcher is opened over and over while an operator
+   * edits three service types in a row, and when PCO goes down mid-edit the last
+   * good list is a far better answer than an empty one.
+   */
+  private upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[] } | null = null;
   /** Daily sweep for overrides whose plan is long past. */
   private slotsPruneTimer: ReturnType<typeof setInterval> | null = null;
   /** The one-shot sweep shortly after boot, held so it can be cancelled too. */
@@ -475,6 +495,7 @@ export class StageController {
       showQr,
       kioskDiscovery,
       allowedServiceTypeIds,
+      planSwitcherMode: settings.planSwitcherMode === "within-type" ? "within-type" : "upcoming",
       checklistNoteCategories: settings.checklistNoteCategories ?? [],
       checklistNoteTeams: settings.checklistNoteTeams ?? [],
       appName: settings.appName ?? "Stage Utility",
@@ -829,6 +850,106 @@ export class StageController {
       ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
       ...future,
     ];
+  }
+
+  /**
+   * Every allowed service type's plans in one dated list, for the editor's plan
+   * switcher.
+   *
+   * NOT `listPlans` per type at the call site: the switcher walks plans by date
+   * across types, and a client stitching several lists together would have to
+   * repeat the window, the ordering and the "never drop the current plan" rule.
+   *
+   * Never throws and never 5xx's. When Planning Center cannot be reached the last
+   * good list is returned with `unavailable` set, and an empty list with
+   * `unavailable` when there was no cache — the editor can still edit the plan
+   * the machine is already on, and the switcher says why it cannot offer more.
+   *
+   * A type that fails on its own does NOT fail the list: its plans are missing
+   * and the failure is logged, because one unreachable service type is not
+   * evidence about the other five.
+   */
+  async getUpcomingPlanList(days: number): Promise<UpcomingPlansDTO> {
+    const now = Date.now();
+    const cached = this.upcomingCache;
+    // Keyed on the ALLOWLIST as well as the window. The list is built from it, so
+    // an entry made under a different allowlist answers for service types the
+    // operator has since turned on or off. setAllowedServiceTypes drops the cache
+    // outright; this is the second half of that, for anything that changes the
+    // allowlist without going through it.
+    if (
+      cached &&
+      cached.days === days &&
+      sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
+      now - cached.at < UPCOMING_CACHE_MS
+    ) {
+      return { plans: cached.plans, cacheAgeMs: now - cached.at };
+    }
+
+    let types: ServiceTypeDTO[];
+    try {
+      types = switcherTypes(await this.listServiceTypes(), this.state.allowedServiceTypeIds);
+    } catch (err) {
+      return this.upcomingUnavailable(errorMessage(err), now);
+    }
+
+    const w = planWindow(now, days);
+    const currentPlanId = this.state.planId;
+    const failures: string[] = [];
+    const perType = await Promise.all(
+      types.map(async (t) => {
+        try {
+          return toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+        } catch (err) {
+          // Returned to the caller as a shortfall in the list, not swallowed: a
+          // total failure below becomes `unavailable`, and a partial one is
+          // logged so an operator with a missing type has something to read.
+          failures.push(`${t.name}: ${errorMessage(err)}`);
+          return [] as UpcomingPlan[];
+        }
+      }),
+    );
+
+    if (types.length > 0 && failures.length === types.length) {
+      return this.upcomingUnavailable(failures[0]!, now);
+    }
+
+    const plans = sortUpcoming(perType.flat());
+    this.upcomingCache = { at: now, days, allowed: [...this.state.allowedServiceTypeIds], plans };
+    console.log(
+      `[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`,
+    );
+    if (failures.length > 0) {
+      console.warn(
+        `[plans] upcoming list incomplete: ${scrub(failures.length)} of ${scrub(types.length)} types could not be read — ${scrub(failures.join("; "))}`,
+      );
+    }
+    return { plans, cacheAgeMs: 0 };
+  }
+
+  /** The unavailable answer: the last good list when there is one, else nothing. */
+  private upcomingUnavailable(reason: string, now: number): UpcomingPlansDTO {
+    console.warn(`[plans] upcoming list unavailable: ${scrub(reason)}`);
+    const cached = this.upcomingCache;
+    if (cached) return { plans: cached.plans, cacheAgeMs: now - cached.at, unavailable: reason };
+    return { plans: [], cacheAgeMs: 0, unavailable: reason };
+  }
+
+  /** One switcher row from the cached list, for labelling a target that is not
+   *  the machine's own plan. Never reaches for the network. */
+  private cachedUpcoming(planId: string | null): UpcomingPlan | null {
+    if (!planId) return null;
+    return this.upcomingCache?.plans.find((p) => p.planId === planId) ?? null;
+  }
+
+  /** How the editor's plan switcher steps. Operator setting; changes nothing the
+   *  machine follows. */
+  async setPlanSwitcherMode(mode: PlanSwitcherMode): Promise<StageState> {
+    console.log(`[plans] plan switcher mode → ${scrub(mode)}`);
+    this.state = { ...this.state, planSwitcherMode: mode };
+    await settingsStore.patch({ planSwitcherMode: mode });
+    this.broadcast();
+    return this.state;
   }
 
   async listTeamPositions(): Promise<TeamPositionDTO[]> {
@@ -1583,6 +1704,12 @@ export class StageController {
     this.state = { ...this.state, allowedServiceTypeIds: ids };
     await settingsStore.patch({ allowedServiceTypeIds: ids });
     broadcast("settings:allowedServiceTypeIds-changed", { value: ids });
+    // The switcher's plan list is BUILT from this allowlist and cached for five
+    // minutes. Left alone, a type added here was missing from the switcher for up
+    // to five minutes, and a type just removed lingered in it — where stepping
+    // onto one of its plans wrote a real override for a service type the operator
+    // had turned off, under an ordinary success toast.
+    this.upcomingCache = null;
     this.broadcast();
 
     // Returns NOW. The re-selection sweep used to be awaited here, which froze the
@@ -1801,6 +1928,15 @@ export class StageController {
         const sortDate =
           target.sortDate ??
           (target.planId === this.state.planId ? this.currentPlanSortDate : null);
+        if (sortDate === null) {
+          // Recoverable, not lost: the daily prune dates an undated override by
+          // asking Planning Center about the plan. Said out loud because the
+          // alternative is an operator finding an override that never ages out
+          // and having nothing at all to read about why.
+          console.log(
+            `[slots] override for plan ${scrub(target.planId)} saved without a date; prune will ask Planning Center for it`,
+          );
+        }
         await slotsStore.setOverride(key, target.planId, target.serviceTypeId, slots, sortDate);
       }
       map.set(key, await slotsStore.resolve(key, this.state.serviceTypeId, this.state.planId));
@@ -1883,19 +2019,37 @@ export class StageController {
    * One request rather than a route per target — the editor needs the pair at
    * once anyway, to know whether to badge the plan side as edited.
    */
-  async getSlotTargets(scope: SlotsScope, key: string): Promise<SlotTargetsDTO> {
+  async getSlotTargets(
+    scope: SlotsScope,
+    key: string,
+    want?: { serviceTypeId?: string | null; planId?: string | null },
+  ): Promise<SlotTargetsDTO> {
     this.assertSlotsKey(scope, key);
-    const serviceTypeId = this.state.serviceTypeId;
-    const planId = this.state.planId;
+    // Absent `want` means the machine's own type and plan — what every caller
+    // did before the editor could be pointed somewhere else. A `want` naming a
+    // type and no plan is the type's DEFAULT board, not "fall back to the
+    // current plan": the editor asks for exactly one target and guessing here
+    // would read a board it is not showing.
+    const asked = want !== undefined;
+    const serviceTypeId = asked ? (want.serviceTypeId ?? null) : this.state.serviceTypeId;
+    const planId = asked ? (want.planId ?? null) : this.state.planId;
+    const isCurrent = planId !== null && planId === this.state.planId;
+    const row = isCurrent ? null : this.cachedUpcoming(planId);
     const override = serviceTypeId && planId ? await slotsStore.getOverride(key, planId) : null;
     return {
       scope,
       key,
       serviceTypeId,
-      serviceTypeName: this.state.serviceTypeName,
+      // The switcher's own list is the only place a NON-current plan's name and
+      // date are known without another Planning Center request, and the editor
+      // is opened far more often than that list changes. Null when the target is
+      // not in it; planLabel() falls back rather than inventing a date.
+      serviceTypeName: isCurrent
+        ? this.state.serviceTypeName
+        : (row?.serviceTypeName ?? (serviceTypeId === this.state.serviceTypeId ? this.state.serviceTypeName : null)),
       planId,
-      planDates: this.state.planDates,
-      planSortDate: this.currentPlanSortDate,
+      planDates: isCurrent ? this.state.planDates : (row?.dates ?? null),
+      planSortDate: isCurrent ? this.currentPlanSortDate : (row?.sortDate ?? null),
       defaultSlots: serviceTypeId ? await slotsStore.getDefault(key, serviceTypeId) : [],
       // A record saved against a DIFFERENT service type is not this type's
       // override, and offering it as one would let a revert discard a board the

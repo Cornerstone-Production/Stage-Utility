@@ -34,6 +34,7 @@ export interface SectionHandlers {
   handleSetTimezone: (tz: string | null) => Promise<void>;
   handleSetHourCycle: (cycle: "12h" | "24h") => Promise<void>;
   handleSetAllowedServiceTypes: (ids: string[]) => Promise<void>;
+  handleSetPlanSwitcherMode: (mode: PlanSwitcherMode) => Promise<void>;
   handleSetBranding: (partial: {
     name?: string;
     accentColor?: string | null;

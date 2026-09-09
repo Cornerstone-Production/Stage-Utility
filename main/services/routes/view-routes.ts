@@ -84,7 +84,7 @@ function slotsFailure(res: RouteCtx["res"], err: unknown): void {
 }
 
 export async function viewRoutes(c: RouteCtx): Promise<void> {
-  const { req, res, pathname, method } = c;
+  const { req, res, pathname, method, url } = c;
     if (method === "GET" && pathname === "/api/displays") {
       json(res, stageController.getDisplays());
       return;
@@ -161,8 +161,17 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     const targetsMatch = pathname.match(/^\/api\/(views|layout-objects)\/([^/]+)\/slot-targets$/);
     if (method === "GET" && targetsMatch) {
       const scope: SlotsScope = targetsMatch[1] === "views" ? "view" : "object";
+      // ?serviceTypeId=&planId= names WHICH board pair to read, for an editor
+      // the plan switcher has pointed at another week. Absent, it is the
+      // machine's own type and plan, which is what every caller before the
+      // switcher asked for. A serviceTypeId with no planId is that type's
+      // default and nothing else — see getSlotTargets.
+      const wantType = url.searchParams.get("serviceTypeId");
+      const want = wantType
+        ? { serviceTypeId: wantType, planId: url.searchParams.get("planId") }
+        : undefined;
       try {
-        json(res, await stageController.getSlotTargets(scope, decodeURIComponent(targetsMatch[2])));
+        json(res, await stageController.getSlotTargets(scope, decodeURIComponent(targetsMatch[2]), want));
       } catch (err) {
         slotsFailure(res, err);
       }
@@ -632,6 +641,18 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     if (method === "DELETE" && outputDeleteMatch) {
       const state = await stageController.removeOutput(outputDeleteMatch[1]);
       json(res, state);
+      return;
+    }
+
+    // How the editor's plan switcher steps. Beside the allowlist because they are
+    // edited together on the Plan page and neither changes what the screens show.
+    if (method === "POST" && pathname === "/api/plan-switcher-mode") {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (body.mode !== "within-type" && body.mode !== "upcoming") {
+        error(res, 'body.mode must be "within-type" or "upcoming"');
+        return;
+      }
+      json(res, await stageController.setPlanSwitcherMode(body.mode));
       return;
     }
 
