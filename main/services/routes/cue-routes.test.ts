@@ -33,7 +33,10 @@ const { automationEngine } = await import("../automation-engine.js");
 const { automationLog } = await import("../automation-log.js");
 const { cueTokens } = await import("../cue-tokens.js");
 const { companionApi, companionDeps } = await import("../companion-api.js");
-const { companionExportFixture, FIXTURE_PAGES } = await import("../fixtures/companion-export.js");
+const { companionExportFixture, FIXTURE_PAGES, FIXTURE_PAGE_IDS, fixtureActionId } = await import(
+  "../fixtures/companion-export.js"
+);
+type CompanionButton = import("../companion-export.js").CompanionButton;
 const { stageController } = await import("../stage-controller.js");
 const { integrationManager } = await import("../integration-manager.js");
 const { AUTOMATION_TRIGGERS, CALL_TRIGGER_ID } = await import("../automation-triggers.js");
@@ -720,8 +723,24 @@ describe("the button and pair endpoints", () => {
     assert.equal(r.status, 200);
     const body = r.json as { ok: boolean; buttons: { pageName: string; label: string }[] };
     assert.equal(body.ok, true);
-    assert.equal(body.buttons.length, 12);
+    assert.equal(body.buttons.length, 13);
     assert.ok(body.buttons.some((b) => b.pageName === FIXTURE_PAGES.screens));
+  });
+
+  test("every button carries its page id and its action ids, so the picker can fingerprint it", async () => {
+    // Without these on the wire the picker would have to make a second request
+    // per button, and a rule created from it would be pinned to coordinates
+    // alone — which is the whole bug the fingerprint exists to remove.
+    const r = await callRoute(cueRoutes, "/api/companion/buttons");
+    const buttons = (r.json as { buttons: CompanionButton[] }).buttons;
+    const on = buttons.find((b) => b.page === 1 && b.row === 0 && b.col === 1)!;
+    assert.equal(on.pageId, FIXTURE_PAGE_IDS[1]);
+    assert.deepEqual(on.actionIds, [fixtureActionId(1, 0, 1, 0)]);
+    assert.equal(
+      buttons.every((b) => typeof b.pageId === "string" && Array.isArray(b.actionIds)),
+      true,
+      "a button came back without the fingerprint fields",
+    );
   });
 
   test("an unreachable Companion answers 200 with the reason, so the picker can offer the fields", async () => {

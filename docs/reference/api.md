@@ -202,7 +202,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
+| GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Each carries `page`, `pageId`, `pageName`, `row`, `col`, `label`, `drives` and `actionIds` — the page's opaque id and the button's sorted action ids are its identity, and survive being renumbered or dragged to another key. Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
 | POST | `/api/companion/buttons/refresh` | Drop the five-minute cache and re-read |
 | GET | `/api/companion/pairs` | ON/OFF pairs with their proposed cue names, and whether each already exists |
 

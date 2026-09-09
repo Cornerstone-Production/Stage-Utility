@@ -26,7 +26,12 @@ import {
   slugsForPairs,
   UTILITY_MODULES,
 } from "./companion-export.js";
-import { FIXTURE_PAGES, companionExportFixture } from "./fixtures/companion-export.js";
+import {
+  FIXTURE_PAGES,
+  FIXTURE_PAGE_IDS,
+  companionExportFixture,
+  fixtureActionId,
+} from "./fixtures/companion-export.js";
 
 const EXPORT = companionExportFixture();
 const BUTTONS = parseButtons(EXPORT);
@@ -35,10 +40,10 @@ const at = (page: number, row: number, col: number) =>
 
 describe("parseButtons", () => {
   test("finds every labelled or acting button, and nothing else", () => {
-    // EXACT, not a floor. Seven on page 1, four on page 2, one on page 3, none
+    // EXACT, not a floor. Seven on page 1, four on page 2, two on page 3, none
     // on the navigation-only page. A floor here is how the pagenum furniture
     // creeps back in and the picker grows 150 rows of "Page 4".
-    assert.equal(BUTTONS.length, 12);
+    assert.equal(BUTTONS.length, 13);
     assert.deepEqual(
       [...new Set(BUTTONS.map((b) => b.page))].sort((a, b) => a - b),
       [1, 2, 3],
@@ -76,6 +81,45 @@ describe("parseButtons", () => {
 
   test("carries the page name, for grouping in the picker", () => {
     assert.equal(at(2, 0, 0)?.pageName, FIXTURE_PAGES.lights);
+  });
+
+  test("carries the page's opaque id, which a renumber does not change", () => {
+    // `page` is a position and moves; this is the identity a cue is pinned to.
+    assert.equal(at(1, 0, 1)?.pageId, FIXTURE_PAGE_IDS[1]);
+    assert.equal(at(2, 0, 0)?.pageId, FIXTURE_PAGE_IDS[2]);
+  });
+
+  test("carries the button's action ids, sorted, as its fingerprint", () => {
+    const on = at(1, 0, 1)!;
+    assert.deepEqual(on.actionIds, [fixtureActionId(1, 0, 1, 0)]);
+    // And no two buttons share one. A fixture that derived the id from the
+    // CONNECTION gave both halves of a pair the same fingerprint, so a moved ON
+    // would have been "found" at the OFF's coordinates.
+    const all = BUTTONS.flatMap((b) => b.actionIds);
+    assert.equal(new Set(all).size, all.length, "two buttons share an action id");
+  });
+
+  test("a button that runs nothing has an empty fingerprint, not a made-up one", () => {
+    // 59 of the 536 buttons on the install this was built against. They can only
+    // ever be identified by their coordinates, and pretending otherwise is worse.
+    assert.deepEqual(at(3, 0, 0)?.actionIds, []);
+  });
+
+  test("actions nested in a logic_if count, for both drives and the fingerprint", () => {
+    // 28 actions on the real install live in `children.actions`. A walk that
+    // stopped at the top level said this button drives nothing — which decides
+    // whether the import ticks it — and gave it an empty fingerprint, so moving
+    // it would have read as two different buttons.
+    const nested = at(3, 0, 1)!;
+    assert.deepEqual(nested.drives, ["generic-pjlink"]);
+    assert.deepEqual(nested.actionIds, [fixtureActionId(3, 0, 1, 0), fixtureActionId(3, 0, 1, 99)].sort());
+  });
+
+  test("a feedback id inside the condition branch is NOT part of the fingerprint", () => {
+    // `children.condition` holds feedbacks, which carry ids and are not actions.
+    // Folding one in would make a fingerprint that changes when somebody edits
+    // the button's colour rule.
+    assert.equal(at(3, 0, 1)!.actionIds.length, 2);
   });
 
   test("junk in yields nothing out, never a throw", () => {

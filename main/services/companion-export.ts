@@ -23,6 +23,11 @@
 /** One pressable Companion button, at the coordinates the press API takes. */
 export interface CompanionButton {
   page: number;
+  /**
+   * The page's own opaque id (`8h51ShTMsZ4ECnQhLlMg5`), which survives being
+   * renumbered — `page` does not. "" for a document with no page ids at all.
+   */
+  pageId: string;
   pageName: string;
   row: number;
   col: number;
@@ -30,6 +35,15 @@ export interface CompanionButton {
   label: string;
   /** Module ids of the connections this button's actions drive ("generic-pjlink"). */
   drives: string[];
+  /**
+   * The ids of every action this button runs, sorted — the button's identity.
+   *
+   * A control in Companion has no id of its own; its ACTIONS do, and they travel
+   * with the button when somebody drags it to another key. Empty for a button
+   * that runs nothing, which is 59 of the 536 on the install this was built
+   * against and cannot be identified by anything but its coordinates.
+   */
+  actionIds: string[];
 }
 
 /** Two buttons whose labels differ only by a trailing ON/OFF (or Startup/Shutdown). */
@@ -84,20 +98,60 @@ function labelOf(control: Record<string, unknown>): string {
   return collapse(parts.join(" "));
 }
 
-/** Connection ids referenced by any action in any step of a control. */
-function connectionsOf(control: Record<string, unknown>): string[] {
-  const out: string[] = [];
-  for (const step of Object.values(rec(control.steps))) {
-    for (const set of Object.values(rec(rec(step).action_sets))) {
-      for (const action of arr(set)) {
-        const a = rec(action);
-        // 5.x names it connectionId; 3.x named it instance.
-        const id = str(a.connectionId) || str(a.instance);
-        if (id) out.push(id);
-      }
+/**
+ * Every action a control runs, in every step and every action set, INCLUDING the
+ * ones nested inside a container action.
+ *
+ * The nesting is real and not rare: `logic_if` keeps its branches in
+ * `children.actions` and `children.else_actions`, and 28 actions on the install
+ * this was built against live there. A walk that stopped at the top level
+ * reported a button driving nothing — which decides whether the import ticks it
+ * — and would leave its identity out of the fingerprint, so moving it would read
+ * as two different buttons.
+ *
+ * `children.condition` holds FEEDBACKS, which also carry ids and are not actions.
+ * They are excluded by `type`, so a feedback id never enters a fingerprint.
+ */
+function actionsOf(control: Record<string, unknown>): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const visit = (list: unknown[]): void => {
+    for (const entry of list) {
+      const a = rec(entry);
+      if (str(a.type) === "feedback") continue;
+      out.push(a);
+      for (const nested of Object.values(rec(a.children))) visit(arr(nested));
     }
+  };
+  for (const step of Object.values(rec(control.steps))) {
+    for (const set of Object.values(rec(rec(step).action_sets))) visit(arr(set));
   }
   return out;
+}
+
+/** Connection ids referenced by any action of a control. */
+function connectionsOf(control: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const a of actionsOf(control)) {
+    // 5.x names it connectionId; 3.x named it instance.
+    const id = str(a.connectionId) || str(a.instance);
+    if (id) out.push(id);
+  }
+  return out;
+}
+
+/**
+ * The sorted, de-duplicated action ids of a control — its fingerprint.
+ *
+ * SORTED here and nowhere else, so a comparison is a string compare and cannot
+ * depend on the order Companion happened to write the steps in.
+ */
+export function actionIdsOf(control: unknown): string[] {
+  const ids = new Set<string>();
+  for (const a of actionsOf(rec(control))) {
+    const id = str(a.id);
+    if (id) ids.add(id);
+  }
+  return [...ids].sort();
 }
 
 /**
@@ -124,6 +178,7 @@ export function parseButtons(raw: unknown): CompanionButton[] {
     const pageNum = Number(pageKey);
     if (!Number.isFinite(pageNum)) continue;
     const pageName = collapse(str(page.name)) || `Page ${pageNum}`;
+    const pageId = str(page.id);
 
     for (const [rowKey, rowRaw] of Object.entries(rec(page.controls))) {
       const row = Number(rowKey);
@@ -146,7 +201,16 @@ export function parseButtons(raw: unknown): CompanionButton[] {
           })
           .filter((m) => m !== "");
 
-        out.push({ page: pageNum, pageName, row, col, label, drives });
+        out.push({
+          page: pageNum,
+          pageId,
+          pageName,
+          row,
+          col,
+          label,
+          drives,
+          actionIds: actionIdsOf(control),
+        });
       }
     }
   }
