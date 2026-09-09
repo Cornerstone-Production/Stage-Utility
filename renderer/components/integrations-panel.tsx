@@ -41,6 +41,7 @@ import {
   confirm,
   SkeletonRows,
   InfoHint,
+  Separator,
   DialogRoot,
   DialogContent,
   DialogHeader,
@@ -260,15 +261,27 @@ async function toggleIntegration(
  * Discard and no Test in the dialog footer, exactly as they had neither in the
  * row.
  */
-function bespokePanelFor(descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode | null {
+function bespokePanelFor(descriptor: IntegrationDescriptor): ReactNode | null {
   if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
   if (descriptor.id === "osc") return <OscTargetsPanel />;
   // Its own panel: the only setting is WHICH TEAMS, and a searchable
   // multi-league team picker is not expressible as a ConfigField.
   if (descriptor.id === "scores") return <ScoresTeamsPanel />;
   if (descriptor.id === "rosstalk") return <RossTalkTargetsPanel />;
-  // Its own panel: what Companion needs is an address to dial and the module
-  // to dial it with, not a form.
+  return null;
+}
+
+/**
+ * A panel rendered ABOVE the schema form, with the form and its footer kept.
+ *
+ * Companion has two halves. Inbound, the module dials this server: that half is
+ * an address to copy and a client count, not a form. Outbound, this server
+ * presses Companion's buttons: that half IS the descriptor's form (host, port)
+ * and needs Save and Test. As a bespoke panel the info replaced the form, so
+ * the two fields the server declared were never on screen and the docs
+ * described controls nobody could find.
+ */
+function preludePanelFor(descriptor: IntegrationDescriptor, state: IntegrationState): ReactNode | null {
   if (descriptor.id === "companion") return <CompanionInfoPanel state={state} />;
   return null;
 }
@@ -414,7 +427,8 @@ export function IntegrationDialog({
   onClose,
   onBeforeMove,
 }: IntegrationDialogProps) {
-  const bespoke = bespokePanelFor(descriptor, state);
+  const bespoke = bespokePanelFor(descriptor);
+  const prelude = preludePanelFor(descriptor, state);
   // Which ref the Setup guide link points at. Already fetched and cached for the
   // rail's version line, so this costs nothing.
   const { data: updateStatus } = useUpdateStatus();
@@ -577,6 +591,12 @@ export function IntegrationDialog({
 
   const body = bespoke ?? (
     <div className="flex flex-col gap-3">
+      {prelude && (
+        <>
+          {prelude}
+          <Separator />
+        </>
+      )}
       <FieldSet flat>
         <FieldGroup>
           {descriptor.configSchema.map((field) => {
