@@ -182,11 +182,46 @@ export function CueButtonStatus({ params }: { params: Record<string, string | nu
 // ── The button picker ─────────────────────────────────────────────────────────
 
 /**
+ * The params to merge when somebody TYPES a coordinate, PURE.
+ *
+ * The coordinate they typed, and "" for every field that described the button
+ * the cue used to point at. All five have to go, and each one is a way the
+ * escape hatch was not one:
+ *
+ *  - `status`, because `"missing"` makes the action refuse the press outright,
+ *    so a cue rescued by hand went on failing (automation-actions.ts).
+ *  - `pageId` and `actionIds`, because the next reconcile matches on them and
+ *    would answer `missing` again — or, worse, follow the OLD button to
+ *    wherever it now is and overwrite what was just typed.
+ *  - `movedFrom`, because "moved from r2c6" under a hand-typed coordinate is a
+ *    move nobody made.
+ *  - `label`, because the old label is no longer known to be the right one, and
+ *    a wrong name on the row is what the operator would act on next.
+ *
+ * Written as "" rather than left out: these are MERGED over the stored params,
+ * so an omitted key keeps yesterday's value. Same reason fingerprintParams
+ * writes an empty `movedFrom`.
+ */
+export function typedCoordinate(
+  coordinate: { page: number } | { row: number } | { col: number },
+): Record<string, string | number> {
+  return { ...coordinate, pageId: "", actionIds: "", status: "", movedFrom: "", label: "" };
+}
+
+/**
  * The `companion.press` action's params, as a picker rather than three numbers.
  *
  * The three numbers stay: they are what is stored, they are what shows when
- * Companion is unreachable, and they are the escape hatch when a button is not
- * in the export. Picking fills them in — it does not replace them.
+ * Companion is unreachable, and they are how an operator rescues a cue whose
+ * button is not in the export. Picking fills them in — it does not replace them.
+ *
+ * TYPING A COORDINATE CLEARS THE IDENTITY. The stored `pageId`, `actionIds`,
+ * `label` and `status` all describe a button the operator has just said is
+ * somewhere else, and a `status: "missing"` left beside a hand-typed coordinate
+ * makes the action go on REFUSING to press (automation-actions.ts) with nothing
+ * on screen saying why — so the numbers looked like an escape hatch and were
+ * not one. Cleared, the next reconcile adopts whatever is at the coordinates
+ * through its legacy branch, exactly as it adopts a rule written by hand.
  */
 export function CompanionPressFields({
   params,
@@ -223,10 +258,11 @@ export function CompanionPressFields({
         <span className={labelCls}>Page</span>
         <span className="min-w-0 flex-1">
           <NumberInput
+            aria-label="Page"
             value={page}
             min={1}
             max={999}
-            onChange={(n) => onChange({ page: n })}
+            onChange={(n) => onChange(typedCoordinate({ page: n }))}
             className="h-7 text-footnote"
           />
         </span>
@@ -235,10 +271,11 @@ export function CompanionPressFields({
         <span className={labelCls}>Row</span>
         <span className="min-w-0 flex-1">
           <NumberInput
+            aria-label="Row"
             value={row}
             min={0}
             max={99}
-            onChange={(n) => onChange({ row: n })}
+            onChange={(n) => onChange(typedCoordinate({ row: n }))}
             className="h-7 text-footnote"
           />
         </span>
@@ -247,10 +284,11 @@ export function CompanionPressFields({
         <span className={labelCls}>Column</span>
         <span className="min-w-0 flex-1">
           <NumberInput
+            aria-label="Column"
             value={col}
             min={0}
             max={99}
-            onChange={(n) => onChange({ col: n })}
+            onChange={(n) => onChange(typedCoordinate({ col: n }))}
             className="h-7 text-footnote"
           />
         </span>

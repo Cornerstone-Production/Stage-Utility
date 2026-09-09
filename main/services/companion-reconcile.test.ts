@@ -353,6 +353,38 @@ describe("a rule from before the fingerprint existed", () => {
     const r = only([e], parse(doc()));
     assert.equal(r.changes[0]!.status, "missing");
   });
+
+  test("a MISSING cue rescued by hand-typed coordinates is adopted, not refused again", () => {
+    // The other half of the escape hatch. Typing a coordinate in the editor
+    // clears the identity that no longer describes anything — see
+    // typedCoordinate in renderer/settings/sections/companion-cues.tsx — which
+    // leaves exactly the shape a legacy rule has, and this is the pass that has
+    // to adopt it. Without the clearing the stored `status: "missing"` survives
+    // and companion.press goes on refusing with the right coordinates typed in.
+    const e: PressEntry = {
+      ruleId: "rule-rescued",
+      label: "projectors_on",
+      params: {
+        ...entry().params,
+        // What the Row field emits: the coordinate, and "" for the identity.
+        row: 0,
+        col: 2,
+        pageId: "",
+        actionIds: "",
+        status: "",
+        movedFrom: "",
+        label: "",
+      },
+    };
+    const r = only([e], parse(doc()));
+    const change = r.changes[0]!;
+    assert.equal(change.status, "in-place");
+    const after = merged(e, change.patch);
+    assert.equal(after.pageId, FIXTURE_PAGE_IDS[1]);
+    assert.deepEqual(after.actionIds, [fixtureActionId(1, 0, 2, 0)]);
+    // And the row now names the button that is actually there.
+    assert.equal(after.label, "Projectors OFF");
+  });
 });
 
 describe("a button that runs nothing", () => {
