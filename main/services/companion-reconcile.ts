@@ -646,9 +646,19 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
       // A literal format string with the values in an argument: a cue label can
       // contain a `%`, and `console.error(fmt, arg)` reads that as a format
       // specifier and eats the reason after it.
-      const detail = scrub(scrubError(err), LOG_MAX);
-      failed.push({ ruleId: change.ruleId, label: change.label, detail });
-      console.error("[companion] could not record a button status:", scrub(change.label), detail);
+      //
+      // scrub() is spelled out AT THE LOG SITE, not hoisted into the variable
+      // above it. The barrier has to be visible where the value reaches the
+      // console or log-injection.test.ts cannot see it, and a value laundered
+      // through a helper or a local is exactly the shape that scan refuses. It
+      // caught this being hoisted. See scrub.ts.
+      const detail = scrubError(err);
+      failed.push({ ruleId: change.ruleId, label: change.label, detail: scrub(detail, LOG_MAX) });
+      console.error(
+        "[companion] could not record a button status:",
+        scrub(change.label),
+        scrub(detail, LOG_MAX),
+      );
     }
   }
 
