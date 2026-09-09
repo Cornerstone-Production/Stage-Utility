@@ -318,3 +318,46 @@ describe("the log", () => {
     assert.deepEqual(logged, []);
   });
 });
+
+// ── Keys that are not ordinary ────────────────────────────────────────────────
+//
+// The key in the answer is the pair's BASE, which is half of a cue name out of
+// the rules file — an operator's string, and one a request can reach through
+// POST /api/automation/rules. `record["__proto__"] = row` does not add a
+// property: it replaces the object's prototype. The pair then vanishes from the
+// answer with nothing saying so, and every object built from that record's shape
+// carries the row's fields.
+describe("a pair whose base is a prototype key", () => {
+  test("__proto__ is an OWN property of the answer, and a real row", async () => {
+    rules = pair("__proto__");
+    values.__proto___state = { value: "on" };
+    const answer = await cueStates.read();
+
+    assert.equal(Object.hasOwn(answer.states, "__proto__"), true, "the pair is not in the answer");
+    assert.deepEqual(Object.keys(answer.states), ["__proto__"]);
+    // Read through a Map: `answer.states.__proto__` and `.constructor` resolve
+    // to Object's own members in the type checker, whatever the value is.
+    assert.equal(new Map(Object.entries(answer.states)).get("__proto__")?.state, "on");
+    assert.equal(answer.ok, true);
+    // The record itself is an ordinary object, not one wearing the row as its
+    // prototype.
+    assert.equal(Object.getPrototypeOf(answer.states), Object.prototype);
+    assert.equal((({}) as Record<string, unknown>).variable, undefined, "Object.prototype was polluted");
+
+    // And it survives the wire, which is the only thing Home Assistant sees.
+    const wire = JSON.parse(JSON.stringify(answer)) as { states: Record<string, unknown> };
+    assert.equal(Object.hasOwn(wire.states, "__proto__"), true, "the pair is not in the JSON");
+  });
+
+  test("constructor and prototype bases are ordinary rows too", async () => {
+    rules = [...pair("constructor"), ...pair("prototype")];
+    values.constructor_state = { value: "on" };
+    values.prototype_state = { value: "off" };
+    const answer = await cueStates.read();
+    assert.deepEqual(Object.keys(answer.states).sort(), ["constructor", "prototype"]);
+    const rows = new Map(Object.entries(answer.states));
+    assert.equal(rows.get("constructor")?.state, "on");
+    assert.equal(rows.get("prototype")?.state, "off");
+    assert.equal(answer.ok, true);
+  });
+});

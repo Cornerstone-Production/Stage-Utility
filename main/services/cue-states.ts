@@ -132,7 +132,12 @@ class CueStates {
       ),
     );
 
-    const states: Record<string, CueStateRow> = {};
+    // A MAP, not a plain record. The key is the pair's base, which comes from a
+    // cue name in the rules file — and `record["__proto__"] = row` does not add
+    // a property, it replaces the object's prototype, so the pair vanishes from
+    // the answer and every object in the process gains its fields. A Map holds
+    // any string, and Object.fromEntries below defines an own property for it.
+    const states = new Map<string, CueStateRow>();
     for (const pair of pairs) {
       const binding = pair.binding!;
       const result = read.get(binding.variable) ?? { error: "not read" };
@@ -155,13 +160,13 @@ class CueStates {
           `"${binding.onValue}" nor "${binding.offValue}"`;
       }
       this.note(pair.base, binding.variable, row.reason ?? null);
-      states[pair.base] = row;
+      states.set(pair.base, row);
     }
 
     const answer: CueStatesAnswer = {
-      ok: Object.values(states).every((s) => s.state !== "unknown"),
+      ok: [...states.values()].every((s) => s.state !== "unknown"),
       checkedAt: new Date(cueStatesDeps.now()).toISOString(),
-      states,
+      states: Object.fromEntries(states),
     };
     this.cached = { at: cueStatesDeps.now(), answer };
     return answer;
