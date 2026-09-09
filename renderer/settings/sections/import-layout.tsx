@@ -36,10 +36,12 @@ import type { ServiceTypeDTO } from "@main/types/pco";
 interface Review {
   bundle: ViewBundle;
   rootName: string;
-  /** Every top-level view. One for a view export; one per board for a plan. */
-  rootNames: string[];
+  /** Every top-level view. One for a view export; one per board for a plan.
+   *  Carries the id as well as the name, because two views may share a name and
+   *  a name is not a React key. */
+  roots: { id: string; name: string }[];
   /** Views that came along only because something embeds them. */
-  dependencies: string[];
+  embedded: { id: string; name: string }[];
   slotSets: number;
   notes: number;
   images: number;
@@ -71,7 +73,7 @@ function review(bundle: ViewBundle): Review {
   const boardSets = Object.values(slots).flatMap((byType) => Object.values(byType ?? {}));
   const rootIds = new Set(bundle.roots?.length ? bundle.roots : [root.id]);
   return {
-    rootNames: bundle.views.filter((v) => rootIds.has(v.id)).map((v) => v.name),
+    roots: bundle.views.filter((v) => rootIds.has(v.id)).map((v) => ({ id: v.id, name: v.name })),
     boards: boardSets.length,
     rows: boardSets.reduce((n, rows) => n + (rows?.length ?? 0), 0),
     patchVariants: (bundle.sideData?.patchVariants ?? []).map((p) => ({
@@ -83,7 +85,7 @@ function review(bundle: ViewBundle): Review {
     // By ROOT, not by position. A plan export has one root per view the service
     // type has a board on, and "comes with it — the layout embeds this" on five
     // of six roots is a straight untruth about where they came from.
-    dependencies: bundle.views.filter((v) => !rootIds.has(v.id)).map((v) => v.name),
+    embedded: bundle.views.filter((v) => !rootIds.has(v.id)).map((v) => ({ id: v.id, name: v.name })),
     slotSets: Object.keys(bundle.sideData?.slots ?? {}).length,
     notes: Object.keys(bundle.sideData?.notes ?? {}).length,
     images: Object.keys(bundle.images ?? {}).length,
@@ -239,15 +241,15 @@ export function ImportLayout({ serviceTypes = [], currentServiceTypeId = null }:
             )}
 
             <Group title="Views">
-              {pending.rootNames.map((n) => (
+              {pending.roots.map((v) => (
                 <Row
-                  key={n}
-                  label={n}
+                  key={v.id}
+                  label={v.name}
                   sub={plan ? "has a board for this service type" : "the layout you picked"}
                 />
               ))}
-              {pending.dependencies.map((n) => (
-                <Row key={n} label={n} sub="comes with it — the layout embeds this" tag="embedded" />
+              {pending.embedded.map((v) => (
+                <Row key={v.id} label={v.name} sub="comes with it — the layout embeds this" tag="embedded" />
               ))}
             </Group>
 

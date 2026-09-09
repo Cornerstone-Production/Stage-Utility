@@ -234,6 +234,34 @@ describe("what the review calls each view", () => {
     m.restore();
   });
 
+  test("two views with the same name are two rows, not one key", async (t) => {
+    // Names are not unique — two campuses' boards are both "Mic Board". Keyed
+    // on the name, React sees one key for two siblings: it warns, and every
+    // later reconcile of that list is working from an ambiguous identity.
+    //
+    // Both halves are asserted. The row COUNT alone does not go red on the bug
+    // (React still renders both children of a duplicate key on a first render),
+    // so the warning is the half that proves the fix — see the commit.
+    const errors: string[] = [];
+    const before = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
+    t.after(() => { console.error = before; });
+    const view = (id: string) => ({ id, name: "Mic Board", kind: "slots", createdAt: 0, layout: null });
+    const m = mount(planFile({
+      roots: ["v1", "v2"],
+      views: [view("v1"), view("v2")],
+    }, { slots: {} }));
+    await m.take();
+    assert.equal(screen.queryAllByText("Mic Board").length, 2, "one of the two views is not on screen");
+    assert.deepEqual(
+      errors.filter((e) => e.includes("same key")),
+      [],
+      "the review keys its rows on a name two views can share",
+    );
+    m.unmount();
+    m.restore();
+  });
+
   test("a view export still says which layout was picked", async () => {
     const file = planFile() as Record<string, unknown>;
     delete file.plan;
