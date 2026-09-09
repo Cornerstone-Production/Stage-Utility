@@ -45,7 +45,7 @@ const REQUEST_TIMEOUT_MS = 8000;
  * seconds is long enough for a Companion on the same LAN and short enough that
  * an unplugged one reports unknown rather than holding the request open.
  */
-const VARIABLE_TIMEOUT_MS = 3000;
+export const VARIABLE_TIMEOUT_MS = 3000;
 /** The export is 4 MB on a real install; give it longer than a press. */
 const EXPORT_TIMEOUT_MS = 20_000;
 const EXPORT_CACHE_MS = 5 * 60 * 1000;

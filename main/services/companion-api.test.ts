@@ -21,7 +21,7 @@ import * as fsp from "node:fs/promises";
 // the data directory at import. Point it somewhere disposable first.
 process.env.STAGE_UTILITY_DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "companion-api-"));
 
-const { companionApi, companionDeps } = await import("./companion-api.js");
+const { companionApi, companionDeps, VARIABLE_TIMEOUT_MS } = await import("./companion-api.js");
 const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
 const { companionExportFixture } = await import("./fixtures/companion-export.js");
 
@@ -32,6 +32,8 @@ interface Call {
   url: string;
   method: string;
   body: string;
+  /** Whatever was passed as `init.signal`, so the timeout can be asserted. */
+  signal: AbortSignal | null | undefined;
 }
 
 /** Record every request and answer it however the case needs. */
@@ -39,7 +41,12 @@ function stub(answer: (url: string) => Response | Promise<Response>): Call[] {
   const calls: Call[] = [];
   companionDeps.fetch = async (input, init) => {
     const url = String(input);
-    calls.push({ url, method: init?.method ?? "GET", body: String(init?.body ?? "") });
+    calls.push({
+      url,
+      method: init?.method ?? "GET",
+      body: String(init?.body ?? ""),
+      signal: init?.signal as AbortSignal | null | undefined,
+    });
     return answer(url);
   };
   return calls;
@@ -305,6 +312,10 @@ describe("readCustomVariable", () => {
       ["GET http://10.0.0.5:8000/api/custom-variable/projectors_state/value"],
     );
     assert.deepEqual(r, { value: "on" });
+    // The request is TIMED. Without a signal a Companion that accepts the
+    // connection and never answers hangs this read, and with it the whole batch
+    // the states route is waiting on.
+    assert.ok(calls[0]!.signal instanceof AbortSignal, "the read was sent with no timeout");
   });
 
   test("404 is its own sentence, not \"HTTP 404\"", async () => {
@@ -408,5 +419,49 @@ describe("a getTarget failure", () => {
     const r = await companionApi.fetchExport({ force: true });
     assert.equal(r.ok, false);
     assert.match(r.ok === false ? r.reason : "", /secrets\.bin is unreadable/);
+  });
+});
+
+// ── The read's timeout ────────────────────────────────────────────────────────
+//
+// A Companion that accepts the connection and never answers is the failure the
+// three-second timeout exists for: `GET /api/cues/states` reads every bound pair
+// and answers when the slowest read does, so a read with no ceiling is a Home
+// Assistant sensor hanging until its own client gives up.
+//
+// NO FAKE TIMER, and it is not for want of trying: `AbortSignal.timeout` is not
+// driven by node:test's `mock.timers` — enabling the setTimeout mock and
+// ticking past 3000 ms leaves the signal unaborted, because the timer lives in
+// the runtime rather than in the JS timer queue. Driving it would mean replacing
+// `AbortSignal.timeout` with a hand-rolled controller plus clearTimeout at 18
+// call sites this codebase deliberately does not do that at (see the comments in
+// reaper-service.ts and pvp-service.ts). So this waits the real three seconds
+// and pins the constant by elapsed time. `timeout` is set on the test because
+// the red state of this guard is a read that never settles.
+describe("readCustomVariable's timeout", () => {
+  test("a Companion that never answers is an error, not a hang", { timeout: 10_000 }, async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    // Never resolves on its own. It rejects with the signal's own reason, which
+    // is what a real fetch does when its signal aborts.
+    companionDeps.fetch = async (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | null | undefined;
+        assert.ok(signal instanceof AbortSignal, "the read was sent with no timeout");
+        signal.addEventListener("abort", () => reject(signal.reason));
+      });
+
+    const started = Date.now();
+    const r = await companionApi.readCustomVariable("projectors_state");
+    const took = Date.now() - started;
+
+    assert.equal("error" in r, true, "a hung read came back as a value");
+    assert.match("error" in r ? r.error : "", /timeout/i);
+    // The CONSTANT, not just that something aborted eventually: a timeout raised
+    // to a minute would still abort, and would still be a sensor Home Assistant
+    // gave up on.
+    assert.ok(
+      took >= VARIABLE_TIMEOUT_MS - 100 && took < VARIABLE_TIMEOUT_MS + 1500,
+      `the read took ${took} ms, not about ${VARIABLE_TIMEOUT_MS} ms`,
+    );
   });
 });
