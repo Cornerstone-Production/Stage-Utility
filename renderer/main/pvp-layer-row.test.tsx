@@ -53,6 +53,7 @@ const FIXTURE_LAYERS = parseWorkspace(FIXTURE);
 const layer = (over: Partial<PvpLayerDTO> = {}): PvpLayerDTO => ({
   uuid: "l1", name: "Graphics", index: 0, state: "video",
   mediaName: "loop_a.mp4", mediaUuid: "m1", lastCueName: "MAIN GRAPHIC", lastCueUuid: "c1", nextCueName: null,
+  mediaSinceAt: null,
   hidden: false, muted: false, opacity: 1, playbackRate: 1,
   anchorElapsedSec: 10, durationSec: 20,
   ...over,
@@ -138,6 +139,17 @@ describe("PvpLayerRow — the five states in the approved table", () => {
     assert.deepEqual(rowQualifiers(layer({ muted: true }), true), ["muted"]);
   });
 
+  test("an ended clip reads `ended`, never `still` — it is not timed either", () => {
+    // GUARD: ended is never timed (durationSec is null), so without the
+    // dedicated branch it falls into the `!timed` arm and reads as a plain
+    // "still" — losing the one distinction the state exists for.
+    const ENDED = { state: "ended" as const, mediaName: "speaker_bumper.mov", playbackRate: 1, anchorElapsedSec: 7.97, durationSec: null };
+    const html = draw(layer(ENDED));
+    assert.ok(html.includes("speaker_bumper.mov"), html);
+    assert.deepEqual(rowQualifiers(layer(ENDED), false), ["ended"]);
+    assert.ok(!/[0-9]:[0-9][0-9]/.test(html), `an ended clip drew a countdown:\n${html}`);
+  });
+
   test("LAST CUE IS GONE FROM THE ROW, on a live layer too", () => {
     // It was the loudest text on the tile and it is the least trustworthy field
     // PVP reports: measured live, media LoopGraphic_1_HeisWorthy.mp4 under a cue
@@ -192,23 +204,46 @@ describe("the hairline rule", () => {
   });
 });
 
+describe("a still's 'on screen' qualifier", () => {
+  test("counts UP from mediaSinceAt, after the state qualifier, never a countdown", () => {
+    const since = new Date(AT - 65_000).toISOString(); // 1:05 ago
+    const html = draw(layer({ ...STILL, mediaSinceAt: since }));
+    assert.ok(html.includes("still"), html);
+    assert.ok(html.includes("on screen 1:05"), `expected the elapsed time counted UP:\n${html}`);
+  });
+
+  test("absent when PVP has not told us an arrival time", () => {
+    const html = draw(layer(STILL));
+    assert.ok(!html.includes("on screen"), html);
+  });
+
+  test("absent on a layer that is not a still, even with a mediaSinceAt", () => {
+    // Belt and braces: `stillOnScreenSec` itself already gates on `state`, but a
+    // regression that stopped gating it would put a stale "on screen" beside a
+    // rolling clip's own countdown.
+    const html = draw(layer({ mediaSinceAt: new Date(AT - 5000).toISOString() }));
+    assert.ok(!html.includes("on screen"), html);
+  });
+});
+
 describe("visibleLayers", () => {
   const c = (over: Partial<Config> = {}): Config => ({ type: "pvp-layers", ...over });
 
   test("with-content drops the empty layers, which is the useful default", () => {
+    // "Tag" is the fixture's ended clip — ended has content, so it stays.
     const shown = visibleLayers(FIXTURE_LAYERS, c({ show: "with-content" }));
-    assert.deepEqual(shown.map((l) => l.name), ["Graphics", "Lower third"]);
+    assert.deepEqual(shown.map((l) => l.name), ["Graphics", "Lower third", "Tag"]);
   });
 
   test("an unset show behaves as with-content", () => {
     assert.deepEqual(
       visibleLayers(FIXTURE_LAYERS, c()).map((l) => l.name),
-      ["Graphics", "Lower third"],
+      ["Graphics", "Lower third", "Tag"],
     );
   });
 
   test("all shows all of them, empties included", () => {
-    assert.equal(visibleLayers(FIXTURE_LAYERS, c({ show: "all" })).length, 4);
+    assert.equal(visibleLayers(FIXTURE_LAYERS, c({ show: "all" })).length, 5);
   });
 
   test("one with no layer chosen shows NOTHING, not everything", () => {
@@ -232,7 +267,7 @@ describe("visibleLayers", () => {
 
 describe("emptyReason", () => {
   const c = (over: Partial<Config> = {}): Config => ({ type: "pvp-layers", ...over });
-  const up: PvpStatusDTO = { connected: true, layers: [], sampledAt: T };
+  const up: PvpStatusDTO = { connected: true, layers: [], sampledAt: T, imageDurationSec: 20 };
 
   test("offline, idle and not-yet-heard are THREE different answers", () => {
     // One message for all of them would send an operator looking for a fault in
@@ -254,7 +289,7 @@ describe("emptyReason", () => {
 describe("PvpObject", () => {
   const render = (config: Config, status: PvpStatusDTO | null): string =>
     renderToStaticMarkup(<PvpObject config={config} status={status} now={AT} skewMs={0} H={1080} />);
-  const live: PvpStatusDTO = { connected: true, layers: FIXTURE_LAYERS, sampledAt: T };
+  const live: PvpStatusDTO = { connected: true, layers: FIXTURE_LAYERS, sampledAt: T, imageDurationSec: 20 };
 
   test("draws one row per visible layer", () => {
     const html = render({ type: "pvp-layers", show: "with-content" }, live);
@@ -278,7 +313,7 @@ describe("PvpObject", () => {
   });
 
   test("without hideWhenEmpty it says why it is empty", () => {
-    const offline: PvpStatusDTO = { connected: false, layers: [], sampledAt: null };
+    const offline: PvpStatusDTO = { connected: false, layers: [], sampledAt: null, imageDurationSec: null };
     assert.ok(render({ type: "pvp-layers", show: "with-content" }, offline).includes("ProVideoPlayer offline"));
     // And before the first snapshot it does not accuse PVP of anything.
     assert.ok(!render({ type: "pvp-layers", show: "with-content" }, null).includes("offline"));

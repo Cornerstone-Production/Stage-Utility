@@ -245,7 +245,7 @@ export function useExpand(enabled: boolean) {
               type="button"
               onClick={close}
               aria-label={`Close ${title}`}
-              className="ml-auto rounded-md p-1.5 text-fg-subtle transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              className="touch-target ml-auto rounded-md p-1.5 text-fg-subtle transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
               <XIcon className="size-4" />
             </button>

@@ -68,7 +68,37 @@ describe("the console rail's icon", () => {
   test("opens on the GLYPH, not on the row", () => {
     // A right-click anywhere on the row would fire while aiming at the label.
     assert.match(ICON, /onContextMenu=/);
-    assert.doesNotMatch(RAIL, /onContextMenu=/, "the rail row itself answers right-clicks");
+    // The rail's OWN `onContextMenu` — added for the resize handle's
+    // tap-and-hold "Reset sidebar width" menu (see context-menu-trigger.ts) —
+    // is a different control on a different edge of the sidebar, not the row
+    // this guard is about; only THAT one use is allowed. Any other
+    // `onContextMenu` in this file would be exactly the regression this
+    // guard exists to catch — a right-click reaching the row (or its label)
+    // instead of staying on the glyph.
+    //
+    // An earlier version of this test only looped over whatever matched and
+    // asserted each was the resize handle's own — with zero matches (a rename,
+    // or `{...resizeTrigger}` swallowing the attribute into a spread) the loop
+    // never ran and the test passed having checked nothing. Asserting an EXACT
+    // count first closes that: a rename, an added raw handler, or a spread
+    // that hides the attribute name all fail the count before the content
+    // check ever gets a chance to pass vacuously.
+    assert.match(
+      RAIL,
+      /import\s*\{[^}]*\buseContextMenuTrigger\b[^}]*\}\s*from\s*["']\.\.\/components\/ui\/context-menu-trigger["']/,
+      "rail.tsx no longer imports useContextMenuTrigger — the resize handle's tap-and-hold menu must ride it, not a raw onContextMenu",
+    );
+    const uses = RAIL.match(/onContextMenu=\{[^}]*\}/g) ?? [];
+    assert.equal(
+      uses.length,
+      1,
+      `expected exactly one onContextMenu attribute in rail.tsx (the resize handle's own), found ${uses.length}: ${JSON.stringify(uses)}`,
+    );
+    assert.match(
+      uses[0],
+      /resizeTrigger\.onContextMenu/,
+      `the one onContextMenu in rail.tsx must be the resize handle's own: ${uses[0]}`,
+    );
   });
 });
 

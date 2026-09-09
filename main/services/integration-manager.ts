@@ -336,6 +336,17 @@ const PVP_DESCRIPTOR: IntegrationDescriptor = {
       help: "Match PVP's own 'Use HTTPS Connection' setting. PVP normally uses a self-signed certificate, which this app will not accept.",
     },
     { key: "token", label: "API Token", type: "password", help: "Only if Require Authentication is on in PVP." },
+    {
+      key: "imageDurationSec",
+      label: "Image duration",
+      type: "number",
+      // PVP's API never reports this — a still's timeRemaining and timeElapsed
+      // are both always 0 — so it cannot be read off the box, only entered here
+      // to match what the operator set in PVP itself. It is a DEFAULT, not a
+      // fact this integration observed, and the help says so.
+      default: 20,
+      help: "From PVP's Preferences → Import → Image Duration. The hold a still counts down from, on widgets that ask.",
+    },
   ],
 };
 
@@ -1453,6 +1464,27 @@ class IntegrationManager {
     return { host, port, https: this.states.get("pvp")?.config.https === "on" };
   }
 
+  /**
+   * The Image Duration default, from the card's own config.
+   *
+   * An unset field resolves to the descriptor's own default (20s) — that is the
+   * ordinary, unconfigured case and not worth a log line. pvpService.configure()
+   * is where an operator-entered value OUTSIDE 1-3600s gets caught and logged;
+   * this only has to resolve "nothing saved yet" the way sensource's poll
+   * interval does.
+   */
+  private getPvpImageDurationSec(): number {
+    const raw = this.states.get("pvp")?.config.imageDurationSec;
+    if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+    // A non-empty string is handed on as parsed, NaN included: "abc" is an
+    // operator's typo, and configure() is where a value it cannot use gets
+    // logged and replaced. Resolving it to the default here would hide the
+    // typo behind a working default — the one class of bad input with no line
+    // in the log.
+    if (typeof raw === "string" && raw.trim()) return parseInt(raw, 10);
+    return 20;
+  }
+
   /** Start/stop the ProVideoPlayer poll to match enabled + configured state. */
   private async applyPvp(): Promise<void> {
     await this.applyService("pvp", pvpService, async () => {
@@ -1461,9 +1493,10 @@ class IntegrationManager {
       // The state map holds secrets MASKED, so anything that dials has to read
       // the real value back out of the secrets store.
       const secrets = await secretsStore.getSecrets("pvp");
+      const imageDurationSec = this.getPvpImageDurationSec();
       return {
         connecting: `Connecting ${host}:${port}`,
-        start: () => pvpService.configure(host, port, https, secrets.token ?? null),
+        start: () => pvpService.configure(host, port, https, secrets.token ?? null, imageDurationSec),
       };
     });
   }

@@ -78,7 +78,7 @@ export function HistoryCalendar({
     <div className="su-card w-full p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <button
-          className="rounded-md p-1 text-fg-subtle transition-colors enabled:hover:bg-fill enabled:hover:text-fg disabled:opacity-30"
+          className="touch-target rounded-md p-1 text-fg-subtle transition-colors enabled:hover:bg-fill enabled:hover:text-fg disabled:opacity-30"
           disabled={!canPrev}
           onClick={() => step(-1)}
           aria-label="Previous month"
@@ -89,7 +89,7 @@ export function HistoryCalendar({
           {MONTHS[view.m]} {view.y}
         </span>
         <button
-          className="rounded-md p-1 text-fg-subtle transition-colors enabled:hover:bg-fill enabled:hover:text-fg disabled:opacity-30"
+          className="touch-target rounded-md p-1 text-fg-subtle transition-colors enabled:hover:bg-fill enabled:hover:text-fg disabled:opacity-30"
           disabled={!canNext}
           onClick={() => step(1)}
           aria-label="Next month"

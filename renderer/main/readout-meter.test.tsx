@@ -236,10 +236,11 @@ describe("both ProVideoPlayer progress rules are the same rule", () => {
     uuid: "l1", name: "Graphics", index: 0, state: "video",
     mediaName: "loop_a.mp4", mediaUuid: "m1",
     lastCueName: null, lastCueUuid: null, nextCueName: null,
+    mediaSinceAt: null,
     hidden: false, muted: false, opacity: 1, playbackRate: 1,
     anchorElapsedSec: 10, durationSec: 20,
   };
-  const status: PvpStatusDTO = { connected: true, layers: [layer], sampledAt: T };
+  const status: PvpStatusDTO = { connected: true, layers: [layer], sampledAt: T, imageDurationSec: 20 };
 
   test("the readout's rule interpolates", () => {
     const { container } = render(

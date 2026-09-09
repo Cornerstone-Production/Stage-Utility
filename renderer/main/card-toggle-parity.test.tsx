@@ -176,9 +176,44 @@ const LAYER: PvpLayerDTO = {
   playbackRate: 1,
   anchorElapsedSec: 12,
   durationSec: 90,
+  mediaSinceAt: null,
 };
-const PVP_LIVE: PvpStatusDTO = { connected: true, layers: [LAYER], sampledAt: new Date(NOW).toISOString() };
-const PVP_IDLE: PvpStatusDTO = { connected: true, layers: [], sampledAt: null };
+const PVP_LIVE: PvpStatusDTO = {
+  connected: true, layers: [LAYER], sampledAt: new Date(NOW).toISOString(), imageDurationSec: 20,
+};
+const PVP_IDLE: PvpStatusDTO = { connected: true, layers: [], sampledAt: null, imageDurationSec: null };
+
+/**
+ * A STILL, for `countStills` alone.
+ *
+ * `LAYER` above is a rolling video on purpose — it is what every OTHER pvp-now
+ * setting (showProgress, showNextCue, compact, nowLabel) is proven against, and
+ * `countStills` has no effect at all on a video. Swapping the shared fixture for
+ * a still would have broken `showProgress`'s own pair test: a still draws no bar
+ * unless it is counting down, so with `countStills` untouched (its own
+ * fallback, off) the "on"/"off" renders of `showProgress` would stop differing.
+ */
+const STILL_LAYER: PvpLayerDTO = {
+  uuid: "layer-2",
+  name: "Stills",
+  index: 0,
+  state: "still",
+  mediaName: "photo.jpg",
+  mediaUuid: "media-2",
+  lastCueName: "Photo cue",
+  lastCueUuid: "cue-2",
+  nextCueName: null,
+  hidden: false,
+  muted: false,
+  opacity: 1,
+  playbackRate: 0,
+  anchorElapsedSec: 0,
+  durationSec: null,
+  mediaSinceAt: new Date(NOW - 5000).toISOString(),
+};
+const PVP_LIVE_STILL: PvpStatusDTO = {
+  connected: true, layers: [STILL_LAYER], sampledAt: new Date(NOW).toISOString(), imageDurationSec: 20,
+};
 
 const PRO_LIVE: ProPresenterStatusDTO = {
   connected: true,
@@ -224,6 +259,16 @@ const TIMELINE: ServiceTimeline = {
  *  subscribe on their own — StreamingCard reaches for Resi, YouTube and OBS, the
  *  PVP cards for PVP — so a ctx fixture alone leaves them looking at nothing. */
 let happening = true;
+/**
+ * The PVP fixture in play for the CURRENT pair test, live half only.
+ *
+ * `countStills` needs a STILL with content to show any difference at all — see
+ * `PVP_LIVE_STILL`'s own comment — and every other PVP setting needs `LAYER`,
+ * the shared video. `draw()` sets this before each render so both halves of the
+ * fixture (this fetch stub, for the Home cards, and `ctxFor`, for the wall
+ * objects) agree on which one is up.
+ */
+let activePvpLive: PvpStatusDTO = PVP_LIVE;
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
   const url = String(input);
   const pick = <T,>(live: T, idle: T): T => (happening ? live : idle);
@@ -231,7 +276,7 @@ let happening = true;
     url.includes("/api/obs/status") ? pick(OBS_LIVE, OBS_IDLE)
     : url.includes("/api/reaper/status") ? pick(REAPER_LIVE, REAPER_IDLE)
     : url.includes("/api/resi/status") || url.includes("/api/youtube/status") ? pick(STREAM_LIVE, STREAM_IDLE)
-    : url.includes("/api/pvp/status") ? pick(PVP_LIVE, PVP_IDLE)
+    : url.includes("/api/pvp/status") ? pick(activePvpLive, PVP_IDLE)
     : url.includes("/api/spl/metrics") ? pick(SPL_LIVE, SPL_IDLE)
     : url.includes("/api/scores/status") ? pick(SCORES_LIVE, SCORES_IDLE)
     : url.includes("/api/attendance/history") ? ATTENDANCE
@@ -277,7 +322,7 @@ function ctxFor(home: boolean, live: boolean) {
     reaper: live ? REAPER_LIVE : REAPER_IDLE,
     resi: live ? STREAM_LIVE : STREAM_IDLE,
     youtube: live ? STREAM_LIVE : STREAM_IDLE,
-    pvp: live ? PVP_LIVE : PVP_IDLE,
+    pvp: live ? activePvpLive : PVP_IDLE,
     spl: live ? SPL_LIVE : SPL_IDLE,
     // The WALL scores object reads ctx; the Home card opens its own hook. Both
     // are fed, because the guard renders each pair on both surfaces.
@@ -316,9 +361,18 @@ const PREREQ: Record<string, Record<string, unknown>> = {
   nowLabel: { compact: true },
 };
 
+/**
+ * Which PVP fixture a setting needs to show anything — see `activePvpLive`'s
+ * own doc. Every other key not named here gets the shared video, `PVP_LIVE`.
+ */
+const PVP_LIVE_FOR: Record<string, PvpStatusDTO> = {
+  countStills: PVP_LIVE_STILL,
+};
+
 /** One render of one object, as markup. */
 async function draw(type: string, key: string, value: unknown, home: boolean, live: boolean): Promise<string> {
   happening = live;
+  activePvpLive = PVP_LIVE_FOR[key] ?? PVP_LIVE;
   const base = LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS].config() as Record<string, unknown>;
   let container!: HTMLElement;
   await act(async () => {

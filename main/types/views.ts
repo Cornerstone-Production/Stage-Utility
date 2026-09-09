@@ -668,6 +668,26 @@ export type LayoutObjectConfig =
        * so reusing it would have pulled every button type into this setting.
        */
       nowLabel?: "cue" | "file" | "file-ext" | "layer";
+      /**
+       * Count a STILL down, the same way a rolling clip already counts down.
+       *
+       * Off by default and deliberately per-widget rather than a fact PVP
+       * reports: the same image duration is stored on every still in the
+       * library, including ones whose Next Behavior is None and that are never
+       * going anywhere — a countdown on a graphic that stays up is a lie. This
+       * is the operator opting one widget IN, for a layer whose cue actually
+       * advances on the hold (a rotating pre-roll, say).
+       */
+      countStills?: boolean;
+      /**
+       * Override the PVP integration card's Image Duration default, for this
+       * widget alone. `null` (the default) uses the card's own
+       * `imageDurationSec` — see `PvpStatusDTO.imageDurationSec`. Ignored unless
+       * `countStills` is on. Inspector-only: Home's card menu is a short list of
+       * switches and offers no numeric field, the same reason `layerName` is
+       * absent from `home-pvp-now` below.
+       */
+      stillHoldSec?: number | null;
     }
   // The same reading on the operator's own page. No `layerName`: Home's card
   // settings are a short menu of switches, so a text field there would be a
@@ -681,6 +701,9 @@ export type LayoutObjectConfig =
       compact?: boolean;
       /** Same meaning as the wall object's — see `pvp-now`. */
       nowLabel?: "cue" | "file" | "file-ext" | "layer";
+      /** Same meaning as the wall object's — see `pvp-now`. No `stillHoldSec`
+       *  here: that field is inspector-only on the wall object too. */
+      countStills?: boolean;
     }
   // Followed scores on the operator's own Home page. A quiet composition, NOT
   // the wall strip: a Home tile sits beside a readiness list and a next-service

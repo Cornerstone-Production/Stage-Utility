@@ -46,3 +46,18 @@ export const MOBILE_MAX_WIDTH = 640;
 export function useIsMobile(): boolean {
   return useMediaQuery(`(max-width: ${MOBILE_MAX_WIDTH - 1}px)`);
 }
+
+/**
+ * True when the primary pointer is coarse — a finger, not a mouse.
+ *
+ * `(pointer: coarse)`, not a width check: an iPad in landscape is well past
+ * `MOBILE_MAX_WIDTH` and still has no cursor, and a narrow browser window on a
+ * desktop is well under it and still has one. This is the one signal that
+ * answers "can this visitor right-click" rather than "how wide is the window."
+ *
+ * Gates the ⋯ buttons that stand in for a menu's only other way in — a mouse
+ * user must see nothing new.
+ */
+export function useCoarsePointer(): boolean {
+  return useMediaQuery("(pointer: coarse)");
+}

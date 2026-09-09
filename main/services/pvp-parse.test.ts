@@ -5,7 +5,9 @@ import { describe, test } from "node:test";
 import {
   parseWorkspace, layerSignature, anchorDriftSec, driftedLayers,
   cueSuccessors, hasUnknownCue, isPlaylistsResponse, isWorkspaceResponse, withNextCues,
+  updateMediaSince, withMediaSinceAt,
 } from "./pvp-parse.js";
+import type { MediaSinceEntry } from "./pvp-parse.js";
 import type { PvpLayerDTO, PvpStatusDTO } from "../types/pvp.js";
 
 const FIXTURE: unknown = JSON.parse(
@@ -23,7 +25,7 @@ function byName(layers: PvpLayerDTO[], name: string): PvpLayerDTO {
 
 describe("parseWorkspace", () => {
   test("reads every layer in the workspace", () => {
-    assert.equal(parseWorkspace(FIXTURE).length, 4);
+    assert.equal(parseWorkspace(FIXTURE).length, 5);
   });
 
   test("a layer with a rolling video is 'video'", () => {
@@ -112,6 +114,43 @@ describe("parseWorkspace", () => {
     assert.equal(byName(layers, "Graphics").anchorElapsedSec, 9.6);
     // A still's timeRemaining is 0, so a "duration" would just echo its elapsed.
     assert.equal(byName(layers, "Lower third").durationSec, null);
+  });
+
+  test("a clip that ran out is 'ended', not 'video' — real PVP output for a", () => {
+    // finished clip holding its last frame: playbackRate: 1 (never reset),
+    // timeRemaining: 0, timeElapsed > 0, isPlaying: false. Read naively that is
+    // "video" with durationSec null, which drew "playing" beside "no duration".
+    const l = byName(parseWorkspace(FIXTURE), "Tag");
+    assert.equal(l.state, "ended");
+    assert.equal(l.mediaName, "speaker_bumper.mov");
+    assert.equal(l.playbackRate, 1, "PVP never resets the rate on a clip that ran out");
+    assert.equal(l.durationSec, null, "nothing is left to count for a clip that already ended");
+    assert.equal(l.anchorElapsedSec, 7.97);
+  });
+
+  test("a still is unchanged: isPlaying true keeps it 'still', never 'ended'", () => {
+    // The case an ended clip could be confused with: same timeRemaining 0, same
+    // shape otherwise, but a still reports isPlaying true.
+    const l = byName(parseWorkspace(FIXTURE), "Lower third");
+    assert.equal(l.state, "still");
+  });
+
+  test("a paused clip is unchanged: timeRemaining > 0 keeps it 'video', never 'ended'", () => {
+    const l = parseWorkspace({
+      data: [{
+        transportState: {
+          isPlaying: false, playbackRate: 0, timeElapsed: 10, timeRemaining: 10,
+          playingMedia: { name: "clip.mp4", uuid: "m1" },
+          layer: { uuid: "p2", name: "Paused" },
+        },
+      }],
+    })[0];
+    assert.equal(l.state, "video", "time left on the clock is never 'ended'");
+  });
+
+  test("a rolling video is unchanged: isPlaying true (or absent) keeps it 'video'", () => {
+    const l = byName(parseWorkspace(FIXTURE), "Graphics");
+    assert.equal(l.state, "video");
   });
 
   test("an empty layer has no anchor and no duration", () => {
@@ -234,6 +273,10 @@ describe("layerSignature", () => {
       // The uuid beside it is the identity; a name change under a stable uuid is
       // a relabel, not a cue.
       { mediaName: "something_else.mp4" },
+      // It moves only when the media changes, and a media change already trips
+      // `mediaUuid` above — so including it too would buy nothing except a
+      // second frame for the same event.
+      { mediaSinceAt: "2026-08-30T12:05:00.000Z" },
     ] as Partial<PvpLayerDTO>[]) {
       const next = base.map((l, i) => (i === 0 ? { ...l, ...patch } : l));
       assert.equal(
@@ -287,7 +330,7 @@ describe("anchorDriftSec", () => {
 });
 
 describe("driftedLayers", () => {
-  const at = (iso: string, layers: PvpLayerDTO[]): PvpStatusDTO => ({ connected: true, layers, sampledAt: iso });
+  const at = (iso: string, layers: PvpLayerDTO[]): PvpStatusDTO => ({ connected: true, layers, sampledAt: iso, imageDurationSec: 20 });
   const T0 = "2026-08-30T12:00:00.000Z";
   const T1 = "2026-08-30T12:00:01.000Z";
   const base = parseWorkspace(FIXTURE);
@@ -318,10 +361,25 @@ describe("driftedLayers", () => {
   test("an idle workspace of stills never drifts, however long it sits", () => {
     // Every still has rate 0, so it predicts no movement. Without that, a
     // workspace holding one graphic between services would force a frame on
-    // every poll for hours.
+    // every poll for hours. The fixture's "Tag" layer is ENDED here, not a
+    // still, and its own test below is the one that matters for it.
     const stills = base.filter((l) => l.state !== "video");
     const later = "2026-08-30T13:00:00.000Z";
     assert.deepEqual(driftedLayers(at(T0, stills), at(later, stills), 1), []);
+  });
+
+  test("AN ENDED CLIP NEVER DRIFTS, however non-zero the rate it stopped at", () => {
+    // GUARD. PVP was observed reporting playbackRate: 1 on a clip that had
+    // already ended (see the parser's own test for the raw shape). Restore
+    // driftedLayers to predicting from raw playbackRate with no state gate and
+    // this goes red: an hour-old ended clip whose anchor never moved would
+    // "drift" further from its frozen anchor every second, forcing a frame on
+    // every keepalive for the rest of the service.
+    const ended = base.filter((l) => l.state === "ended");
+    assert.ok(ended.length > 0, "the fixture has no ended layer to test with");
+    assert.ok(ended.some((l) => l.playbackRate > 0), "the ended layer must carry a non-zero rate to prove this");
+    const later = "2026-08-30T13:00:00.000Z";
+    assert.deepEqual(driftedLayers(at(T0, ended), at(later, ended), 1), []);
   });
 });
 
@@ -472,6 +530,90 @@ describe("withNextCues", () => {
 
   test("an unknown cue leaves null rather than guessing", () => {
     assert.equal(withNextCues(base, new Map())[0].nextCueName, null);
+  });
+});
+
+describe("updateMediaSince", () => {
+  const base = parseWorkspace(FIXTURE);
+  const graphics = () => byName(base, "Graphics"); // video, media-0001
+  const lowerThird = () => byName(base, "Lower third"); // still, media-0002
+  const T0 = 1_000_000;
+
+  test("first sight stamps every layer with content at the current clock", () => {
+    const map = updateMediaSince(base, new Map(), T0);
+    assert.equal(map.get(graphics().uuid)?.sinceMs, T0);
+    assert.equal(map.get(lowerThird().uuid)?.sinceMs, T0);
+  });
+
+  test("an empty layer gets no entry", () => {
+    const map = updateMediaSince(base, new Map(), T0);
+    const exitScreen = byName(base, "Exit screen"); // no playingMedia
+    assert.equal(map.has(exitScreen.uuid), false);
+  });
+
+  test("the SAME media across ticks keeps the ORIGINAL timestamp, not a fresh one", () => {
+    // THE guard this whole map exists for: if every poll re-stamped an unchanged
+    // media, a widget counting a still down would never see the timestamp move
+    // and would read as permanently just-arrived.
+    const first = updateMediaSince(base, new Map(), T0);
+    const second = updateMediaSince(base, first, T0 + 5000);
+    assert.equal(second.get(lowerThird().uuid)?.sinceMs, T0, "an unchanged still got a fresh timestamp");
+    // And the entry object itself is reused, not rebuilt — withMediaSinceAt
+    // below relies on that to avoid stamping every layer on every poll.
+    assert.equal(second.get(lowerThird().uuid), first.get(lowerThird().uuid));
+  });
+
+  test("a cue change on the SAME layer resets its timestamp", () => {
+    const first = updateMediaSince(base, new Map(), T0);
+    const recued = base.map((l) =>
+      l.uuid === lowerThird().uuid ? { ...l, mediaUuid: "media-9999", mediaName: "different.png" } : l,
+    );
+    const second = updateMediaSince(recued, first, T0 + 5000);
+    assert.equal(second.get(lowerThird().uuid)?.sinceMs, T0 + 5000);
+  });
+
+  test("a layer that goes empty drops its entry, so coming back counts as freshly seen", () => {
+    const first = updateMediaSince(base, new Map(), T0);
+    const emptied = base.map((l) => (l.uuid === lowerThird().uuid ? { ...l, mediaUuid: null, mediaName: null, state: "empty" as const } : l));
+    const second = updateMediaSince(emptied, first, T0 + 5000);
+    assert.equal(second.has(lowerThird().uuid), false);
+  });
+
+  test("no uuid at all still keys on the file name, so a build that omits it is not treated as unchanging forever", () => {
+    const noUuid = base.map((l) => (l.uuid === lowerThird().uuid ? { ...l, mediaUuid: null } : l));
+    const first = updateMediaSince(noUuid, new Map(), T0);
+    const recued = noUuid.map((l) => (l.uuid === lowerThird().uuid ? { ...l, mediaName: "different.png" } : l));
+    const second = updateMediaSince(recued, first, T0 + 5000);
+    assert.equal(second.get(lowerThird().uuid)?.sinceMs, T0 + 5000, "a file-name-only media change was not noticed");
+  });
+});
+
+describe("withMediaSinceAt", () => {
+  const base = parseWorkspace(FIXTURE);
+  const T0 = Date.parse("2026-08-30T12:00:00.000Z");
+
+  test("stamps the ISO time from the map, null when the layer has no entry", () => {
+    const since = new Map<string, MediaSinceEntry>([[byName(base, "Graphics").uuid, { mediaKey: "media-0001", sinceMs: T0 }]]);
+    const out = withMediaSinceAt(base, since);
+    assert.equal(byName(out, "Graphics").mediaSinceAt, new Date(T0).toISOString());
+    assert.equal(byName(out, "Lower third").mediaSinceAt, null);
+  });
+
+  test("it never mutates the layers it was given", () => {
+    const since = updateMediaSince(base, new Map(), T0);
+    const before = JSON.stringify(base);
+    withMediaSinceAt(base, since);
+    assert.equal(JSON.stringify(base), before);
+  });
+
+  test("an unchanged mediaSinceAt reuses the SAME layer object", () => {
+    // emitIfChanged compares the array via layerSignature, which does not
+    // include mediaSinceAt at all — but a fresh object here would still cost an
+    // allocation every poll for nothing, and this is the same discipline
+    // withNextCues already keeps.
+    const since = updateMediaSince(base, new Map(), T0);
+    const stamped = withMediaSinceAt(base, since);
+    assert.equal(withMediaSinceAt(stamped, since)[0], stamped[0]);
   });
 });
 

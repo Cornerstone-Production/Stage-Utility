@@ -10,7 +10,8 @@ different on Home than on a wall, it says so below.
 - **Add one to a screen**: Screens → a view → **Edit** → **Add widget**.
 - **Add one to Home**: the pencil in the Home header → **Add widget**.
 - **Change one**: click it in the editor and use the inspector, or **right-click a
-  Home tile** for its size, when it shows, and the few settings it supports.
+  Home tile** — or tap and hold it — for its size, when it shows, and the few
+  settings it supports.
 
 A widget whose integration is not set up draws a dash rather than disappearing, so
 a screen does not silently lose a tile when a device goes offline. The palette can
@@ -52,9 +53,10 @@ switches.
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
 **Recent services** draws the same attendance trend the History tab does.
-Right-click it for **SPL trend line** — the service level for each date, behind the
-attendance curve on its own dB scale — and **Metric**, which picks the Smaart metric
-it plots. See [Attendance and history](../features/attendance-and-history.md).
+Right-click it — or tap and hold it — for **SPL trend line** — the service level
+for each date, behind the attendance curve on its own dB scale — and **Metric**,
+which picks the Smaart metric it plots. See
+[Attendance and history](../features/attendance-and-history.md).
 
 **Service pacing** carries slippage forward from earlier items and keeps growing
 while the current item runs long, so it answers "are we going to finish on time",
@@ -170,9 +172,9 @@ and two of them describe what the tile does on a screen: **Elapsed time** applie
 on both surfaces, while **Fill the card when live** and **Hide when idle** shape
 the screen presentation, which is the only one that fills or hides.
 
-Right-click a Home tile to choose what it answers for: **Platform** on
-**Streaming** (any, Resi, YouTube) and **Recorder** on **Recording** (every
-recorder, OBS, REAPER). Both also offer **Elapsed time**.
+Right-click a Home tile — or tap and hold it — to choose what it answers for:
+**Platform** on **Streaming** (any, Resi, YouTube) and **Recorder** on
+**Recording** (every recorder, OBS, REAPER). Both also offer **Elapsed time**.
 
 > Four Home cards are marked *replaced* below — **OBS recording**, **REAPER
 > recording**, **Resi status** and **YouTube status**. Each was the general card
@@ -242,13 +244,23 @@ how much of it is left. A layer with nothing on it reads **empty**.
 
 The word after the time says what is unusual — **still** for a graphic, which has
 no duration to count and so shows no time at all; **paused** for a clip that has
-stopped where it was; **hidden** or **muted** for live content nobody can see or
-hear; and a percentage for a layer that has been faded.
+stopped where it was; **ended** for a clip that ran out and is holding its last
+frame; **hidden** or **muted** for live content nobody can see or hear; and a
+percentage for a layer that has been faded. A still also reads **on screen
+m:ss**, counting UP from when its current file first appeared — there is no
+per-layer hold to count DOWN against here; that lives on **ProVideoPlayer now**,
+below.
 
 **Show** chooses between every layer, only the layers holding something (the
-default), and one layer by name. **Progress bar** adds a hairline rule under each
-rolling clip; it is off by default, because the time remaining is always shown
-and four rules stacked in one tile is a lot of chrome for a glance.
+default), and one layer by name. Naming one layer picks it from a dropdown of
+PVP's own live layers, each with its current state word beside it, or **Type a
+layer name…** to type one instead — kept visible whenever the typed name is not
+(yet) one PVP is reporting, so a layout can be built on a laptop away from the
+machine. Until a layer is chosen the widget shows nothing and says so. A name that does not match a live layer shows its own selected option,
+labelled **not found**, rather than snapping back to a default. **Progress bar**
+adds a hairline rule under each rolling clip; it is off by default, because the
+time remaining is always shown and four rules stacked in one tile is a lot of
+chrome for a glance.
 
 A layer list longer than its widget is clipped — a screen cannot scroll — so the
 widget says **+N more** in the corner rather than dropping the tail silently. The
@@ -256,13 +268,24 @@ Home card shows up to three layers and does the same.
 
 ### ProVideoPlayer now
 
-The same data as one reading rather than a list: the file that is up, how long is
-left, and a state word — playing, paused, still or empty — beside the caption.
-**Layer** picks which layer it reads; left empty it follows whichever layer has
-something on it. A layer with nothing on it says so rather than counting down to
-nothing.
+The same data as one reading rather than a list, leading with how long is left:
+while a clip is rolling, the countdown IS the value, with the file it belongs to
+and the file's total length underneath. A layer with nothing left to count —
+still, ended, or nothing on it at all — falls back to the current cue's name (or
+the file name, without its extension, when there is no cue to read), with a state
+word — **playing**, **paused**, **still**, **ended**, **empty** or **not
+found** — beside the caption.
 
-**Progress bar** draws a hairline rule under the time. It advances smoothly
+**Layer** picks which layer it reads, from the same dropdown of live layers the
+layer list's Show uses (see above), or Any layer with content to follow whichever
+layer has something on it. Naming a layer changes the caption itself: it reads
+`PVP · <layer name>` in every state, including empty and not found, so the tile
+says which one it is without waiting for content. With no layer named the
+caption is the fixed word "ProVideoPlayer" (compact: bare "PVP"). A named layer
+PVP is not currently reporting reads **not found**, with its own sentence — never
+"empty", which is a different problem (the layer exists and has nothing on it).
+
+**Progress bar** draws a hairline rule under the countdown. It advances smoothly
 rather than a step a second, and snaps instead of sliding whenever the change is
 not a tick — a cue change, a scrub, or a display waking up. A paused clip holds
 its bar where it stopped.
@@ -274,14 +297,35 @@ this line is wrong until the next poll. It is the quietest line on the widget fo
 that reason, it is never drawn without a current cue to anchor it, and it can be
 switched off.
 
-**Compact** trades the three-line composition above for two: the caption becomes
-`PVP · <label>`, and the value is the countdown alone — no "remaining" word, no
-next-cue footer. A still shows `no duration`, dimmed, in place of a countdown; an
-empty layer still says so, with a bare `PVP` caption. **Label** chooses what the
-compact caption names: the layer's current cue, the media file's name with or
-without its extension, or the layer's own name. It falls back to the file name
-when there is no cue name to read, and it has no effect outside compact mode —
-the normal composition's value is always the media name.
+**Compact** trades the composition above for two lines: the caption becomes
+`PVP · <label>` (or `PVP · <layer name>` when a layer is pinned, in every state),
+and the value is the countdown alone while there is one. With nothing to count —
+a still, an ended clip, or an empty layer's dash — the value falls back to
+whichever of the cue name or the file name is NOT already the caption, so the
+tile never repeats itself and never reads the literal "no duration". **Label**
+chooses what the caption names when no layer is pinned: the layer's current cue,
+the media file's name with or without its extension, or the layer's own name. It
+falls back to the file name when there is no cue name to read, and it has no
+effect on a pinned tile, whose caption is always the layer's own name.
+
+**Count down stills**, off by default, counts a STILL down the way a rolling clip
+already counts down — the value slot, the progress bar and (in the normal
+composition) the sub line all read exactly as they do for a clip. PVP's API never
+reports a still's duration, so the hold comes from **Still hold (seconds)**, a
+per-widget number that appears once this is on; left alone it follows the PVP
+integration card's own Image Duration default, and editing it pins the widget to
+its own number. It is off by default and
+per-widget on purpose: a still's Duration is set at import and stored on every
+image in the library, including ones whose Next Behavior is None and that never
+advance — a countdown on a graphic that is not going anywhere would be a lie, so
+this is the operator opting IN a specific widget, for a layer whose cue actually
+advances on the hold (a rotating pre-roll, say). Once the hold runs out the
+countdown holds at 0:00 with a full bar rather than switching to another state.
+
+With **Count down stills** off, a still still gets one line the countdown steals
+otherwise: the normal composition's sub line gains **on screen**, counting UP
+from when the file first appeared, on the same clock the layer list's own **on
+screen** reads (compact mode shows nothing extra).
 
 The **last cue** a layer played is deliberately not shown on any of these. PVP
 reports it and it never clears, so four idle layers were observed all naming the
@@ -348,10 +392,10 @@ See [Wireless Gear](../integrations/wireless.md) and [Mic slots](../slots.md).
 **SPL meter** picks its meter and which metric to read, and can colour itself past
 thresholds you set. See [Smaart](../integrations/smaart.md).
 
-**Sound level** reads whichever meter is loudest. To watch one instead, right-click
-the tile and pick it under **Meter**. A pinned meter that stops reporting says so
-rather than falling back to another one, so the number on the tile is always the
-channel it names.
+**Sound level** reads whichever meter is loudest. To watch one instead,
+right-click the tile — or tap and hold it — and pick it under **Meter**. A
+pinned meter that stops reporting says so rather than falling back to another
+one, so the number on the tile is always the channel it names.
 
 ## People
 

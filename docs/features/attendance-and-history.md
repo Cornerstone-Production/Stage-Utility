@@ -34,10 +34,15 @@ average, and per-item SPL.
 
 The overview's attendance trend can carry a second line: the **service SPL** for
 each date, drawn behind the attendance curve on its own dB scale. Right-click the
-chart to switch it on and to choose which Smaart metric it plots — the list offers
-the metrics your history actually holds, and defaults to the LAeq with the longest
+chart — or tap and hold it, or tap the **⋯** in its corner on a touch device — to
+switch it on and to choose which Smaart metric it plots — the list offers the
+metrics your history actually holds, and defaults to the LAeq with the longest
 averaging window the meter reports (LAeq 10 over LAeq 2 over LAeq 1), because that
 is the steadiest number for "how loud was the service".
+
+Hovering a point with a mouse shows its reading in a tooltip; on a touch device,
+tapping a point pins that same reading in place — no hover needed — until another
+tap elsewhere on the page clears it.
 
 Each point is the service's equivalent continuous level, energy-averaged across
 its plan items and weighted by how long each ran, so a 30-second welcome does not
@@ -45,10 +50,10 @@ count as much as a 25-minute sermon. Several services on one date combine the sa
 way. A date with no recording breaks the line rather than dropping it to zero — a
 missing reading is not a quiet service. The setting is per-machine and off by
 default; Home's **Recent services** widget offers the same two settings on its own
-right-click menu, but only History shows the summary below — Home stays headline
-figures only.
+right-click (or tap-and-hold) menu, but only History shows the summary below —
+Home stays headline figures only.
 
-On History, while the line is on, the same right-click menu also puts an average
+On History, while the line is on, the same right-click (or tap-and-hold) menu also puts an average
 level under the average attendance, in the same shape: the level across settled
 weekends, then the latest weekend against the four before it. The comparison is
 a **dB difference**, not a percentage — decibels are logarithmic, so a percentage

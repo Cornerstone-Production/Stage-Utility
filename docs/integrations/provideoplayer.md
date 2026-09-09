@@ -43,28 +43,43 @@ note the **port shown there**. Leave *Use HTTPS Connection* off (see below). If
 **In Stage:** Settings → Integrations → **ProVideoPlayer** →
 enter the **Host** and the **Network API Port** — prefilled with 50742, PVP's
 usual port, so check it against what the preferences pane shows and change it if
-yours differs — paste the **API Token** if you use one, enable it, and
-**Test connection**. A successful test names how many layers PVP has and how many
-are showing something.
+yours differs — paste the **API Token** if you use one, set **Image duration** to
+match Preferences → Import → Image Duration, enable it, and **Test connection**. A
+successful test names how many layers PVP has and how many are showing something.
+
+**Image duration is a setting you enter, not a fact PVP reports.** Every still
+image gets a Duration at import — 20 seconds by default — and PVP's own transport
+API never exposes it: a still's `timeRemaining` and `timeElapsed` are both always
+0, whether it is about to advance or sitting on screen indefinitely. This field is
+the hold a widget counts a still down from when it opts in — see **Count down
+stills** below — and it is only as accurate as it matches what Import actually
+used. A value outside 1–3600 seconds is ignored and the default of 20 is used
+instead.
 
 **On a layout:** add object → **ProVideoPlayer**, which offers two widgets and a
 Home card for each.
 
 **ProVideoPlayer layers** is the list — one row per layer, with the file it is
 holding and how long is left. Options: which layers to show (all, only the ones
-holding something, or one by name), a hairline progress bar, and hide when
-nothing is on screen. **ProVideoPlayer** is its Home card, showing up to three
-layers with content.
+holding something, or one by name, picked from a dropdown of PVP's own live
+layers or typed by hand), a hairline progress bar, and hide when nothing is on
+screen. **ProVideoPlayer** is its Home card, showing up to three layers with
+content.
 
 **ProVideoPlayer now** answers the other question: what is up right now, on one
-layer, as a single reading with a state word beside it. Options: which layer,
-the progress bar, the next cue, and Compact — a two-line treatment for a small
-tile, caption plus countdown, whose Label chooses what the caption names (the
-current cue, the file name with or without its extension, or the layer name).
-**On screen now** is its Home card.
+layer, leading with the countdown while there is one and a state word beside the
+caption. Options: which layer (the same picker the layer list uses — naming one
+also puts its name in the caption, in every state), the progress bar, the next
+cue, Compact — a two-line treatment for a small tile, caption plus value, whose
+Label chooses what an UNPINNED caption names (the current cue, the file name with
+or without its extension, or the layer name) — and **Count down stills**, off by
+default, which counts a still down the same way a rolling clip already counts
+down. See [Widgets](../reference/widgets.md) for what it uses as the hold and why
+it defaults off. **On screen now** is its Home card.
 
-Home's cards take their settings from a right-click on the card, not from the
-layout editor. See [Widgets](../reference/widgets.md) for what each line means.
+Home's cards take their settings from a right-click on the card (or tap and
+hold it), not from the layout editor. See [Widgets](../reference/widgets.md)
+for what each line means.
 
 ## Four things that will otherwise surprise you
 

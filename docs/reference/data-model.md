@@ -91,10 +91,11 @@ Home is edited in the Home tab itself, with the pencil in the header. In edit
 mode each tile gains a size picker, a visibility select, a remove button and a
 drag handle, and **Add widget** offers the whole object registry.
 
-**Right-click a tile** for its size, when it shows, remove, and the few settings
-that widget supports — seconds and the hour cycle on a clock, hide-when-idle and
-fill-when-recording on a status widget. No edit mode needed. Ticking one leaves
-the menu open, so several can be changed at once. Home's own cards
+**Right-click a tile** — or tap and hold it — for its size, when it shows,
+remove, and the few settings that widget supports — seconds and the hour cycle
+on a clock, hide-when-idle and fill-when-recording on a status widget. No edit
+mode needed. Ticking one leaves the menu open, so several can be changed at
+once. Home's own cards
 (`home-screens`, `home-recording` and the rest) carry no settings on purpose;
 their menu is size, visibility and remove.
 

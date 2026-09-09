@@ -12,7 +12,7 @@
 // SplitView needs the same values to size the panel and to decide between the
 // inline rail and the mobile drawer.
 
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { ConsoleRailIcon } from "../components/console-rail-icon";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
@@ -27,6 +27,8 @@ import { BrandHeader } from "../settings/brand-header";
 import { BrandLogo } from "../components/brand-logo";
 import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
+import { ContextMenu } from "../components/ui/context-menu";
+import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useTheme } from "../lib/use-theme";
 import { buildLabel } from "../lib/build-label";
 import { withViewTransition } from "../lib/view-transition";
@@ -67,6 +69,15 @@ export function Rail({
   // in context. Reading it here rather than recomputing keeps the drawer from
   // rendering as an icon rail.
   const { collapsed: railed, isMobile } = useSidebarChrome();
+
+  // The resize handle's only other way in on a coarse pointer: `onDoubleClick`
+  // resets the width for a mouse, but a finger has no double-click. There is
+  // no existing rail-level menu to add a second item to — ConsoleRailIcon's
+  // menu is per-console and about icons, not the rail itself — so this is a
+  // menu of exactly one item, opened the same way every other touch-only menu
+  // in the app is (see context-menu-trigger.ts).
+  const [resizeMenu, setResizeMenu] = useState<{ x: number; y: number } | null>(null);
+  const resizeTrigger = useContextMenuTrigger((point) => setResizeMenu(point));
 
   // The footer's version readout. A failure here must not blank the navigation,
   // but it is not swallowed either: the reason is kept and shown in the tooltip,
@@ -222,7 +233,7 @@ export function Rail({
               type="button"
               aria-label="Expand sidebar"
               onClick={onToggleCollapsed}
-              className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
+              className="touch-target rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
             >
               <PanelLeftOpenIcon className="size-4" />
             </button>
@@ -253,7 +264,7 @@ export function Rail({
                   type="button"
                   aria-label="Collapse sidebar"
                   onClick={onToggleCollapsed}
-                  className="rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
+                  className="touch-target rounded-lg p-1.5 text-fg-subtle hover:bg-fill hover:text-fg transition-colors duration-(--motion-instant)"
                 >
                   <PanelLeftCloseIcon className="size-4" />
                 </button>
@@ -267,20 +278,45 @@ export function Rail({
           a fixed width) and on mobile (the drawer sizes itself).
 
           The hit area is 7px but only a 1px line lights up, so it is easy to
-          grab without drawing a permanent seam. Double-click resets, which is
-          the way back from a drag that went badly. */}
+          grab without drawing a permanent seam — widened to 16px under a
+          coarse pointer (`coarse:w-4`), where 7px is under a finger's own
+          width, while the line itself stays the same thin `after:w-px`.
+          Double-click resets, which is the way back from a drag that went
+          badly, for a mouse — a finger has no double-click, so a tap-and-hold
+          opens the one-item menu below instead (see `resizeTrigger` and its
+          comment above). This handle already owns `after:` for the visible
+          line, so the reset item rides `useContextMenuTrigger` directly
+          rather than the shared `.touch-target` class, which would collide
+          with it on the same pseudo-element. */}
       {!railed && !isMobile && (
         <div
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize sidebar"
-          onPointerDown={onStartResize}
+          onPointerDown={(e) => {
+            onStartResize(e);
+            resizeTrigger.onPointerDown(e);
+          }}
+          onPointerMove={resizeTrigger.onPointerMove}
+          onPointerUp={resizeTrigger.onPointerUp}
+          onPointerCancel={resizeTrigger.onPointerCancel}
+          onContextMenu={resizeTrigger.onContextMenu}
+          onClickCapture={resizeTrigger.onClickCapture}
           onDoubleClick={onResetWidth}
+          style={resizeTrigger.style}
           className={cn(
-            "absolute inset-y-0 right-0 z-10 w-[7px] cursor-col-resize",
+            "absolute inset-y-0 right-0 z-10 w-[7px] coarse:w-4 cursor-col-resize",
             "after:absolute after:inset-y-0 after:right-0 after:w-px after:transition-colors",
             dragging ? "after:bg-accent" : "after:bg-transparent hover:after:bg-line-strong",
           )}
+        />
+      )}
+      {resizeMenu && (
+        <ContextMenu
+          x={resizeMenu.x}
+          y={resizeMenu.y}
+          items={[{ label: "Reset sidebar width", onSelect: onResetWidth }]}
+          onClose={() => setResizeMenu(null)}
         />
       )}
     </Sidebar>

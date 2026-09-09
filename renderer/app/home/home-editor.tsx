@@ -109,7 +109,7 @@ export function CardChrome({
           type="button"
           onClick={onRemove}
           aria-label={`Remove ${label}`}
-          className="grid h-5 w-5 place-items-center rounded-[5px] text-fg-subtle transition-colors hover:bg-danger-9 hover:text-white"
+          className="touch-target grid h-5 w-5 place-items-center rounded-[5px] text-fg-subtle transition-colors hover:bg-danger-9 hover:text-white"
         >
           <XIcon className="size-3" />
         </button>

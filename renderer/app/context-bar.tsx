@@ -27,8 +27,10 @@ import { useServerSkew } from "@renderer/lib/use-server-skew";
 import { useDashboardState } from "../main/use-dashboard-state";
 import { computePcoTimer, fmtDuration } from "../main/pco-timer";
 import { cn } from "../lib/cn";
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
+import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
+import { EllipsisIcon } from "lucide-react";
 import { BarConfigurator } from "./bar-configurator";
 import {
   BAR_PROSE_ITEMS,
@@ -40,7 +42,7 @@ import {
   type BarRowId,
 } from "./bar-items";
 import { useBarFit } from "./bar-fit";
-import { useIsMobile } from "../lib/use-media-query";
+import { useIsMobile, useCoarsePointer } from "../lib/use-media-query";
 import { recordIndicator, recorders, streamingStat, streamers } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
@@ -306,14 +308,24 @@ export function ContextBar({ active }: { active: ActivePage | null }) {
     { label: "Configure bar…", onSelect: () => setConfiguring(true) },
   ];
 
-  function openMenu(e: ReactMouseEvent) {
-    e.preventDefault();
-    setMenu({ x: e.clientX, y: e.clientY });
-  }
+  const trigger = useContextMenuTrigger((pt) => setMenu(pt));
+  // A mouse never sees this: the strip's own right-click is unaffected, and the
+  // button exists only where that gesture does not — see useCoarsePointer.
+  const isCoarse = useCoarsePointer();
 
   return (
     <>
-      <header ref={stripRef} className={cn("shrink-0", BAR_STRIP_CLASS)} onContextMenu={openMenu}>
+      <header
+        ref={stripRef}
+        className={cn("shrink-0", BAR_STRIP_CLASS)}
+        onContextMenu={trigger.onContextMenu}
+        onPointerDown={trigger.onPointerDown}
+        onPointerMove={trigger.onPointerMove}
+        onPointerUp={trigger.onPointerUp}
+        onPointerCancel={trigger.onPointerCancel}
+        onClickCapture={trigger.onClickCapture}
+        style={trigger.style}
+      >
         {/* FIRST CHILD, so the name sits where the header's h1 sat — the strip's
             20px inset is the same one the header used, so nothing moved
             sideways when the band went. It is also the only shrinkable element
@@ -325,6 +337,19 @@ export function ContextBar({ active }: { active: ActivePage | null }) {
             flexible spacer, so there is always something between the operator's
             last reading and these. */}
         <PageActionsEnd active={active} />
+        {isCoarse && (
+          <button
+            type="button"
+            aria-label="Bar options"
+            className="ml-1 grid size-11 shrink-0 place-items-center rounded-md text-fg-subtle hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenu({ x: r.left, y: r.bottom });
+            }}
+          >
+            <EllipsisIcon className="size-4" />
+          </button>
+        )}
       </header>
 
       {/* The panel belongs to the ITEM: a bar without the capsule has no panel to

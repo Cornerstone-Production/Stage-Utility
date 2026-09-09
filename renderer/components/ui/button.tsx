@@ -8,6 +8,15 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   size?: "small" | "medium";
   iconOnly?: boolean;
   /**
+   * An icon-only button that sits within ~8px of another icon-only button in
+   * a row — a move/remove trio, a page-actions strip — grows its tap area
+   * TALL only (`.touch-target-y`, styles.css) instead of the usual 44×44
+   * `.touch-target`. The plain version grows sideways too and reaches past
+   * the gap into the neighbour's own box, so a tap aimed at one button's edge
+   * can land on the button beside it.
+   */
+  touchTargetY?: boolean;
+  /**
    * Hover tooltip text. Icon-only buttons fall back to their `aria-label`
    * automatically, so every labeled icon button gets a tooltip for free. Pass
    * an explicit string to override, or `""` to suppress.
@@ -26,7 +35,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = "transparent", size = "medium", iconOnly, tooltip, asChild, children, ...props }, ref) => {
+  ({ className, variant = "transparent", size = "medium", iconOnly, touchTargetY, tooltip, asChild, children, ...props }, ref) => {
     const Comp = asChild ? Slot.Root : "button";
     const btn = (
       <Comp
@@ -38,9 +47,13 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           "disabled:pointer-events-none disabled:opacity-40 select-none",
           // Size
           size === "small" && !iconOnly && "h-6 px-2 text-caption1",
-          size === "small" && iconOnly && "h-6 w-6 p-0 text-caption1",
+          // `touch-target`/`touch-target-y`: both icon-only sizes draw under
+          // the 44px a finger needs (see styles.css) — a mouse sees no
+          // difference at all. `-y` for a button packed beside another
+          // icon-only button (see `touchTargetY` above).
+          size === "small" && iconOnly && ["h-6 w-6 p-0 text-caption1", touchTargetY ? "touch-target-y" : "touch-target"],
           size === "medium" && !iconOnly && "h-8 px-3 text-footnote",
-          size === "medium" && iconOnly && "h-8 w-8 p-0 text-footnote",
+          size === "medium" && iconOnly && ["h-8 w-8 p-0 text-footnote", touchTargetY ? "touch-target-y" : "touch-target"],
           // Variant
           variant === "accent" && [
             "bg-accent text-white",

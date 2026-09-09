@@ -45,6 +45,18 @@
         "playingItem": { "name": "MAIN GRAPHIC", "uuid": "cue-0001" },
         "layer": { "name": "Hidden layer", "uuid": "layer-0004", "isHidden": true, "isMuted": true, "opacity": 0.5 }
       }
+    },
+    {
+      "transportState": {
+        "isPlaying": false,
+        "isScrubbing": false,
+        "playbackRate": 1,
+        "timeElapsed": 7.97,
+        "timeRemaining": 0,
+        "playingItem": { "name": "BUMPER", "uuid": "cue-0005" },
+        "playingMedia": { "name": "speaker_bumper.mov", "uuid": "media-0005" },
+        "layer": { "name": "Tag", "uuid": "layer-0005", "isHidden": false, "isMuted": false, "opacity": 1 }
+      }
     }
   ]
 }

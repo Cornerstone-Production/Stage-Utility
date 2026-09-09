@@ -53,6 +53,98 @@ import {
 import { HomeGrid } from "./home-grid";
 import { AddWidgetSheet, CardChrome } from "./home-editor";
 
+/** The pointer distance, in CSS px, a card drag must travel before it counts
+ *  as a drag rather than a press on the chrome underneath it — see
+ *  `startCardDrag` below, and `HomeCardCell` in home-grid.tsx for why the
+ *  long-press hook is handed this same number as its own cancel threshold. */
+export const DRAG_START_PX = 4;
+
+/** What `startCardDrag` needs from the component to actually move a card,
+ *  injected rather than closed over so the gesture-detection code below can
+ *  be exercised directly in a test, against the SAME function the app runs —
+ *  not a copy of its movement-threshold logic. */
+export interface CardDragCallbacks {
+  cellAt: (clientX: number, clientY: number) => { col: number; row: number } | null;
+  onDragStart: (id: string) => void;
+  onDropCell: (cell: { col: number; row: number }) => void;
+  onDrop: (id: string, clientX: number, clientY: number) => void;
+  onEnd: () => void;
+}
+
+/**
+ * Press, move, drop — the whole gesture, in pointer events.
+ *
+ * A drag only begins once the pointer has actually travelled: the chrome
+ * carries the size and remove controls, and a press that never moves has to
+ * stay a click on those. The pointer is captured, so a drag that leaves the
+ * grid still reports where it went and still ends.
+ *
+ * `cancelPress`, if given, is called the INSTANT this drag actually starts —
+ * not merely on a card's own movement threshold, on the same card's separate
+ * long-press-to-open-menu timer (`useContextMenuTrigger` in home-grid.tsx).
+ * That hook cancels itself past its own movement threshold, but a finger that
+ * drifts past THIS gesture's 4px start without yet clearing the hook's own
+ * cancel distance would otherwise leave the long-press timer running under a
+ * live drag — reproduced by moving 5px and then holding still for 500ms, which
+ * opened the card's menu on top of a drag already under way. Calling
+ * `cancelPress()` here closes that gap without depending on the two
+ * thresholds ever being kept numerically equal.
+ */
+export function startCardDrag(
+  e: ReactPointerEvent<HTMLElement>,
+  id: string,
+  cb: CardDragCallbacks,
+  cancelPress?: () => void,
+) {
+  if (e.button !== 0) return;
+  // The chrome carries the size buttons, the visibility select and the remove
+  // X. A press on one of those is a press on a CONTROL, and the drag gesture
+  // must not touch it — capturing the pointer here retargets the rest of the
+  // sequence to the card, so the button never saw its own pointerup and the
+  // click never happened. Delete stopped working the day dragging moved to
+  // pointer events.
+  if ((e.target as HTMLElement).closest("button, select, input, [role='combobox']")) return;
+
+  const el = e.currentTarget;
+  const startX = e.clientX;
+  const startY = e.clientY;
+  let moved = false;
+
+  const move = (ev: PointerEvent) => {
+    if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < DRAG_START_PX) return;
+    if (!moved) {
+      moved = true;
+      // Captured only once this IS a drag, for the same reason: until the
+      // pointer has travelled, everything under it must keep behaving
+      // normally.
+      el.setPointerCapture(ev.pointerId);
+      cancelPress?.();
+      cb.onDragStart(id);
+    }
+    const cell = cb.cellAt(ev.clientX, ev.clientY);
+    if (cell) cb.onDropCell(cell);
+  };
+  const finish = (ev: PointerEvent) => {
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", finish);
+    el.removeEventListener("pointercancel", cancel);
+    if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
+    if (moved) cb.onDrop(id, ev.clientX, ev.clientY);
+    else cb.onEnd();
+  };
+  // A cancelled pointer (a system gesture, a lost capture) must not leave the
+  // page frozen mid-drag with a card half-moved.
+  const cancel = () => {
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", finish);
+    el.removeEventListener("pointercancel", cancel);
+    cb.onEnd();
+  };
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", finish);
+  el.addEventListener("pointercancel", cancel);
+}
+
 export function HomeRoute() {
   const { pcoLive, pcoLiveKnown } = useDashboardState();
   const s = useStageSettings();
@@ -172,6 +264,7 @@ export function HomeRoute() {
             variant="filled"
             size="medium"
             iconOnly
+            touchTargetY
             onClick={() => setAdding(true)}
             aria-label="Add widget"
           >
@@ -186,6 +279,7 @@ export function HomeRoute() {
             variant="filled"
             size="medium"
             iconOnly
+            touchTargetY
             onClick={() => save((objs) => resetPlacement(objs))}
             aria-label="Pack widgets tight, clearing any gaps"
             tooltip="Pack tight — clears the gaps"
@@ -197,6 +291,7 @@ export function HomeRoute() {
           variant={editing ? "accent" : "filled"}
           size="medium"
           iconOnly
+          touchTargetY
           onClick={() => setEditing((e) => !e)}
           aria-label={editing ? "Done editing widgets" : "Edit widgets"}
         >
@@ -475,61 +570,23 @@ export function HomeRoute() {
     });
   })();
 
-  /**
-   * Press, move, drop — the whole gesture, in pointer events.
-   *
-   * A drag only begins once the pointer has actually travelled: the chrome
-   * carries the size and remove controls, and a press that never moves has to
-   * stay a click on those. The pointer is captured, so a drag that leaves the
-   * grid still reports where it went and still ends.
-   */
-  function startDrag(e: ReactPointerEvent<HTMLElement>, id: string) {
-    if (e.button !== 0) return;
-    // The chrome carries the size buttons, the visibility select and the remove
-    // X. A press on one of those is a press on a CONTROL, and the drag gesture
-    // must not touch it — capturing the pointer here retargets the rest of the
-    // sequence to the card, so the button never saw its own pointerup and the
-    // click never happened. Delete stopped working the day dragging moved to
-    // pointer events.
-    if ((e.target as HTMLElement).closest("button, select, input, [role='combobox']")) return;
-
-    const el = e.currentTarget;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    let moved = false;
-
-    const move = (ev: PointerEvent) => {
-      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
-      if (!moved) {
-        moved = true;
-        // Captured only once this IS a drag, for the same reason: until the
-        // pointer has travelled, everything under it must keep behaving
-        // normally.
-        el.setPointerCapture(ev.pointerId);
-        setDragId(id);
-      }
-      const cell = cellAt(ev.clientX, ev.clientY);
-      if (cell) setDropCell((prev) => (prev && prev.col === cell.col && prev.row === cell.row ? prev : cell));
-    };
-    const finish = (ev: PointerEvent) => {
-      el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", finish);
-      el.removeEventListener("pointercancel", cancel);
-      if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
-      if (moved) dropOnGrid(id, ev.clientX, ev.clientY);
-      else endDrag();
-    };
-    // A cancelled pointer (a system gesture, a lost capture) must not leave the
-    // page frozen mid-drag with a card half-moved.
-    const cancel = () => {
-      el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", finish);
-      el.removeEventListener("pointercancel", cancel);
-      endDrag();
-    };
-    el.addEventListener("pointermove", move);
-    el.addEventListener("pointerup", finish);
-    el.addEventListener("pointercancel", cancel);
+  /** Wires the pure gesture logic above to this component's own state. See
+   *  `startCardDrag` for the gesture itself and why it takes callbacks rather
+   *  than reading this closure directly. */
+  function startDrag(e: ReactPointerEvent<HTMLElement>, id: string, cancelPress?: () => void) {
+    startCardDrag(
+      e,
+      id,
+      {
+        cellAt,
+        onDragStart: setDragId,
+        onDropCell: (cell) =>
+          setDropCell((prev) => (prev && prev.col === cell.col && prev.row === cell.row ? prev : cell)),
+        onDrop: dropOnGrid,
+        onEnd: endDrag,
+      },
+      cancelPress,
+    );
   }
 
   function endDrag() {
@@ -570,23 +627,22 @@ export function HomeRoute() {
           layout={{ ...home.layout, objects: cards }}
           cards={cards}
           gridRef={(el) => { gridEl.current = el; }}
-          onCardContextMenu={(o, e) => {
-            e.preventDefault();
-            setMenu({ x: e.clientX, y: e.clientY, cardId: o.id });
+          onCardContextMenu={(o, point) => {
+            setMenu({ x: point.x, y: point.y, cardId: o.id });
           }}
           menuCardId={menu?.cardId ?? null}
           boxes={previewBoxes}
           animate={!!dragId}
           chrome={
             editing
-              ? (o) => (
+              ? (o, cancelPress) => (
                   <CardChrome
                     card={o}
                     dragging={dragId === o.id}
                     onSize={(size) => save((objs) => setSize(objs, o.id, size))}
                     onWhen={(when) => save((objs) => setWhen(objs, o.id, when))}
                     onRemove={() => save((objs) => removeCard(objs, o.id))}
-                    onDragPointerDown={(e) => startDrag(e, o.id)}
+                    onDragPointerDown={(e) => startDrag(e, o.id, cancelPress)}
                   />
                 )
               : undefined

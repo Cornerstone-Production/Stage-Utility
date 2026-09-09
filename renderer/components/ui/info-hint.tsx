@@ -16,7 +16,7 @@ export function InfoHint({ children, className }: { children: React.ReactNode; c
           type="button"
           aria-label="More info"
           className={cn(
-            "inline-flex size-4 items-center justify-center rounded-full text-gray-9",
+            "touch-target inline-flex size-4 items-center justify-center rounded-full text-gray-9",
             "hover:text-fg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
             className,
           )}

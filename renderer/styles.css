@@ -43,6 +43,13 @@
 @source "./components/**/*.{ts,tsx}";
 @source "./lib/**/*.{ts,tsx}";
 
+/* A finger, not a mouse — the same signal `useCoarsePointer` reads in JS
+   (use-media-query.ts), as a Tailwind variant so a CSS-only override needs no
+   re-render. `coarse:flex` etc. below is this app's one spelling of "show this
+   only for a coarse pointer"; do not hand-roll a second `@media (pointer:
+   coarse)` block next to a class list that could use this instead. */
+@custom-variant coarse (@media (pointer: coarse));
+
 /* ── Map Radix color CSS vars to Tailwind color utilities ── */
 @theme {
   /* Type — IBM Plex is the whole system (all-sans; mono for numerals). */
@@ -413,6 +420,89 @@
       0 0 0 1px color-mix(in srgb, var(--su-live-9) 45%, transparent),
       0 0 34px color-mix(in srgb, var(--su-live-9) 16%, transparent),
       var(--su-shadow-1);
+  }
+
+  /* One rule for "a finger can hit this," applied to every icon-only control
+   * under 44px rather than re-derived per component. `position: relative` on
+   * the host itself, so the pseudo-element below has something to anchor to —
+   * every caller must be (or already is) positioned, or stay static and get
+   * this for nothing.
+   *
+   * The pseudo is a MOUSE no-op: it only exists under `(pointer: coarse)`, so
+   * a trackpad or mouse user's hit area, cursor and layout are all untouched.
+   * It never changes the drawn size — the button paints exactly as small as
+   * its own classes say; this only widens what counts as "on" it.
+   *
+   * KNOWN GAP: a host inside an `overflow-hidden` ancestor that hugs it
+   * tightly (a rounded pill, a clipped panel) can have this pseudo clipped
+   * before it reaches 44px — the pseudo is painted as part of the host's own
+   * box and obeys the same clipping the host's overflow does. NumberInput's
+   * steppers hit this same gap, on the `.touch-target-y` variant below (see
+   * number-input.tsx's wrapper comment for why its row lost `overflow-hidden`
+   * so the pseudo has room to extend). Any other host this class is applied
+   * to sits with enough padding from its own clipping ancestor, if it has
+   * one, that the extra ~10px on each side stays inside — this was NOT
+   * re-verified pixel-by-pixel for every caller; see the touch sweep notes
+   * for which ones were checked in a browser.
+   */
+  .touch-target {
+    position: relative;
+  }
+  @media (pointer: coarse) {
+    .touch-target::after {
+      content: "";
+      position: absolute;
+      inset: 50% auto auto 50%;
+      translate: -50% -50%;
+      width: max(44px, 100%);
+      height: max(44px, 100%);
+    }
+  }
+
+  /* `.touch-target`'s one-way variant: grows the hit area to 44px TALL only,
+   * staying exactly the host's own width. For icon buttons that sit in a
+   * tight horizontal row — two or more within ~8px of each other, as a
+   * move/remove trio or a Recall/Save/Delete strip — the plain `.touch-target`
+   * pseudo grows sideways too and reaches past the gap into the NEIGHBOUR's
+   * own box, so a tap aimed at one button's edge can land on the button next
+   * to it instead. `.touch-target-y` trades that width growth away on
+   * purpose: the row still gets a taller target, and no button can steal a
+   * pixel from the one beside it. Same `position: relative` requirement, same
+   * mouse no-op, same overflow-hidden gap as `.touch-target` above — swap this
+   * in for that one, never add both to the same host.
+   */
+  .touch-target-y {
+    position: relative;
+  }
+  @media (pointer: coarse) {
+    .touch-target-y::after {
+      content: "";
+      position: absolute;
+      inset: 50% auto auto 50%;
+      translate: -50% -50%;
+      width: 100%;
+      height: max(44px, 100%);
+    }
+  }
+
+  /* `.touch-target-y` rotated: for icon buttons stacked in a tight VERTICAL
+   * column instead — the collapsed rail's `ThemeTogglePill` at `vertical`, a
+   * 1px `gap-px` column where `.touch-target-y`'s height growth would reach
+   * past the gap into the button ABOVE or BELOW it, the exact bug that class
+   * exists to avoid on a row. This grows width only, and stays the host's own
+   * height, for the same reason in the other axis. */
+  .touch-target-x {
+    position: relative;
+  }
+  @media (pointer: coarse) {
+    .touch-target-x::after {
+      content: "";
+      position: absolute;
+      inset: 50% auto auto 50%;
+      translate: -50% -50%;
+      width: max(44px, 100%);
+      height: 100%;
+    }
   }
 }
 
@@ -1745,4 +1835,30 @@ button.score-capsule:focus-visible {
   background: var(--live-9);
   margin-right: 5px;
   vertical-align: middle;
+}
+
+/* ── layout editor: touch targets ────────────────────────────────────────────
+   A 9px resize handle is a fine mark on a design canvas and an impossible
+   target for a finger, which lands with about 40px of contact and no cursor to
+   aim it. The square stays 9px; a transparent pseudo-element extends the area
+   that ACCEPTS the pointerdown to 28px, centred on it. Pseudo-element rather
+   than padding so nothing about the handle's box, the selection outline or the
+   grid it sits on moves — the two must stay pixel-identical between a mouse and
+   a tablet or the editor draws differently on the two.
+
+   Coarse pointers only. On a mouse an invisible 28px pad around each of eight
+   handles would swallow clicks meant for the object underneath.
+
+   The pad is per handle, in --handle-pad, computed from the object's rendered
+   size by handlePadPx() in layout-editor.tsx: at a flat 9.5px the eight pads
+   meet in the middle of a small widget and leave it with no move region at all.
+   0px is the fallback and the small-object answer — the ::after then covers
+   nothing but the square itself. */
+@media (pointer: coarse) {
+  .editor-handle::after {
+    content: "";
+    position: absolute;
+    /* 9px square + up to 9.5px on each side = up to 28px. */
+    inset: calc(-1 * var(--handle-pad, 0px));
+  }
 }

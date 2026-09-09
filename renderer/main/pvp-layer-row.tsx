@@ -23,7 +23,7 @@
 // — so "what is on this layer" is answerable only as a name, a state and a time.
 
 import { fmtDuration } from "./pco-timer";
-import { computePvpProgress, pvpMeterKey } from "./pvp-progress";
+import { computePvpProgress, pvpMeterKey, stillOnScreenSec } from "./pvp-progress";
 import { MeterFill } from "./readout-meter";
 import { hasContent, type PvpLayerDTO } from "@main/types/pvp";
 
@@ -52,6 +52,7 @@ export interface PvpLayerRowProps {
  *   rolling video   ->  []                 the number says it
  *   still graphic   ->  ["still"]          up, but not counting
  *   paused clip     ->  ["paused"]         keeps its duration, number stops
+ *   ended clip      ->  ["ended"]          ran out, holding its last frame
  *   hidden / muted  ->  ["hidden"]         live content nobody can see
  *
  * `hidden` covers a zero opacity too: a layer faded to nothing is invisible for
@@ -68,8 +69,14 @@ export function rowQualifiers(layer: PvpLayerDTO, timed: boolean): string[] {
   // ROLLING is playbackRate > 0, never isPlaying: a still reports isPlaying true
   // with rate 0, so isPlaying would call every still a rolling clip and put a
   // countdown to nothing under a graphic that is up indefinitely.
-  if (timed && layer.playbackRate <= 0) out.push("paused");
-  if (!timed) out.push("still");
+  //
+  // "ended" is checked before the timed/still split: an ended clip is never
+  // timed (its durationSec is null), so without this branch it would fall into
+  // the `!timed` arm and read as a plain "still" — losing the distinction the
+  // state exists for.
+  if (layer.state === "ended") out.push("ended");
+  else if (timed && layer.playbackRate <= 0) out.push("paused");
+  else if (!timed) out.push("still");
   return out;
 }
 
@@ -78,6 +85,10 @@ export function PvpLayerRow({ layer, sampledAt, now, skewMs, showProgress = fals
   // Computed whatever showProgress says: it gates the BAR, not the number.
   const progress = computePvpProgress(layer, sampledAt, now, skewMs);
   const quals = rowQualifiers(layer, progress != null);
+  // "on screen m:ss" — counting UP, never down: the list has no per-layer hold
+  // to count down against (that lives on `pvp-now`, which a widget opts into),
+  // so this is only ever "how long has this been up".
+  const onScreenSec = stillOnScreenSec(layer, now, skewMs);
 
   return (
     <div className="min-w-0">
@@ -110,6 +121,9 @@ export function PvpLayerRow({ layer, sampledAt, now, skewMs, showProgress = fals
               {progress && <span className="shrink-0 font-semibold">{fmtDuration(progress.remainingSec)}</span>}
               {quals.length > 0 && (
                 <span className="shrink-0 text-[0.85em] text-fg-subtle">{quals.join(" ")}</span>
+              )}
+              {onScreenSec != null && (
+                <span className="shrink-0 text-[0.85em] text-fg-subtle">on screen {fmtDuration(onScreenSec)}</span>
               )}
             </>
           )}

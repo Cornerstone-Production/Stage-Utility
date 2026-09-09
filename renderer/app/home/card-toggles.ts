@@ -91,6 +91,15 @@ const APPLIES = {
   // The countdown-first compact treatment, on both PVP "now" widgets. Off by
   // default on both, agreeing with the renderer.
   compact: { "pvp-now": true, "home-pvp-now": true },
+  // Count a STILL down the same way a rolling clip already counts down. Off by
+  // default: the same image duration is stored on every still in the library,
+  // including ones that never advance, and a countdown on a graphic that stays
+  // up is a lie. `stillHoldSec` — the per-widget override of the card's default
+  // — is NOT here: it is a number, not a switch, and this record only carries
+  // booleans. It stays inspector-only, the same way `layerName` stays off
+  // Home's menu (a text field the card menu has no room for) rather than
+  // getting a second, cut-down control here.
+  countStills: { "pvp-now": true, "home-pvp-now": true },
   // The SPL trend line on Home's Recent services card. History's copy of the
   // same switch lives in settings rather than here, because that chart is not a
   // layout object and has no config to write into.
@@ -215,6 +224,7 @@ type ToggleKey =
   | "showProgress"
   | "showNextCue"
   | "compact"
+  | "countStills"
   | "showSpl";
 
 /** What to call each setting, and what "on" means for it. `format` is the only
@@ -268,6 +278,7 @@ const SPECS: {
   },
   { key: "showNextCue", label: "Next cue", fallback: true },
   { key: "compact", label: "Compact", fallback: false },
+  { key: "countStills", label: "Count down stills", fallback: false },
   // `false` to agree with the renderer: a card that has never been told draws
   // attendance alone, exactly as it did before the line existed.
   { key: "showSpl", label: "SPL trend line", fallback: false },

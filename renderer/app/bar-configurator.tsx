@@ -279,9 +279,14 @@ function BarRow({ row, ctx, onRemove }: { row: Row; ctx: BarItemContext; onRemov
         onClick={onRemove}
         aria-label={`Remove ${label}`}
         className={cn(
-          "absolute -right-2 -top-2 z-10 hidden size-4 items-center justify-center rounded-full",
+          "touch-target absolute -right-2 -top-2 z-10 hidden size-4 items-center justify-center rounded-full",
           "border border-line-strong bg-bg text-fg-muted shadow-sm",
           "group-hover:flex group-focus-within:flex hover:text-danger-11 hover:border-danger-11",
+          // Coarse pointer: always visible, not just on a hover it cannot
+          // produce. `!` forces it over the bare `hidden` above — both are the
+          // same specificity, and `coarse:` alone would leave the winner to
+          // stylesheet source order rather than to which is actually true.
+          "coarse:flex!",
         )}
       >
         <XIcon className="size-2.5" />
