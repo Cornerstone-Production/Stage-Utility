@@ -657,6 +657,53 @@ describe("cue names", () => {
   });
 });
 
+describe("a pair's state binding", () => {
+  /** One rule POST, with whatever trigger params the case needs. */
+  const post = (params: Record<string, string>) =>
+    callRoute(automationRoutes, "/api/automation/rules", {
+      method: "POST",
+      body: {
+        name: "Projectors ON",
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params },
+        conditions: [],
+        action: { id: "log.message", params: { message: "x" } },
+        cooldownSec: 0,
+        oncePerService: false,
+      },
+    });
+
+  test("a variable name Companion could not have is refused with 400", async () => {
+    // Accepted, it is a switch that reads unknown forever with nothing saying
+    // which rule is wrong — the state route would answer 404 for it every poll.
+    await withCue();
+    const r = await post({ name: "screens_on", stateVariable: "state:projectors" });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /not a Companion variable name/);
+    assert.equal(automationEngine.cueRules().length, 1, "the rule was saved anyway");
+  });
+
+  test("on and off values that are the same string are refused with 400", async () => {
+    await withCue();
+    const r = await post({
+      name: "screens_on",
+      stateVariable: "screens_state",
+      stateOnValue: "1",
+      stateOffValue: "1",
+    });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /could never be read/);
+  });
+
+  test("a good binding saves, and comes back on the rule", async () => {
+    await withCue();
+    const r = await post({ name: "screens_on", stateVariable: "screens_state" });
+    assert.equal(r.status, 201);
+    const saved = automationEngine.cueRules().find((x) => x.trigger.params.name === "screens_on");
+    assert.equal(String(saved?.trigger.params.stateVariable), "screens_state");
+  });
+});
+
 describe("a cue's former names", () => {
   /** The cue, renamed, still carrying the name Home Assistant was pasted with. */
   const renamed = () =>

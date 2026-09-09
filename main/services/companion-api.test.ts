@@ -291,3 +291,80 @@ describe("testConnection", () => {
     assert.match(r.message, /Host is required/);
   });
 });
+
+describe("readCustomVariable", () => {
+  test("reads Companion's value endpoint and trims what comes back", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stub(() => new Response("on\n", { status: 200 }));
+
+    const r = await companionApi.readCustomVariable("projectors_state");
+    // The exact URL Companion wants. Everything downstream compares the VALUE,
+    // so a trailing newline off a button expression must not read as unknown.
+    assert.deepEqual(
+      calls.map((c) => `${c.method} ${c.url}`),
+      ["GET http://10.0.0.5:8000/api/custom-variable/projectors_state/value"],
+    );
+    assert.deepEqual(r, { value: "on" });
+  });
+
+  test("404 is its own sentence, not \"HTTP 404\"", async () => {
+    // The ordinary case when somebody binds a cue before creating the variable.
+    target({ host: "10.0.0.5", port: 8000 });
+    stub(() => new Response("Not found", { status: 404 }));
+
+    assert.deepEqual(await companionApi.readCustomVariable("nope"), {
+      error: "no such custom variable in Companion",
+    });
+  });
+
+  test("another status comes back as the status", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stub(() => new Response("", { status: 500 }));
+
+    assert.deepEqual(await companionApi.readCustomVariable("projectors_state"), {
+      error: "Companion answered HTTP 500",
+    });
+  });
+
+  test("a network failure is returned, not thrown", async () => {
+    // The states route reads every bound pair before it answers; a throw here
+    // would be a 500 for one unplugged Companion.
+    target({ host: "10.0.0.5", port: 8000 });
+    companionDeps.fetch = async () => {
+      throw new Error("fetch failed", { cause: new Error("connect ECONNREFUSED 10.0.0.5:8000") });
+    };
+
+    assert.deepEqual(await companionApi.readCustomVariable("projectors_state"), {
+      error: "connect ECONNREFUSED 10.0.0.5:8000",
+    });
+  });
+
+  test("a name Companion could not have is refused without a request", async () => {
+    // The name is pasted into a URL path. A request that cannot succeed is not
+    // sent, so nothing has to be trusted to encode its way out of trouble.
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stub(() => new Response("on", { status: 200 }));
+
+    const r = await companionApi.readCustomVariable("../../int/export/full");
+    assert.equal("error" in r && r.error.includes("not a Companion variable name"), true);
+    assert.equal(calls.length, 0, "a malformed variable name reached Companion");
+  });
+
+  test("no host is a refusal, not a reach", async () => {
+    target(null);
+    assert.deepEqual(await companionApi.readCustomVariable("projectors_state"), {
+      error: "Companion host is not configured",
+    });
+  });
+
+  test("the value is NEVER cached — it is the thing that changes", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    let value = "on";
+    const calls = stub(() => new Response(value, { status: 200 }));
+
+    assert.deepEqual(await companionApi.readCustomVariable("projectors_state"), { value: "on" });
+    value = "off";
+    assert.deepEqual(await companionApi.readCustomVariable("projectors_state"), { value: "off" });
+    assert.equal(calls.length, 2, "a cached value here would freeze every switch in Home Assistant");
+  });
+});

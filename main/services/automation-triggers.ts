@@ -512,6 +512,35 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
         optional: true,
         help: "Where the thing this cue drives is. Shown in the log; not used to route anything.",
       },
+      // The state binding, on the `_on` half of a pair. Declared here so the
+      // registry documents it and the rules route validates it, but rendered by
+      // its own editor rather than by the generic loop — three text fields on
+      // every cue, most of which cannot use them, would read as three settings
+      // that do nothing. See cue-pairs.ts.
+      {
+        key: "stateVariable",
+        label: "State variable",
+        type: "string",
+        optional: true,
+        help:
+          "A Companion custom variable your ON/OFF buttons set. Set it on the _on half of a pair and " +
+          "the generated Home Assistant switch reports what the device is actually doing instead of " +
+          "what it was asked to do. Blank leaves the switch optimistic.",
+      },
+      {
+        key: "stateOnValue",
+        label: "Value meaning on",
+        type: "string",
+        optional: true,
+        help: 'What the variable holds when the thing is on. Blank means "on".',
+      },
+      {
+        key: "stateOffValue",
+        label: "Value meaning off",
+        type: "string",
+        optional: true,
+        help: 'What the variable holds when the thing is off. Blank means "off".',
+      },
     ],
     // Never. A called cue has no edge to read, and the engine refuses to
     // evaluate it at all — this is the second of the three guards described on

@@ -18,8 +18,10 @@ import { describe, test } from "node:test";
 import {
   collapse,
   cueSlugs,
+  customVariableNames,
   exportBuild,
   findPairs,
+  isCompanionVariableName,
   isSuggestedPair,
   isUtilityModule,
   parseButtons,
@@ -295,5 +297,44 @@ describe("isSuggestedPair", () => {
     assert.equal(isUtilityModule("generic-pjlink-extra"), false);
     assert.equal(isUtilityModule("bmd-atem"), false);
     assert.equal(isUtilityModule(""), false);
+  });
+});
+
+describe("customVariableNames", () => {
+  test("reads the KEYS of the export's custom_variables, sorted", () => {
+    // EXACT. The fixture declares five and two of them are names Companion's own
+    // value API could never answer for, so a list of five here is a dialog
+    // offering a binding that reads 404 forever.
+    assert.deepEqual(customVariableNames(EXPORT), ["house_lights_state", "lobby_tvs", "rig.state"]);
+  });
+
+  test("an export with no custom variables is an empty list, not an error", () => {
+    // The 5.0.3 export this was built against has no `custom_variables` key at
+    // all. Reading that as a failure would make the import dialog unusable on
+    // an install that simply has none.
+    assert.deepEqual(customVariableNames({ version: 12, type: "full", pages: {} }), []);
+    assert.deepEqual(customVariableNames({ custom_variables: {} }), []);
+    assert.deepEqual(customVariableNames(null), []);
+    assert.deepEqual(customVariableNames("nonsense"), []);
+  });
+
+  test("an array of named entries is read too", () => {
+    assert.deepEqual(
+      customVariableNames({ custom_variables: [{ name: "b_state" }, { name: "a_state" }, {}] }),
+      ["a_state", "b_state"],
+    );
+  });
+
+  test("the name rule is Companion's, and a path traversal is not a name", () => {
+    assert.equal(isCompanionVariableName("projectors_state"), true);
+    assert.equal(isCompanionVariableName("rig.state"), true);
+    assert.equal(isCompanionVariableName("Room-A_2"), true);
+    assert.equal(isCompanionVariableName("  padded  "), true);
+    assert.equal(isCompanionVariableName(""), false);
+    assert.equal(isCompanionVariableName("not a name"), false);
+    assert.equal(isCompanionVariableName("state:projectors"), false);
+    assert.equal(isCompanionVariableName("../../int/export/full"), false);
+    assert.equal(isCompanionVariableName("a/b"), false);
+    assert.equal(isCompanionVariableName("x".repeat(101)), false);
   });
 });
