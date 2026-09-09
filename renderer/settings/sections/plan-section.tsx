@@ -1,4 +1,5 @@
-import { Loader2Icon, RefreshCwIcon } from "lucide-react";
+import { useState } from "react";
+import { DownloadIcon, Loader2Icon, RefreshCwIcon } from "lucide-react";
 import {
   FieldSet,
   FieldGroup,
@@ -18,6 +19,7 @@ import {
 } from "../../components/ui";
 import type { SectionProps } from "../types";
 import { ChecklistSources } from "./checklist-sources";
+import { ExportPlanDialog } from "./export-plan-dialog";
 
 export function PlanSection({
   stageState,
@@ -26,6 +28,7 @@ export function PlanSection({
   isRefreshing,
   handlers,
 }: Pick<SectionProps, "stageState" | "serviceTypes" | "plans" | "isRefreshing" | "handlers">) {
+  const [exporting, setExporting] = useState(false);
   const allowed = stageState.allowedServiceTypeIds ?? [];
   const visibleServiceTypes =
     allowed.length === 0 ? serviceTypes : serviceTypes.filter((st) => allowed.includes(st.id));
@@ -193,7 +196,10 @@ export function PlanSection({
         return (
           <FieldSet>
             <FieldGroup>
-              <Field orientation="vertical">
+              {/* Export sits with the types it exports, rather than under
+                  Advanced beside the whole-machine snapshot: this is one
+                  service type's setup, and the type is chosen here. */}
+              <Field orientation="horizontal">
                 <FieldContent>
                   <FieldLabel>Active Service Types</FieldLabel>
                   <FieldDescription>
@@ -201,7 +207,16 @@ export function PlanSection({
                     them. Turning all off is the same as having them all active.
                   </FieldDescription>
                 </FieldContent>
+                <Button variant="filled" size="small" onClick={() => setExporting(true)}>
+                  <DownloadIcon className="size-3.5" /> Export plan…
+                </Button>
               </Field>
+              <ExportPlanDialog
+                open={exporting}
+                onOpenChange={setExporting}
+                serviceTypes={visibleServiceTypes}
+                defaultServiceTypeId={stageState.serviceTypeId ?? null}
+              />
               {active.map(row)}
               {/* The slot editors' plan switcher walks these types. Beside the
                   allowlist because it is the same decision continued: which

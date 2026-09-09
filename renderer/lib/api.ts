@@ -609,9 +609,20 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     case "update:dismissNotice":
       return post<T>("/api/update/notices/dismiss", p);
 
-    // The bundle IS the payload — a view export file, posted verbatim.
+    // The bundle IS the payload — a view export file, posted verbatim — unless
+    // the caller also names a service type or a clash choice, which only a plan
+    // file can carry. Then it is wrapped, and the server tells the two apart by
+    // the `kind` a bundle always has.
     case "views:import":
-      return post<T>("/api/views/import", p.bundle);
+      return post<T>(
+        "/api/views/import",
+        p.serviceTypeId || p.onClash
+          ? { bundle: p.bundle, serviceTypeId: p.serviceTypeId, onClash: p.onClash }
+          : p.bundle,
+      );
+
+    case "plans:exportPreview":
+      return apiFetch<T>(`/api/plans/export/preview?serviceTypeId=${encodeURIComponent(String(p.serviceTypeId ?? ""))}`);
 
     case "views:reorder":
       return post<T>("/api/views/reorder", { ids: p.ids });
