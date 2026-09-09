@@ -212,6 +212,54 @@ describe("homeAssistantYaml", () => {
     );
   });
 
+  test("two scripts whose cues say the same thing get DIFFERENT aliases", () => {
+    // The switches were disambiguated and the scripts were not, so two one-shot
+    // cues with the same `says` put two scripts called "the screens" into Home
+    // Assistant. An assistant asked to run "the screens" then picks one at
+    // random, which is the same failure as two identical switches.
+    const yaml = homeAssistantYaml(
+      [cue("main_screens", "the screens"), cue("south_screens", "the screens")],
+      BASE,
+    );
+    const aliases = scripts(yaml).map((x) => x.alias);
+    assert.deepEqual(aliases, ["Main Screens", "South Screens"]);
+    assert.equal(new Set(aliases).size, aliases.length, "two scripts share an alias");
+  });
+
+  test("a switch and a script that would say the same thing are separated too", () => {
+    // Across the KINDS, which no amount of disambiguating each list on its own
+    // would catch. To a voice assistant a switch's friendly_name and a script's
+    // alias are one namespace: the words somebody says out loud.
+    const yaml = homeAssistantYaml(
+      [
+        cue("projectors_on", "Projectors on"),
+        cue("projectors_off", "Projectors off"),
+        cue("take_screens", "Projectors"),
+      ],
+      BASE,
+    );
+    const said = [...friendlyNames(yaml), ...scripts(yaml).map((x) => x.alias)];
+    assert.deepEqual(said, ["Projectors", "Take Screens"]);
+    assert.equal(new Set(said).size, said.length, "a switch and a script share a spoken name");
+  });
+
+  test("a pair and a one-shot cue on the SAME base are separated by their domain", () => {
+    // The one case humanising the id cannot separate: `switch.projectors` and
+    // `script.projectors` are two different Home Assistant entities whose ids
+    // humanise identically, so the domain goes into the words.
+    const yaml = homeAssistantYaml(
+      [
+        cue("projectors_on", "Projectors on"),
+        cue("projectors_off", "Projectors off"),
+        cue("projectors", "Projectors"),
+      ],
+      BASE,
+    );
+    const said = [...friendlyNames(yaml), ...scripts(yaml).map((x) => x.alias)];
+    assert.deepEqual(said, ["Projectors (switch)", "Projectors (script)"]);
+    assert.equal(new Set(said).size, said.length, "a switch and a script share a spoken name");
+  });
+
   test("a newline in a script's alias does not break the document either", () => {
     // The same failure as a switch's friendly_name: one bad scalar and Home
     // Assistant rejects the WHOLE file, so every cue disappears.

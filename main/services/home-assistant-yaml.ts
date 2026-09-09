@@ -88,7 +88,7 @@ function pairsOf(cues: Map<string, Cue>): Pair[] {
     const friendly = cue.friendly.replace(/\s+on$/i, "").trim() || base;
     out.push({ base, friendly, on: name, off: `${base}_off` });
   }
-  return disambiguate(out).sort((a, b) => a.base.localeCompare(b.base));
+  return out.sort((a, b) => a.base.localeCompare(b.base));
 }
 
 /** "ma_conf_tvs" -> "Ma Conf Tvs". The cue name is all there is to go on. */
@@ -100,25 +100,74 @@ function humanise(base: string): string {
     .join(" ");
 }
 
+/** One object in the generated config that carries a name a person says. */
+interface Spoken {
+  /** `switch:<base>` or `script:<cue name>`. Unique across the document. */
+  key: string;
+  /** `switch` or `script` — Home Assistant's own two domains. */
+  kind: "switch" | "script";
+  /** The id it gets in its domain: a pair's base, or a script's cue name. */
+  id: string;
+  /** The words, from `says` or the rule's name. */
+  friendly: string;
+}
+
 /**
- * No two switches may share a `friendly_name`.
+ * No two objects may share the name a person says — ACROSS THE KINDS, not
+ * within each.
  *
- * The Companion import already does this on the way in — a base found on two
- * pages is spoken with its page name — but a hand-written pair has no page, and
- * two rules both saying "Projectors" put two identical switches into Home
- * Assistant, where the operator picks one at random and finds out which in the
- * middle of a service. The cue names cannot collide (the engine refuses that), so
- * falling back to the name is guaranteed to separate them.
+ * A switch's `friendly_name` and a script's `alias` are the same thing to a
+ * voice assistant: the words somebody says out loud. Two of them saying
+ * "Projectors" is an assistant that picks one at random, and the operator finds
+ * out which in the middle of a service. Disambiguating the switches on their own
+ * — which is all this did — left two scripts whose cues have the same `says`
+ * both called that, and a switch and a script colliding with each other
+ * entirely unhandled.
+ *
+ * The Companion import already separates most of this on the way in: a name
+ * found on two pages is spoken with its page name (see cueSlugs). A
+ * hand-written cue has no page, and two operators typing the same `says` is
+ * exactly what this catches.
+ *
+ * Three tiers, and every collision is resolved by the second or the third:
+ *
+ *  1. the words, when this is the only object saying them,
+ *  2. else the id humanised — a pair's base, a script's cue name. Ids are
+ *     unique WITHIN a kind, because a pair is keyed by a cue name the engine
+ *     refuses to duplicate,
+ *  3. else the id humanised with its domain, which separates the one case tier
+ *     2 cannot: a pair based `projectors` and a one-shot cue called
+ *     `projectors`, which are `switch.projectors` and `script.projectors` in
+ *     Home Assistant and two different things.
+ *
+ * Returned as a map rather than a rewritten list so the switches and the scripts
+ * can be emitted from their own loops while sharing one answer.
  */
-function disambiguate(pairs: Pair[]): Pair[] {
-  const counts = new Map<string, number>();
-  for (const p of pairs) {
-    const key = p.friendly.toLowerCase();
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+function friendlyNames(items: readonly Spoken[]): Map<string, string> {
+  const tally = (of: (item: Spoken) => string): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      const key = of(item).toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const said = tally((i) => i.friendly);
+  const humanised = tally((i) => humanise(i.id));
+
+  const out = new Map<string, string>();
+  for (const item of items) {
+    if ((said.get(item.friendly.toLowerCase()) ?? 0) < 2) {
+      out.set(item.key, item.friendly);
+      continue;
+    }
+    const fallback = humanise(item.id);
+    out.set(
+      item.key,
+      (humanised.get(fallback.toLowerCase()) ?? 0) < 2 ? fallback : `${fallback} (${item.kind})`,
+    );
   }
-  return pairs.map((p) =>
-    (counts.get(p.friendly.toLowerCase()) ?? 0) > 1 ? { ...p, friendly: humanise(p.base) } : p,
-  );
+  return out;
 }
 
 /**
@@ -189,12 +238,23 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
 
   const pairs = pairsOf(cues);
   const paired = new Set(pairs.flatMap((p) => [p.on, p.off]));
+  // Every cue that is not half of a pair.
+  const scripts = [...cues.values()].filter((c) => !paired.has(c.name));
+
+  // ONE disambiguation over both kinds. A switch's friendly_name and a script's
+  // alias are the same thing to a voice assistant, so they cannot be separated
+  // one list at a time. See friendlyNames.
+  const spoken = friendlyNames([
+    ...pairs.map((p): Spoken => ({ key: `switch:${p.base}`, kind: "switch", id: p.base, friendly: p.friendly })),
+    ...scripts.map((c): Spoken => ({ key: `script:${c.name}`, kind: "script", id: c.name, friendly: c.friendly })),
+  ]);
+
   if (pairs.length > 0) {
     lines.push("", "switch:", "  - platform: template", "    switches:");
     for (const p of pairs) {
       lines.push(
         `      ${p.base}:`,
-        `        friendly_name: ${q(p.friendly)}`,
+        `        friendly_name: ${q(spoken.get(`switch:${p.base}`) ?? p.friendly)}`,
         "        optimistic: true",
         "        turn_on:",
         `          action: rest_command.su_${p.on}`,
@@ -204,16 +264,15 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     }
   }
 
-  // Every cue that is not half of a pair. `action:` rather than the deprecated
-  // `service:`, matching the switches above — Home Assistant renamed it in
-  // 2024.8 and a fragment that used both spellings would read as two eras.
-  const scripts = [...cues.values()].filter((c) => !paired.has(c.name));
+  // `action:` rather than the deprecated `service:`, matching the switches
+  // above — Home Assistant renamed it in 2024.8 and a fragment that used both
+  // spellings would read as two eras.
   if (scripts.length > 0) {
     lines.push("", "script:");
     for (const cue of scripts) {
       lines.push(
         `  ${cue.name}:`,
-        `    alias: ${q(cue.friendly)}`,
+        `    alias: ${q(spoken.get(`script:${cue.name}`) ?? cue.friendly)}`,
         "    sequence:",
         `      - action: rest_command.su_${cue.name}`,
       );
