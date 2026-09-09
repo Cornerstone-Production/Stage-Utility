@@ -805,6 +805,27 @@ describe("GET /api/cues/states", () => {
     assert.deepEqual(variableReads, [], "an unbound pair must not read anything");
   });
 
+  test("a binding saved inside the window is read back through the NEW variable", async () => {
+    // The cache is five seconds and nothing dropped it when a rule changed, so
+    // the operator saved a binding, the row refreshed, and it still reported the
+    // old variable — for up to five seconds, contradicting what they had just
+    // typed. No injected clock here on purpose: this is the real engine, the
+    // real route and the real cache, inside the real window.
+    await withBoundPair();
+    variables.projectors_state = "on";
+    variables.amps_state = "off";
+    assert.equal(String((await states()).projectors!.variable), "projectors_state");
+
+    const on = automationEngine.listRules().find((r) => r.trigger.params.name === "projectors_on")!;
+    await automationEngine.updateRule(on.id, {
+      trigger: { id: CALL_TRIGGER_ID, params: { ...on.trigger.params, stateVariable: "amps_state" } },
+    });
+
+    const row = (await states()).projectors!;
+    assert.equal(String(row.variable), "amps_state", "the states answer is five seconds stale after a save");
+    assert.equal(String(row.state), "off");
+  });
+
   test("a read that REJECTS is still a 200, with that pair unknown", async () => {
     // getTarget reaches the config store, and its rejection escaped
     // readCustomVariable — which under a batch read of every bound pair was a

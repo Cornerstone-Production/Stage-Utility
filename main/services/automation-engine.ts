@@ -30,6 +30,7 @@ import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, CALL_CHANNEL, CALL_TRIGGER_ID, isValidCueName, triggersForChannel } from "./automation-triggers.js";
 import { stateBindingProblem } from "./cue-pairs.js";
+import { cueStates } from "./cue-states.js";
 import { parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
@@ -192,12 +193,27 @@ class AutomationEngine {
     if (problem) throw new Error(problem);
   }
 
+  /**
+   * The rules changed: tell the pages, and forget what a pair's state was.
+   *
+   * ONE method rather than the same two lines at three call sites — add, update
+   * and remove — because the cue-state cache is invisible from here and the
+   * copy that forgot to drop it is the one that reads five seconds stale. It
+   * matters on save: a binding the operator has just changed is read back
+   * through the OLD variable, and the row they are looking at contradicts what
+   * they typed until the window passes. See cue-states.ts.
+   */
+  private rulesChanged(): void {
+    broadcast("automation:rules", { rules: this.listRules() });
+    cueStates.invalidate();
+  }
+
   async addRule(rule: Omit<Rule, "id">): Promise<Rule> {
     this.assertCueValid(rule, null);
     const next: Rule = { ...rule, id: randomUUID() };
     this.rules.push(next);
     await automationStore.saveRules(this.rules);
-    broadcast("automation:rules", { rules: this.listRules() });
+    this.rulesChanged();
     return next;
   }
 
@@ -207,14 +223,14 @@ class AutomationEngine {
     this.assertCueValid({ ...r, ...patch }, id);
     Object.assign(r, patch);
     await automationStore.saveRules(this.rules);
-    broadcast("automation:rules", { rules: this.listRules() });
+    this.rulesChanged();
     return this.listRules();
   }
 
   async removeRule(id: string): Promise<Rule[]> {
     this.rules = this.rules.filter((r) => r.id !== id);
     await automationStore.saveRules(this.rules);
-    broadcast("automation:rules", { rules: this.listRules() });
+    this.rulesChanged();
     return this.listRules();
   }
 
