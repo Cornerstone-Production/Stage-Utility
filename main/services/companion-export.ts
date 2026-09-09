@@ -414,6 +414,85 @@ export function singleButtons(
   return buttons.filter((b) => b.label !== "" && !paired.has(`${b.page}:${b.row}:${b.col}`));
 }
 
+/** Which half of an ON/OFF pair a button is, in the NAMES the import writes —
+ *  a Startup/Shutdown pair is still named `_on`/`_off`. */
+export type PairHalf = "on" | "off";
+
+/** The cue the import would create for one button. */
+export interface ImportedCue {
+  /** Its name, or "" when the import would not offer this button at all. */
+  slug: string;
+  /** The pair it belongs to, or null for a single button. */
+  pair: { base: string; half: PairHalf } | null;
+}
+
+/**
+ * The cue the import would create for EVERY button in an export, keyed
+ * `<page>:<row>:<col>`.
+ *
+ * One place asking the question the import already answers — the pairs, the
+ * page disambiguation, the `_on`/`_off` suffix — so that reconciling a button
+ * whose label changed can work out the name the import would give it now
+ * without a second copy of any of those rules. companion-reconcile.ts is the
+ * other caller.
+ */
+export function importedCues(buttons: readonly CompanionButton[]): Map<string, ImportedCue> {
+  const key = (b: CompanionButton): string => `${b.page}:${b.row}:${b.col}`;
+  const out = new Map<string, ImportedCue>();
+
+  const pairs = findPairs([...buttons]);
+  const pairSlugs = slugsForPairs(pairs);
+  for (const p of pairs) {
+    const base = pairSlugs.get(`${p.page}:${slugForCue(p.base)}`) ?? "";
+    for (const [half, button] of [["on", p.on], ["off", p.off]] as const) {
+      out.set(key(button), {
+        slug: base ? `${base}_${half}` : "",
+        pair: base ? { base, half } : null,
+      });
+    }
+  }
+
+  const singles = singleButtons(buttons, pairs);
+  const singleSlugs = slugsForButtons(singles);
+  for (const b of singles) {
+    out.set(key(b), { slug: singleSlugs.get(key(b)) ?? "", pair: null });
+  }
+
+  return out;
+}
+
+/**
+ * Every cue name the import COULD have produced for a button with this label on
+ * a page with this name.
+ *
+ * Used to decide whether a cue was named after its button or by hand: a
+ * hand-named cue is never renamed when the button is relabelled, and the only
+ * evidence either way is whether the current name is one of these.
+ *
+ * Several, not one, because two of the import's decisions cannot be recovered
+ * afterwards. Whether a slug needed its page name in front of it depended on the
+ * whole export at the time, and a pair is named from its shared BASE with an
+ * `_on`/`_off` suffix — so "Rig Startup" is `rig_on`, not `rig_startup`. Both
+ * spellings, with and without the page, count as named after the button.
+ */
+export function importedCueNames(label: string, pageName: string): string[] {
+  const page = slugForCue(pageName);
+  const out = new Set<string>();
+  const add = (slug: string): void => {
+    if (!slug) return;
+    out.add(slug);
+    if (page) out.add(`${page}_${slug}`);
+  };
+
+  add(slugForCue(label));
+  const split = splitSuffix(label);
+  if (split) {
+    const half: PairHalf = SUFFIX_PAIRS.some(([on]) => on === split.suffix) ? "on" : "off";
+    add(`${slugForCue(split.base)}_${half}`);
+  }
+  return [...out];
+}
+
 /**
  * A cue name from a button label: lower snake_case, letters/digits/underscore.
  *

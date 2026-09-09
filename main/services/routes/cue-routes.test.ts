@@ -1234,6 +1234,68 @@ describe("reconciling a cue's Companion button", () => {
     assert.deepEqual(presses, []);
   });
 
+  /** Rewrite the text layer of the control at these coordinates. */
+  function relabel(row: string, col: string, text: string): void {
+    const control = (exportDoc as unknown as Doc).pages["1"]!.controls[row]![col] as {
+      style: { layers: { type: string; text?: { value: string } }[] };
+    };
+    const layers = control.style.layers;
+    layers[layers.length - 1]!.text = { value: text };
+  }
+
+  test("A RELABELLED button renames the cue, and the old name still answers", async () => {
+    // The whole path, not the pure pass: the rename has to survive the engine's
+    // own name check on save, and the former name has to resolve afterwards.
+    // Both were green in isolation while the save threw, on an earlier attempt.
+    await importPageOne();
+    relabel("0", "1", "Screens ON");
+    relabel("0", "2", "Screens OFF");
+
+    const r = await callRoute(cueRoutes, "/api/companion/buttons/refresh", {
+      method: "POST",
+      headers: browser,
+    });
+    assert.equal(r.status, 200);
+
+    const names = automationEngine.cueRules().map((x) => automationEngine.cueNameOf(x));
+    assert.ok(names.includes("screens_on"), `not renamed; cues are ${names.join(", ")}`);
+    assert.ok(names.includes("screens_off"), `the OFF half did not follow; cues are ${names.join(", ")}`);
+    const renamed = automationEngine.cueRules().find((x) => automationEngine.cueNameOf(x) === "screens_on")!;
+    assert.deepEqual(automationEngine.cueAliasesOf(renamed), ["room_a_screens_projectors_on"]);
+    // `says` is NOT touched: a pair's spoken words are "Room A: Screens
+    // Projectors on", which the import composed and an operator may have
+    // edited — never the button's label, so there is nothing here to follow.
+    assert.equal(String(renamed.trigger.params.says), "Room A: Screens Projectors on");
+
+    // The old URL — the one in the pasted Home Assistant config — still fires it.
+    presses = [];
+    assert.equal((await call("room_a_screens_projectors_on")).status, 200);
+    // And the new name fires the other half. A different cue, because an
+    // imported cue carries a two-second cooldown.
+    assert.equal((await call("screens_off")).status, 200);
+    assert.deepEqual(presses, [
+      "http://10.0.0.5:8000/api/location/1/0/1/press",
+      "http://10.0.0.5:8000/api/location/1/0/2/press",
+    ]);
+  });
+
+  test("a hand-named cue keeps its name when its button is relabelled", async () => {
+    await importPageOne();
+    const rule = automationEngine
+      .cueRules()
+      .find((x) => automationEngine.cueNameOf(x) === "room_a_screens_projectors_on")!;
+    await automationEngine.updateRule(rule.id, {
+      trigger: { ...rule.trigger, params: { ...rule.trigger.params, name: "big_screens_please" } },
+    });
+    relabel("0", "1", "Screens ON");
+
+    await callRoute(cueRoutes, "/api/companion/buttons/refresh", { method: "POST", headers: browser });
+    const names = automationEngine.cueRules().map((x) => automationEngine.cueNameOf(x));
+    assert.ok(names.includes("big_screens_please"), `a typed name was overwritten: ${names.join(", ")}`);
+    // The label is still refreshed on the action — that is not the name.
+    assert.equal(readFingerprint(paramsOf("big_screens_please")).label, "Screens ON");
+  });
+
   test("an unreachable Companion changes NO status", async () => {
     // A pass that downgraded every cue to `missing` because a switch was
     // rebooting would refuse every cue in the building until somebody noticed.

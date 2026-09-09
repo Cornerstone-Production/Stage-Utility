@@ -34,7 +34,7 @@ import {
   fixtureActionId,
 } from "./fixtures/companion-export.js";
 import { fingerprintParams, readFingerprint } from "./companion-fingerprint.js";
-import { type PressEntry, reconcileCues } from "./companion-reconcile.js";
+import { type CueIdentity, type PressEntry, reconcileCues } from "./companion-reconcile.js";
 
 const NOW = "2026-09-09T14:00:00.000Z";
 const EARLIER = "2026-09-01T09:00:00.000Z";
@@ -87,9 +87,13 @@ function entry(over: Record<string, string | number> = {}, label = "projectors_o
   };
 }
 
-/** The one change a single-entry pass produced. */
-function only(entries: PressEntry[], buttons: CompanionButton[]) {
-  const r = reconcileCues(entries, buttons, NOW);
+/** The one change a single-entry pass produced.
+ *
+ *  NO cue identities: these cases are about following a button, and a press
+ *  action whose rule is not a cue — or whose cue this pass was not told about —
+ *  is never renamed. The rename cases pass their own, below. */
+function only(entries: PressEntry[], buttons: CompanionButton[], cues: CueIdentity[] = []) {
+  const r = reconcileCues(entries, buttons, NOW, cues);
   assert.equal(r.changes.length, entries.length);
   return r;
 }
@@ -392,6 +396,7 @@ describe("what is not looked at", () => {
       [{ ruleId: "r", label: "unset", params: { label: "" } }],
       parse(doc()),
       NOW,
+      [],
     );
     assert.deepEqual(r.changes, []);
     assert.equal(r.checked, 0);
@@ -418,7 +423,7 @@ describe("what is not looked at", () => {
       ),
       "projectors_off",
     );
-    const r = reconcileCues([entry(), { ...off, ruleId: "rule-2" }], buttons, NOW);
+    const r = reconcileCues([entry(), { ...off, ruleId: "rule-2" }], buttons, NOW, []);
     assert.deepEqual(
       r.changes.map((c) => `${c.label}=${c.status}`),
       ["projectors_on=moved", "projectors_off=missing"],
@@ -430,5 +435,303 @@ describe("what is not looked at", () => {
     // Guards the two log lines above against a fixture rename making them
     // meaningless while still matching.
     assert.equal(FIXTURE_PAGES.screens, "Room A: Screens");
+  });
+});
+
+// ── A button somebody RENAMED ────────────────────────────────────────────────
+//
+// The cue name is the URL Home Assistant calls (`rest_command.su_<name>`), and
+// the HomeKit switch a household asks for was created from that command. So the
+// rename has to be conservative in three directions at once, and each of these
+// is a bug rather than a nicety:
+//
+//  - A CUE SOMEBODY NAMED BY HAND IS NEVER RENAMED. A Companion label is not
+//    authority over a name an operator typed.
+//  - A COLLISION KEEPS THE NAME. Renaming onto a name — or a FORMER name — that
+//    another cue holds would silently move somebody else's switch onto this
+//    button. Including a name claimed by another rename in the same pass.
+//  - A PAIR RENAMES TOGETHER OR NOT AT ALL. Renaming one half leaves a Home
+//    Assistant switch with no off, which is worse than one under the old name.
+//
+// And the old name keeps answering, as an alias, or the switch breaks the moment
+// the button is relabelled rather than when somebody re-pastes the config.
+
+describe("a button somebody renamed", () => {
+  /** Replace the text of the control at these coordinates. */
+  function relabel(d: Doc, page: string, at: [number, number], text: string): void {
+    const control = d.pages[page]!.controls[String(at[0])]![String(at[1])] as {
+      style: { layers: { type: string; text?: { value: string } }[] };
+    };
+    const layers = control.style.layers;
+    layers[layers.length - 1]!.text = { value: text };
+  }
+
+  /** The parsed button at these coordinates. */
+  const at = (buttons: CompanionButton[], page: number, row: number, col: number): CompanionButton =>
+    buttons.find((b) => b.page === page && b.row === row && b.col === col)!;
+
+  /** A press action fingerprinted against a button as the import found it. */
+  const press = (button: CompanionButton, ruleId: string, cueName: string): PressEntry => ({
+    ruleId,
+    label: cueName,
+    params: fingerprintParams(button, "in-place", EARLIER),
+  });
+
+  const cue = (ruleId: string, name: string, aliases: string[] = [], says = ""): CueIdentity => ({
+    ruleId,
+    name,
+    aliases,
+    says,
+  });
+
+  /** The pristine export, and the same export with one button relabelled. */
+  function relabelled(page: string, spot: [number, number], text: string) {
+    const before = parse(doc());
+    const d = doc();
+    relabel(d, page, spot, text);
+    return { before, after: parse(d), doc: d };
+  }
+
+  test("renames the cue, keeps the old name answering, and follows `says`", () => {
+    const { before, after } = relabelled("1", [2, 3], "Take Stage");
+    const e = press(at(before, 1, 2, 3), "rule-1", "take_screens");
+    const r = only([e], after, [cue("rule-1", "take_screens", [], "Take Screens")]);
+
+    const change = r.changes[0]!;
+    assert.equal(change.status, "in-place");
+    assert.deepEqual(change.triggerPatch, {
+      name: "take_stage",
+      aliases: "take_screens",
+      says: "Take Stage",
+    });
+    assert.equal(
+      change.renameLog,
+      "[companion] cue take_screens renamed to take_stage after its button's label changed; " +
+        "take_screens still answers",
+    );
+    // And the label is refreshed on the action, as it always was.
+    assert.equal(merged(e, change.patch).label, "Take Stage");
+  });
+
+  test("leaves `says` alone when it is not the label — somebody typed that", () => {
+    const { before, after } = relabelled("1", [2, 3], "Take Stage");
+    const e = press(at(before, 1, 2, 3), "rule-1", "take_screens");
+    const r = only([e], after, [cue("rule-1", "take_screens", [], "the big screens")]);
+    assert.deepEqual(r.changes[0]!.triggerPatch, { name: "take_stage", aliases: "take_screens" });
+  });
+
+  test("A HAND-NAMED CUE IS NOT RENAMED, and its label is still refreshed", () => {
+    const { before, after } = relabelled("1", [2, 3], "Take Stage");
+    const e = press(at(before, 1, 2, 3), "rule-1", "screens_please");
+    const r = only([e], after, [cue("rule-1", "screens_please", [], "Take Screens")]);
+
+    assert.equal(r.changes[0]!.triggerPatch, null, "a name the operator typed was overwritten");
+    assert.equal(r.changes[0]!.renameLog, null);
+    assert.equal(merged(e, r.changes[0]!.patch).label, "Take Stage");
+  });
+
+  test("the page-qualified name counts as named after the button", () => {
+    // The import prefixes the page name when a label appears on two pages, so
+    // `room_a_screens_projectors_on` is auto-named and must rename like any
+    // other. Reading only the plain slug would treat every disambiguated cue as
+    // hand-named — which is every cue on a real install with two auditoriums.
+    const before = parse(doc());
+    const d = doc();
+    relabel(d, "1", [0, 1], "Screens ON");
+    relabel(d, "1", [0, 2], "Screens OFF");
+    const after = parse(d);
+
+    const on = press(at(before, 1, 0, 1), "rule-on", "room_a_screens_projectors_on");
+    const off = press(at(before, 1, 0, 2), "rule-off", "room_a_screens_projectors_off");
+    const r = reconcileCues([on, off], after, NOW, [
+      cue("rule-on", "room_a_screens_projectors_on"),
+      cue("rule-off", "room_a_screens_projectors_off"),
+    ]);
+
+    assert.deepEqual(
+      r.changes.map((c) => String(c.triggerPatch?.name ?? "")),
+      ["screens_on", "screens_off"],
+      "a pair did not rename together",
+    );
+    assert.deepEqual(
+      r.changes.map((c) => String(c.triggerPatch?.aliases ?? "")),
+      ["room_a_screens_projectors_on", "room_a_screens_projectors_off"],
+    );
+  });
+
+  test("ONE HALF of a pair relabelled renames NEITHER, and says so once", () => {
+    // The switch in Home Assistant is the two names together. Renaming the ON
+    // half alone leaves a switch with no off.
+    const before = parse(doc());
+    const d = doc();
+    relabel(d, "1", [0, 1], "Screens ON");
+    const after = parse(d);
+
+    const on = press(at(before, 1, 0, 1), "rule-on", "room_a_screens_projectors_on");
+    const off = press(at(before, 1, 0, 2), "rule-off", "room_a_screens_projectors_off");
+    const r = reconcileCues([on, off], after, NOW, [
+      cue("rule-on", "room_a_screens_projectors_on"),
+      cue("rule-off", "room_a_screens_projectors_off"),
+    ]);
+
+    assert.deepEqual(r.changes.map((c) => c.triggerPatch), [null, null]);
+    assert.deepEqual(
+      r.changes.map((c) => c.renameLog).filter((l) => l !== null),
+      [
+        '[companion] cue room_a_screens_projectors_on: label changed to "Screens ON" but its ' +
+          "OFF half room_a_screens_projectors_off was not relabelled; both names kept",
+      ],
+      "a pair refusal must be one line, not two",
+    );
+  });
+
+  test("a pair whose halves stop being a pair renames neither", () => {
+    // Relabelled to words with no ON/OFF between them: the two buttons are two
+    // single cues now, and renaming them would dissolve the switch silently.
+    const before = parse(doc());
+    const d = doc();
+    relabel(d, "1", [0, 1], "Screens Up");
+    relabel(d, "1", [0, 2], "Screens Down");
+    const after = parse(d);
+
+    const on = press(at(before, 1, 0, 1), "rule-on", "room_a_screens_projectors_on");
+    const off = press(at(before, 1, 0, 2), "rule-off", "room_a_screens_projectors_off");
+    const r = reconcileCues([on, off], after, NOW, [
+      cue("rule-on", "room_a_screens_projectors_on"),
+      cue("rule-off", "room_a_screens_projectors_off"),
+    ]);
+
+    assert.deepEqual(r.changes.map((c) => c.triggerPatch), [null, null]);
+    assert.deepEqual(
+      r.changes.map((c) => c.renameLog).filter((l) => l !== null),
+      [
+        '[companion] cue room_a_screens_projectors_on: label changed to "Screens Up" but ' +
+          "screens_up and screens_down are no longer an ON/OFF pair; both names kept",
+      ],
+    );
+  });
+
+  test("A NAME ANOTHER CUE HOLDS keeps this one's name, and logs why", () => {
+    const { before, after } = relabelled("1", [2, 3], "Lobby TVs");
+    const e = press(at(before, 1, 2, 3), "rule-1", "take_screens");
+    const r = only([e], after, [
+      cue("rule-1", "take_screens"),
+      // Any other cue, press action or not. This one is the reason the whole
+      // engine's namespace is passed in rather than just the press rules.
+      cue("rule-other", "lobby_tvs"),
+    ]);
+
+    assert.equal(r.changes[0]!.triggerPatch, null);
+    assert.equal(
+      r.changes[0]!.renameLog,
+      '[companion] cue take_screens: label changed to "Lobby TVs" but lobby_tvs is taken; name kept',
+    );
+  });
+
+  test("A FORMER name another cue holds blocks it too", () => {
+    // A former name is a live URL. Taking it would move an already pasted
+    // switch onto this button.
+    const { before, after } = relabelled("1", [2, 3], "Lobby TVs");
+    const e = press(at(before, 1, 2, 3), "rule-1", "take_screens");
+    const r = only([e], after, [
+      cue("rule-1", "take_screens"),
+      cue("rule-other", "atrium_tvs", ["lobby_tvs"]),
+    ]);
+    assert.equal(r.changes[0]!.triggerPatch, null);
+    assert.match(r.changes[0]!.renameLog ?? "", /lobby_tvs is taken/);
+  });
+
+  test("two buttons relabelled to the SAME words rename only the first", () => {
+    // Both land on one name. The second rename would be refused by the engine
+    // anyway; deciding it here means it is refused with a sentence instead of an
+    // exception.
+    const before = parse(doc());
+    const d = doc();
+    relabel(d, "1", [2, 3], "Record Cam");
+    relabel(d, "1", [2, 1], "Record Cam");
+    const after = parse(d);
+
+    const first = press(at(before, 1, 2, 3), "rule-1", "take_screens");
+    const second = press(at(before, 1, 2, 1), "rule-2", "house_lights_on");
+    const r = reconcileCues([first, second], after, NOW, [
+      cue("rule-1", "take_screens"),
+      cue("rule-2", "house_lights_on"),
+    ]);
+
+    const names = r.changes.map((c) => String(c.triggerPatch?.name ?? ""));
+    assert.deepEqual(names, ["room_a_screens_record_cam", ""]);
+    assert.match(r.changes[1]!.renameLog ?? "", /room_a_screens_record_cam is taken; name kept/);
+  });
+
+  test("a MISSING button never renames anything", () => {
+    // Its label is whatever it said the last time anybody could see it, and a
+    // rename off a stale label is a name from nowhere.
+    const d = doc();
+    delete d.pages["1"]!.controls["2"]!["3"];
+    const before = parse(doc());
+    const e = press(at(before, 1, 2, 3), "rule-1", "take_screens");
+    const r = only([e], parse(d), [cue("rule-1", "take_screens")]);
+
+    assert.equal(r.changes[0]!.status, "missing");
+    assert.equal(r.changes[0]!.triggerPatch, null);
+    assert.equal(r.changes[0]!.renameLog, null);
+  });
+
+  test("a rule the pass has never reconciled is adopted, not renamed", () => {
+    // `status: null` is every cue on an upgrading install. A differing label
+    // there means "this may be a different button", not "somebody renamed it" —
+    // the pass adopts whatever is at the coordinates, so renaming off that would
+    // name the cue after a button it may never have pressed.
+    //
+    // The old label is "Take Stage" and the button at those coordinates now says
+    // "Take Screens", so a pass that read this as a relabel WOULD rename it:
+    // `take_stage` is exactly the name the import would have given the old
+    // label, and `take_screens` is a free name. Only the never-reconciled check
+    // stops it.
+    const legacy: PressEntry = {
+      ruleId: "rule-1",
+      label: "take_stage",
+      params: { page: 1, row: 2, col: 3, label: "Take Stage" },
+    };
+    const r = only([legacy], parse(doc()), [cue("rule-1", "take_stage")]);
+    assert.equal(r.changes[0]!.status, "in-place");
+    assert.equal(r.changes[0]!.triggerPatch, null);
+  });
+
+  test("a second rename keeps BOTH former names, and five is the cap", () => {
+    const { before, after } = relabelled("1", [2, 3], "Take Stage");
+    const once = only([press(at(before, 1, 2, 3), "rule-1", "take_screens")], after, [
+      cue("rule-1", "take_screens"),
+    ]);
+    assert.equal(once.changes[0]!.triggerPatch!.aliases, "take_screens");
+
+    // Renamed again, now carrying the first former name.
+    const second = relabelled("1", [2, 3], "Take Lobby");
+    const settled: PressEntry = {
+      ruleId: "rule-1",
+      label: "take_stage",
+      params: { ...press(at(second.before, 1, 2, 3), "rule-1", "take_stage").params, label: "Take Stage" },
+    };
+    const twice = only([settled], second.after, [cue("rule-1", "take_stage", ["take_screens"])]);
+    assert.equal(twice.changes[0]!.triggerPatch!.aliases, "take_screens,take_stage");
+
+    // Six deep, the oldest falls off: every former name is a live URL, and one
+    // per relabel forever is unbounded growth.
+    const capped = only([settled], second.after, [
+      cue("rule-1", "take_stage", ["a1", "a2", "a3", "a4", "a5"]),
+    ]);
+    assert.equal(capped.changes[0]!.triggerPatch!.aliases, "a2,a3,a4,a5,take_stage");
+  });
+
+  test("a relabel with nothing else changed still writes the rename", () => {
+    // The fingerprint compare is what decides whether anything is saved, and a
+    // label is part of it — but the rename must not depend on that: it is a
+    // change to the TRIGGER, and nothing about the button's coordinates moved.
+    const { before, after } = relabelled("1", [2, 3], "Take Stage");
+    const e = press(at(before, 1, 2, 3), "rule-1", "take_screens");
+    const r = only([e], after, [cue("rule-1", "take_screens")]);
+    assert.equal(r.changes[0]!.status, "in-place");
+    assert.notEqual(r.changes[0]!.patch, null, "the label refresh is what makes this saveable");
+    assert.equal(String(r.changes[0]!.triggerPatch?.name), "take_stage");
   });
 });

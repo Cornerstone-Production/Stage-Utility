@@ -224,6 +224,33 @@ Cues imported from Companion and buttons chosen with the picker are fingerprinte
 as they are created. A rule that predates this has no fingerprint, shows no pill,
 and is adopted at its own coordinates by the first check.
 
+### When a button is renamed
+
+Relabel a button in Companion and the cue named after it is renamed to match, so
+`projectors_on` becomes `screens_on` when the button starts saying "Screens ON".
+The old name **keeps answering**: `POST /api/cues/projectors_on` still fires the
+cue, so a Home Assistant config already pasted into `configuration.yaml` — and
+any HomeKit switch made from it — carries on working. Re-paste the YAML when
+convenient; the generated fragment names each renamed cue in a comment.
+
+A cue keeps up to five former names, oldest dropped first, and they share one
+namespace with live names: no other cue may take a name or a former name that is
+already in use. Remove one in the rule editor and that URL stops resolving.
+
+Four cases where the name is kept, each on a `[companion] cue <name>:` line:
+
+| | |
+|---|---|
+| **you named the cue yourself** | a name that is not the one the import would have produced from the button's old label is never touched. A Companion label is not authority over a name you typed into Home Assistant |
+| **the new name is taken** | by another cue's name, by another cue's former name, or by another cue being renamed in the same check |
+| **one half of an ON/OFF pair** | a pair renames together or not at all. Renaming one half leaves a Home Assistant switch with no off |
+| **the button is missing** | its label is whatever it said the last time anybody could see it |
+
+The label on the rule's action is refreshed either way — that is what the button
+says, not what the cue is called. **Spoken as** is left alone unless it was the
+button's label exactly, so words you chose for an assistant survive a relabel; a
+pair's spoken name is composed by the import and never follows.
+
 ### Home Assistant
 
 **Copy YAML** in the same panel produces the whole configuration fragment: one
