@@ -154,7 +154,8 @@ start, and when Planning Center cannot be read.
 
 | | |
 |---|---|
-| **Cue name** | `lower_snake_case`, unique across rules. This is the URL |
+| **Cue name** | `lower_snake_case`, unique across rules — and across every cue's former names. This is the URL |
+| **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
@@ -168,8 +169,10 @@ label.
 A cue that presses a Companion button remembers which button, not just where it
 was: if somebody moves it, the coordinates follow it and the rule's row says so;
 if it is gone, the cue answers `button-missing` and presses nothing rather than
-pressing whatever is now at those coordinates. See
-[When a button moves](integrations/companion.md#when-a-button-moves).
+pressing whatever is now at those coordinates; if it is RELABELLED, the cue is
+renamed to match and the old name keeps answering. See
+[When a button moves](integrations/companion.md#when-a-button-moves) and
+[When a button is renamed](integrations/companion.md#when-a-button-is-renamed).
 
 Set the whole thing up under [Companion](integrations/companion.md#calling-a-cue-by-name):
 the button picker, the ON/OFF and single-button import, the tokens and the Home
