@@ -334,32 +334,84 @@ export function isSuggestedPair(pair: CompanionPair): boolean {
 }
 
 /**
- * A unique cue slug per pair, keyed by `<page>:<base slug>`.
+ * Unique cue slugs across a set of offers, keyed however the caller asks.
  *
  * A plain slug of the label is not unique, and this is not hypothetical: the
  * real Companion this was built against has "Conf TVs ON" on the main
  * auditorium's page and again on the south auditorium's, driving different
  * televisions. Two cues cannot share a name — the second would be refused on
  * import and one room would quietly have no cue — so a base used on more than
- * one page is prefixed with the page.
+ * one offer is prefixed with the page.
  *
  * Only the CLASHING ones grow a prefix. Naming every cue after its page would
  * make `ma_tvs_pjs_projectors_on` the normal case, which is a thing nobody will
  * say out loud.
+ *
+ * ONE copy, taken generic when the single-button import needed the same rule:
+ * two of these written separately is how one of them stops disambiguating.
  */
-export function slugsForPairs(pairs: CompanionPair[]): Map<string, string> {
+function uniqueSlugs<T>(
+  items: readonly T[],
+  of: (item: T) => { key: string; base: string; pageName: string },
+): Map<string, string> {
   const counts = new Map<string, number>();
-  for (const p of pairs) {
-    const base = slugForCue(p.base);
+  for (const item of items) {
+    const base = slugForCue(of(item).base);
     counts.set(base, (counts.get(base) ?? 0) + 1);
   }
   const out = new Map<string, string>();
-  for (const p of pairs) {
-    const base = slugForCue(p.base);
-    const unique = (counts.get(base) ?? 0) > 1 ? `${slugForCue(p.pageName)}_${base}` : base;
-    out.set(`${p.page}:${base}`, base ? unique : "");
+  for (const item of items) {
+    const { key, base: rawBase, pageName } = of(item);
+    const base = slugForCue(rawBase);
+    const unique = (counts.get(base) ?? 0) > 1 ? `${slugForCue(pageName)}_${base}` : base;
+    out.set(key, base ? unique : "");
   }
   return out;
+}
+
+/** A unique cue slug per pair, keyed by `<page>:<base slug>`. See uniqueSlugs. */
+export function slugsForPairs(pairs: CompanionPair[]): Map<string, string> {
+  return uniqueSlugs(pairs, (p) => ({
+    key: `${p.page}:${slugForCue(p.base)}`,
+    base: p.base,
+    pageName: p.pageName,
+  }));
+}
+
+/**
+ * A unique cue slug per single button, keyed by `<page>:<row>:<col>`.
+ *
+ * Keyed by COORDINATES rather than by base slug, because two buttons on the same
+ * page can perfectly well carry the same label — and unlike a pair, there is
+ * nothing else to tell them apart. Both get the same slug, and the second is
+ * skipped on import and reported, which is the honest answer: nothing here can
+ * name them differently.
+ */
+export function slugsForButtons(buttons: readonly CompanionButton[]): Map<string, string> {
+  return uniqueSlugs(buttons, (b) => ({
+    key: `${b.page}:${b.row}:${b.col}`,
+    base: b.label,
+    pageName: b.pageName,
+  }));
+}
+
+/**
+ * The labelled buttons that are NOT half of an ON/OFF pair.
+ *
+ * The pairs are offered as switches and their halves must not also be offered as
+ * one-shot scripts — a `projectors_on` cue that is both is two objects in Home
+ * Assistant fighting over one button. A button with no label is left out
+ * entirely: `slugForCue("")` is "", and a cue called nothing cannot be called.
+ */
+export function singleButtons(
+  buttons: readonly CompanionButton[],
+  pairs: readonly CompanionPair[],
+): CompanionButton[] {
+  const paired = new Set<string>();
+  for (const p of pairs) {
+    for (const half of [p.on, p.off]) paired.add(`${half.page}:${half.row}:${half.col}`);
+  }
+  return buttons.filter((b) => b.label !== "" && !paired.has(`${b.page}:${b.row}:${b.col}`));
 }
 
 /**

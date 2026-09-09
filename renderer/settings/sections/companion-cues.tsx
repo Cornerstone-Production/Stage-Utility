@@ -5,13 +5,19 @@
 // settings and is about rules in general. Everything here is about one action
 // and one trigger.
 //
-// NOT unit-tested, deliberately, and this is the honest reason: every one of
-// these is a dialog whose failure modes are visual — a picker whose list does
-// not scroll, a dialog that opens behind the overlay, a button that renders and
-// does nothing. jsdom loads no stylesheet and reports every offsetHeight as 0,
-// so a test here would assert that a <button> exists, which is exactly the
-// assurance this repo has been burned by. They were driven in a browser instead;
-// the server side they call is covered in main/services/routes/cue-routes.test.ts.
+// Mostly NOT unit-tested, deliberately, and this is the honest reason: these are
+// dialogs whose failure modes are visual — a picker whose list does not scroll, a
+// dialog that opens behind the overlay. jsdom loads no stylesheet and reports
+// every offsetHeight as 0, so a test for those would assert that a <button>
+// exists, which is exactly the assurance this repo has been burned by. They were
+// driven in a browser instead; the server side they call is covered in
+// main/services/routes/cue-routes.test.ts.
+//
+// The IMPORT dialog is the exception, in companion-import.test.tsx, because what
+// it decides is not visual: which boxes are ticked before anybody touches one,
+// and whether the second section's picks reach the request at all. Both are
+// assertable as strings, and a wrong default there creates cues that press real
+// buttons.
 
 import { errorMessage } from "@main/services/errors";
 import { useMemo, useState } from "react";
@@ -36,11 +42,15 @@ import { copyText } from "../../lib/clipboard";
 
 export interface CompanionButton {
   page: number;
+  /** The page's opaque id, which survives a renumber. See companion-export.ts. */
+  pageId: string;
   pageName: string;
   row: number;
   col: number;
   label: string;
   drives: string[];
+  /** The button's sorted action ids — its identity when somebody moves it. */
+  actionIds: string[];
 }
 
 interface ButtonsReply {
@@ -60,10 +70,17 @@ interface Pair {
   exists: boolean;
 }
 
+/** A labelled button that is not half of a pair, as the import offers it. */
+interface Single extends CompanionButton {
+  slug: string;
+  exists: boolean;
+}
+
 interface PairsReply {
   ok: boolean;
   reason?: string;
   pairs: Pair[];
+  buttons: Single[];
 }
 
 interface TokenSummary {
@@ -265,7 +282,56 @@ function ButtonPickerDialog({
   );
 }
 
-// ── Importing ON/OFF pairs ────────────────────────────────────────────────────
+// ── Importing pairs and single buttons ────────────────────────────────────────
+
+/**
+ * The footer's label. PURE, and tested — the grammar is the part that reads
+ * wrong on a real install.
+ *
+ * A zero side is omitted rather than written out: "Import 0 pairs and 1 button"
+ * is a sentence nobody would type, and the dialog's footer is the last thing
+ * read before something presses real buttons.
+ */
+export function importFooterLabel(pairs: number, buttons: number): string {
+  const parts: string[] = [];
+  if (pairs > 0) parts.push(`${pairs} pair${pairs === 1 ? "" : "s"}`);
+  if (buttons > 0) parts.push(`${buttons} button${buttons === 1 ? "" : "s"}`);
+  return parts.length === 0 ? "Import" : `Import ${parts.join(" and ")}`;
+}
+
+/**
+ * Does this single button match what was typed? PURE.
+ *
+ * The cue NAME is searched as well as the label and the page, because the name is
+ * what an operator will say out loud and is often the only part they remember —
+ * `take_screens` for a button labelled "Take Screens".
+ */
+export function matchesButtonSearch(b: Single, search: string): boolean {
+  const needle = search.trim().toLowerCase();
+  if (!needle) return true;
+  return `${b.pageName} ${b.label} ${b.slug}`.toLowerCase().includes(needle);
+}
+
+/** `switch` / `script` — which Home Assistant object this offer becomes. */
+function KindTag({ kind }: { kind: "switch" | "script" }) {
+  return (
+    <span
+      className="shrink-0 rounded bg-field px-1 font-mono text-caption2 text-fg-subtle"
+      data-cue-kind={kind}
+    >
+      {kind}
+    </span>
+  );
+}
+
+function SectionHeading({ title, count }: { title: string; count: number }) {
+  return (
+    <div className="sticky top-0 z-10 flex items-baseline gap-2 bg-bg py-1">
+      <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">{title}</span>
+      <span className="text-caption2 text-fg-subtle">{count}</span>
+    </div>
+  );
+}
 
 export function ImportPairsDialog({
   open,
@@ -282,9 +348,12 @@ export function ImportPairsDialog({
     enabled: open,
   });
   const [picked, setPicked] = useState<Set<string> | null>(null);
+  const [pickedButtons, setPickedButtons] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
 
   const pairs = data?.pairs ?? [];
+  const singles = data?.buttons ?? [];
 
   // DERIVED, not synchronised. `picked` is null until the operator touches a
   // box, and until then the selection is computed from the server's own
@@ -295,14 +364,22 @@ export function ImportPairsDialog({
     picked ?? new Set(pairs.filter((p) => p.suggested && !p.exists).map((p) => `${p.page}:${p.slug}`));
 
   const key = (p: Pair) => `${p.page}:${p.slug}`;
+  const buttonKey = (b: Single) => `${b.page}:${b.row}:${b.col}`;
+
+  // Single buttons are NEVER pre-ticked, and this is not an oversight. A pair is
+  // plainly a thing being turned on and off; a single button is whatever
+  // somebody put on a Companion page, and a ticked-by-default camera shot or
+  // playback macro is a cue somebody can say by accident.
+  const shown = singles.filter((b) => matchesButtonSearch(b, search));
 
   async function run() {
     setBusy(true);
     try {
       const send = pairs.filter((p) => chosen.has(key(p)));
+      const sendButtons = singles.filter((b) => pickedButtons.has(buttonKey(b)));
       const r = await invoke<{ created: string[]; skipped: { name: string; why: string }[] }>(
         "automation:importPairs",
-        { pairs: send },
+        { pairs: send, buttons: sendButtons },
       );
       // Both halves reported. "12 created" alone hides the four that clashed.
       if (r.created.length) toast.success(`Created ${r.created.length} cue${r.created.length === 1 ? "" : "s"}`);
@@ -317,38 +394,55 @@ export function ImportPairsDialog({
     }
   }
 
+  const total = chosen.size + pickedButtons.size;
+
   return (
     <DialogRoot
       open={open}
       onOpenChange={(v) => {
         // Cleared on close rather than in an effect, so re-opening starts from
         // the suggestion again instead of last time's half-made choice.
-        if (!v) setPicked(null);
+        if (!v) {
+          setPicked(null);
+          setPickedButtons(new Set());
+          setSearch("");
+        }
         onOpenChange(v);
       }}
     >
       <DialogContent className="max-w-2xl">
         <h2 className="text-subheadline font-semibold text-fg">Import from Companion</h2>
         <p className="mb-2 mt-1 text-caption1 text-fg-muted">
-          Buttons whose labels differ only by ON/OFF. Each pair becomes two cues you can call by name.
-          Every one is created with <span className="text-fg">no service is live</span> on it and a two
-          second cooldown. Pairs that drive a projector, television, plug or lighting console are
-          ticked for you; tick anything else you want.
+          Every cue is created with <span className="text-fg">no service is live</span> on it and a two
+          second cooldown. Pairs that drive a projector, television, plug or lighting console are ticked
+          for you; nothing else is.
         </p>
 
         {data && !data.ok ? (
           <p className="text-caption1 text-fg-muted">Could not read Companion&rsquo;s configuration: {data.reason}</p>
         ) : (
           <div className="max-h-[50vh] overflow-y-auto">
-            {isFetching && pairs.length === 0 && <p className="py-4 text-caption1 text-fg-muted">Reading Companion…</p>}
+            {isFetching && pairs.length === 0 && singles.length === 0 && (
+              <p className="py-4 text-caption1 text-fg-muted">Reading Companion…</p>
+            )}
+
+            <SectionHeading title="ON/OFF pairs" count={pairs.length} />
+            <p className="pb-1 text-caption2 text-fg-subtle">
+              Buttons whose labels differ only by ON/OFF. Each becomes two cues and one Home Assistant
+              switch.
+            </p>
+            {pairs.length === 0 && !isFetching && (
+              <p className="py-2 text-caption1 text-fg-muted">No ON/OFF pairs on this Companion.</p>
+            )}
             {pairs.map((p) => (
               <label
                 key={key(p)}
-                className="flex items-center gap-2 border-b border-line py-1.5 last:border-0"
+                className="flex items-center gap-2 border-b border-line py-1.5"
               >
                 <Checkbox
                   checked={chosen.has(key(p))}
                   disabled={p.exists}
+                  aria-label={`${p.base} · ${p.pageName}`}
                   onCheckedChange={(v) => {
                     const next = new Set(chosen);
                     if (v) next.add(key(p));
@@ -363,14 +457,66 @@ export function ImportPairsDialog({
                     {p.exists ? " · already imported" : ""}
                   </span>
                 </span>
+                <KindTag kind="switch" />
               </label>
             ))}
+
+            <div className="mt-3">
+              <SectionHeading title="Single buttons" count={singles.length} />
+              <p className="pb-1 text-caption2 text-fg-subtle">
+                Every other labelled button. Each becomes one cue and one Home Assistant script — nothing
+                here is ticked for you.
+              </p>
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search buttons, pages and cue names…"
+                className="mb-1 h-7 text-footnote"
+                aria-label="Search single buttons"
+              />
+              {shown.length === 0 && !isFetching && (
+                <p className="py-2 text-caption1 text-fg-muted">
+                  {singles.length === 0 ? "Every labelled button is part of a pair." : "Nothing matches."}
+                </p>
+              )}
+              {shown.map((b) => (
+                <label
+                  key={buttonKey(b)}
+                  className="flex items-center gap-2 border-b border-line py-1.5"
+                >
+                  <Checkbox
+                    checked={pickedButtons.has(buttonKey(b))}
+                    disabled={b.exists}
+                    aria-label={`${b.label} · ${b.pageName}`}
+                    onCheckedChange={(v) => {
+                      const next = new Set(pickedButtons);
+                      if (v) next.add(buttonKey(b));
+                      else next.delete(buttonKey(b));
+                      setPickedButtons(next);
+                    }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-footnote text-fg">{b.label}</span>
+                    <span className="block truncate text-caption2 text-fg-subtle">
+                      {b.pageName} · {b.slug}
+                      {b.exists ? " · already imported" : ""}
+                    </span>
+                  </span>
+                  <KindTag kind="script" />
+                </label>
+              ))}
+            </div>
           </div>
         )}
 
         <div className="mt-3 flex items-center gap-2">
-          <Button variant="accent" size="small" disabled={busy || chosen.size === 0} onClick={() => void run()}>
-            {busy ? "Importing…" : `Import ${chosen.size} pair${chosen.size === 1 ? "" : "s"}`}
+          <Button
+            variant="accent"
+            size="small"
+            disabled={busy || total === 0}
+            onClick={() => void run()}
+          >
+            {busy ? "Importing…" : importFooterLabel(chosen.size, pickedButtons.size)}
           </Button>
           <Button variant="transparent" size="small" onClick={() => onOpenChange(false)}>
             Cancel

@@ -5,11 +5,17 @@
 // that answers "unavailable" with nothing anywhere saying why — and because
 // somebody adding a cue should not have to learn Home Assistant's REST syntax.
 //
-// Two objects per cue set:
+// Three objects per cue set:
 //
-//  - a `rest_command` per cue, which is the plain "call this URL" primitive, and
+//  - a `rest_command` per cue, which is the plain "call this URL" primitive,
 //  - a template `switch` per ON/OFF pair, which is what a voice assistant can be
-//    asked to turn on and off by name.
+//    asked to turn on and off by name, and
+//  - a `script` per cue that is NOT half of a pair, which is what an assistant
+//    can be asked to RUN. A one-shot button has no on and no off; a switch for
+//    it would sit in Home Assistant permanently claiming a state it never had.
+//
+// A cue is never both. A pair's two halves are exactly the cues whose names end
+// `_on`/`_off` with a partner present, and those are excluded from the scripts.
 //
 // The switches are `optimistic: true`: Stage Utility can tell Home Assistant it
 // DISPATCHED the press and nothing more. Companion answers 200 the moment it
@@ -162,6 +168,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
   }
 
   const pairs = pairsOf(cues);
+  const paired = new Set(pairs.flatMap((p) => [p.on, p.off]));
   if (pairs.length > 0) {
     lines.push("", "switch:", "  - platform: template", "    switches:");
     for (const p of pairs) {
@@ -173,6 +180,22 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
         `          action: rest_command.su_${p.on}`,
         "        turn_off:",
         `          action: rest_command.su_${p.off}`,
+      );
+    }
+  }
+
+  // Every cue that is not half of a pair. `action:` rather than the deprecated
+  // `service:`, matching the switches above — Home Assistant renamed it in
+  // 2024.8 and a fragment that used both spellings would read as two eras.
+  const scripts = [...cues.values()].filter((c) => !paired.has(c.name));
+  if (scripts.length > 0) {
+    lines.push("", "script:");
+    for (const cue of scripts) {
+      lines.push(
+        `  ${cue.name}:`,
+        `    alias: ${q(cue.friendly)}`,
+        "    sequence:",
+        `      - action: rest_command.su_${cue.name}`,
       );
     }
   }

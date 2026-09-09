@@ -47,6 +47,28 @@ function commandKeys(yaml: string): string[] {
   return [...yaml.matchAll(/^ {2}(su_\w+):$/gm)].map((m) => m[1]!);
 }
 
+/**
+ * The `script:` keys and their aliases, in order.
+ *
+ * Read off the block rather than by matching `^ {2}\w+:$` anywhere, because the
+ * `rest_command` keys sit at the same indent and a scan that could not tell them
+ * apart would report every cue as having a script.
+ */
+function scripts(yaml: string): { name: string; alias: string }[] {
+  const lines = yaml.split("\n");
+  const start = lines.indexOf("script:");
+  if (start === -1) return [];
+  const out: { name: string; alias: string }[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const key = /^ {2}(\w+):$/.exec(lines[i]!);
+    if (!key) continue;
+    const alias = /^ {4}alias: "((?:[^"\\\n\r\t]|\\.)*)"$/.exec(lines[i + 1] ?? "");
+    assert.ok(alias, `alias is not a single well-formed quoted scalar: ${JSON.stringify(lines[i + 1])}`);
+    out.push({ name: key[1]!, alias: alias[1]! });
+  }
+  return out;
+}
+
 /** One called cue, with only the fields the generator reads set meaningfully. */
 function cue(name: string, says: string, ruleName = name): Rule {
   return {
@@ -136,6 +158,57 @@ describe("homeAssistantYaml", () => {
     const yaml = homeAssistantYaml([cue("house_lights_on", "House lights on")], BASE);
     assert.deepEqual(commandKeys(yaml), ["su_house_lights_on"]);
     assert.deepEqual(friendlyNames(yaml), []);
+  });
+
+  test("a cue that is not half of a pair gets a script, aliased from `says`", () => {
+    const yaml = homeAssistantYaml([cue("take_screens", "take the screens")], BASE);
+    assert.deepEqual(scripts(yaml), [{ name: "take_screens", alias: "take the screens" }]);
+    assert.match(yaml, /^ {6}- action: rest_command\.su_take_screens$/m);
+    // No switch: a one-shot button has no on and no off, and a switch for it
+    // would sit in Home Assistant claiming a state it never had.
+    assert.deepEqual(friendlyNames(yaml), []);
+  });
+
+  test("a pair is a switch and NEITHER half is also a script", () => {
+    // Both objects for one cue is two things in Home Assistant fighting over
+    // one Companion button.
+    const yaml = homeAssistantYaml(
+      [cue("projectors_on", "Projectors on"), cue("projectors_off", "Projectors off")],
+      BASE,
+    );
+    assert.deepEqual(friendlyNames(yaml), ["Projectors"]);
+    assert.deepEqual(scripts(yaml), []);
+  });
+
+  test("an `_on` with no partner is not a pair, so it is a script", () => {
+    // The rule for what a pair IS lives in one place; this is the boundary of it.
+    const yaml = homeAssistantYaml([cue("house_lights_on", "House lights on")], BASE);
+    assert.deepEqual(scripts(yaml), [{ name: "house_lights_on", alias: "House lights on" }]);
+    assert.deepEqual(friendlyNames(yaml), []);
+  });
+
+  test("a pair and a single in one document each get their own object, and only that", () => {
+    const yaml = homeAssistantYaml(
+      [
+        cue("projectors_on", "Projectors on"),
+        cue("projectors_off", "Projectors off"),
+        cue("take_screens", "take the screens"),
+      ],
+      BASE,
+    );
+    assert.deepEqual(commandKeys(yaml), ["su_projectors_on", "su_projectors_off", "su_take_screens"]);
+    assert.deepEqual(friendlyNames(yaml), ["Projectors"]);
+    assert.deepEqual(
+      scripts(yaml).map((x) => x.name),
+      ["take_screens"],
+    );
+  });
+
+  test("a newline in a script's alias does not break the document either", () => {
+    // The same failure as a switch's friendly_name: one bad scalar and Home
+    // Assistant rejects the WHOLE file, so every cue disappears.
+    const yaml = homeAssistantYaml([cue("odd", "Take:\nScreens")], BASE);
+    assert.deepEqual(scripts(yaml), [{ name: "odd", alias: "Take:\\nScreens" }]);
   });
 
   test("no cues yields a comment, not a half-written document", () => {

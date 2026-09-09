@@ -186,7 +186,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | POST | `/api/automation/rules/:id/test` | Fire the action now, ignoring the trigger. Honours simulate; a refusal is `400` with the reason |
 | GET / POST | `/api/automation/settings` | `simulate` and `disarmed` |
 | GET / DELETE | `/api/automation/log` | Read / clear the Activity log |
-| POST | `/api/automation/rules/import-pairs` | Create two cues per Companion ON/OFF pair (`{pairs}`). Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
+| POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
 
 **Cues** — an automation rule called by name. See
 [Companion](../integrations/companion.md#calling-a-cue-by-name).
@@ -204,7 +204,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 |--------|------|---------|
 | GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Each carries `page`, `pageId`, `pageName`, `row`, `col`, `label`, `drives` and `actionIds` — the page's opaque id and the button's sorted action ids are its identity, and survive being renumbered or dragged to another key. Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
 | POST | `/api/companion/buttons/refresh` | Drop the five-minute cache and re-read |
-| GET | `/api/companion/pairs` | ON/OFF pairs with their proposed cue names, and whether each already exists |
+| GET | `/api/companion/pairs` | The import dialog's whole offer: `{ok, pairs, buttons}` — ON/OFF pairs, and the labelled buttons that are not half of one — each with its proposed cue name and whether that name already exists. One request, because deciding which buttons are unpaired needs the pairs |
 
 **ProPresenter & ProdCom**
 | Method | Path | Purpose |

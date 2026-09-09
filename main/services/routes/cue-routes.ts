@@ -35,7 +35,13 @@ import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
 import { automationEngine } from "../automation-engine.js";
 import { companionApi } from "../companion-api.js";
-import { isSuggestedPair, slugForCue, slugsForPairs } from "../companion-export.js";
+import {
+  isSuggestedPair,
+  singleButtons,
+  slugForCue,
+  slugsForButtons,
+  slugsForPairs,
+} from "../companion-export.js";
 import { bearerOf, cueTokens, isSameOriginBrowser } from "../cue-tokens.js";
 import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
@@ -213,7 +219,22 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
         exists: !!slug && (taken.has(`${slug}_on`) || taken.has(`${slug}_off`)),
       };
     });
-    json(res, { ok: true, pairs });
+
+    // The single buttons come back from the same request, because deciding
+    // which buttons are NOT half of a pair needs the pairs — a second endpoint
+    // would compute them twice and could disagree with this one.
+    //
+    // Nothing here is `suggested`. A pair is two buttons that are plainly a
+    // thing being turned on and off; a single button is whatever somebody put on
+    // a Companion page, and pre-ticking those would arm cues for camera shots
+    // and playback macros. The dialog ticks nothing in this section.
+    const singles = singleButtons(result.buttons, result.pairs);
+    const singleSlugs = slugsForButtons(singles);
+    const buttons = singles.map((b) => {
+      const slug = singleSlugs.get(`${b.page}:${b.row}:${b.col}`) ?? "";
+      return { ...b, slug, exists: !!slug && taken.has(slug) };
+    });
+    json(res, { ok: true, pairs, buttons });
     return;
   }
 
@@ -222,12 +243,25 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
   if (method === "POST" && pathname === "/api/automation/rules/import-pairs") {
     if (!(await requireCaller(c, { allowSameOrigin: true }))) return;
     const body = (await readBody(req)) as Record<string, unknown>;
+    // Either key, or both, in ONE request: the dialog offers pairs and single
+    // buttons in one list and a single Import button, and two requests would
+    // report two half-results for one press.
     const pairs = Array.isArray(body.pairs) ? body.pairs : null;
-    if (!pairs) {
-      error(res, "body.pairs (array) required");
+    const buttons = Array.isArray(body.buttons) ? body.buttons : null;
+    if (!pairs && !buttons) {
+      error(res, "body.pairs or body.buttons (array) required");
       return;
     }
-    json(res, await importPairs(pairs));
+    const fromPairs = await importPairs(pairs ?? []);
+    const fromButtons = await importButtons(buttons ?? []);
+    const created = [...fromPairs.created, ...fromButtons.created];
+    const skipped = [...fromPairs.skipped, ...fromButtons.skipped];
+    // ONE line for the whole import, not one per kind: the operator pressed one
+    // button, and two lines reading "0 created" and "3 created" is a puzzle.
+    console.log(
+      `[cues] import from Companion: ${scrub(created.length)} created, ${scrub(skipped.length)} skipped`,
+    );
+    json(res, { created, skipped });
     return;
   }
 }
@@ -263,10 +297,12 @@ function asButton(v: unknown): ImportButton | null {
  * the import after adding a button to Companion is the ordinary case, and it
  * must not rewrite rules somebody has since edited.
  */
-async function importPairs(raw: unknown[]): Promise<{
+interface ImportResult {
   created: string[];
   skipped: { name: string; why: string }[];
-}> {
+}
+
+async function importPairs(raw: unknown[]): Promise<ImportResult> {
   const created: string[] = [];
   const skipped: { name: string; why: string }[] = [];
 
@@ -324,8 +360,61 @@ async function importPairs(raw: unknown[]): Promise<{
     }
   }
 
-  console.log(
-    `[cues] import from Companion: ${scrub(created.length)} created, ${scrub(skipped.length)} skipped`,
-  );
+  return { created, skipped };
+}
+
+/**
+ * Turn chosen single buttons into ONE cue each.
+ *
+ * The same defaults as a pair's two halves — `service.is-not-live` and a two
+ * second cooldown — for the same reason: a cue somebody can say during a
+ * service, twice, is the failure mode this feature has to not have.
+ *
+ * Unlike a pair there is no ON/OFF to speak, so the cue's name, its spoken
+ * words and its `says` are all the button's own label. A slug that had to be
+ * disambiguated by page carries the page name in the WORDS too, exactly as a
+ * pair's do — otherwise two cues both read "Record" in the rules list and Home
+ * Assistant gets two scripts with one alias.
+ */
+async function importButtons(raw: unknown[]): Promise<ImportResult> {
+  const created: string[] = [];
+  const skipped: { name: string; why: string }[] = [];
+
+  for (const entry of raw) {
+    const button = asButton(entry);
+    const o = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
+    const label = String(o.label ?? "").trim();
+    const slug = typeof o.slug === "string" && o.slug ? slugForCue(o.slug) : slugForCue(label);
+
+    if (!button || !slug) {
+      skipped.push({ name: label || "(unnamed)", why: "no usable cue name for this button" });
+      continue;
+    }
+
+    const pageName = String(o.pageName ?? "").trim();
+    const spoken = slug !== slugForCue(label) && pageName ? `${pageName} ${label}` : label;
+
+    const rule: Omit<Rule, "id"> = {
+      name: spoken,
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: slug, says: spoken } },
+      conditions: [{ id: "service.is-not-live", params: {} }],
+      action: {
+        id: "companion.press",
+        params: { page: button.page, row: button.row, col: button.col, label: button.label ?? label },
+      },
+      cooldownSec: 2,
+      oncePerService: false,
+    };
+    try {
+      // addRule enforces uniqueness, so a name already in use is refused by the
+      // same check the rule editor goes through.
+      await automationEngine.addRule(rule);
+      created.push(slug);
+    } catch (err) {
+      skipped.push({ name: slug, why: errorMessage(err) });
+    }
+  }
+
   return { created, skipped };
 }

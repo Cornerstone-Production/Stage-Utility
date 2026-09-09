@@ -137,6 +137,9 @@ async function withCue(over: Record<string, unknown> = {}): Promise<string> {
   return rule.id;
 }
 
+/** A button offer's slug, as a string. */
+const slugOf = (b: Record<string, unknown>): string => String(b.slug ?? "");
+
 const call = (name: string, opts: Record<string, unknown> = {}) =>
   callRoute(cueRoutes, `/api/cues/${name}`, { method: "POST", headers: auth(), ...opts });
 
@@ -890,5 +893,172 @@ describe("the Home Assistant config", () => {
     assert.equal(r.body.includes("su_"), true, "the cue names are there");
     assert.equal(/Bearer\s+su_[A-Za-z0-9_-]{20,}/.test(r.body), false, "a real token is in the YAML");
     assert.match(r.body, /authorization: !secret stage_utility_token/);
+  });
+});
+
+// LAST in the file on purpose. The Home Assistant cases above read whatever the
+// pair import left in the rule store, and a block that wipes it has to come
+// after them or their four rest_commands become three.
+describe("importing single buttons", () => {
+  /** The `buttons` half of the import offer, from the real route. */
+  async function offered(): Promise<Record<string, unknown>[]> {
+    return (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        buttons: Record<string, unknown>[];
+      }
+    ).buttons;
+  }
+
+  test("the offer is every LABELLED button that is not half of a pair, ticked by nothing", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const buttons = await offered();
+    // Page 1: House Lights ON (an ON with no OFF), Take Screens. The unlabelled
+    // button at r3c0 is left out — a cue called nothing cannot be called.
+    // Page 3: Cam 1, Record Toggle. Everything else on pages 1 and 2 is paired.
+    assert.deepEqual(
+      buttons.map((b) => `${b.page as number}:${b.slug as string}`),
+      ["1:house_lights_on", "1:take_screens", "3:cam_1", "3:record_toggle"],
+    );
+    assert.equal(
+      buttons.some((b) => "suggested" in b),
+      false,
+      "a single button must not arrive pre-ticked — that is a cue somebody can say by accident",
+    );
+    assert.equal(buttons.every((b) => b.exists === false), true);
+  });
+
+  test("each becomes ONE cue, guarded and on a cooldown, and presses its coordinates", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const buttons = (await offered()).filter((b) => b.slug === "take_screens" || b.slug === "cam_1");
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { buttons },
+    });
+    assert.equal(r.status, 200);
+    const { created, skipped } = r.json as { created: string[]; skipped: unknown[] };
+    assert.deepEqual(created, ["take_screens", "cam_1"]);
+    assert.deepEqual(skipped, []);
+
+    const rules = automationEngine.cueRules();
+    assert.equal(rules.length, 2, "one rule per button, not two");
+    for (const rule of rules) {
+      assert.deepEqual(rule.conditions, [{ id: "service.is-not-live", params: {} }]);
+      assert.equal(rule.cooldownSec, 2);
+      assert.equal(rule.action.id, "companion.press");
+    }
+    const take = rules.find((x) => automationEngine.cueNameOf(x) === "take_screens")!;
+    assert.equal(take.trigger.params.says, "Take Screens");
+    assert.equal(take.name, "Take Screens");
+
+    presses = [];
+    assert.equal((await call("take_screens")).status, 200);
+    assert.deepEqual(presses, ["http://10.0.0.5:8000/api/location/1/2/3/press"]);
+  });
+
+  test("re-importing skips what exists and says which", async () => {
+    const buttons = (await offered()).filter((b) => b.slug === "take_screens");
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { buttons },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string }[] };
+    assert.deepEqual(created, []);
+    assert.deepEqual(
+      skipped.map((x) => x.name),
+      ["take_screens"],
+    );
+    assert.equal(automationEngine.cueRules().length, 2, "nothing was duplicated");
+  });
+
+  test("the offer marks what already exists, so the dialog can disable it", async () => {
+    const buttons = await offered();
+    assert.deepEqual(
+      buttons.filter((b) => b.exists).map((b) => b.slug),
+      ["take_screens", "cam_1"],
+    );
+  });
+
+  test("two pages with the same label are named after their page, on both", async () => {
+    // The pairs import has always done this; a single button collides in exactly
+    // the same way, and without it the second import is refused as a duplicate
+    // and one room quietly has no cue.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const real = companionDeps.fetch;
+    companionDeps.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/press")) {
+        presses.push(url);
+        return new Response("ok", { status: 200 });
+      }
+      // "Take Screens" now exists on page 2 as well, driving something else.
+      const doc = companionExportFixture() as {
+        pages: Record<string, { controls: Record<string, Record<string, unknown>> }>;
+      };
+      const source = doc.pages["1"]!.controls["2"]!["3"];
+      doc.pages["2"]!.controls["3"] = { "3": source };
+      return Response.json(doc);
+    };
+    companionApi.invalidate();
+    try {
+      const buttons = (await offered()).filter((b) => slugOf(b).endsWith("take_screens"));
+      assert.deepEqual(
+        buttons.map((b) => b.slug),
+        ["room_a_screens_take_screens", "room_a_lighting_take_screens"],
+      );
+      const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+        method: "POST",
+        headers: browser,
+        body: { buttons },
+      });
+      assert.deepEqual((r.json as { created: string[] }).created, [
+        "room_a_screens_take_screens",
+        "room_a_lighting_take_screens",
+      ]);
+      // And the WORDS are disambiguated too, or Home Assistant gets two scripts
+      // with one alias between them.
+      assert.deepEqual(
+        automationEngine.cueRules().map((x) => String(x.trigger.params.says)),
+        ["Room A: Screens Take Screens", "Room A: Lighting Take Screens"],
+      );
+    } finally {
+      companionDeps.fetch = real;
+      companionApi.invalidate();
+    }
+  });
+
+  test("pairs and single buttons import together, in one answer", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const offer = (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+      pairs: { slug: string }[];
+      buttons: Record<string, unknown>[];
+    };
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: {
+        pairs: offer.pairs.filter((p) => p.slug === "rig"),
+        buttons: offer.buttons.filter((b) => b.slug === "cam_1"),
+      },
+    });
+    assert.deepEqual((r.json as { created: string[] }).created, ["rig_on", "rig_off", "cam_1"]);
+  });
+
+  test("a body with neither key is refused, and one with only pairs still works", async () => {
+    const neither = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: {},
+    });
+    assert.equal(neither.status, 400);
+    const onlyPairs = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs: [] },
+    });
+    assert.equal(onlyPairs.status, 200);
+    assert.deepEqual(onlyPairs.json, { created: [], skipped: [] });
   });
 });

@@ -158,10 +158,27 @@ cooldown. They are ordinary rules afterwards — edit, disable or delete them li
 any other. Re-running the import skips names that already exist and tells you
 which.
 
+### Single buttons
+
+Under the pairs, the same dialog lists **Single buttons** — every other labelled
+button, one cue each, named after the button's own label. A button with no label
+is left out: a cue called nothing cannot be called.
+
+**Nothing in this section is ticked for you.** A pair is plainly a thing being
+turned on and off; a single button is whatever somebody put on a Companion page,
+and a pre-ticked camera shot or playback macro is a cue somebody can say by
+accident. Search by label, page or cue name and tick what you want.
+
+They carry the same **no service is live** condition and two-second cooldown as a
+pair's halves, and the same page-naming rule applies when the same label is on two
+pages. In Home Assistant a single button becomes a `script` rather than a switch —
+there is no on and no off to give a switch a state.
+
 ### Home Assistant
 
 **Copy YAML** in the same panel produces the whole configuration fragment: one
-`rest_command` per cue, and a template `switch` per ON/OFF pair. Paste it into
+`rest_command` per cue, a template `switch` per ON/OFF pair, and a `script` per
+cue that is not half of a pair. Paste it into
 `configuration.yaml`, put the token in `secrets.yaml` **with the scheme**:
 
 ```yaml
