@@ -629,6 +629,68 @@ describe("cue names", () => {
   });
 });
 
+describe("a cue's former names", () => {
+  /** The cue, renamed, still carrying the name Home Assistant was pasted with. */
+  const renamed = () =>
+    withCue({
+      name: "Screens ON",
+      trigger: {
+        id: CALL_TRIGGER_ID,
+        params: { name: "screens_on", says: "the screens", aliases: "projectors_on" },
+      },
+    });
+
+  test("a call through a former name presses the button", async () => {
+    // The whole point of keeping the old name: the HomeKit switch was created
+    // from `rest_command.su_projectors_on` and nobody has re-pasted the YAML.
+    await renamed();
+    const r = await call("projectors_on");
+    assert.equal(r.status, 200);
+    assert.deepEqual(presses, ["http://10.0.0.5:8000/api/location/17/2/6/press"]);
+  });
+
+  test("and the log line says BOTH names, with an arrow", async () => {
+    // Otherwise the only trace of a Home Assistant still holding a stale name is
+    // a line naming a cue that is not in the rules list under that name.
+    await renamed();
+    const lines: string[] = [];
+    const real = console.log;
+    console.log = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+    try {
+      await call("projectors_on");
+    } finally {
+      console.log = real;
+    }
+    assert.ok(
+      lines.includes("[cues] projectors_on → screens_on by Home Assistant: dispatched"),
+      `no arrow line was logged; got:\n  ${lines.join("\n  ")}`,
+    );
+  });
+
+  test("a call by the CURRENT name logs one name, not an arrow to itself", async () => {
+    await renamed();
+    const lines: string[] = [];
+    const real = console.log;
+    console.log = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+    try {
+      await call("screens_on");
+    } finally {
+      console.log = real;
+    }
+    assert.ok(
+      lines.includes("[cues] screens_on by Home Assistant: dispatched"),
+      `the plain line is gone; got:\n  ${lines.join("\n  ")}`,
+    );
+  });
+
+  test("a name that is nobody's, current or former, is still 404", async () => {
+    await renamed();
+    const r = await call("lobby_tvs_on");
+    assert.equal(r.status, 404);
+    assert.deepEqual(presses, []);
+  });
+});
+
 // ── /api/action/invoke ────────────────────────────────────────────────────────
 
 describe("the token gate on /api/action/invoke", () => {

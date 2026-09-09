@@ -489,6 +489,16 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
         help: "lower_snake_case, unique across rules. This is the URL: /api/cues/<name>.",
       },
       {
+        key: "aliases",
+        label: "Former names",
+        type: "string",
+        optional: true,
+        help:
+          "Names this cue also answers to, comma-separated. Written when a Companion button is " +
+          "relabelled and the cue is renamed to match, so an already-pasted Home Assistant " +
+          "config keeps working. Remove one and that URL stops resolving.",
+      },
+      {
         key: "says",
         label: "Spoken as",
         type: "string",

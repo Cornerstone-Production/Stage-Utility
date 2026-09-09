@@ -193,7 +193,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/cues/:name` | Run the cue. `200` dispatched, `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
+| POST | `/api/cues/:name` | Run the cue. `:name` is the cue's current name or any of its former names; a current name always wins. `200` dispatched, `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
 | GET / POST | `/api/cues/tokens` | List callers (never a hash) / mint one (`{label}`). The secret is returned once and never again |
 | DELETE | `/api/cues/tokens/:id` | Revoke one caller |
 | GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml`, not JSON |
