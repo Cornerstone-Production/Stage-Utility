@@ -91,6 +91,13 @@ function assertBundle(b: unknown): asserts b is ViewBundle {
     if (!Array.isArray(o.roots) || o.roots.some((r) => typeof r !== "string" || !r)) {
       throw new Error("import — roots is not a list of view ids");
     }
+    // A root naming no view in the file is refused whole, like everything else
+    // here. Filtered out instead, it emptied the walk the rebind list is built
+    // from: the operator was told there was no hardware to re-point, on a file
+    // whose roots the importer could not find at all.
+    for (const r of o.roots as string[]) {
+      if (!seenIds.has(r)) throw new Error(`import — roots names a view that is not in the file: ${r}`);
+    }
   }
 
   if (sd?.patchVariants != null) {
@@ -436,9 +443,12 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   // it; a plan export has as many roots as the type has boards on, and walking
   // only the first under-reported every other root's hardware bindings — the
   // operator would find them on a Sunday instead of in the report.
+  //
+  // No filter over the mapped ids: assertBundle has already refused a file whose
+  // roots name a view it does not contain, so every id here maps to one that
+  // landed. Filtering instead is what silently emptied this list.
   const rootIds = (bundle.roots?.length ? bundle.roots : [bundle.views[0]!.id])
-    .map((id) => viewIdMap.get(id) ?? id)
-    .filter((id) => named.some((v) => v.id === id));
+    .map((id) => viewIdMap.get(id) ?? id);
   const rebind = collectRefsFrom(named, rootIds).unresolvable;
 
   return {

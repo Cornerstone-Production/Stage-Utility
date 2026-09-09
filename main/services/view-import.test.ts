@@ -350,6 +350,16 @@ describe("landing a plan under a different service type", () => {
 describe("the rebind list walks every root", () => {
   beforeEach(async () => { await viewsStore.save([] as never); });
 
+  test("a root naming a view the file does not contain refuses the whole file", async () => {
+    // Filtered out instead, the walk started from nothing: the report promised
+    // no hardware to re-point on a file whose roots the importer could not find.
+    await assert.rejects(
+      () => applyViewBundle(planBundle({ roots: ["view-1", "ghost"] })),
+      /roots names a view that is not in the file: ghost/,
+    );
+    assert.deepEqual(await viewsStore.load(), [], "a view landed from a file that was refused");
+  });
+
   test("not just the first one", async () => {
     // A plan export has as many roots as the service type has boards on. Walking
     // views[0] alone under-reported every other root's hardware, and the
