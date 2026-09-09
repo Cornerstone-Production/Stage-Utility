@@ -2,7 +2,7 @@ import { errorMessage } from "@main/services/errors";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { OctagonXIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import {
@@ -16,6 +16,10 @@ import {
   toast,
 } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
+import { CompanionPressFields, CueAccessCard, ImportPairsDialog } from "./companion-cues";
+
+/** The one trigger that only ever runs because something CALLED it. */
+const CALL_TRIGGER_ID = "call.by-name";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
@@ -53,6 +57,7 @@ interface Rule {
   action: { id: string; params: Record<string, string | number> };
   cooldownSec: number;
   oncePerService: boolean;
+  confirmRequired?: boolean;
 }
 
 interface LogEntry {
@@ -62,6 +67,8 @@ interface LogEntry {
   actionId: string;
   outcome: "fired" | "failed" | "simulated" | "suppressed" | "condition-not-met";
   detail: string;
+  /** The token label behind a called cue. Absent for anything the engine fired. */
+  caller?: string;
 }
 
 // ── Shared row helpers, matching the layout inspector's shape ─────────────────
@@ -292,6 +299,9 @@ function ActivityLog() {
                 {formatClock(e.at, { seconds: true })}
               </span>
               <span className="shrink-0 font-medium text-fg-muted">{e.ruleName}</span>
+              {e.caller && (
+                <span className="shrink-0 text-caption2 text-fg-subtle">via {e.caller}</span>
+              )}
               <span className={`min-w-0 flex-1 truncate ${OUTCOME_STYLE[e.outcome]}`}>
                 {e.outcome === "fired" ? "" : `${e.outcome}: `}
                 {e.detail}
@@ -350,6 +360,11 @@ function RuleCard({
     try {
       await invoke("automation:updateRule", { id: rule.id, patch: draft });
       onChanged();
+    } catch (e) {
+      // The server refuses a duplicate or malformed cue name with a 400. Without
+      // this the rejection was an unhandled rejection and the editor just sat
+      // there with the operator's change still on screen, apparently saved.
+      toast.error(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -500,15 +515,30 @@ function RuleCard({
               ))}
             </select>
           </Row>
-          {action?.params.map((p) => (
-            <ParamField
-              key={p.key}
-              spec={p}
-              value={draft.action.params[p.key]}
-              dynamicOptions={dynamicOptions}
-              onChange={(v) => setDraft({ ...draft, action: { ...draft.action, params: { ...draft.action.params, [p.key]: v } } })}
+          {/* One action renders its own params: three coordinates are not
+              something an operator can be expected to know, so companion.press
+              gets a picker that fills them in. The fields stay visible and
+              editable — the picker is a convenience over the same params, not a
+              replacement for them, which is what keeps a button that is not in
+              Companion's export reachable. */}
+          {draft.action.id === "companion.press" ? (
+            <CompanionPressFields
+              params={draft.action.params}
+              onChange={(patch) =>
+                setDraft({ ...draft, action: { ...draft.action, params: { ...draft.action.params, ...patch } } })
+              }
             />
-          ))}
+          ) : (
+            action?.params.map((p) => (
+              <ParamField
+                key={p.key}
+                spec={p}
+                value={draft.action.params[p.key]}
+                dynamicOptions={dynamicOptions}
+                onChange={(v) => setDraft({ ...draft, action: { ...draft.action, params: { ...draft.action.params, [p.key]: v } } })}
+              />
+            ))
+          )}
 
           <Separator />
           <Row
@@ -530,6 +560,21 @@ function RuleCard({
               aria-label="Once per service"
             />
           </Row>
+          {/* Only for a called cue: there is nothing to confirm to when a rule
+              fires itself off a state change, and a switch that did nothing on
+              every other rule would be worse than absent. */}
+          {draft.trigger.id === CALL_TRIGGER_ID && (
+            <Row
+              label="Ask twice"
+              hint="The first call is answered with a confirmation and does nothing. A second call within 30 seconds runs it."
+            >
+              <Switch
+                checked={draft.confirmRequired === true}
+                onCheckedChange={(v) => setDraft({ ...draft, confirmRequired: v })}
+                aria-label="Ask twice before running"
+              />
+            </Row>
+          )}
 
           {dirty && (
             <div className="flex items-center gap-2 pt-2">
@@ -551,6 +596,7 @@ function RuleCard({
 
 export function AutomationSection() {
   const qc = useQueryClient();
+  const [importing, setImporting] = useState(false);
   const { data: registry } = useQuery({
     queryKey: ["automation:registry"],
     queryFn: () => invoke<Registry>("automation:registry"),
@@ -669,7 +715,7 @@ export function AutomationSection() {
               />
             ))
           )}
-          <div>
+          <div className="flex items-center gap-2">
             <Button
               variant="filled"
               size="small"
@@ -688,10 +734,15 @@ export function AutomationSection() {
             >
               <PlusIcon className="size-3.5" /> Add rule
             </Button>
+            <Button variant="transparent" size="small" onClick={() => setImporting(true)}>
+              <DownloadIcon className="size-3.5" /> Import from Companion…
+            </Button>
           </div>
         </div>
       )}
 
+      <ImportPairsDialog open={importing} onOpenChange={setImporting} onImported={refresh} />
+      <CueAccessCard />
       <ActivityLog />
     </div>
   );

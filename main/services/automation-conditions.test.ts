@@ -12,7 +12,8 @@ import type { PvpLayerDTO } from "../types/pvp.js";
 // Sunday 2026-07-26 is a Sunday; 10:00 local.
 const SUNDAY_10AM = Date.parse("2026-07-26T10:00:00Z");
 const ctx = (over: Partial<ConditionCtx> = {}): ConditionCtx => ({
-  pcoLive: { mode: "item", serviceTimeId: "st1" },
+  pcoLive: { mode: "item", serviceTimeId: "st1", startsAtMs: SUNDAY_10AM },
+  pcoConfigured: true,
   serviceTypeId: "weekend",
   integrations: {},
   obsRecording: false,
@@ -30,8 +31,58 @@ describe("service.is-live", () => {
     assert.equal(c.holds(ctx(), {}, SUNDAY_10AM), true);
   });
   test("does not hold pre-service or when nothing is live", () => {
-    assert.equal(c.holds(ctx({ pcoLive: { mode: "preservice", serviceTimeId: null } }), {}, SUNDAY_10AM), false);
+    assert.equal(
+      c.holds(ctx({ pcoLive: { mode: "preservice", serviceTimeId: null, startsAtMs: null } }), {}, SUNDAY_10AM),
+      false,
+    );
     assert.equal(c.holds(ctx({ pcoLive: null }), {}, SUNDAY_10AM), false);
+  });
+});
+
+describe("service.is-not-live", () => {
+  // This is the condition every imported cue carries, and it FAILS CLOSED: a
+  // wrong cue during setup is worse than a cue that does not fire. It was
+  // `mode !== "item"`, which held ten minutes before a service and held whenever
+  // Planning Center could not be read at all.
+  const c = AUTOMATION_CONDITIONS["service.is-not-live"];
+  const live = (mode: string, startsAtMs: number | null) =>
+    ctx({ pcoLive: { mode, serviceTimeId: "st1", startsAtMs } });
+
+  test("holds only when PCO says nothing is on", () => {
+    assert.equal(c.holds(live("none", null), {}, SUNDAY_10AM), true);
+  });
+
+  test("a live item blocks", () => {
+    assert.equal(c.holds(live("item", SUNDAY_10AM), {}, SUNDAY_10AM), false);
+  });
+
+  test("preservice blocks inside the hour before the service, and after a late start", () => {
+    assert.equal(c.holds(live("preservice", SUNDAY_10AM + 10 * 60_000), {}, SUNDAY_10AM), false);
+    assert.equal(c.holds(live("preservice", SUNDAY_10AM + 59 * 60_000), {}, SUNDAY_10AM), false);
+    // Started 20 minutes ago and PCO is still in preservice — nobody is driving
+    // Live, but the service is happening.
+    assert.equal(c.holds(live("preservice", SUNDAY_10AM - 20 * 60_000), {}, SUNDAY_10AM), false);
+  });
+
+  test("preservice with no time to anchor to blocks", () => {
+    assert.equal(c.holds(live("preservice", null), {}, SUNDAY_10AM), false);
+  });
+
+  test("preservice for a service days away HOLDS", () => {
+    // PCO reports "preservice" from the moment a plan has a service time — its
+    // own countdown says "6 days". Blocking on the mode alone would refuse every
+    // cue all week, which is the same bug pointing the other way.
+    assert.equal(c.holds(live("preservice", SUNDAY_10AM + 6 * 24 * 3600_000), {}, SUNDAY_10AM), true);
+    // And an hour after the last service, so teardown can be asked for.
+    assert.equal(c.holds(live("preservice", SUNDAY_10AM - 60 * 60_000), {}, SUNDAY_10AM), true);
+  });
+
+  test("no PCO state at all, with the integration configured, BLOCKS", () => {
+    assert.equal(c.holds(ctx({ pcoLive: null, pcoConfigured: true }), {}, SUNDAY_10AM), false);
+  });
+
+  test("no PCO state and no Planning Center configured holds — there is nothing to check", () => {
+    assert.equal(c.holds(ctx({ pcoLive: null, pcoConfigured: false }), {}, SUNDAY_10AM), true);
   });
 });
 

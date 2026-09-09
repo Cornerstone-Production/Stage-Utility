@@ -1,0 +1,858 @@
+// Calling a cue: the gate, the guards, and the answers a voice assistant reads.
+//
+// Everything here runs the REAL route module against the real engine through
+// route-harness, so these are the bytes a caller gets. The only stub is
+// Companion's own HTTP API — a test that presses a button turns something on in
+// a building.
+//
+// Four things are guarded that have no other check anywhere:
+//
+//  - a call with no token is 401. Without it, "anyone who can reach the port"
+//    can turn the projectors off during a service from a phone on the guest wifi.
+//  - `call.by-name` never fires from the bus. A cue that fired itself because a
+//    snapshot changed is the failure this whole feature must not have.
+//  - the cooldown applies to a CALL, not just to a triggered fire. A voice
+//    assistant that mishears "again" is a double press.
+//  - `POST /api/action/invoke` with no Origin needs a token, while the app's own
+//    same-origin page still works. Half of that is easy to break silently.
+
+import assert from "node:assert/strict";
+import { after, before, beforeEach, describe, test } from "node:test";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as fsp from "node:fs/promises";
+
+const TMP = await fsp.mkdtemp(path.join(os.tmpdir(), "cue-routes-"));
+process.env.STAGE_UTILITY_DATA = TMP;
+process.env.HOME = path.join(TMP, "home");
+
+const { cueRoutes } = await import("./cue-routes.js");
+const { automationRoutes } = await import("./automation-routes.js");
+const { callRoute } = await import("./route-harness.js");
+const { automationEngine } = await import("../automation-engine.js");
+const { automationLog } = await import("../automation-log.js");
+const { cueTokens } = await import("../cue-tokens.js");
+const { companionApi, companionDeps } = await import("../companion-api.js");
+const { companionExportFixture, FIXTURE_PAGES } = await import("../fixtures/companion-export.js");
+const { stageController } = await import("../stage-controller.js");
+const { integrationManager } = await import("../integration-manager.js");
+const { AUTOMATION_TRIGGERS, CALL_TRIGGER_ID } = await import("../automation-triggers.js");
+
+after(async () => {
+  await fsp.rm(TMP, { recursive: true, force: true });
+});
+
+// ── Fixtures ──────────────────────────────────────────────────────────────────
+
+/** Every press the stubbed Companion received. */
+let presses: string[] = [];
+
+/**
+ * A live PCO service, or none.
+ *
+ * stageController has no setter for this — nothing in production sets it from
+ * outside — so the private fields are written directly. The alternative is a
+ * production seam that exists only for a test, which is worse.
+ */
+function setPco(live: Record<string, unknown> | null, planTitle: string | null = null): void {
+  const c = stageController as unknown as { lastLive: unknown; state: Record<string, unknown> };
+  c.lastLive = live;
+  c.state = { ...c.state, planTitle };
+}
+
+/** PCO answering, with nothing on. The baseline every cue needs to run. */
+const setQuiet = () => setPco({ mode: "none", serviceTimeId: null, targetAt: null, serviceTimeStartsAt: null });
+/** A plan item live. */
+const setLive = (planTitle: string) => setPco({ mode: "item", serviceTimeId: "st-1" }, planTitle);
+
+/**
+ * Whether the Planning Center integration counts as set up.
+ *
+ * `service.is-not-live` fails closed only when PCO is CONFIGURED — an install
+ * with no Planning Center at all must not have every cue refused forever — so
+ * every case here has to say which it is. The manager has no setter for it
+ * (nothing in production sets it from outside), so getStates is wrapped.
+ */
+type State = ReturnType<typeof integrationManager.getStates>[number];
+const realGetStates = integrationManager.getStates.bind(integrationManager);
+function setPcoConfigured(configured: boolean): void {
+  integrationManager.getStates = () => {
+    const states = realGetStates();
+    // The manager reports nothing at all until it is initialised, which in this
+    // suite it never is — so the row is added rather than patched.
+    if (!states.some((s) => s.id === "planning-center")) {
+      return [...states, { id: "planning-center", connection: "disconnected", configured } as State];
+    }
+    return states.map((s) => (s.id === "planning-center" ? { ...s, configured } : s));
+  };
+}
+
+let TOKEN = "";
+
+before(async () => {
+  companionDeps.getTarget = async () => ({ host: "10.0.0.5", port: 8000 });
+  companionDeps.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.includes("/press")) {
+      presses.push(url);
+      return new Response("ok", { status: 200 });
+    }
+    void init;
+    return Response.json(companionExportFixture());
+  };
+  await automationEngine.init();
+  await automationEngine.setSettings({ simulate: false, disarmed: false });
+  TOKEN = (await cueTokens.mint("Home Assistant")).secret;
+});
+
+/** A function, not a constant: TOKEN is minted in `before`, which runs after
+ *  module scope. Captured as a constant it is "Bearer " and every case 401s. */
+const auth = (): Record<string, string> => ({ authorization: `Bearer ${TOKEN}` });
+/** What a browser on this server's own page sends on a POST or DELETE. BOTH
+ *  headers: either one alone is refused, and curl with one of them used to be
+ *  able to mint itself a token. */
+const browser = {
+  origin: "http://stage.local:8788",
+  host: "stage.local:8788",
+  "sec-fetch-site": "same-origin",
+};
+
+/** Wipe the rules and the log, then install one cue. */
+async function withCue(over: Record<string, unknown> = {}): Promise<string> {
+  for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+  await automationLog.clear();
+  const rule = await automationEngine.addRule({
+    name: "Projectors ON",
+    enabled: true,
+    trigger: { id: CALL_TRIGGER_ID, params: { name: "projectors_on", says: "the projectors" } },
+    conditions: [{ id: "service.is-not-live", params: {} }],
+    action: { id: "companion.press", params: { page: 17, row: 2, col: 6, label: "Projectors ON" } },
+    cooldownSec: 0,
+    oncePerService: false,
+    ...over,
+  });
+  return rule.id;
+}
+
+const call = (name: string, opts: Record<string, unknown> = {}) =>
+  callRoute(cueRoutes, `/api/cues/${name}`, { method: "POST", headers: auth(), ...opts });
+
+beforeEach(() => {
+  presses = [];
+  setQuiet();
+  setPcoConfigured(true);
+  companionApi.invalidate();
+});
+
+// ── The gate ──────────────────────────────────────────────────────────────────
+
+describe("the token gate on a call", () => {
+  test("no Authorization header is 401", async () => {
+    await withCue();
+    const r = await callRoute(cueRoutes, "/api/cues/projectors_on", { method: "POST" });
+    assert.equal(r.status, 401);
+    assert.equal(presses.length, 0, "nothing may be pressed before the caller is known");
+  });
+
+  test("a wrong token is 401, not 403 — we do not confirm the cue exists", async () => {
+    await withCue();
+    const r = await call("projectors_on", { headers: { authorization: "Bearer su_wrong" } });
+    assert.equal(r.status, 401);
+  });
+
+  test("a same-origin browser does NOT get a free pass on a call", async () => {
+    // Deliberately unlike the management routes. There is no operator-at-the-
+    // console case for firing a cue; the rule editor has a Test button.
+    await withCue();
+    const r = await callRoute(cueRoutes, "/api/cues/projectors_on", {
+      method: "POST",
+      headers: browser,
+    });
+    assert.equal(r.status, 401);
+  });
+
+  test("simulate mode answers 200 but SAYS it was simulated", async () => {
+    // Simulate is on by default on a fresh install. A plain 200 here is a Home
+    // Assistant switch that flips with the projectors still off.
+    await withCue();
+    await automationEngine.setSettings({ simulate: true });
+    const r = await call("projectors_on");
+    await automationEngine.setSettings({ simulate: false });
+
+    assert.equal(r.status, 200);
+    const body = r.json as { ok: boolean; detail: string; simulated?: true };
+    assert.equal(body.simulated, true);
+    assert.match(body.detail, /^would press/);
+    assert.equal(presses.length, 0);
+  });
+
+  test("a valid token fires it", async () => {
+    await withCue();
+    const r = await call("projectors_on");
+    assert.equal(r.status, 200);
+    assert.deepEqual((r.json as { ok: boolean }).ok, true);
+    assert.deepEqual(presses, ["http://10.0.0.5:8000/api/location/17/2/6/press"]);
+  });
+});
+
+// ── The same-origin exemption on the management writes ────────────────────────
+
+describe("the browser exemption needs BOTH headers", () => {
+  // Driven live against a real server before this was written: curl with only
+  // `Sec-Fetch-Site: same-origin` minted a token (201) and then called a cue with
+  // it (200). Either header alone is now refused.
+  const mint = (headers: Record<string, string>) =>
+    callRoute(cueRoutes, "/api/cues/tokens", {
+      method: "POST",
+      headers,
+      body: { label: "curl" },
+    });
+
+  test("Sec-Fetch-Site alone is 401", async () => {
+    const r = await mint({ "sec-fetch-site": "same-origin", host: "stage.local:8788" });
+    assert.equal(r.status, 401);
+  });
+
+  test("an Origin alone is 401", async () => {
+    const r = await mint({ origin: "http://stage.local:8788", host: "stage.local:8788" });
+    assert.equal(r.status, 401);
+  });
+
+  test("both, matching, is allowed", async () => {
+    const r = await mint(browser);
+    assert.equal(r.status, 201);
+    await callRoute(cueRoutes, `/api/cues/tokens/${(r.json as { token: { id: string } }).token.id}`, {
+      method: "DELETE",
+      headers: browser,
+    });
+  });
+
+  test("an Origin naming somebody else is 401 here, and 403 before it ever arrives", async () => {
+    // remote-server refuses a cross-origin write with 403 before routing (see
+    // remote-server.test.ts for that matrix). This is the second line: even if it
+    // did arrive, the exemption does not apply to it.
+    const r = await mint({
+      "sec-fetch-site": "same-origin",
+      origin: "https://evil.example",
+      host: "stage.local:8788",
+    });
+    assert.equal(r.status, 401);
+  });
+
+  test("`same-site` is not `same-origin`", async () => {
+    const r = await mint({
+      "sec-fetch-site": "same-site",
+      origin: "http://stage.local:8788",
+      host: "stage.local:8788",
+    });
+    assert.equal(r.status, 401);
+  });
+
+  test("the same rule covers revoke, import-pairs and buttons/refresh", async () => {
+    const half = { "sec-fetch-site": "same-origin", host: "stage.local:8788" };
+    assert.equal(
+      (await callRoute(cueRoutes, "/api/cues/tokens/whatever", { method: "DELETE", headers: half })).status,
+      401,
+    );
+    assert.equal(
+      (await callRoute(cueRoutes, "/api/companion/buttons/refresh", { method: "POST", headers: half })).status,
+      401,
+    );
+    assert.equal(
+      (await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+        method: "POST",
+        headers: half,
+        body: { pairs: [] },
+      })).status,
+      401,
+    );
+    // And each of them works for the app's own page.
+    assert.equal(
+      (await callRoute(cueRoutes, "/api/companion/buttons/refresh", { method: "POST", headers: browser })).status,
+      200,
+    );
+  });
+});
+
+// ── The guards ────────────────────────────────────────────────────────────────
+
+describe("guards on a call", () => {
+  test("an unknown name is 404", async () => {
+    await withCue();
+    const r = await call("nothing_by_that_name");
+    assert.equal(r.status, 404);
+    assert.equal((r.json as { reason: string }).reason, "unknown");
+  });
+
+  test("a live service is 409, with a sentence an assistant can say", async () => {
+    await withCue();
+    setLive("The Gospel Way");
+    const r = await call("projectors_on");
+    assert.equal(r.status, 409);
+    const body = r.json as { error: string; reason: string; plan: string };
+    assert.equal(body.reason, "service-live");
+    assert.equal(body.error, "The Gospel Way is live");
+    assert.equal(body.plan, "The Gospel Way");
+    assert.equal(presses.length, 0);
+  });
+
+  test("a disabled rule is 409, not 404 — the cue exists, it is switched off", async () => {
+    await withCue({ enabled: false });
+    const r = await call("projectors_on");
+    assert.equal(r.status, 409);
+    assert.equal((r.json as { reason: string }).reason, "disabled");
+  });
+
+  test("THE COOLDOWN: a second call inside it is 409 and presses nothing", async () => {
+    await withCue({ cooldownSec: 60 });
+    assert.equal((await call("projectors_on")).status, 200);
+
+    const second = await call("projectors_on");
+    assert.equal(second.status, 409, "a repeat inside the cooldown must be refused");
+    assert.equal((second.json as { reason: string }).reason, "cooldown");
+    assert.match((second.json as { error: string }).error, /try again in \d+ seconds?/);
+    assert.equal(presses.length, 1, "exactly one press reached Companion");
+  });
+
+  test("disarmed refuses everything, cue or not", async () => {
+    await withCue();
+    await automationEngine.setSettings({ disarmed: true });
+    const r = await call("projectors_on");
+    await automationEngine.setSettings({ disarmed: false });
+    assert.equal(r.status, 409);
+    assert.equal((r.json as { reason: string }).reason, "disarmed");
+  });
+});
+
+describe("what Planning Center says, and failing closed", () => {
+  // The condition every imported cue carries. It was `mode !== "item"`, which
+  // held ten minutes before a service and held whenever PCO could not be read —
+  // the two moments a lighting shutdown is most likely to be asked for by
+  // mistake. A wrong cue during setup is worse than a cue that does not fire.
+  const HOUR = 60 * 60_000;
+
+  test("preservice inside the hour is 409, and says so", async () => {
+    await withCue();
+    setPco(
+      { mode: "preservice", serviceTimeId: "st-1", targetAt: new Date(Date.now() + 10 * 60_000).toISOString() },
+      "The Gospel Way",
+    );
+    const r = await call("projectors_on");
+    assert.equal(r.status, 409);
+    const body = r.json as { reason: string; error: string; plan: string };
+    assert.equal(body.reason, "service-live");
+    assert.equal(body.error, "The Gospel Way is about to start");
+    assert.equal(body.plan, "The Gospel Way");
+    assert.equal(presses.length, 0);
+  });
+
+  test("preservice for a service days away still runs — PCO reports it all week", async () => {
+    await withCue();
+    setPco(
+      { mode: "preservice", serviceTimeId: "st-1", targetAt: new Date(Date.now() + 6 * 24 * HOUR).toISOString() },
+      "Next Sunday",
+    );
+    assert.equal((await call("projectors_on")).status, 200);
+  });
+
+  test("no PCO state at all, with Planning Center configured, is 409", async () => {
+    await withCue();
+    setPco(null);
+    const r = await call("projectors_on");
+    assert.equal(r.status, 409);
+    assert.equal((r.json as { reason: string }).reason, "planning-center-unknown");
+    assert.match((r.json as { error: string }).error, /Planning Center is not answering/);
+    assert.equal(presses.length, 0);
+  });
+
+  test("no PCO state and no Planning Center configured runs — there is nothing to check", async () => {
+    await withCue();
+    setPco(null);
+    setPcoConfigured(false);
+    assert.equal((await call("projectors_on")).status, 200);
+  });
+});
+
+describe("oncePerService on a CALL", () => {
+  test("the second call in the same service occurrence is 409", async () => {
+    // Silently ignored before: the flag was read from the rule for a triggered
+    // fire and nowhere on this path, so "the announcement, once" ran as often as
+    // anybody asked.
+    await withCue({ oncePerService: true });
+    // Quiet, but with a service occurrence to key on: a Tuesday rehearsal with
+    // Sunday's plan loaded is exactly this.
+    setPco({
+      mode: "preservice",
+      serviceTimeId: "st-42",
+      targetAt: new Date(Date.now() + 4 * 24 * 60 * 60_000).toISOString(),
+    });
+
+    assert.equal((await call("projectors_on")).status, 200);
+    const second = await call("projectors_on");
+    assert.equal(second.status, 409);
+    assert.equal((second.json as { reason: string }).reason, "once-per-service");
+    assert.equal(presses.length, 1, "exactly one press reached Companion");
+  });
+
+  test("a different service occurrence starts it over", async () => {
+    await withCue({ oncePerService: true });
+    const at = (id: string) =>
+      setPco({
+        mode: "preservice",
+        serviceTimeId: id,
+        targetAt: new Date(Date.now() + 4 * 24 * 60 * 60_000).toISOString(),
+      });
+    at("st-9am");
+    assert.equal((await call("projectors_on")).status, 200);
+    at("st-11am");
+    assert.equal((await call("projectors_on")).status, 200);
+    assert.equal(presses.length, 2);
+  });
+});
+
+describe("confirmRequired", () => {
+  test("the first call is 202 and presses nothing; the second, carrying the token, runs", async () => {
+    await withCue({ confirmRequired: true });
+
+    const first = await call("projectors_on");
+    assert.equal(first.status, 202);
+    const { confirm, expiresInSec } = first.json as { confirm: string; expiresInSec: number };
+    assert.ok(confirm, "a confirmation token comes back");
+    assert.equal(expiresInSec, 30);
+    assert.equal(presses.length, 0);
+
+    const second = await call(`projectors_on?confirm=${confirm}`);
+    assert.equal(second.status, 200);
+    assert.equal(presses.length, 1);
+  });
+
+  test("a wrong confirmation is refused and hands out a fresh one", async () => {
+    await withCue({ confirmRequired: true });
+    await call("projectors_on");
+    const r = await call("projectors_on?confirm=not-the-token");
+    assert.equal(r.status, 202);
+    assert.equal(presses.length, 0);
+  });
+
+  test("a confirmation is SINGLE USE — replaying it hands out a fresh one and presses nothing", async () => {
+    // Was untested: deleting the `pendingConfirm.delete` left the whole suite
+    // green, so a voice assistant that retried a request (or anybody who read the
+    // token out of a log) could fire the cue twice. The answer to a replay is
+    // deliberately the same 202-with-a-new-token as any other unconfirmed call:
+    // 409 would tell a caller which of its two problems it has, and there is
+    // nothing useful it could do differently.
+    const id = await withCue({ confirmRequired: true, cooldownSec: 0 });
+    const first = await automationEngine.callByName("projectors_on", { caller: "test", now: 1_000 });
+    assert.equal(first.status, 202);
+    const token = (first.body as { confirm: string }).confirm;
+
+    const used = await automationEngine.callByName("projectors_on", {
+      caller: "test",
+      confirm: token,
+      now: 2_000,
+    });
+    assert.equal(used.status, 200);
+    assert.equal(presses.length, 1);
+
+    const replay = await automationEngine.callByName("projectors_on", {
+      caller: "test",
+      confirm: token,
+      now: 3_000,
+    });
+    assert.equal(replay.status, 202, "a spent confirmation ran the cue again");
+    assert.notEqual((replay.body as { confirm: string }).confirm, token, "the same token came back");
+    assert.equal(presses.length, 1, "a replayed confirmation pressed a second time");
+    void id;
+  });
+
+  test("a confirmation EXPIRES after 30 seconds", async () => {
+    // Also untested. The window is the whole reason walking away cancels a cue;
+    // without it a token minted before the service is still good after it.
+    await withCue({ confirmRequired: true, cooldownSec: 0 });
+    const first = await automationEngine.callByName("projectors_on", { caller: "test", now: 1_000 });
+    const token = (first.body as { confirm: string }).confirm;
+
+    const late = await automationEngine.callByName("projectors_on", {
+      caller: "test",
+      confirm: token,
+      now: 1_000 + 30_001,
+    });
+    assert.equal(late.status, 202, "a lapsed confirmation still ran the cue");
+    assert.equal(presses.length, 0);
+
+    // One millisecond inside the window is still good, so the guard is testing
+    // the boundary and not merely "expiry exists".
+    const second = await automationEngine.callByName("projectors_on", { caller: "test", now: 100_000 });
+    const fresh = (second.body as { confirm: string }).confirm;
+    const inTime = await automationEngine.callByName("projectors_on", {
+      caller: "test",
+      confirm: fresh,
+      now: 100_000 + 29_999,
+    });
+    assert.equal(inTime.status, 200);
+    assert.equal(presses.length, 1);
+  });
+
+  test("the confirmation may arrive in the body, for Home Assistant", async () => {
+    await withCue({ confirmRequired: true });
+    const first = await call("projectors_on");
+    const { confirm } = first.json as { confirm: string };
+    const r = await call("projectors_on", { body: { confirm } });
+    assert.equal(r.status, 200);
+    assert.equal(presses.length, 1);
+  });
+});
+
+// ── The log ───────────────────────────────────────────────────────────────────
+
+describe("the activity log", () => {
+  test("a fired cue records the caller's token label", async () => {
+    await withCue();
+    await call("projectors_on");
+    const entry = automationLog.list()[0]!;
+    assert.equal(entry.caller, "Home Assistant");
+    assert.match(entry.detail, /dispatched p17 r2 c6 "Projectors ON"/);
+  });
+
+  test("a BLOCKED cue is logged too, with the caller and the reason", async () => {
+    await withCue();
+    setLive("Sunday Morning");
+    await call("projectors_on");
+    const entry = automationLog.list()[0]!;
+    assert.equal(entry.caller, "Home Assistant");
+    assert.equal(entry.outcome, "condition-not-met");
+    assert.match(entry.detail, /Sunday Morning is live/);
+  });
+});
+
+// ── The trigger cannot fire itself ────────────────────────────────────────────
+
+describe("a called cue never fires from an event", () => {
+  test("didFire is false for every snapshot pair", async () => {
+    const trigger = AUTOMATION_TRIGGERS[CALL_TRIGGER_ID]!;
+    const snaps: unknown[] = [null, {}, { mode: "item" }, [{ id: "companion", connection: "connected" }], "x", 0];
+    for (const prev of snaps) {
+      for (const next of snaps) {
+        assert.equal(
+          trigger.didFire(prev, next, { name: "projectors_on" }, Date.now()),
+          false,
+          `didFire fired on ${JSON.stringify(prev)} -> ${JSON.stringify(next)}`,
+        );
+      }
+    }
+  });
+
+  test("THE ENGINE refuses it even when didFire says yes", async () => {
+    // didFire is the trigger author's discipline; this is the engine's. The
+    // override is what makes this a test of the ENGINE rather than a second copy
+    // of the one above — remove the CALL_CHANNEL skip in handleBroadcast and
+    // this goes red while everything else stays green.
+    await withCue();
+    const trigger = AUTOMATION_TRIGGERS[CALL_TRIGGER_ID]!;
+    const real = trigger.didFire;
+    trigger.didFire = () => true;
+    try {
+      // Two broadcasts: the first seeds the channel, the second is the "edge".
+      await automationEngine.__handleBroadcast("cue:call", { a: 1 }, Date.now());
+      await automationEngine.__handleBroadcast("cue:call", { a: 2 }, Date.now() + 1000);
+    } finally {
+      trigger.didFire = real;
+    }
+    assert.equal(presses.length, 0, "a cue fired itself off the bus");
+    assert.equal(automationLog.list().length, 0, "the engine evaluated a call-only rule");
+  });
+});
+
+// ── Names are unique ──────────────────────────────────────────────────────────
+
+describe("cue names", () => {
+  test("a duplicate name is refused with 400", async () => {
+    await withCue();
+    const r = await callRoute(automationRoutes, "/api/automation/rules", {
+      method: "POST",
+      body: {
+        name: "Another one",
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name: "projectors_on" } },
+        conditions: [],
+        action: { id: "log.message", params: { message: "x" } },
+        cooldownSec: 0,
+        oncePerService: false,
+      },
+    });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /already used/);
+    assert.equal(automationEngine.cueRules().length, 1);
+  });
+
+  test("a name that is not snake_case is refused", async () => {
+    await withCue();
+    const r = await callRoute(automationRoutes, "/api/automation/rules", {
+      method: "POST",
+      body: {
+        name: "Shouty",
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name: "Projectors ON!" } },
+        conditions: [],
+        action: { id: "log.message", params: { message: "x" } },
+        cooldownSec: 0,
+        oncePerService: false,
+      },
+    });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /lower_snake_case/);
+  });
+});
+
+// ── /api/action/invoke ────────────────────────────────────────────────────────
+
+describe("the token gate on /api/action/invoke", () => {
+  const invoke = (headers: Record<string, string>) =>
+    callRoute(automationRoutes, "/api/action/invoke", {
+      method: "POST",
+      headers,
+      body: { actionId: "log.message", params: { message: "hello" } },
+    });
+
+  test("no Origin and no token is 401", async () => {
+    const r = await invoke({});
+    assert.equal(r.status, 401);
+  });
+
+  test("no Origin WITH a token runs", async () => {
+    const r = await invoke(auth());
+    assert.equal(r.status, 200);
+    assert.equal((r.json as { ok: boolean }).ok, true);
+  });
+
+  test("a same-origin browser still works, exactly as before", async () => {
+    // remote-server has already refused a cross-origin write by the time a
+    // request with an Origin reaches this handler, so an Origin here is ours.
+    const r = await invoke(browser);
+    assert.equal(r.status, 200);
+    assert.equal((r.json as { ok: boolean }).ok, true);
+  });
+});
+
+// ── Tokens ────────────────────────────────────────────────────────────────────
+
+describe("token management", () => {
+  test("mint returns the secret once, and the list never carries a hash", async () => {
+    const minted = await callRoute(cueRoutes, "/api/cues/tokens", {
+      method: "POST",
+      headers: browser,
+      body: { label: "Kitchen tablet" },
+    });
+    assert.equal(minted.status, 201);
+    const secret = (minted.json as { secret: string }).secret;
+    assert.match(secret, /^su_/);
+
+    const listed = await callRoute(cueRoutes, "/api/cues/tokens", { headers: browser });
+    const tokens = (listed.json as { tokens: Record<string, unknown>[] }).tokens;
+    assert.ok(tokens.some((t) => t.label === "Kitchen tablet"));
+    for (const t of tokens) {
+      assert.equal("hash" in t, false, "a hash reached a client");
+      assert.equal(String(JSON.stringify(t)).includes("su_"), false);
+    }
+
+    // The minted token works, and revoking it stops it.
+    const id = tokens.find((t) => t.label === "Kitchen tablet")!.id as string;
+    await withCue();
+    assert.equal((await call("projectors_on", { headers: { authorization: `Bearer ${secret}` } })).status, 200);
+
+    const revoked = await callRoute(cueRoutes, `/api/cues/tokens/${id}`, {
+      method: "DELETE",
+      headers: browser,
+    });
+    assert.equal(revoked.status, 200);
+    await withCue();
+    assert.equal((await call("projectors_on", { headers: { authorization: `Bearer ${secret}` } })).status, 401);
+  });
+
+  test("LISTING is an open read, and carries nothing secret", async () => {
+    // Deliberately ungated, like every other read in this app. A same-origin GET
+    // sends no Origin, so the only thing it could be gated on is a header curl
+    // can type — and the list is labels, ids and timestamps. The hashes never
+    // leave cue-tokens.ts.
+    const r = await callRoute(cueRoutes, "/api/cues/tokens");
+    assert.equal(r.status, 200);
+    const tokens = (r.json as { tokens: Record<string, unknown>[] }).tokens;
+    assert.ok(tokens.length > 0);
+    for (const t of tokens) {
+      assert.equal("hash" in t, false, "a hash reached a client");
+      assert.equal(JSON.stringify(t).includes("su_"), false);
+    }
+  });
+
+  test("a call records lastUsedAt", async () => {
+    await withCue();
+    await call("projectors_on");
+    const listed = await callRoute(cueRoutes, "/api/cues/tokens", { headers: browser });
+    const ha = (listed.json as { tokens: { label: string; lastUsedAt: string | null }[] }).tokens.find(
+      (t) => t.label === "Home Assistant",
+    )!;
+    assert.ok(ha.lastUsedAt, "the token's last use was recorded");
+  });
+});
+
+// ── Companion pickers ─────────────────────────────────────────────────────────
+
+describe("the button and pair endpoints", () => {
+  test("buttons come back grouped-ready, from the export", async () => {
+    const r = await callRoute(cueRoutes, "/api/companion/buttons");
+    assert.equal(r.status, 200);
+    const body = r.json as { ok: boolean; buttons: { pageName: string; label: string }[] };
+    assert.equal(body.ok, true);
+    assert.equal(body.buttons.length, 12);
+    assert.ok(body.buttons.some((b) => b.pageName === FIXTURE_PAGES.screens));
+  });
+
+  test("an unreachable Companion answers 200 with the reason, so the picker can offer the fields", async () => {
+    const real = companionDeps.fetch;
+    companionDeps.fetch = async () => {
+      throw new Error("EHOSTUNREACH");
+    };
+    companionApi.invalidate();
+    try {
+      const r = await callRoute(cueRoutes, "/api/companion/buttons");
+      assert.equal(r.status, 200);
+      const body = r.json as { ok: boolean; reason: string; buttons: unknown[] };
+      assert.equal(body.ok, false);
+      assert.match(body.reason, /EHOSTUNREACH/);
+      assert.deepEqual(body.buttons, []);
+    } finally {
+      companionDeps.fetch = real;
+      companionApi.invalidate();
+    }
+  });
+
+  test("pairs carry a slug and whether the rule already exists", async () => {
+    for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+    const r = await callRoute(cueRoutes, "/api/companion/pairs");
+    const pairs = (r.json as { pairs: { base: string; slug: string; exists: boolean }[] }).pairs;
+    assert.equal(pairs.length, 4);
+    assert.deepEqual(
+      pairs.map((p) => p.slug),
+      // "Projectors" is on both fixture pages, so both are prefixed. See
+      // slugsForPairs — a plain slug would have one of them refused on import.
+      ["lobby_tvs", "room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
+    );
+    assert.equal(pairs.every((p) => !p.exists), true);
+  });
+
+  test("the ticked-by-default pairs come from what the buttons DRIVE, not a page name", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const r = await callRoute(cueRoutes, "/api/companion/pairs");
+    const body = r.json as { pairs: { slug: string; suggested: boolean }[]; defaultPages?: unknown };
+    assert.deepEqual(
+      body.pairs.filter((p) => p.suggested).map((p) => p.slug),
+      ["room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
+    );
+    // "lobby_tvs" drives generic-tcp-udp — something we cannot call a projector —
+    // so it is offered unticked rather than pre-armed.
+    assert.deepEqual(
+      body.pairs.filter((p) => !p.suggested).map((p) => p.slug),
+      ["lobby_tvs"],
+    );
+    assert.equal("defaultPages" in body, false, "a site's page names came back over the wire");
+  });
+});
+
+describe("importing pairs", () => {
+  test("creates two rules per pair, guarded and on a cooldown", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        pairs: { base: string; slug: string; page: number; on: unknown; off: unknown }[];
+      }
+    ).pairs.filter((p) => p.page === 1);
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    assert.equal(r.status, 200);
+    const { created, skipped } = r.json as { created: string[]; skipped: unknown[] };
+    assert.deepEqual(created, [
+      "lobby_tvs_on",
+      "lobby_tvs_off",
+      "room_a_screens_projectors_on",
+      "room_a_screens_projectors_off",
+    ]);
+    assert.deepEqual(skipped, []);
+
+    const rules = automationEngine.cueRules();
+    assert.equal(rules.length, 4);
+    for (const rule of rules) {
+      assert.deepEqual(rule.conditions, [{ id: "service.is-not-live", params: {} }]);
+      assert.equal(rule.cooldownSec, 2);
+      assert.equal(rule.enabled, true);
+      assert.equal(rule.action.id, "companion.press");
+    }
+
+    // And the imported cue actually presses the coordinate it was imported with.
+    presses = [];
+    const fired = await call("room_a_screens_projectors_on");
+    assert.equal(fired.status, 200);
+    assert.deepEqual(presses, ["http://10.0.0.5:8000/api/location/1/0/1/press"]);
+  });
+
+  test("re-importing skips what exists and says which, rather than overwriting", async () => {
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { page: number }[] }
+    ).pairs.filter((p) => p.page === 1);
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string }[] };
+    assert.deepEqual(created, []);
+    assert.deepEqual(
+      skipped.map((s) => s.name),
+      [
+        "lobby_tvs_on",
+        "lobby_tvs_off",
+        "room_a_screens_projectors_on",
+        "room_a_screens_projectors_off",
+      ],
+    );
+    assert.equal(automationEngine.cueRules().length, 4, "nothing was duplicated");
+  });
+});
+
+// ── Home Assistant ────────────────────────────────────────────────────────────
+
+describe("the Home Assistant config", () => {
+  test("one rest_command per cue and one switch per pair", async () => {
+    const r = await callRoute(cueRoutes, "/api/cues/home-assistant.yaml", { headers: browser });
+    assert.equal(r.status, 200);
+    assert.match(r.headers["Content-Type"] ?? "", /yaml/);
+    const yaml = r.body;
+
+    // Four cues from the import above -> four commands, two pairs -> two switches.
+    assert.equal((yaml.match(/^ {2}su_\w+:$/gm) ?? []).length, 4);
+    assert.equal((yaml.match(/^ {8}optimistic: true$/gm) ?? []).length, 2);
+    assert.match(yaml, /url: "http:\/\/[^"]+\/api\/cues\/room_a_screens_projectors_on"/);
+    assert.match(yaml, /authorization: !secret stage_utility_token/);
+    // The switch is the THING; Home Assistant supplies the verb.
+    // Both fixture pages have a "Projectors" pair, so the switch has to name
+    // the page too — otherwise Home Assistant gets two switches called
+    // "Projectors" and the operator picks one at random.
+    assert.match(yaml, /friendly_name: "Room A: Screens Projectors"/);
+    assert.match(yaml, /friendly_name: "Lobby: TVs"/);
+  });
+
+  test("it is an open read, and never contains a token", async () => {
+    // Ungated for the same reason the token list is: a same-origin GET sends no
+    // Origin. It names cues that GET /api/automation/rules already serves to
+    // anyone on the LAN, and refers to the token as `!secret`.
+    const r = await callRoute(cueRoutes, "/api/cues/home-assistant.yaml");
+    assert.equal(r.status, 200);
+    assert.equal(r.body.includes("su_"), true, "the cue names are there");
+    assert.equal(/Bearer\s+su_[A-Za-z0-9_-]{20,}/.test(r.body), false, "a real token is in the YAML");
+    assert.match(r.body, /authorization: !secret stage_utility_token/);
+  });
+});

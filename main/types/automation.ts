@@ -62,7 +62,14 @@ export interface ConditionDef {
 
 /** The current-state snapshot conditions are evaluated against. */
 export interface ConditionCtx {
-  pcoLive: { mode: string; serviceTimeId: string | null } | null;
+  /** The live snapshot, or null when Planning Center has not been read.
+   *  `startsAtMs` is the countdown target ("preservice") or the service time —
+   *  what `service.is-not-live` needs to tell "an hour before" from "next week". */
+  pcoLive: { mode: string; serviceTimeId: string | null; startsAtMs: number | null } | null;
+  /** Whether the Planning Center integration is set up at all. A null `pcoLive`
+   *  means "cannot be read" only if it is; otherwise there is nothing to read and
+   *  a cue must not be refused forever. */
+  pcoConfigured: boolean;
   serviceTypeId: string | null;
   /** Connection state per integration id, for the `<id>.is-connected` conditions. */
   integrations: Record<string, string>;
@@ -107,6 +114,19 @@ export interface Rule {
   cooldownSec: number;
   /** Fire at most once per PCO service occurrence (keyed on serviceTimeId). */
   oncePerService: boolean;
+  /**
+   * A CALLED cue must be asked twice.
+   *
+   * Only meaningful with the `call.by-name` trigger: the first call answers 202
+   * with a short-lived token and does nothing, and a second call carrying that
+   * token executes. For the cue that kills the projectors, said out loud, in a
+   * room where a voice assistant can mishear.
+   *
+   * Optional because every rule persisted before this existed lacks it, and
+   * absent means false — the safe reading is "no extra step", not "silently
+   * refuse to run".
+   */
+  confirmRequired?: boolean;
 }
 
 export type AutomationOutcome = "fired" | "failed" | "simulated" | "suppressed" | "condition-not-met";
@@ -120,6 +140,14 @@ export interface AutomationLogEntry {
   outcome: AutomationOutcome;
   /** The resolved action detail, or the suppression reason. */
   detail: string;
+  /**
+   * The label of the token that CALLED this rule, when a call is what ran it.
+   *
+   * Absent for anything the engine fired itself. A cue turns real gear on and
+   * off from outside the building; "which of them did that" has to survive in
+   * the log, and the token label is the only identity a caller has.
+   */
+  caller?: string;
 }
 
 export interface AutomationSettings {

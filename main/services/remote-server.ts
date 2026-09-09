@@ -23,6 +23,7 @@ import { buildHistoryWorkbook, historyFileName, type HistorySheet } from "./hist
 import { serverPort } from "./server-port.js";
 import { buildVersionPayload, describePortHolder, rawPortHolder } from "./port-holder.js";
 import { getUserDataPath } from "./app-paths.js";
+import { isCrossOrigin } from "./http-origin.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
 import { logRoutes } from "./routes/log-routes.js";
 
@@ -61,6 +62,7 @@ import { viewRoutes } from "./routes/view-routes.js";
 import { integrationRoutes } from "./routes/integration-routes.js";
 import { rosstalkRoutes } from "./routes/rosstalk-routes.js";
 import { automationRoutes } from "./routes/automation-routes.js";
+import { cueRoutes } from "./routes/cue-routes.js";
 import { displaySettingsRoutes } from "./routes/display-settings-routes.js";
 import { kioskDeviceRoutes } from "./routes/kiosk-device-routes.js";
 import { startKioskResponder, stopKioskResponder } from "./kiosk-responder.js";
@@ -95,6 +97,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   integrationRoutes,
   rosstalkRoutes,
   automationRoutes,
+  cueRoutes,
   displaySettingsRoutes,
   kioskDeviceRoutes,
   systemRoutes,
@@ -155,45 +158,17 @@ function getLanIp(): string {
 function cors(res: http.ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  // Authorization is here for the cue routes: a caller that presents a bearer
+  // token is not a browser and never sends a preflight, but a page on this app's
+  // own origin fetching the Home Assistant config is, and it does.
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
-/** Hostname of an Origin header ("http://host:port") or a Host header ("host:port"). */
-function hostnameOf(value: string | undefined): string | null {
-  if (!value) return null;
-  try {
-    return new URL(value.includes("://") ? value : `http://${value}`).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Whether a request is a browser cross-site request. Pure + exported so the
- * matrix below can be unit-tested without a socket.
- *
- * The app is deliberately unauthenticated: it's a LAN appliance, and displays,
- * phones and the Companion module all reach it without credentials. That is fine
- * for peers on the network — but a browser is a confused deputy. Any page an
- * operator visits can POST here, and with permissive CORS the preflight passes,
- * so a drive-by page could hit POST /api/update/apply and rebuild + restart every
- * display mid-service. DNS rebinding makes that reachable from the open internet.
- *
- * No Origin header  → not a browser cross-site request (Companion, curl, a
- *                     script, or a same-origin navigation). Allowed.
- * Origin present    → its hostname must match the Host it was sent to.
- * Origin: "null"    → a sandboxed iframe or opaque origin. Rejected.
- *
- * Ports are ignored so the Vite dev proxy (:3000 → :8788) keeps working. The
- * check rests on hostname, which an attacker cannot serve the appliance's own
- * address from.
- */
-export function isCrossOrigin(origin: string | undefined, host: string | undefined): boolean {
-  if (!origin) return false;
-  const from = hostnameOf(origin);
-  const to = hostnameOf(host);
-  return from === null || to === null || from !== to;
-}
+// hostnameOf / isCrossOrigin live in http-origin.ts, because the cue routes'
+// browser exemption has to be the SAME check — a second, looser copy of it in
+// cue-tokens.ts is how curl with one header minted itself a token. Re-exported
+// here so remote-server.test.ts and every existing importer keep their path.
+export { hostnameOf, isCrossOrigin } from "./http-origin.js";
 
 /** Methods that change server state, and so must be same-origin. */
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);

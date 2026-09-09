@@ -65,6 +65,55 @@ When reporting, please include:
   This is defence against the *browser*, not against a peer on the network: anyone who can
   reach the port directly can still call the API. Firewall the port regardless.
 
+- **Cue tokens, and what they are not.** Calling a cue (`POST /api/cues/<name>`) presses a
+  real button on real gear on behalf of a caller that is not a browser — a voice assistant, a
+  script — so it is the one route that requires a credential. Callers present
+  `Authorization: Bearer su_…`; a request without a valid token is refused `401` before
+  anything is dispatched.
+
+  Tokens are 32 bytes of CSPRNG output, shown **once** at mint. Only a SHA-256 of the token
+  is stored, inside the existing AES-256-GCM `secrets.bin`, so reading that file does not
+  yield a token that can be replayed. A lost token is replaced, not recovered. Each token
+  carries a label and is revoked on its own.
+
+  **The token is not a perimeter.** It identifies the caller in the activity log, and it
+  keeps the *call* route shut to anything that has not been handed one. It is not a boundary
+  around the app, because anyone with write access over the LAN can change any setting —
+  including the cue rules themselves and the token list — exactly as they always could. The
+  rule routes are ungated like every other settings route; adding a token to those would
+  break the app's own settings page and still not close anything, since the caller could
+  mint a token first.
+
+  **The perimeter is the network.** Do not expose this app beyond the LAN or a private
+  overlay such as Tailscale. The same applies to Companion, whose own HTTP API is
+  unauthenticated: restrict its port with an ACL on the switch (an Aruba ACL on Companion's
+  port is what this deployment uses).
+
+  There is **no rate limit and no lockout** on bad tokens: an attacker who can reach the port
+  may guess as fast as the network allows. A 32-byte random token makes that hopeless, and a
+  peer who can reach the port has easier routes in regardless — but nothing here slows one
+  down.
+
+  Cue tokens are for **setup and teardown, not for cues during a service**. A cue carries the
+  "no service is live" condition, which fails closed: it refuses while a service is running
+  or about to start, and when Planning Center cannot be read at all.
+
+  The same token is required by `POST /api/action/invoke` and by the cue-token *writes*
+  (mint, revoke), by `import-pairs` and by `buttons/refresh`, **unless the request is a
+  same-origin browser write** — which means `Sec-Fetch-Site: same-origin` **and** an `Origin`
+  naming this server, both of which a page on this app's own origin sends on every `POST` and
+  `DELETE`. Either header alone is refused: they are checked together because `curl` with one
+  of them is not a browser.
+
+  That exemption is a **browser convenience, not a boundary**: `curl` can set both headers as
+  easily as one. What it closes is the confused-deputy case — a page on another origin can
+  forge neither.
+
+  Reads are unchanged and remain open to the LAN: the token *list* (labels, ids and last-use
+  times — never a hash), the generated Home Assistant fragment (which refers to the token as
+  `!secret`, never by value), `/api/companion/buttons` and `/api/companion/pairs`. Nothing
+  there presses anything or reveals a secret.
+
 ## Supported versions
 
 Security fixes target the latest release on the `main` branch. Please update to the latest

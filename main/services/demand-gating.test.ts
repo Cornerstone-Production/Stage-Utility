@@ -36,7 +36,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { automationEngine } = await import("./automation-engine.js");
 const { automationStore } = await import("./automation-store.js");
-const { AUTOMATION_TRIGGERS } = await import("./automation-triggers.js");
+const { AUTOMATION_TRIGGERS, CALL_CHANNEL } = await import("./automation-triggers.js");
 const { AUTOMATION_CONDITIONS } = await import("./automation-conditions.js");
 const { reaperService } = await import("./reaper-service.js");
 const { propresenterService } = await import("./propresenter-service.js");
@@ -295,13 +295,28 @@ describe("demand is registered for everything automation reads", () => {
 
   it("every channel a trigger reads has a consumer registered", () => {
     const channels = [...new Set(Object.values(AUTOMATION_TRIGGERS).map((t) => t.channel))].sort();
-    const unregistered = channels.filter((c) => channelDemandSourceCount(c) === 0);
+    // CALL_CHANNEL is exempt because it has no PRODUCER: a called cue runs from
+    // an HTTP request, and registering demand on it would ask a service that
+    // does not exist to keep working. Asserted separately below, so the
+    // exemption cannot quietly become "we stopped registering demand".
+    const unregistered = channels
+      .filter((c) => c !== CALL_CHANNEL)
+      .filter((c) => channelDemandSourceCount(c) === 0);
     assert.deepEqual(
       unregistered,
       [],
       `No in-process demand registered for: ${unregistered.join(", ")}. ` +
         "A producer gating on that channel will go quiet on an unattended box and " +
         "every rule reading it stops firing, with no error anywhere.",
+    );
+  });
+
+  it("the call channel has no demand source, because it has no producer", () => {
+    assert.equal(
+      channelDemandSourceCount(CALL_CHANNEL),
+      0,
+      "cue:call has a demand source — something is being asked to produce on a channel " +
+        "whose whole point is that nothing does.",
     );
   });
 

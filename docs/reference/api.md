@@ -20,13 +20,22 @@ broke, and only that.
 ## What is protected, and what is not
 
 The app is a LAN appliance with no user accounts, and **every route below is
-reachable unauthenticated** unless it says otherwise. Three things do gate:
+reachable unauthenticated** unless it says otherwise. Four things do gate:
 
 | | |
 |---|---|
 | **Cross-origin writes** | Any `POST`/`PUT`/`PATCH`/`DELETE` carrying an `Origin` whose hostname is not the request's `Host` is refused `403`. A request with no `Origin` is allowed, and reads are never gated. Ports are ignored so the dev proxy works |
 | **The log** | `/log` and `/api/log` require `?token=…` when `STAGE_UTILITY_LOG_TOKEN` is set, and answer `401` without it. Unset means open |
 | **Device enrolment** | `/enroll` authorises a `device` id against the secret that device was issued. An unrecognised device gets a holding screen rather than somebody else's screen |
+| **Cue calls** | `POST /api/cues/:name` always requires `Authorization: Bearer su_…`, browser or not, and answers `401` without one. `POST /api/action/invoke`, the cue token **writes** (mint, revoke), `import-pairs` and `buttons/refresh` require the same token **unless the request is a same-origin browser write** — `Sec-Fetch-Site: same-origin` **and** an `Origin` naming this server, both of which a browser sends on a `POST`/`DELETE`. Either alone is refused. Reads are open, including the token list and the Home Assistant fragment: a same-origin `GET` sends no `Origin`, and neither carries a secret |
+
+The cue token identifies the caller in the activity log and keeps the call route
+closed to anything that has not been handed one. **It is not a perimeter.** Anyone
+with write access to the app over the LAN can change any setting, including the cue
+rules and the tokens themselves, as they always could — the rule routes are ungated
+like every other settings route. The perimeter is the network: do not expose the app
+beyond the LAN or Tailscale, and restrict Companion's own unauthenticated API port
+with a switch ACL. See [SECURITY.md](../../SECURITY.md).
 
 Put it behind your own network. Do not expose it to the internet.
 
@@ -84,7 +93,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | PATCH | `/api/outputs/:id` | Set `name`, `viewId` (routing), `blackout`, `locked`, `hideTopBar` (show or hide this display's kiosk top bar), `slug` (`""` clears; validated against the reserved list — see [Display URLs](../display-urls.md)), or `mode` (`display`\|`panel`). A console view on a display screen is refused, with the reason, as `400` |
 | POST | `/api/outputs/reorder` | Reorder displays |
 | DELETE | `/api/outputs/:id` | Remove a display |
-| POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does |
+| POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does. Needs a cue bearer token unless the request is a same-origin browser request |
 | POST | `/api/notes` | Save a notes/checklist object's content (`{objectId, content}`) |
 | POST | `/api/bar-items` | Set the context bar's items and order. `{items}` for the desktop bar, `{mobileItems}` for the phone's own set (empty = follow the desktop bar). Either may be omitted and is then left as it stands |
 | GET / POST | `/api/layout-templates` | List / save a custom-layout template |
@@ -175,6 +184,25 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | POST | `/api/automation/rules/:id/test` | Fire the action now, ignoring the trigger. Honours simulate; a refusal is `400` with the reason |
 | GET / POST | `/api/automation/settings` | `simulate` and `disarmed` |
 | GET / DELETE | `/api/automation/log` | Read / clear the Activity log |
+| POST | `/api/automation/rules/import-pairs` | Create two cues per Companion ON/OFF pair (`{pairs}`). Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
+
+**Cues** — an automation rule called by name. See
+[Companion](../integrations/companion.md#calling-a-cue-by-name).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/cues/:name` | Run the cue. `200` dispatched, `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}` |
+| GET / POST | `/api/cues/tokens` | List callers (never a hash) / mint one (`{label}`). The secret is returned once and never again |
+| DELETE | `/api/cues/tokens/:id` | Revoke one caller |
+| GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml`, not JSON |
+
+**Companion** — reading the connected Companion's own configuration.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
+| POST | `/api/companion/buttons/refresh` | Drop the five-minute cache and re-read |
+| GET | `/api/companion/pairs` | ON/OFF pairs with their proposed cue names, and whether each already exists |
 
 **ProPresenter & ProdCom**
 | Method | Path | Purpose |
