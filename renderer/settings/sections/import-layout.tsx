@@ -36,6 +36,9 @@ import type { ServiceTypeDTO } from "@main/types/pco";
 interface Review {
   bundle: ViewBundle;
   rootName: string;
+  /** Every top-level view. One for a view export; one per board for a plan. */
+  rootNames: string[];
+  /** Views that came along only because something embeds them. */
   dependencies: string[];
   slotSets: number;
   notes: number;
@@ -66,7 +69,9 @@ function review(bundle: ViewBundle): Review {
   const refs = collectRefsFrom(bundle.views, bundle.roots?.length ? bundle.roots : [root.id]);
   const slots = bundle.sideData?.slots ?? {};
   const boardSets = Object.values(slots).flatMap((byType) => Object.values(byType ?? {}));
+  const rootIds = new Set(bundle.roots?.length ? bundle.roots : [root.id]);
   return {
+    rootNames: bundle.views.filter((v) => rootIds.has(v.id)).map((v) => v.name),
     boards: boardSets.length,
     rows: boardSets.reduce((n, rows) => n + (rows?.length ?? 0), 0),
     patchVariants: (bundle.sideData?.patchVariants ?? []).map((p) => ({
@@ -75,7 +80,10 @@ function review(bundle: ViewBundle): Review {
     presets: bundle.sideData?.presets?.length ?? 0,
     bundle,
     rootName: root.name,
-    dependencies: bundle.views.slice(1).map((v) => v.name),
+    // By ROOT, not by position. A plan export has one root per view the service
+    // type has a board on, and "comes with it — the layout embeds this" on five
+    // of six roots is a straight untruth about where they came from.
+    dependencies: bundle.views.filter((v) => !rootIds.has(v.id)).map((v) => v.name),
     slotSets: Object.keys(bundle.sideData?.slots ?? {}).length,
     notes: Object.keys(bundle.sideData?.notes ?? {}).length,
     images: Object.keys(bundle.images ?? {}).length,
@@ -231,7 +239,13 @@ export function ImportLayout({ serviceTypes = [], currentServiceTypeId = null }:
             )}
 
             <Group title="Views">
-              <Row label={pending.rootName} sub="the layout you picked" />
+              {pending.rootNames.map((n) => (
+                <Row
+                  key={n}
+                  label={n}
+                  sub={plan ? "has a board for this service type" : "the layout you picked"}
+                />
+              ))}
               {pending.dependencies.map((n) => (
                 <Row key={n} label={n} sub="comes with it — the layout embeds this" tag="embedded" />
               ))}
@@ -296,7 +310,13 @@ export function ImportLayout({ serviceTypes = [], currentServiceTypeId = null }:
         </section>
       )}
 
-      {report && <ImportResult report={report} onClose={() => setReport(null)} />}
+      {report && (
+        <ImportResult
+          report={report}
+          nameOfType={(id) => serviceTypes.find((t) => t.id === id)?.name ?? id}
+          onClose={() => setReport(null)}
+        />
+      )}
     </>
   );
 }
@@ -390,7 +410,13 @@ const PATCH_OUTCOME: Record<ImportReport["patchVariants"][number]["outcome"], st
 };
 
 /** What landed, and what is left to do. */
-function ImportResult({ report, onClose }: { report: ImportReport; onClose: () => void }) {
+function ImportResult({ report, nameOfType, onClose }: {
+  report: ImportReport;
+  /** A PCO service type id means nothing to a human. Resolved here rather than
+   *  on the server, which knows the FILE's type name and not this machine's. */
+  nameOfType: (id: string) => string;
+  onClose: () => void;
+}) {
   const router = useRouter();
   return (
     <section className="mt-3 basis-full overflow-hidden rounded-xl border border-line-strong bg-surface">
@@ -403,10 +429,10 @@ function ImportResult({ report, onClose }: { report: ImportReport; onClose: () =
         {report.plan && (
           <Group title="Service type">
             <Row
-              label={report.plan.serviceTypeName}
+              label={nameOfType(report.plan.serviceTypeId)}
               sub={report.plan.retypedFrom
-                ? `landed under ${report.plan.serviceTypeId} — retyped from ${report.plan.retypedFrom}`
-                : `landed under ${report.plan.serviceTypeId}`}
+                ? `the file was exported from "${report.plan.serviceTypeName}" — landed here under this type instead`
+                : "the type the file names, and the one it landed under"}
             />
             <Row
               label="Slot boards"

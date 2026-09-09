@@ -213,6 +213,39 @@ describe("the clash choice", () => {
   });
 });
 
+describe("what the review calls each view", () => {
+  test("every root of a plan file is a root, not something a layout embeds", async () => {
+    // "comes with it — the layout embeds this" on five of six roots is a
+    // straight untruth about where they came from. Caught in a browser first:
+    // a plan export has one root per view the type has a board on, and the
+    // review listed views[0] as the one picked and the rest as embedded.
+    const view = (id: string, name: string) => ({ id, name, kind: "slots", createdAt: 0, layout: null });
+    const m = mount(planFile({
+      roots: ["v1", "v2"],
+      views: [view("v1", "Left Board"), view("v2", "Right Board")],
+    }, { slots: {} }));
+    await m.take();
+    assert.equal(screen.queryAllByText("has a board for this service type").length, 2);
+    assert.ok(
+      !screen.queryByText("comes with it — the layout embeds this"),
+      "a root was described as something another layout embeds",
+    );
+    m.unmount();
+    m.restore();
+  });
+
+  test("a view export still says which layout was picked", async () => {
+    const file = planFile() as Record<string, unknown>;
+    delete file.plan;
+    delete file.roots;
+    const m = mount(file);
+    await m.take();
+    assert.ok(!!screen.queryByText("the layout you picked"));
+    m.unmount();
+    m.restore();
+  });
+});
+
 describe("the rebind list on the review", () => {
   test("covers every root, so it cannot promise less than the import does", async () => {
     // The server walks every root. A review that walked views[0] alone would
@@ -247,7 +280,12 @@ describe("the report", () => {
     for (let i = 0; i < 100 && !screen.queryByText(/retyped from/); i++) {
       await act(async () => { await new Promise((res) => setTimeout(res, 5)); });
     }
-    assert.ok(!!screen.queryByText("landed under st-other — retyped from st-here"));
+    // The chosen type is named from this machine's list; the file's own name is
+    // the one it was exported from. A raw PCO id means nothing to a human.
+    assert.ok(!!screen.queryByText("Youth"), "the type it landed under is not named");
+    assert.ok(!!screen.queryByText(
+      'the file was exported from "Sunday AM" — landed here under this type instead',
+    ));
     assert.ok(!!screen.queryByText("1 board, 2 rows"));
     assert.ok(!!screen.queryByText('"Sunday rig" on Analog'));
     assert.ok(!!screen.queryByText("1 added, 0 kept, 0 replaced"));
