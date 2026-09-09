@@ -343,11 +343,21 @@ describe("the log", () => {
 // ── Keys that are not ordinary ────────────────────────────────────────────────
 //
 // The key in the answer is the pair's BASE, which is half of a cue name out of
-// the rules file — an operator's string, and one a request can reach through
-// POST /api/automation/rules. `record["__proto__"] = row` does not add a
-// property: it replaces the object's prototype. The pair then vanishes from the
-// answer with nothing saying so, and every object built from that record's shape
-// carries the row's fields.
+// the rules file. `record["__proto__"] = row` does not add a property: it
+// replaces the object's prototype. The pair then vanishes from the answer with
+// nothing saying so.
+//
+// HOW FAR EACH KEY REACHES, measured against the real route rather than assumed:
+// `constructor` and `prototype` are valid cue names, so a pair based on either
+// arrives through POST /api/automation/rules — but as own properties on a record
+// they are harmless, and the bug they cause is one level up, on the READ (see
+// cue-pair-state.test.tsx). `__proto__` is the one that breaks the write, and
+// `__proto___on` is refused by CUE_NAME_RE — a leading underscore and a double
+// underscore are both out — so it takes a hand-edited automation-rules.json to
+// get there. That is a path this repo treats as real: a hand-edited rules file
+// is why a state binding is read off the `_off` half as a fallback three modules
+// away. Cheap to hold, and it is the difference between the pair working and the
+// pair silently not existing.
 describe("a pair whose base is a prototype key", () => {
   test("__proto__ is an OWN property of the answer, and a real row", async () => {
     rules = pair("__proto__");
