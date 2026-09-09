@@ -74,6 +74,10 @@ const STATE = {
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
   const url = String(input);
+  // The api client's SSE channel report is a POST on its own 200 ms debounce.
+  // It is not something the switcher does, and on a slow CI runner it lands
+  // inside a case's window, so it is not recorded at all.
+  if (url.includes("/api/events/subscribe")) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
   requests.push({
     url,
     method: init?.method ?? "GET",
