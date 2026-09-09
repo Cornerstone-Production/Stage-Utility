@@ -1075,6 +1075,35 @@ describe("importing single buttons", () => {
     );
   });
 
+  test("and marks a FORMER name as taken too, because the engine refuses it", async () => {
+    // The ordinary case after a relabel: a button renamed "Screens" and then
+    // back to "Take Screens" is offered as `take_screens`, which is now the
+    // cue's former name. The engine treats names and former names as one
+    // namespace, so an offer shown as available would be ticked and then
+    // refused by addRule with the operator having been told it was free.
+    const take = automationEngine
+      .cueRules()
+      .find((x) => automationEngine.cueNameOf(x) === "take_screens")!;
+    await automationEngine.updateRule(take.id, {
+      trigger: {
+        ...take.trigger,
+        params: { ...take.trigger.params, name: "screens", aliases: "take_screens" },
+      },
+    });
+    try {
+      const offer = (await offered()).find((b) => b.slug === "take_screens")!;
+      assert.equal(
+        offer.exists,
+        true,
+        "a button whose cue name is somebody's former name was offered as available",
+      );
+    } finally {
+      await automationEngine.updateRule(take.id, {
+        trigger: { ...take.trigger, params: { ...take.trigger.params, name: "take_screens", aliases: "" } },
+      });
+    }
+  });
+
   test("two pages with the same label are named after their page, on both", async () => {
     // The pairs import has always done this; a single button collides in exactly
     // the same way, and without it the second import is refused as a duplicate

@@ -218,7 +218,19 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
       json(res, { ok: false, reason: result.reason, pairs: [] });
       return;
     }
-    const taken = new Set(automationEngine.listRules().map((r) => automationEngine.cueNameOf(r)).filter(Boolean));
+    // Names AND FORMER NAMES. The engine treats the two as one namespace — no
+    // rule may take either from another — so an offer whose proposed name is
+    // somebody's former name would be shown as available, ticked, and then
+    // refused by addRule with the operator having been told it was free. That
+    // is the ordinary case after a relabel: a button renamed "Screens ON" and
+    // then back to "Projectors ON" is offered as `projectors_on`, which is now
+    // the cue's former name.
+    const taken = new Set<string>();
+    for (const rule of automationEngine.listRules()) {
+      const name = automationEngine.cueNameOf(rule);
+      if (name) taken.add(name);
+      for (const alias of automationEngine.cueAliasesOf(rule)) taken.add(alias);
+    }
     // The single buttons are worked out HERE rather than below, because the cue
     // names of the pairs and of the singles are resolved together: uniqueness is
     // a property of the whole offer, and counted per family a lone "House Lights
