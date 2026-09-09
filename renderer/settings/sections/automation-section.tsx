@@ -452,10 +452,19 @@ function RuleCard({
                 when its Companion button is relabelled, and the old name stays
                 live — so this is the only place the rules list says that the URL
                 in somebody's Home Assistant config is not the name on the row. */}
+            {/* `min-w-0` with a cap, not `shrink-0`: a shrink-0 box cannot
+                truncate — it takes whatever width its text wants and crushes
+                the rule name beside it, which is the one thing on the row that
+                has to stay readable. Five former names is the maximum
+                (cue-aliases.ts), and five names is wider than most rule names.
+                Not unit-tested: jsdom loads no stylesheet, so a width and a
+                truncation are not observable in it at all, and asserting the
+                class string would only say the class is spelled how it is
+                spelled. Driven in a browser. */}
             {formerNames.length > 0 && (
               <span
                 data-cue-former-names={formerNames.join(",")}
-                className="shrink-0 truncate text-caption2 text-fg-subtle"
+                className="min-w-0 max-w-[40%] truncate text-caption2 text-fg-subtle"
               >
                 was {formerNames.join(", ")}
               </span>
