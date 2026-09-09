@@ -67,9 +67,12 @@ export function ExportPlanDialog({
   const [patch, setPatch] = useState(true);
   const [presets, setPresets] = useState(false);
 
+  // The scope is IN the key: the counts differ between the two, so flipping the
+  // segmented control has to refetch. Left out, the boards and rows line sat
+  // still while the file the Download link points at grew.
   const preview = useQuery({
-    queryKey: ["plans:exportPreview", chosen],
-    queryFn: () => invoke<PlanExportPreview>("plans:exportPreview", { serviceTypeId: chosen }),
+    queryKey: ["plans:exportPreview", chosen, slots],
+    queryFn: () => invoke<PlanExportPreview>("plans:exportPreview", { serviceTypeId: chosen, slots }),
     enabled: open && !!chosen,
     retry: false,
   });

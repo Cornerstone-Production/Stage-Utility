@@ -86,7 +86,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET | `/api/views/:id/export` | Download the view and anything it embeds as one file |
 | POST | `/api/views/import` | Merge an exported view or plan in; returns what landed and what needs rebinding. Body is the bundle, or `{bundle, serviceTypeId?, onClash?}` to land a plan export under a chosen service type (`onClash` is `keep`, the default, or `replace`) |
 | GET | `/api/plans/export?serviceTypeId=…[&slots=type\|all&patch=1\|0&presets=1\|0]` | Download one service type's setup as one file — its slot boards, the views and layouts holding them, optionally the patch variant it is assigned to and the slot presets. `slots=all` also carries other types' boards on those views. Missing or unknown type, or a bad flag, is `400` |
-| GET | `/api/plans/export/preview?serviceTypeId=…` | What that file would contain, for the export dialog's counts. `400` as above |
+| GET | `/api/plans/export/preview?serviceTypeId=…[&slots=type\|all]` | What that file would contain at that scope, for the export dialog's counts. `400` as above |
 | POST | `/api/views/:id/copy-slots` | Copy slots from another view onto one board (`{fromViewId, target?}`) |
 | POST | `/api/views/reorder` | Reorder views |
 | DELETE | `/api/views/:id` | Delete a view |

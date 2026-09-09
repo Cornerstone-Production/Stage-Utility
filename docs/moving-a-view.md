@@ -137,5 +137,5 @@ nothing in an export reads.
 |---|---|---|
 | GET | `/api/views/:id/export` | The view and its dependencies as one file |
 | GET | `/api/plans/export` | One service type's setup as one file (`?serviceTypeId=&slots=type\|all&patch=1\|0&presets=1\|0`) |
-| GET | `/api/plans/export/preview` | What that file would contain, for the dialog's counts |
+| GET | `/api/plans/export/preview` | What that file would contain, for the dialog's counts (`?serviceTypeId=&slots=type\|all`) |
 | POST | `/api/views/import` | Merge a bundle in; returns what landed and what needs rebinding. `{bundle, serviceTypeId?, onClash?}` to land a plan under a chosen type |

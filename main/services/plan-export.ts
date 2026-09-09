@@ -172,16 +172,17 @@ export async function buildPlanBundle(
  * What the dialog shows before the download.
  *
  * Built by the SAME code path with every section on, so the counts cannot
- * disagree with the file. Slots are counted at the dialog's default scope
- * ("this type only") — the other scope is a superset, and the segmented control
- * says which it is.
+ * disagree with the file — INCLUDING the slots scope, which the caller passes.
+ * Counted always at "type", the boards and rows line sat still while the
+ * segmented control moved to "every type on those views" and the file grew.
  */
 export async function planExportPreview(
   serviceTypeId: string,
+  slots: PlanExportOptions["slots"] = "type",
   deps: PlanExportDeps = controllerTypes,
 ): Promise<PlanExportPreview> {
   const { bundle, boards, rows } = await buildPlan(
-    { serviceTypeId, slots: "type", patch: true, presets: true },
+    { serviceTypeId, slots, patch: true, presets: true },
     deps,
   );
   return {

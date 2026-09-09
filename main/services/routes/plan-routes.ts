@@ -29,6 +29,13 @@ function flag(url: URL, name: string, fallback: boolean): boolean | null {
   return null;
 }
 
+/** `slots=type|all`, defaulting to "type". Null is a query the caller got wrong,
+ *  which both routes answer as a 400 rather than picking a scope for them. */
+function slotsScope(url: URL): "type" | "all" | null {
+  const raw = url.searchParams.get("slots") ?? "type";
+  return raw === "type" || raw === "all" ? raw : null;
+}
+
 /** Both routes answer 400 the same way: an unknown type and an empty type are
  *  the operator's query, not a server fault. */
 function refuse(res: RouteCtx["res"], err: unknown): void {
@@ -39,7 +46,7 @@ function refuse(res: RouteCtx["res"], err: unknown): void {
 export async function planRoutes(c: RouteCtx): Promise<void> {
   const { res, pathname, method, url } = c;
 
-  // GET /api/plans/export/preview?serviceTypeId= — what the export dialog counts
+  // GET /api/plans/export/preview?serviceTypeId=&slots=type|all — what the dialog counts
   // before an operator commits to a download. Must precede the /export matcher.
   if (method === "GET" && pathname === "/api/plans/export/preview") {
     const serviceTypeId = url.searchParams.get("serviceTypeId");
@@ -47,8 +54,16 @@ export async function planRoutes(c: RouteCtx): Promise<void> {
       error(res, "serviceTypeId is required");
       return;
     }
+    // The scope changes the counts, so the preview takes it too — a dialog that
+    // showed one type's boards beside a file carrying every type's was telling
+    // the operator the wrong size.
+    const slots = slotsScope(url);
+    if (slots === null) {
+      error(res, `slots must be "type" or "all", not "${url.searchParams.get("slots")}"`);
+      return;
+    }
     try {
-      json(res, await planExportPreview(serviceTypeId));
+      json(res, await planExportPreview(serviceTypeId, slots));
     } catch (err) {
       refuse(res, err);
     }
@@ -62,9 +77,9 @@ export async function planRoutes(c: RouteCtx): Promise<void> {
       error(res, "serviceTypeId is required");
       return;
     }
-    const slots = url.searchParams.get("slots") ?? "type";
-    if (slots !== "type" && slots !== "all") {
-      error(res, `slots must be "type" or "all", not "${slots}"`);
+    const slots = slotsScope(url);
+    if (slots === null) {
+      error(res, `slots must be "type" or "all", not "${url.searchParams.get("slots")}"`);
       return;
     }
     const patch = flag(url, "patch", true);

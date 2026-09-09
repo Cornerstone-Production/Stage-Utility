@@ -621,8 +621,13 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
           : p.bundle,
       );
 
+    // `slots` too: the scope changes the counts, and a preview that ignored it
+    // described a different file than the Download link points at.
     case "plans:exportPreview":
-      return apiFetch<T>(`/api/plans/export/preview?serviceTypeId=${encodeURIComponent(String(p.serviceTypeId ?? ""))}`);
+      return apiFetch<T>(
+        `/api/plans/export/preview?serviceTypeId=${encodeURIComponent(String(p.serviceTypeId ?? ""))}`
+        + `&slots=${encodeURIComponent(String(p.slots ?? "type"))}`,
+      );
 
     case "views:reorder":
       return post<T>("/api/views/reorder", { ids: p.ids });

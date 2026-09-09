@@ -61,6 +61,27 @@ describe("GET /api/plans/export/preview", () => {
     assert.deepEqual(p.patchVariants, [{ sheetName: "Analog", variantName: "Sunday rig" }]);
   });
 
+  test("counts the other scope when the query asks for it", async (t) => {
+    // The dialog's segmented control sends this. Ignored, the counts described
+    // a smaller file than the Download link beside them points at.
+    //
+    // The board is removed again afterwards: slots.json outlives a test, and a
+    // stray st-2 board left here makes the "nothing to export for Youth" test
+    // below pass a 200. beforeEach puts view-1's st-1 board back.
+    t.after(() => slotsStore.removeDisplay("view-1"));
+    await slotsStore.setDefault("view-1", "st-2", [row("c")] as never);
+    const type = await callRoute(planRoutes, "/api/plans/export/preview?serviceTypeId=st-1&slots=type");
+    const all = await callRoute(planRoutes, "/api/plans/export/preview?serviceTypeId=st-1&slots=all");
+    assert.equal((type.json as { boards: number }).boards, 1);
+    assert.equal((all.json as { boards: number }).boards, 2, "the preview ignored slots=all");
+  });
+
+  test("a slots scope the server does not know is a 400 here too", async () => {
+    const r = await callRoute(planRoutes, "/api/plans/export/preview?serviceTypeId=st-1&slots=some");
+    assert.equal(r.status, 400);
+    assert.match(String((r.json as { error?: string })?.error), /slots must be/);
+  });
+
   test("no service type at all is a 400 that says so", async () => {
     const r = await callRoute(planRoutes, "/api/plans/export/preview");
     assert.equal(r.status, 400);

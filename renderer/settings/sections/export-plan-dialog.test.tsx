@@ -46,9 +46,15 @@ const PREVIEW = {
   scriptviewLayouts: 1,
 };
 
+/** Every URL the dialog asked for, as STRINGS — see the note at the top. */
+const asked: string[] = [];
+
 /** The dialog reads its counts over HTTP. Answered here rather than mocked at
- *  the api layer, so the real invoke() and the real query hook both run. */
+ *  the api layer, so the real invoke() and the real query hook both run. Every
+ *  request is recorded: a preview that never refetches is invisible on screen,
+ *  because the stub answers both scopes with the same body. */
 function stubFetch(body: unknown, ok = true): () => void {
+  asked.length = 0;
   const before = globalThis.fetch;
   // api.ts arms AbortSignal.timeout(15000) on every request. The stub never
   // reads the signal, but the TIMER outlives the test, and firing it after
@@ -56,7 +62,7 @@ function stubFetch(body: unknown, ok = true): () => void {
   // finished test. A controller's signal never fires and holds no timer.
   const beforeTimeout = AbortSignal.timeout;
   AbortSignal.timeout = () => new AbortController().signal;
-  globalThis.fetch = (async () => ({
+  globalThis.fetch = (async (url: unknown) => (asked.push(String(url)), {
     ok,
     status: ok ? 200 : 400,
     statusText: ok ? "OK" : "Bad Request",
@@ -169,6 +175,37 @@ describe("the download link reflects the checklist", () => {
     assert.match(href, /patch=0/);
     const sw = screen.getByLabelText("Include the patch sheet variant") as HTMLButtonElement;
     assert.equal(sw.disabled, true, "the switch is offered with nothing to include");
+    unmount();
+    restore();
+  });
+});
+
+describe("the preview follows the slots scope", () => {
+  test("flipping the segment asks the server again, for the other scope", async () => {
+    // The counts differ between the two scopes. Keyed on the service type
+    // alone, the query never refetched: the boards and rows line sat still
+    // while the file the Download link points at grew.
+    const restore = stubFetch(PREVIEW);
+    const { unmount } = open();
+    await download();
+    const before = asked.filter((u) => u.includes("/api/plans/export/preview")).length;
+    await press(screen.getByRole("button", { name: "Every type on those views" }));
+    for (let i = 0; i < 200; i++) {
+      if (asked.some((u) => u.includes("/api/plans/export/preview") && u.includes("slots=all"))) break;
+      await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+    }
+    const previews = asked.filter((u) => u.includes("/api/plans/export/preview"));
+    assert.equal(previews.length, before + 1, `the preview was asked ${previews.length} times: ${previews.join(", ")}`);
+    assert.match(previews.at(-1)!, /slots=all/);
+    unmount();
+    restore();
+  });
+
+  test("the first ask carries the default scope rather than leaving it off", async () => {
+    const restore = stubFetch(PREVIEW);
+    const { unmount } = open();
+    await download();
+    assert.match(asked.find((u) => u.includes("/api/plans/export/preview"))!, /serviceTypeId=st-1&slots=type/);
     unmount();
     restore();
   });

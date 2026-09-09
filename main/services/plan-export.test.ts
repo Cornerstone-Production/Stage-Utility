@@ -162,7 +162,7 @@ describe("refusing rather than shipping an empty file", () => {
 
 describe("the preview and the file agree", () => {
   test("because they are the same code path", async () => {
-    const p = await planExportPreview("st-1", TYPES);
+    const p = await planExportPreview("st-1", "type", TYPES);
     const b = await buildPlanBundle(opts(), TYPES);
     assert.equal(p.serviceTypeName, "Sunday AM");
     assert.equal(p.views, b.views.length);
@@ -173,8 +173,19 @@ describe("the preview and the file agree", () => {
     assert.equal(p.scriptviewLayouts, 0);
   });
 
+  test("at the other scope, because the file at that scope is bigger", async () => {
+    // obj-grid carries a board for st-1 and one for st-2. Counted always at
+    // "type", the dialog's boards and rows line sat still while the segmented
+    // control moved and the file grew.
+    const type = await planExportPreview("st-1", "type", TYPES);
+    const all = await planExportPreview("st-1", "all", TYPES);
+    assert.equal(type.boards, 2);
+    assert.equal(all.boards, 3, "the preview ignored the slots scope");
+    assert.equal(all.rows, type.rows + 2);
+  });
+
   test("and it refuses the same things", async () => {
-    await assert.rejects(() => planExportPreview("st-nope", TYPES), /unknown service type/);
+    await assert.rejects(() => planExportPreview("st-nope", "type", TYPES), /unknown service type/);
   });
 });
 
