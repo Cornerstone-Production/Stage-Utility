@@ -101,6 +101,28 @@ describe("GET /api/plans/export/preview", () => {
   });
 });
 
+describe("Planning Center not being set up", () => {
+  // The operator's configuration, not a server fault. Answered 500, it read as
+  // the app being broken on a machine that simply has no PCO credentials.
+  const controller = stageController as unknown as Record<string, unknown>;
+
+  test("is a 400 on the preview", async (t) => {
+    t.after(() => { controller.pcoAppId = "app"; });
+    controller.pcoAppId = "";
+    const r = await callRoute(planRoutes, "/api/plans/export/preview?serviceTypeId=st-1");
+    assert.equal(r.status, 400);
+    assert.match(String((r.json as { error?: string })?.error), /not configured/);
+  });
+
+  test("is a 400 on the export too", async (t) => {
+    t.after(() => { controller.pcoAppId = "app"; });
+    controller.pcoAppId = "";
+    const r = await callRoute(planRoutes, "/api/plans/export?serviceTypeId=st-1");
+    assert.equal(r.status, 400);
+    assert.match(String((r.json as { error?: string })?.error), /not configured/);
+  });
+});
+
 describe("GET /api/plans/export", () => {
   test("downloads the bundle as an attachment, named for the type and the day", async () => {
     const r = await callRoute(planRoutes, "/api/plans/export?serviceTypeId=st-1");

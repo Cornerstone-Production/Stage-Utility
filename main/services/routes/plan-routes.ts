@@ -36,11 +36,19 @@ function slotsScope(url: URL): "type" | "all" | null {
   return raw === "type" || raw === "all" ? raw : null;
 }
 
-/** Both routes answer 400 the same way: an unknown type and an empty type are
- *  the operator's query, not a server fault. */
+/**
+ * Both routes answer 400 the same way: an unknown type, an empty type and a
+ * Planning Center that is not set up are the operator's query or configuration,
+ * not a server fault.
+ *
+ * Matched on the message because there is no error class to match on — the
+ * controller's assertPco throws a plain Error ("PCO not configured — add App ID
+ * and Secret in Integrations settings"), as do the two direct checks beside it
+ * ("Planning Center not configured").
+ */
 function refuse(res: RouteCtx["res"], err: unknown): void {
   const msg = errorMessage(err);
-  error(res, msg, /unknown service type|nothing to export/.test(msg) ? 400 : 500);
+  error(res, msg, /unknown service type|nothing to export|not configured/.test(msg) ? 400 : 500);
 }
 
 export async function planRoutes(c: RouteCtx): Promise<void> {
