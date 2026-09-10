@@ -230,6 +230,28 @@ describe("the token gate on a call", () => {
     assert.equal(r.status, 401);
   });
 
+  test("the refusal line says WHICH header problem it was", async () => {
+    // Three refusals that read identically as a 401 and are fixed in three
+    // different places. The log used to say "no valid token" for all of them.
+    await withCue();
+    const warns: string[] = [];
+    const real = console.warn;
+    console.warn = (...a: unknown[]) => { warns.push(a.map(String).join(" ")); };
+    try {
+      await callRoute(cueRoutes, "/api/cues/projectors_on", { method: "POST" });
+      await call("projectors_on", { headers: { authorization: "su_bare_no_scheme" } });
+      await call("projectors_on", { headers: { authorization: "Bearer su_wrong" } });
+    } finally {
+      console.warn = real;
+    }
+    const refusals = warns.filter((w) => w.includes("[cues] refused"));
+    assert.equal(refusals.length, 3, `expected three refusal lines, got ${JSON.stringify(warns)}`);
+    assert.match(refusals[0]!, /no Authorization header/);
+    assert.match(refusals[1]!, /not "Bearer <token>"/);
+    assert.match(refusals[2]!, /not recognised/);
+    assert.equal(refusals.some((w) => w.includes("su_wrong") || w.includes("su_bare")), false, "a refusal line carried the token");
+  });
+
   test("a same-origin browser does NOT get a free pass on a call", async () => {
     // Deliberately unlike the management routes. There is no operator-at-the-
     // console case for firing a cue; the rule editor has a Test button.

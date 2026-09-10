@@ -10,7 +10,7 @@ import { AUTOMATION_CONDITIONS } from "../automation-conditions.js";
 import { automationEngine } from "../automation-engine.js";
 import { automationLog } from "../automation-log.js";
 import { AUTOMATION_TRIGGERS } from "../automation-triggers.js";
-import { bearerOf, cueTokens, isSameOriginBrowser } from "../cue-tokens.js";
+import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-tokens.js";
 import { scrub } from "../scrub.js";
 import { stageController } from "../stage-controller.js";
 
@@ -34,7 +34,7 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     if (!isSameOriginBrowser(req.headers)) {
       const caller = await cueTokens.verify(bearerOf(req.headers.authorization));
       if (!caller) {
-        console.warn(`[cues] refused POST /api/action/invoke: no valid token`);
+        console.warn(`[cues] refused POST /api/action/invoke: ${scrub(refusalReason(req.headers.authorization))}`);
         error(res, "A bearer token is required for a request with no Origin", 401);
         return;
       }
