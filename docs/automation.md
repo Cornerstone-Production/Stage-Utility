@@ -118,6 +118,7 @@ for "idle", because before it runs we do not know that it is idle.
 | Send a RossTalk command | a Carbonite or Ultrix command at a target |
 | Send an OSC message | to an OSC target |
 | Advance PCO Live one item | steps the live plan forward once |
+| REAPER transport | Record, Stop or Play, through the same web interface the [REAPER](integrations/reaper.md) integration polls. Record does nothing when REAPER is already recording |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
 | Press a Companion button | presses one button at a page/row/column. Reports "dispatched", never "on" — see [Pressing a button](integrations/companion.md#pressing-a-button) |
@@ -138,6 +139,12 @@ for "idle", because before it runs we do not know that it is idle.
 > argument and ignores it, playing the cue on its own configured layer. Which
 > layer a cue uses is set in ProVideoPlayer, not here. See
 > [ProVideoPlayer](integrations/provideoplayer.md).
+
+> **REAPER transport** needs REAPER's web interface switched on — the same
+> prerequisite as the [REAPER](integrations/reaper.md) integration, and the same
+> host and port. REAPER's Record is a TOGGLE: pressed while it is recording it
+> stops the recording, so the action reads the transport first and sends nothing
+> when REAPER is already rolling. Stop and Play go out unconditionally.
 
 ## Cues
 
@@ -169,7 +176,7 @@ the trigger and action's own names.
 | **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
-| **State variable** | on the `_on` half of an ON/OFF pair, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `VCR-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) |
+| **State variable** | on the `_on` half of an ON/OFF pair, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `VCR-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
 | **Learning** | shown on the `_on` half of a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
 | **Once per service** | honoured on a call as well as on a trigger: a second call in the same service occurrence is refused `once-per-service` |
@@ -213,6 +220,27 @@ renamed to match and the old name keeps answering. See
 Set the whole thing up under [Companion](integrations/companion.md#calling-a-cue-by-name):
 the button picker, the ON/OFF and single-button import, the tokens and the Home
 Assistant paste.
+
+### State from Stage Utility
+
+A cue that does not press a Companion button has no Companion variable to read,
+and does not need one — Stage Utility is already talking to the device. Those
+bindings are written `app:<source>` and are offered in the **State variable**
+select whenever the integration behind them is set up.
+
+| Source | Reads |
+|---|---|
+| `app:reaper.recording` | `on` while REAPER is recording, `off` while it is connected and not, unknown while it is not connected |
+
+A pair whose `_on` half is a **REAPER transport** Record is bound to
+`app:reaper.recording` without anybody choosing it: it is the only answer there
+is, and the two values are fixed at `on` and `off`, so the value rows are not
+offered. Setting **State variable** to anything else on that pair overrides it.
+
+Such a pair is a switch in Home Assistant like any other, reports a real state,
+and is idempotent — "start the recording" said twice while it is recording
+answers `already on` and sends nothing, which matters because REAPER's Record is
+a toggle.
 
 ## Firing an item on time
 
