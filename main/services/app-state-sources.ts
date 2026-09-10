@@ -29,6 +29,9 @@ export type AppStateSourceId = (typeof APP_STATE_SOURCE_IDS)[number];
 export interface AppStateSourceDef {
   /** What the rule editor calls it. */
   label: string;
+  /** The one line the rule editor says under it. Declared here so a second
+   *  source cannot arrive with the first one's wording. */
+  hint: string;
   /**
    * The broadcast channel whose producer has to be running for this to be
    * fresh. A bound pair is demand on that channel — REAPER polls every five
@@ -36,6 +39,13 @@ export interface AppStateSourceDef {
    * the unattended box this feature is for. automation-engine.ts registers it.
    */
   channel: string;
+  /**
+   * The integration this comes from, as INTEGRATION_IDS spells it. The rule
+   * editor offers a source only when its integration is set up — there is no
+   * state to read otherwise — and deriving that from the source id's first
+   * segment would be a convention nothing enforces.
+   */
+  integrationId: string;
   /** The two values this source reports. A pair bound to it is fixed to them. */
   onValue: string;
   offValue: string;
@@ -46,7 +56,9 @@ export const APP_STATE_SOURCES = new Map<AppStateSourceId, AppStateSourceDef>([
     "reaper.recording",
     {
       label: "REAPER recording (Stage Utility)",
+      hint: "Read from Stage Utility's REAPER connection. Nothing to set up.",
       channel: "reaper:status",
+      integrationId: "reaper",
       onValue: "on",
       offValue: "off",
     },
@@ -69,6 +81,12 @@ export function appStateSourceId(variable: string): AppStateSourceId | null {
   if (!isAppStateRef(trimmed)) return null;
   const id = trimmed.slice(APP_STATE_PREFIX.length);
   return APP_STATE_SOURCES.has(id as AppStateSourceId) ? (id as AppStateSourceId) : null;
+}
+
+/** The source this ref names, with its label, values and hint, or null. */
+export function appStateSourceDef(variable: string): AppStateSourceDef | null {
+  const id = appStateSourceId(variable);
+  return id ? (APP_STATE_SOURCES.get(id) ?? null) : null;
 }
 
 /**

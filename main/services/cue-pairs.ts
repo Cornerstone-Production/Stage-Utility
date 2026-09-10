@@ -252,7 +252,7 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
         binding:
           stateBindingOf(cue.rule.trigger.params) ??
           stateBindingOf(off.rule.trigger.params) ??
-          implicitStateBinding(cue.rule),
+          implicitStateBinding(cue.rule.action),
       });
     }
   }
@@ -269,10 +269,13 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
  * "recording" after a Record that REAPER never carried out.
  *
  * Never overrides a stored `stateVariable`: cuePairs applies it last.
+ *
+ * Takes the ACTION rather than the rule, because the rule editor asks it about
+ * a draft the operator is still typing, which is not a saved Rule.
  */
-export function implicitStateBinding(onRule: Rule): StateBinding | null {
-  if (onRule.action.id !== "reaper.transport") return null;
-  if (String(onRule.action.params.command ?? "").trim() !== "record") return null;
+export function implicitStateBinding(onAction: Rule["action"]): StateBinding | null {
+  if (onAction.id !== "reaper.transport") return null;
+  if (String(onAction.params.command ?? "").trim() !== "record") return null;
   const source = APP_STATE_SOURCES.get("reaper.recording")!;
   return {
     variable: appStateRef("reaper.recording"),
