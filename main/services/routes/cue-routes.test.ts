@@ -1141,7 +1141,7 @@ describe("the button and pair endpoints", () => {
     assert.equal(r.status, 200);
     const body = r.json as { ok: boolean; buttons: { pageName: string; label: string }[] };
     assert.equal(body.ok, true);
-    assert.equal(body.buttons.length, 19);
+    assert.equal(body.buttons.length, 30);
     assert.ok(body.buttons.some((b) => b.pageName === FIXTURE_PAGES.screens));
   });
 
@@ -1184,12 +1184,12 @@ describe("the button and pair endpoints", () => {
     for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
     const r = await callRoute(cueRoutes, "/api/companion/pairs");
     const pairs = (r.json as { pairs: { base: string; slug: string; exists: boolean }[] }).pairs;
-    assert.equal(pairs.length, 4);
+    assert.equal(pairs.length, 5);
     assert.deepEqual(
       pairs.map((p) => p.slug),
       // "Projectors" is on both fixture pages, so both are prefixed. See
       // slugsForPairs — a plain slug would have one of them refused on import.
-      ["lobby_tvs", "room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
+      ["lobby_tvs", "room_a_screens_projectors", "room_a_lighting_projectors", "rig", "ptz"],
     );
     assert.equal(pairs.every((p) => !p.exists), true);
   });
@@ -1215,10 +1215,13 @@ describe("the button and pair endpoints", () => {
       ["room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
     );
     // "lobby_tvs" drives generic-tcp-udp — something we cannot call a projector —
-    // so it is offered unticked rather than pre-armed.
+    // so it is offered unticked rather than pre-armed. "ptz" drives a Panasonic
+    // camera, whose power the inference reads and which is still not on the
+    // utility list: a camera pre-ticked is a cue somebody can say by accident,
+    // and an unticked pair is one click away.
     assert.deepEqual(
       body.pairs.filter((p) => !p.suggested).map((p) => p.slug),
-      ["lobby_tvs"],
+      ["lobby_tvs", "ptz"],
     );
     assert.equal("defaultPages" in body, false, "a site's page names came back over the wire");
   });
@@ -1354,6 +1357,9 @@ describe("importing single buttons", () => {
     // Cam 2 both run nothing, which is what the reconcile's "an empty
     // fingerprint is never searched for" guard needs — then the two OBS
     // toggles. See the fixture.
+    // Page 5: the recorder keys. Deck 1 START and STOP are here rather than in
+    // the pairs half until START/STOP is a pair suffix; the encoder and camera
+    // keys have no partner at all.
     assert.deepEqual(
       buttons.map((b) => `${b.page as number}:${b.slug as string}`),
       [
@@ -1367,6 +1373,15 @@ describe("importing single buttons", () => {
         "3:obs_rec_toggle",
         "3:obs_stream_toggle",
         "3:tv_wall_on",
+        "5:deck_1_start",
+        "5:deck_1_stop",
+        "5:deck_2_start",
+        "5:encoder_stop",
+        "5:pgm_rec_toggle",
+        "5:pgm_stream_toggle",
+        "5:ptz_sd_rec",
+        "5:cam_1_rec_start",
+        "5:format_decks",
       ],
     );
     assert.equal(

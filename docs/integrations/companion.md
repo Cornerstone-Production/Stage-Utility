@@ -352,22 +352,52 @@ variables could be named goes on meaning what it meant.
 
 #### Inferred, from what the button drives
 
-A button that drives a smart plug, a television, a projector or OBS already has
-somewhere to read its state from, with nothing to build in Companion at all. The
-import offers it as the default binding, labelled `(inferred)`, and the hourly
-reconcile fills it in for a pair that has none:
+A button that drives a smart plug, a television, a projector, a camera, a
+recorder or OBS already has somewhere to read its state from, with nothing to
+build in Companion at all. The import offers it as the default binding, labelled
+`(inferred)`, and the hourly reconcile fills it in for a pair that has none:
 
-| Module | Variable | On / off |
-|---|---|---|
-| `tplink-kasasmartplug`, `tplink-kasasmartbulb` | `power_state` | `On` / `Off` |
-| `vizio-smartcast` | `power` | `On` / `Off` |
-| `generic-pjlink` | `powerState` | `On` / `Off` |
-| `obs-studio` | `streaming` | `Live` / `Off-Air` |
+| Module | What it reads | Variable | On value | Off value |
+|---|---|---|---|---|
+| `tplink-kasasmartplug` | the plug's power | `power_state` | `On` | `Off` |
+| `tplink-kasasmartbulb` | the bulb's power | `power_state` | `On` | `Off` |
+| `vizio-smartcast` | the television's power | `power` | `On` | `Off` |
+| `generic-pjlink` | the projector's power | `powerState` | `On` | `Off` |
+| `panasonic-cameras` | the camera's power | `power` | `ON` | `OFF` |
+| `panasonic-cameras` | its SD card recording | `recording` | `ON` | `OFF` |
+| `obs-studio` | the stream | `streaming` | `Live` | `*` |
+| `obs-studio` | the recording | `recording` | `Recording` | `*` |
+| `bmd-hyperdeck` | the deck's transport | `status` | `Record` | `*` |
+| `magewell-ultrastream` | the encoder's stream | `stream_status` | `Streaming` | `*` |
+| `magewell-ultrastream` | its recording | `record_status` | `Recording` | `*` |
+| `red-rcp2` | the camera's recording | `recording` | `Recording` | `*` |
 
-The connection comes from the button's `powerState` feedback where it has one,
-and from its first action otherwise. OBS only infers for a button whose actions
-are **streaming** actions — a recording button on the same connection is a
-different fact. Anything else infers nothing rather than guessing a name.
+A power variable holds one of two values and keeps an exact off value, so a
+projector warming up reads *unknown* rather than *off* — reported off it is a
+projector somebody presses again mid warm-up. A status variable holds several,
+so its off value is [`*`](#real-state) and the on value is the only one spelled
+out.
+
+**Which connection** comes from the button's `powerState` feedback where it has
+one, then from its first action, then from any other feedback — which is what
+lets a macro key whose actions are all Companion button presses still be
+identified by the one device feedback on it.
+
+**Which fact** comes from what the button does. A module with more than one row
+— OBS, an encoder, a camera — matches on the actions the button runs, and on its
+feedbacks only if no action matched: a recording key and a streaming key on one
+OBS connection are two different facts, and a deck's format key is neither.
+Anything else infers nothing rather than guessing a name.
+
+Modules in use with **no row**, because they publish no on/off state to read:
+`bmd-atem` (its `record_active` and `stream_active` variables exist only in
+module versions after 3.18.0), `qsys-remote-control` and `yamaha-rcp` (their
+variables are named after a control or a console model, not after the module),
+`renewedvision-pvp` (registers no variables at all), `malighting-grandma3`,
+`rossvideo-rosstalk`, `generic-swp08`, `bmd-smartview`, `slack-webhooks` (send
+only), `magewell-proconvert-decoder` (only cable and source state),
+`shure-wireless`, `shure-psm1000` and `shure-chargers` (per-channel RF and
+battery).
 
 A binding you set yourself is never replaced. Pick a different variable, or
 **No state**, and the reconcile leaves it alone.

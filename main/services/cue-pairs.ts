@@ -26,6 +26,7 @@
 // only ever reads it.
 
 import { isCompanionVariableRef } from "./companion-export.js";
+import { STATE_ANY_OTHER } from "./companion-state-source.js";
 // From cue-aliases, NOT from the trigger registry: the registry reaches
 // node:url, and this module is imported by the settings page.
 import { CALL_TRIGGER_ID, parseAliases } from "./cue-aliases.js";
@@ -52,8 +53,13 @@ export const STATE_OFF_DEFAULT = "off";
  * Off ONLY. `*` as the on value would make a pair read on whatever the device
  * is doing, which is the silent failure this whole binding exists to remove, so
  * stateBindingProblem refuses it.
+ *
+ * DEFINED in companion-state-source.ts, whose inference table writes it on
+ * every status row, and re-exported here beside the other two values a binding
+ * can hold. It cannot be declared here: this module imports companion-export,
+ * which imports that one.
  */
-export const STATE_ANY_OTHER = "*";
+export { STATE_ANY_OTHER };
 
 /** Where a pair's real state is read from, and what the two answers look like. */
 export interface StateBinding {

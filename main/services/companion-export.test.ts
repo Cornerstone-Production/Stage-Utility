@@ -45,13 +45,14 @@ const at = (page: number, row: number, col: number) =>
 
 describe("parseButtons", () => {
   test("finds every labelled or acting button, and nothing else", () => {
-    // EXACT, not a floor. Seven on page 1, four on page 2, three on page 3,
-    // none on the navigation-only page. A floor here is how the pagenum
-    // furniture creeps back in and the picker grows 150 rows of "Page 4".
-    assert.equal(BUTTONS.length, 19);
+    // EXACT, not a floor. Seven on page 1, four on page 2, eight on page 3,
+    // eleven on the recorders page, none on the navigation-only page. A floor
+    // here is how the pagenum furniture creeps back in and the picker grows 150
+    // rows of "Page 4".
+    assert.equal(BUTTONS.length, 30);
     assert.deepEqual(
       [...new Set(BUTTONS.map((b) => b.page))].sort((a, b) => a - b),
-      [1, 2, 3],
+      [1, 2, 3, 5],
     );
   });
 
@@ -153,6 +154,7 @@ describe("findPairs", () => {
       "1:Projectors",
       "2:Projectors",
       "2:Rig",
+      "5:PTZ",
     ]);
   });
 
