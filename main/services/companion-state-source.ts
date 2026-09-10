@@ -100,7 +100,7 @@ export const STATE_ANY_OTHER = "*";
  * `source` is not read by anything; it is the evidence, kept beside the row it
  * justifies, because a row nobody can re-check is a row nobody dares change.
  */
-interface StateRow {
+export interface StateRow {
   /** The module variable, spelled as the module registers it. */
   name: string;
   /** What it holds when the thing is on, spelled as the module writes it. */
@@ -139,8 +139,14 @@ interface StateRow {
  *
  * Every module on the install this was built against is either here or listed
  * in docs/integrations/companion.md as having no on/off state to read.
+ *
+ * EXPORTED for its own test, which is the only caller: the reconcile writes a
+ * binding straight from a row without going through stateBindingProblem, so a
+ * row with `*` in the on column — or with its two values the same — would be a
+ * pair reading on whatever the device is doing, saved by housekeeping, with no
+ * 400 anywhere to catch it. The test walks every row.
  */
-const STATE_SOURCES: Readonly<Record<string, readonly StateRow[]>> = {
+export const STATE_SOURCES: Readonly<Record<string, readonly StateRow[]>> = {
   // Both kasa modules answer On/Off on the same variable name.
   "tplink-kasasmartplug": [
     { name: "power_state", on: "On", off: "Off", source: "live read, VCR-Overhead-Light" },

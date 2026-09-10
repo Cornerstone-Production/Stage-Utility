@@ -20,7 +20,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { inferStateSource, type ExportConnection } from "./companion-state-source.js";
+import {
+  inferStateSource,
+  STATE_ANY_OTHER,
+  STATE_SOURCES,
+  type ExportConnection,
+} from "./companion-state-source.js";
 import { parseButtons } from "./companion-export.js";
 import { companionExportFixture } from "./fixtures/companion-export.js";
 
@@ -125,6 +130,66 @@ describe("inferStateSource, one row per module", () => {
         moduleId: "obs-studio",
       },
     );
+  });
+});
+
+describe("the table itself", () => {
+  const rows = Object.entries(STATE_SOURCES).flatMap(([moduleId, list]) =>
+    list.map((row) => ({ moduleId, ...row })),
+  );
+
+  test("EXACTLY the modules and rows that have been verified", () => {
+    // Exact, not a floor. A row is a variable name and an on value read off a
+    // real module, and a row nobody wrote a test and a docs line for is a
+    // binding that reads unknown forever with nothing on screen saying why. A
+    // new one fails here until it is named in all three places.
+    assert.deepEqual(
+      rows.map((r) => `${r.moduleId}:${r.name} ${r.on}/${r.off}`),
+      [
+        "tplink-kasasmartplug:power_state On/Off",
+        "tplink-kasasmartbulb:power_state On/Off",
+        "vizio-smartcast:power On/Off",
+        "generic-pjlink:powerState On/Off",
+        "panasonic-cameras:power ON/OFF",
+        "panasonic-cameras:recording ON/OFF",
+        "obs-studio:streaming Live/*",
+        "obs-studio:recording Recording/*",
+        "bmd-hyperdeck:status Record/*",
+        "magewell-ultrastream:stream_status Streaming/*",
+        "magewell-ultrastream:record_status Recording/*",
+        "red-rcp2:recording Recording/*",
+      ],
+    );
+  });
+
+  test("no row can be saved as a binding that reads on whatever the device does", () => {
+    // The RECONCILE writes a row straight into a rule's params without going
+    // through stateBindingProblem, so these two are the only thing standing
+    // between a bad row and a switch that lies. `*` in the on column would
+    // match every value; two equal values could never be told apart.
+    for (const row of rows) {
+      const where = `${row.moduleId}:${row.name}`;
+      assert.notEqual(row.on, STATE_ANY_OTHER, where);
+      assert.notEqual(row.on, row.off, where);
+      assert.notEqual(row.on.trim(), "", where);
+      assert.notEqual(row.off.trim(), "", where);
+      // Trimmed on both ends before comparison, so a value with whitespace on
+      // it would never match what it was read from.
+      assert.equal(row.on, row.on.trim(), where);
+      assert.equal(row.off, row.off.trim(), where);
+      // And the evidence, on the row, in the same object a reader changes.
+      assert.notEqual(row.source.trim(), "", where);
+    }
+  });
+
+  test("every `when` fragment is lower-cased, because definitionIds are compared lower-cased", () => {
+    // `sdCardRec` as a fragment would match nothing at all — silently, on the
+    // one module whose action ids are camelCase.
+    for (const row of rows) {
+      for (const fragment of row.when ?? []) {
+        assert.equal(fragment, fragment.toLowerCase(), `${row.moduleId}:${row.name}`);
+      }
+    }
   });
 });
 
