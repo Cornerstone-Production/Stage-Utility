@@ -24,7 +24,22 @@
 // this app where the answer is. That is a Companion CUSTOM VARIABLE the
 // operator's own buttons set: `projectors_state` = `on` / `off`. Stage Utility
 // only ever reads it.
+//
+// A cue that does NOT press a Companion button has no such variable to read, and
+// does not need one — this app is already talking to the device. Those bindings
+// are `app:<source>` (see app-state-sources.ts), and a pair whose ON half is a
+// `reaper.transport` RECORD is bound to `app:reaper.recording` IMPLICITLY: it is
+// the only answer there is, and a Record/Stop pair reporting nothing until
+// somebody found a select would be optimistic for no reason. An explicit
+// `stateVariable` on either half always wins over the implicit one, so a pair
+// can still be pointed somewhere else, or left unbound, by hand.
 
+import {
+  APP_STATE_SOURCES,
+  appStateProblem,
+  appStateRef,
+  isAppStateRef,
+} from "./app-state-sources.js";
 import { isCompanionVariableRef } from "./companion-export.js";
 import { STATE_ANY_OTHER } from "./companion-state-source.js";
 // From cue-aliases, NOT from the trigger registry: the registry reaches
@@ -118,7 +133,13 @@ export function stateBindingParams(binding: Partial<StateBinding> | null): Recor
 export function stateBindingProblem(params: Record<string, string | number>): string | null {
   const binding = stateBindingOf(params);
   if (!binding) return null;
-  if (!isCompanionVariableRef(binding.variable)) {
+  if (isAppStateRef(binding.variable)) {
+    // An app source is refused for the SAME reason a malformed Companion ref is:
+    // a name nothing answers to is a switch that reads unknown forever, and the
+    // refusal names the sources that do exist.
+    const problem = appStateProblem(binding.variable);
+    if (problem) return problem;
+  } else if (!isCompanionVariableRef(binding.variable)) {
     return (
       `"${binding.variable}" is not a Companion variable — a custom variable ` +
       `(letters, digits, _, - and . only) or <connection label>:<variable name>`
@@ -226,13 +247,38 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
         // Read from the off half as a fallback rather than ignored, because a
         // hand-edited rules file with it on the other half is otherwise a
         // setting that is saved and does nothing.
+        // An EXPLICIT binding on either half first, then the one this pair's own
+        // ON action implies. See implicitStateBinding.
         binding:
-          stateBindingOf(cue.rule.trigger.params) ?? stateBindingOf(off.rule.trigger.params),
+          stateBindingOf(cue.rule.trigger.params) ??
+          stateBindingOf(off.rule.trigger.params) ??
+          implicitStateBinding(cue.rule),
       });
     }
   }
 
   return out.sort((a, b) => a.base.localeCompare(b.base));
+}
+
+/**
+ * The binding this pair's own ON action implies, or null.
+ *
+ * ONE case today: an ON half that starts a REAPER recording reads
+ * `app:reaper.recording`. Stage Utility polls REAPER's transport already, so
+ * the state costs nothing — and the alternative, an optimistic pair, reports
+ * "recording" after a Record that REAPER never carried out.
+ *
+ * Never overrides a stored `stateVariable`: cuePairs applies it last.
+ */
+export function implicitStateBinding(onRule: Rule): StateBinding | null {
+  if (onRule.action.id !== "reaper.transport") return null;
+  if (String(onRule.action.params.command ?? "").trim() !== "record") return null;
+  const source = APP_STATE_SOURCES.get("reaper.recording")!;
+  return {
+    variable: appStateRef("reaper.recording"),
+    onValue: source.onValue,
+    offValue: source.offValue,
+  };
 }
 
 /**

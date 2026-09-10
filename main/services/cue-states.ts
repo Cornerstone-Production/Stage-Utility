@@ -27,11 +27,19 @@
 // variable every second until it agrees — a bounded, unref'd timer that cannot
 // outlive the window, and nothing at all on an install nobody presses.
 //
+// NOT EVERY BINDING IS A COMPANION VARIABLE. A pair bound to `app:<source>`
+// (app-state-sources.ts) is answered from inside this process — REAPER's
+// transport poll, for a cue that starts a recording — in the same shape, through
+// the same seam, with the same cache and the same settle re-read. Nothing below
+// the seam distinguishes the two.
+//
 // Reads run in PARALLEL and one variable is read ONCE however many pairs bind
 // it: the answer waits for the slowest read, and eight sequential three-second
 // timeouts on an unplugged Companion is a request Home Assistant has long since
 // given up on.
 
+import { readAppState } from "./app-state-reads.js";
+import { isAppStateRef } from "./app-state-sources.js";
 import { boundCuePairs, STATE_ANY_OTHER } from "./cue-pairs.js";
 import { errorMessage } from "./errors.js";
 import { companionApi, type VariableResult } from "./companion-api.js";
@@ -96,7 +104,10 @@ export interface CueStateRow {
   on: string;
   /** The `_off` half's cue name. */
   off: string;
-  /** The Companion variable this was read from — custom, or `<label>:<name>`. */
+  /**
+   * What this was read from: a Companion variable (custom, or
+   * `<label>:<name>`), or an `app:<source>` this app answers itself.
+   */
   variable: string;
   /** What the variable held, or null when it could not be read at all. */
   value: string | null;
@@ -140,7 +151,12 @@ export const cueStatesDeps: {
 } = {
   now: () => Date.now(),
   rules: async () => (await import("./automation-engine.js")).automationEngine.listRules(),
-  read: (variable) => companionApi.readVariable(variable),
+  // TWO NAMESPACES, one seam. An `app:` ref is answered from this process (the
+  // REAPER transport poll, say) and everything else is a Companion variable —
+  // both in the same VariableResult shape, so nothing below this line, including
+  // the settle re-read, knows which kind it is reading.
+  read: async (variable) =>
+    isAppStateRef(variable) ? readAppState(variable) : companionApi.readVariable(variable),
   setTimeout: (fn, ms) => {
     const t = setTimeout(fn, ms);
     // A re-read that lasts eight seconds must never be what keeps the process

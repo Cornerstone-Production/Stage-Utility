@@ -165,6 +165,28 @@ const POLLERS: {
       ),
   },
   {
+    // The OTHER in-process consumer of this poll, and the one no condition
+    // registers: a cue pair bound to `app:reaper.recording` reads the transport
+    // snapshot every time Home Assistant asks for its state.
+    label: "REAPER (a cue pair reading its state)",
+    service: reaperService as unknown as Poller,
+    demand: (on) =>
+      setRules(
+        on
+          ? [
+              {
+                trigger: { id: "call.by-name", params: { name: "reaper_record_on" } },
+                action: { id: "reaper.transport", params: { command: "record" } },
+              },
+              {
+                trigger: { id: "call.by-name", params: { name: "reaper_record_off" } },
+                action: { id: "reaper.transport", params: { command: "stop" } },
+              },
+            ]
+          : [],
+      ),
+  },
+  {
     label: "ProPresenter",
     service: propresenterService as unknown as Poller,
     demand: async (on) => {
@@ -350,11 +372,15 @@ describe("demand is registered for everything automation reads", () => {
     );
   });
 
-  it("reaper:status has one, which no trigger channel would have given it", () => {
-    // reaper:status carries no trigger — its automation surface is the
-    // reaper.is-recording CONDITION, which is pulled rather than broadcast. An
-    // exact count, so dropping the condition registration shows up here rather
-    // than as a qualifier quietly answering from a five-second-old snapshot.
-    assert.equal(channelDemandSourceCount("reaper:status"), 1);
+  it("reaper:status has exactly the two no trigger channel would have given it", () => {
+    // reaper:status carries no trigger. Its two automation surfaces are both
+    // PULLED rather than broadcast: the reaper.is-recording CONDITION, and a cue
+    // pair bound to `app:reaper.recording` (app-state-sources.ts), whose state
+    // Home Assistant reads straight off this poll.
+    //
+    // An EXACT count, so dropping either registration shows up here rather than
+    // as a qualifier — or a switch in somebody's house — quietly answering from
+    // a five-second-old snapshot.
+    assert.equal(channelDemandSourceCount("reaper:status"), 2);
   });
 });

@@ -329,3 +329,75 @@ describe("isTogglePair", () => {
     assert.equal(isTogglePair(only([on, off])), false);
   });
 });
+
+// ── State from Stage Utility itself ───────────────────────────────────────────
+//
+// A cue that drives REAPER directly presses no Companion button, so there is no
+// Companion variable to bind — and an optimistic Record/Stop pair would report
+// "recording" after a Record that REAPER never carried out. The pair is bound to
+// `app:reaper.recording` without anybody choosing it.
+
+describe("app: state sources", () => {
+  /** A cue with a `reaper.transport` action. */
+  const transport = (name: string, command: string, params: Record<string, string> = {}): Rule => ({
+    ...cue(name, params),
+    action: { id: "reaper.transport", params: { command } },
+  });
+
+  const recordPair = (params: Record<string, string> = {}): Rule[] => [
+    transport("reaper_record_on", "record", params),
+    transport("reaper_record_off", "stop"),
+  ];
+
+  test("a Record/Stop pair is bound with nothing configured", () => {
+    const pair = cuePairs(recordPair())[0]!;
+    assert.deepEqual(pair.binding, {
+      variable: "app:reaper.recording",
+      onValue: "on",
+      offValue: "off",
+    });
+    assert.equal(boundCuePairs(recordPair()).length, 1);
+  });
+
+  test("an explicit state variable on the rule wins", () => {
+    const pair = cuePairs(recordPair({ stateVariable: "rec_state" }))[0]!;
+    assert.equal(pair.binding?.variable, "rec_state");
+  });
+
+  test("a Play/Stop pair implies nothing — only Record has an answer to read", () => {
+    const pair = cuePairs([
+      transport("reaper_play_on", "play"),
+      transport("reaper_play_off", "stop"),
+    ])[0]!;
+    assert.equal(pair.binding, null);
+  });
+
+  test("a pair pressing Companion buttons is unaffected", () => {
+    assert.equal(cuePairs([cue("lights_on"), cue("lights_off")])[0]!.binding, null);
+  });
+
+  test("a known app source is a binding the server accepts", () => {
+    assert.equal(stateBindingProblem({ stateVariable: "app:reaper.recording" }), null);
+  });
+
+  test("an app source nothing answers to is refused, and the known ones named", () => {
+    // `app:reaper` is a typo whose only symptom would be a switch that never
+    // reports anything, so it is a 400 at the moment it is typed.
+    const problem = stateBindingProblem({ stateVariable: "app:reaper" });
+    assert.match(String(problem), /not a Stage Utility state source/);
+    assert.match(String(problem), /app:reaper\.recording/);
+  });
+
+  test("an app source is still refused values that could never be read", () => {
+    assert.match(
+      String(
+        stateBindingProblem({
+          stateVariable: "app:reaper.recording",
+          stateOnValue: "yes",
+          stateOffValue: "yes",
+        }),
+      ),
+      /both "yes"/,
+    );
+  });
+});

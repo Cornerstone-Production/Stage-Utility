@@ -29,7 +29,8 @@ import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, CALL_CHANNEL, CALL_TRIGGER_ID, isValidCueName, triggersForChannel } from "./automation-triggers.js";
-import { cuePairs, stateBindingProblem } from "./cue-pairs.js";
+import { APP_STATE_SOURCES, appStateRef, type AppStateSourceId } from "./app-state-sources.js";
+import { boundCuePairs, cuePairs, stateBindingProblem } from "./cue-pairs.js";
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
@@ -592,6 +593,13 @@ class AutomationEngine {
     rule: Rule,
   ): { ruleId: string; base: string; want: "on" | "off"; params: Record<string, string | number> } | null {
     if (rule.trigger.id !== CALL_TRIGGER_ID) return null;
+    // LEARNING IS COMPANION-ONLY. It watches what a module variable does when a
+    // BUTTON is pressed, so a pair whose halves drive something else — a REAPER
+    // transport cue — has nothing to watch and no fingerprint to read. Guarded
+    // here rather than trusted to notePressForLearning's empty-candidates early
+    // return: the candidates are written by the probe, and "the probe cannot
+    // reach this pair today" is an invariant three modules away.
+    if (rule.action.id !== "companion.press") return null;
     for (const pair of cuePairs(this.rules)) {
       if (pair.binding !== null) continue;
       const want = pair.on.id === rule.id ? "on" : pair.off.id === rule.id ? "off" : null;
@@ -848,6 +856,24 @@ class AutomationEngine {
       (rule) => rule.enabled && rule.conditions.some((c) => c.id === conditionId),
     );
   }
+
+  /**
+   * Does any cue pair read its state from this app source?
+   *
+   * A pair bound to `app:reaper.recording` is answered from REAPER's transport
+   * poll, which falls to IDLE_POLL_MS when no browser is watching — so a Home
+   * Assistant switch on an unattended booth machine read a snapshot up to five
+   * seconds old, which is exactly the window a repeat call arrives in.
+   *
+   * NOT gated on `disarmed`, unlike the two above. Disarming stops rules
+   * FIRING; `GET /api/cues/states` and the manifest still answer, and a switch
+   * in Home Assistant reporting a five-second-old state because the engine is
+   * disarmed would be a second, invisible consequence of the panic switch.
+   */
+  wantsAppStateSource(id: AppStateSourceId): boolean {
+    const ref = appStateRef(id);
+    return boundCuePairs(this.rules).some((pair) => pair.binding?.variable === ref);
+  }
 }
 
 export const automationEngine = new AutomationEngine();
@@ -893,4 +919,17 @@ for (const [conditionId, def] of Object.entries(AUTOMATION_CONDITIONS)) {
   const { channel } = def;
   if (channel === null) continue;
   addChannelDemandSource(channel, () => automationEngine.wantsCondition(conditionId));
+}
+
+/**
+ * App state sources, which arrive by pull as conditions do.
+ *
+ * A pair bound to `app:reaper.recording` reads REAPER's latest snapshot rather
+ * than the bus, so neither loop above can see it — and REAPER polls at its idle
+ * cadence with no browser attached, which is the whole case a cue on a booth
+ * machine is for. Derived from the registry, so a second source is covered the
+ * moment it is added there.
+ */
+for (const [id, def] of APP_STATE_SOURCES) {
+  addChannelDemandSource(def.channel, () => automationEngine.wantsAppStateSource(id));
 }

@@ -894,3 +894,42 @@ describe("a pair whose two halves press the SAME button", () => {
     assert.deepEqual(warnings, []);
   });
 });
+
+// A pair whose state Stage Utility answers itself — a REAPER Record/Stop cue
+// bound to `app:reaper.recording` (cue-pairs.ts) — is a bound pair here and
+// nowhere else in this generator: the sensor reads `/api/cues/states`, which
+// answers for both namespaces, so the document must not care which it is.
+describe("a pair bound to an app state source", () => {
+  const transport = (name: string, says: string, command: string): Rule => ({
+    ...cue(name, says),
+    action: { id: "reaper.transport", params: { command } },
+  });
+
+  test("renders exactly as a Companion-bound pair does, sensor and all", () => {
+    const yaml = homeAssistantYaml(
+      [
+        transport("reaper_record_on", "the recording on", "record"),
+        transport("reaper_record_off", "the recording off", "stop"),
+        cue("amps_on", "Amps on"),
+        cue("amps_off", "Amps off"),
+      ],
+      BASE,
+    );
+    // The pair is in the sensor's attribute list, which is what makes the
+    // switch's template resolve to anything at all.
+    assert.deepEqual(sensorAttributes(yaml), ["reaper_record"]);
+    assert.deepEqual(switchStates(yaml), [
+      { id: "amps", from: "optimistic" },
+      {
+        id: "reaper_record",
+        from:
+          "\"{{ (state_attr('sensor.stage_utility_cues', 'reaper_record') or {}).get('commanded', " +
+          "(state_attr('sensor.stage_utility_cues', 'reaper_record') or {}).get('state')) == 'on' }}\"",
+      },
+    ]);
+    // The ref itself never appears in the document: Home Assistant reads the
+    // pair's base off the sensor and knows nothing about where the state came
+    // from, which is why nothing here had to change for a second namespace.
+    assert.equal(yaml.includes("app:reaper.recording"), false);
+  });
+});

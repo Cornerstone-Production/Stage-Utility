@@ -44,6 +44,7 @@ const { readFingerprint } = await import("../companion-fingerprint.js");
 const { runCompanionReconcile } = await import("../companion-reconcile.js");
 const { cueStates, SETTLE_MS } = await import("../cue-states.js");
 const { __resetWatches, stateProbeDeps } = await import("../companion-state-probe.js");
+const { reaperDeps, reaperService } = await import("../reaper-service.js");
 
 after(async () => {
   await fsp.rm(TMP, { recursive: true, force: true });
@@ -2971,6 +2972,157 @@ describe("importing a single button as a TOGGLE pair", () => {
     } finally {
       companionDeps.fetch = real;
       companionApi.invalidate();
+    }
+  });
+});
+
+// ── A cue that is not a Companion button ──────────────────────────────────────
+//
+// A REAPER Record/Stop pair drives REAPER through this app's own connection and
+// presses nothing, so its state is `app:reaper.recording` rather than a
+// Companion variable — bound implicitly, because it is the only answer there is
+// (cue-pairs.ts).
+//
+// Three things have to hold, and all three are the machinery a Companion pair
+// already uses, reached here through the real call route:
+//
+//  - idempotency. REAPER's Record is a TOGGLE, so "start the recording" said
+//    twice while it is recording must send nothing. Nothing in the engine is
+//    reaper-specific; the binding is what makes it work.
+//  - the manifest names the source, so Home Assistant shows a real state.
+//  - LEARNING NEVER TOUCHES IT. Learning watches a module variable move when a
+//    BUTTON is pressed, so a pair that presses no button has nothing to watch —
+//    and probing it would read Companion on a call that never went near it.
+
+describe("a cue that drives REAPER rather than a Companion button", () => {
+  before(() => installCompanionStub());
+
+  /** Every `/_/…` the transport commands sent. There is no REAPER to run. */
+  let transport: string[] = [];
+  let recording = false;
+  const realReaperFetch = reaperDeps.fetch;
+  const realGetLatest = reaperService.getLatest.bind(reaperService);
+
+  before(() => {
+    reaperService.configure("reaper.example", 8080);
+    reaperService.stop();
+    reaperService.getLatest = () => ({
+      connected: true,
+      recording,
+      recordPaused: false,
+      playing: false,
+      positionSeconds: null,
+      positionString: null,
+    });
+    reaperDeps.fetch = (async (input: unknown) => {
+      const url = String(input);
+      transport.push(url);
+      const body = url.endsWith("/TRANSPORT")
+        ? `TRANSPORT\t${recording ? 5 : 0}\t0\t0\t0:00.000\t1.1.00`
+        : "";
+      return { ok: true, status: 200, text: async () => body } as unknown as Response;
+    }) as typeof fetch;
+  });
+
+  after(() => {
+    // Unconfigured and stopped BEFORE the real fetch goes back: the other order
+    // let a poll already in flight leave this process for a hostname that does
+    // not exist, which is a test making a real DNS request at teardown.
+    reaperService.configure("", 0);
+    reaperService.stop();
+    reaperService.getLatest = realGetLatest;
+    reaperDeps.fetch = realReaperFetch;
+  });
+
+  /** A REAPER pair, `<base>_on` running `onCommand` and `<base>_off` a Stop. */
+  async function withReaperPair(
+    base: string,
+    onCommand: string,
+    onParams: Record<string, string> = {},
+  ): Promise<void> {
+    for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+    await automationLog.clear();
+    for (const [suffix, command, extra] of [
+      ["on", onCommand, onParams],
+      ["off", "stop", {}],
+    ] as const) {
+      const name = `${base}_${suffix}`;
+      await automationEngine.addRule({
+        name,
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name, ...extra } },
+        conditions: [],
+        action: { id: "reaper.transport", params: { command } },
+        cooldownSec: 0,
+        oncePerService: false,
+      });
+    }
+  }
+
+  beforeEach(() => {
+    transport = [];
+    recording = false;
+  });
+
+  test("_on while REAPER is already recording answers already on and sends nothing", async () => {
+    await withReaperPair("reaper_record", "record");
+    recording = true;
+    const r = await call("reaper_record_on");
+    assert.equal(r.status, 200);
+    const body = r.json as Record<string, unknown>;
+    assert.equal(String(body.detail), "already on");
+    assert.equal(String(body.state), "on");
+    assert.equal(body.skipped, true);
+    assert.deepEqual(transport, [], "a second Record would have STOPPED the recording");
+  });
+
+  test("_on while REAPER is idle really does send Record", async () => {
+    await withReaperPair("reaper_record", "record");
+    const r = await call("reaper_record_on");
+    assert.equal(r.status, 200);
+    assert.equal((r.json as Record<string, unknown>).skipped, undefined);
+    assert.deepEqual(transport, [
+      "http://reaper.example:8080/_/TRANSPORT",
+      "http://reaper.example:8080/_/1013",
+    ]);
+  });
+
+  test("the manifest names Stage Utility as the state source", async () => {
+    await withReaperPair("reaper_record", "record");
+    recording = true;
+    const r = await callRoute(cueRoutes, "/api/cues/manifest");
+    const { switches } = r.json as { switches: Record<string, unknown>[] };
+    const entry = switches.find((s) => s.id === "reaper_record")!;
+    assert.equal(entry.stateSource, "app:reaper.recording");
+    assert.equal(entry.state, "on");
+    assert.equal(entry.available, true, "a cue with no Companion button cannot be button-missing");
+  });
+
+  test("a REAPER pair is never queued for learning", async () => {
+    // A Play/Stop pair, which has NO binding — the case the learning path is
+    // reached in. Its `_on` half carries candidates a probe could never have
+    // written for it (the probe only ever sees `companion.press` pairs); if the
+    // engine queued the press anyway, the watcher would read them from
+    // Companion, and `variableReads` is where that shows.
+    await withReaperPair("reaper_play", "play", { stateCandidates: "Lighting:status" });
+    variables["Lighting:status"] = "Standby";
+    const realTimeout = stateProbeDeps.setTimeout;
+    stateProbeDeps.setTimeout = () => ({}) as unknown as NodeJS.Timeout;
+    try {
+      variableReads.length = 0;
+      const r = await call("reaper_play_on");
+      assert.equal(r.status, 200);
+      assert.deepEqual(transport, ["http://reaper.example:8080/_/1007"], "the cue still runs");
+      for (let i = 0; i < 32; i++) await Promise.resolve();
+      assert.deepEqual(
+        variableReads,
+        [],
+        "a cue that presses no Companion button was probed for a state source",
+      );
+    } finally {
+      stateProbeDeps.setTimeout = realTimeout;
+      __resetWatches();
+      delete variables["Lighting:status"];
     }
   });
 });
