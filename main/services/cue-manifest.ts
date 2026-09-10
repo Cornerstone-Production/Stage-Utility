@@ -23,10 +23,17 @@
 // silently, and it comes back under a fresh name when the button reappears.
 // `available: false` says so and keeps the entity.
 //
+// A HIDDEN CUE IS NOT LISTED, and that is the one case where losing the entity
+// is the intent: the operator turned the cue's Home Assistant switch off, so it
+// is voice-only from here. Home Assistant removes the entity within seconds and
+// automations there that refer to it stop working — which is why it takes a
+// deliberate action and never happens because something failed. Both halves of
+// a hidden pair stay accounted for as a pair, so neither leaks out as a button.
+//
 // Open, like `GET /api/cues/states` and the YAML: it carries cue names and
 // on/off, never a token.
 
-import { cuePairs, isTogglePair } from "./cue-pairs.js";
+import { cuePairs, isHiddenFromHome, isTogglePair } from "./cue-pairs.js";
 import { readFingerprint } from "./companion-fingerprint.js";
 import { stageController } from "./stage-controller.js";
 import { CALL_TRIGGER_ID } from "./cue-aliases.js";
@@ -136,9 +143,17 @@ export async function cueManifest(): Promise<CueManifest> {
 
   const paired = new Set<string>();
   const switches: ManifestSwitch[] = [];
+  let hidden = 0;
   for (const pair of pairs) {
+    // BEFORE the skip: a hidden pair's halves are still a pair, and leaving
+    // them out of `paired` would publish both of them as buttons — the entity
+    // the operator hid, twice, under different ids.
     paired.add(pair.on.id);
     paired.add(pair.off.id);
+    if (pair.hiddenFromHome) {
+      hidden += 1;
+      continue;
+    }
     const row = states?.states[pair.base];
     const entry: ManifestSwitch = {
       id: pair.base,
@@ -172,6 +187,10 @@ export async function cueManifest(): Promise<CueManifest> {
     // Assistant created and removed an entity for it. Half a switch is not a
     // thing anyone should be able to press from Home.
     if (/_(on|off)$/.test(cue)) continue;
+    if (isHiddenFromHome(rule.trigger.params)) {
+      hidden += 1;
+      continue;
+    }
     buttons.push({
       id: cue,
       name: spokenName(rule, cue),
@@ -181,6 +200,7 @@ export async function cueManifest(): Promise<CueManifest> {
     });
   }
 
+  reportHidden(hidden);
   const state = stageController.getState();
   return {
     version,
@@ -227,4 +247,21 @@ function roomOf(rule: Rule): string {
 function pressable(rule: Rule): boolean {
   if (rule.action.id !== "companion.press") return true;
   return readFingerprint(rule.action.params).status !== "missing";
+}
+
+/**
+ * The last hidden count this process reported, so an unchanged build says
+ * nothing.
+ *
+ * The manifest is built on every read — a poll, a subscribe, a version bump —
+ * and a line per build would bury the log. Only a CHANGE is worth reading: an
+ * operator wondering why an entity vanished wants the moment it did.
+ */
+let reportedHidden = 0;
+
+function reportHidden(count: number): void {
+  if (count === reportedHidden) return;
+  reportedHidden = count;
+  if (count > 0) console.log(`[cues] ${count} cue(s) hidden from Home Assistant`);
+  else console.log("[cues] no cues are hidden from Home Assistant");
 }

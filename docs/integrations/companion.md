@@ -345,6 +345,20 @@ and reload. A switch is `optimistic: true` unless its pair has a **state
 variable** — Stage Utility reports that it dispatched the press and nothing more,
 so Home Assistant shows what it asked for rather than what the device did.
 
+### Keeping a cue out of Home Assistant
+
+Each cue's editor carries a **Home Assistant** switch. Turned off, the cue is
+voice-only: it is left out of `/api/cues/manifest` and out of the generated
+YAML, so no entity is created for it and it appears under **Everything else** in
+the Automations tab. `POST /api/cues/<name>` still fires it, and so does
+anything already calling it that way.
+
+For a pair the switch belongs to the ON half and covers both halves — one
+switch, hidden or shown together. Turning it off removes the entity from Home
+Assistant within a few seconds, and automations there that refer to it stop
+working; the entity comes back under the same id when the switch is turned on
+again.
+
 ### Cues that are not Companion buttons
 
 A cue is a rule, and every rule has an action — a Companion press is only the
