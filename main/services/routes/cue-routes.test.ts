@@ -1605,6 +1605,19 @@ describe("reconciling a cue's Companion button", () => {
         presses.push(url);
         return new Response("ok", { status: 200 });
       }
+      // A VARIABLE read, answered from the shared map. Without this clause it
+      // fell through to the export below, so every name a candidate probe asked
+      // for answered 200 with a 4 MB JSON document as its value — which is
+      // every candidate "existing", holding the same value, forever.
+      const moduleVariable = /\/api\/variable\/([^/]+)\/([^/]+)\/value$/.exec(url);
+      if (moduleVariable) {
+        const ref = `${decodeURIComponent(moduleVariable[1]!)}:${decodeURIComponent(moduleVariable[2]!)}`;
+        variableReads.push(ref);
+        const value = variables[ref];
+        return value === undefined
+          ? new Response("Not found", { status: 404 })
+          : new Response(value, { status: 200 });
+      }
       if (!exportOk) throw new Error("EHOSTUNREACH");
       return Response.json(exportDoc);
     };
@@ -1914,6 +1927,51 @@ describe("reconciling a cue's Companion button", () => {
     // A second pass writes nothing more — the binding is now explicit.
     const again = await runCompanionReconcile();
     assert.equal(again?.applied, 0, "the pass rewrote a binding it had just made");
+  });
+
+  test("a pair the table has no row for records its candidates for a later press", async () => {
+    // The page 2 "Projectors" pair drives a lighting console, which has no
+    // verified row — so the pass probes its connection and records the names
+    // that answered, and the pair waits to be pressed. What it must NOT do is
+    // bind anything from a probe: a name existing says nothing about which of
+    // its values means on.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    exportDoc = companionExportFixture();
+    exportOk = true;
+    companionApi.invalidate();
+    variables["Lighting:status"] = "Standby";
+    variables["Lighting:mute"] = "0";
+    try {
+      const offer = (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        pairs: { page: number; base: string; learnable?: boolean }[];
+      };
+      const pair = offer.pairs.filter((p) => p.page === 2 && p.base === "Projectors");
+      assert.deepEqual(
+        pair.map((p) => p.learnable),
+        [true],
+        "the offer says this one will be learned",
+      );
+      await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+        method: "POST",
+        headers: browser,
+        body: { pairs: pair },
+      });
+
+      const run = await runCompanionReconcile();
+      assert.ok((run?.applied ?? 0) > 0);
+      const on = automationEngine
+        .cueRules()
+        .find((r) => automationEngine.cueNameOf(r).endsWith("_on"))!;
+      assert.equal(
+        String(on.trigger.params.stateCandidates),
+        "Lighting:status,Lighting:mute",
+        "the names that answered, in candidate order",
+      );
+      assert.equal(String(on.trigger.params.stateVariable ?? ""), "", "a probe never binds");
+    } finally {
+      delete variables["Lighting:status"];
+      delete variables["Lighting:mute"];
+    }
   });
 
   test("an hourly pass that changed nothing logs no summary line", async () => {
