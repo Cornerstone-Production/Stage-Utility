@@ -719,8 +719,8 @@ export function ImportPairsDialog({
         <h2 className="text-subheadline font-semibold text-fg">Import from Companion</h2>
         <p className="mb-2 mt-1 text-caption1 text-fg-muted">
           Every cue is created with <span className="text-fg">no service is live</span> on it and a three
-          second cooldown. Pairs that drive a projector, television, plug or lighting console are ticked
-          for you; nothing else is.
+          second cooldown. Pairs that drive a projector, television, plug, lighting console or recorder
+          are ticked for you; nothing else is.
         </p>
 
         {data && !data.ok ? (
@@ -748,8 +748,10 @@ export function ImportPairsDialog({
               }}
             />
             <p className="pb-1 text-caption2 text-fg-subtle">
-              Buttons whose labels differ only by ON/OFF. Each becomes two cues and one Home Assistant
-              switch.
+              Buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown or START/STOP.
+              Each becomes two cues — <span className="text-fg">_on</span> and{" "}
+              <span className="text-fg">_off</span>, whichever words the buttons use — and one Home
+              Assistant switch.
               {(customVariables.length > 0 || pairs.some((p) => p.stateSource)) && (
                 <>
                   {" "}
