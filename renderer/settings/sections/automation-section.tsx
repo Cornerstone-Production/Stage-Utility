@@ -8,10 +8,11 @@ import {
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
 import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
+import { labelFor, ruleMatchesSearch } from "./rule-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import {
@@ -684,7 +685,7 @@ function RuleCard({
           onClick={() => setOpen((o) => !o)}
         >
           <div className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-footnote font-medium text-fg">{rule.name}</span>
+            <span data-rule-name={rule.name} className="truncate text-footnote font-medium text-fg">{rule.name}</span>
             {/* The names this cue used to answer to, quietly. A cue is renamed
                 when its Companion button is relabelled, and the old name stays
                 live — so this is the only place the rules list says that the URL
@@ -1012,6 +1013,22 @@ export function AutomationSection() {
   );
   const anyBinding = useMemo(() => pairs.some((p) => p.binding !== null), [pairs]);
 
+  // The search field's value, in component state only — it is a filter over
+  // what is on screen right now, not something a maintainer with hundreds of
+  // cues would want restored on the next visit.
+  const [search, setSearch] = useState("");
+  const filteredRules = useMemo(() => {
+    if (!search.trim()) return rules;
+    return rules.filter((r) =>
+      ruleMatchesSearch(
+        r,
+        search,
+        labelFor(registry?.triggers ?? [], r.trigger.id),
+        labelFor(registry?.actions ?? [], r.action.id),
+      ),
+    );
+  }, [rules, search, registry]);
+
   // The custom variables Companion has, for the editor's select. Read from the
   // same offer the import dialog uses, and only worth asking for when there is
   // a pair that could be bound.
@@ -1118,18 +1135,41 @@ export function AutomationSection() {
               real action.
             </p>
           ) : (
-            rules.map((r) => (
-              <RuleCard
-                key={r.id}
-                rule={r}
-                registry={registry}
-                dynamicOptions={dynamicOptions}
-                pairBase={pairBases.get(r.id) ?? null}
-                cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
-                customVariables={companionPairs?.customVariables ?? []}
-                onChanged={refresh}
-              />
-            ))
+            <>
+              <div className="flex items-center gap-2">
+                <span className="relative min-w-0 flex-1">
+                  <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search rules"
+                    aria-label="Search rules"
+                    className="h-8 pl-7 text-footnote"
+                  />
+                </span>
+                {search.trim() && (
+                  <span className="shrink-0 text-caption1 text-fg-muted" data-rule-search-count="">
+                    {filteredRules.length} of {rules.length} rules
+                  </span>
+                )}
+              </div>
+              {filteredRules.length === 0 ? (
+                <p className="text-caption1 text-fg-muted">No rules match.</p>
+              ) : (
+                filteredRules.map((r) => (
+                  <RuleCard
+                    key={r.id}
+                    rule={r}
+                    registry={registry}
+                    dynamicOptions={dynamicOptions}
+                    pairBase={pairBases.get(r.id) ?? null}
+                    cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
+                    customVariables={companionPairs?.customVariables ?? []}
+                    onChanged={refresh}
+                  />
+                ))
+              )}
+            </>
           )}
           <div className="flex items-center gap-2">
             <Button
