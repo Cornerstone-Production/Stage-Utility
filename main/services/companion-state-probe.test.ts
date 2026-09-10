@@ -240,7 +240,10 @@ describe("probing", () => {
     assert.equal(reads.length, CANDIDATE_VARIABLES.length * 2, "one GET per name per connection");
     assert.equal(new Set(reads).size, reads.length, "no name asked for twice");
     assert.deepEqual(outcomes[0]?.patch.stateCandidates, "Rack:status");
-    assert.match(outcomes[0]!.log!, /^\[cues\] pair rack: no state source in the table; watching 1 candidate\(s\) — Rack:status$/);
+    assert.match(
+      outcomes[0]!.log!,
+      /^\[cues\] pair rack: no state source in the table; watching 1 candidate\(s\) — Rack:status$/,
+    );
     // The value read at probe time is the baseline the first press compares
     // against, so a candidate that has never moved is not later mistaken for a
     // two-state variable.

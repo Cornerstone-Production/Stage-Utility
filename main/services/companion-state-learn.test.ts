@@ -27,6 +27,7 @@ import {
   LEARN_MAX_ATTEMPTS,
   candidateRefs,
   gaveUpLog,
+  learnableOffer,
   learnAgainParams,
   learnedLog,
   learningHint,
@@ -159,6 +160,47 @@ describe("which connections can be learned", () => {
       ),
       ["Smartview", "Yamaha-Rack"],
     );
+  });
+});
+
+describe("what the import offer says", () => {
+  const half = (over: { stateSource?: unknown; learnConnections?: string[] } = {}) => ({
+    stateSource: over.stateSource ?? null,
+    learnConnections: over.learnConnections ?? [],
+  });
+
+  test("a pair whose connection has no table row will be learned", () => {
+    assert.equal(learnableOffer([half({ learnConnections: ["Rack"] }), half()]), true);
+    assert.equal(learnableOffer([half(), half({ learnConnections: ["Rack"] })]), true);
+  });
+
+  test("a pair the table answers for will NOT, even with another connection to probe", () => {
+    // THE GUARD, and the shape the export fixture does not have: a button that
+    // drives a known module AND an unknown one. The table is verified and is
+    // what the import offers as the default binding, so a pair told "will
+    // learn" here would be told the wrong thing about itself.
+    const inferred = {
+      variable: "Plug:power_state",
+      onValue: "On",
+      offValue: "Off",
+      moduleId: "x",
+    };
+    assert.equal(
+      learnableOffer([half({ stateSource: inferred, learnConnections: ["Rack"] }), half()]),
+      false,
+    );
+    // And on the OFF half: the offer reads the ON button's source with the OFF
+    // one as a fallback, so either being answered is answered.
+    assert.equal(
+      learnableOffer([half({ learnConnections: ["Rack"] }), half({ stateSource: inferred })]),
+      false,
+    );
+  });
+
+  test("a pair with nothing to probe will not", () => {
+    assert.equal(learnableOffer([half(), half()]), false);
+    // A label the reference grammar refuses is nothing to probe.
+    assert.equal(learnableOffer([half({ learnConnections: ["Old Thing"] }), half()]), false);
   });
 });
 

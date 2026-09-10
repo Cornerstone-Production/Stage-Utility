@@ -107,6 +107,28 @@ export function candidateRefs(labels: readonly string[]): string[] {
   return out;
 }
 
+/**
+ * Will this pair's state source have to be LEARNED?
+ *
+ * True when nothing in the verified table answers for either half and at least
+ * one connection it drives could be probed. The import offer sends it, and the
+ * dialog says "will learn" where it would otherwise say "No state".
+ *
+ * THE TABLE WINS. `stateSource` set is a verified answer the import offers as
+ * the default binding, and a pair told "will learn" while it was about to be
+ * bound from the table would be told the wrong thing. A function rather than a
+ * clause in the route because a pair whose button drives a known module AND an
+ * unknown one is a shape the export fixture does not have, so a clause there
+ * could not be tested — and every clause of this one is a wrong answer on
+ * screen.
+ */
+export function learnableOffer(
+  halves: readonly { stateSource: unknown; learnConnections: readonly string[] }[],
+): boolean {
+  if (halves.some((h) => h.stateSource)) return false;
+  return halves.some((h) => candidateRefs(h.learnConnections).length > 0);
+}
+
 /** What one candidate has been seen to do across the presses so far. */
 export interface CandidateObservation {
   /** What it held once the device settled after an ON press, or absent. */

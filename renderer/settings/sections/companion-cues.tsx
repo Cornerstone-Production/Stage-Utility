@@ -103,6 +103,13 @@ interface Pair {
   suggested: boolean;
   /** Where this pair's device already reports its state, off its `_on` button. */
   stateSource?: InferredStateSource | null;
+  /**
+   * The verified table has no row for what this pair drives, so its state
+   * source will be LEARNED after it is pressed on and off once.
+   *
+   * Optional on the wire so an older server's answer still renders.
+   */
+  learnable?: boolean;
   exists: boolean;
 }
 
@@ -792,6 +799,14 @@ export function ImportPairsDialog({
                 {/* Offered only when Companion HAS custom variables, and never
                     for a pair that is already imported — its cues exist, and
                     the binding is an edit to the rule from here on. */}
+                {/* Nothing to offer and nothing to build: this pair's state
+                    source is learned from a press. Said here rather than left
+                    blank, because a blank State column reads as "this pair
+                    cannot report its state" — which is the opposite of what is
+                    about to happen. See companion-state-learn.ts. */}
+                {p.learnable && !p.exists && customVariables.length === 0 && (
+                  <span className="w-40 shrink-0 text-caption2 text-fg-subtle">will learn</span>
+                )}
                 {(customVariables.length > 0 || p.stateSource) && !p.exists && (
                   <Select value={stateVarFor(p)} onValueChange={(v) => setStateVars({ ...stateVars, [key(p)]: v })}>
                     {/* The PAGE is in the accessible name, exactly as the
@@ -806,7 +821,12 @@ export function ImportPairsDialog({
                       <SelectValue placeholder="No state" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No state</SelectItem>
+                      {/* "will learn" is the EMPTY option's own text for a
+                          learnable pair, not a placeholder beside it: Select
+                          drops a placeholder whenever the caller supplies an
+                          empty item, and an operator who leaves this alone
+                          gets learning — "No state" would say the opposite. */}
+                      <SelectItem value="">{p.learnable ? "will learn" : "No state"}</SelectItem>
                       {optionsFor(p.stateSource).map((o) => (
                         <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
                       ))}

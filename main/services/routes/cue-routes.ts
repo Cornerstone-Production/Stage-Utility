@@ -43,6 +43,7 @@ import {
   splitToggleLabel,
   togglePairSlug,
 } from "../companion-export.js";
+import { learnableOffer } from "../companion-state-learn.js";
 import { stateBindingParams, stateBindingProblem } from "../cue-pairs.js";
 import { fingerprintParams } from "../companion-fingerprint.js";
 import { runCompanionReconcile } from "../companion-reconcile.js";
@@ -292,6 +293,11 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
         // evidence; the `_off` half is read only when the ON button is a macro
         // that names no device. See companion-state-source.ts.
         stateSource: p.on.stateSource ?? p.off.stateSource,
+        // No table row for what this pair drives, so its state source can only
+        // be LEARNED — the dialog says "will learn" rather than offering a
+        // variable nobody has verified. False whenever `stateSource` is set:
+        // the table's answer is verified and wins. See companion-state-learn.ts.
+        learnable: learnableOffer([p.on, p.off]),
         exists: !!slug && (taken.has(`${slug}_on`) || taken.has(`${slug}_off`)),
       };
     });

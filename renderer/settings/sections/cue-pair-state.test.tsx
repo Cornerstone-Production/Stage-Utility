@@ -469,6 +469,91 @@ describe("the state fields in the rule editor", () => {
     );
   });
 
+  test("a pair with candidates and no binding says it is learning", async () => {
+    // A blank State variable with nothing inferred reads as "this pair cannot
+    // report its state", which is the opposite of what is about to happen. The
+    // hint is the only thing on screen that says a press will bind it.
+    RULES = [
+      cue("amps_on", {
+        stateCandidates: "Rack:status,Rack:mute",
+        stateLearning: '{"attempts":0,"observed":{}}',
+      }),
+      cue("amps_off"),
+    ];
+    await mount();
+    await open("amps_on");
+    assert.equal(
+      document.body.textContent?.includes(
+        "Learning: watching 2 candidates; press the pair on and off once to bind",
+      ),
+      true,
+      "a learning pair said nothing about learning",
+    );
+  });
+
+  test("a pair that gave up says so, and offers Learn again", async () => {
+    RULES = [
+      cue("amps_on", { stateCandidates: "", stateLearning: '{"attempts":3,"observed":{},"stopped":"gave-up"}' }),
+      cue("amps_off"),
+    ];
+    await mount();
+    await open("amps_on");
+    assert.equal(
+      document.body.textContent?.includes("Learning gave up after 3 presses"),
+      true,
+      "learning stopped with nothing on screen saying why",
+    );
+    assert.equal(document.body.textContent?.includes("Learn again"), true);
+  });
+
+  test("a pair with nothing to learn offers no Learn again", async () => {
+    // The button is not offered on every pair in the building: nothing has been
+    // probed, so there is nothing to forget.
+    RULES = [cue("amps_on"), cue("amps_off")];
+    await mount();
+    await open("amps_on");
+    assert.equal(document.body.textContent?.includes("Learn again"), false);
+  });
+
+  test("Learn again SAVES the reset, so the next pass probes again", async () => {
+    // A control that renders is not a control that does anything. This is the
+    // patch it sends: both keys blank, which is what makes the next hourly pass
+    // probe a pair whose learning had stopped.
+    RULES = [
+      cue("amps_on", {
+        stateCandidates: "Rack:status",
+        stateLearning: '{"attempts":2,"observed":{"Rack:status":{"values":["Standby"]}},"stopped":"bound"}',
+        stateVariable: "Rack:status",
+        stateOnValue: "Active",
+        stateOffValue: "Standby",
+      }),
+      cue("amps_off"),
+    ];
+    await mount();
+    await open("amps_on");
+    await act(async () => {
+      screen.getByText("Learn again").click();
+    });
+    await act(async () => {
+      screen.getByText("Save").click();
+    });
+    await settle();
+    const patch = requests.find((r) => r.url.includes("/api/automation/rules/rule-amps_on"));
+    const params = (
+      JSON.parse(String(patch?.body)) as { trigger: { params: Record<string, string> } }
+    ).trigger.params;
+    assert.deepEqual(
+      {
+        candidates: params.stateCandidates,
+        learning: params.stateLearning,
+        variable: params.stateVariable,
+      },
+      // The BINDING is left alone: an operator asking to learn again has not
+      // asked for the switch to stop reporting in the meantime.
+      { candidates: "", learning: "", variable: "Rack:status" },
+    );
+  });
+
   test("choosing a variable saves it on the _on rule", async () => {
     // A control that renders is not a control that does anything — the named
     // scar in this repo. This is the PATCH the editor sends.
