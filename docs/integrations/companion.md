@@ -418,7 +418,9 @@ read always presses.
 
 **A bound cue is idempotent.** Calling `<pair>_on` while the variable already
 says `on` presses nothing and answers `200 {detail: "already on", state: "on",
-skipped: true}`; the Activity log records it as `skipped`. That is what makes a
+skipped: true}`; the Activity log records it as `skipped`. Inside the
+[settle window](#the-settle-window) the last press is what a repeat is compared
+against instead. That is what makes a
 [toggle button](#toggle-buttons) safe, and it also absorbs a Home Assistant that
 repeats `turn_on`, or an assistant that hears the same sentence twice. Only a
 call is checked — a rule the engine fires from a trigger of its own presses
@@ -429,13 +431,58 @@ Companion reads shared with any poller, and its answer is served for five
 seconds. An unreachable Companion makes a bound cue wait up to **three seconds**
 before it presses — the read's timeout. It still presses.
 
+#### The settle window
+
+Companion polls the device on its own interval — one to five seconds for a smart
+plug — so for a moment after a press the variable still holds the value from
+before it. A repeat compared against that reading is compared against the state
+the device was in before the press it is repeating.
+
+So a press is remembered for **eight seconds**, and inside that window the
+command outranks the variable:
+
+- the **same** state again is `200 {detail: "already on (just pressed)",
+  skipped: true}` and presses nothing. The variable is not read at all — nothing
+  it could say would change the answer;
+- the **opposite** state presses, whatever the variable reads, because the
+  reading is presumed to be behind. `[cues] vcr_light_off by Home Assistant:
+  pressed against a stale reading (off) inside the settle window` says so.
+
+Flipping a switch in Apple Home several times quickly is what this is for: the
+`_off` a second after the `_on` used to read the pre-press `off`, answer *already
+off*, press nothing, and leave the light on with Home showing it off.
+
+While a pair is inside its window, that one variable is re-read every second
+until it holds the commanded value — so `/api/cues/states`, the manifest and the
+[`cues`](../reference/api.md#channels) channel carry the truth about a second
+after the device moves rather than at the next five-second poll. Both the states
+route and the manifest also carry `settling: true` and `commanded` for that
+pair, so an integration can show what was asked for instead of a reading it has
+been told is stale. The log says how it ended, once:
+
+```
+[cues] state of vcr_light_state settled to on after 3 s
+[cues] state of vcr_light_state did not settle within 8 s
+```
+
+The generated Home Assistant switch reads `commanded` before `state` for the
+same reason: templated on the reading alone it flips itself back mid-window, and
+a switch that flips back is an invitation to tap it again. Re-paste the fragment
+to pick that up.
+
+A press that reached nothing opens no window: a simulated call, a call Companion
+refused, and a call that was itself skipped all leave the variable as the only
+thing worth comparing against.
+
 If the whole read fails rather than one pair — the server could not answer at all
 — Settings → Automation says so in one line above the rules list and shows no
 pills, rather than leaving them out silently.
 
 Nothing polls Companion in the background: the variables are read when
 `/api/cues/states` is called and the answer is served for five seconds, so an
-install nobody polls costs nothing.
+install nobody polls costs nothing. The one exception is the eight seconds after
+a press — see [The settle window](#the-settle-window) — which reads one variable
+a second and stops as soon as it agrees.
 
 ### For Home Assistant
 

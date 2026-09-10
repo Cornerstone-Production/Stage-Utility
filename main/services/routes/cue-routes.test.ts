@@ -42,7 +42,7 @@ const { integrationManager } = await import("../integration-manager.js");
 const { AUTOMATION_TRIGGERS, CALL_TRIGGER_ID } = await import("../automation-triggers.js");
 const { readFingerprint } = await import("../companion-fingerprint.js");
 const { runCompanionReconcile } = await import("../companion-reconcile.js");
-const { cueStates } = await import("../cue-states.js");
+const { cueStates, SETTLE_MS } = await import("../cue-states.js");
 
 after(async () => {
   await fsp.rm(TMP, { recursive: true, force: true });
@@ -222,6 +222,10 @@ beforeEach(() => {
   variables = {};
   variableReads = [];
   cueStates.invalidate();
+  // A real press in the previous case is remembered for eight seconds, and the
+  // next case's first call would be compared against IT rather than against the
+  // variable it sets up. Cancels the settle re-read with it.
+  cueStates.__resetSettle();
   setQuiet();
   setPcoConfigured(true);
   companionApi.invalidate();
@@ -2147,6 +2151,12 @@ describe("a bound cue does not press when the device is already there", () => {
     }
   }
 
+  /** The pair's row out of a `GET /api/cues/states` answer. */
+  function rowOf(r: { json: unknown }): Record<string, unknown> {
+    const { states } = r.json as { states: Record<string, Record<string, unknown>> };
+    return states.projectors!;
+  }
+
   /** Put a real cooldown on both halves, as the import does. */
   async function setCooldown(seconds: number): Promise<void> {
     for (const rule of automationEngine.listRules()) {
@@ -2216,7 +2226,10 @@ describe("a bound cue does not press when the device is already there", () => {
     cueStates.invalidate();
     const skipped = (await call("projectors_off")).json as Record<string, unknown>;
     assert.equal(skipped.skipped, true);
-    assert.equal(String(skipped.detail), "already off");
+    // "(just pressed)" because the first press is still inside its settle
+    // window: the skip is against the COMMAND, and the variable — which agrees
+    // here — was not read for it.
+    assert.equal(String(skipped.detail), "already off (just pressed)");
     assert.equal(presses.length, 1, "off was pressed again with the device already off");
   });
 
@@ -2238,23 +2251,32 @@ describe("a bound cue does not press when the device is already there", () => {
     const repeat = await call("projectors_on");
     assert.equal(repeat.status, 200);
     const body = repeat.json as Record<string, unknown>;
-    assert.equal(String(body.detail), "already on");
+    assert.equal(String(body.detail), "already on (just pressed)");
     assert.equal(body.skipped, true);
     assert.equal(presses.length, 1);
   });
 
-  test("and the cooldown is still the backstop when the state DISAGREES", async () => {
-    // The device has not caught up yet — the variable still says off after the
-    // first press — so there is nothing to skip and the cooldown is what stops
-    // the second press.
+  test("the cooldown is still the backstop once the settle window has lapsed", async () => {
+    // Inside the window a same-state repeat is a skip, so the cooldown is what
+    // stops the one that arrives after it — here on a cue whose cooldown is
+    // longer than the window, with the device still reporting the old value.
+    //
+    // Through callByName rather than the route: `now` is the only way to be
+    // twelve seconds later without waiting, and the window, the cooldown and
+    // this argument are all the same clock.
     await withPair();
-    await setCooldown(3);
+    await setCooldown(30);
     variables.projectors_state = "off";
     assert.equal((await call("projectors_on")).status, 200);
+    assert.equal(presses.length, 1);
+
     cueStates.invalidate();
-    const repeat = await call("projectors_on");
+    const repeat = await automationEngine.callByName("projectors_on", {
+      caller: "Home Assistant",
+      now: Date.now() + SETTLE_MS + 4000,
+    });
     assert.equal(repeat.status, 409);
-    assert.equal(String((repeat.json as Record<string, unknown>).reason), "cooldown");
+    assert.equal(String((repeat.body as Record<string, unknown>).reason), "cooldown");
     assert.equal(presses.length, 1, "the cooldown let a second press through");
   });
 
@@ -2280,18 +2302,25 @@ describe("a bound cue does not press when the device is already there", () => {
   });
 
   test("a press through a bound cue drops the cached state", async () => {
-    // The states cache is five seconds. Left in place across a press, a second
-    // call three seconds later reads the state from BEFORE the press and presses
-    // again — the repeat this check exists to absorb, arriving through the cache
-    // instead.
+    // The states cache is five seconds and what it holds after a press is from
+    // before it. Left in place, `GET /api/cues/states` — and with it the Home
+    // Assistant sensor and the rules page — reports the pre-press value for up
+    // to five seconds after the device has moved.
     await withPair();
     variables.projectors_state = "off";
+    const before = await callRoute(cueRoutes, "/api/cues/states");
+    assert.equal(rowOf(before).state, "off");
+    variableReads = [];
+
     await call("projectors_on");
     assert.equal(presses.length, 1);
     variables.projectors_state = "on";
-    const second = (await call("projectors_on")).json as Record<string, unknown>;
-    assert.equal(second.skipped, true, "the state was read from the cache, from before the press");
-    assert.equal(presses.length, 1);
+    const after = await callRoute(cueRoutes, "/api/cues/states");
+    assert.deepEqual(variableReads, ["projectors_state"], "the states route served the cache");
+    assert.equal(rowOf(after).state, "on");
+    // And it says the press is still settling, with what was asked for.
+    assert.equal(rowOf(after).settling, true);
+    assert.equal(rowOf(after).commanded, "on");
   });
 
   test("a SIMULATED call keeps the cached state — nothing reached the device", async () => {
@@ -2337,6 +2366,172 @@ describe("a bound cue does not press when the device is already there", () => {
     assert.equal(presses.length, 1, "the triggered rule did not press");
     assert.deepEqual(variableReads, [], "a triggered press consulted the state variable");
     setQuiet();
+  });
+
+  // ── The settle window ───────────────────────────────────────────────────────
+  //
+  // Companion polls the device on its own interval, so for a second or two
+  // after a press the variable STILL READS THE OLD VALUE. Flipping a switch in
+  // Apple Home twice quickly hit exactly that: the `_off` read the pre-press
+  // `off`, was told the device was already off, pressed nothing, and the light
+  // stayed on with Home showing it off.
+  //
+  // The Companion stub here never moves the variable at all, which is that lag
+  // taken to its limit and the only thing these cases need.
+
+  /** Every console line one call wrote. */
+  async function withLines(fn: () => Promise<void>): Promise<string[]> {
+    const lines: string[] = [];
+    const real = console.log;
+    console.log = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+    try {
+      await fn();
+    } finally {
+      console.log = real;
+    }
+    return lines;
+  }
+
+  test("a repeat of what was just commanded skips without reading the variable", async () => {
+    await withPair();
+    variables.projectors_state = "off";
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+
+    variableReads = [];
+    const body = (await call("projectors_on")).json as Record<string, unknown>;
+    assert.equal(String(body.detail), "already on (just pressed)");
+    assert.equal(body.skipped, true);
+    assert.equal(presses.length, 1);
+    // Nothing the variable could say would change this answer, and an
+    // unreachable Companion would make an idempotent repeat wait three seconds
+    // to be told nothing.
+    assert.deepEqual(variableReads, [], "a decision the command had already made read Companion");
+  });
+
+  test("the OPPOSITE state presses against a reading from before the press", async () => {
+    // THE DEFECT. Both calls must press: the second one is being told `off` by
+    // a variable that has not caught up with the first press yet.
+    await withPair();
+    variables.projectors_state = "off";
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+
+    let body: Record<string, unknown> = {};
+    const lines = await withLines(async () => {
+      body = (await call("projectors_off")).json as Record<string, unknown>;
+    });
+    assert.equal(presses.length, 2, "off was skipped against a reading from before the on press");
+    assert.equal(body.skipped, undefined);
+    // The stale reading is still reported as what was read. The answer does not
+    // pretend the variable said something else.
+    assert.equal(String(body.state), "off");
+    assert.ok(
+      lines.includes(
+        "[cues] projectors_off by Home Assistant: pressed against a stale reading (off) " +
+          "inside the settle window",
+      ),
+      `no stale-reading line: ${JSON.stringify(lines)}`,
+    );
+  });
+
+  test("once the window has lapsed the variable rules again", async () => {
+    await withPair();
+    variables.projectors_state = "off";
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+
+    // The device caught up, and the window is over. Through callByName because
+    // `now` is the only way to be eight seconds later without waiting, and the
+    // window and this argument are the same clock.
+    variables.projectors_state = "on";
+    cueStates.invalidate();
+    const late = await automationEngine.callByName("projectors_on", {
+      caller: "Home Assistant",
+      now: Date.now() + SETTLE_MS,
+    });
+    const body = late.body as Record<string, unknown>;
+    assert.equal(String(body.detail), "already on", "the command still outranked the variable");
+    assert.equal(body.skipped, true);
+    assert.equal(String(body.state), "on");
+    assert.equal(presses.length, 1);
+  });
+
+  test("a SIMULATED press opens no window", async () => {
+    // Nothing reached a device, so the variable is still the truth and a window
+    // would have the app overriding it with a command nothing carried out.
+    await withPair();
+    variables.projectors_state = "off";
+    await automationEngine.setSettings({ simulate: true });
+    try {
+      await call("projectors_on");
+      assert.equal(presses.length, 0);
+      const body = (await call("projectors_off")).json as Record<string, unknown>;
+      assert.equal(String(body.detail), "already off", "a simulated press opened a settle window");
+      assert.equal(body.skipped, true);
+    } finally {
+      await automationEngine.setSettings({ simulate: false });
+    }
+  });
+
+  test("a press Companion refused opens no window", async () => {
+    // Companion answers an invalid coordinate 204 and presses nothing.
+    await withPair();
+    variables.projectors_state = "off";
+    const real = companionDeps.fetch;
+    companionDeps.fetch = async (input, init) => {
+      if (String(input).includes("/press")) return new Response(null, { status: 204 });
+      return real!(input, init);
+    };
+    try {
+      const failed = (await call("projectors_on")).json as Record<string, unknown>;
+      assert.equal(failed.ok, false);
+    } finally {
+      companionDeps.fetch = real;
+    }
+    const body = (await call("projectors_off")).json as Record<string, unknown>;
+    assert.equal(String(body.detail), "already off", "a refused press opened a settle window");
+    assert.equal(body.skipped, true);
+    assert.equal(presses.length, 0);
+  });
+
+  test("a SKIPPED call opens no window", async () => {
+    // Nothing was pressed, so there is nothing for the variable to lag behind.
+    await withPair();
+    variables.projectors_state = "on";
+    const first = (await call("projectors_on")).json as Record<string, unknown>;
+    assert.equal(String(first.detail), "already on");
+    const second = (await call("projectors_on")).json as Record<string, unknown>;
+    assert.equal(String(second.detail), "already on", "a skip opened a settle window");
+    assert.equal(presses.length, 0);
+  });
+
+  test("the manifest says the pair is settling, with what was commanded", async () => {
+    // Through the real route, the real engine and the real cue-states: an
+    // integration reading the manifest inside the window has to be able to show
+    // the command rather than a reading it has been told is stale.
+    await withPair();
+    variables.projectors_state = "off";
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+
+    const r = await callRoute(cueRoutes, "/api/cues/manifest");
+    const [pair] = (r.json as { switches: Record<string, unknown>[] }).switches;
+    assert.equal(pair!.id, "projectors");
+    assert.equal(pair!.settling, true);
+    assert.equal(pair!.commanded, "on");
+    assert.equal(pair!.state, "off", "the manifest hid the reading rather than marking it stale");
+  });
+
+  test("an unbound pair is not settled, whatever it presses", async () => {
+    // No binding is no command: there is nothing to read, nothing to lag, and
+    // both halves must go on pressing every time they are called.
+    await withPair(false);
+    await call("projectors_on");
+    await call("projectors_on");
+    await call("projectors_off");
+    assert.equal(presses.length, 3, "an unbound pair skipped a press");
+    assert.deepEqual(variableReads, [], "an unbound pair read a Companion variable");
   });
 });
 

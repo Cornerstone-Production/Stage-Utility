@@ -30,7 +30,7 @@ import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, CALL_CHANNEL, CALL_TRIGGER_ID, isValidCueName, triggersForChannel } from "./automation-triggers.js";
 import { cuePairs, stateBindingProblem } from "./cue-pairs.js";
-import { cueStates, type CueStateName } from "./cue-states.js";
+import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { cueLive } from "./cue-live.js";
 import { parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
@@ -408,6 +408,15 @@ class AutomationEngine {
     // call whose state DISAGREES falls straight through to it, which is the case
     // where the device has not yet caught up with the first press.
     //
+    // AND THE READING IS NOT ALWAYS THE TRUTH. Companion polls the device on its
+    // own interval, so for a second or two after a press the variable still
+    // holds the old value. Inside the settle window (cue-states' SETTLE_MS) the
+    // last command is what a call is compared against instead: the same state
+    // skips, the opposite presses whatever the variable says. Flipping a switch
+    // in Apple Home twice quickly hit exactly that gap — the `_off` read the
+    // pre-press `off`, answered "already off", pressed nothing, and the light
+    // stayed on.
+    //
     // Deliberately NOT in runAction and NOT on the bus path: a rule the engine
     // fires from a trigger of its own has already decided that the press is what
     // it wants, and a state read there would put a Companion round trip — and a
@@ -417,18 +426,42 @@ class AutomationEngine {
     const desired = this.desiredStateOf(rule);
     let state: CueStateName | null = null;
     if (desired) {
-      state = await this.readCueState(desired.base);
-      if (state === desired.want) {
-        const detail = `already ${desired.want}, not pressed`;
-        this.log(rule, "skipped", detail, opts.caller);
-        console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: already ${scrub(desired.want)}, not pressed`);
+      const skip = (detail: string, extra: { state?: CueStateName } = {}): CueCallResult => {
+        this.log(rule, "skipped", `${detail}, not pressed`, opts.caller);
+        console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: ${scrub(detail)}, not pressed`);
         // No `simulated` flag, in simulate mode or out of it: nothing was
         // dispatched and nothing WOULD have been, so there is no simulation to
         // report. `skipped: true` is the whole answer.
-        return {
-          status: 200,
-          body: { ok: true, detail: `already ${desired.want}`, state, skipped: true },
-        };
+        return { status: 200, body: { ok: true, detail, ...extra, skipped: true } };
+      };
+
+      // INSIDE THE SETTLE WINDOW the last COMMAND outranks the reading, and the
+      // variable is not consulted for the decision at all. See SETTLE_MS: the
+      // reading lags the press it is supposed to reflect, so a repeat compared
+      // against it is answered from before the press it is repeating.
+      const command = cueStates.commandedWithin(desired.base, now);
+      if (command?.want === desired.want) {
+        // No read: nothing the variable could say would change this, and a
+        // Companion that is down would make an idempotent repeat wait three
+        // seconds to be told nothing.
+        return skip(`already ${desired.want} (just pressed)`);
+      }
+
+      const read = await this.readCueState(desired.base);
+      state = read.state;
+      if (command) {
+        // The OPPOSITE of what was just commanded. It presses whatever the
+        // variable says — and when the variable contradicts it, that is the
+        // stale reading this window exists for, and the operator gets a line
+        // saying the press went ahead against it.
+        if (state === desired.want) {
+          console.log(
+            `[cues] ${scrub(said)} by ${scrub(opts.caller)}: pressed against a stale reading ` +
+              `(${scrub(read.value)}) inside the settle window`,
+          );
+        }
+      } else if (state === desired.want) {
+        return skip(`already ${desired.want}`, { state });
       }
     }
 
@@ -481,14 +514,17 @@ class AutomationEngine {
         ? "dispatched (simulated)"
         : "dispatched";
     console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: ${scrub(verdict)}`);
-    // The cached state is now a state from BEFORE a press. Left in place, a
-    // second call inside the five second window would read the old value and
-    // press again — which is the repeat this whole check exists to absorb.
+    // THE PRESS IS REMEMBERED. What the variable holds is now a value from
+    // BEFORE it, for as long as Companion takes to poll the device, so this
+    // drops the cached answer, is what the next repeat is compared against for
+    // eight seconds, and starts the one-second re-read that notices the device
+    // catching up. See SETTLE_MS.
     //
     // Only when something REALLY reached a device: a simulated call and a failed
-    // action both leave the cached state accurate, and dropping it there would
-    // buy every bound pair a fresh round of Companion reads for nothing.
-    if (desired && result.ok && !this.settings.simulate) cueStates.invalidate();
+    // action both leave the cached state accurate, and a window opened by
+    // either would have the app overriding a truthful reading with a command
+    // nothing carried out.
+    if (desired && result.ok && !this.settings.simulate) cueStates.noteCommand(desired);
     // `state` is what was read BEFORE the press — including `unknown`, which is
     // the caller's evidence that the press went ahead without knowing what the
     // device was doing rather than because the device needed it.
@@ -511,12 +547,23 @@ class AutomationEngine {
    * for: there is nothing to read, and a call on one must not pay a Companion
    * round trip to find that out.
    */
-  private desiredStateOf(rule: Rule): { base: string; want: "on" | "off" } | null {
+  private desiredStateOf(rule: Rule): CueCommand | null {
     if (rule.trigger.id !== CALL_TRIGGER_ID) return null;
     for (const pair of cuePairs(this.rules)) {
-      if (pair.binding === null) continue;
-      if (pair.on.id === rule.id) return { base: pair.base, want: "on" };
-      if (pair.off.id === rule.id) return { base: pair.base, want: "off" };
+      const binding = pair.binding;
+      if (binding === null) continue;
+      // The whole binding, not just the base: what a press COMMANDS is the
+      // variable and the value it will hold once the device catches up, and
+      // cue-states needs both to re-read it. Read from the pair here so nothing
+      // downstream has to resolve the pair a second time.
+      const of = (want: "on" | "off"): CueCommand => ({
+        base: pair.base,
+        want,
+        variable: binding.variable,
+        wantValue: want === "on" ? binding.onValue : binding.offValue,
+      });
+      if (pair.on.id === rule.id) return of("on");
+      if (pair.off.id === rule.id) return of("off");
     }
     return null;
   }
@@ -530,10 +577,11 @@ class AutomationEngine {
    * Never throws and never blocks: anything it cannot answer is `unknown`, and
    * an unknown state presses.
    */
-  private async readCueState(base: string): Promise<CueStateName> {
+  private async readCueState(base: string): Promise<{ state: CueStateName; value: string | null }> {
     try {
       const answer = await cueStates.read();
-      return answer.states[base]?.state ?? "unknown";
+      const row = answer.states[base];
+      return { state: row?.state ?? "unknown", value: row?.value ?? null };
     } catch (err) {
       // NOT swallowed: "unknown" IS the failure, returned to the caller — it
       // comes back in the call's answer as `state: "unknown"` and presses. The
@@ -541,7 +589,7 @@ class AutomationEngine {
       // which is the one thing this feature must never cause. The reason is
       // logged here because nothing downstream carries it.
       console.warn(`[cues] state of ${scrub(base)} could not be read: ${scrub(errorMessage(err))}`);
-      return "unknown";
+      return { state: "unknown", value: null };
     }
   }
 

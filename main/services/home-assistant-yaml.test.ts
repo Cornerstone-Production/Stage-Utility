@@ -450,7 +450,13 @@ describe("a pair with a state variable", () => {
       { id: "amps", from: "optimistic" },
       {
         id: "projectors",
-        from: "\"{{ (state_attr('sensor.stage_utility_cues', 'projectors') or {}).get('state') == 'on' }}\"",
+        // `commanded` first: for a few seconds after a press the reading is
+        // still from before it, and a switch templated on the reading alone
+        // flips itself back. Absent — which is every other second — `.get`
+        // falls through to the reading.
+        from:
+          "\"{{ (state_attr('sensor.stage_utility_cues', 'projectors') or {}).get('commanded', " +
+          "(state_attr('sensor.stage_utility_cues', 'projectors') or {}).get('state')) == 'on' }}\"",
       },
     ]);
     // Guarded as a count too: one `optimistic: true` in the document, for the
@@ -672,6 +678,20 @@ describe("the template integration's modern shape", () => {
     assert.equal(/optimistic:/.test(block), false, "a bound switch is optimistic as well as read");
   });
 
+  test("a bound switch shows what was COMMANDED before what was read", () => {
+    // Companion polls the device on its own interval, so for a few seconds
+    // after a press the sensor's reading is from before it. Templated on the
+    // reading alone the switch flips itself back — the same defect the settle
+    // window fixes on the call, arriving through the pasted config instead.
+    const yaml = homeAssistantYaml(DOCUMENTS["one bound pair"]!, BASE);
+    const line = templateBlock(yaml).find((l) => l.trimStart().startsWith("state:"))!;
+    const commanded = line.indexOf("get('commanded'");
+    const read = line.indexOf("get('state')");
+    assert.ok(commanded > 0, `the switch never reads \`commanded\`: ${line}`);
+    assert.ok(read > 0, `the switch never falls back to the reading: ${line}`);
+    assert.ok(commanded < read, `the reading is preferred over the command: ${line}`);
+  });
+
   test("an unbound switch carries NO `state:` at all", () => {
     // Which is what makes it optimistic per the docs — the switch assumes its
     // commands succeeded. `optimistic: true` is spelled out beside it anyway.
@@ -838,7 +858,8 @@ describe("a pair whose two halves press the SAME button", () => {
       {
         id: "house_lights",
         from:
-          "\"{{ (state_attr('sensor.stage_utility_cues', 'house_lights') or {}).get('state') == 'on' }}\"",
+          "\"{{ (state_attr('sensor.stage_utility_cues', 'house_lights') or {}).get('commanded', " +
+          "(state_attr('sensor.stage_utility_cues', 'house_lights') or {}).get('state')) == 'on' }}\"",
       },
     ]);
     assert.deepEqual(warnings, [], "a bound toggle is not a warning — it is the supported shape");
