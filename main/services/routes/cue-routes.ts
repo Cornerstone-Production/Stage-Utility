@@ -580,14 +580,16 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
       // have an off cue called `vcr_light_on_off`. The slug is stripped the same
       // way rather than re-slugged, so a page disambiguation the offer already
       // carries survives.
+      //
+      // No emptiness check on what comes back: slugForCue has already
+      // normalised the slug above, so it cannot be a bare `_on` that strips to
+      // nothing — and if it ever were, addRule refuses `_on` as a cue name and
+      // the button is reported skipped with the reason, which is a better
+      // answer than a second copy of that rule here.
       const { base } = splitToggleLabel(label);
       const pairSlug = togglePairSlug(slug, label);
       const spokenBase =
         spoken === label ? base : `${spoken.slice(0, spoken.length - label.length)}${base}`;
-      if (!pairSlug) {
-        skipped.push({ name: label || "(unnamed)", why: "no usable cue name for this button" });
-        continue;
-      }
       await addPairRules(
         {
           slug: pairSlug,
