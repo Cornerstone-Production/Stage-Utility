@@ -599,6 +599,65 @@ export function isCompanionVariableName(name: string): boolean {
 }
 
 /**
+ * What Companion accepts as a CONNECTION LABEL — the name in `$(VCR-Light:power_state)`.
+ *
+ * Narrower than a variable name: Companion sanitises a connection label to
+ * letters, digits, `_` and `-`, with no dot. Capped for the same reason the
+ * variable name is — it is pasted into a URL path.
+ */
+const COMPANION_LABEL_RE = /^[A-Za-z0-9_-]{1,100}$/;
+
+/**
+ * Where a cue's state is read from: Companion's own CUSTOM variables, or the
+ * variables a MODULE publishes for one of its connections.
+ *
+ * Companion answers the two at different URLs —
+ * `/api/custom-variable/<name>/value` and `/api/variable/<label>/<name>/value`
+ * — and a binding names which it means. See parseVariableRef.
+ */
+export type VariableRef =
+  | { kind: "custom"; name: string }
+  | { kind: "module"; label: string; name: string };
+
+/**
+ * A binding string as the rule stores it, split into which variable it names.
+ *
+ * Three spellings, and the bare one is the reason the other two exist:
+ *
+ *   `custom:projectors_state`        a custom variable, said explicitly
+ *   `VCR-Overhead-Light:power_state` a MODULE variable on that connection
+ *   `projectors_state`               a custom variable — every binding written
+ *                                    before module variables could be named,
+ *                                    which must go on meaning what it meant
+ *
+ * `custom` wins over a connection that happens to be labelled "custom": the
+ * prefix is Companion's own spelling for its custom variables, and a binding
+ * that changed meaning because somebody named a connection is worse than one
+ * that cannot reach a connection nobody should have called that.
+ *
+ * Returns null for anything neither half of which Companion could have, so a
+ * caller can refuse it rather than build a URL that answers 404 forever.
+ */
+export function parseVariableRef(ref: string): VariableRef | null {
+  const text = ref.trim();
+  if (!text) return null;
+  const colon = text.indexOf(":");
+  if (colon === -1) {
+    return isCompanionVariableName(text) ? { kind: "custom", name: text } : null;
+  }
+  const left = text.slice(0, colon);
+  const right = text.slice(colon + 1);
+  if (!isCompanionVariableName(right)) return null;
+  if (left.toLowerCase() === "custom") return { kind: "custom", name: right };
+  return COMPANION_LABEL_RE.test(left) ? { kind: "module", label: left, name: right } : null;
+}
+
+/** Is this a binding Companion could answer for — custom or module? */
+export function isCompanionVariableRef(ref: string): boolean {
+  return parseVariableRef(ref) !== null;
+}
+
+/**
  * The names of every custom variable in an export, sorted.
  *
  * `custom_variables` is a top-level object keyed by NAME, whose values carry the

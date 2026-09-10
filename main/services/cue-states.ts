@@ -50,7 +50,7 @@ export interface CueStateRow {
   on: string;
   /** The `_off` half's cue name. */
   off: string;
-  /** The Companion custom variable this was read from. */
+  /** The Companion variable this was read from — custom, or `<label>:<name>`. */
   variable: string;
   /** What the variable held, or null when it could not be read at all. */
   value: string | null;
@@ -84,7 +84,7 @@ export const cueStatesDeps: {
 } = {
   now: () => Date.now(),
   rules: async () => (await import("./automation-engine.js")).automationEngine.listRules(),
-  read: (variable) => companionApi.readCustomVariable(variable),
+  read: (variable) => companionApi.readVariable(variable),
 };
 
 class CueStates {

@@ -37,7 +37,7 @@ import { automationEngine } from "../automation-engine.js";
 import { companionApi } from "../companion-api.js";
 import {
   cueSlugs,
-  isCompanionVariableName,
+  isCompanionVariableRef,
   isSuggestedPair,
   singleButtons,
   slugForCue,
@@ -465,7 +465,7 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
     // Checked BEFORE either half is created: addRule would refuse the `_on`
     // rule and create the `_off` one, leaving half a pair behind for a typo in
     // a field that is not even the cue's name.
-    if (stateVariable && !isCompanionVariableName(stateVariable)) {
+    if (stateVariable && !isCompanionVariableRef(stateVariable)) {
       skipped.push({
         name: slug,
         why: `"${stateVariable}" is not a Companion variable name`,
@@ -595,7 +595,7 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
       // Checked BEFORE either half is created, exactly as the pairs import
       // does: a typo in a field that is not even the cue's name must not leave
       // half a pair behind.
-      if (!isCompanionVariableName(stateVariable)) {
+      if (!isCompanionVariableRef(stateVariable)) {
         skipped.push({ name: slug, why: `"${stateVariable}" is not a Companion variable name` });
         continue;
       }

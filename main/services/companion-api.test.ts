@@ -465,3 +465,81 @@ describe("readCustomVariable's timeout", () => {
     );
   });
 });
+
+// A binding may name a MODULE variable, not only a custom one.
+//
+// Companion serves the two at different paths — `/api/custom-variable/<name>`
+// and `/api/variable/<label>/<name>` — and both were probed against a real
+// Companion 5.0.3: a module variable that exists answers 200 with the value as
+// text, one that does not answers 404 "Not found". A binding that dispatched to
+// the wrong path would 404 forever with nothing on screen but "unknown".
+describe("readVariable dispatches on the form of the binding", () => {
+  test("a bare name is a CUSTOM variable, as every binding written before this meant", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stub(() => new Response("on", { status: 200 }));
+
+    assert.deepEqual(await companionApi.readVariable("projectors_state"), { value: "on" });
+    assert.deepEqual(
+      calls.map((c) => c.url),
+      ["http://10.0.0.5:8000/api/custom-variable/projectors_state/value"],
+    );
+  });
+
+  test("`custom:` says the same thing explicitly", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stub(() => new Response("off", { status: 200 }));
+
+    assert.deepEqual(await companionApi.readVariable("custom:projectors_state"), { value: "off" });
+    assert.deepEqual(
+      calls.map((c) => c.url),
+      ["http://10.0.0.5:8000/api/custom-variable/projectors_state/value"],
+    );
+  });
+
+  test("`<label>:<name>` reads the module variable endpoint", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stub(() => new Response("On\n", { status: 200 }));
+
+    // The value is trimmed here too: the module endpoint answers text, and a
+    // trailing newline matching neither "On" nor "Off" reads as unknown.
+    assert.deepEqual(await companionApi.readVariable("VCR-Overhead-Light:power_state"), {
+      value: "On",
+    });
+    assert.deepEqual(
+      calls.map((c) => c.url),
+      ["http://10.0.0.5:8000/api/variable/VCR-Overhead-Light/power_state/value"],
+    );
+    assert.equal(calls[0]!.signal instanceof AbortSignal, true, "the read was sent with no timeout");
+  });
+
+  test("404 on a module variable names it, rather than reading as HTTP 404", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stub(() => new Response("Not found", { status: 404 }));
+
+    assert.deepEqual(await companionApi.readVariable("VCR-Overhead-Light:power_state"), {
+      error: "no such variable VCR-Overhead-Light:power_state in Companion",
+    });
+  });
+
+  test("a label Companion could not have is refused without a request", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stub(() => new Response("On", { status: 200 }));
+
+    // Both halves land in a URL path, so neither is trusted to encode its way
+    // out of trouble.
+    const r = await companionApi.readVariable("../../int:power_state");
+    assert.equal("error" in r && r.error.includes("not a Companion variable name"), true);
+    assert.equal(calls.length, 0, "a malformed connection label reached Companion");
+  });
+
+  test("a module read that fails is returned, not thrown", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    companionDeps.fetch = async () => {
+      throw new Error("fetch failed", { cause: new Error("connect ECONNREFUSED 10.0.0.5:8000") });
+    };
+
+    assert.deepEqual(await companionApi.readVariable("VCR-Overhead-Light:power_state"), {
+      error: "connect ECONNREFUSED 10.0.0.5:8000",
+    });
+  });
+});

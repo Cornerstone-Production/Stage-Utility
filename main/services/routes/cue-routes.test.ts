@@ -733,9 +733,9 @@ describe("a pair's state binding", () => {
     // Accepted, it is a switch that reads unknown forever with nothing saying
     // which rule is wrong — the state route would answer 404 for it every poll.
     await withCue();
-    const r = await post({ name: "screens_on", stateVariable: "state:projectors" });
+    const r = await post({ name: "screens_on", stateVariable: "../../projectors" });
     assert.equal(r.status, 400);
-    assert.match((r.json as { error: string }).error, /not a Companion variable name/);
+    assert.match((r.json as { error: string }).error, /not a Companion variable/);
     assert.equal(automationEngine.cueRules().length, 1, "the rule was saved anyway");
   });
 
@@ -1854,7 +1854,7 @@ describe("importing a pair with a state variable", () => {
       (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
     ).pairs
       .filter((p) => p.slug === "lobby_tvs")
-      .map((p) => ({ ...p, stateVariable: "state:lobby" }));
+      .map((p) => ({ ...p, stateVariable: "../../lobby" }));
 
     const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
       method: "POST",
@@ -1867,7 +1867,7 @@ describe("importing a pair with a state variable", () => {
       skipped.map((x) => x.name),
       ["lobby_tvs"],
     );
-    assert.match(skipped[0]!.why, /not a Companion variable name/);
+    assert.match(skipped[0]!.why, /not a Companion variable/);
     assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
   });
 });
@@ -2274,11 +2274,11 @@ describe("importing a single button as a TOGGLE pair", () => {
 
   test("a variable Companion could not have skips the button, creating NEITHER half", async () => {
     const button = await offered("house_lights_on");
-    const r = await importing([{ ...button, stateVariable: "state:lights" }]);
+    const r = await importing([{ ...button, stateVariable: "../../lights" }]);
     const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
     assert.deepEqual(created, []);
     assert.deepEqual(skipped.map((x) => x.name), ["house_lights_on"]);
-    assert.match(skipped[0]!.why, /not a Companion variable name/);
+    assert.match(skipped[0]!.why, /not a Companion variable/);
     assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
   });
 

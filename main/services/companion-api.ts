@@ -9,6 +9,7 @@
 //   POST /api/location/<page>/<row>/<col>/press      presses a button
 //   GET  /int/export/full?format=json                the whole configuration
 //   GET  /api/custom-variable/<name>/value           one custom variable's value
+//   GET  /api/variable/<label>/<name>/value          one module variable's value
 //
 // Companion answers the press with 200 and the body `ok` when the coordinate
 // exists. An INVALID coordinate answers 204 and presses nothing — so 2xx alone is
@@ -30,7 +31,9 @@ import {
   exportBuild,
   findPairs,
   isCompanionVariableName,
+  isCompanionVariableRef,
   parseButtons,
+  parseVariableRef,
 } from "./companion-export.js";
 
 /** Companion's default HTTP/web port. */
@@ -295,6 +298,57 @@ class CompanionApi {
     if (!isCompanionVariableName(variable)) {
       return { error: `"${variable}" is not a Companion variable name` };
     }
+    return this.readValueAt(
+      `/api/custom-variable/${encodeURIComponent(variable)}/value`,
+      "no such custom variable in Companion",
+    );
+  }
+
+  /**
+   * Read one variable a MODULE publishes for a connection.
+   *
+   * `/api/variable/<connection label>/<name>/value`, which is the other half of
+   * what `$(VCR-Overhead-Light:power_state)` means inside Companion. Same
+   * contract as readCustomVariable in every respect — never throws, never
+   * caches, three second timeout — because cue-states.ts batches the two
+   * together and a binding must not behave differently for having named a
+   * connection.
+   */
+  async readModuleVariable(label: string, name: string): Promise<VariableResult> {
+    const ref = `${label.trim()}:${name.trim()}`;
+    if (!isCompanionVariableRef(ref)) {
+      return { error: `"${ref}" is not a Companion variable name` };
+    }
+    return this.readValueAt(
+      `/api/variable/${encodeURIComponent(label.trim())}/${encodeURIComponent(name.trim())}/value`,
+      `no such variable ${ref} in Companion`,
+    );
+  }
+
+  /**
+   * Read whichever variable a binding names — `custom:<name>`, a bare `<name>`
+   * (custom, as every binding written before this meant), or
+   * `<connection label>:<name>`.
+   *
+   * ONE entry point, so cue-states.ts and anything else reading a binding
+   * dispatch in one place rather than each deciding what a string means.
+   */
+  async readVariable(ref: string): Promise<VariableResult> {
+    const parsed = parseVariableRef(ref);
+    if (!parsed) return { error: `"${ref.trim()}" is not a Companion variable name` };
+    return parsed.kind === "custom"
+      ? this.readCustomVariable(parsed.name)
+      : this.readModuleVariable(parsed.label, parsed.name);
+  }
+
+  /**
+   * GET one value off Companion, said as a VariableResult.
+   *
+   * The shared body of the two reads above: one timeout, one 404 sentence, one
+   * trim, one catch. Two copies of this is how the module read would come to
+   * hold the request open for eight seconds while the custom one did not.
+   */
+  private async readValueAt(path: string, missing: string): Promise<VariableResult> {
     // `baseUrl()` is INSIDE the try. It awaits getTarget, which reaches the
     // integration manager and its config store, and a rejection there escaped a
     // method documented as never throwing — which under the caller's batch read
@@ -304,11 +358,10 @@ class CompanionApi {
       const resolved = await this.baseUrl();
       if (!resolved) return { error: "Companion host is not configured" };
       base = resolved;
-      const url = `${base}/api/custom-variable/${encodeURIComponent(variable)}/value`;
-      const res = await companionDeps.fetch(url, {
+      const res = await companionDeps.fetch(`${base}${path}`, {
         signal: AbortSignal.timeout(VARIABLE_TIMEOUT_MS),
       });
-      if (res.status === 404) return { error: "no such custom variable in Companion" };
+      if (res.status === 404) return { error: missing };
       if (!res.ok) return { error: `Companion answered HTTP ${res.status}` };
       // Companion answers with the value as text. Trimmed, because a variable an
       // operator set from a button expression can carry a trailing newline and

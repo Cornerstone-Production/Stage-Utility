@@ -22,9 +22,11 @@ import {
   exportBuild,
   findPairs,
   isCompanionVariableName,
+  isCompanionVariableRef,
   isSuggestedPair,
   isUtilityModule,
   parseButtons,
+  parseVariableRef,
   singleButtons,
   slugForCue,
   UTILITY_MODULES,
@@ -336,5 +338,56 @@ describe("customVariableNames", () => {
     assert.equal(isCompanionVariableName("../../int/export/full"), false);
     assert.equal(isCompanionVariableName("a/b"), false);
     assert.equal(isCompanionVariableName("x".repeat(101)), false);
+  });
+});
+
+describe("parseVariableRef", () => {
+  test("a bare name stays a CUSTOM variable", () => {
+    // Every binding written before module variables could be named is a bare
+    // name, and each has to go on meaning exactly what it meant.
+    assert.deepEqual(parseVariableRef("projectors_state"), { kind: "custom", name: "projectors_state" });
+    assert.deepEqual(parseVariableRef("  rig.state "), { kind: "custom", name: "rig.state" });
+  });
+
+  test("`custom:` is the same thing said out loud", () => {
+    assert.deepEqual(parseVariableRef("custom:projectors_state"), {
+      kind: "custom",
+      name: "projectors_state",
+    });
+    // Companion's own prefix is case-insensitive in an expression, so this is
+    // too — and it wins over a connection somebody labelled "custom", because a
+    // binding that changed meaning when a connection was renamed is worse than
+    // one that cannot reach a connection nobody should have called that.
+    assert.deepEqual(parseVariableRef("CUSTOM:projectors_state"), {
+      kind: "custom",
+      name: "projectors_state",
+    });
+  });
+
+  test("`<label>:<name>` is a module variable", () => {
+    assert.deepEqual(parseVariableRef("VCR-Overhead-Light:power_state"), {
+      kind: "module",
+      label: "VCR-Overhead-Light",
+      name: "power_state",
+    });
+    assert.deepEqual(parseVariableRef("MA_Video_Mac_Mini_OBS:streaming"), {
+      kind: "module",
+      label: "MA_Video_Mac_Mini_OBS",
+      name: "streaming",
+    });
+  });
+
+  test("neither half may be something Companion could not have", () => {
+    // Both land in a URL path.
+    assert.equal(parseVariableRef("../../int:power_state"), null);
+    assert.equal(parseVariableRef("VCR-Light:../../int/export/full"), null);
+    // A dot is legal in a variable name and not in a connection label.
+    assert.equal(parseVariableRef("VCR.Light:power_state"), null);
+    assert.equal(parseVariableRef("a:b:c"), null);
+    assert.equal(parseVariableRef(""), null);
+    assert.equal(parseVariableRef("not a name"), null);
+    assert.equal(isCompanionVariableRef("VCR-Overhead-Light:power_state"), true);
+    assert.equal(isCompanionVariableRef("state:projectors"), true);
+    assert.equal(isCompanionVariableRef("a/b"), false);
   });
 });
