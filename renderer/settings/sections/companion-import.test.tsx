@@ -492,7 +492,11 @@ describe("the per-pair State select", () => {
     try {
       await mount();
       assert.deepEqual(
-        [...document.querySelectorAll("select")].map((el) => el.getAttribute("aria-label")),
+        // The pairs section's selects only — the single buttons each have a
+        // Toggle select of their own, covered further down.
+        [...document.querySelectorAll("select")]
+          .map((el) => el.getAttribute("aria-label") ?? "")
+          .filter((n) => n.startsWith("State variable for")),
         [
           "State variable for Projectors · Room A: Screens",
           "State variable for Projectors · Room A: Lighting",
@@ -566,5 +570,116 @@ describe("the per-pair State select", () => {
       body.pairs.map((p) => p.stateVariable),
       [""],
     );
+  });
+});
+
+// ── The per-button Toggle select ──────────────────────────────────────────────
+//
+// A Companion button that is really a TOGGLE — one key for both directions, no
+// OFF partner — is imported as a PAIR when a state variable is chosen for it,
+// and as one cue when it is not. What is silent when it breaks is the same
+// thing as for the pairs select: a control that renders and does not reach the
+// request. The cues then look right, and Home Assistant gets a script that
+// snaps back and toggles the light again on every tap.
+//
+// NOT unit-tested here, for the same reason the pairs row is not: that a click
+// on this select does not activate the row's checkbox is a real-browser
+// behaviour of <label>, and jsdom's fireEvent.change does not synthesise label
+// activation at all — a test for it would pass with the row restored to a
+// single <label>, which is the vacuous guard this repo keeps shipping. The row
+// is a <div> with the label around the checkbox and the words only, and it was
+// driven in a browser.
+describe("the per-button Toggle select", () => {
+  const toggleSelect = (name: string): HTMLSelectElement | null =>
+    document.querySelector(`select[aria-label="Toggle with state for ${name}"]`);
+
+  const importNow = async () => {
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((b) => (b.textContent ?? "").startsWith("Import"))!
+        .click();
+    });
+    await settle();
+    return JSON.parse(requests.find((r) => r.url.includes("import-pairs"))!.body ?? "{}") as {
+      buttons: { slug: string; stateVariable?: string }[];
+    };
+  };
+
+  test("one select per single button, with the page in the accessible name", async () => {
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    assert.deepEqual(
+      [...document.querySelectorAll("select")]
+        .map((el) => el.getAttribute("aria-label") ?? "")
+        .filter((n) => n.startsWith("Toggle with state")),
+      [
+        "Toggle with state for Take Screens · Room A: Screens",
+        "Toggle with state for House Lights ON · Room A: Screens",
+        "Toggle with state for Cam 1 · Room A: Cameras",
+      ],
+    );
+  });
+
+  test("nothing is suggested — a single button is only a toggle if somebody says so", async () => {
+    // Unlike a pair, where a variable named after the base is the one the
+    // operator meant. A pre-chosen variable here would turn a camera shot into
+    // a switch nobody asked for.
+    CUSTOM_VARIABLES = ["house_lights_state", "house_lights_on"];
+    await mount();
+    assert.equal(toggleSelect("House Lights ON · Room A: Screens")?.value, "");
+  });
+
+  test("is not offered at all when Companion has no custom variables", async () => {
+    CUSTOM_VARIABLES = [];
+    await mount();
+    assert.equal(toggleSelect("House Lights ON · Room A: Screens") === null, true);
+  });
+
+  test("what is chosen reaches the request, for THAT button only", async () => {
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    await act(async () => {
+      fireEvent.change(toggleSelect("House Lights ON · Room A: Screens")!, {
+        target: { value: "house_lights_state" },
+      });
+    });
+    await act(async () => {
+      screen.getByLabelText("House Lights ON · Room A: Screens").click();
+    });
+    await act(async () => {
+      screen.getByLabelText("Cam 1 · Room A: Cameras").click();
+    });
+    const body = await importNow();
+    assert.deepEqual(
+      body.buttons.map((b) => `${b.slug}=${b.stateVariable ?? "(none)"}`),
+      ["house_lights_on=house_lights_state", "cam_1=(none)"],
+    );
+    // ABSENT, not blank: a `stateVariable: ""` on the wire would be a body the
+    // server has to know to ignore, and the server reads any non-blank value as
+    // "this is a toggle".
+    assert.equal(
+      body.buttons.some((b) => "stateVariable" in b && !b.stateVariable),
+      false,
+      "a button with no variable sent the key anyway",
+    );
+  });
+
+  test("the row shows the two cue names it would create, and calls itself a switch", async () => {
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    const before = document.body.textContent ?? "";
+    assert.equal(before.includes("house_lights_on / house_lights_off"), false);
+    await act(async () => {
+      fireEvent.change(toggleSelect("House Lights ON · Room A: Screens")!, {
+        target: { value: "house_lights_state" },
+      });
+    });
+    const after = document.body.textContent ?? "";
+    // The trailing ON comes off the name: the pair is the house lights, and
+    // `house_lights_on_off` is what naming it after the whole label would give.
+    assert.equal(after.includes("house_lights_on / house_lights_off"), true);
+    // And the tag follows, because it is a switch in Home Assistant now, not a
+    // script. Two switch tags on screen: the Projectors pair and this button.
+    assert.equal(document.querySelectorAll("[data-cue-kind='switch']").length, 2);
   });
 });

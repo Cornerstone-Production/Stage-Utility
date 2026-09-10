@@ -197,6 +197,33 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
   return out.sort((a, b) => a.base.localeCompare(b.base));
 }
 
+/**
+ * Both halves press the SAME Companion button.
+ *
+ * A toggle button — one button, no OFF partner, "VCR Light ON" that is really
+ * "VCR Light" — is imported as a pair whose two cues press it from both
+ * directions, because a `script` in Home Assistant is a momentary switch that
+ * snaps back and each tap toggles the light again. What tells the two
+ * directions apart is the state variable, and nothing else: without one, Home
+ * Assistant cannot know which way a press went. The generated config says so,
+ * and so does the rule editor.
+ *
+ * Coordinates only — the fingerprint is not compared. Two halves that both
+ * carry `p3 r1 c2` are one button whatever their stored labels or action ids
+ * say, and a reconcile that has updated one half's fingerprint and not the
+ * other's must not make a toggle pair look like an ordinary one.
+ */
+export function isTogglePair(pair: CuePair): boolean {
+  const at = (rule: Rule): string | null => {
+    if (rule.action.id !== "companion.press") return null;
+    const p = rule.action.params;
+    const parts = ["page", "row", "col"].map((k) => Number(p[k]));
+    return parts.every((n) => Number.isFinite(n)) ? parts.join(":") : null;
+  };
+  const on = at(pair.on);
+  return on !== null && on === at(pair.off);
+}
+
 /** The pairs that have somewhere to read their state from. */
 export function boundCuePairs(rules: readonly Rule[]): CuePair[] {
   return cuePairs(rules).filter((p) => p.binding !== null);

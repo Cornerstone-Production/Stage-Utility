@@ -71,6 +71,9 @@ const REQUEST_FACING = [
   "cue-tokens.ts",
   "display-settings-routes.ts",
   "history-routes.ts",
+  // Its one warning names a cue pair's base, which comes from a cue name typed
+  // into an HTTP body.
+  "home-assistant-yaml.ts",
   "integration-manager.ts",
   "integration-routes.ts",
   "kiosk-device-routes.ts",
@@ -228,6 +231,10 @@ function requestFacingFiles(): string[] {
     // Every value on its lines is either a cue name — typed into an HTTP body
     // — or a Companion page name out of the export. Both reach `/log`.
     path.join(HERE, "companion-reconcile.ts"),
+    // Its one line — a pair whose two halves press the same Companion button
+    // with no state variable bound — names the pair's base, which is a cue name
+    // typed into an HTTP body.
+    path.join(HERE, "home-assistant-yaml.ts"),
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),

@@ -181,6 +181,35 @@ pair's halves, and the same page-naming rule applies when the same label is on t
 pages. In Home Assistant a single button becomes a `script` rather than a switch —
 there is no on and no off to give a switch a state.
 
+#### Toggle buttons
+
+A button that is really a **toggle** — one key that turns the thing on and off in
+turn, with no OFF partner — is the exception. Imported as a single cue it becomes
+a `script`, which HomeKit shows as a momentary button that snaps back: every tap
+presses the toggle again, and the light ends up whichever way the taps happened to
+land.
+
+Give the row a **Toggle with state** variable and it is imported as an ON/OFF
+**pair** instead. Both cues press the same button; the variable is what tells the
+two directions apart, so `<name>_on` presses only when the variable says off, and
+`<name>_off` only when it says on. A trailing `ON`, `OFF` or `Toggle` comes off the
+name first: "VCR Light ON" becomes `vcr_light_on` and `vcr_light_off`, not
+`vcr_light_on_off`.
+
+In Companion, set the variable from the button's own toggle branches — a **Set
+custom variable** action to `on` in the branch that turns the thing on, and one to
+`off` in the branch that turns it off. Without a variable the button stays a single
+cue and a `script`, as before.
+
+A toggle **needs** the variable. Two cues pointed at one button with nothing bound
+generate a switch that reports what it last asked for while the device does the
+opposite every other press; the generated YAML carries a `# WARNING` comment on it,
+the rule's **State variable** field says so, and the server logs:
+
+```
+[cues] pair vcr_light presses one button with no state variable
+```
+
 ### When a button moves
 
 Coordinates are the one thing about a Companion button that does not last.
@@ -348,7 +377,7 @@ read always presses.
 **A bound cue is idempotent.** Calling `<pair>_on` while the variable already
 says `on` presses nothing and answers `200 {detail: "already on", state: "on",
 skipped: true}`; the Activity log records it as `skipped`. That is what makes a
-toggle button safe, and it also absorbs a Home Assistant that
+[toggle button](#toggle-buttons) safe, and it also absorbs a Home Assistant that
 repeats `turn_on`, or an assistant that hears the same sentence twice. Only a
 call is checked — a rule the engine fires from a trigger of its own presses
 without reading anything.

@@ -496,3 +496,64 @@ describe("the state fields in the rule editor", () => {
     );
   });
 });
+
+// ── A toggle pair's warning on the State variable field ───────────────────────
+//
+// Two cues that press the SAME Companion button are a toggle: the state
+// variable is the ONLY thing that can tell the two directions apart, so leaving
+// it blank is not merely "optimistic", it is a switch that reports the opposite
+// of the truth every other press. The field says so, and the hint lives behind
+// the row's InfoHint, so this opens it the way an operator does.
+describe("the State variable hint on a toggle pair", () => {
+  /** Open the InfoHint beside a row label and return the popover's text. */
+  async function hintFor(label: string): Promise<string> {
+    const span = [...document.querySelectorAll("label > span")].find((el) =>
+      (el.textContent ?? "").startsWith(label),
+    );
+    assert.equal(span === undefined, false, `no row labelled ${label}`);
+    const button = span!.querySelector('button[aria-label="More info"]');
+    assert.equal(button === null, false, `the ${label} row has no hint`);
+    await act(async () => {
+      (button as HTMLButtonElement).click();
+    });
+    await settle();
+    return document.body.textContent ?? "";
+  }
+
+  test("both halves on one button and nothing bound says Home cannot know which way it went", async () => {
+    // `cue()` presses p1 r0 c1 for every rule in this file, so these two halves
+    // are one button — which is exactly the imported toggle.
+    RULES = [cue("house_lights_on"), cue("house_lights_off")];
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    await open("house_lights_on");
+    const text = await hintFor("State variable");
+    assert.equal(
+      text.includes(
+        "Both halves press the same button. Without a state variable, Home Assistant cannot know which way it went.",
+      ),
+      true,
+    );
+  });
+
+  test("once a variable is bound the ordinary hint is back", async () => {
+    RULES = [cue("house_lights_on", { stateVariable: "house_lights_state" }), cue("house_lights_off")];
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    await open("house_lights_on");
+    const text = await hintFor("State variable");
+    assert.equal(text.includes("Home Assistant cannot know which way it went"), false);
+    assert.equal(text.includes("A Companion custom variable your ON/OFF buttons set"), true);
+  });
+
+  test("an ordinary pair on two buttons never says it", async () => {
+    const off = cue("house_lights_off");
+    off.action.params.col = 2;
+    RULES = [cue("house_lights_on"), off];
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    await open("house_lights_on");
+    const text = await hintFor("State variable");
+    assert.equal(text.includes("Home Assistant cannot know which way it went"), false);
+  });
+});
