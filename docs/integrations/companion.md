@@ -467,7 +467,9 @@ been told is stale. The log says how it ended, once:
 
 The generated Home Assistant switch reads `commanded` before `state` for the
 same reason: templated on the reading alone it flips itself back mid-window, and
-a switch that flips back is an invitation to tap it again. Re-paste the fragment
+a switch that flips back is an invitation to tap it again. The rules list in
+Settings does the same: a bound pair's pill shows `commanded` while `settling`
+is true, never the stale reading underneath it. Re-paste the fragment
 to pick that up.
 
 A press that reached nothing opens no window: a simulated call, a call Companion

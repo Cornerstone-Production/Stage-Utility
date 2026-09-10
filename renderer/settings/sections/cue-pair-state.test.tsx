@@ -255,6 +255,83 @@ describe("the state pill on the rules list", () => {
     await mount();
     assert.deepEqual(pills(), []);
   });
+
+  test("settling shows the commanded state, not the stale reading", async () => {
+    // A press was dispatched in the last 8 s; `state` may still be the
+    // pre-press value. The pill must show `commanded` and never `unknown`.
+    STATES = {
+      projectors: {
+        on: "projectors_on",
+        off: "projectors_off",
+        variable: "projectors_state",
+        value: "off",
+        state: "off",
+        settling: true,
+        commanded: "on",
+      },
+    };
+    await mount();
+    assert.deepEqual(pills(), ["on"], "settling did not show the commanded state");
+  });
+
+  test("settling shows the commanded state even when the stale reading is unknown", async () => {
+    STATES = {
+      projectors: {
+        on: "projectors_on",
+        off: "projectors_off",
+        variable: "projectors_state",
+        value: "WARMUP",
+        state: "unknown",
+        settling: true,
+        commanded: "off",
+      },
+    };
+    await mount();
+    assert.deepEqual(pills(), ["off"], "a settling row showed unknown instead of the commanded state");
+  });
+
+  test("a settling row marks itself and says why, on hover", async () => {
+    STATES = {
+      projectors: {
+        on: "projectors_on",
+        off: "projectors_off",
+        variable: "projectors_state",
+        value: "off",
+        state: "off",
+        settling: true,
+        commanded: "on",
+      },
+    };
+    await mount();
+    const pill = document.querySelector("[data-cue-state]");
+    assert.equal(pill === null, false, "no settling pill rendered");
+    assert.equal(
+      pill?.textContent?.includes("…"),
+      true,
+      "a settling pill did not carry the settling marker",
+    );
+    assert.equal(
+      pill?.getAttribute("title"),
+      "Pressed just now; the device has not reported back yet",
+    );
+  });
+
+  test("a row with no settling field renders exactly as before", async () => {
+    STATES = {
+      projectors: {
+        on: "projectors_on",
+        off: "projectors_off",
+        variable: "projectors_state",
+        value: "on",
+        state: "on",
+      },
+    };
+    await mount();
+    assert.deepEqual(pills(), ["on"]);
+    const pill = document.querySelector("[data-cue-state]");
+    assert.equal(pill?.textContent, "on");
+    assert.equal(pill?.getAttribute("title"), "projectors_state");
+  });
 });
 
 describe("a pair whose base is a prototype key", () => {
