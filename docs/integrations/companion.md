@@ -465,6 +465,11 @@ been told is stale. The log says how it ended, once:
 [cues] state of vcr_light_state did not settle within 8 s
 ```
 
+The generated Home Assistant switch reads `commanded` before `state` for the
+same reason: templated on the reading alone it flips itself back mid-window, and
+a switch that flips back is an invitation to tap it again. Re-paste the fragment
+to pick that up.
+
 A press that reached nothing opens no window: a simulated call, a call Companion
 refused, and a call that was itself skipped all leave the variable as the only
 thing worth comparing against.
