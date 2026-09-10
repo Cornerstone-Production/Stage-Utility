@@ -26,7 +26,7 @@
 // timeouts on an unplugged Companion is a request Home Assistant has long since
 // given up on.
 
-import { boundCuePairs } from "./cue-pairs.js";
+import { boundCuePairs, STATE_ANY_OTHER } from "./cue-pairs.js";
 import { errorMessage } from "./errors.js";
 import { companionApi, type VariableResult } from "./companion-api.js";
 import { scrub } from "./scrub.js";
@@ -161,7 +161,11 @@ class CueStates {
         row.reason = result.error;
       } else if (result.value === binding.onValue) {
         row.state = "on";
-      } else if (result.value === binding.offValue) {
+      } else if (binding.offValue === STATE_ANY_OTHER || result.value === binding.offValue) {
+        // `*` is "anything that is not the on value", so a status variable with
+        // seven off values needs one row rather than six unknowns. The variable
+        // was READ — an empty string included — so this is off and not unknown;
+        // a variable that could not be read at all is the `error` branch above.
         row.state = "off";
       } else {
         row.reason =

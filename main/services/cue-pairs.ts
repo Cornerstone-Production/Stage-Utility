@@ -35,6 +35,26 @@ import type { Rule } from "../types/automation.js";
 export const STATE_ON_DEFAULT = "on";
 export const STATE_OFF_DEFAULT = "off";
 
+/**
+ * The off value meaning "anything else" — any value that is not the on value.
+ *
+ * Exact matching is right for a variable an operator's own buttons set to `on`
+ * and `off`, and wrong for a STATUS variable with more than two answers. A
+ * HyperDeck's `status` is `Record` while it records and `Stopped`, `Preview`,
+ * `Play`, `Forward`, `Rewind`, `Jog` or `Shuttle` when it does not — seven off
+ * values, and a pair bound to one of them reads unknown in the other six.
+ *
+ * With `*` as the off value, only the ON value is spelled out: the read is on
+ * when it matches and off otherwise, INCLUDING an empty string, which is what a
+ * module writes for a device it has not heard from yet. `unknown` then means
+ * only what it says — no variable by that name, or no Companion to ask.
+ *
+ * Off ONLY. `*` as the on value would make a pair read on whatever the device
+ * is doing, which is the silent failure this whole binding exists to remove, so
+ * stateBindingProblem refuses it.
+ */
+export const STATE_ANY_OTHER = "*";
+
 /** Where a pair's real state is read from, and what the two answers look like. */
 export interface StateBinding {
   /**
@@ -44,7 +64,7 @@ export interface StateBinding {
   variable: string;
   /** The value that means on. Compared trimmed, case-sensitively. */
   onValue: string;
-  /** The value that means off. */
+  /** The value that means off, or `*` for anything that is not the on value. */
   offValue: string;
 }
 
@@ -97,6 +117,12 @@ export function stateBindingProblem(params: Record<string, string | number>): st
       `"${binding.variable}" is not a Companion variable — a custom variable ` +
       `(letters, digits, _, - and . only) or <connection label>:<variable name>`
     );
+  }
+  // Checked BEFORE the equal-values case, which `*`/`*` would otherwise be
+  // reported as: the answer an operator needs is that `*` belongs on the off
+  // field, not that the two fields match.
+  if (binding.onValue === STATE_ANY_OTHER) {
+    return `"${STATE_ANY_OTHER}" means "anything else" and can only be the off value`;
   }
   if (binding.onValue === binding.offValue) {
     return `the on and off values are both "${binding.onValue}", so the state could never be read`;

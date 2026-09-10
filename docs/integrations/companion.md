@@ -391,6 +391,15 @@ The comparison is **exact and case-sensitive**, after trimming whitespace from
 both ends: a variable holding `ON` does not match the default `on`, and reads
 *unknown*. Set **Value meaning on** to `ON` or have the button write `on`.
 
+**`*` as the off value means "anything else".** A status variable with more than
+two answers — a recorder's transport, which reads `Record`, `Stopped`, `Preview`,
+`Play`, `Forward`, `Rewind`, `Jog` or `Shuttle` — needs only its on value spelled
+out: set **Value meaning off** to `*` and every other value, including an empty
+one, reads *off*. *Unknown* then means only that Companion has no variable by
+that name or could not be reached. Only the off value may be `*`; `*` as the on
+value is refused, because a switch that reads on whatever the device is doing is
+the failure this binding exists to remove.
+
 The generated YAML then also carries one `rest` sensor polling
 `GET /api/cues/states` every ten seconds, with an attribute per bound pair, and
 each bound switch reads its own attribute off it instead of being optimistic. One

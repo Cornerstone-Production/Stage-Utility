@@ -546,7 +546,10 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
         label: "Value meaning off",
         type: "string",
         optional: true,
-        help: 'What the variable holds when the thing is off. Blank means "off".',
+        help:
+          'What the variable holds when the thing is off. Blank means "off", and "*" means ' +
+          "anything else — any value that is not the on value, which is what a status variable " +
+          "with several answers needs. Only the off value may be \"*\".",
       },
     ],
     // Never. A called cue has no edge to read, and the engine refuses to

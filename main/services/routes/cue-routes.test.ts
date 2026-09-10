@@ -2087,6 +2087,61 @@ describe("importing a pair with a state variable", () => {
     assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
   });
 
+  test('an off value of "*" imports, and reads on for the on value and off for anything else', async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs", stateOnValue: "Record", stateOffValue: "*" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    assert.deepEqual((r.json as { created: string[] }).created, ["lobby_tvs_on", "lobby_tvs_off"]);
+    const on = automationEngine
+      .cueRules()
+      .find((x) => String(x.trigger.params.name) === "lobby_tvs_on");
+    assert.equal(String(on?.trigger.params.stateOffValue), "*");
+
+    const stateOf = async (): Promise<string> => {
+      cueStates.invalidate();
+      const answer = (await callRoute(cueRoutes, "/api/cues/states")).json as {
+        states: Record<string, { state: string }>;
+      };
+      return String(answer.states.lobby_tvs?.state);
+    };
+    variables.lobby_tvs = "Record";
+    assert.equal(await stateOf(), "on");
+    // One of the seven other words a transport variable holds. Exact matching
+    // would have read every one of them unknown.
+    variables.lobby_tvs = "Preview";
+    assert.equal(await stateOf(), "off");
+    delete variables.lobby_tvs;
+    assert.equal(await stateOf(), "unknown");
+  });
+
+  test('an ON value of "*" is refused before either half exists', async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs", stateOnValue: "*", stateOffValue: "Idle" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.match(skipped[0]!.why, /can only be the off value/);
+    assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
+  });
+
   test("a state variable Companion could not have skips the pair, creating NEITHER half", async () => {
     // Checked before either half is created: addRule would refuse the `_on` rule
     // and create the `_off` one, leaving half a pair behind for a typo in a
