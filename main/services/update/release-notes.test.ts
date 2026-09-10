@@ -214,4 +214,18 @@ describe("the cap is big enough for the notices actually written", () => {
     assert.doesNotMatch(intro, /…$/, "the shipped notice is being truncated");
     assert.match(intro, /Resi and\s+YouTube now sit alongside/, "the closing sentence was cut");
   });
+
+  test("the overview being written right now survives whole too", () => {
+    // The cap is only ever hit by the release in progress, and the file for a
+    // release nobody has cut yet is the one that grows a sentence per feature.
+    // 1.11.0 above is frozen and can no longer fail; this one can.
+    const real = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "release-notes", "1.18.0.md"),
+      "utf8",
+    );
+    const intro = parseReleaseIntro(`${real}\n## Install\n\ncurl …\n`) ?? "";
+    assert.ok(intro, "the shipped notice produces no intro at all");
+    assert.doesNotMatch(intro, /…$/, `the 1.18.0 overview is ${intro.length} characters and is being cut`);
+    assert.match(intro, /REC START and REC STOP import as one pair/, "the closing sentence was cut");
+  });
 });

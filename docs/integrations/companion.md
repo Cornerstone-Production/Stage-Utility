@@ -345,6 +345,28 @@ and reload. A switch is `optimistic: true` unless its pair has a **state
 variable** — Stage Utility reports that it dispatched the press and nothing more,
 so Home Assistant shows what it asked for rather than what the device did.
 
+### Cues that are not Companion buttons
+
+A cue is a rule, and every rule has an action — a Companion press is only the
+most common one. A cue whose action is anything else appears in Home Assistant
+the same way, through the same manifest and the same generated YAML: cues named
+`<base>_on` and `<base>_off` become one switch, and a cue on its own becomes a
+script.
+
+The **REAPER transport** action is the worked example:
+
+| Cue | Action |
+|---|---|
+| `reaper_record_on` | REAPER transport → Start recording |
+| `reaper_record_off` | REAPER transport → Stop |
+
+That pair's state is read from Stage Utility's own REAPER connection rather than
+from a Companion variable, so the switch reports whether REAPER is really
+recording and a repeated `turn_on` sends nothing. Nothing has to be built in
+Companion for it, and the pair is never probed for a state source or marked
+`button missing` — it has no button. See
+[State from Stage Utility](../automation.md#state-from-stage-utility).
+
 ### Real state
 
 Companion answers a press the moment it hands it to a control and never says what

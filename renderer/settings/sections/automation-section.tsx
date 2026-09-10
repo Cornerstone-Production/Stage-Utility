@@ -1,7 +1,14 @@
 import { errorMessage } from "@main/services/errors";
 import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
 import {
+  APP_STATE_SOURCES,
+  appStateRef,
+  appStateSourceDef,
+  isAppStateRef,
+} from "@main/services/app-state-sources";
+import {
   cuePairs,
+  implicitStateBinding,
   isTogglePair,
   stateBindingOf,
   stateBindingParams,
@@ -26,6 +33,7 @@ import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard"
 import type { AutomationOutcome } from "@main/types/automation";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useConfiguredIntegrations } from "../../main/use-integration-states";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon } from "lucide-react";
@@ -565,12 +573,27 @@ interface CompanionPairsReply {
   buttons?: OfferedButton[];
 }
 
+/**
+ * The stored form of an app source, with the two values it reports.
+ *
+ * Written out rather than left blank: blank means "the defaults", and a source
+ * whose values are not `on`/`off` would then be compared against the wrong two
+ * strings with the field on screen looking right — the same trap the inferred
+ * Companion source has.
+ */
+function appBindingFor(ref: string): { variable: string; onValue: string; offValue: string } | null {
+  const def = appStateSourceDef(ref);
+  return def ? { variable: ref, onValue: def.onValue, offValue: def.offValue } : null;
+}
+
 function CueStateFields({
   params,
   base,
   toggle,
   customVariables,
   inferred,
+  onAction,
+  appSources,
   onChange,
 }: {
   params: Record<string, string | number>;
@@ -580,10 +603,24 @@ function CueStateFields({
   customVariables: string[];
   /** Where this pair's own button says its device reports state, or null. */
   inferred: InferredStateSource | null;
+  /** The ON half's action as it stands in the draft — what implies a binding. */
+  onAction: Rule["action"];
+  /** App state sources whose integration is set up, so there is something to read. */
+  appSources: string[];
   onChange: (patch: Record<string, string>) => void;
 }) {
   const binding = stateBindingOf(params);
   const variable = String(params.stateVariable ?? "");
+  // What this pair's own action implies, when nothing is stored. The SAME
+  // function the server binds with — a second copy of "a Record cue reads
+  // app:reaper.recording" is how the editor and the switch come to disagree.
+  const implicit = binding ? null : implicitStateBinding(onAction);
+  /** What is being read, stored or implied. */
+  const effective = binding?.variable ?? implicit?.variable ?? "";
+  /** An app source needs no values: it reports exactly `on` and `off`. */
+  const fromApp = isAppStateRef(effective);
+  /** The source's own one-liner, or null when this is not an app source. */
+  const appHint = appStateSourceDef(effective)?.hint ?? null;
   // What learning has found and how far it got. A pair whose connections the
   // verified table has no row for is probed by the reconcile and BOUND from
   // watching a press, so the field has something to say with nothing picked and
@@ -595,8 +632,19 @@ function CueStateFields({
   // deleted — is still offered, so the select shows what the rule actually says.
   // The INFERRED one is offered too and labelled, because on a Companion with
   // no custom variables it is the only thing there is to pick.
-  const options = [...new Set([...customVariables, ...(variable ? [variable] : [])])].sort();
+  const options = [...new Set([...customVariables, ...(variable ? [variable] : [])])]
+    .filter((name) => !isAppStateRef(name))
+    .sort();
+  // APP SOURCES FIRST. They are read from an integration this app is already
+  // talking to, so there is nothing to build in Companion for them — and the
+  // implied one has to be offered whatever the integration list says, or the
+  // select would show a value that is not among its options.
+  const appOffered = [...APP_STATE_SOURCES].flatMap(([id, def]) => {
+    const ref = appStateRef(id);
+    return appSources.includes(ref) || effective === ref ? [{ value: ref, text: def.label }] : [];
+  });
   const offered = [
+    ...appOffered,
     ...(inferred && !options.includes(inferred.variable)
       ? [{ value: inferred.variable, text: `${inferred.variable} (inferred)` }]
       : []),
@@ -629,7 +677,10 @@ function CueStateFields({
             // forever, with the field on screen looking right.
             next.trim() === inferred?.variable
             ? inferred
-            : {
+            : // An APP source reports exactly two values and this app knows
+              // which — written out, so the pair is not left comparing against
+              // whatever was typed for the variable it used to read.
+              appBindingFor(next.trim()) ?? {
                 variable: next,
                 onValue: String(params.stateOnValue ?? ""),
                 offValue: String(params.stateOffValue ?? ""),
@@ -642,24 +693,36 @@ function CueStateFields({
       <Row
         label="State variable"
         hint={
-          // A toggle pair with nothing bound is the one case where blank is not
-          // merely "optimistic": the two halves press the same key, so an
-          // optimistic switch reports the opposite of the truth every other
-          // press. Said on the field, where the operator can fix it.
-          inferred && !binding
+          // An APP SOURCE first: there is nothing to set up for it, and the
+          // Companion wording below would send an operator to build a custom
+          // variable this pair will never read.
+          //
+          // Then the toggle case, which is the one where blank is not merely
+          // "optimistic": the two halves press the same key, so an optimistic
+          // switch reports the opposite of the truth every other press. Said on
+          // the field, where the operator can fix it.
+          appHint ??
+          (inferred && !binding
             ? `This pair's button drives a device that reports its own state — ${inferred.variable}. Pick it and nothing has to be built in Companion.`
             : toggle && !binding
               ? "Both halves press the same button. Without a state variable, Home Assistant cannot know which way it went."
-              : `A Companion custom variable your ON/OFF buttons set, or a module's own variable as <connection label>:<name>. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`
+              : `A Companion custom variable your ON/OFF buttons set, or a module's own variable as <connection label>:<name>. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`)
         }
       >
         {offered.length > 0 ? (
-          <Select value={variable} onValueChange={setVariable}>
+          // `effective`, not `variable`: an IMPLIED binding is shown as selected
+          // even though nothing is stored, because it is what the switch really
+          // reads. Choosing anything else — including "No state" — stores that
+          // and the implication stops applying.
+          <Select value={effective} onValueChange={setVariable}>
             <SelectTrigger className="w-full" aria-label="State variable">
               <SelectValue placeholder="No state" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">No state</SelectItem>
+              {/* NOT offered while a binding is implied: there is nothing to
+                  clear, so a "No state" that re-rendered as the app source
+                  would be a control that visibly does nothing. */}
+              {!implicit && <SelectItem value="">No state</SelectItem>}
               {offered.map((o) => (
                 <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
               ))}
@@ -712,7 +775,11 @@ function CueStateFields({
           </span>
         </Row>
       )}
-      {binding && (
+      {/* An app source reports exactly two values, which this app writes itself,
+          so there is nothing here for an operator to set. Hidden rather than
+          disabled: two fields that cannot change anything are two settings that
+          read as ignored. */}
+      {binding && !fromApp && (
         <>
           <Row label="Value meaning on" hint={`What the variable holds when it is on. Blank means "${STATE_ON_DEFAULT}".`}>
             <Input
@@ -758,6 +825,7 @@ function RuleCard({
   cueState,
   customVariables,
   inferredSource,
+  appSources,
   onChanged,
 }: {
   rule: Rule;
@@ -772,6 +840,8 @@ function RuleCard({
   customVariables: string[];
   /** Where this rule's own Companion button says its device reports state. */
   inferredSource: InferredStateSource | null;
+  /** App state sources whose integration is set up. See useConfiguredIntegrations. */
+  appSources: string[];
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -942,6 +1012,8 @@ function RuleCard({
               toggle={pairIsToggle}
               customVariables={customVariables}
               inferred={inferredSource}
+              onAction={draft.action}
+              appSources={appSources}
               onChange={(patch) =>
                 setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, ...patch } } })
               }
@@ -1138,6 +1210,20 @@ export function AutomationSection() {
       "plan-items": planItems?.items ?? [],
     }),
     [rt, rtCmds, planItems],
+  );
+
+  // Which app state sources there is anything to read. An integration that is
+  // not set up has no state, so offering it would be offering a binding that
+  // reads unknown forever — the source's own integration id is the question,
+  // and `configured` (not "connected") is the right half of it: a REAPER that
+  // is set up and currently unreachable is still the right thing to bind to.
+  const configuredIntegrations = useConfiguredIntegrations();
+  const appSources = useMemo(
+    () =>
+      [...APP_STATE_SOURCES]
+        .filter(([, def]) => configuredIntegrations.has(def.integrationId))
+        .map(([id]) => appStateRef(id)),
+    [configuredIntegrations],
   );
 
   // Memoised because the pair resolution below depends on it: `data?.rules ?? []`
@@ -1350,6 +1436,7 @@ export function AutomationSection() {
                     cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
                     customVariables={companionPairs?.customVariables ?? []}
                     inferredSource={inferredFor(r)}
+                    appSources={appSources}
                     onChanged={refresh}
                   />
                 ))

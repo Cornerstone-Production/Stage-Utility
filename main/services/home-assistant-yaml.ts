@@ -257,8 +257,9 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     "#",
     ...(bound.length > 0
       ? [
-          "# A pair with a state variable reports what its device is actually doing,",
-          "# read from Companion through the rest sensor below.",
+          "# A pair with a state source reports what its device is actually doing,",
+          "# read through the rest sensor below — from a Companion variable, or from",
+          "# Stage Utility itself for a cue it drives directly.",
           "# Every other switch is optimistic: Stage Utility reports that it",
           "# dispatched the press, never that the device did anything.",
         ]

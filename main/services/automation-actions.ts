@@ -13,6 +13,7 @@ import { broadcast } from "./broadcaster.js";
 import { companionApi } from "./companion-api.js";
 import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
 import { oscManager } from "./osc-manager.js";
+import { isReaperTransportCommand, reaperService } from "./reaper-service.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
 import { stageController } from "./stage-controller.js";
 import { matchRoster } from "./automation-roster-match.js";
@@ -215,6 +216,38 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
       } catch (e) {
         return fail(errorMessage(e));
       }
+    },
+  },
+
+  "reaper.transport": {
+    id: "reaper.transport",
+    label: "REAPER transport",
+    help:
+      "Drives REAPER through the same web interface the REAPER integration polls, so nothing else has to be set up " +
+      "(Preferences → Control/OSC/web → \"Web browser interface\"). Record does NOTHING when REAPER is already " +
+      "recording: REAPER's Record is a toggle, and a cue said twice would otherwise end the recording.",
+    params: [
+      {
+        key: "command",
+        label: "Command",
+        type: "enum",
+        options: [
+          { value: "record", label: "Start recording" },
+          { value: "stop", label: "Stop" },
+          { value: "play", label: "Play" },
+        ],
+      },
+    ],
+    run: async (params, ctx) => {
+      const command = String(params.command ?? "").trim();
+      if (!isReaperTransportCommand(command)) {
+        return fail(command ? `"${command}" is not a REAPER transport command` : "no command chosen");
+      }
+      // Ahead of the service on purpose: a simulated run must not read the
+      // transport either, so a rule can be tested with REAPER off the network.
+      if (ctx.simulate) return ok(`would send ${command}`);
+      const result = await reaperService.transport(command);
+      return result.ok ? ok(`${command}: ${result.detail}`) : fail(`${command}: ${result.detail}`);
     },
   },
 
