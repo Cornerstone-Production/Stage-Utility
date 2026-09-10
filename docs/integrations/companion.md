@@ -191,8 +191,9 @@ land.
 
 Give the row a **Toggle with state** variable and it is imported as an ON/OFF
 **pair** instead. Both cues press the same button; the variable is what tells the
-two directions apart, so `<name>_on` presses only when the variable says off, and
-`<name>_off` only when it says on. A trailing `ON`, `OFF` or `Toggle` comes off the
+two directions apart, so `<name>_on` presses when the variable says off — and when
+it cannot be read at all — but not when it already says on. `<name>_off` mirrors
+it. See [Real state](#real-state). A trailing `ON`, `OFF` or `Toggle` comes off the
 name first: "VCR Light ON" becomes `vcr_light_on` and `vcr_light_off`, not
 `vcr_light_on_off`.
 
