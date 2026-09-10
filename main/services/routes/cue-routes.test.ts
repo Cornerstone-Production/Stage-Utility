@@ -2194,6 +2194,84 @@ describe("importing a single button as a TOGGLE pair", () => {
     );
   });
 
+  test("an imported toggle is not offered again, under EITHER of its two names", async () => {
+    // `exists` used to be read off the button's own slug, which is not what a
+    // toggle's cues are called: `record_toggle` becomes `record_on`/`record_off`
+    // and the button was offered again forever. Taking that offer created a
+    // THIRD cue on the same key, so Home Assistant had a switch and a script
+    // fighting over one button. Re-running the import is the ordinary case.
+    const button = await offered("record_toggle");
+    await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    const again = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { buttons: Record<string, unknown>[] }
+    ).buttons.find((b) => b.slug === "record_toggle")!;
+    assert.equal(again.exists, true, "an imported toggle was offered as available");
+  });
+
+  test("a second import of the same toggle creates NOTHING, not a third cue", async () => {
+    const button = await offered("record_toggle");
+    await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    const r = await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.deepEqual(skipped.map((x) => x.name), ["record_on"]);
+    assert.deepEqual(
+      automationEngine.cueRules().map((x) => String(x.trigger.params.name)).sort(),
+      ["record_off", "record_on"],
+    );
+  });
+
+  test("a clashing name skips the WHOLE toggle, never half of one", async () => {
+    // Half a toggle is worse than none: the binding lives on the `_on` half, so
+    // a surviving `_off` alone is an unbound cue that pairs itself with whatever
+    // unrelated `<base>_on` was already there — and the generated switch turns
+    // that stranger on and this button off.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    await automationEngine.addRule({
+      name: "House lights on, the old way",
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: "house_lights_on" } },
+      conditions: [],
+      action: { id: "log.message", params: { message: "x" } },
+      cooldownSec: 0,
+      oncePerService: false,
+    });
+    const button = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { buttons: Record<string, unknown>[] }
+    ).buttons.find((b) => b.slug === "house_lights_on")!;
+    const r = await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.match(skipped[0]!.why, /a toggle is imported as a whole pair or not at all/);
+    assert.deepEqual(
+      automationEngine.cueRules().map((x) => String(x.trigger.params.name)),
+      ["house_lights_on"],
+      "half a toggle was left behind",
+    );
+  });
+
+  test("a FORMER name counts as taken too, so the pair cannot steal one", async () => {
+    // The engine holds names and former names in one namespace, so a half whose
+    // name is somebody's former name is refused by addRule — after the other
+    // half had already been created, if this only looked at current names.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    await automationEngine.addRule({
+      name: "Something else entirely",
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: "unrelated", aliases: "house_lights_off" } },
+      conditions: [],
+      action: { id: "log.message", params: { message: "x" } },
+      cooldownSec: 0,
+      oncePerService: false,
+    });
+    const button = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { buttons: Record<string, unknown>[] }
+    ).buttons.find((b) => b.slug === "house_lights_on")!;
+    const r = await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    assert.deepEqual((r.json as { created: string[] }).created, []);
+    assert.equal(automationEngine.cueRules().length, 1, "half a toggle was left behind");
+  });
+
   test("a variable Companion could not have skips the button, creating NEITHER half", async () => {
     const button = await offered("house_lights_on");
     const r = await importing([{ ...button, stateVariable: "state:lights" }]);

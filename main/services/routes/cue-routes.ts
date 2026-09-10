@@ -259,12 +259,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // is the ordinary case after a relabel: a button renamed "Screens ON" and
     // then back to "Projectors ON" is offered as `projectors_on`, which is now
     // the cue's former name.
-    const taken = new Set<string>();
-    for (const rule of automationEngine.listRules()) {
-      const name = automationEngine.cueNameOf(rule);
-      if (name) taken.add(name);
-      for (const alias of automationEngine.cueAliasesOf(rule)) taken.add(alias);
-    }
+    const taken = takenCueNames();
     // The single buttons are worked out HERE rather than below, because the cue
     // names of the pairs and of the singles are resolved together: uniqueness is
     // a property of the whole offer, and counted per family a lone "House Lights
@@ -296,7 +291,18 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // and playback macros. The dialog ticks nothing in this section.
     const buttons = singles.map((b) => {
       const slug = slugs.buttons.get(`${b.page}:${b.row}:${b.col}`) ?? "";
-      return { ...b, slug, exists: !!slug && taken.has(slug) };
+      // Imported as a TOGGLE, this button's cues are named after its pair base,
+      // not after its own slug — `record_toggle` becomes `record_on`/
+      // `record_off`. Reading `exists` off the slug alone offered an already
+      // imported toggle again forever, and taking the offer created a THIRD cue
+      // on the same key: a Home Assistant switch and a script fighting over one
+      // button. Re-running the import is the ordinary case, so this is the
+      // documented path.
+      const base = slug ? togglePairSlug(slug, b.label) : "";
+      const exists =
+        !!slug &&
+        (taken.has(slug) || (!!base && (taken.has(`${base}_on`) || taken.has(`${base}_off`))));
+      return { ...b, slug, exists };
     });
     // The custom variables Companion has, so the import dialog can offer a pair
     // a state binding without a second request. Empty on an install with none,
@@ -334,11 +340,29 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
 }
 
 /**
+ * Every cue name in use, INCLUDING former names.
+ *
+ * The engine treats the two as one namespace — no rule may take either from
+ * another — so an offer or an import that only looked at current names would
+ * show a name as free and then be refused by addRule. One copy, for the offer
+ * and for the toggle import both.
+ */
+function takenCueNames(): Set<string> {
+  const taken = new Set<string>();
+  for (const rule of automationEngine.listRules()) {
+    const name = automationEngine.cueNameOf(rule);
+    if (name) taken.add(name);
+    for (const alias of automationEngine.cueAliasesOf(rule)) taken.add(alias);
+  }
+  return taken;
+}
+
+/**
  * The cooldown every imported cue carries, in seconds.
  *
- * The backstop behind the desired-state check, not the front line: a bound pair
- * presses nothing when the device is already where the call asks for (see
- * automation-engine's callByName), and this catches the repeats that check
+ * The backstop behind the desired-state check, and it runs after it: a bound
+ * pair presses nothing when the device is already where the call asks for (see
+ * callByName in automation-engine.ts), and this catches the repeats that check
  * cannot — an unbound pair, a single button, or a second call arriving before
  * the device's own state variable has caught up with the first.
  *
@@ -590,6 +614,22 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
       const pairSlug = togglePairSlug(slug, label);
       const spokenBase =
         spoken === label ? base : `${spoken.slice(0, spoken.length - label.length)}${base}`;
+      // ALL OR NOTHING, unlike a real ON/OFF pair, where a half that clashes is
+      // reported and the other half still lands — which is how somebody
+      // re-imports a half they deleted. A toggle cannot do that: the binding
+      // lives on the `_on` half, so a surviving `_off` half alone is an UNBOUND
+      // cue that then pairs itself with whatever unrelated `<base>_on` was
+      // already there, and the generated switch turns that stranger on and this
+      // button off.
+      const taken = takenCueNames();
+      const clash = ["on", "off"].map((half) => `${pairSlug}_${half}`).find((n) => taken.has(n));
+      if (clash) {
+        skipped.push({
+          name: clash,
+          why: `"${clash}" is already used — a toggle is imported as a whole pair or not at all`,
+        });
+        continue;
+      }
       await addPairRules(
         {
           slug: pairSlug,

@@ -204,6 +204,11 @@ custom variable** action to `on` in the branch that turns the thing on, and one 
 `off` in the branch that turns it off. A button with no variable is a single cue
 and a `script`.
 
+A toggle already imported is not offered again: the dialog knows its two cue
+names as well as its own. Importing one whose name is taken creates **neither**
+half — a lone `_off` cue would carry no variable and would pair itself with
+whatever `<name>_on` was already there.
+
 A toggle **needs** the variable. Two cues pointed at one button with nothing bound
 generate a switch that reports what it last asked for while the device does the
 opposite every other press; the generated YAML carries a `# WARNING` comment on it,
