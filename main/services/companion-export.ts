@@ -29,6 +29,7 @@ import {
   type ExportConnection,
   type InferredStateSource,
   inferStateSource,
+  learnableConnections,
 } from "./companion-state-source.js";
 
 /** One pressable Companion button, at the coordinates the press API takes. */
@@ -68,6 +69,20 @@ export interface CompanionButton {
    * one field is the only thing anything downstream asks of it.
    */
   stateSource: InferredStateSource | null;
+  /**
+   * The labels of the connections this button drives that NO verified table row
+   * covers — the ones a state source can only be LEARNED for.
+   *
+   * EMPTY for almost every button: a button on a module the table knows, and a
+   * button that drives nothing at all, both have nothing to learn. So this is
+   * cheap on a list of 536 that crosses to the browser, which is why it is
+   * carried here while the evidence `stateSource` was derived from is not.
+   *
+   * The LABELS and not the module ids, because a label is what a variable
+   * reference names — `drives` is module ids and cannot be read back through
+   * Companion's value API at all. See companion-state-learn.ts.
+   */
+  learnConnections: string[];
 }
 
 /** Two buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown or START/STOP. */
@@ -268,6 +283,14 @@ export function parseButtons(raw: unknown): CompanionButton[] {
           .map((id) => connections[id]?.moduleId ?? "")
           .filter((m) => m !== "");
 
+        // The same two lists feed the inference and the learnable-connection
+        // walk, built ONCE: they are the button's whole evidence and reading
+        // the control twice for them would be two walks over every action set.
+        const entries = {
+          feedbacks: feedbackEntriesOf(control),
+          actions: actionEntriesOf(control),
+        };
+
         out.push({
           page: pageNum,
           pageId,
@@ -277,10 +300,8 @@ export function parseButtons(raw: unknown): CompanionButton[] {
           label,
           drives,
           actionIds: actionIdsOf(control),
-          stateSource: inferStateSource(
-            { feedbacks: feedbackEntriesOf(control), actions: actionEntriesOf(control) },
-            connections,
-          ),
+          stateSource: inferStateSource(entries, connections),
+          learnConnections: learnableConnections(entries, connections),
         });
       }
     }
