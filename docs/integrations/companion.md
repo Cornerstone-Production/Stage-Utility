@@ -171,6 +171,12 @@ reports that rather than what it last asked for. See
 [Real state](#real-state) — a variable named after the pair (`projectors` or
 `projectors_state`) is picked for you.
 
+One **search** field at the top of the dialog filters both sections at once, by
+label, page, base and cue name — `projectors_off` finds its pair. A section with
+nothing left shows *No matches* under its heading rather than disappearing, and
+each section's **Select all** and **Clear** act on the rows the search has left
+on screen. The counter beside the field says how many of the offered rows match.
+
 Each imported pair becomes two rules with **no service is live** and a three-second
 cooldown. They are ordinary rules afterwards — edit, disable or delete them like
 any other. Re-running the import skips names that already exist and tells you
@@ -185,9 +191,9 @@ is left out: a cue called nothing cannot be called.
 **Nothing in this section is ticked for you.** A pair is plainly a thing being
 turned on and off; a single button is whatever somebody put on a Companion page,
 and a pre-ticked camera shot or playback macro is a cue somebody can say by
-accident. Search by label, page or cue name and tick what you want. Choosing a
-**Toggle with state** variable for a row ticks that row, because picking one is
-saying you want that button.
+accident. Use the search at the top of the dialog and tick what you want.
+Choosing a **Toggle with state** variable for a row ticks that row, because
+picking one is saying you want that button.
 
 They carry the same **no service is live** condition and three-second cooldown as a
 pair's halves, and the same page-naming rule applies when the same label is on two
