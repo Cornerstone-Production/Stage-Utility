@@ -281,7 +281,15 @@ describe("the token gate on a call", () => {
     // Assistant switch that flips with the projectors still off.
     await withCue();
     await automationEngine.setSettings({ simulate: true });
-    const r = await call("projectors_on");
+    const lines: string[] = [];
+    const real = console.log;
+    console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+    let r;
+    try {
+      r = await call("projectors_on");
+    } finally {
+      console.log = real;
+    }
     await automationEngine.setSettings({ simulate: false });
 
     assert.equal(r.status, 200);
@@ -289,6 +297,12 @@ describe("the token gate on a call", () => {
     assert.equal(body.simulated, true);
     assert.match(body.detail, /^would press/);
     assert.equal(presses.length, 0);
+    // The LOG says so too. It used to read a bare "dispatched", identical to a
+    // real press, so an operator reading /log with the projectors dark had
+    // nothing to go on; only the response body carried the flag.
+    const verdict = lines.find((l) => l.includes("[cues] projectors_on by"));
+    assert.ok(verdict, `no verdict line: ${JSON.stringify(lines)}`);
+    assert.match(verdict!, /dispatched \(simulated\)/);
   });
 
   test("a valid token fires it", async () => {
