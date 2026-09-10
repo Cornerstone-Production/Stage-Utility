@@ -89,6 +89,20 @@ function q(text: string): string {
     .replace(/\t/g, "\\t")}"`;
 }
 
+/**
+ * One pair's row off the sensor, as a Jinja expression.
+ *
+ * `or {}` because before the sensor's first poll the attribute does not exist
+ * and `None.get` throws — a template error in Home Assistant's log at every
+ * restart, with the switch unavailable and nothing saying why. Written twice in
+ * the state template rather than bound to a variable: a `{% set %}` needs a
+ * block scalar, and a folded block's leading space is a rendered result Home
+ * Assistant has to strip before it can read it as a boolean.
+ */
+function attrOf(base: string): string {
+  return `(state_attr('${SENSOR_ENTITY}', '${base}') or {})`;
+}
+
 /** The name a person would say for a cue, from `says` or the rule's own name. */
 function friendlyOf(rule: Rule): string {
   const says = String(rule.trigger.params.says ?? "").trim();
@@ -401,9 +415,18 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
         // device ON — the press path does not depend on the state variable at
         // all, so a read failure must never take the switch away. Reading off
         // and staying pressable is the trade taken deliberately.
+        //
+        // `commanded` FIRST, falling back to `state`. Companion polls the device
+        // on its own interval, so for a few seconds after a press the reading is
+        // from before it — and a switch templated on the reading alone flips
+        // itself back, which is an invitation to tap it again. Stage Utility
+        // marks that pair `settling` and puts what was asked for in
+        // `commanded`; absent it, `.get` falls through to the reading, which is
+        // every other second of the week. See
+        // docs/integrations/companion.md#the-settle-window.
         ...(p.binding
           ? [
-              `        state: "{{ (state_attr('${SENSOR_ENTITY}', '${p.base}') or {}).get('state') == 'on' }}"`,
+              `        state: "{{ ${attrOf(p.base)}.get('commanded', ${attrOf(p.base)}.get('state')) == 'on' }}"`,
             ]
           : ["        optimistic: true"]),
         "        turn_on:",

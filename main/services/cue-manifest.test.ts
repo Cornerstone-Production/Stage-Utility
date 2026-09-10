@@ -70,7 +70,10 @@ function cue(
 }
 
 let RULES: Rule[] = [];
-let STATES: Record<string, { state: "on" | "off" | "unknown"; reason?: string }> = {};
+let STATES: Record<
+  string,
+  { state: "on" | "off" | "unknown"; reason?: string; settling?: true; commanded?: "on" | "off" }
+> = {};
 let stateReads = 0;
 
 beforeEach(() => {
@@ -137,6 +140,31 @@ describe("the shape of the manifest", () => {
     assert.equal(m.switches[0]?.state, "unknown");
     assert.equal(m.switches[0]?.reason, "no such variable in Companion");
     assert.equal(m.switches[0]?.stateSource, "Projectors:powerState");
+  });
+
+  test("a pair settling from a press carries what was commanded", async () => {
+    // The reading lags the press by however long Companion takes to poll the
+    // device, so an integration reading the manifest in that gap has to be able
+    // to show the command instead. Without this it shows the pre-press value
+    // and offers the user the same tap again.
+    RULES = [
+      cue("plug_on", { params: { stateVariable: "plug_state" } }),
+      cue("plug_off", { at: { page: 1, row: 0, col: 2 } }),
+    ];
+    STATES = { plug: { state: "off", settling: true, commanded: "on" } };
+    const settlingPair = (await cueManifest()).switches[0]!;
+    assert.equal(settlingPair.settling, true);
+    assert.equal(settlingPair.commanded, "on");
+    // The reading itself is unchanged: the manifest does not pretend.
+    assert.equal(settlingPair.state, "off");
+
+    // And once the window closes the fields are gone, rather than left on
+    // saying `false` or carrying the last command forever.
+    STATES = { plug: { state: "on" } };
+    const done = (await cueManifest()).switches[0]!;
+    assert.equal(done.settling, undefined);
+    assert.equal(done.commanded, undefined);
+    assert.equal(Object.hasOwn(done, "settling"), false);
   });
 
   test("a toggle pair says so", async () => {
