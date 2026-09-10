@@ -191,6 +191,7 @@ export const FIXTURE_PAGE_IDS: Record<number, string> = {
   2: opaqueId("page:lights"),
   3: opaqueId("page:cameras"),
   4: opaqueId("page:blank"),
+  5: opaqueId("page:recorders"),
 };
 
 /** Fake page names, deliberately — the real ones name a real building. */
@@ -198,6 +199,7 @@ export const FIXTURE_PAGES = {
   screens: "Room A: Screens",
   lights: "Room A: Lighting",
   cameras: "Room A: Cameras",
+  recorders: "Room A: Recorders",
 } as const;
 
 export function companionExportFixture(): Record<string, unknown> {
@@ -255,6 +257,42 @@ export function companionExportFixture(): Record<string, unknown> {
         moduleId: "obs-studio",
         moduleInstanceType: "connection",
         moduleVersionId: "3.15.3",
+      },
+      // The recorders and the cameras: modules with no power state at all,
+      // whose transport or record variable is the fact a cue pair is about.
+      // Module versions are the ones the real install runs, because that is the
+      // version the inference table's values were verified against.
+      "conn-deck": {
+        label: "MA_HyperDeck_01",
+        // DISABLED, exactly as all three decks are on the real install. A
+        // disabled connection still carries its actions in the export, so the
+        // inference has everything it needs — and its variables cannot be read,
+        // which is a pair reading unknown and not a pair reading off.
+        enabled: false,
+        moduleId: "bmd-hyperdeck",
+        moduleInstanceType: "connection",
+        moduleVersionId: "2.5.0",
+      },
+      "conn-encoder": {
+        label: "UltraEncode01-MA-PGM",
+        enabled: true,
+        moduleId: "magewell-ultrastream",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.0.1",
+      },
+      "conn-ptz": {
+        label: "SA-PTZ-Camera",
+        enabled: true,
+        moduleId: "panasonic-cameras",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.2.0",
+      },
+      "conn-cine": {
+        label: "MA-CAM-1",
+        enabled: true,
+        moduleId: "red-rcp2",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.4.8",
       },
     },
     // Custom variables, keyed by NAME with the definition as the value — the
@@ -397,6 +435,70 @@ export function companionExportFixture(): Record<string, unknown> {
       ]),
       // A page with nothing but navigation, as most of a real install's are.
       "4": page(4, "PAGE", []),
+      // The recorders page, laid out as the real install's is: one key per
+      // device that starts it and one that stops it, plus the macro key that
+      // starts them all at once.
+      "5": page(5, FIXTURE_PAGES.recorders, [
+        // A START on one device beside a STOP on ANOTHER, both on this page.
+        // Their labels share no base, so they must not pair — an encoder that
+        // stopped when somebody said "deck 2 off" is the mistake.
+        //
+        // FIRST on the page, before the real pair, and that ordering is the
+        // whole point. Pairing by page and direction word rather than by base
+        // is a mistake findPairs's own "first one wins" rule hides when the
+        // matching pair is parsed first: Deck 1 claims both slots and the
+        // wrongly-paired keys never get a look in. Parsed first, they pair with
+        // each other and the guard bites.
+        { row: 0, col: 0, text: "Deck 2 START", connections: ["conn-deck"], actionDef: "rec" },
+        { row: 0, col: 1, text: "Encoder STOP", connections: ["conn-encoder"], actionDef: "record" },
+        // A START/STOP pair on a HyperDeck. The deck's transport variable is
+        // the only thing it publishes — it has no power state — and the pair
+        // infers it from the `rec` action on the ON half.
+        { row: 1, col: 0, text: "Deck 1 START", connections: ["conn-deck"], actionDef: "rec" },
+        { row: 1, col: 1, text: "Deck 1 STOP", connections: ["conn-deck"], actionDef: "stop" },
+        // The encoder's two facts on one connection, one key each.
+        {
+          row: 2,
+          col: 0,
+          text: "PGM Rec Toggle",
+          connections: ["conn-encoder"],
+          actionDef: "record",
+          feedbacks: [{ definitionId: "record", connectionId: "conn-encoder" }],
+        },
+        { row: 2, col: 1, text: "PGM Stream Toggle", connections: ["conn-encoder"], actionDef: "stream" },
+        // A PTZ camera: a power pair, and an SD recording key that is a
+        // different fact on the same connection.
+        {
+          row: 3,
+          col: 0,
+          text: "PTZ ON",
+          connections: ["conn-ptz"],
+          actionDef: "power",
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-ptz" }],
+        },
+        {
+          row: 3,
+          col: 1,
+          text: "PTZ OFF",
+          connections: ["conn-ptz"],
+          actionDef: "power",
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-ptz" }],
+        },
+        { row: 3, col: 2, text: "PTZ SD Rec", connections: ["conn-ptz"], actionDef: "sdCardRec" },
+        // A cinema camera whose record key is a toggle with no partner, exactly
+        // as the five REC START keys on the real install are.
+        {
+          row: 4,
+          col: 0,
+          text: "Cam 1 REC START",
+          connections: ["conn-cine"],
+          actionDef: "toggle_recording",
+        },
+        // A deck key that is NOT about the transport: formatting a disk. It
+        // drives the deck and infers nothing, which is what the row's `when`
+        // fragments are for.
+        { row: 5, col: 0, text: "Format Decks", connections: ["conn-deck"], actionDef: "formatPrepare" },
+      ]),
     },
   };
 }

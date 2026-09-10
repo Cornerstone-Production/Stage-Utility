@@ -5,6 +5,7 @@ import {
   isTogglePair,
   stateBindingOf,
   stateBindingParams,
+  STATE_ANY_OTHER,
   STATE_OFF_DEFAULT,
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
@@ -658,7 +659,18 @@ function CueStateFields({
               className="h-7 text-footnote"
             />
           </Row>
-          <Row label="Value meaning off" hint={`What the variable holds when it is off. Blank means "${STATE_OFF_DEFAULT}".`}>
+          {/* The `*` sentinel is named on the OFF field only, because that is
+              the only field it is legal on — the server refuses it as the on
+              value. A status variable with several answers (a recorder's
+              transport, say) is bound by spelling out the on value and leaving
+              the rest to `*`. */}
+          <Row
+            label="Value meaning off"
+            hint={
+              `What the variable holds when it is off. Blank means "${STATE_OFF_DEFAULT}"; ` +
+              `"${STATE_ANY_OTHER}" means anything else — any value that is not the on value.`
+            }
+          >
             <Input
               value={String(params.stateOffValue ?? "")}
               onChange={(e) => onChange({ stateOffValue: e.target.value })}

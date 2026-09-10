@@ -546,6 +546,24 @@ describe("the State variable hint on a toggle pair", () => {
     assert.equal(text.includes("A Companion custom variable your ON/OFF buttons set"), true);
   });
 
+  test('the off value hint says what "*" means, and the on value hint does not', async () => {
+    // `*` is legal on the OFF field only — the server refuses it as the on
+    // value — so naming it on both would be an invitation to a 400. The hint
+    // lives behind the row's InfoHint, opened here the way an operator does.
+    //
+    // The FIELD ITSELF is verified in a browser rather than here: the popover's
+    // placement and whether it is legible over the field below it are not
+    // things jsdom can see. See the pull request.
+    RULES = [cue("deck_on", { stateVariable: "MA_HyperDeck_01:status", stateOnValue: "Record", stateOffValue: "*" }), cue("deck_off")];
+    CUSTOM_VARIABLES = [];
+    await mount();
+    await open("deck_on");
+    const off = await hintFor("Value meaning off");
+    assert.equal(off.includes('"*" means anything else — any value that is not the on value'), true);
+    const on = await hintFor("Value meaning on");
+    assert.equal(on.includes("anything else"), false);
+  });
+
   test("an ordinary pair on two buttons never says it", async () => {
     const off = cue("house_lights_off");
     off.action.params.col = 2;

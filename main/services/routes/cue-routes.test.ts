@@ -1145,7 +1145,7 @@ describe("the button and pair endpoints", () => {
     assert.equal(r.status, 200);
     const body = r.json as { ok: boolean; buttons: { pageName: string; label: string }[] };
     assert.equal(body.ok, true);
-    assert.equal(body.buttons.length, 19);
+    assert.equal(body.buttons.length, 30);
     assert.ok(body.buttons.some((b) => b.pageName === FIXTURE_PAGES.screens));
   });
 
@@ -1188,12 +1188,20 @@ describe("the button and pair endpoints", () => {
     for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
     const r = await callRoute(cueRoutes, "/api/companion/pairs");
     const pairs = (r.json as { pairs: { base: string; slug: string; exists: boolean }[] }).pairs;
-    assert.equal(pairs.length, 4);
+    assert.equal(pairs.length, 6);
     assert.deepEqual(
       pairs.map((p) => p.slug),
       // "Projectors" is on both fixture pages, so both are prefixed. See
       // slugsForPairs — a plain slug would have one of them refused on import.
-      ["lobby_tvs", "room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
+      // `deck_1` is a START/STOP pair, named `_on`/`_off` like every other.
+      [
+        "lobby_tvs",
+        "room_a_screens_projectors",
+        "room_a_lighting_projectors",
+        "rig",
+        "deck_1",
+        "ptz",
+      ],
     );
     assert.equal(pairs.every((p) => !p.exists), true);
   });
@@ -1216,13 +1224,16 @@ describe("the button and pair endpoints", () => {
     const body = r.json as { pairs: { slug: string; suggested: boolean }[]; defaultPages?: unknown };
     assert.deepEqual(
       body.pairs.filter((p) => p.suggested).map((p) => p.slug),
-      ["room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
+      ["room_a_screens_projectors", "room_a_lighting_projectors", "rig", "deck_1"],
     );
     // "lobby_tvs" drives generic-tcp-udp — something we cannot call a projector —
-    // so it is offered unticked rather than pre-armed.
+    // so it is offered unticked rather than pre-armed. "ptz" drives a Panasonic
+    // camera, whose power the inference reads and which is still not on the
+    // utility list: a camera pre-ticked is a cue somebody can say by accident,
+    // and an unticked pair is one click away.
     assert.deepEqual(
       body.pairs.filter((p) => !p.suggested).map((p) => p.slug),
-      ["lobby_tvs"],
+      ["lobby_tvs", "ptz"],
     );
     assert.equal("defaultPages" in body, false, "a site's page names came back over the wire");
   });
@@ -1358,6 +1369,9 @@ describe("importing single buttons", () => {
     // Cam 2 both run nothing, which is what the reconcile's "an empty
     // fingerprint is never searched for" guard needs — then the two OBS
     // toggles. See the fixture.
+    // Page 5: the recorder keys that have no partner. Deck 1 START and STOP are
+    // a pair and are offered as one, so neither is here; "Deck 2 START" and
+    // "Encoder STOP" share no base and are two singles.
     assert.deepEqual(
       buttons.map((b) => `${b.page as number}:${b.slug as string}`),
       [
@@ -1371,6 +1385,13 @@ describe("importing single buttons", () => {
         "3:obs_rec_toggle",
         "3:obs_stream_toggle",
         "3:tv_wall_on",
+        "5:deck_2_start",
+        "5:encoder_stop",
+        "5:pgm_rec_toggle",
+        "5:pgm_stream_toggle",
+        "5:ptz_sd_rec",
+        "5:cam_1_rec_start",
+        "5:format_decks",
       ],
     );
     assert.equal(
@@ -2088,6 +2109,61 @@ describe("importing a pair with a state variable", () => {
     const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
     assert.deepEqual(created, []);
     assert.match(skipped[0]!.why, /could never be read/);
+    assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
+  });
+
+  test('an off value of "*" imports, and reads on for the on value and off for anything else', async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs", stateOnValue: "Record", stateOffValue: "*" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    assert.deepEqual((r.json as { created: string[] }).created, ["lobby_tvs_on", "lobby_tvs_off"]);
+    const on = automationEngine
+      .cueRules()
+      .find((x) => String(x.trigger.params.name) === "lobby_tvs_on");
+    assert.equal(String(on?.trigger.params.stateOffValue), "*");
+
+    const stateOf = async (): Promise<string> => {
+      cueStates.invalidate();
+      const answer = (await callRoute(cueRoutes, "/api/cues/states")).json as {
+        states: Record<string, { state: string }>;
+      };
+      return String(answer.states.lobby_tvs?.state);
+    };
+    variables.lobby_tvs = "Record";
+    assert.equal(await stateOf(), "on");
+    // One of the seven other words a transport variable holds. Exact matching
+    // would have read every one of them unknown.
+    variables.lobby_tvs = "Preview";
+    assert.equal(await stateOf(), "off");
+    delete variables.lobby_tvs;
+    assert.equal(await stateOf(), "unknown");
+  });
+
+  test('an ON value of "*" is refused before either half exists', async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs", stateOnValue: "*", stateOffValue: "Idle" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.match(skipped[0]!.why, /can only be the off value/);
     assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
   });
 

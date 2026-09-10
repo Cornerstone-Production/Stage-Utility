@@ -177,6 +177,50 @@ describe("cueStates.read", () => {
     );
   });
 
+  describe('an off value of "*" is anything that is not the on value', () => {
+    // A recorder's transport variable holds one of eight words. Bound with an
+    // exact off value it reads unknown in six of them; bound with `*` the on
+    // value is the only one spelled out. `unknown` then means only "no such
+    // variable" or "no Companion".
+    test("the on value still reads on", async () => {
+      rules = pair("deck", { stateOnValue: "Record", stateOffValue: "*" });
+      values.deck_state = { value: "Record" };
+      const answer = await cueStates.read();
+      assert.equal(answer.states.deck!.state, "on");
+      assert.equal(answer.ok, true);
+    });
+
+    test("any other non-empty value reads off, with no reason", async () => {
+      rules = pair("deck", { stateOnValue: "Record", stateOffValue: "*" });
+      values.deck_state = { value: "Preview" };
+      const answer = await cueStates.read();
+      assert.equal(answer.states.deck!.state, "off");
+      assert.equal(answer.states.deck!.value, "Preview");
+      assert.equal(answer.states.deck!.reason, undefined);
+      assert.equal(answer.ok, true);
+    });
+
+    test("an EMPTY value reads off — the variable was read", async () => {
+      // What a module writes for a device it has not heard from yet. It is
+      // certainly not recording, and it is not a failure to read either.
+      rules = pair("deck", { stateOnValue: "Record", stateOffValue: "*" });
+      values.deck_state = { value: "" };
+      const answer = await cueStates.read();
+      assert.equal(answer.states.deck!.state, "off");
+      assert.equal(answer.states.deck!.value, "");
+      assert.equal(answer.ok, true);
+    });
+
+    test("a MISSING variable is still unknown — `*` matches a value, not a failure", async () => {
+      rules = pair("deck", { stateOnValue: "Record", stateOffValue: "*" });
+      const answer = await cueStates.read();
+      assert.equal(answer.states.deck!.state, "unknown");
+      assert.equal(answer.states.deck!.value, null);
+      assert.equal(answer.states.deck!.reason, "no such custom variable in Companion");
+      assert.equal(answer.ok, false);
+    });
+  });
+
   test("a variable Companion does not have is unknown, with that reason", async () => {
     rules = pair("missing");
     const answer = await cueStates.read();

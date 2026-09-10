@@ -237,6 +237,26 @@ describe("stateBindingProblem", () => {
     // The defaults differ, so an unset pair of values is fine.
     assert.equal(stateBindingProblem({ stateVariable: "p" }), null);
   });
+
+  test('"*" is accepted as the OFF value and refused as the on value', () => {
+    assert.equal(
+      stateBindingProblem({ stateVariable: "Deck:status", stateOnValue: "Record", stateOffValue: "*" }),
+      null,
+    );
+    // On `*` is a switch that reads on whatever the device is doing — the exact
+    // silent failure the binding exists to remove.
+    assert.match(
+      String(stateBindingProblem({ stateVariable: "Deck:status", stateOnValue: "*", stateOffValue: "x" })),
+      /can only be the off value/,
+    );
+    // Both `*` is reported as the on value being wrong, not as the two matching:
+    // moving it to the off field is the fix, and "they are the same" does not
+    // say that.
+    assert.match(
+      String(stateBindingProblem({ stateVariable: "Deck:status", stateOnValue: "*", stateOffValue: "*" })),
+      /can only be the off value/,
+    );
+  });
 });
 
 describe("defaultStateVariable", () => {

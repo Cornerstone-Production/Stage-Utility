@@ -1,21 +1,31 @@
 // Inferring where a button's device already reports its own state.
 //
-// Every module row here was read LIVE off a Companion 5.0.3 — the variable name
-// and the two values it holds — because inventing either is a binding that
-// answers 404 forever, or one that matches neither value and reads unknown
-// forever. Neither failure says anything on screen; both look like an operator
-// who bound the wrong thing.
+// Every module row is verified twice over — the variable name and the ON value
+// read live off this install's Companion where the connection is enabled, and
+// read out of the module's own source at the version the install runs — because
+// inventing either is a binding that answers 404 forever, or one that matches
+// neither value and reads unknown forever. Neither failure says anything on
+// screen; both look like an operator who bound the wrong thing. The row in
+// companion-state-source.ts carries its evidence in a `source` field.
 //
-// The one row NOT read live is OBS `streaming`: that install has three
-// recording buttons and no streaming one. Its RECORDING actions were read
-// (`StartStopRecording`, `start_recording`, `stop_recording`), which is why the
-// streaming test below is about a button being excluded rather than a list of
-// action ids being matched.
+// One value could not be read live: OBS `streaming`, because that install has
+// three recording buttons and no streaming one. It shipped as `On-Air`, guessed
+// from the off value, and the module writes `Live`.
+//
+// TWO ROWS PER MODULE is the case these tests are mostly about. A recorder has
+// no power state and an OBS box has a stream and a recording on one connection,
+// so which fact a button is about comes from what the button DOES — and a row
+// picked off a feedback instead would report a recording nobody started.
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { inferStateSource, type ExportConnection } from "./companion-state-source.js";
+import {
+  inferStateSource,
+  STATE_ANY_OTHER,
+  STATE_SOURCES,
+  type ExportConnection,
+} from "./companion-state-source.js";
 import { parseButtons } from "./companion-export.js";
 import { companionExportFixture } from "./fixtures/companion-export.js";
 
@@ -25,6 +35,10 @@ const connections: Record<string, ExportConnection> = {
   tv: { label: "MA-Foyer-TV-1", moduleId: "vizio-smartcast" },
   projector: { label: "MA_HL_Projector", moduleId: "generic-pjlink" },
   obs: { label: "Studio-OBS", moduleId: "obs-studio" },
+  deck: { label: "MA_HyperDeck_01", moduleId: "bmd-hyperdeck" },
+  encoder: { label: "UltraEncode01-MA-PGM", moduleId: "magewell-ultrastream" },
+  ptz: { label: "SA-PTZ-Camera", moduleId: "panasonic-cameras" },
+  cine: { label: "MA-CAM-1", moduleId: "red-rcp2" },
   mixer: { label: "Mixer", moduleId: "yamaha-rcp" },
   unlabelled: { label: "", moduleId: "tplink-kasasmartplug" },
 };
@@ -95,29 +109,254 @@ describe("inferStateSource, one row per module", () => {
     );
   });
 
-  test("OBS infers `streaming` only for a STREAMING button", () => {
-    const streaming = inferStateSource(
-      button(
-        [{ definitionId: "recording", connectionId: "obs" }],
-        [{ definitionId: "StartStopStreaming", connectionId: "obs" }],
+  test("OBS is two rows, not one — see the next describe for which button picks which", () => {
+    // The row list itself: what a STREAMING key gets. `Live` and `*`, because
+    // OBS reports Starting, Stopping and Reconnecting as well as Off-Air, and a
+    // switch has no use for the difference.
+    assert.deepEqual(
+      inferStateSource(
+        button([], [{ definitionId: "StartStopStreaming", connectionId: "obs" }]),
+        connections,
       ),
-      connections,
+      {
+        variable: "Studio-OBS:streaming",
+        // `Live`, which is what obs-studio 3.15.3 writes
+        // (`this.states.streaming ? 'Live' : 'Off-Air'`) and what master's
+        // getOBSStreamingStateLabel returns. It shipped as `On-Air` — a guess
+        // from the off value's spelling, on the one row nothing on the real
+        // install could confirm — and a live stream read unknown.
+        onValue: "Live",
+        offValue: "*",
+        moduleId: "obs-studio",
+      },
     );
-    assert.deepEqual(streaming, {
-      variable: "Studio-OBS:streaming",
-      onValue: "On-Air",
-      offValue: "Off-Air",
-      moduleId: "obs-studio",
-    });
+  });
+});
 
-    // The same connection, the recording action. Bound to `streaming` it would
-    // report a stream nobody started, every time somebody recorded.
+describe("the table itself", () => {
+  const rows = Object.entries(STATE_SOURCES).flatMap(([moduleId, list]) =>
+    list.map((row) => ({ moduleId, ...row })),
+  );
+
+  test("EXACTLY the modules and rows that have been verified", () => {
+    // Exact, not a floor. A row is a variable name and an on value read off a
+    // real module, and a row nobody wrote a test and a docs line for is a
+    // binding that reads unknown forever with nothing on screen saying why. A
+    // new one fails here until it is named in all three places.
+    assert.deepEqual(
+      rows.map((r) => `${r.moduleId}:${r.name} ${r.on}/${r.off}`),
+      [
+        "tplink-kasasmartplug:power_state On/Off",
+        "tplink-kasasmartbulb:power_state On/Off",
+        "vizio-smartcast:power On/Off",
+        "generic-pjlink:powerState On/Off",
+        "panasonic-cameras:power ON/OFF",
+        "panasonic-cameras:recording ON/OFF",
+        "obs-studio:streaming Live/*",
+        "obs-studio:recording Recording/*",
+        "bmd-hyperdeck:status Record/*",
+        "magewell-ultrastream:stream_status Streaming/*",
+        "magewell-ultrastream:record_status Recording/*",
+        "red-rcp2:recording Recording/*",
+      ],
+    );
+  });
+
+  test("no row can be saved as a binding that reads on whatever the device does", () => {
+    // The RECONCILE writes a row straight into a rule's params without going
+    // through stateBindingProblem, so these two are the only thing standing
+    // between a bad row and a switch that lies. `*` in the on column would
+    // match every value; two equal values could never be told apart.
+    for (const row of rows) {
+      const where = `${row.moduleId}:${row.name}`;
+      assert.notEqual(row.on, STATE_ANY_OTHER, where);
+      assert.notEqual(row.on, row.off, where);
+      assert.notEqual(row.on.trim(), "", where);
+      assert.notEqual(row.off.trim(), "", where);
+      // Trimmed on both ends before comparison, so a value with whitespace on
+      // it would never match what it was read from.
+      assert.equal(row.on, row.on.trim(), where);
+      assert.equal(row.off, row.off.trim(), where);
+      // And the evidence, on the row, in the same object a reader changes.
+      assert.notEqual(row.source.trim(), "", where);
+    }
+  });
+
+  test("every `when` fragment is lower-cased, because definitionIds are compared lower-cased", () => {
+    // `sdCardRec` as a fragment would match nothing at all — silently, on the
+    // one module whose action ids are camelCase.
+    for (const row of rows) {
+      for (const fragment of row.when ?? []) {
+        assert.equal(fragment, fragment.toLowerCase(), `${row.moduleId}:${row.name}`);
+      }
+    }
+  });
+});
+
+describe("a module with more than one row, and the button that picks it", () => {
+  test("a HyperDeck's transport: `status` is Record, and anything else is off", () => {
+    // The deck publishes no power state at all. `status` is its transport, and
+    // the module capitalises the protocol's own word — `record` on the wire is
+    // `Record` in the variable.
+    for (const definitionId of ["rec", "recAppend", "stop"]) {
+      assert.deepEqual(
+        inferStateSource(button([], [{ definitionId, connectionId: "deck" }]), connections),
+        {
+          variable: "MA_HyperDeck_01:status",
+          onValue: "Record",
+          offValue: "*",
+          moduleId: "bmd-hyperdeck",
+        },
+        definitionId,
+      );
+    }
+    // A macro key whose only deck evidence is the transport FEEDBACK — the
+    // shape the real install's "REC START" has, whose actions are all internal
+    // key presses.
     assert.equal(
+      inferStateSource(
+        button(
+          [{ definitionId: "transport_status", connectionId: "deck" }],
+          [{ definitionId: "rec", connectionId: "deck" }],
+        ),
+        connections,
+      )?.variable,
+      "MA_HyperDeck_01:status",
+    );
+  });
+
+  test("a deck key that is not about the transport infers nothing", () => {
+    // Formatting a disk. Bound to `status` it would be a switch reporting
+    // whether the deck is recording, on a key that cannot start a recording.
+    assert.equal(
+      inferStateSource(
+        button([], [{ definitionId: "formatPrepare", connectionId: "deck" }]),
+        connections,
+      ),
+      null,
+    );
+  });
+
+  test("an UltraEncode has a stream row and a record row on ONE connection", () => {
+    assert.deepEqual(
+      inferStateSource(button([], [{ definitionId: "stream", connectionId: "encoder" }]), connections),
+      {
+        variable: "UltraEncode01-MA-PGM:stream_status",
+        onValue: "Streaming",
+        offValue: "*",
+        moduleId: "magewell-ultrastream",
+      },
+    );
+    // `Recording`, NOT `Record`. The module writes `Record` when it is IDLE —
+    // one letter apart — so a row taking the live read at face value would have
+    // been a switch that reads on whenever the encoder is not recording.
+    assert.deepEqual(
+      inferStateSource(button([], [{ definitionId: "record", connectionId: "encoder" }]), connections),
+      {
+        variable: "UltraEncode01-MA-PGM:record_status",
+        onValue: "Recording",
+        offValue: "*",
+        moduleId: "magewell-ultrastream",
+      },
+    );
+  });
+
+  test("a Panasonic camera's power and SD recording are ON/OFF in capitals", () => {
+    assert.deepEqual(
+      inferStateSource(
+        button(
+          [{ definitionId: "powerState", connectionId: "ptz" }],
+          [{ definitionId: "power", connectionId: "ptz" }],
+        ),
+        connections,
+      ),
+      { variable: "SA-PTZ-Camera:power", onValue: "ON", offValue: "OFF", moduleId: "panasonic-cameras" },
+    );
+    assert.deepEqual(
+      inferStateSource(button([], [{ definitionId: "sdCardRec", connectionId: "ptz" }]), connections),
+      {
+        variable: "SA-PTZ-Camera:recording",
+        onValue: "ON",
+        offValue: "OFF",
+        moduleId: "panasonic-cameras",
+      },
+    );
+    // A preset RECALL key. `presetRecallScope` contains "rec", which is why the
+    // recording row matches `sdCardRec` and `sdRecState` and not the word.
+    assert.equal(
+      inferStateSource(
+        button([], [{ definitionId: "presetRecallScope", connectionId: "ptz" }]),
+        connections,
+      ),
+      null,
+    );
+  });
+
+  test("a RED camera's record toggle reads `recording`, off for its four other words", () => {
+    assert.deepEqual(
+      inferStateSource(
+        button([], [{ definitionId: "toggle_recording", connectionId: "cine" }]),
+        connections,
+      ),
+      { variable: "MA-CAM-1:recording", onValue: "Recording", offValue: "*", moduleId: "red-rcp2" },
+    );
+    // An exposure key on the same camera is not a record key.
+    assert.equal(
+      inferStateSource(
+        button([], [{ definitionId: "increase_exposure_adjust", connectionId: "cine" }]),
+        connections,
+      ),
+      null,
+    );
+  });
+
+  test("OBS records and streams on one connection, and the ACTION decides which", () => {
+    // The real install's OBS keys all carry a `recording` FEEDBACK, streaming
+    // ones included. Picked off the feedback, a stream key would report a
+    // recording nobody started — so actions are read first.
+    assert.equal(
+      inferStateSource(
+        button(
+          [{ definitionId: "recording", connectionId: "obs" }],
+          [{ definitionId: "StartStopStreaming", connectionId: "obs" }],
+        ),
+        connections,
+      )?.variable,
+      "Studio-OBS:streaming",
+    );
+    assert.deepEqual(
       inferStateSource(
         button(
           [{ definitionId: "recording", connectionId: "obs" }],
           [{ definitionId: "StartStopRecording", connectionId: "obs" }],
         ),
+        connections,
+      ),
+      {
+        variable: "Studio-OBS:recording",
+        onValue: "Recording",
+        offValue: "*",
+        moduleId: "obs-studio",
+      },
+    );
+    // A macro key with no OBS action at all: the feedback is the only evidence,
+    // and it names the recording.
+    assert.equal(
+      inferStateSource(
+        button(
+          [{ definitionId: "recording", connectionId: "obs" }],
+          [{ definitionId: "button_pressrelease", connectionId: "internal" }],
+        ),
+        connections,
+      )?.variable,
+      "Studio-OBS:recording",
+    );
+  });
+
+  test("an OBS key that is neither infers nothing", () => {
+    assert.equal(
+      inferStateSource(
+        button([], [{ definitionId: "set_scene", connectionId: "obs" }]),
         connections,
       ),
       null,
@@ -201,8 +440,22 @@ describe("through the real parser, on the fixture export", () => {
         "1:3:0 Projectors:powerState",
         "2:2:0 VCR-Overhead-Light:power_state",
         "2:2:1 Desk-Lamp:power_state",
+        // The recording key infers now, where it used to infer nothing: the
+        // fact it is about has a row of its own rather than being excluded from
+        // the streaming one.
+        "3:2:0 Studio-OBS:recording",
         "3:2:1 Studio-OBS:streaming",
         "3:3:0 MA-Foyer-TV-1:power",
+        "5:0:0 MA_HyperDeck_01:status",
+        "5:0:1 UltraEncode01-MA-PGM:record_status",
+        "5:1:0 MA_HyperDeck_01:status",
+        "5:1:1 MA_HyperDeck_01:status",
+        "5:2:0 UltraEncode01-MA-PGM:record_status",
+        "5:2:1 UltraEncode01-MA-PGM:stream_status",
+        "5:3:0 SA-PTZ-Camera:power",
+        "5:3:1 SA-PTZ-Camera:power",
+        "5:3:2 SA-PTZ-Camera:recording",
+        "5:4:0 MA-CAM-1:recording",
       ],
     );
   });
@@ -223,8 +476,15 @@ describe("through the real parser, on the fixture export", () => {
     assert.deepEqual(at(3, 3, 0)?.drives, []);
   });
 
-  test("the OBS recording toggle beside the streaming one infers nothing", () => {
-    assert.equal(at(3, 2, 0)?.stateSource, null);
+  test("the OBS recording toggle beside the streaming one reads the OTHER variable", () => {
+    assert.equal(at(3, 2, 0)?.stateSource?.variable, "Studio-OBS:recording");
     assert.equal(at(3, 2, 1)?.stateSource?.variable, "Studio-OBS:streaming");
+  });
+
+  test("a deck key that is not a transport key still infers nothing", () => {
+    // `Format Decks` drives the deck and is not about its transport, so the
+    // page's one non-inferring button is that and only that.
+    assert.equal(at(5, 5, 0)?.stateSource, null);
+    assert.deepEqual(at(5, 5, 0)?.drives, ["bmd-hyperdeck"]);
   });
 });

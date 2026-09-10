@@ -143,11 +143,22 @@ mitigation there is the same: an ACL on the switch port Companion is on.
 ### Importing ON/OFF pairs
 
 Settings → Automation → **Import from Companion…** finds, per page, buttons whose
-labels differ only by a trailing `ON`/`OFF` (or `Startup`/`Shutdown`) and offers
-each pair as two cues, `<name>_on` and `<name>_off`. A pair whose buttons drive a
-utility device — a projector, a television, a smart plug or bulb, a lighting console
-— is ticked by default; everything else is offered unticked, because a cue that
-presses it is a cue somebody can say by accident.
+labels differ only by a trailing direction word — `ON`/`OFF`,
+`Startup`/`Shutdown` or `START`/`STOP` — and offers each pair as two cues,
+`<name>_on` and `<name>_off`. Whichever pair of words the buttons use, the cues
+are named `_on` and `_off`: "REC START" and "REC STOP" become `rec_on` and
+`rec_off`.
+
+The word is the **trailing word** and the base is everything before it, so a
+"Deck 2 START" beside an "Encoder STOP" on one page is two single buttons and
+not a pair. `Record`/`Stop` is deliberately not a pair of words: a lone "Stop"
+has too many partners.
+
+A pair whose buttons drive a utility device — a projector, a television, a smart
+plug or bulb, a lighting console, a recorder or stream encoder — is ticked by
+default; everything else is offered unticked, because a cue that presses it is a
+cue somebody can say by accident. A camera is not on that list: it is pointed at
+things during a service, not turned on before one.
 
 Pairs are matched **within a page**: "Conf TVs ON" on two auditoriums' pages are
 different televisions, and crossing them is the kind of mistake found out during
@@ -196,8 +207,9 @@ Give the row a **Toggle with state** variable and it is imported as an ON/OFF
 two directions apart, so `<name>_on` presses when the variable says off — and when
 it cannot be read at all — but not when it already says on. `<name>_off` mirrors
 it. See [Real state](#real-state). A trailing direction word — `ON`, `OFF`,
-`Startup`, `Shutdown` or `Toggle` — comes off the name first: "VCR Light ON"
-becomes `vcr_light_on` and `vcr_light_off`, not `vcr_light_on_off`.
+`Startup`, `Shutdown`, `START`, `STOP` or `Toggle` — comes off the name first:
+"VCR Light ON" becomes `vcr_light_on` and `vcr_light_off`, not
+`vcr_light_on_off`.
 
 In Companion, set the variable from the button's own toggle branches — a **Set
 custom variable** action to `on` in the branch that turns the thing on, and one to
@@ -352,22 +364,52 @@ variables could be named goes on meaning what it meant.
 
 #### Inferred, from what the button drives
 
-A button that drives a smart plug, a television, a projector or OBS already has
-somewhere to read its state from, with nothing to build in Companion at all. The
-import offers it as the default binding, labelled `(inferred)`, and the hourly
-reconcile fills it in for a pair that has none:
+A button that drives a smart plug, a television, a projector, a camera, a
+recorder or OBS already has somewhere to read its state from, with nothing to
+build in Companion at all. The import offers it as the default binding, labelled
+`(inferred)`, and the hourly reconcile fills it in for a pair that has none:
 
-| Module | Variable | On / off |
-|---|---|---|
-| `tplink-kasasmartplug`, `tplink-kasasmartbulb` | `power_state` | `On` / `Off` |
-| `vizio-smartcast` | `power` | `On` / `Off` |
-| `generic-pjlink` | `powerState` | `On` / `Off` |
-| `obs-studio` | `streaming` | `On-Air` / `Off-Air` |
+| Module | What it reads | Variable | On value | Off value |
+|---|---|---|---|---|
+| `tplink-kasasmartplug` | the plug's power | `power_state` | `On` | `Off` |
+| `tplink-kasasmartbulb` | the bulb's power | `power_state` | `On` | `Off` |
+| `vizio-smartcast` | the television's power | `power` | `On` | `Off` |
+| `generic-pjlink` | the projector's power | `powerState` | `On` | `Off` |
+| `panasonic-cameras` | the camera's power | `power` | `ON` | `OFF` |
+| `panasonic-cameras` | its SD card recording | `recording` | `ON` | `OFF` |
+| `obs-studio` | the stream | `streaming` | `Live` | `*` |
+| `obs-studio` | the recording | `recording` | `Recording` | `*` |
+| `bmd-hyperdeck` | the deck's transport | `status` | `Record` | `*` |
+| `magewell-ultrastream` | the encoder's stream | `stream_status` | `Streaming` | `*` |
+| `magewell-ultrastream` | its recording | `record_status` | `Recording` | `*` |
+| `red-rcp2` | the camera's recording | `recording` | `Recording` | `*` |
 
-The connection comes from the button's `powerState` feedback where it has one,
-and from its first action otherwise. OBS only infers for a button whose actions
-are **streaming** actions — a recording button on the same connection is a
-different fact. Anything else infers nothing rather than guessing a name.
+A power variable holds one of two values and keeps an exact off value, so a
+projector warming up reads *unknown* rather than *off* — reported off it is a
+projector somebody presses again mid warm-up. A status variable holds several,
+so its off value is [`*`](#real-state) and the on value is the only one spelled
+out.
+
+**Which connection** comes from the button's `powerState` feedback where it has
+one, then from its first action, then from any other feedback — which is what
+lets a macro key whose actions are all Companion button presses still be
+identified by the one device feedback on it.
+
+**Which fact** comes from what the button does. A module with more than one row
+— OBS, an encoder, a camera — matches on the actions the button runs, and on its
+feedbacks only if no action matched: a recording key and a streaming key on one
+OBS connection are two different facts, and a deck's format key is neither.
+Anything else infers nothing rather than guessing a name.
+
+Modules in use with **no row**, because they publish no on/off state to read:
+`bmd-atem` (its `record_active` and `stream_active` variables exist only in
+module versions after 3.18.0), `qsys-remote-control` and `yamaha-rcp` (their
+variables are named after a control or a console model, not after the module),
+`renewedvision-pvp` (registers no variables at all), `malighting-grandma3`,
+`rossvideo-rosstalk`, `generic-swp08`, `bmd-smartview`, `slack-webhooks` (send
+only), `magewell-proconvert-decoder` (only cable and source state),
+`shure-wireless`, `shure-psm1000` and `shure-chargers` (per-channel RF and
+battery).
 
 A binding you set yourself is never replaced. Pick a different variable, or
 **No state**, and the reconcile leaves it alone.
@@ -390,6 +432,15 @@ the same string.
 The comparison is **exact and case-sensitive**, after trimming whitespace from
 both ends: a variable holding `ON` does not match the default `on`, and reads
 *unknown*. Set **Value meaning on** to `ON` or have the button write `on`.
+
+**`*` as the off value means "anything else".** A status variable with more than
+two answers — a recorder's transport, which reads `Record`, `Stopped`, `Preview`,
+`Play`, `Forward`, `Rewind`, `Jog` or `Shuttle` — needs only its on value spelled
+out: set **Value meaning off** to `*` and every other value, including an empty
+one, reads *off*. *Unknown* then means only that Companion has no variable by
+that name or could not be reached. Only the off value may be `*`; `*` as the on
+value is refused, because a switch that reads on whatever the device is doing is
+the failure this binding exists to remove.
 
 The generated YAML then also carries one `rest` sensor polling
 `GET /api/cues/states` every ten seconds, with an attribute per bound pair, and
