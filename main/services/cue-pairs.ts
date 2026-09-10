@@ -358,6 +358,29 @@ export function boundCuePairs(rules: readonly Rule[]): CuePair[] {
 }
 
 /**
+ * What to call a cue on a screen — the words, not the rule's name.
+ *
+ * The operator's own `says` first, with a trailing "on" taken off: it is there
+ * so the cue can be SAID and is not part of the thing's name. "Projectors on"
+ * is a sentence; the switch is called Projectors. Falling back to the cue name
+ * humanised, never to the rule's `name` field — a rule may be called "Rule 4",
+ * and a house full of switches called that is worse than one called by its cue.
+ *
+ * Here rather than in cue-manifest.ts, which is where it was, because the rule
+ * editor names the switch an operator is about to hide and cue-manifest reaches
+ * stage-controller — a renderer importing it crashes the page at load.
+ */
+export function spokenCueName(params: Record<string, string | number>, fallback: string): string {
+  const stripped = String(params.says ?? "").trim().replace(/\s+on$/i, "").trim();
+  if (stripped) return stripped;
+  return fallback
+    .split("_")
+    .filter((w) => w !== "")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/**
  * The custom variable an operator most likely means for a pair called `<slug>`,
  * or "" when nothing in Companion matches.
  *

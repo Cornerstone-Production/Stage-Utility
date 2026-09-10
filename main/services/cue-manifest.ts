@@ -33,8 +33,9 @@
 // Open, like `GET /api/cues/states` and the YAML: it carries cue names and
 // on/off, never a token.
 
-import { cuePairs, isHiddenFromHome, isTogglePair } from "./cue-pairs.js";
+import { cuePairs, isHiddenFromHome, isTogglePair, spokenCueName } from "./cue-pairs.js";
 import { readFingerprint } from "./companion-fingerprint.js";
+import { scrub } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import { CALL_TRIGGER_ID } from "./cue-aliases.js";
 import type { CueStateName, CueStatesAnswer } from "./cue-states.js";
@@ -211,26 +212,11 @@ export async function cueManifest(): Promise<CueManifest> {
 }
 
 /**
- * What to call a cue on a screen.
- *
- * The operator's own `says` first, because that is the words they chose — with
- * a trailing "on" taken off a pair's ON half, which is there so the cue can be
- * SAID and is not part of the thing's name. "Projectors on" is a sentence; the
- * switch is called Projectors.
- *
- * Falling back to the cue name humanised, never to the rule's `name` field: a
- * rule may be called anything, and "Rule 4" in a house full of switches is
- * worse than "Room A Screens Projectors".
+ * What to call a cue on a screen. See spokenCueName — the rule editor names the
+ * same switch, and this module cannot be imported from a renderer.
  */
 function spokenName(rule: Rule, fallback: string): string {
-  const says = String(rule.trigger.params.says ?? "").trim();
-  const stripped = says.replace(/\s+on$/i, "").trim();
-  if (stripped) return stripped;
-  return fallback
-    .split("_")
-    .filter((w) => w !== "")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  return spokenCueName(rule.trigger.params, fallback);
 }
 
 function roomOf(rule: Rule): string {
@@ -262,6 +248,6 @@ let reportedHidden = 0;
 function reportHidden(count: number): void {
   if (count === reportedHidden) return;
   reportedHidden = count;
-  if (count > 0) console.log(`[cues] ${count} cue(s) hidden from Home Assistant`);
+  if (count > 0) console.log(`[cues] ${scrub(count)} cue(s) hidden from Home Assistant`);
   else console.log("[cues] no cues are hidden from Home Assistant");
 }
