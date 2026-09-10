@@ -31,6 +31,7 @@ import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, CALL_CHANNEL, CALL_TRIGGER_ID, isValidCueName, triggersForChannel } from "./automation-triggers.js";
 import { cuePairs, stateBindingProblem } from "./cue-pairs.js";
 import { cueStates, type CueStateName } from "./cue-states.js";
+import { cueLive } from "./cue-live.js";
 import { parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
@@ -220,6 +221,10 @@ class AutomationEngine {
   private rulesChanged(): void {
     broadcast("automation:rules", { rules: this.listRules() });
     cueStates.invalidate();
+    // The cues manifest is a different audience — a Home Assistant integration
+    // that is not a browser and does not read `automation:rules`. It watches a
+    // VERSION, which goes up here and is announced on the `cues` channel.
+    cueLive.rulesChanged();
   }
 
   async addRule(rule: Omit<Rule, "id">): Promise<Rule> {

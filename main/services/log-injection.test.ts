@@ -64,6 +64,9 @@ const REQUEST_FACING = [
   "checklist-ticks-store.ts",
   "companion-reconcile.ts",
   "context.ts",
+  // Its read failure line carries whatever cue-states could not read, which
+  // reaches Companion over HTTP with a variable name typed into a rule.
+  "cue-live.ts",
   "cue-routes.ts",
   // Logs the Companion variable name a cue is bound to, which arrives as a rule
   // param over HTTP.
@@ -227,6 +230,9 @@ function requestFacingFiles(): string[] {
     // Its lines name the Companion custom variable a cue pair is bound to and
     // the pair's base — a rule param typed into an HTTP body — and the value
     // Companion sent back.
+    // Its read failure line carries whatever cue-states could not read, which
+    // reaches Companion over HTTP with a variable name typed into a rule.
+    path.join(HERE, "cue-live.ts"),
     path.join(HERE, "cue-states.ts"),
     // Every value on its lines is either a cue name — typed into an HTTP body
     // — or a Companion page name out of the export. Both reach `/log`.

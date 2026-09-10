@@ -50,6 +50,7 @@ import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-
 import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
 import { cueStates } from "../cue-states.js";
+import { cueManifest } from "../cue-manifest.js";
 import { stageController } from "../stage-controller.js";
 import type { Rule } from "../../types/automation.js";
 
@@ -168,6 +169,15 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // (cue-states.ts), so a sensor polling every ten seconds costs one round of
     // reads and an install nobody polls costs nothing.
     json(res, await cueStates.read());
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/cues/manifest") {
+    // Open, like the states route, the YAML and the token list. It carries cue
+    // names, room names, on/off and this server's own LAN address — all of
+    // which GET /api/automation/rules and GET /api/version already serve to
+    // anyone on the LAN — and never a token.
+    json(res, await cueManifest());
     return;
   }
 

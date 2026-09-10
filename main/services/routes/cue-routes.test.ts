@@ -773,6 +773,80 @@ describe("a pair's state binding", () => {
   });
 });
 
+describe("GET /api/cues/manifest", () => {
+  /** A bound pair and a lone cue, on the real engine through the real addRule. */
+  async function withACueOfEachKind(): Promise<void> {
+    for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+    for (const [name, says, extra, params] of [
+      ["projectors_on", "Projectors on", { stateVariable: "projectors_state" }, { page: 1, row: 0, col: 1 }],
+      ["projectors_off", "Projectors off", {}, { page: 1, row: 0, col: 2 }],
+      ["take_screens", "Take screens", {}, { page: 1, row: 2, col: 3 }],
+    ] as const) {
+      await automationEngine.addRule({
+        name,
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name, says, room: "Room A", ...extra } },
+        conditions: [],
+        action: { id: "companion.press", params: { ...params } },
+        cooldownSec: 0,
+        oncePerService: false,
+      });
+    }
+  }
+
+  const manifest = async () => {
+    const r = await callRoute(cueRoutes, "/api/cues/manifest");
+    assert.equal(r.status, 200);
+    return r.json as {
+      version: number;
+      server: { name: string; lanUrl: string | null };
+      switches: { id: string; name: string; on: string; off: string; state: string; available: boolean }[];
+      buttons: { id: string; name: string; cue: string; available: boolean }[];
+    };
+  };
+
+  test("is an OPEN read, and lists a switch per pair and a button per lone cue", async () => {
+    // Open like the states route and the YAML: cue names and on/off, never a
+    // token. The thing reading it is an integration that has not been handed
+    // one yet — this is how it finds out what to ask for.
+    await withACueOfEachKind();
+    variables.projectors_state = "on";
+    cueStates.invalidate();
+    const m = await manifest();
+    assert.deepEqual(
+      m.switches.map((x) => `${x.id}|${x.name}|${x.on}|${x.off}|${x.state}|${x.available}`),
+      ["projectors|Projectors|projectors_on|projectors_off|on|true"],
+    );
+    assert.deepEqual(
+      m.buttons.map((x) => `${x.id}|${x.name}|${x.cue}|${x.available}`),
+      ["take_screens|Take screens|take_screens|true"],
+    );
+    assert.equal(typeof m.server.name, "string");
+  });
+
+  test("the version goes up when a rule changes", async () => {
+    // The only thing telling an integration to re-read. Frozen, a cue added on
+    // a Saturday never appears anywhere.
+    await withACueOfEachKind();
+    const before = (await manifest()).version;
+    await automationEngine.addRule({
+      name: "house_lights",
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: "house_lights", says: "House lights" } },
+      conditions: [],
+      action: { id: "companion.press", params: { page: 2, row: 2, col: 1 } },
+      cooldownSec: 0,
+      oncePerService: false,
+    });
+    const after = await manifest();
+    assert.equal(String(after.version > before), "true");
+    assert.equal(
+      after.buttons.some((b) => b.id === "house_lights"),
+      true,
+    );
+  });
+});
+
 describe("GET /api/cues/states", () => {
   /** A bound pair on the real engine, through the real addRule. */
   async function withBoundPair(params: Record<string, string> = {}): Promise<void> {
