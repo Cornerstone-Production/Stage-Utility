@@ -165,6 +165,17 @@ export interface LearningState {
   stopped?: "bound" | "gave-up";
   /** When the candidates were last probed, ISO — the hourly cap. */
   probedAt?: string;
+  /**
+   * How many probes have come back with NOTHING.
+   *
+   * Bounded, because an hourly probe of a connection that publishes none of the
+   * 19 names would otherwise be 19 requests an hour at a Companion for the rest
+   * of the year, learning nothing each time. It is retried at all — rather than
+   * recorded once — because a module that has not finished connecting publishes
+   * no variables yet, which is the ordinary state of a Companion for the first
+   * minute after a reboot, and the reconcile runs at boot.
+   */
+  probes?: number;
 }
 
 /** Nothing observed yet. */
@@ -180,6 +191,15 @@ const EMPTY: LearningState = { attempts: 0, observed: {} };
  * that would learn on the next two.
  */
 export const LEARN_MAX_ATTEMPTS = 3;
+
+/**
+ * How many probes that find NOTHING a pair gets before it stops asking.
+ *
+ * Three hours of trying, which covers a Companion whose modules had not
+ * finished connecting when the app booted and says so once rather than every
+ * hour until Christmas.
+ */
+export const LEARN_MAX_PROBES = 3;
 
 /**
  * The learning state in a cue's trigger params.
@@ -229,6 +249,7 @@ export function parseLearning(params: Record<string, string | number>): Learning
   };
   if (rec.stopped === "bound" || rec.stopped === "gave-up") state.stopped = rec.stopped;
   if (typeof rec.probedAt === "string" && rec.probedAt) state.probedAt = rec.probedAt;
+  if (Number.isFinite(rec.probes)) state.probes = Math.max(0, Math.trunc(Number(rec.probes)));
   return state;
 }
 
@@ -276,6 +297,15 @@ export function shouldProbe(
 ): boolean {
   const state = parseLearning(params);
   if (state.stopped) return false;
+  // ALREADY ANSWERED. The candidate set is recorded and what happens next is a
+  // press, not another probe: re-asking Companion for 19 names it has already
+  // answered for costs 19 requests an hour and cannot change the answer unless
+  // somebody reconfigures the connection — for which there is Learn again.
+  if (parseCandidates(params).length > 0) return false;
+  // NO clause for the probe budget. The pass that spends the last one writes
+  // `stopped`, which the line above already refuses on — a second check on
+  // `probes` could not be made to fail, and an unfalsifiable guard is worse
+  // than none. See probeStateCandidates.
   if (!state.probedAt) return true;
   const at = Date.parse(state.probedAt);
   // An unparseable timestamp probes: it is a hand-edited or corrupted value,
@@ -430,6 +460,15 @@ export function learnedLog(
   return (
     `[cues] pair ${base}: learned state source ${binding.variable} ` +
     `(${binding.onValue}/${binding.offValue}) from watching ${attempts} presses${also}`
+  );
+}
+
+/** The line for a connection that answers for none of the candidate names. */
+export function noCandidatesLog(base: string, labels: readonly string[]): string {
+  return (
+    `[cues] pair ${base}: none of the ${CANDIDATE_VARIABLES.length} candidate state ` +
+    `variables exist on ${labels.join(", ")} after ${LEARN_MAX_PROBES} tries; ` +
+    `pick one on the rule`
   );
 }
 

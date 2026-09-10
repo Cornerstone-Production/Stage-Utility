@@ -31,7 +31,13 @@ import {
   probeTargets,
   stateProbeDeps,
 } from "./companion-state-probe.js";
-import { CANDIDATE_VARIABLES, learningParams, parseLearning } from "./companion-state-learn.js";
+import {
+  CANDIDATE_VARIABLES,
+  LEARN_MAX_PROBES,
+  learningParams,
+  noCandidatesLog,
+  parseLearning,
+} from "./companion-state-learn.js";
 import { SETTLE_MS, SETTLE_POLL_MS } from "./cue-states.js";
 import { cuePairs } from "./cue-pairs.js";
 import { CALL_TRIGGER_ID } from "./automation-triggers.js";
@@ -258,13 +264,13 @@ describe("probing", () => {
     assert.deepEqual(await probeStateCandidates(pairs, found), []);
   });
 
-  test("records the timestamp even when no candidate exists, so it waits an hour", async () => {
+  test("records the timestamp when no candidate exists, and waits an hour", async () => {
     const { pairs, found } = pairAnd();
     const first = await probeStateCandidates(pairs, found);
     assert.equal(first[0]?.patch.stateCandidates, "");
-    assert.match(first[0]!.log!, /none of the 19 candidate names exist on Rack$/);
-    const probedAt = parseLearning(first[0]!.patch).probedAt;
-    assert.equal(probedAt, new Date(clock).toISOString());
+    assert.equal(first[0]?.log, null, "the first empty probe is not worth a line");
+    assert.equal(parseLearning(first[0]!.patch).probedAt, new Date(clock).toISOString());
+    assert.equal(parseLearning(first[0]!.patch).probes, 1);
 
     // With that recorded, the next pass inside the hour asks for nothing.
     reads = [];
@@ -277,6 +283,57 @@ describe("probing", () => {
     clock += 2 * 60 * 1000;
     assert.equal((await probeStateCandidates(again.pairs, again.found)).length, 1);
     assert.equal(reads.length, CANDIDATE_VARIABLES.length);
+  });
+
+  test("stops asking after three probes that find nothing, with a line", async () => {
+    // THE COST. A connection that publishes none of the 19 names would
+    // otherwise be asked 19 times an hour for the rest of the year, learning
+    // nothing each time. Retried at all because a module that has not finished
+    // connecting publishes no variables yet, which is the ordinary state of a
+    // Companion in the minute after a reboot — and the reconcile runs at boot.
+    let params: Record<string, string | number> = {};
+    const lines: (string | null)[] = [];
+    for (let i = 1; i <= LEARN_MAX_PROBES; i++) {
+      const { pairs, found } = pairAnd(params);
+      const out = await probeStateCandidates(pairs, found);
+      assert.equal(out.length, 1, `probe ${i}`);
+      params = out[0]!.patch;
+      lines.push(out[0]!.log);
+      assert.equal(parseLearning(params).probes, i);
+      clock += 61 * 60 * 1000;
+    }
+    assert.equal(parseLearning(params).stopped, "gave-up");
+    // ONE line, on the probe that gave up. Three hours of "nothing yet" is
+    // three lines saying the same thing on the /log page an operator reads on a
+    // Sunday morning.
+    assert.deepEqual(lines, [null, null, noCandidatesLog("rack", ["Rack"])]);
+    assert.match(
+      noCandidatesLog("rack", ["Rack"]),
+      /^\[cues\] pair rack: none of the 19 candidate state variables exist on Rack after 3 tries; pick one on the rule$/,
+    );
+    // A fourth pass asks for nothing at all, whatever the clock says.
+    reads = [];
+    const after = pairAnd(params);
+    clock += 24 * 60 * 60 * 1000;
+    assert.deepEqual(await probeStateCandidates(after.pairs, after.found), []);
+    assert.deepEqual(reads, []);
+  });
+
+  test("a probe that FOUND something does not ask again either", async () => {
+    // The candidate set is recorded and what happens next is a press. Asking
+    // Companion again for names it has already answered for cannot change the
+    // answer unless somebody reconfigures the connection, for which there is
+    // Learn again.
+    values = { "Rack:status": "Standby" };
+    const { pairs, found } = pairAnd();
+    const first = await probeStateCandidates(pairs, found);
+    assert.equal(first[0]?.patch.stateCandidates, "Rack:status");
+    assert.equal(parseLearning(first[0]!.patch).probes, 0, "a probe that found something is not a miss");
+    reads = [];
+    const again = pairAnd(first[0]!.patch);
+    clock += 24 * 60 * 60 * 1000;
+    assert.deepEqual(await probeStateCandidates(again.pairs, again.found), []);
+    assert.deepEqual(reads, []);
   });
 });
 

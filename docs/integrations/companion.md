@@ -445,6 +445,15 @@ What it never does:
 - **bind from one press.** A variable that moves after an ON press and then
   holds is a `last_command` or a counter, not a state.
 
+It asks Companion **once**. The candidate set is recorded and what happens next
+is a press — Learn again is what re-asks. A connection that answers for none of
+the 19 is retried hourly three times, because a module that has not finished
+connecting publishes no variables yet, and then left alone:
+
+```
+[cues] pair projectors: none of the 19 candidate state variables exist on GrandMA3 after 3 tries; pick one on the rule
+```
+
 It **stops** after three presses that taught it nothing:
 
 ```

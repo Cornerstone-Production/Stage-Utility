@@ -34,7 +34,9 @@ import {
   gaveUpLog,
   learnAgainParams,
   learnedLog,
+  LEARN_MAX_PROBES,
   learningParams,
+  noCandidatesLog,
   observePress,
   parseCandidates,
   parseLearning,
@@ -232,6 +234,7 @@ export async function probeStateCandidates(
     // second line per learning pair would be the log for the morning.
     if (!probed) return out;
     const previous = parseLearning(pair.on.trigger.params);
+    const probes = probed.existing.length === 0 ? (previous.probes ?? 0) + 1 : 0;
     const state: LearningState = {
       ...previous,
       // The baseline for the first observation: what each candidate held when
@@ -241,6 +244,13 @@ export async function probeStateCandidates(
         probed.existing.map((ref) => [ref, { values: [probed.values[ref]!] }]),
       ),
       probedAt: new Date(stateProbeDeps.now()).toISOString(),
+      probes,
+      // A connection that has answered for NONE of the names three times over
+      // is a connection that does not publish one. Stopped, so it is not asked
+      // 19 times an hour for the rest of the year — Learn again is what retries
+      // it. A probe that found something stops asking too, without stopping
+      // learning: what happens next is a press. See shouldProbe.
+      ...(probes >= LEARN_MAX_PROBES ? { stopped: "gave-up" as const } : {}),
     };
     out.push({
       ruleId: pair.on.id,
@@ -250,8 +260,9 @@ export async function probeStateCandidates(
         probed.existing.length > 0
           ? `[cues] pair ${pair.base}: no state source in the table; watching ` +
             `${probed.existing.length} candidate(s) — ${probed.existing.join(", ")}`
-          : `[cues] pair ${pair.base}: no state source in the table and none of the ` +
-            `${candidateRefs(labels).length} candidate names exist on ${labels.join(", ")}`,
+          : probes >= LEARN_MAX_PROBES
+            ? noCandidatesLog(pair.base, labels)
+            : null,
     });
   }
   return out;
