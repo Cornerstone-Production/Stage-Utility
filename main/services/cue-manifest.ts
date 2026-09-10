@@ -152,6 +152,12 @@ export async function cueManifest(): Promise<CueManifest> {
     if (rule.trigger.id !== CALL_TRIGGER_ID || paired.has(rule.id)) continue;
     const cue = String(rule.trigger.params.name ?? "").trim().toLowerCase();
     if (!cue) continue;
+    // A cue named like half of a pair whose partner is not here is an ORPHAN,
+    // not a button: deleting a pair one half at a time exposed the survivor as
+    // a momentary button for the moment between the two deletes, and Home
+    // Assistant created and removed an entity for it. Half a switch is not a
+    // thing anyone should be able to press from Home.
+    if (/_(on|off)$/.test(cue)) continue;
     buttons.push({
       id: cue,
       name: spokenName(rule, cue),

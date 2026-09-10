@@ -109,6 +109,17 @@ describe("the shape of the manifest", () => {
     );
   });
 
+  test("an orphaned pair half is neither a switch nor a button", async () => {
+    // Deleting a pair one half at a time left the survivor exposed as a
+    // momentary button for the moment between the two deletes, and Home
+    // Assistant created and removed an entity for it. Half a switch is not
+    // something anyone should be able to press from Home.
+    RULES = [cue("projectors_off", { says: "Projectors off" })];
+    const m = await cueManifest();
+    assert.deepEqual(m.switches, []);
+    assert.deepEqual(m.buttons.map((b) => b.id), []);
+  });
+
   test("an unbound pair costs no Companion read at all", async () => {
     RULES = [cue("projectors_on"), cue("projectors_off", { at: { page: 1, row: 0, col: 2 } })];
     await cueManifest();
