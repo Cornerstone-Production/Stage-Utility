@@ -95,6 +95,11 @@ interface CueStateRow {
   value: string | null;
   state: "on" | "off" | "unknown";
   reason?: string;
+  /** True for up to eight seconds after a press, while `state` may still be
+   *  the pre-press reading — see `main/services/cue-states.ts`. */
+  settling?: true;
+  /** What that press asked for. Present exactly when `settling` is. */
+  commanded?: "on" | "off";
 }
 
 interface LogEntry {
@@ -438,7 +443,17 @@ function cueStateFor(
  * rule in the list would be noise nobody could act on.
  */
 function CuePairState({ base, state }: { base: string; state: CueStateRow }) {
-  const variant = state.state === "on" ? "success" : state.state === "off" ? "neutral" : "warning";
+  // While settling, `commanded` is what the press asked for and is shown
+  // instead of `state` — `state` may still be the pre-press reading for up to
+  // eight seconds (see the settle window in main/services/cue-states.ts), and
+  // it is never `unknown` because a press always commands `on` or `off`.
+  const shown = state.settling ? state.commanded : state.state;
+  const variant = shown === "on" ? "success" : shown === "off" ? "neutral" : "warning";
+  const title = state.settling
+    ? "Pressed just now; the device has not reported back yet"
+    : state.reason
+      ? `${state.variable}: ${state.reason}`
+      : state.variable;
   return (
     <span
       className="flex min-w-0 items-center gap-1.5"
@@ -447,12 +462,13 @@ function CuePairState({ base, state }: { base: string; state: CueStateRow }) {
       // the prototype chain rendered a dot with no word AND no state attribute,
       // so nothing could count it.
       data-cue-pair={base}
-      data-cue-state={state.state}
+      data-cue-state={shown}
       // The reason on hover rather than on the row: it is a sentence, and the
-      // row already carries the rule name and the summary.
-      title={state.reason ? `${state.variable}: ${state.reason}` : state.variable}
+      // row already carries the rule name and the summary. While settling it
+      // is replaced with a note that the reading below it is stale.
+      title={title}
     >
-      <Status variant={variant}>{state.state}</Status>
+      <Status variant={variant}>{state.settling ? `${shown}…` : shown}</Status>
     </span>
   );
 }
