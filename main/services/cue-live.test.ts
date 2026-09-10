@@ -32,7 +32,12 @@ process.env.STAGE_UTILITY_DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "cue-l
 const { cueLive, cueLiveDeps, CUES_POLL_MS } = await import("./cue-live.js");
 type CuesEvent = import("./cue-live.js").CuesEvent;
 
-type Row = { state: "on" | "off" | "unknown"; reason?: string };
+type Row = {
+  state: "on" | "off" | "unknown";
+  reason?: string;
+  settling?: true;
+  commanded?: "on" | "off";
+};
 
 let STATES: Record<string, Row> = {};
 let reads = 0;
@@ -250,5 +255,63 @@ describe("a read that fails", () => {
       console.error = realError;
       await stopEverything();
     }
+  });
+});
+
+// ── A pair settling from a press ──────────────────────────────────────────────
+//
+// Companion polls the device on its own interval, so for a second or two after
+// a press the reading is from before it. cue-states says so on the row
+// (`settling`, `commanded`) and tells this channel the moment the real value
+// lands. Both halves matter here: pushing a reading known to be stale is what
+// made Home Assistant flip a switch back and invite another tap, and waiting
+// for the next five-second tick is how long that lasted.
+describe("a pair settling from a press", () => {
+  test("the commanded state goes out, and so does the window closing", async () => {
+    STATES = { projectors: { state: "off", settling: true, commanded: "on" } };
+    subscribed = true;
+    cueLive.subscriptionsChanged();
+    await settle();
+    assert.deepEqual(events, [
+      { type: "state", id: "projectors", state: "off", settling: true, commanded: "on" },
+    ]);
+
+    // The window closed with the device never having reported the press. The
+    // state has not changed, but what an integration should DO with it has: a
+    // subscriber never told the window closed goes on showing the command.
+    STATES = { projectors: { state: "off" } };
+    await poll();
+    assert.deepEqual(events, [
+      { type: "state", id: "projectors", state: "off", settling: true, commanded: "on" },
+      { type: "state", id: "projectors", state: "off" },
+    ]);
+    await stopEverything();
+  });
+
+  test("a value that lands is pushed at once, not at the next five second tick", async () => {
+    STATES = { projectors: { state: "off", settling: true, commanded: "on" } };
+    subscribed = true;
+    cueLive.subscriptionsChanged();
+    await settle();
+    assert.equal(String(reads), "1");
+
+    // cue-states' one-second re-read saw the device catch up.
+    STATES = { projectors: { state: "on" } };
+    cueLive.settled();
+    await settle();
+    assert.equal(String(reads), "2", "the settled value waited for the next poll");
+    assert.deepEqual(events[1], { type: "state", id: "projectors", state: "on" });
+    await stopEverything();
+  });
+
+  test("with nobody subscribed a settled value reads nothing", async () => {
+    // The re-read runs for the CALLER's next read, not for this channel, and
+    // this channel has nobody to tell.
+    STATES = { projectors: { state: "on" } };
+    cueLive.settled();
+    await settle();
+    assert.equal(String(reads), "0", "a settled value read Companion for nobody");
+    assert.deepEqual(events, []);
+    console.log = realLog;
   });
 });

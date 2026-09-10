@@ -2506,6 +2506,23 @@ describe("a bound cue does not press when the device is already there", () => {
     assert.equal(presses.length, 0);
   });
 
+  test("the manifest says the pair is settling, with what was commanded", async () => {
+    // Through the real route, the real engine and the real cue-states: an
+    // integration reading the manifest inside the window has to be able to show
+    // the command rather than a reading it has been told is stale.
+    await withPair();
+    variables.projectors_state = "off";
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+
+    const r = await callRoute(cueRoutes, "/api/cues/manifest");
+    const [pair] = (r.json as { switches: Record<string, unknown>[] }).switches;
+    assert.equal(pair!.id, "projectors");
+    assert.equal(pair!.settling, true);
+    assert.equal(pair!.commanded, "on");
+    assert.equal(pair!.state, "off", "the manifest hid the reading rather than marking it stale");
+  });
+
   test("an unbound pair is not settled, whatever it presses", async () => {
     // No binding is no command: there is nothing to read, nothing to lag, and
     // both halves must go on pressing every time they are called.

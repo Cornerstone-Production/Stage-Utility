@@ -183,7 +183,12 @@ a [State variable](integrations/companion.md#real-state), the variable is read
 before the press. If it already says what the call is asking for, nothing is
 pressed and the answer is `200 {ok: true, detail: "already on", state: "on",
 skipped: true}` — mirrored for off. This is checked before the cue's cooldown,
-so a repeated call is answered "already on" rather than refused `cooldown`. The Activity log records it as its own
+so a repeated call is answered "already on" rather than refused `cooldown`.
+Within eight seconds of a press the last press is what a repeat is compared
+against rather than the variable, which lags it by however long Companion takes
+to poll the device — the same state answers `already on (just pressed)`, the
+opposite presses. See [The settle
+window](integrations/companion.md#the-settle-window). The Activity log records it as its own
 outcome, `skipped`, not as a suppression: nothing refused the call.
 
 ```

@@ -49,6 +49,16 @@ export interface ManifestSwitch {
   state: CueStateName;
   /** Why the state is unknown. Absent for on and off. */
   reason?: string;
+  /**
+   * A press was dispatched for this pair inside the last few seconds and
+   * `state` may still be from before it. Absent otherwise, never false.
+   */
+  settling?: true;
+  /**
+   * What that press asked for. Present exactly when `settling` is, and what an
+   * integration should show instead of a reading it has been told is stale.
+   */
+  commanded?: "on" | "off";
   /** The Companion variable the state is read from. Absent for an unbound pair. */
   stateSource?: string;
   /** False when a half's Companion button is missing — it cannot be pressed. */
@@ -143,6 +153,10 @@ export async function cueManifest(): Promise<CueManifest> {
       available: pressable(pair.on) && pressable(pair.off),
     };
     if (row?.reason) entry.reason = row.reason;
+    if (row?.settling) {
+      entry.settling = true;
+      entry.commanded = row.commanded;
+    }
     if (pair.binding) entry.stateSource = pair.binding.variable;
     switches.push(entry);
   }
