@@ -41,6 +41,23 @@ interface ButtonSpec {
   /** Connection ids the button's down-action drives. */
   connections?: string[];
   /**
+   * The `definitionId` every one of those actions carries. Companion's own
+   * spelling per module — `toggle` on a kasa plug, `StartStopStreaming` on OBS
+   * — and what tells an OBS streaming button from an OBS recording one.
+   */
+  actionDef?: string;
+  /**
+   * The control's own `feedbacks[]`, a TOP-LEVEL array beside `steps`, exactly
+   * as 5.0.3 writes it.
+   *
+   * A `powerState` feedback is what says which connection a key is ABOUT — it
+   * is what makes the key light up when the device is on — and it is the first
+   * evidence the state-source inference reads. Real ones carry `options`,
+   * `isInverted` and a long `styleOverrides` list; none of that is read here,
+   * so none of it is invented.
+   */
+  feedbacks?: { definitionId: string; connectionId: string }[];
+  /**
    * Wrap the down-actions in a `logic_if`, the way a real export nests them.
    *
    * The branches live in `children.actions`/`children.else_actions`, and
@@ -87,7 +104,7 @@ function button(spec: ButtonSpec, pageNum: number): Record<string, unknown> {
     // Unique per CONTROL, not per connection: two buttons on a page driving the
     // same device must not share an id, or a fingerprint identifies both.
     id: fixtureActionId(pageNum, spec.row, spec.col, i),
-    definitionId: "power",
+    definitionId: spec.actionDef ?? "power",
     connectionId,
     options: {},
     children: {},
@@ -119,6 +136,15 @@ function button(spec: ButtonSpec, pageNum: number): Record<string, unknown> {
   return {
     type: "button-layered",
     style: { layers: [...CHROME_LAYERS, textLayer(spec.text)] },
+    feedbacks: (spec.feedbacks ?? []).map((f, i) => ({
+      type: "feedback",
+      id: opaqueId(`control-feedback:${pageNum}:${spec.row}:${spec.col}:${i}`),
+      definitionId: f.definitionId,
+      connectionId: f.connectionId,
+      options: {},
+      isInverted: { value: false, isExpression: false },
+      styleOverrides: [],
+    })),
     steps: { "0": { action_sets: { down, up: [] }, options: { runWhileHeld: [] } } },
   };
 }
@@ -196,6 +222,40 @@ export function companionExportFixture(): Record<string, unknown> {
       },
       // The pre-5.x spelling, so a 3.x export is not silently module-less.
       "conn-legacy": { label: "Old Thing", instance_type: "generic-tcp-udp" },
+      // A smart plug, a smart bulb and OBS — the three shapes the state-source
+      // inference reads. The kasa plug is the case the whole thing was built
+      // for: one `toggle` action and a `powerState` feedback, which is exactly
+      // what the VCR light on the real install is.
+      "conn-vcr-light": {
+        label: "VCR-Overhead-Light",
+        enabled: true,
+        moduleId: "tplink-kasasmartplug",
+        moduleInstanceType: "connection",
+        moduleVersionId: "2.2.3",
+      },
+      // A BULB carries a `color` feedback, not a `powerState` one, so it is
+      // only ever found through its first action's connection.
+      "conn-desk-lamp": {
+        label: "Desk-Lamp",
+        enabled: true,
+        moduleId: "tplink-kasasmartbulb",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.1.0",
+      },
+      "conn-foyer-tv": {
+        label: "MA-Foyer-TV-1",
+        enabled: true,
+        moduleId: "vizio-smartcast",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.3.0",
+      },
+      "conn-obs": {
+        label: "Studio-OBS",
+        enabled: true,
+        moduleId: "obs-studio",
+        moduleInstanceType: "connection",
+        moduleVersionId: "3.15.3",
+      },
     },
     // Custom variables, keyed by NAME with the definition as the value — the
     // only part of this document a cue's state binding reads, and the part the
@@ -230,9 +290,23 @@ export function companionExportFixture(): Record<string, unknown> {
     },
     pages: {
       "1": page(1, FIXTURE_PAGES.screens, [
-        // A clean pair.
-        { row: 0, col: 1, text: "Projectors ON", connections: ["conn-pjlink"] },
-        { row: 0, col: 2, text: "Projectors OFF", connections: ["conn-pjlink"] },
+        // A clean pair, and both halves carry the `powerState` feedback a
+        // PJLink projector button really does — so the pair infers
+        // `Projectors:powerState` and needs no custom variable.
+        {
+          row: 0,
+          col: 1,
+          text: "Projectors ON",
+          connections: ["conn-pjlink"],
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-pjlink" }],
+        },
+        {
+          row: 0,
+          col: 2,
+          text: "Projectors OFF",
+          connections: ["conn-pjlink"],
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-pjlink" }],
+        },
         // A pair whose label carries Companion's LITERAL \n escape, which is what
         // a two-line button looks like in the export.
         { row: 1, col: 1, text: "Lobby:\\nTVs ON", connections: ["conn-legacy"] },
@@ -251,6 +325,27 @@ export function companionExportFixture(): Record<string, unknown> {
         // Pairing across pages would cross these two.
         { row: 1, col: 0, text: "Projectors ON", connections: ["conn-lights"] },
         { row: 1, col: 1, text: "Projectors OFF", connections: ["conn-lights"] },
+        // A TOGGLE on a smart plug: one key, one `toggle` action, a
+        // `powerState` feedback. The button the whole state-source inference
+        // was built from.
+        {
+          row: 2,
+          col: 0,
+          text: "VCR Light ON",
+          connections: ["conn-vcr-light"],
+          actionDef: "toggle",
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-vcr-light" }],
+        },
+        // A bulb, whose feedback is `color` and not `powerState` — found only
+        // through its first action's connection.
+        {
+          row: 2,
+          col: 1,
+          text: "Desk Lamp Toggle",
+          connections: ["conn-desk-lamp"],
+          actionDef: "powerOff",
+          feedbacks: [{ definitionId: "color", connectionId: "conn-desk-lamp" }],
+        },
       ]),
       "3": page(3, FIXTURE_PAGES.cameras, [
         // TWO buttons that run nothing, deliberately, and the second one is not
@@ -266,6 +361,39 @@ export function companionExportFixture(): Record<string, unknown> {
         // Its actions live inside a `logic_if`. Both what it drives and its
         // fingerprint have to come out of the nesting.
         { row: 0, col: 1, text: "Record Toggle", connections: ["conn-pjlink"], nested: true },
+        // OBS twice on ONE connection. `streaming` is the variable; `recording`
+        // is a different fact on the same box, so only the streaming button
+        // infers anything and the recording one infers nothing at all.
+        {
+          row: 2,
+          col: 0,
+          text: "OBS Rec Toggle",
+          connections: ["conn-obs"],
+          actionDef: "StartStopRecording",
+          feedbacks: [{ definitionId: "recording", connectionId: "conn-obs" }],
+        },
+        // A MACRO button: every action is on Companion's own `internal`
+        // connection (it presses three other keys), and the only thing naming
+        // the device it is about is its `powerState` feedback. The real install
+        // has exactly this shape — its "REC START" key presses three others and
+        // carries an OBS feedback — and read off the actions alone it infers
+        // nothing at all.
+        {
+          row: 3,
+          col: 0,
+          text: "TV Wall ON",
+          connections: ["internal"],
+          actionDef: "button_pressrelease",
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-foyer-tv" }],
+        },
+        {
+          row: 2,
+          col: 1,
+          text: "OBS Stream Toggle",
+          connections: ["conn-obs"],
+          actionDef: "StartStopStreaming",
+          feedbacks: [{ definitionId: "recording", connectionId: "conn-obs" }],
+        },
       ]),
       // A page with nothing but navigation, as most of a real install's are.
       "4": page(4, "PAGE", []),

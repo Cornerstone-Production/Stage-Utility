@@ -1040,7 +1040,7 @@ describe("the button and pair endpoints", () => {
     assert.equal(r.status, 200);
     const body = r.json as { ok: boolean; buttons: { pageName: string; label: string }[] };
     assert.equal(body.ok, true);
-    assert.equal(body.buttons.length, 14);
+    assert.equal(body.buttons.length, 19);
     assert.ok(body.buttons.some((b) => b.pageName === FIXTURE_PAGES.screens));
   });
 
@@ -1248,12 +1248,25 @@ describe("importing single buttons", () => {
     const buttons = await offered();
     // Page 1: House Lights ON (an ON with no OFF), Take Screens. The unlabelled
     // button at r3c0 is left out — a cue called nothing cannot be called.
+    // Page 2: VCR Light ON and Desk Lamp Toggle, the two smart-device toggles.
     // Page 3: Cam 1 and Record Toggle on row 0, then Cam 2 on row 1 — Cam 1 and
     // Cam 2 both run nothing, which is what the reconcile's "an empty
-    // fingerprint is never searched for" guard needs. See the fixture.
+    // fingerprint is never searched for" guard needs — then the two OBS
+    // toggles. See the fixture.
     assert.deepEqual(
       buttons.map((b) => `${b.page as number}:${b.slug as string}`),
-      ["1:house_lights_on", "1:take_screens", "3:cam_1", "3:record_toggle", "3:cam_2"],
+      [
+        "1:house_lights_on",
+        "1:take_screens",
+        "2:vcr_light_on",
+        "2:desk_lamp_toggle",
+        "3:cam_1",
+        "3:record_toggle",
+        "3:cam_2",
+        "3:obs_rec_toggle",
+        "3:obs_stream_toggle",
+        "3:tv_wall_on",
+      ],
     );
     assert.equal(
       buttons.some((b) => "suggested" in b),

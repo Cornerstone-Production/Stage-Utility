@@ -14,11 +14,22 @@
 //  - an action names its connection as `connectionId`; 3.x called it `instance`.
 //  - a connection declares its module as `moduleId`; 3.x called it
 //    `instance_type`.
+//  - a control's FEEDBACKS are a top-level `feedbacks[]` array on the control,
+//    beside `steps`, each with its own `connectionId` and `definitionId`. (The
+//    feedbacks nested under a `logic_if`'s `children.condition` are a different
+//    thing and are excluded from the actions by `type`.)
 //
 // Every one of those is read both ways. None of them can be told apart from
 // "this button has no label" or "this button drives nothing" by looking at the
 // output, which is exactly why they are read defensively here rather than
 // assumed.
+
+import {
+  type ControlEntry,
+  type ExportConnection,
+  type InferredStateSource,
+  inferStateSource,
+} from "./companion-state-source.js";
 
 /** One pressable Companion button, at the coordinates the press API takes. */
 export interface CompanionButton {
@@ -44,6 +55,19 @@ export interface CompanionButton {
    * against and cannot be identified by anything but its coordinates.
    */
   actionIds: string[];
+  /**
+   * Where this button's own device already reports its state, or null.
+   *
+   * Inferred from what the button drives — see companion-state-source.ts. The
+   * import offers it as the default binding, the reconcile fills an empty one
+   * with it, and the rule editor shows it as a hint.
+   *
+   * The evidence it is derived from — the button's feedbacks and its actions'
+   * definition ids — is deliberately NOT carried on the button. It is two more
+   * arrays per button on a list of 536 that crosses to the browser, and this
+   * one field is the only thing anything downstream asks of it.
+   */
+  stateSource: InferredStateSource | null;
 }
 
 /** Two buttons whose labels differ only by a trailing ON/OFF (or Startup/Shutdown). */
@@ -130,11 +154,58 @@ function actionsOf(control: Record<string, unknown>): Record<string, unknown>[] 
 
 /** Connection ids referenced by any action of a control. */
 function connectionsOf(control: Record<string, unknown>): string[] {
-  const out: string[] = [];
-  for (const a of actionsOf(control)) {
+  return actionEntriesOf(control)
+    .map((a) => a.connectionId)
+    .filter((id) => id !== "");
+}
+
+/**
+ * Every action of a control as `{ connectionId, definitionId }`, IN ORDER.
+ *
+ * The order matters: the state-source inference falls back to the FIRST
+ * action's connection, and a button whose first action is the projector and
+ * whose second is a house-lights macro is a button about the projector.
+ */
+function actionEntriesOf(control: Record<string, unknown>): ControlEntry[] {
+  return actionsOf(control).map((a) => ({
     // 5.x names it connectionId; 3.x named it instance.
-    const id = str(a.connectionId) || str(a.instance);
-    if (id) out.push(id);
+    connectionId: str(a.connectionId) || str(a.instance),
+    definitionId: str(a.definitionId),
+  }));
+}
+
+/**
+ * A control's own feedbacks — the top-level `feedbacks[]` array, not the ones
+ * nested inside a `logic_if`'s condition.
+ *
+ * This is what says which connection a key is ABOUT: a `powerState` feedback is
+ * what an operator adds to make the key light up when the device is on.
+ */
+function feedbackEntriesOf(control: Record<string, unknown>): ControlEntry[] {
+  return arr(control.feedbacks).map((entry) => {
+    const f = rec(entry);
+    return {
+      connectionId: str(f.connectionId) || str(f.instance),
+      definitionId: str(f.definitionId) || str(f.type),
+    };
+  });
+}
+
+/**
+ * Every connection in an export, keyed by its id.
+ *
+ * The LABEL is what a variable reference names — `$(VCR-Overhead-Light:power_state)`
+ * — and the module id is what says which variable that connection publishes.
+ */
+export function parseConnections(raw: unknown): Record<string, ExportConnection> {
+  const out: Record<string, ExportConnection> = Object.create(null) as Record<string, ExportConnection>;
+  for (const [id, entry] of Object.entries(rec(rec(raw).instances))) {
+    const inst = rec(entry);
+    out[id] = {
+      label: str(inst.label).trim(),
+      // 5.x: moduleId. 3.x: instance_type.
+      moduleId: str(inst.moduleId) || str(inst.instance_type),
+    };
   }
   return out;
 }
@@ -164,7 +235,7 @@ export function actionIdsOf(control: unknown): string[] {
  */
 export function parseButtons(raw: unknown): CompanionButton[] {
   const doc = rec(raw);
-  const instances = rec(doc.instances);
+  const connections = parseConnections(raw);
   const out: CompanionButton[] = [];
 
   // `pages` is an object keyed by page number in every export seen; an array is
@@ -190,15 +261,11 @@ export function parseButtons(raw: unknown): CompanionButton[] {
         if (!str(control.type).startsWith("button")) continue;
 
         const label = labelOf(control);
-        const connections = connectionsOf(control);
-        if (!label && connections.length === 0) continue;
+        const driven = connectionsOf(control);
+        if (!label && driven.length === 0) continue;
 
-        const drives = [...new Set(connections)]
-          .map((id) => {
-            const inst = rec(instances[id]);
-            // 5.x: moduleId. 3.x: instance_type.
-            return str(inst.moduleId) || str(inst.instance_type);
-          })
+        const drives = [...new Set(driven)]
+          .map((id) => connections[id]?.moduleId ?? "")
           .filter((m) => m !== "");
 
         out.push({
@@ -210,6 +277,10 @@ export function parseButtons(raw: unknown): CompanionButton[] {
           label,
           drives,
           actionIds: actionIdsOf(control),
+          stateSource: inferStateSource(
+            { feedbacks: feedbackEntriesOf(control), actions: actionEntriesOf(control) },
+            connections,
+          ),
         });
       }
     }
