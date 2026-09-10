@@ -21,6 +21,8 @@ import {
   customVariableNames,
   exportBuild,
   findPairs,
+  importedCueNames,
+  importedCues,
   isCompanionVariableName,
   isCompanionVariableRef,
   isSuggestedPair,
@@ -148,14 +150,54 @@ describe("findPairs", () => {
   const pairs = findPairs(BUTTONS);
   const bases = pairs.map((p) => `${p.page}:${p.base}`);
 
-  test("finds exactly the ON/OFF and Startup/Shutdown sets", () => {
+  test("finds exactly the ON/OFF, Startup/Shutdown and START/STOP sets", () => {
     assert.deepEqual(bases, [
       "1:Lobby: TVs",
       "1:Projectors",
       "2:Projectors",
       "2:Rig",
+      "5:Deck 1",
       "5:PTZ",
     ]);
+  });
+
+  test("START/STOP is a pair, and its cues are still named _on and _off", () => {
+    // How a recorder is labelled. Without it the two halves of every deck,
+    // encoder and camera recording were two unrelated one-shot cues.
+    const deck = pairs.find((p) => p.base === "Deck 1");
+    assert.equal(deck?.on.label, "Deck 1 START");
+    assert.equal(deck?.off.label, "Deck 1 STOP");
+    // The NAMES the import writes, from the one function the import and the
+    // reconcile both ask.
+    const cues = importedCues(BUTTONS);
+    assert.equal(cues.get("5:1:0")?.slug, "deck_1_on");
+    assert.equal(cues.get("5:1:1")?.slug, "deck_1_off");
+    assert.equal(cues.get("5:1:0")?.pair?.half, "on");
+    // And a relabelled half is still recognised as named after its button, so
+    // the reconcile renames it rather than leaving it alone as hand-named.
+    assert.ok(importedCueNames("Deck 1 START", FIXTURE_PAGES.recorders).includes("deck_1_on"));
+  });
+
+  test("a START and a STOP on different devices do NOT pair", () => {
+    // Same page, adjacent keys, no shared base: "Deck 2 START" and "Encoder
+    // STOP". Paired, saying "deck 2 off" would stop the encoder.
+    assert.equal(bases.includes("5:Deck 2"), false);
+    assert.equal(bases.includes("5:Encoder"), false);
+    const singles = singleButtons(BUTTONS, pairs).map((b) => b.label);
+    assert.ok(singles.includes("Deck 2 START"));
+    assert.ok(singles.includes("Encoder STOP"));
+  });
+
+  test("the START half is what the state source is inferred from", () => {
+    // A deck has no power state; `status` is its transport, and the `rec`
+    // action on the START half is what says the pair is about recording.
+    const deck = pairs.find((p) => p.base === "Deck 1");
+    assert.deepEqual(deck?.on.stateSource, {
+      variable: "MA_HyperDeck_01:status",
+      onValue: "Record",
+      offValue: "*",
+      moduleId: "bmd-hyperdeck",
+    });
   });
 
   test("an ON with no OFF is not a pair", () => {
@@ -281,16 +323,28 @@ describe("isSuggestedPair", () => {
 
   test("ticks the pairs that drive a utility device, and only those", () => {
     // EXACT. Projectors on page 1 drive generic-pjlink; Rig and Projectors on
-    // page 2 drive malighting-msc, matched by the family wildcard. "Lobby: TVs"
-    // drives generic-tcp-udp — something we cannot say is a projector — so it is
-    // offered unticked rather than pre-armed.
-    assert.deepEqual(suggested, ["1:Projectors", "2:Projectors", "2:Rig"]);
+    // page 2 drive malighting-msc, matched by the family wildcard. "Deck 1"
+    // drives a HyperDeck — a recorder is setup gear in the same sense, started
+    // before a service and stopped after. "Lobby: TVs" drives generic-tcp-udp
+    // — something we cannot say is a projector — so it is offered unticked
+    // rather than pre-armed, and so is the Panasonic camera's power pair.
+    assert.deepEqual(suggested, ["1:Projectors", "2:Projectors", "2:Rig", "5:Deck 1"]);
   });
 
   test("no page name appears anywhere in the rule", () => {
     // The whole point of the heuristic: a Companion page name is one building's
     // furniture and must not be in this repository at all.
     for (const m of UTILITY_MODULES) assert.match(m, /^[a-z0-9-]+\*?$/);
+  });
+
+  test("a recorder pair is a utility pair", () => {
+    assert.equal(isUtilityModule("bmd-hyperdeck"), true);
+    assert.equal(isUtilityModule("magewell-ultrastream"), true);
+    // Not every recording device: a camera is pointed at things during a
+    // service, and a pre-ticked camera cue is one somebody can say by accident.
+    assert.equal(isUtilityModule("red-rcp2"), false);
+    assert.equal(isUtilityModule("panasonic-cameras"), false);
+    assert.equal(isUtilityModule("obs-studio"), false);
   });
 
   test("a family wildcard matches the family and nothing beyond it", () => {

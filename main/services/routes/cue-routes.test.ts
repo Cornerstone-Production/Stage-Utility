@@ -1184,12 +1184,20 @@ describe("the button and pair endpoints", () => {
     for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
     const r = await callRoute(cueRoutes, "/api/companion/pairs");
     const pairs = (r.json as { pairs: { base: string; slug: string; exists: boolean }[] }).pairs;
-    assert.equal(pairs.length, 5);
+    assert.equal(pairs.length, 6);
     assert.deepEqual(
       pairs.map((p) => p.slug),
       // "Projectors" is on both fixture pages, so both are prefixed. See
       // slugsForPairs — a plain slug would have one of them refused on import.
-      ["lobby_tvs", "room_a_screens_projectors", "room_a_lighting_projectors", "rig", "ptz"],
+      // `deck_1` is a START/STOP pair, named `_on`/`_off` like every other.
+      [
+        "lobby_tvs",
+        "room_a_screens_projectors",
+        "room_a_lighting_projectors",
+        "rig",
+        "deck_1",
+        "ptz",
+      ],
     );
     assert.equal(pairs.every((p) => !p.exists), true);
   });
@@ -1212,7 +1220,7 @@ describe("the button and pair endpoints", () => {
     const body = r.json as { pairs: { slug: string; suggested: boolean }[]; defaultPages?: unknown };
     assert.deepEqual(
       body.pairs.filter((p) => p.suggested).map((p) => p.slug),
-      ["room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
+      ["room_a_screens_projectors", "room_a_lighting_projectors", "rig", "deck_1"],
     );
     // "lobby_tvs" drives generic-tcp-udp — something we cannot call a projector —
     // so it is offered unticked rather than pre-armed. "ptz" drives a Panasonic
@@ -1357,9 +1365,9 @@ describe("importing single buttons", () => {
     // Cam 2 both run nothing, which is what the reconcile's "an empty
     // fingerprint is never searched for" guard needs — then the two OBS
     // toggles. See the fixture.
-    // Page 5: the recorder keys. Deck 1 START and STOP are here rather than in
-    // the pairs half until START/STOP is a pair suffix; the encoder and camera
-    // keys have no partner at all.
+    // Page 5: the recorder keys that have no partner. Deck 1 START and STOP are
+    // a pair and are offered as one, so neither is here; "Deck 2 START" and
+    // "Encoder STOP" share no base and are two singles.
     assert.deepEqual(
       buttons.map((b) => `${b.page as number}:${b.slug as string}`),
       [
@@ -1373,8 +1381,6 @@ describe("importing single buttons", () => {
         "3:obs_rec_toggle",
         "3:obs_stream_toggle",
         "3:tv_wall_on",
-        "5:deck_1_start",
-        "5:deck_1_stop",
         "5:deck_2_start",
         "5:encoder_stop",
         "5:pgm_rec_toggle",

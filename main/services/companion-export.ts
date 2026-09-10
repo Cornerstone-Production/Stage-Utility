@@ -70,7 +70,7 @@ export interface CompanionButton {
   stateSource: InferredStateSource | null;
 }
 
-/** Two buttons whose labels differ only by a trailing ON/OFF (or Startup/Shutdown). */
+/** Two buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown or START/STOP. */
 export interface CompanionPair {
   /** The shared label with the suffix removed ("Projectors"). */
   base: string;
@@ -296,15 +296,33 @@ export function parseButtons(raw: unknown): CompanionButton[] {
  * pair that is wrong here becomes two rules a voice assistant will call, and a
  * guess about what "Open"/"Close" or "Up"/"Down" means on somebody's lighting
  * console is not a guess this should make.
+ *
+ * START/STOP is how a recorder is labelled — "REC START" beside "REC STOP" —
+ * and without it the two halves of every deck, encoder and camera recording
+ * were offered as two unrelated one-shot cues. `Record`/`Stop` is NOT here on
+ * purpose: a lone "Stop" has too many partners, and "MA PGM REC" beside "MA
+ * PGM STOP" would pair under one reading and "MA Cam 1 REC" beside a general
+ * "STOP ALL" under another.
+ *
+ * The two halves are still named `<base>_on` and `<base>_off`, like every other
+ * pair — a Startup/Shutdown pair always was — so "REC START" and "REC STOP"
+ * become `rec_on` and `rec_off`.
  */
 const SUFFIX_PAIRS: readonly (readonly [string, string])[] = [
   ["on", "off"],
   ["startup", "shutdown"],
+  ["start", "stop"],
 ];
 
 const SUFFIXES = SUFFIX_PAIRS.flat();
 
-/** Split "Projectors ON" into ["Projectors", "on"], or null. */
+/**
+ * Split "Projectors ON" into ["Projectors", "on"], or null.
+ *
+ * The suffix is the TRAILING WORD, matched case-insensitively, and the base is
+ * everything before it — so "REC START" and "REC STOP" share the base "REC"
+ * while "Deck 2 START" and "Encoder STOP" share nothing and cannot pair.
+ */
 function splitSuffix(label: string): { base: string; suffix: string } | null {
   const m = /^(.*?)[\s]+(\S+)$/.exec(collapse(label));
   if (!m) return null;
@@ -422,6 +440,11 @@ export const UTILITY_MODULES: readonly string[] = [
   "tplink-kasasmartplug",
   "tplink-kasasmartbulb",
   "malighting-*",
+  // Recorders. A deck or a stream encoder is setup gear in exactly the sense
+  // this list means — somebody starts it before a service and stops it after —
+  // and the START/STOP pair that drives one is the reason it is here.
+  "bmd-hyperdeck",
+  "magewell-ultrastream",
 ];
 
 /** Does this module id name a utility device? Supports the trailing `*`. */
@@ -558,7 +581,7 @@ export function singleButtons(
 }
 
 /** Which half of an ON/OFF pair a button is, in the NAMES the import writes —
- *  a Startup/Shutdown pair is still named `_on`/`_off`. */
+ *  a Startup/Shutdown or START/STOP pair is still named `_on`/`_off`. */
 export type PairHalf = "on" | "off";
 
 /** The cue the import would create for one button. */

@@ -143,11 +143,22 @@ mitigation there is the same: an ACL on the switch port Companion is on.
 ### Importing ON/OFF pairs
 
 Settings → Automation → **Import from Companion…** finds, per page, buttons whose
-labels differ only by a trailing `ON`/`OFF` (or `Startup`/`Shutdown`) and offers
-each pair as two cues, `<name>_on` and `<name>_off`. A pair whose buttons drive a
-utility device — a projector, a television, a smart plug or bulb, a lighting console
-— is ticked by default; everything else is offered unticked, because a cue that
-presses it is a cue somebody can say by accident.
+labels differ only by a trailing direction word — `ON`/`OFF`,
+`Startup`/`Shutdown` or `START`/`STOP` — and offers each pair as two cues,
+`<name>_on` and `<name>_off`. Whichever pair of words the buttons use, the cues
+are named `_on` and `_off`: "REC START" and "REC STOP" become `rec_on` and
+`rec_off`.
+
+The word is the **trailing word** and the base is everything before it, so a
+"Deck 2 START" beside an "Encoder STOP" on one page is two single buttons and
+not a pair. `Record`/`Stop` is deliberately not a pair of words: a lone "Stop"
+has too many partners.
+
+A pair whose buttons drive a utility device — a projector, a television, a smart
+plug or bulb, a lighting console, a recorder or stream encoder — is ticked by
+default; everything else is offered unticked, because a cue that presses it is a
+cue somebody can say by accident. A camera is not on that list: it is pointed at
+things during a service, not turned on before one.
 
 Pairs are matched **within a page**: "Conf TVs ON" on two auditoriums' pages are
 different televisions, and crossing them is the kind of mistake found out during
@@ -196,8 +207,9 @@ Give the row a **Toggle with state** variable and it is imported as an ON/OFF
 two directions apart, so `<name>_on` presses when the variable says off — and when
 it cannot be read at all — but not when it already says on. `<name>_off` mirrors
 it. See [Real state](#real-state). A trailing direction word — `ON`, `OFF`,
-`Startup`, `Shutdown` or `Toggle` — comes off the name first: "VCR Light ON"
-becomes `vcr_light_on` and `vcr_light_off`, not `vcr_light_on_off`.
+`Startup`, `Shutdown`, `START`, `STOP` or `Toggle` — comes off the name first:
+"VCR Light ON" becomes `vcr_light_on` and `vcr_light_off`, not
+`vcr_light_on_off`.
 
 In Companion, set the variable from the button's own toggle branches — a **Set
 custom variable** action to `on` in the branch that turns the thing on, and one to

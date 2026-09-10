@@ -280,7 +280,7 @@ describe("testConnection", () => {
     assert.equal(r.ok, true);
     assert.match(r.message, /Companion 5\.0\.3/);
     assert.match(r.message, /30 button\(s\)/);
-    assert.match(r.message, /5 on\/off pair\(s\)/);
+    assert.match(r.message, /6 on\/off pair\(s\)/);
   });
 
   test("presses nothing", async () => {

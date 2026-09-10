@@ -439,16 +439,23 @@ export function companionExportFixture(): Record<string, unknown> {
       // device that starts it and one that stops it, plus the macro key that
       // starts them all at once.
       "5": page(5, FIXTURE_PAGES.recorders, [
-        // A START/STOP pair on a HyperDeck. The deck's transport variable is
-        // the only thing it publishes — it has no power state — and the pair
-        // infers it from the `rec` action on the ON half.
-        { row: 0, col: 0, text: "Deck 1 START", connections: ["conn-deck"], actionDef: "rec" },
-        { row: 0, col: 1, text: "Deck 1 STOP", connections: ["conn-deck"], actionDef: "stop" },
         // A START on one device beside a STOP on ANOTHER, both on this page.
         // Their labels share no base, so they must not pair — an encoder that
         // stopped when somebody said "deck 2 off" is the mistake.
-        { row: 1, col: 0, text: "Deck 2 START", connections: ["conn-deck"], actionDef: "rec" },
-        { row: 1, col: 1, text: "Encoder STOP", connections: ["conn-encoder"], actionDef: "record" },
+        //
+        // FIRST on the page, before the real pair, and that ordering is the
+        // whole point. Pairing by page and direction word rather than by base
+        // is a mistake findPairs's own "first one wins" rule hides when the
+        // matching pair is parsed first: Deck 1 claims both slots and the
+        // wrongly-paired keys never get a look in. Parsed first, they pair with
+        // each other and the guard bites.
+        { row: 0, col: 0, text: "Deck 2 START", connections: ["conn-deck"], actionDef: "rec" },
+        { row: 0, col: 1, text: "Encoder STOP", connections: ["conn-encoder"], actionDef: "record" },
+        // A START/STOP pair on a HyperDeck. The deck's transport variable is
+        // the only thing it publishes — it has no power state — and the pair
+        // infers it from the `rec` action on the ON half.
+        { row: 1, col: 0, text: "Deck 1 START", connections: ["conn-deck"], actionDef: "rec" },
+        { row: 1, col: 1, text: "Deck 1 STOP", connections: ["conn-deck"], actionDef: "stop" },
         // The encoder's two facts on one connection, one key each.
         {
           row: 2,
