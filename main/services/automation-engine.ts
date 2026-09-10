@@ -461,14 +461,14 @@ class AutomationEngine {
     // second call inside the five second window would read the old value and
     // press again — which is the repeat this whole check exists to absorb.
     if (desired) cueStates.invalidate();
-    // Simulate is on by default on a fresh install, and a call that answers a
-    // plain 200 while nothing reached a device is a switch in Home Assistant
-    // that flips with the projectors still off. The flag is how a caller can
-    // tell; `detail` already reads "would press …".
     // `state` is what was read BEFORE the press — including `unknown`, which is
     // the caller's evidence that the press went ahead without knowing what the
     // device was doing rather than because the device needed it.
     const body = state === null ? { ...result } : { ...result, state };
+    // Simulate is on by default on a fresh install, and a call that answers a
+    // plain 200 while nothing reached a device is a switch in Home Assistant
+    // that flips with the projectors still off. The flag is how a caller can
+    // tell; `detail` already reads "would press …".
     return this.settings.simulate
       ? { status: 200, body: { ...body, simulated: true } }
       : { status: 200, body };
