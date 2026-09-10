@@ -193,7 +193,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/cues/:name` | Run the cue. `:name` is the cue's current name or any of its former names (see [When a button is renamed](../integrations/companion.md#when-a-button-is-renamed)); a current name always wins. `200` dispatched, `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
+| POST | `/api/cues/:name` | Run the cue. `:name` is the cue's current name or any of its former names (see [When a button is renamed](../integrations/companion.md#when-a-button-is-renamed)); a current name always wins. `200` dispatched — `{ok, detail}`, plus `state` (`on`, `off` or `unknown`) when the cue is half of a pair with a **State variable**, and `{detail: "already on", skipped: true}` when the variable already says what the call asked for and nothing was pressed. `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
 | GET / POST | `/api/cues/tokens` | List callers (never a hash) / mint one (`{label}`). The secret is returned once and never again |
 | DELETE | `/api/cues/tokens/:id` | Revoke one caller |
 | GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml; charset=utf-8`, not JSON, with `Content-Disposition: attachment; filename="stage_utility.yaml"` so it downloads as a fixed name |

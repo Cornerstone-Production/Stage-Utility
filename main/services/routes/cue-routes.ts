@@ -331,6 +331,21 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
   }
 }
 
+/**
+ * The cooldown every imported cue carries, in seconds.
+ *
+ * The backstop behind the desired-state check, not the front line: a bound pair
+ * presses nothing when the device is already where the call asks for (see
+ * automation-engine's callByName), and this catches the repeats that check
+ * cannot — an unbound pair, a single button, or a second call arriving before
+ * the device's own state variable has caught up with the first.
+ *
+ * Three seconds rather than two because a Home Assistant switch that repeats
+ * `turn_on` does so about two seconds apart, which slipped straight through.
+ * ONE constant for the pairs import and the single-button import both.
+ */
+const IMPORT_COOLDOWN_SEC = 3;
+
 interface ImportButton {
   page: number;
   row: number;
@@ -386,7 +401,7 @@ function pressParamsFor(button: ImportButton, fallbackLabel: string): Record<str
 /**
  * Turn chosen ON/OFF pairs into two rules each.
  *
- * Every generated rule carries the `service.is-not-live` condition and a two
+ * Every generated rule carries the `service.is-not-live` condition and a three
  * second cooldown, and both are the point of importing rather than hand-writing:
  * a cue that somebody can say during a service, twice, is the failure mode this
  * whole feature has to not have. They stay editable afterwards — the import sets
@@ -461,7 +476,7 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
           id: "companion.press",
           params: pressParamsFor(button, `${base} ${suffix.toUpperCase()}`),
         },
-        cooldownSec: 2,
+        cooldownSec: IMPORT_COOLDOWN_SEC,
         oncePerService: false,
       };
       try {
@@ -482,7 +497,7 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
 /**
  * Turn chosen single buttons into ONE cue each.
  *
- * The same defaults as a pair's two halves — `service.is-not-live` and a two
+ * The same defaults as a pair's two halves — `service.is-not-live` and a three
  * second cooldown — for the same reason: a cue somebody can say during a
  * service, twice, is the failure mode this feature has to not have.
  *
@@ -516,7 +531,7 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
       trigger: { id: CALL_TRIGGER_ID, params: { name: slug, says: spoken } },
       conditions: [{ id: "service.is-not-live", params: {} }],
       action: { id: "companion.press", params: pressParamsFor(button, label) },
-      cooldownSec: 2,
+      cooldownSec: IMPORT_COOLDOWN_SEC,
       oncePerService: false,
     };
     try {

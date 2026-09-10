@@ -638,7 +638,7 @@ export function ImportPairsDialog({
       <DialogContent className="max-w-2xl">
         <h2 className="text-subheadline font-semibold text-fg">Import from Companion</h2>
         <p className="mb-2 mt-1 text-caption1 text-fg-muted">
-          Every cue is created with <span className="text-fg">no service is live</span> on it and a two
+          Every cue is created with <span className="text-fg">no service is live</span> on it and a three
           second cooldown. Pairs that drive a projector, television, plug or lighting console are ticked
           for you; nothing else is.
         </p>

@@ -93,7 +93,7 @@ interface LogEntry {
   ruleName: string;
   triggerId: string;
   actionId: string;
-  outcome: "fired" | "failed" | "simulated" | "suppressed" | "condition-not-met";
+  outcome: "fired" | "failed" | "simulated" | "suppressed" | "skipped" | "condition-not-met";
   detail: string;
   /** The token label behind a called cue. Absent for anything the engine fired. */
   caller?: string;
@@ -298,6 +298,7 @@ const OUTCOME_STYLE: Record<LogEntry["outcome"], string> = {
   fired: "text-fg",
   simulated: "text-fg-muted",
   suppressed: "text-fg-subtle",
+  skipped: "text-fg-subtle",
   "condition-not-met": "text-fg-subtle",
   failed: "text-red-10",
 };
