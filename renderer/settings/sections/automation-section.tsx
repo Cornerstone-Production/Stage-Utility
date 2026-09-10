@@ -7,10 +7,12 @@ import {
   STATE_OFF_DEFAULT,
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
+import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
+import { labelFor, ruleMatchesSearch } from "./rule-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import {
@@ -446,6 +448,59 @@ function CuePairState({ base, state }: { base: string; state: CueStateRow }) {
 }
 
 /**
+ * "service-safe" (quiet) when the cue carries `service.is-not-live`, or a
+ * clearly visible amber "any time" when it does not — so the cues that can
+ * fire mid-service stand out in a long list rather than needing the editor
+ * opened one at a time.
+ *
+ * Only for a cue (`call.by-name`): the condition means nothing on a rule that
+ * cannot be called.
+ */
+function ServiceGuardBadge({ conditions }: { conditions: Rule["conditions"] }) {
+  const guarded = hasServiceGuard(conditions);
+  return (
+    <span
+      data-service-guard={guarded ? "on" : "off"}
+      className={
+        "inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-caption2 " +
+        (guarded ? "text-fg-subtle" : "border border-amber-7 bg-amber-3 font-medium text-amber-11")
+      }
+    >
+      {guarded ? "service-safe" : "any time"}
+    </span>
+  );
+}
+
+/**
+ * The one switch over the `service.is-not-live` condition — see
+ * service-guard.ts for what flipping it does to the condition list.
+ *
+ * Only for a cue: the condition, and the switch reading it, mean nothing on a
+ * rule with any other trigger.
+ */
+function ServiceGuardField({
+  conditions,
+  onChange,
+}: {
+  conditions: Rule["conditions"];
+  onChange: (next: Rule["conditions"]) => void;
+}) {
+  const allowed = !hasServiceGuard(conditions);
+  return (
+    <Row
+      label="Allowed during a service"
+      hint='Off: refused while a service is live or about to start (the imported default). On: fires whenever it is called.'
+    >
+      <Switch
+        checked={allowed}
+        onCheckedChange={(v) => onChange(withServiceGuard(conditions, !v))}
+        aria-label="Allowed during a service"
+      />
+    </Row>
+  );
+}
+
+/**
  * The three state-binding fields, on the `_on` half of a pair and nowhere else.
  *
  * A binding on a cue with no partner reads a variable nothing ever shows, so the
@@ -630,7 +685,7 @@ function RuleCard({
           onClick={() => setOpen((o) => !o)}
         >
           <div className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-footnote font-medium text-fg">{rule.name}</span>
+            <span data-rule-name={rule.name} className="truncate text-footnote font-medium text-fg">{rule.name}</span>
             {/* The names this cue used to answer to, quietly. A cue is renamed
                 when its Companion button is relabelled, and the old name stays
                 live — so this is the only place the rules list says that the URL
@@ -652,6 +707,7 @@ function RuleCard({
                 was {formerNames.join(", ")}
               </span>
             )}
+            {rule.trigger.id === CALL_TRIGGER_ID && <ServiceGuardBadge conditions={rule.conditions} />}
           </div>
           <div className="truncate text-caption1 text-fg-muted">{summary}</div>
           {/* What the last reconcile found about this rule's Companion button.
@@ -746,6 +802,16 @@ function RuleCard({
 
           <Separator />
           <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">If</span>
+          {/* The single switch over `service.is-not-live`, for a cue only — the
+              condition means nothing on a rule with any other trigger. A view
+              on the condition below, not a replacement for it: the condition
+              is still there in the list and still removable by hand. */}
+          {draft.trigger.id === CALL_TRIGGER_ID && (
+            <ServiceGuardField
+              conditions={draft.conditions}
+              onChange={(conditions) => setDraft({ ...draft, conditions })}
+            />
+          )}
           {draft.conditions.length === 0 && (
             <p className="text-caption1 text-fg-subtle">No conditions — the rule fires whenever its trigger does.</p>
           )}
@@ -947,6 +1013,22 @@ export function AutomationSection() {
   );
   const anyBinding = useMemo(() => pairs.some((p) => p.binding !== null), [pairs]);
 
+  // The search field's value, in component state only — it is a filter over
+  // what is on screen right now, not something a maintainer with hundreds of
+  // cues would want restored on the next visit.
+  const [search, setSearch] = useState("");
+  const filteredRules = useMemo(() => {
+    if (!search.trim()) return rules;
+    return rules.filter((r) =>
+      ruleMatchesSearch(
+        r,
+        search,
+        labelFor(registry?.triggers ?? [], r.trigger.id),
+        labelFor(registry?.actions ?? [], r.action.id),
+      ),
+    );
+  }, [rules, search, registry]);
+
   // The custom variables Companion has, for the editor's select. Read from the
   // same offer the import dialog uses, and only worth asking for when there is
   // a pair that could be bound.
@@ -1053,18 +1135,41 @@ export function AutomationSection() {
               real action.
             </p>
           ) : (
-            rules.map((r) => (
-              <RuleCard
-                key={r.id}
-                rule={r}
-                registry={registry}
-                dynamicOptions={dynamicOptions}
-                pairBase={pairBases.get(r.id) ?? null}
-                cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
-                customVariables={companionPairs?.customVariables ?? []}
-                onChanged={refresh}
-              />
-            ))
+            <>
+              <div className="flex items-center gap-2">
+                <span className="relative min-w-0 flex-1">
+                  <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search rules"
+                    aria-label="Search rules"
+                    className="h-8 pl-7 text-footnote"
+                  />
+                </span>
+                {search.trim() && (
+                  <span className="shrink-0 text-caption1 text-fg-muted" data-rule-search-count="">
+                    {filteredRules.length} of {rules.length} rules
+                  </span>
+                )}
+              </div>
+              {filteredRules.length === 0 ? (
+                <p className="text-caption1 text-fg-muted">No rules match.</p>
+              ) : (
+                filteredRules.map((r) => (
+                  <RuleCard
+                    key={r.id}
+                    rule={r}
+                    registry={registry}
+                    dynamicOptions={dynamicOptions}
+                    pairBase={pairBases.get(r.id) ?? null}
+                    cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
+                    customVariables={companionPairs?.customVariables ?? []}
+                    onChanged={refresh}
+                  />
+                ))
+              )}
+            </>
           )}
           <div className="flex items-center gap-2">
             <Button

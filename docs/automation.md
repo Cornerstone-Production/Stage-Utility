@@ -152,6 +152,17 @@ from Companion carries the **no service is live** condition, and refuses with a
 sentence — *"The Gospel Way is live"* — while a service is running or about to
 start, and when Planning Center cannot be read.
 
+A cue's editor has an **Allowed during a service** switch that is the same
+condition in one control: off (the imported default) refuses the cue while a
+service is live or about to start, on removes the condition and lets it fire
+whenever it is called. The rules list marks every cue that is on with a
+clearly visible **any time** badge, so the ones that can fire mid-service are
+easy to spot in a long list.
+
+The rules list has a **Search rules** field above it, filtering live by rule
+name, cue name, spoken name, former names, a Companion button's label, and
+the trigger and action's own names.
+
 | | |
 |---|---|
 | **Cue name** | `lower_snake_case`, unique across rules — and across every cue's former names. This is the URL |
