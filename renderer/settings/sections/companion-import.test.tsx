@@ -43,7 +43,12 @@ interface StubButton {
   actionIds: string[];
   slug: string;
   exists: boolean;
+  /** Where this button's own device reports its state. See companion-state-source.ts. */
+  stateSource?: StubSource;
 }
+
+/** An inferred state source, or none. */
+type StubSource = { variable: string; onValue: string; offValue: string; moduleId: string } | null;
 
 const button = (over: Partial<StubButton>): StubButton => ({
   page: 1,
@@ -68,6 +73,9 @@ const PAIRS = [
     on: button({ col: 1, label: "Projectors ON" }),
     off: button({ col: 2, label: "Projectors OFF" }),
     suggested: true,
+    // Set per test. Annotated so a test may assign one — the inferred literal
+    // would otherwise be `null` and nothing could be written to it.
+    stateSource: null as StubSource,
     exists: false,
   },
 ];
@@ -706,5 +714,180 @@ describe("the per-button Toggle select", () => {
     // And the tag follows, because it is a switch in Home Assistant now, not a
     // script. Two switch tags on screen: the Projectors pair and this button.
     assert.equal(document.querySelectorAll("[data-cue-kind='switch']").length, 2);
+  });
+});
+
+// ── An INFERRED state source ──────────────────────────────────────────────────
+//
+// A button that drives a smart plug, a television or a projector already has
+// somewhere to read its state from — the module's own variable — with nothing
+// for the operator to build in Companion at all. The dialog offers that as the
+// default binding.
+//
+// What is silent when this breaks: the VALUES. A kasa plug's `power_state`
+// holds `On`, not `on`, and the comparison downstream is case-sensitive — so an
+// import that carried the variable and not its two values creates a pair that
+// reads unknown forever, with a State select on screen that looks correct.
+describe("a button's own inferred state source", () => {
+  const PLUG = {
+    variable: "VCR-Overhead-Light:power_state",
+    onValue: "On",
+    offValue: "Off",
+    moduleId: "tplink-kasasmartplug",
+  };
+  const PJLINK = {
+    variable: "Projectors:powerState",
+    onValue: "On",
+    offValue: "Off",
+    moduleId: "generic-pjlink",
+  };
+
+  const stateSelect = (): HTMLSelectElement | null =>
+    document.querySelector('select[aria-label="State variable for Projectors · Room A: Screens"]');
+  const toggleSelect = (name: string): HTMLSelectElement | null =>
+    document.querySelector(`select[aria-label="Toggle with state for ${name}"]`);
+
+  const importNow = async () => {
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((b) => (b.textContent ?? "").startsWith("Import"))!
+        .click();
+    });
+    await settle();
+    return JSON.parse(requests.find((r) => r.url.includes("import-pairs"))!.body ?? "{}") as {
+      pairs: { slug: string; stateVariable?: string; stateOnValue?: string; stateOffValue?: string }[];
+      buttons: { slug: string; stateVariable?: string; stateOnValue?: string; stateOffValue?: string }[];
+    };
+  };
+
+  /** Every option in a select, as "value|text". */
+  const options = (el: HTMLSelectElement | null): string[] =>
+    [...(el?.options ?? [])].map((o) => `${o.value}|${o.textContent ?? ""}`);
+
+  test("a pair defaults to its own button's source, with the VALUES", async () => {
+    CUSTOM_VARIABLES = [];
+    PAIRS[0]!.stateSource = PJLINK;
+    try {
+      await mount();
+      assert.equal(stateSelect()?.value, "Projectors:powerState");
+      const body = await importNow();
+      assert.deepEqual(
+        body.pairs.map((p) => `${p.slug}=${p.stateVariable}/${p.stateOnValue}/${p.stateOffValue}`),
+        ["projectors=Projectors:powerState/On/Off"],
+      );
+    } finally {
+      PAIRS[0]!.stateSource = null;
+    }
+  });
+
+  test("it is offered with no custom variables at all, and says it was inferred", async () => {
+    // The Companion this was built against has no custom variables whatsoever.
+    // Before the inference there was nothing to offer and the select was not
+    // rendered; now the only entry is the one nobody had to build.
+    CUSTOM_VARIABLES = [];
+    PAIRS[0]!.stateSource = PJLINK;
+    try {
+      await mount();
+      assert.deepEqual(options(stateSelect()), [
+        "|No state",
+        "Projectors:powerState|Projectors:powerState (inferred)",
+      ]);
+    } finally {
+      PAIRS[0]!.stateSource = null;
+    }
+  });
+
+  test("the inference beats a custom variable merely NAMED after the pair", async () => {
+    // `projectors_state` is a guess from a spelling; the inferred source is the
+    // connection the button actually drives, read out of Companion's document.
+    CUSTOM_VARIABLES = ["projectors_state"];
+    PAIRS[0]!.stateSource = PJLINK;
+    try {
+      await mount();
+      assert.equal(stateSelect()?.value, "Projectors:powerState");
+    } finally {
+      PAIRS[0]!.stateSource = null;
+    }
+  });
+
+  test("an explicit choice wins, and sends no values with it", async () => {
+    // A custom variable an operator's own buttons set holds "on"/"off"; sending
+    // the inferred `On`/`Off` alongside it would bind a switch that can never
+    // read on.
+    CUSTOM_VARIABLES = ["projectors_state"];
+    PAIRS[0]!.stateSource = PJLINK;
+    try {
+      await mount();
+      await act(async () => {
+        fireEvent.change(stateSelect()!, { target: { value: "projectors_state" } });
+      });
+      assert.equal(stateSelect()?.value, "projectors_state");
+      const body = await importNow();
+      assert.deepEqual(
+        body.pairs.map((p) => `${p.stateVariable}/${p.stateOnValue ?? "-"}/${p.stateOffValue ?? "-"}`),
+        ["projectors_state/-/-"],
+      );
+    } finally {
+      PAIRS[0]!.stateSource = null;
+    }
+  });
+
+  test("choosing None still sticks over an inferred source", async () => {
+    CUSTOM_VARIABLES = [];
+    PAIRS[0]!.stateSource = PJLINK;
+    try {
+      await mount();
+      await act(async () => {
+        fireEvent.change(stateSelect()!, { target: { value: "" } });
+      });
+      assert.equal(stateSelect()?.value, "");
+      const body = await importNow();
+      assert.deepEqual(
+        body.pairs.map((p) => p.stateVariable),
+        [""],
+      );
+    } finally {
+      PAIRS[0]!.stateSource = null;
+    }
+  });
+
+  test("a single button with a source is offered as a SWITCH, and stays unticked", async () => {
+    CUSTOM_VARIABLES = [];
+    SINGLES = [
+      button({ page: 2, row: 2, col: 0, label: "VCR Light ON", slug: "vcr_light_on", stateSource: PLUG }),
+      button({ row: 2, col: 3, label: "Take Screens", slug: "take_screens" }),
+    ];
+    await mount();
+
+    // The tag says switch — it would become a PAIR pressing that one key both
+    // ways — while the box is not ticked. Nothing in this section is ticked for
+    // you, whatever it would become.
+    assert.deepEqual(
+      [...document.querySelectorAll("[data-cue-kind]")].map((el) => el.getAttribute("data-cue-kind")),
+      ["switch", "switch", "script"],
+    );
+    assert.deepEqual(
+      boxes()
+        .filter((b) => b.name.startsWith("VCR Light ON"))
+        .map((b) => `${b.name}=${b.checked}`),
+      ["VCR Light ON · Room A: Screens=false"],
+    );
+    assert.equal(toggleSelect("VCR Light ON · Room A: Screens")?.value, PLUG.variable);
+  });
+
+  test("a single button's inferred binding reaches the request once it is ticked", async () => {
+    CUSTOM_VARIABLES = [];
+    SINGLES = [
+      button({ page: 2, row: 2, col: 0, label: "VCR Light ON", slug: "vcr_light_on", stateSource: PLUG }),
+    ];
+    await mount();
+    await act(async () => {
+      screen.getByRole("checkbox", { name: "VCR Light ON · Room A: Screens" }).click();
+    });
+    const body = await importNow();
+    assert.deepEqual(
+      body.buttons.map((b) => `${b.slug}=${b.stateVariable}/${b.stateOnValue}/${b.stateOffValue}`),
+      ["vcr_light_on=VCR-Overhead-Light:power_state/On/Off"],
+    );
   });
 });

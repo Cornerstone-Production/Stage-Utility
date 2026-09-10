@@ -45,6 +45,7 @@ import {
   importedCues,
 } from "./companion-export.js";
 import { encodeAliases, nextAliases } from "./cue-aliases.js";
+import { type CuePair, cuePairs, stateBindingParams } from "./cue-pairs.js";
 import {
   type ButtonFingerprint,
   type ButtonLocation,
@@ -102,6 +103,16 @@ export interface ReconcileChange {
    * passes, and those are two facts an operator reads for different reasons.
    */
   renameLog: string | null;
+  /** The line about a state binding this pass filled in, or null. */
+  bindLog: string | null;
+  /**
+   * The button this cue is now pointed at, or null when it is missing.
+   *
+   * Carried out of the pass so the binding pass can read what the button
+   * DRIVES without repeating the three-way match that found it. Not persisted
+   * and not answered to any caller.
+   */
+  found: CompanionButton | null;
 }
 
 export interface ReconcileResult {
@@ -183,6 +194,8 @@ export function reconcileCues(
       log: unchanged ? null : decided.log,
       triggerPatch: null,
       renameLog: null,
+      bindLog: null,
+      found: decided.found,
     });
 
     // A relabelled button, collected for the second pass. Only ever a button
@@ -394,6 +407,40 @@ function kept(candidate: Candidate, why: string, pair = false): string {
   );
 }
 
+/**
+ * The state bindings this pass can fill in, PURE.
+ *
+ * A pair with NO binding whose `_on` button drives a device that publishes its
+ * own state gets that as its binding — see companion-state-source.ts. It is the
+ * same offer the import makes, arriving for pairs imported before the inference
+ * existed and for pairs whose button was only later pointed at a smart plug.
+ *
+ * AN EXPLICIT BINDING IS NEVER OVERWRITTEN, and `pair.binding` is what says so:
+ * it reads the `_on` half's params and falls back to the `_off` half's, so a
+ * binding on either half stops this. An operator who chose a custom variable
+ * their own buttons set meant it, and a housekeeping sweep is not permission to
+ * replace it with something a module happens to publish.
+ *
+ * Keyed by the `_on` half's rule id, because that is the half the binding lives
+ * on and the half whose change carries the patch.
+ */
+export function inferBindingPatches(
+  pairs: readonly CuePair[],
+  found: ReadonlyMap<string, CompanionButton>,
+): Map<string, { patch: Record<string, string>; log: string }> {
+  const out = new Map<string, { patch: Record<string, string>; log: string }>();
+  for (const pair of pairs) {
+    if (pair.binding !== null) continue;
+    const source = found.get(pair.on.id)?.stateSource;
+    if (!source) continue;
+    out.set(pair.on.id, {
+      patch: stateBindingParams(source),
+      log: `[companion] cue ${pair.base}: state source inferred ${source.variable}`,
+    });
+  }
+  return out;
+}
+
 /** One press action's verdict. See the header for the three outcomes. */
 interface Verdict {
   status: CueButtonStatus;
@@ -595,6 +642,19 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
   }));
   const { changes, counts, checked } = reconcileCues(pressEntries(rules), result.buttons, nowIso, cues);
 
+  // A pair with no binding whose button now names a device that reports its own
+  // state. Merged INTO the change rather than saved separately, so one
+  // updateRule carries a rename and a new binding together — two saves would
+  // broadcast twice and could leave one of them unwritten.
+  const foundButtons = new Map<string, CompanionButton>();
+  for (const change of changes) if (change.found) foundButtons.set(change.ruleId, change.found);
+  for (const [ruleId, bound] of inferBindingPatches(cuePairs(rules), foundButtons)) {
+    const change = changes.find((c) => c.ruleId === ruleId);
+    if (!change) continue;
+    change.triggerPatch = { ...(change.triggerPatch ?? {}), ...bound.patch };
+    change.bindLog = bound.log;
+  }
+
   let applied = 0;
   const failed: ReconcileFailure[] = [];
   for (const change of changes) {
@@ -638,6 +698,9 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
       // exactly the shape log-injection.test.ts refuses. See scrub.ts.
       if (change.log) console.warn(scrub(change.log, LOG_MAX));
       if (change.renameLog) console.warn(scrub(change.renameLog, LOG_MAX));
+      // Not a warning: a pair that could not report its state now can, which is
+      // the pass doing its job rather than something an operator must look at.
+      if (change.bindLog) console.log(scrub(change.bindLog, LOG_MAX));
     } catch (err) {
       // Rethrowing would abandon the rest of the rules over one of them, so this
       // COLLECTS the failure and carries on — and returns it, because a caller

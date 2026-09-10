@@ -8,6 +8,7 @@ import {
   STATE_OFF_DEFAULT,
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
+import type { InferredStateSource } from "@main/services/companion-state-source";
 import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
 // The one main type imported rather than restated below. The wire shapes in
 // this file are deliberately local — the renderer models what the API sends —
@@ -518,11 +519,34 @@ function ServiceGuardField({
  * whenever the export could not be read — otherwise an unreachable Companion
  * would mean an existing binding could not even be seen, let alone cleared.
  */
+/** One button in the Companion offer, as far as the editor reads it. */
+interface OfferedButton {
+  page: number;
+  row: number;
+  col: number;
+  stateSource?: InferredStateSource | null;
+}
+
+/**
+ * `GET /api/companion/pairs`, as far as the editor reads it.
+ *
+ * The custom variable names for the select, and every offered button's inferred
+ * source — the pairs' halves and the singles between them are every labelled
+ * button Companion has. Every field optional, so an older server's answer still
+ * renders.
+ */
+interface CompanionPairsReply {
+  customVariables?: string[];
+  pairs?: { on?: OfferedButton; off?: OfferedButton }[];
+  buttons?: OfferedButton[];
+}
+
 function CueStateFields({
   params,
   base,
   toggle,
   customVariables,
+  inferred,
   onChange,
 }: {
   params: Record<string, string | number>;
@@ -530,13 +554,26 @@ function CueStateFields({
   /** Both halves press the same Companion button. See isTogglePair. */
   toggle: boolean;
   customVariables: string[];
+  /** Where this pair's own button says its device reports state, or null. */
+  inferred: InferredStateSource | null;
   onChange: (patch: Record<string, string>) => void;
 }) {
   const binding = stateBindingOf(params);
   const variable = String(params.stateVariable ?? "");
   // A variable that is bound but no longer in Companion's export — renamed or
   // deleted — is still offered, so the select shows what the rule actually says.
+  // The INFERRED one is offered too and labelled, because on a Companion with
+  // no custom variables it is the only thing there is to pick.
   const options = [...new Set([...customVariables, ...(variable ? [variable] : [])])].sort();
+  const offered = [
+    ...(inferred && !options.includes(inferred.variable)
+      ? [{ value: inferred.variable, text: `${inferred.variable} (inferred)` }]
+      : []),
+    ...options.map((name) => ({
+      value: name,
+      text: name === inferred?.variable ? `${name} (inferred)` : name,
+    })),
+  ];
 
   /**
    * Write the whole binding, all three params, through the module that owns the
@@ -555,11 +592,17 @@ function CueStateFields({
     onChange(
       stateBindingParams(
         next.trim()
-          ? {
-              variable: next,
-              onValue: String(params.stateOnValue ?? ""),
-              offValue: String(params.stateOffValue ?? ""),
-            }
+          ? // Picking the INFERRED variable brings its two values with it. A kasa
+            // plug's `power_state` holds `On`, not `on`, and the comparison is
+            // case-sensitive — chosen without them the pair reads unknown
+            // forever, with the field on screen looking right.
+            next.trim() === inferred?.variable
+            ? inferred
+            : {
+                variable: next,
+                onValue: String(params.stateOnValue ?? ""),
+                offValue: String(params.stateOffValue ?? ""),
+              }
           : null,
       ),
     );
@@ -572,20 +615,22 @@ function CueStateFields({
           // merely "optimistic": the two halves press the same key, so an
           // optimistic switch reports the opposite of the truth every other
           // press. Said on the field, where the operator can fix it.
-          toggle && !binding
-            ? "Both halves press the same button. Without a state variable, Home Assistant cannot know which way it went."
-            : `A Companion custom variable your ON/OFF buttons set. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`
+          inferred && !binding
+            ? `This pair's button drives a device that reports its own state — ${inferred.variable}. Pick it and nothing has to be built in Companion.`
+            : toggle && !binding
+              ? "Both halves press the same button. Without a state variable, Home Assistant cannot know which way it went."
+              : `A Companion custom variable your ON/OFF buttons set, or a module's own variable as <connection label>:<name>. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`
         }
       >
-        {options.length > 0 ? (
+        {offered.length > 0 ? (
           <Select value={variable} onValueChange={setVariable}>
             <SelectTrigger className="w-full" aria-label="State variable">
               <SelectValue placeholder="No state" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">No state</SelectItem>
-              {options.map((name) => (
-                <SelectItem key={name} value={name}>{name}</SelectItem>
+              {offered.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -636,6 +681,7 @@ function RuleCard({
   pairIsToggle,
   cueState,
   customVariables,
+  inferredSource,
   onChanged,
 }: {
   rule: Rule;
@@ -648,6 +694,8 @@ function RuleCard({
   /** This pair's state, when it has a binding and the route answered. */
   cueState: CueStateRow | null;
   customVariables: string[];
+  /** Where this rule's own Companion button says its device reports state. */
+  inferredSource: InferredStateSource | null;
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -817,6 +865,7 @@ function RuleCard({
               base={pairBase}
               toggle={pairIsToggle}
               customVariables={customVariables}
+              inferred={inferredSource}
               onChange={(patch) =>
                 setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, ...patch } } })
               }
@@ -1065,9 +1114,36 @@ export function AutomationSection() {
   // a pair that could be bound.
   const { data: companionPairs } = useQuery({
     queryKey: ["companion:pairs"],
-    queryFn: () => invoke<{ customVariables?: string[] }>("companion:pairs"),
+    queryFn: () => invoke<CompanionPairsReply>("companion:pairs"),
     enabled: pairBases.size > 0,
   });
+
+  /**
+   * Every offered button's inferred state source, keyed by its coordinates.
+   *
+   * Built from the SAME offer, over the union of the pairs' halves and the
+   * single buttons — which between them is every labelled button Companion has.
+   * A rule is matched to it by the coordinates its press action stores, so a
+   * cue whose button was moved and reconciled finds the button it now presses.
+   */
+  const inferredByLocation = useMemo(() => {
+    const out = new Map<string, InferredStateSource>();
+    const add = (b: OfferedButton | undefined) => {
+      if (b?.stateSource) out.set(`${b.page}:${b.row}:${b.col}`, b.stateSource);
+    };
+    for (const p of companionPairs?.pairs ?? []) {
+      add(p.on);
+      add(p.off);
+    }
+    for (const b of companionPairs?.buttons ?? []) add(b);
+    return out;
+  }, [companionPairs]);
+
+  const inferredFor = (rule: Rule): InferredStateSource | null => {
+    if (rule.action.id !== "companion.press") return null;
+    const p = rule.action.params;
+    return inferredByLocation.get(`${Number(p.page)}:${Number(p.row)}:${Number(p.col)}`) ?? null;
+  };
 
   /**
    * Every bound pair's real state, while this page is OPEN.
@@ -1197,6 +1273,7 @@ export function AutomationSection() {
                     pairIsToggle={togglePairs.has(r.id)}
                     cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
                     customVariables={companionPairs?.customVariables ?? []}
+                    inferredSource={inferredFor(r)}
                     onChanged={refresh}
                   />
                 ))

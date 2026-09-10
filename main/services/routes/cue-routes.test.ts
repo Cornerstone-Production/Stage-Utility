@@ -156,6 +156,19 @@ function installCompanionStub(): void {
         ? new Response("Not found", { status: 404 })
         : new Response(value, { status: 200 });
     }
+    // A MODULE variable, which Companion serves at its own path. Held in the
+    // same map under `<label>:<name>` — the spelling a binding uses — so a test
+    // that binds one reads it back through the real dispatch rather than
+    // through a second stub that could answer for a URL nothing builds.
+    const moduleVariable = /\/api\/variable\/([^/]+)\/([^/]+)\/value$/.exec(url);
+    if (moduleVariable) {
+      const ref = `${decodeURIComponent(moduleVariable[1]!)}:${decodeURIComponent(moduleVariable[2]!)}`;
+      variableReads.push(ref);
+      const value = variables[ref];
+      return value === undefined
+        ? new Response("Not found", { status: 404 })
+        : new Response(value, { status: 200 });
+    }
     void init;
     return Response.json(companionExportFixture());
   };
@@ -733,9 +746,9 @@ describe("a pair's state binding", () => {
     // Accepted, it is a switch that reads unknown forever with nothing saying
     // which rule is wrong — the state route would answer 404 for it every poll.
     await withCue();
-    const r = await post({ name: "screens_on", stateVariable: "state:projectors" });
+    const r = await post({ name: "screens_on", stateVariable: "../../projectors" });
     assert.equal(r.status, 400);
-    assert.match((r.json as { error: string }).error, /not a Companion variable name/);
+    assert.match((r.json as { error: string }).error, /not a Companion variable/);
     assert.equal(automationEngine.cueRules().length, 1, "the rule was saved anyway");
   });
 
@@ -757,6 +770,80 @@ describe("a pair's state binding", () => {
     assert.equal(r.status, 201);
     const saved = automationEngine.cueRules().find((x) => x.trigger.params.name === "screens_on");
     assert.equal(String(saved?.trigger.params.stateVariable), "screens_state");
+  });
+});
+
+describe("GET /api/cues/manifest", () => {
+  /** A bound pair and a lone cue, on the real engine through the real addRule. */
+  async function withACueOfEachKind(): Promise<void> {
+    for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+    for (const [name, says, extra, params] of [
+      ["projectors_on", "Projectors on", { stateVariable: "projectors_state" }, { page: 1, row: 0, col: 1 }],
+      ["projectors_off", "Projectors off", {}, { page: 1, row: 0, col: 2 }],
+      ["take_screens", "Take screens", {}, { page: 1, row: 2, col: 3 }],
+    ] as const) {
+      await automationEngine.addRule({
+        name,
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name, says, room: "Room A", ...extra } },
+        conditions: [],
+        action: { id: "companion.press", params: { ...params } },
+        cooldownSec: 0,
+        oncePerService: false,
+      });
+    }
+  }
+
+  const manifest = async () => {
+    const r = await callRoute(cueRoutes, "/api/cues/manifest");
+    assert.equal(r.status, 200);
+    return r.json as {
+      version: number;
+      server: { name: string; lanUrl: string | null };
+      switches: { id: string; name: string; on: string; off: string; state: string; available: boolean }[];
+      buttons: { id: string; name: string; cue: string; available: boolean }[];
+    };
+  };
+
+  test("is an OPEN read, and lists a switch per pair and a button per lone cue", async () => {
+    // Open like the states route and the YAML: cue names and on/off, never a
+    // token. The thing reading it is an integration that has not been handed
+    // one yet — this is how it finds out what to ask for.
+    await withACueOfEachKind();
+    variables.projectors_state = "on";
+    cueStates.invalidate();
+    const m = await manifest();
+    assert.deepEqual(
+      m.switches.map((x) => `${x.id}|${x.name}|${x.on}|${x.off}|${x.state}|${x.available}`),
+      ["projectors|Projectors|projectors_on|projectors_off|on|true"],
+    );
+    assert.deepEqual(
+      m.buttons.map((x) => `${x.id}|${x.name}|${x.cue}|${x.available}`),
+      ["take_screens|Take screens|take_screens|true"],
+    );
+    assert.equal(typeof m.server.name, "string");
+  });
+
+  test("the version goes up when a rule changes", async () => {
+    // The only thing telling an integration to re-read. Frozen, a cue added on
+    // a Saturday never appears anywhere.
+    await withACueOfEachKind();
+    const before = (await manifest()).version;
+    await automationEngine.addRule({
+      name: "house_lights",
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: "house_lights", says: "House lights" } },
+      conditions: [],
+      action: { id: "companion.press", params: { page: 2, row: 2, col: 1 } },
+      cooldownSec: 0,
+      oncePerService: false,
+    });
+    const after = await manifest();
+    assert.equal(String(after.version > before), "true");
+    assert.equal(
+      after.buttons.some((b) => b.id === "house_lights"),
+      true,
+    );
   });
 });
 
@@ -1040,7 +1127,7 @@ describe("the button and pair endpoints", () => {
     assert.equal(r.status, 200);
     const body = r.json as { ok: boolean; buttons: { pageName: string; label: string }[] };
     assert.equal(body.ok, true);
-    assert.equal(body.buttons.length, 14);
+    assert.equal(body.buttons.length, 19);
     assert.ok(body.buttons.some((b) => b.pageName === FIXTURE_PAGES.screens));
   });
 
@@ -1248,12 +1335,25 @@ describe("importing single buttons", () => {
     const buttons = await offered();
     // Page 1: House Lights ON (an ON with no OFF), Take Screens. The unlabelled
     // button at r3c0 is left out — a cue called nothing cannot be called.
+    // Page 2: VCR Light ON and Desk Lamp Toggle, the two smart-device toggles.
     // Page 3: Cam 1 and Record Toggle on row 0, then Cam 2 on row 1 — Cam 1 and
     // Cam 2 both run nothing, which is what the reconcile's "an empty
-    // fingerprint is never searched for" guard needs. See the fixture.
+    // fingerprint is never searched for" guard needs — then the two OBS
+    // toggles. See the fixture.
     assert.deepEqual(
       buttons.map((b) => `${b.page as number}:${b.slug as string}`),
-      ["1:house_lights_on", "1:take_screens", "3:cam_1", "3:record_toggle", "3:cam_2"],
+      [
+        "1:house_lights_on",
+        "1:take_screens",
+        "2:vcr_light_on",
+        "2:desk_lamp_toggle",
+        "3:cam_1",
+        "3:record_toggle",
+        "3:cam_2",
+        "3:obs_rec_toggle",
+        "3:obs_stream_toggle",
+        "3:tv_wall_on",
+      ],
     );
     assert.equal(
       buttons.some((b) => "suggested" in b),
@@ -1736,11 +1836,59 @@ describe("reconciling a cue's Companion button", () => {
     assert.match(automationEngine.cueNameOf(after), /^screens_(on|off)$/);
   });
 
+  test("a pair with no binding is bound from what its ON button drives", async () => {
+    // The whole path, through the real engine: imported unbound, the hourly
+    // pass reads the export, sees the PJLink `powerState` feedback on the ON
+    // button and writes the binding with its values.
+    await importPageOne();
+    const before = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "room_a_screens_projectors_on")!;
+    assert.equal(before.trigger.params.stateVariable, undefined);
+
+    const realLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await runCompanionReconcile();
+    } finally {
+      console.log = realLog;
+    }
+
+    const after = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "room_a_screens_projectors_on")!;
+    assert.equal(String(after.trigger.params.stateVariable), "Projectors:powerState");
+    assert.equal(String(after.trigger.params.stateOnValue), "On");
+    assert.equal(String(after.trigger.params.stateOffValue), "Off");
+    // And an operator reading /log on a Sunday can see it happened.
+    assert.deepEqual(
+      lines.filter((l) => l.includes("state source inferred")),
+      [
+        "[companion] cue room_a_screens_projectors: " +
+          "state source inferred Projectors:powerState",
+      ],
+    );
+
+    // A second pass writes nothing more — the binding is now explicit.
+    const again = await runCompanionReconcile();
+    assert.equal(again?.applied, 0, "the pass rewrote a binding it had just made");
+  });
+
   test("an hourly pass that changed nothing logs no summary line", async () => {
     // 24 lines a day saying "4 in place" on the same /log page an operator
     // reads on a Sunday morning, burying the lines that matter. Every actual
     // decision already logs itself; the summary exists to total those.
     await importPageOne();
+    // ONE settling pass first. The page 1 pairs are imported unbound here, the
+    // way an install from before the state-source inference has them, so the
+    // first pass legitimately writes a binding for the Projectors pair. What
+    // this test is about is the pass AFTER that, which changes nothing.
+    const settling = await runCompanionReconcile();
+    assert.equal(settling?.applied, 1, "the settling pass wrote something other than the binding");
+
     const realLog = console.log;
     const lines: string[] = [];
     console.log = (...args: unknown[]) => {
@@ -1845,6 +1993,86 @@ describe("importing a pair with a state variable", () => {
     assert.equal(states.lobby_tvs?.state, "on");
   });
 
+  test("an offer carries its inferred source's VALUES onto the _on half", async () => {
+    // The whole point of the values travelling: a kasa plug's `power_state`
+    // holds `On`, not `on`. Imported without them the pair reads unknown
+    // forever, and there is nothing on screen that looks wrong.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const offered = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        pairs: {
+          slug: string;
+          page: number;
+          base: string;
+          stateSource: { variable: string; onValue: string; offValue: string } | null;
+        }[];
+      }
+      // "Projectors" is on two pages in the fixture, so the slug is
+      // page-qualified. Only the page 1 pair drives a PJLink projector.
+    ).pairs.find((p) => p.page === 1 && p.base === "Projectors")!;
+    // The offer itself names it, so the dialog needs no second request.
+    assert.equal(offered.stateSource?.variable, "Projectors:powerState");
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: {
+        pairs: [
+          {
+            ...offered,
+            stateVariable: offered.stateSource!.variable,
+            stateOnValue: offered.stateSource!.onValue,
+            stateOffValue: offered.stateSource!.offValue,
+          },
+        ],
+      },
+    });
+    const slug = offered.slug;
+    assert.deepEqual((r.json as { created: string[] }).created, [`${slug}_on`, `${slug}_off`]);
+
+    const byName = new Map(
+      automationEngine.cueRules().map((x) => [String(x.trigger.params.name), x]),
+    );
+    assert.equal(String(byName.get(`${slug}_on`)?.trigger.params.stateVariable), "Projectors:powerState");
+    assert.equal(String(byName.get(`${slug}_on`)?.trigger.params.stateOnValue), "On");
+    assert.equal(String(byName.get(`${slug}_on`)?.trigger.params.stateOffValue), "Off");
+    // The `_off` half inherits all three, as it always did.
+    assert.equal(byName.get(`${slug}_off`)?.trigger.params.stateVariable, undefined);
+
+    // And it reads back through the MODULE endpoint, end to end.
+    variables["Projectors:powerState"] = "On";
+    cueStates.invalidate();
+    const states = (
+      (await callRoute(cueRoutes, "/api/cues/states")).json as {
+        states: Record<string, { state: string; variable: string }>;
+      }
+    ).states;
+    assert.equal(states[slug]?.variable, "Projectors:powerState");
+    assert.equal(states[slug]?.state, "on");
+    // A binding whose values were left at the on/off defaults would have read
+    // "On" as neither.
+    delete variables["Projectors:powerState"];
+  });
+
+  test("on and off values that are the same are refused before either half exists", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs", stateOnValue: "1", stateOffValue: "1" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.match(skipped[0]!.why, /could never be read/);
+    assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
+  });
+
   test("a state variable Companion could not have skips the pair, creating NEITHER half", async () => {
     // Checked before either half is created: addRule would refuse the `_on` rule
     // and create the `_off` one, leaving half a pair behind for a typo in a
@@ -1854,7 +2082,7 @@ describe("importing a pair with a state variable", () => {
       (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
     ).pairs
       .filter((p) => p.slug === "lobby_tvs")
-      .map((p) => ({ ...p, stateVariable: "state:lobby" }));
+      .map((p) => ({ ...p, stateVariable: "../../lobby" }));
 
     const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
       method: "POST",
@@ -1867,7 +2095,7 @@ describe("importing a pair with a state variable", () => {
       skipped.map((x) => x.name),
       ["lobby_tvs"],
     );
-    assert.match(skipped[0]!.why, /not a Companion variable name/);
+    assert.match(skipped[0]!.why, /not a Companion variable/);
     assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
   });
 });
@@ -2274,11 +2502,11 @@ describe("importing a single button as a TOGGLE pair", () => {
 
   test("a variable Companion could not have skips the button, creating NEITHER half", async () => {
     const button = await offered("house_lights_on");
-    const r = await importing([{ ...button, stateVariable: "state:lights" }]);
+    const r = await importing([{ ...button, stateVariable: "../../lights" }]);
     const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
     assert.deepEqual(created, []);
     assert.deepEqual(skipped.map((x) => x.name), ["house_lights_on"]);
-    assert.match(skipped[0]!.why, /not a Companion variable name/);
+    assert.match(skipped[0]!.why, /not a Companion variable/);
     assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
   });
 

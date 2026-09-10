@@ -337,8 +337,42 @@ so Home Assistant shows what it asked for rather than what the device did.
 
 Companion answers a press the moment it hands it to a control and never says what
 happened at the other end, so an optimistic switch still reads *on* for a
-projector somebody turned off at the wall. Bind the pair to a Companion **custom
-variable** and it reports the truth instead.
+projector somebody turned off at the wall. Bind the pair to a Companion variable
+and it reports the truth instead.
+
+A binding names one of two things:
+
+| Form | Reads |
+|---|---|
+| `projectors_state`, or `custom:projectors_state` | a Companion **custom variable** — one your own buttons set |
+| `VCR-Overhead-Light:power_state` | a **module variable** — one a connection publishes for itself |
+
+A bare name is a custom variable, so every binding written before module
+variables could be named goes on meaning what it meant.
+
+#### Inferred, from what the button drives
+
+A button that drives a smart plug, a television, a projector or OBS already has
+somewhere to read its state from, with nothing to build in Companion at all. The
+import offers it as the default binding, labelled `(inferred)`, and the hourly
+reconcile fills it in for a pair that has none:
+
+| Module | Variable | On / off |
+|---|---|---|
+| `tplink-kasasmartplug`, `tplink-kasasmartbulb` | `power_state` | `On` / `Off` |
+| `vizio-smartcast` | `power` | `On` / `Off` |
+| `generic-pjlink` | `powerState` | `On` / `Off` |
+| `obs-studio` | `streaming` | `On-Air` / `Off-Air` |
+
+The connection comes from the button's `powerState` feedback where it has one,
+and from its first action otherwise. OBS only infers for a button whose actions
+are **streaming** actions — a recording button on the same connection is a
+different fact. Anything else infers nothing rather than guessing a name.
+
+A binding you set yourself is never replaced. Pick a different variable, or
+**No state**, and the reconcile leaves it alone.
+
+#### A custom variable your buttons set
 
 In Companion:
 
@@ -349,7 +383,7 @@ In Companion:
 
 In Stage Utility, either pick the variable in the **State** column when you import
 the pair, or open the pair's `_on` cue and set **State variable**. The `_off` half
-inherits it. If your buttons set something other than `on`/`off` — `POWER=ON`,
+inherits it. Picking an inferred source brings its two values with it. If your buttons set something other than `on`/`off` — `POWER=ON`,
 `1` — set **Value meaning on** and **Value meaning off** to match; they may not be
 the same string.
 
@@ -402,6 +436,27 @@ pills, rather than leaving them out silently.
 Nothing polls Companion in the background: the variables are read when
 `/api/cues/states` is called and the answer is served for five seconds, so an
 install nobody polls costs nothing.
+
+### For Home Assistant
+
+Two things exist for an integration to build on, beside the pasted YAML above:
+
+- `GET /api/cues/manifest` — every cue as JSON, with a `version` that goes up on
+  any rule change, this server's name and LAN address, one entry per ON/OFF pair
+  with its current state, and one per single cue. A cue whose Companion button
+  has gone missing is listed with `available: false` rather than dropped.
+- the `cues` [SSE channel](../reference/api.md#channels) — a `state` event when a
+  bound pair's device changes, and a `manifest` event carrying the new version
+  when the rules change.
+
+While at least one client is subscribed to `cues`, bound variables are read every
+five seconds and only changes are pushed; with nobody subscribed there is no
+timer and nothing is read. The log says which:
+
+```
+[cues] live channel: polling every 5 s for 1 subscriber(s)
+[cues] live channel: polling stopped
+```
 
 ## What the module exposes
 

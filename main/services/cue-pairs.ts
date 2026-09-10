@@ -25,7 +25,7 @@
 // operator's own buttons set: `projectors_state` = `on` / `off`. Stage Utility
 // only ever reads it.
 
-import { isCompanionVariableName } from "./companion-export.js";
+import { isCompanionVariableRef } from "./companion-export.js";
 // From cue-aliases, NOT from the trigger registry: the registry reaches
 // node:url, and this module is imported by the settings page.
 import { CALL_TRIGGER_ID, parseAliases } from "./cue-aliases.js";
@@ -37,7 +37,10 @@ export const STATE_OFF_DEFAULT = "off";
 
 /** Where a pair's real state is read from, and what the two answers look like. */
 export interface StateBinding {
-  /** A Companion custom variable name. */
+  /**
+   * What to read: a custom variable (`projectors_state`, or `custom:` prefixed)
+   * or a module one (`VCR-Overhead-Light:power_state`). See parseVariableRef.
+   */
   variable: string;
   /** The value that means on. Compared trimmed, case-sensitively. */
   onValue: string;
@@ -89,8 +92,11 @@ export function stateBindingParams(binding: Partial<StateBinding> | null): Recor
 export function stateBindingProblem(params: Record<string, string | number>): string | null {
   const binding = stateBindingOf(params);
   if (!binding) return null;
-  if (!isCompanionVariableName(binding.variable)) {
-    return `"${binding.variable}" is not a Companion variable name — letters, digits, _, - and . only`;
+  if (!isCompanionVariableRef(binding.variable)) {
+    return (
+      `"${binding.variable}" is not a Companion variable — a custom variable ` +
+      `(letters, digits, _, - and . only) or <connection label>:<variable name>`
+    );
   }
   if (binding.onValue === binding.offValue) {
     return `the on and off values are both "${binding.onValue}", so the state could never be read`;
