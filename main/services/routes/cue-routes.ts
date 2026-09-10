@@ -570,7 +570,7 @@ async function addPairRules(
           //
           // The VALUES travel with it. A custom variable an operator's own
           // buttons set holds "on"/"off" and needs neither, but an INFERRED
-          // module variable holds `On`/`Off` — or `On-Air`/`Off-Air` — and the
+          // module variable holds `On`/`Off` — or `Live`/`Off-Air` — and the
           // comparison is case-sensitive, so a binding imported without them is
           // a pair that reads unknown forever with nothing on screen saying why.
           ...(suffix === "on" && pair.binding.stateVariable ? pair.binding : {}),

@@ -105,7 +105,12 @@ describe("inferStateSource, one row per module", () => {
     );
     assert.deepEqual(streaming, {
       variable: "Studio-OBS:streaming",
-      onValue: "On-Air",
+      // `Live`, which is what obs-studio 3.15.3 writes
+      // (`this.states.streaming ? 'Live' : 'Off-Air'`) and what master's
+      // getOBSStreamingStateLabel returns. It shipped as `On-Air` — a guess
+      // from the off value's spelling, on the one row nothing on the real
+      // install could confirm — and a live stream read unknown.
+      onValue: "Live",
       offValue: "Off-Air",
       moduleId: "obs-studio",
     });

@@ -76,7 +76,7 @@ const POWER_SOURCES: Readonly<Record<string, { name: string; on: string; off: st
  * OBS, which is not a power switch and needs the button read as well as the
  * connection.
  *
- * `streaming` is On-Air/Off-Air. `recording` is a different thing on the same
+ * `streaming` is Live/Off-Air. `recording` is a different thing on the same
  * connection — the install this was built against has three recording buttons
  * and no streaming one — so a recording toggle bound to `streaming` would
  * report a stream nobody started. Only a button whose actions are STREAMING
@@ -86,9 +86,17 @@ const POWER_SOURCES: Readonly<Record<string, { name: string; on: string; off: st
  * `start_recording`, `stop_recording`); the streaming ones were not, because
  * that install has no streaming button. Matched on the word rather than on a
  * list of ids for exactly that reason.
+ *
+ * The ON value is `Live`, not `On-Air`. It is the one value in this file that
+ * could not be read live — nothing on that install streams — and it was
+ * guessed from the off value's spelling. The module writes
+ * `this.states.streaming ? 'Live' : 'Off-Air'` (obs-studio 3.15.3 index.js,
+ * the version this install runs; master's getOBSStreamingStateLabel says the
+ * same), so a streaming pair bound to `On-Air` read unknown while OBS was
+ * live.
  */
 const OBS_MODULE = "obs-studio";
-const OBS_STREAMING = { name: "streaming", on: "On-Air", off: "Off-Air" };
+const OBS_STREAMING = { name: "streaming", on: "Live", off: "Off-Air" };
 
 /** The definitionId of the feedback that means "this key shows a device's power". */
 const POWER_FEEDBACK = "powerstate";

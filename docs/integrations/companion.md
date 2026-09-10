@@ -362,7 +362,7 @@ reconcile fills it in for a pair that has none:
 | `tplink-kasasmartplug`, `tplink-kasasmartbulb` | `power_state` | `On` / `Off` |
 | `vizio-smartcast` | `power` | `On` / `Off` |
 | `generic-pjlink` | `powerState` | `On` / `Off` |
-| `obs-studio` | `streaming` | `On-Air` / `Off-Air` |
+| `obs-studio` | `streaming` | `Live` / `Off-Air` |
 
 The connection comes from the button's `powerState` feedback where it has one,
 and from its first action otherwise. OBS only infers for a button whose actions
