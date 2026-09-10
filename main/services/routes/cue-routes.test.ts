@@ -1762,11 +1762,59 @@ describe("reconciling a cue's Companion button", () => {
     assert.match(automationEngine.cueNameOf(after), /^screens_(on|off)$/);
   });
 
+  test("a pair with no binding is bound from what its ON button drives", async () => {
+    // The whole path, through the real engine: imported unbound, the hourly
+    // pass reads the export, sees the PJLink `powerState` feedback on the ON
+    // button and writes the binding with its values.
+    await importPageOne();
+    const before = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "room_a_screens_projectors_on")!;
+    assert.equal(before.trigger.params.stateVariable, undefined);
+
+    const realLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await runCompanionReconcile();
+    } finally {
+      console.log = realLog;
+    }
+
+    const after = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "room_a_screens_projectors_on")!;
+    assert.equal(String(after.trigger.params.stateVariable), "Projectors:powerState");
+    assert.equal(String(after.trigger.params.stateOnValue), "On");
+    assert.equal(String(after.trigger.params.stateOffValue), "Off");
+    // And an operator reading /log on a Sunday can see it happened.
+    assert.deepEqual(
+      lines.filter((l) => l.includes("state source inferred")),
+      [
+        "[companion] cue room_a_screens_projectors: " +
+          "state source inferred Projectors:powerState",
+      ],
+    );
+
+    // A second pass writes nothing more — the binding is now explicit.
+    const again = await runCompanionReconcile();
+    assert.equal(again?.applied, 0, "the pass rewrote a binding it had just made");
+  });
+
   test("an hourly pass that changed nothing logs no summary line", async () => {
     // 24 lines a day saying "4 in place" on the same /log page an operator
     // reads on a Sunday morning, burying the lines that matter. Every actual
     // decision already logs itself; the summary exists to total those.
     await importPageOne();
+    // ONE settling pass first. The page 1 pairs are imported unbound here, the
+    // way an install from before the state-source inference has them, so the
+    // first pass legitimately writes a binding for the Projectors pair. What
+    // this test is about is the pass AFTER that, which changes nothing.
+    const settling = await runCompanionReconcile();
+    assert.equal(settling?.applied, 1, "the settling pass wrote something other than the binding");
+
     const realLog = console.log;
     const lines: string[] = [];
     console.log = (...args: unknown[]) => {

@@ -563,7 +563,7 @@ async function addPairRules(
           // module variable holds `On`/`Off` — or `On-Air`/`Off-Air` — and the
           // comparison is case-sensitive, so a binding imported without them is
           // a pair that reads unknown forever with nothing on screen saying why.
-          ...(suffix === "on" ? pair.binding : {}),
+          ...(suffix === "on" && pair.binding.stateVariable ? pair.binding : {}),
         },
       },
       conditions: [{ id: "service.is-not-live", params: {} }],
