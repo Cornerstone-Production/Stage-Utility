@@ -195,14 +195,14 @@ Give the row a **Toggle with state** variable and it is imported as an ON/OFF
 **pair** instead. Both cues press the same button; the variable is what tells the
 two directions apart, so `<name>_on` presses when the variable says off — and when
 it cannot be read at all — but not when it already says on. `<name>_off` mirrors
-it. See [Real state](#real-state). A trailing `ON`, `OFF` or `Toggle` comes off the
-name first: "VCR Light ON" becomes `vcr_light_on` and `vcr_light_off`, not
-`vcr_light_on_off`.
+it. See [Real state](#real-state). A trailing direction word — `ON`, `OFF`,
+`Startup`, `Shutdown` or `Toggle` — comes off the name first: "VCR Light ON"
+becomes `vcr_light_on` and `vcr_light_off`, not `vcr_light_on_off`.
 
 In Companion, set the variable from the button's own toggle branches — a **Set
 custom variable** action to `on` in the branch that turns the thing on, and one to
-`off` in the branch that turns it off. Without a variable the button stays a single
-cue and a `script`, as before.
+`off` in the branch that turns it off. A button with no variable is a single cue
+and a `script`.
 
 A toggle **needs** the variable. Two cues pointed at one button with nothing bound
 generate a switch that reports what it last asked for while the device does the
@@ -384,6 +384,11 @@ skipped: true}`; the Activity log records it as `skipped`. That is what makes a
 repeats `turn_on`, or an assistant that hears the same sentence twice. Only a
 call is checked — a rule the engine fires from a trigger of its own presses
 without reading anything.
+
+The read is the same one `/api/cues/states` makes, so it costs one round of
+Companion reads shared with any poller, and its answer is served for five
+seconds. An unreachable Companion makes a bound cue wait up to **three seconds**
+before it presses — the read's timeout. It still presses.
 
 If the whole read fails rather than one pair — the server could not answer at all
 — Settings → Automation says so in one line above the rules list and shows no

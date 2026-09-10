@@ -9,6 +9,12 @@ import {
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
 import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
+// The one main type imported rather than restated below. The wire shapes in
+// this file are deliberately local — the renderer models what the API sends —
+// but an OUTCOME is a closed set the server owns, and a second copy of it is a
+// list that silently stops covering the log: `skipped` had to be added here by
+// hand, and nothing would have said so if it had not been.
+import type { AutomationOutcome } from "@main/types/automation";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -94,7 +100,7 @@ interface LogEntry {
   ruleName: string;
   triggerId: string;
   actionId: string;
-  outcome: "fired" | "failed" | "simulated" | "suppressed" | "skipped" | "condition-not-met";
+  outcome: AutomationOutcome;
   detail: string;
   /** The token label behind a called cue. Absent for anything the engine fired. */
   caller?: string;
@@ -295,7 +301,7 @@ function ParamField({
 
 // ── Activity log ──────────────────────────────────────────────────────────────
 
-const OUTCOME_STYLE: Record<LogEntry["outcome"], string> = {
+const OUTCOME_STYLE: Record<AutomationOutcome, string> = {
   fired: "text-fg",
   simulated: "text-fg-muted",
   suppressed: "text-fg-subtle",

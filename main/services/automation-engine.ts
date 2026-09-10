@@ -387,6 +387,46 @@ class AutomationEngine {
       return blocked("condition-not-met", `Not right now — ${label.toLowerCase()} is not satisfied`);
     }
 
+    // DESIRED STATE, and only here — ABOVE the cooldown on purpose.
+    //
+    // A bound pair knows what its device is actually doing, so a call asking for
+    // the state it is already in presses nothing: a Home Assistant switch that
+    // repeats `turn_on`, or an assistant that hears "lights on" twice, would
+    // otherwise press a TOGGLE button twice and leave the light off. Below the
+    // cooldown it would almost never run for the case it exists for — a repeat
+    // arrives about two seconds apart and every imported cue carries a three
+    // second cooldown, so the repeat was answered 409 `cooldown`, which is an
+    // ERROR in Home Assistant's log for a call that was correct and needed
+    // nothing done. "Already on" is the true answer and a 200.
+    //
+    // The cooldown is still the backstop, and still ahead of the press: a second
+    // call whose state DISAGREES falls straight through to it, which is the case
+    // where the device has not yet caught up with the first press.
+    //
+    // Deliberately NOT in runAction and NOT on the bus path: a rule the engine
+    // fires from a trigger of its own has already decided that the press is what
+    // it wants, and a state read there would put a Companion round trip — and a
+    // Companion that is down — in the way of every triggered press. This is the
+    // call route only, where the caller is a voice assistant or a home
+    // automation system that may repeat itself.
+    const desired = this.desiredStateOf(rule);
+    let state: CueStateName | null = null;
+    if (desired) {
+      state = await this.readCueState(desired.base);
+      if (state === desired.want) {
+        const detail = `already ${desired.want}, not pressed`;
+        this.log(rule, "skipped", detail, opts.caller);
+        console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: already ${scrub(desired.want)}, not pressed`);
+        // No `simulated` flag, in simulate mode or out of it: nothing was
+        // dispatched and nothing WOULD have been, so there is no simulation to
+        // report. `skipped: true` is the whole answer.
+        return {
+          status: 200,
+          body: { ok: true, detail: `already ${desired.want}`, state, skipped: true },
+        };
+      }
+    }
+
     const last = this.lastFiredAt.get(rule.id);
     if (last !== undefined && rule.cooldownSec > 0) {
       const remaining = Math.ceil((last + rule.cooldownSec * 1000 - now) / 1000);
@@ -403,35 +443,6 @@ class AutomationEngine {
       const key = this.serviceKey();
       if (key && this.firedForService.get(rule.id) === key) {
         return blocked("once-per-service", `${wanted} has already run for this service`);
-      }
-    }
-
-    // DESIRED STATE, and only here. A bound pair knows what its device is
-    // actually doing, so a call asking for the state it is already in presses
-    // nothing: a Home Assistant switch that repeats `turn_on`, or an assistant
-    // that hears "lights on" twice, would otherwise press a TOGGLE button twice
-    // and leave the light off. Checked BEFORE the confirmation so a redundant
-    // call is not answered "say that again", and before the cooldown is stamped
-    // so a genuine press seconds later is not blocked by a call that did nothing.
-    //
-    // Deliberately NOT in runAction and NOT on the bus path: a rule the engine
-    // fires from a trigger of its own has already decided that the press is what
-    // it wants, and a state read there would put a Companion round trip — and a
-    // Companion that is down — in the way of every triggered press. This is the
-    // call route only, where the caller is a voice assistant or a home
-    // automation system that may repeat itself.
-    const desired = this.desiredStateOf(rule);
-    let state: CueStateName | null = null;
-    if (desired) {
-      state = await this.readCueState(desired.base);
-      if (state === desired.want) {
-        const detail = `already ${desired.want}, not pressed`;
-        this.log(rule, "skipped", detail, opts.caller);
-        console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: already ${scrub(desired.want)}, not pressed`);
-        return {
-          status: 200,
-          body: { ok: true, detail: `already ${desired.want}`, state, skipped: true },
-        };
       }
     }
 
@@ -460,7 +471,11 @@ class AutomationEngine {
     // The cached state is now a state from BEFORE a press. Left in place, a
     // second call inside the five second window would read the old value and
     // press again — which is the repeat this whole check exists to absorb.
-    if (desired) cueStates.invalidate();
+    //
+    // Only when something REALLY reached a device: a simulated call and a failed
+    // action both leave the cached state accurate, and dropping it there would
+    // buy every bound pair a fresh round of Companion reads for nothing.
+    if (desired && result.ok && !this.settings.simulate) cueStates.invalidate();
     // `state` is what was read BEFORE the press — including `unknown`, which is
     // the caller's evidence that the press went ahead without knowing what the
     // device was doing rather than because the device needed it.

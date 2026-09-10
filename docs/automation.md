@@ -182,7 +182,8 @@ label.
 a [State variable](integrations/companion.md#real-state), the variable is read
 before the press. If it already says what the call is asking for, nothing is
 pressed and the answer is `200 {ok: true, detail: "already on", state: "on",
-skipped: true}` — mirrored for off. The Activity log records it as its own
+skipped: true}` — mirrored for off. This is checked before the cue's cooldown,
+so a repeated call is answered "already on" rather than refused `cooldown`. The Activity log records it as its own
 outcome, `skipped`, not as a suppression: nothing refused the call.
 
 ```
@@ -191,7 +192,8 @@ outcome, `skipped`, not as a suppression: nothing refused the call.
 
 A state that cannot be read — the variable missing, Companion unreachable, a
 value matching neither — **presses**, and the answer carries `state: "unknown"`.
-A read never stops a press. Only a call is checked this way; a rule the engine
+A read never stops a press, though an unreachable Companion delays one by up to
+three seconds. Only a call is checked this way; a rule the engine
 fires from a trigger of its own presses without reading anything.
 
 A cue that presses a Companion button remembers which button, not just where it

@@ -1905,6 +1905,13 @@ describe("a bound cue does not press when the device is already there", () => {
     }
   }
 
+  /** Put a real cooldown on both halves, as the import does. */
+  async function setCooldown(seconds: number): Promise<void> {
+    for (const rule of automationEngine.listRules()) {
+      await automationEngine.updateRule(rule.id, { cooldownSec: seconds });
+    }
+  }
+
   test("_on while the variable says on answers already on and presses nothing", async () => {
     await withPair();
     variables.projectors_state = "on";
@@ -1971,6 +1978,44 @@ describe("a bound cue does not press when the device is already there", () => {
     assert.equal(presses.length, 1, "off was pressed again with the device already off");
   });
 
+  test("a repeat inside the COOLDOWN is answered already on, not 409", async () => {
+    // The case the whole feature exists for, at the cooldown every imported cue
+    // actually carries: Home Assistant repeats `turn_on` about two seconds
+    // apart. Below the cooldown check this answered 409 `cooldown` — an error
+    // in Home Assistant's log for a call that was correct and needed nothing
+    // done — and the skip never ran.
+    await withPair();
+    await setCooldown(3);
+    variables.projectors_state = "off";
+    assert.equal((await call("projectors_on")).status, 200);
+    assert.equal(presses.length, 1);
+
+    // The device reports itself on, and the repeat lands well inside 3 s.
+    variables.projectors_state = "on";
+    cueStates.invalidate();
+    const repeat = await call("projectors_on");
+    assert.equal(repeat.status, 200);
+    const body = repeat.json as Record<string, unknown>;
+    assert.equal(String(body.detail), "already on");
+    assert.equal(body.skipped, true);
+    assert.equal(presses.length, 1);
+  });
+
+  test("and the cooldown is still the backstop when the state DISAGREES", async () => {
+    // The device has not caught up yet — the variable still says off after the
+    // first press — so there is nothing to skip and the cooldown is what stops
+    // the second press.
+    await withPair();
+    await setCooldown(3);
+    variables.projectors_state = "off";
+    assert.equal((await call("projectors_on")).status, 200);
+    cueStates.invalidate();
+    const repeat = await call("projectors_on");
+    assert.equal(repeat.status, 409);
+    assert.equal(String((repeat.json as Record<string, unknown>).reason), "cooldown");
+    assert.equal(presses.length, 1, "the cooldown let a second press through");
+  });
+
   test("a state that cannot be read PRESSES, and says unknown", async () => {
     // A read must never be able to stop a press: the variable is missing here,
     // which is exactly what an operator sees before they have set it up.
@@ -2005,6 +2050,25 @@ describe("a bound cue does not press when the device is already there", () => {
     const second = (await call("projectors_on")).json as Record<string, unknown>;
     assert.equal(second.skipped, true, "the state was read from the cache, from before the press");
     assert.equal(presses.length, 1);
+  });
+
+  test("a SIMULATED call keeps the cached state — nothing reached the device", async () => {
+    // The cache is dropped after a press because the state it holds is from
+    // before it. A simulated call pressed nothing, so the cached state is still
+    // true, and dropping it buys every bound pair another round of Companion
+    // reads for nothing.
+    await withPair();
+    variables.projectors_state = "off";
+    await automationEngine.setSettings({ simulate: true });
+    try {
+      await call("projectors_on");
+      assert.deepEqual(variableReads, ["projectors_state"]);
+      await call("projectors_on");
+      assert.deepEqual(variableReads, ["projectors_state"], "a simulated call dropped the cache");
+      assert.equal(presses.length, 0);
+    } finally {
+      await automationEngine.setSettings({ simulate: false });
+    }
   });
 
   test("THE ENGINE never reads state for a rule fired from another trigger", async () => {
