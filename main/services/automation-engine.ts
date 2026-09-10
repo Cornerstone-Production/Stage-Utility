@@ -471,7 +471,15 @@ class AutomationEngine {
       if (key) this.firedForService.set(rule.id, key);
     }
     const result = await this.runAction(rule, `call by ${opts.caller}`, opts.caller);
-    const verdict = result.ok ? "dispatched" : "blocked (action-failed)";
+    // "dispatched (simulated)" and not a bare "dispatched": in simulate mode the
+    // line read identically to a real press while nothing reached a device, so
+    // an operator reading /log with the projectors dark had nothing to go on.
+    // The response body already carried the flag; the log threw it away.
+    const verdict = !result.ok
+      ? "blocked (action-failed)"
+      : this.settings.simulate
+        ? "dispatched (simulated)"
+        : "dispatched";
     console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: ${scrub(verdict)}`);
     // The cached state is now a state from BEFORE a press. Left in place, a
     // second call inside the five second window would read the old value and
