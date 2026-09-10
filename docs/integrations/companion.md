@@ -174,12 +174,14 @@ is left out: a cue called nothing cannot be called.
 **Nothing in this section is ticked for you.** A pair is plainly a thing being
 turned on and off; a single button is whatever somebody put on a Companion page,
 and a pre-ticked camera shot or playback macro is a cue somebody can say by
-accident. Search by label, page or cue name and tick what you want.
+accident. Search by label, page or cue name and tick what you want. Choosing a
+**Toggle with state** variable for a row ticks that row, because picking one is
+saying you want that button.
 
 They carry the same **no service is live** condition and three-second cooldown as a
 pair's halves, and the same page-naming rule applies when the same label is on two
 pages. In Home Assistant a single button becomes a `script` rather than a switch —
-there is no on and no off to give a switch a state.
+there is no on and no off to give a switch a state — unless it is a **toggle**.
 
 #### Toggle buttons
 
