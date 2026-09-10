@@ -414,6 +414,62 @@ battery).
 A binding you set yourself is never replaced. Pick a different variable, or
 **No state**, and the reconcile leaves it alone.
 
+#### Learning a state source
+
+A pair whose connections have **no row above** learns one instead. Companion's
+export carries no variable definitions and its API cannot list a connection's
+variables, so the names are guessed and checked: the hourly pass asks Companion
+for each of 19 candidate names on the connection — the eight the table already
+uses plus `power_status`, `state`, `record_state`, `stream_state`, `on_off`,
+`is_on`, `active`, `enabled`, `mute`, `muted` and `connected` — and records the
+ones that exist. The import dialog says **will learn** for such a pair, and the
+rule shows *Learning: watching N candidates*.
+
+**What it needs from you: press the pair on, and press it off.** The two values
+are not guessed. After a press that really reached a device, each candidate is
+read at the start of the eight-second [settle window](#the-settle-window) and
+again as it moves. A candidate that moved after an ON press *and* after an OFF
+press, to two values and never a third, becomes the binding — with the value
+seen after ON as the on value and the one after OFF as the off value. The order
+of the two presses does not matter, and they can be days apart.
+
+Where more than one candidate qualifies, a `power` name wins, then a `status`
+one; the others are named on the log line.
+
+What it never does:
+
+- **press anything.** Every observation rides a press you or a caller made. A
+  simulated press and a failed one are not observed at all.
+- **replace a binding.** A pair with a binding on either half — typed, inferred
+  or learned — is never probed and never watched.
+- **bind from one press.** A variable that moves after an ON press and then
+  holds is a `last_command` or a counter, not a state.
+
+It asks Companion **once**. The candidate set is recorded and what happens next
+is a press — Learn again is what re-asks. A connection that answers for none of
+the 19 is retried hourly three times, because a module that has not finished
+connecting publishes no variables yet, and then left alone:
+
+```
+[cues] pair projectors: none of the 19 candidate state variables exist on GrandMA3 after 3 tries; pick one on the rule
+```
+
+It **stops** after three presses that taught it nothing:
+
+```
+[cues] pair projectors: could not learn a state source after 3 presses; pick one on the rule
+```
+
+and once it has bound, it stops for good:
+
+```
+[cues] pair projectors: learned state source Rack:status (Active/Standby) from watching 2 presses
+```
+
+A learned binding is an ordinary binding — editable, clearable. Clearing it does
+**not** restart learning, because a pair you unbound on purpose would otherwise
+be re-bound within the hour. **Learn again** on the rule is what starts over.
+
 #### A custom variable your buttons set
 
 In Companion:

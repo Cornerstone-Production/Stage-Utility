@@ -43,6 +43,7 @@ const { AUTOMATION_TRIGGERS, CALL_TRIGGER_ID } = await import("../automation-tri
 const { readFingerprint } = await import("../companion-fingerprint.js");
 const { runCompanionReconcile } = await import("../companion-reconcile.js");
 const { cueStates, SETTLE_MS } = await import("../cue-states.js");
+const { __resetWatches, stateProbeDeps } = await import("../companion-state-probe.js");
 
 after(async () => {
   await fsp.rm(TMP, { recursive: true, force: true });
@@ -1605,6 +1606,19 @@ describe("reconciling a cue's Companion button", () => {
         presses.push(url);
         return new Response("ok", { status: 200 });
       }
+      // A VARIABLE read, answered from the shared map. Without this clause it
+      // fell through to the export below, so every name a candidate probe asked
+      // for answered 200 with a 4 MB JSON document as its value — which is
+      // every candidate "existing", holding the same value, forever.
+      const moduleVariable = /\/api\/variable\/([^/]+)\/([^/]+)\/value$/.exec(url);
+      if (moduleVariable) {
+        const ref = `${decodeURIComponent(moduleVariable[1]!)}:${decodeURIComponent(moduleVariable[2]!)}`;
+        variableReads.push(ref);
+        const value = variables[ref];
+        return value === undefined
+          ? new Response("Not found", { status: 404 })
+          : new Response(value, { status: 200 });
+      }
       if (!exportOk) throw new Error("EHOSTUNREACH");
       return Response.json(exportDoc);
     };
@@ -1914,6 +1928,51 @@ describe("reconciling a cue's Companion button", () => {
     // A second pass writes nothing more — the binding is now explicit.
     const again = await runCompanionReconcile();
     assert.equal(again?.applied, 0, "the pass rewrote a binding it had just made");
+  });
+
+  test("a pair the table has no row for records its candidates for a later press", async () => {
+    // The page 2 "Projectors" pair drives a lighting console, which has no
+    // verified row — so the pass probes its connection and records the names
+    // that answered, and the pair waits to be pressed. What it must NOT do is
+    // bind anything from a probe: a name existing says nothing about which of
+    // its values means on.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    exportDoc = companionExportFixture();
+    exportOk = true;
+    companionApi.invalidate();
+    variables["Lighting:status"] = "Standby";
+    variables["Lighting:mute"] = "0";
+    try {
+      const offer = (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        pairs: { page: number; base: string; learnable?: boolean }[];
+      };
+      const pair = offer.pairs.filter((p) => p.page === 2 && p.base === "Projectors");
+      assert.deepEqual(
+        pair.map((p) => p.learnable),
+        [true],
+        "the offer says this one will be learned",
+      );
+      await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+        method: "POST",
+        headers: browser,
+        body: { pairs: pair },
+      });
+
+      const run = await runCompanionReconcile();
+      assert.ok((run?.applied ?? 0) > 0);
+      const on = automationEngine
+        .cueRules()
+        .find((r) => automationEngine.cueNameOf(r).endsWith("_on"))!;
+      assert.equal(
+        String(on.trigger.params.stateCandidates),
+        "Lighting:status,Lighting:mute",
+        "the names that answered, in candidate order",
+      );
+      assert.equal(String(on.trigger.params.stateVariable ?? ""), "", "a probe never binds");
+    } finally {
+      delete variables["Lighting:status"];
+      delete variables["Lighting:mute"];
+    }
   });
 
   test("an hourly pass that changed nothing logs no summary line", async () => {
@@ -2597,6 +2656,73 @@ describe("a bound cue does not press when the device is already there", () => {
     assert.equal(pair!.settling, true);
     assert.equal(pair!.commanded, "on");
     assert.equal(pair!.state, "off", "the manifest hid the reading rather than marking it stale");
+  });
+
+  test("a press on a LEARNING pair reads its candidates, and only those", async () => {
+    // The other half of the rule above: an unbound pair whose `_on` half
+    // carries probed candidates has its press WATCHED, because the two values
+    // of a variable can only be read off a device that has just been told to
+    // move. The engine is what dispatches that watch, and this drives the real
+    // call route to prove it does.
+    await withPair(false);
+    const on = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "projectors_on")!;
+    await automationEngine.updateRule(on.id, {
+      trigger: {
+        ...on.trigger,
+        params: { ...on.trigger.params, stateCandidates: "Lighting:status,Lighting:mute" },
+      },
+    });
+    variables["Lighting:status"] = "Standby";
+    variables["Lighting:mute"] = "0";
+    // The settle poll is disarmed for this test: what is being asserted is the
+    // one read the engine's dispatch causes, and a live one-second timer would
+    // go on reading into the tests below it.
+    const realTimeout = stateProbeDeps.setTimeout;
+    stateProbeDeps.setTimeout = () => ({}) as unknown as NodeJS.Timeout;
+    try {
+      variableReads.length = 0;
+      await call("projectors_on");
+      assert.equal(presses.length, 1, "a learning pair must still press");
+      // Settling promises inside the watch are not awaited by the route.
+      for (let i = 0; i < 32; i++) await Promise.resolve();
+      assert.deepEqual(variableReads, ["Lighting:status", "Lighting:mute"]);
+    } finally {
+      stateProbeDeps.setTimeout = realTimeout;
+      __resetWatches();
+      delete variables["Lighting:status"];
+      delete variables["Lighting:mute"];
+    }
+  });
+
+  test("a SIMULATED press on a learning pair watches nothing", async () => {
+    // Nothing reached a device, so there is nothing to observe — and an
+    // observation of a press that never happened is a variable ruled out, or
+    // worse ruled IN, on evidence that does not exist. Simulate is on by
+    // default on a fresh install, which is exactly when a pair is learning.
+    await withPair(false);
+    const on = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "projectors_on")!;
+    await automationEngine.updateRule(on.id, {
+      trigger: { ...on.trigger, params: { ...on.trigger.params, stateCandidates: "Lighting:status" } },
+    });
+    variables["Lighting:status"] = "Standby";
+    const realTimeout = stateProbeDeps.setTimeout;
+    stateProbeDeps.setTimeout = () => ({}) as unknown as NodeJS.Timeout;
+    await automationEngine.setSettings({ simulate: true });
+    try {
+      variableReads.length = 0;
+      await call("projectors_on");
+      for (let i = 0; i < 32; i++) await Promise.resolve();
+      assert.deepEqual(variableReads, []);
+    } finally {
+      await automationEngine.setSettings({ simulate: false });
+      stateProbeDeps.setTimeout = realTimeout;
+      __resetWatches();
+      delete variables["Lighting:status"];
+    }
   });
 
   test("an unbound pair is not settled, whatever it presses", async () => {

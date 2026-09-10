@@ -10,6 +10,13 @@ import {
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
 import type { InferredStateSource } from "@main/services/companion-state-source";
+import {
+  LEARN_MAX_ATTEMPTS,
+  learnAgainParams,
+  learningHint,
+  parseCandidates,
+  parseLearning,
+} from "@main/services/companion-state-learn";
 import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
 // The one main type imported rather than restated below. The wire shapes in
 // this file are deliberately local — the renderer models what the API sends —
@@ -577,6 +584,13 @@ function CueStateFields({
 }) {
   const binding = stateBindingOf(params);
   const variable = String(params.stateVariable ?? "");
+  // What learning has found and how far it got. A pair whose connections the
+  // verified table has no row for is probed by the reconcile and BOUND from
+  // watching a press, so the field has something to say with nothing picked and
+  // nothing inferred. See companion-state-learn.ts.
+  const candidates = parseCandidates(params);
+  const learning = parseLearning(params);
+  const learnable = candidates.length > 0 || learning.stopped !== undefined;
   // A variable that is bound but no longer in Companion's export — renamed or
   // deleted — is still offered, so the select shows what the rule actually says.
   // The INFERRED one is offered too and labelled, because on a Companion with
@@ -664,6 +678,40 @@ function CueStateFields({
           />
         )}
       </Row>
+      {/* LEARNING, as a VISIBLE line rather than a hover hint. Nothing in the
+          verified table covers what this pair drives, so its state source is
+          being learned from what moves when it is pressed — and a blank State
+          variable with no explanation beside it reads as "this pair cannot
+          report its state", which is the opposite of what is about to happen.
+          A tooltip nobody hovers is not an explanation. */}
+      {learnable && (
+        <Row
+          label="Learning"
+          hint="Forget what was learned about this pair and probe its connections again on the next hourly pass. The binding above is left alone."
+        >
+          <span className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 text-caption1 text-fg-subtle">
+              {learning.stopped === "gave-up"
+                ? `Learning gave up after ${LEARN_MAX_ATTEMPTS} presses — nothing this pair drives moved in both directions. Pick a variable, or start again.`
+                : learning.stopped === "bound"
+                  ? "Learned from watching this pair being pressed."
+                  : learningHint(candidates)}
+            </span>
+            {/* CLEARING A BINDING deliberately does NOT restart learning — an
+                operator who unbound a pair on purpose would otherwise have it
+                re-probed and re-bound within the hour — so this is the one
+                control that starts it over. */}
+            <Button
+              type="button"
+              variant="transparent"
+              className="h-7 shrink-0 text-footnote"
+              onClick={() => onChange(learnAgainParams())}
+            >
+              Learn again
+            </Button>
+          </span>
+        </Row>
+      )}
       {binding && (
         <>
           <Row label="Value meaning on" hint={`What the variable holds when it is on. Blank means "${STATE_ON_DEFAULT}".`}>

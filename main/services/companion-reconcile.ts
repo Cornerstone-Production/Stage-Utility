@@ -46,6 +46,7 @@ import {
 } from "./companion-export.js";
 import { encodeAliases, nextAliases } from "./cue-aliases.js";
 import { type CuePair, cuePairs, stateBindingParams } from "./cue-pairs.js";
+import { probeStateCandidates } from "./companion-state-probe.js";
 import {
   type ButtonFingerprint,
   type ButtonLocation,
@@ -105,6 +106,14 @@ export interface ReconcileChange {
   renameLog: string | null;
   /** The line about a state binding this pass filled in, or null. */
   bindLog: string | null;
+  /**
+   * The line about the state-source candidates this pass probed, or null.
+   *
+   * Separate from `bindLog` because they are opposites: `bindLog` is a pair
+   * that now reports its real state, and this is a pair that cannot yet and is
+   * waiting to be pressed. See companion-state-probe.ts.
+   */
+  learnLog: string | null;
   /**
    * The button this cue is now pointed at, or null when it is missing.
    *
@@ -195,6 +204,7 @@ export function reconcileCues(
       triggerPatch: null,
       renameLog: null,
       bindLog: null,
+      learnLog: null,
       found: decided.found,
     });
 
@@ -648,11 +658,26 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
   // broadcast twice and could leave one of them unwritten.
   const foundButtons = new Map<string, CompanionButton>();
   for (const change of changes) if (change.found) foundButtons.set(change.ruleId, change.found);
-  for (const [ruleId, bound] of inferBindingPatches(cuePairs(rules), foundButtons)) {
+  const pairs = cuePairs(rules);
+  for (const [ruleId, bound] of inferBindingPatches(pairs, foundButtons)) {
     const change = changes.find((c) => c.ruleId === ruleId);
     if (!change) continue;
     change.triggerPatch = { ...(change.triggerPatch ?? {}), ...bound.patch };
     change.bindLog = bound.log;
+  }
+
+  // A pair the verified table has no row for: ask Companion which candidate
+  // variable names its connection actually publishes, so a later press can be
+  // watched. Merged into the same change for the same reason the inferred
+  // binding is — one updateRule per rule, one broadcast.
+  //
+  // AFTER the inference on purpose. A pair the table covers is bound above and
+  // probeTargets then skips it, so the two never both write to one pair.
+  for (const outcome of await probeStateCandidates(pairs, foundButtons)) {
+    const change = changes.find((c) => c.ruleId === outcome.ruleId);
+    if (!change) continue;
+    change.triggerPatch = { ...(change.triggerPatch ?? {}), ...outcome.patch };
+    change.learnLog = outcome.log;
   }
 
   let applied = 0;
@@ -701,6 +726,11 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
       // Not a warning: a pair that could not report its state now can, which is
       // the pass doing its job rather than something an operator must look at.
       if (change.bindLog) console.log(scrub(change.bindLog, LOG_MAX));
+      // Not a warning either: a pair whose state source has to be learned is
+      // the ordinary case for a module nobody has verified, and the line exists
+      // so an operator can see WHY the switch is still optimistic and what will
+      // change it. See companion-state-probe.ts.
+      if (change.learnLog) console.log(scrub(change.learnLog, LOG_MAX));
     } catch (err) {
       // Rethrowing would abandon the rest of the rules over one of them, so this
       // COLLECTS the failure and carries on — and returns it, because a caller

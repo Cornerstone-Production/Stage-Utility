@@ -76,6 +76,9 @@ const PAIRS = [
     // Set per test. Annotated so a test may assign one — the inferred literal
     // would otherwise be `null` and nothing could be written to it.
     stateSource: null as StubSource,
+    // Set per test, like stateSource: the literal would otherwise be `false`
+    // and nothing could be written to it.
+    learnable: false as boolean,
     exists: false,
   },
 ];
@@ -848,6 +851,65 @@ describe("a button's own inferred state source", () => {
       );
     } finally {
       PAIRS[0]!.stateSource = null;
+    }
+  });
+
+  test("a learnable pair says \"will learn\" where None would be", async () => {
+    // Nothing in the verified table covers what this pair drives, so leaving
+    // the select EMPTY is not "no state" — it is a state source that will be
+    // learned from the first press on and off. "No state" there reads as "this
+    // pair cannot report its state", which is the opposite.
+    //
+    // A custom variable named after the pair still wins the default, as it does
+    // for every other pair: the operator built it on purpose, and it reports
+    // from the first press rather than the third.
+    CUSTOM_VARIABLES = ["projectors_state"];
+    PAIRS[0]!.learnable = true;
+    try {
+      await mount();
+      assert.deepEqual(options(stateSelect()), ["|will learn", "projectors_state|projectors_state"]);
+      assert.equal(stateSelect()?.value, "projectors_state");
+      // And choosing the empty option imports the pair unbound, which is what
+      // hands it to the learning path.
+      await act(async () => {
+        fireEvent.change(stateSelect()!, { target: { value: "" } });
+      });
+      const body = await importNow();
+      assert.deepEqual(
+        body.pairs.map((p) => p.stateVariable),
+        [""],
+      );
+    } finally {
+      PAIRS[0]!.learnable = false;
+    }
+  });
+
+  test("a pair the table DOES cover says No state, never will learn", async () => {
+    // `learnable` is false whenever the inference has an answer: the table is
+    // verified and wins, and an operator told a pair "will learn" while it was
+    // about to be bound from the table would be told the wrong thing.
+    CUSTOM_VARIABLES = ["projectors_state"];
+    PAIRS[0]!.stateSource = PJLINK;
+    try {
+      await mount();
+      assert.equal(options(stateSelect()).includes("|will learn"), false);
+      assert.equal(options(stateSelect()).includes("|No state"), true);
+    } finally {
+      PAIRS[0]!.stateSource = null;
+    }
+  });
+
+  test("with no custom variables at all, a learnable pair still says will learn", async () => {
+    // No select is rendered — there is nothing to choose — so the words have to
+    // be there on their own or the pair looks like every unbound pair.
+    CUSTOM_VARIABLES = [];
+    PAIRS[0]!.learnable = true;
+    try {
+      await mount();
+      assert.equal(stateSelect(), null, "a select was offered with nothing to choose");
+      assert.equal(document.body.textContent?.includes("will learn"), true);
+    } finally {
+      PAIRS[0]!.learnable = false;
     }
   });
 

@@ -334,3 +334,33 @@ function rowFor(
   }
   return null;
 }
+
+/**
+ * The connection labels on this button that NO table row covers.
+ *
+ * Its actions' connections and its feedbacks', in that order and de-duplicated:
+ * the same evidence inferStateSource walks, minus the ranking, because learning
+ * probes every connection rather than picking one.
+ *
+ * A connection whose module HAS rows is excluded even when the button matched
+ * none of them. The module is known, its rows were verified, and a button that
+ * matched no row is a button about something the module does not publish — an
+ * OBS scene key, a deck's format key. Probing there would bind a scene key to
+ * `recording`.
+ *
+ * A connection with no label is excluded: a variable reference names a
+ * connection by its label and there is nothing to ask for.
+ */
+export function learnableConnections(
+  button: { feedbacks: readonly ControlEntry[]; actions: readonly ControlEntry[] },
+  connections: Readonly<Record<string, ExportConnection>>,
+): string[] {
+  const out: string[] = [];
+  for (const entry of [...button.actions, ...button.feedbacks]) {
+    const connection = connections[entry.connectionId];
+    if (!connection?.label) continue;
+    if (STATE_SOURCES[connection.moduleId.trim().toLowerCase()]) continue;
+    if (!out.includes(connection.label)) out.push(connection.label);
+  }
+  return out;
+}
