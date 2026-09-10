@@ -41,6 +41,8 @@ import {
   isSuggestedPair,
   singleButtons,
   slugForCue,
+  splitToggleLabel,
+  togglePairSlug,
 } from "../companion-export.js";
 import { fingerprintParams } from "../companion-fingerprint.js";
 import { runCompanionReconcile } from "../companion-reconcile.js";
@@ -257,12 +259,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // is the ordinary case after a relabel: a button renamed "Screens ON" and
     // then back to "Projectors ON" is offered as `projectors_on`, which is now
     // the cue's former name.
-    const taken = new Set<string>();
-    for (const rule of automationEngine.listRules()) {
-      const name = automationEngine.cueNameOf(rule);
-      if (name) taken.add(name);
-      for (const alias of automationEngine.cueAliasesOf(rule)) taken.add(alias);
-    }
+    const taken = takenCueNames();
     // The single buttons are worked out HERE rather than below, because the cue
     // names of the pairs and of the singles are resolved together: uniqueness is
     // a property of the whole offer, and counted per family a lone "House Lights
@@ -294,7 +291,18 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // and playback macros. The dialog ticks nothing in this section.
     const buttons = singles.map((b) => {
       const slug = slugs.buttons.get(`${b.page}:${b.row}:${b.col}`) ?? "";
-      return { ...b, slug, exists: !!slug && taken.has(slug) };
+      // Imported as a TOGGLE, this button's cues are named after its pair base,
+      // not after its own slug — `record_toggle` becomes `record_on`/
+      // `record_off`. Reading `exists` off the slug alone offered an already
+      // imported toggle again forever, and taking the offer created a THIRD cue
+      // on the same key: a Home Assistant switch and a script fighting over one
+      // button. Re-running the import is the ordinary case, so this is the
+      // documented path.
+      const base = slug ? togglePairSlug(slug, b.label) : "";
+      const exists =
+        !!slug &&
+        (taken.has(slug) || (!!base && (taken.has(`${base}_on`) || taken.has(`${base}_off`))));
+      return { ...b, slug, exists };
     });
     // The custom variables Companion has, so the import dialog can offer a pair
     // a state binding without a second request. Empty on an install with none,
@@ -330,6 +338,39 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     return;
   }
 }
+
+/**
+ * Every cue name in use, INCLUDING former names.
+ *
+ * The engine treats the two as one namespace — no rule may take either from
+ * another — so an offer or an import that only looked at current names would
+ * show a name as free and then be refused by addRule. One copy, for the offer
+ * and for the toggle import both.
+ */
+function takenCueNames(): Set<string> {
+  const taken = new Set<string>();
+  for (const rule of automationEngine.listRules()) {
+    const name = automationEngine.cueNameOf(rule);
+    if (name) taken.add(name);
+    for (const alias of automationEngine.cueAliasesOf(rule)) taken.add(alias);
+  }
+  return taken;
+}
+
+/**
+ * The cooldown every imported cue carries, in seconds.
+ *
+ * The backstop behind the desired-state check, and it runs after it: a bound
+ * pair presses nothing when the device is already where the call asks for (see
+ * callByName in automation-engine.ts), and this catches the repeats that check
+ * cannot — an unbound pair, a single button, or a second call arriving before
+ * the device's own state variable has caught up with the first.
+ *
+ * Three seconds rather than two because a Home Assistant switch that repeats
+ * `turn_on` does so about two seconds apart, which slipped straight through.
+ * ONE constant for the pairs import and the single-button import both.
+ */
+const IMPORT_COOLDOWN_SEC = 3;
 
 interface ImportButton {
   page: number;
@@ -386,7 +427,7 @@ function pressParamsFor(button: ImportButton, fallbackLabel: string): Record<str
 /**
  * Turn chosen ON/OFF pairs into two rules each.
  *
- * Every generated rule carries the `service.is-not-live` condition and a two
+ * Every generated rule carries the `service.is-not-live` condition and a three
  * second cooldown, and both are the point of importing rather than hand-writing:
  * a cue that somebody can say during a service, twice, is the failure mode this
  * whole feature has to not have. They stay editable afterwards — the import sets
@@ -439,50 +480,81 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
     const pageName = String(p.pageName ?? "").trim();
     const spoken = slug !== slugForCue(base) && pageName ? `${pageName} ${base}` : base;
 
-    for (const [suffix, button] of [["on", on], ["off", off]] as const) {
-      const name = `${slug}_${suffix}`;
-      const rule: Omit<Rule, "id"> = {
-        name: `${spoken} ${suffix.toUpperCase()}`,
-        enabled: true,
-        trigger: {
-          id: CALL_TRIGGER_ID,
-          params: {
-            name,
-            says: `${spoken} ${suffix}`,
-            // On the `_on` half only; the `_off` half inherits it by name. See
-            // cue-pairs.ts. The on/off VALUES are not offered here — the
-            // defaults are what a Companion button sets, and anything else is
-            // an edit to the rule.
-            ...(suffix === "on" && stateVariable ? { stateVariable } : {}),
-          },
-        },
-        conditions: [{ id: "service.is-not-live", params: {} }],
-        action: {
-          id: "companion.press",
-          params: pressParamsFor(button, `${base} ${suffix.toUpperCase()}`),
-        },
-        cooldownSec: 2,
-        oncePerService: false,
-      };
-      try {
-        // addRule is what enforces uniqueness, so a duplicate is refused by the
-        // same check the rule editor goes through rather than by a second copy
-        // of it here.
-        await automationEngine.addRule(rule);
-        created.push(name);
-      } catch (err) {
-        skipped.push({ name, why: errorMessage(err) });
-      }
-    }
+    await addPairRules({ slug, spoken, stateVariable, buttons: { on, off }, label: base }, {
+      created,
+      skipped,
+    });
   }
 
   return { created, skipped };
 }
 
 /**
+ * Create the two rules of one pair, `<slug>_on` and `<slug>_off`.
+ *
+ * ONE copy, for a real ON/OFF pair and for a toggle button imported as a pair
+ * both. A toggle passes the SAME button as both halves — that is the whole
+ * difference between the two, and the reason this is not two nearly-identical
+ * loops that would drift the first time a default changed.
+ *
+ * Appends to the caller's result rather than returning its own: a pair whose
+ * `_on` half clashes still offers its `_off` half, which is how re-running the
+ * import fills in a half somebody deleted.
+ */
+async function addPairRules(
+  pair: {
+    slug: string;
+    /** The words, already disambiguated by page where it was needed. */
+    spoken: string;
+    /** The binding for the `_on` half, or "" for an optimistic pair. */
+    stateVariable: string;
+    buttons: { on: ImportButton; off: ImportButton };
+    /** The button label to fall back on when the offer carried none. */
+    label: string;
+  },
+  out: ImportResult,
+): Promise<void> {
+  for (const suffix of ["on", "off"] as const) {
+    const name = `${pair.slug}_${suffix}`;
+    const rule: Omit<Rule, "id"> = {
+      name: `${pair.spoken} ${suffix.toUpperCase()}`,
+      enabled: true,
+      trigger: {
+        id: CALL_TRIGGER_ID,
+        params: {
+          name,
+          says: `${pair.spoken} ${suffix}`,
+          // On the `_on` half only; the `_off` half inherits it by name. See
+          // cue-pairs.ts. The on/off VALUES are not offered here — the
+          // defaults are what a Companion button sets, and anything else is
+          // an edit to the rule.
+          ...(suffix === "on" && pair.stateVariable ? { stateVariable: pair.stateVariable } : {}),
+        },
+      },
+      conditions: [{ id: "service.is-not-live", params: {} }],
+      action: {
+        id: "companion.press",
+        params: pressParamsFor(pair.buttons[suffix], `${pair.label} ${suffix.toUpperCase()}`),
+      },
+      cooldownSec: IMPORT_COOLDOWN_SEC,
+      oncePerService: false,
+    };
+    try {
+      // addRule is what enforces uniqueness, so a duplicate is refused by the
+      // same check the rule editor goes through rather than by a second copy
+      // of it here.
+      await automationEngine.addRule(rule);
+      out.created.push(name);
+    } catch (err) {
+      out.skipped.push({ name, why: errorMessage(err) });
+    }
+  }
+}
+
+/**
  * Turn chosen single buttons into ONE cue each.
  *
- * The same defaults as a pair's two halves — `service.is-not-live` and a two
+ * The same defaults as a pair's two halves — `service.is-not-live` and a three
  * second cooldown — for the same reason: a cue somebody can say during a
  * service, twice, is the failure mode this feature has to not have.
  *
@@ -491,6 +563,13 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
  * disambiguated by page carries the page name in the WORDS too, exactly as a
  * pair's do — otherwise two cues both read "Record" in the rules list and Home
  * Assistant gets two scripts with one alias.
+ *
+ * UNLESS the offer carries a `stateVariable`, which says the button is a TOGGLE.
+ * Then it becomes a PAIR whose two halves press the same button, and the
+ * variable is what tells the two directions apart. A toggle imported as one cue
+ * is a Home Assistant `script`, which HomeKit shows as a momentary switch that
+ * snaps back — so every tap pressed the toggle again and the light ended up
+ * whichever way the taps happened to land.
  */
 async function importButtons(raw: unknown[]): Promise<ImportResult> {
   const created: string[] = [];
@@ -510,13 +589,68 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
     const pageName = String(o.pageName ?? "").trim();
     const spoken = slug !== slugForCue(label) && pageName ? `${pageName} ${label}` : label;
 
+    // A toggle: one button that is both directions, told apart by a variable.
+    const stateVariable = String(o.stateVariable ?? "").trim();
+    if (stateVariable) {
+      // Checked BEFORE either half is created, exactly as the pairs import
+      // does: a typo in a field that is not even the cue's name must not leave
+      // half a pair behind.
+      if (!isCompanionVariableName(stateVariable)) {
+        skipped.push({ name: slug, why: `"${stateVariable}" is not a Companion variable name` });
+        continue;
+      }
+      // The DIRECTION word comes off the label first — "VCR Light ON" is a
+      // toggle for the VCR light, and a pair named after the whole label would
+      // have an off cue called `vcr_light_on_off`. The slug is stripped the same
+      // way rather than re-slugged, so a page disambiguation the offer already
+      // carries survives.
+      //
+      // No emptiness check on what comes back: slugForCue has already
+      // normalised the slug above, so it cannot be a bare `_on` that strips to
+      // nothing — and if it ever were, addRule refuses `_on` as a cue name and
+      // the button is reported skipped with the reason, which is a better
+      // answer than a second copy of that rule here.
+      const { base } = splitToggleLabel(label);
+      const pairSlug = togglePairSlug(slug, label);
+      const spokenBase =
+        spoken === label ? base : `${spoken.slice(0, spoken.length - label.length)}${base}`;
+      // ALL OR NOTHING, unlike a real ON/OFF pair, where a half that clashes is
+      // reported and the other half still lands — which is how somebody
+      // re-imports a half they deleted. A toggle cannot do that: the binding
+      // lives on the `_on` half, so a surviving `_off` half alone is an UNBOUND
+      // cue that then pairs itself with whatever unrelated `<base>_on` was
+      // already there, and the generated switch turns that stranger on and this
+      // button off.
+      const taken = takenCueNames();
+      const clash = ["on", "off"].map((half) => `${pairSlug}_${half}`).find((n) => taken.has(n));
+      if (clash) {
+        skipped.push({
+          name: clash,
+          why: `"${clash}" is already used — a toggle is imported as a whole pair or not at all`,
+        });
+        continue;
+      }
+      await addPairRules(
+        {
+          slug: pairSlug,
+          spoken: spokenBase,
+          stateVariable,
+          // The SAME button both ways: that is what a toggle is.
+          buttons: { on: button, off: button },
+          label: base,
+        },
+        { created, skipped },
+      );
+      continue;
+    }
+
     const rule: Omit<Rule, "id"> = {
       name: spoken,
       enabled: true,
       trigger: { id: CALL_TRIGGER_ID, params: { name: slug, says: spoken } },
       conditions: [{ id: "service.is-not-live", params: {} }],
       action: { id: "companion.press", params: pressParamsFor(button, label) },
-      cooldownSec: 2,
+      cooldownSec: IMPORT_COOLDOWN_SEC,
       oncePerService: false,
     };
     try {

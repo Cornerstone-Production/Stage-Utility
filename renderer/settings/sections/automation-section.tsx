@@ -2,12 +2,19 @@ import { errorMessage } from "@main/services/errors";
 import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
 import {
   cuePairs,
+  isTogglePair,
   stateBindingOf,
   stateBindingParams,
   STATE_OFF_DEFAULT,
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
 import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
+// The one main type imported rather than restated below. The wire shapes in
+// this file are deliberately local — the renderer models what the API sends —
+// but an OUTCOME is a closed set the server owns, and a second copy of it is a
+// list that silently stops covering the log: `skipped` had to be added here by
+// hand, and nothing would have said so if it had not been.
+import type { AutomationOutcome } from "@main/types/automation";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -93,7 +100,7 @@ interface LogEntry {
   ruleName: string;
   triggerId: string;
   actionId: string;
-  outcome: "fired" | "failed" | "simulated" | "suppressed" | "condition-not-met";
+  outcome: AutomationOutcome;
   detail: string;
   /** The token label behind a called cue. Absent for anything the engine fired. */
   caller?: string;
@@ -294,10 +301,11 @@ function ParamField({
 
 // ── Activity log ──────────────────────────────────────────────────────────────
 
-const OUTCOME_STYLE: Record<LogEntry["outcome"], string> = {
+const OUTCOME_STYLE: Record<AutomationOutcome, string> = {
   fired: "text-fg",
   simulated: "text-fg-muted",
   suppressed: "text-fg-subtle",
+  skipped: "text-fg-subtle",
   "condition-not-met": "text-fg-subtle",
   failed: "text-red-10",
 };
@@ -513,11 +521,14 @@ function ServiceGuardField({
 function CueStateFields({
   params,
   base,
+  toggle,
   customVariables,
   onChange,
 }: {
   params: Record<string, string | number>;
   base: string;
+  /** Both halves press the same Companion button. See isTogglePair. */
+  toggle: boolean;
   customVariables: string[];
   onChange: (patch: Record<string, string>) => void;
 }) {
@@ -556,7 +567,15 @@ function CueStateFields({
     <>
       <Row
         label="State variable"
-        hint={`A Companion custom variable your ON/OFF buttons set. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`}
+        hint={
+          // A toggle pair with nothing bound is the one case where blank is not
+          // merely "optimistic": the two halves press the same key, so an
+          // optimistic switch reports the opposite of the truth every other
+          // press. Said on the field, where the operator can fix it.
+          toggle && !binding
+            ? "Both halves press the same button. Without a state variable, Home Assistant cannot know which way it went."
+            : `A Companion custom variable your ON/OFF buttons set. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`
+        }
       >
         {options.length > 0 ? (
           <Select value={variable} onValueChange={setVariable}>
@@ -614,6 +633,7 @@ function RuleCard({
   registry,
   dynamicOptions,
   pairBase,
+  pairIsToggle,
   cueState,
   customVariables,
   onChanged,
@@ -623,6 +643,8 @@ function RuleCard({
   dynamicOptions: Record<string, { value: string; label: string }[]>;
   /** The pair's base when this rule is its `_on` half, else null. */
   pairBase: string | null;
+  /** This rule's pair presses one button both ways. See isTogglePair. */
+  pairIsToggle: boolean;
   /** This pair's state, when it has a binding and the route answered. */
   cueState: CueStateRow | null;
   customVariables: string[];
@@ -793,6 +815,7 @@ function RuleCard({
             <CueStateFields
               params={draft.trigger.params}
               base={pairBase}
+              toggle={pairIsToggle}
               customVariables={customVariables}
               onChange={(patch) =>
                 setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, ...patch } } })
@@ -1011,6 +1034,14 @@ export function AutomationSection() {
     () => new Map(pairs.map((p) => [p.on.id, p.base] as const)),
     [pairs],
   );
+  // The `_on` halves whose pair presses ONE button both ways — an imported
+  // toggle, or two cues somebody pointed at the same key. The state variable is
+  // the only thing that can tell those two directions apart, so the field says
+  // so when there is none.
+  const togglePairs = useMemo(
+    () => new Set(pairs.filter((p) => isTogglePair(p)).map((p) => p.on.id)),
+    [pairs],
+  );
   const anyBinding = useMemo(() => pairs.some((p) => p.binding !== null), [pairs]);
 
   // The search field's value, in component state only — it is a filter over
@@ -1163,6 +1194,7 @@ export function AutomationSection() {
                     registry={registry}
                     dynamicOptions={dynamicOptions}
                     pairBase={pairBases.get(r.id) ?? null}
+                    pairIsToggle={togglePairs.has(r.id)}
                     cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
                     customVariables={companionPairs?.customVariables ?? []}
                     onChanged={refresh}

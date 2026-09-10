@@ -21,6 +21,7 @@ import {
   boundCuePairs,
   cuePairs,
   defaultStateVariable,
+  isTogglePair,
   stateBindingOf,
   stateBindingParams,
   stateBindingProblem,
@@ -247,5 +248,54 @@ describe("defaultStateVariable", () => {
     assert.equal(defaultStateVariable("amps", NAMES), "");
     assert.equal(defaultStateVariable("", NAMES), "");
     assert.equal(defaultStateVariable("", ["_state"]), "");
+  });
+});
+
+describe("isTogglePair", () => {
+  /** A cue that presses a Companion button at these coordinates. */
+  const press = (name: string, at: { page: number; row: number; col: number }): Rule => ({
+    ...cue(name),
+    action: { id: "companion.press", params: { ...at } },
+  });
+  const SAME = { page: 1, row: 2, col: 1 };
+
+  const only = (rules: Rule[]) => cuePairs(rules)[0]!;
+
+  test("both halves on one button is a toggle", () => {
+    assert.equal(isTogglePair(only([press("lights_on", SAME), press("lights_off", SAME)])), true);
+  });
+
+  test("two different buttons is not", () => {
+    assert.equal(
+      isTogglePair(only([press("lights_on", SAME), press("lights_off", { ...SAME, col: 2 })])),
+      false,
+    );
+  });
+
+  test("coordinates only — a stale fingerprint on one half must not hide it", () => {
+    // A reconcile updates one half's label and action ids before the other's,
+    // and a comparison that included them would read a toggle as an ordinary
+    // pair for as long as that lasted — which is the window in which the
+    // generated config would stop warning about it.
+    const on = press("lights_on", SAME);
+    on.action.params.label = "House Lights ON";
+    on.action.params.actionIds = "a1,a2";
+    assert.equal(isTogglePair(only([on, press("lights_off", SAME)])), true);
+  });
+
+  test("a pair that presses nothing is not a toggle", () => {
+    // Two `log.message` cues share no button, so there is nothing for a state
+    // variable to disambiguate and nothing to warn about.
+    assert.equal(isTogglePair(only([cue("lights_on"), cue("lights_off")])), false);
+  });
+
+  test("coordinates that are not numbers are not a match", () => {
+    // A hand-edited rules file with `page: "one"` must not compare equal to
+    // another one just because both are unusable.
+    const on = press("lights_on", SAME);
+    on.action.params.page = "one";
+    const off = press("lights_off", SAME);
+    off.action.params.page = "one";
+    assert.equal(isTogglePair(only([on, off])), false);
   });
 });

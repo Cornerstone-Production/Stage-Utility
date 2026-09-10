@@ -244,6 +244,46 @@ function splitSuffix(label: string): { base: string; suffix: string } | null {
 }
 
 /**
+ * A single button's label split into the thing and the direction word on the
+ * end of it — `{ base: "VCR Light", word: "on" }` for "VCR Light ON".
+ *
+ * For a TOGGLE button, which is one button with no partner and therefore never
+ * seen by findPairs: the import names its two cues after the thing, not after
+ * whichever word the operator happened to put on the key, or a cue that turns a
+ * light off is called `vcr_light_on_off`.
+ *
+ * `Toggle` is included here and deliberately NOT in SUFFIXES: it has no
+ * opposite, so it can never pair two buttons, and a "Lights Toggle" beside a
+ * "Lights ON" must not be read as a pair. A label that is nothing BUT a
+ * direction word keeps its word — a cue called nothing cannot be called.
+ */
+export function splitToggleLabel(label: string): { base: string; word: string } {
+  const collapsed = collapse(label);
+  const m = /^(.*?)[\s]+(\S+)$/.exec(collapsed);
+  const word = m ? m[2]!.toLowerCase() : "";
+  const base = m ? m[1]!.trim() : "";
+  if (!base || !(SUFFIXES.includes(word) || word === "toggle")) return { base: collapsed, word: "" };
+  return { base, word };
+}
+
+/**
+ * The base a toggle button's pair is named after: its own cue slug with the
+ * direction word taken off the end — `vcr_light_on` -> `vcr_light`.
+ *
+ * The SLUG is stripped rather than the label re-slugged, so a page
+ * disambiguation the slug already carries survives ("stage_vcr_light_on" ->
+ * "stage_vcr_light"). The import route names the two rules from this and the
+ * dialog shows the operator the same two names before they press Import; a
+ * second copy of the rule is how the preview would come to disagree with what
+ * is created.
+ */
+export function togglePairSlug(slug: string, label: string): string {
+  const { word } = splitToggleLabel(label);
+  const suffix = word ? `_${slugForCue(word)}` : "";
+  return suffix && slug.endsWith(suffix) ? slug.slice(0, -suffix.length) : slug;
+}
+
+/**
  * ON/OFF pairs, matched WITHIN a page.
  *
  * Per page on purpose: "Conf TVs ON" exists on both the main auditorium's page

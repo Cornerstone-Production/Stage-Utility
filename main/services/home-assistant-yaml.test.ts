@@ -791,3 +791,85 @@ describe("the document for an install with no bindings", () => {
     assert.equal(yaml.includes("state_attr"), false);
   });
 });
+
+// ── A toggle pair: both halves press one button ───────────────────────────────
+
+describe("a pair whose two halves press the SAME button", () => {
+  /** A cue that presses a real coordinate, which is what makes a toggle one. */
+  const press = (
+    name: string,
+    says: string,
+    at: { page: number; row: number; col: number },
+    state: Record<string, string> = {},
+  ): Rule => ({
+    ...cue(name, says, name, "", state),
+    action: { id: "companion.press", params: { ...at } },
+  });
+
+  const SAME = { page: 1, row: 2, col: 1 };
+  const OTHER = { page: 1, row: 2, col: 2 };
+
+  /** Generate, and collect the `[cues]` warnings it wrote. */
+  function generate(rules: Rule[]): { yaml: string; warnings: string[] } {
+    const warnings: string[] = [];
+    const real = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      return { yaml: homeAssistantYaml(rules, BASE), warnings };
+    } finally {
+      console.warn = real;
+    }
+  }
+
+  test("a BOUND toggle pair is an ordinary state switch, with the comment that says why", () => {
+    const { yaml, warnings } = generate([
+      press("house_lights_on", "House lights on", SAME, { stateVariable: "house_lights_state" }),
+      press("house_lights_off", "House lights off", SAME),
+    ]);
+    assert.equal(
+      comments(yaml).includes(
+        "# toggle button: both directions press the same Companion button, so the state variable is what tells them apart",
+      ),
+      true,
+    );
+    assert.deepEqual(switchStates(yaml), [
+      {
+        id: "house_lights",
+        from:
+          "\"{{ (state_attr('sensor.stage_utility_cues', 'house_lights') or {}).get('state') == 'on' }}\"",
+      },
+    ]);
+    assert.deepEqual(warnings, [], "a bound toggle is not a warning — it is the supported shape");
+  });
+
+  test("an UNBOUND one is emitted anyway, with a WARNING comment and one log line", () => {
+    // The import cannot make this — a single button with no variable stays a
+    // single cue — so it is two rules somebody wrote by hand, pointed at one
+    // key. Dropping it would be a switch that vanished from Home Assistant with
+    // nothing saying why; it is emitted, and it says what is wrong with it.
+    const { yaml, warnings } = generate([
+      press("house_lights_on", "House lights on", SAME),
+      press("house_lights_off", "House lights off", SAME),
+    ]);
+    assert.equal(
+      comments(yaml).includes(
+        "# WARNING: both halves press the same button and no state variable is bound — Home cannot know which way it went",
+      ),
+      true,
+    );
+    assert.deepEqual(switchStates(yaml), [{ id: "house_lights", from: "optimistic" }]);
+    assert.deepEqual(warnings, ["[cues] pair house_lights presses one button with no state variable"]);
+  });
+
+  test("an ordinary pair on two different buttons gets NEITHER comment", () => {
+    const { yaml, warnings } = generate([
+      press("projectors_on", "Projectors on", SAME),
+      press("projectors_off", "Projectors off", OTHER),
+    ]);
+    const said = comments(yaml).filter((c) => c.includes("toggle") || c.includes("WARNING"));
+    assert.deepEqual(said, []);
+    assert.deepEqual(warnings, []);
+  });
+});

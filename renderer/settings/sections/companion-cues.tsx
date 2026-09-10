@@ -21,6 +21,7 @@
 
 import { errorMessage } from "@main/services/errors";
 import { defaultStateVariable } from "@main/services/cue-pairs";
+import { togglePairSlug } from "@main/services/companion-export";
 import {
   type ButtonFingerprint,
   fingerprintParams,
@@ -563,6 +564,15 @@ export function ImportPairsDialog({
    * remembered — which is why the lookup uses `??` and not `||`.
    */
   const [stateVars, setStateVars] = useState<Record<string, string>>({});
+  /**
+   * The state variable chosen for a SINGLE button, by button key.
+   *
+   * Nothing is suggested here, unlike a pair: a pair is plainly a thing being
+   * turned on and off, and a single button is only a toggle if the operator
+   * says it is. An entry appears when they pick one, and only those buttons
+   * send `stateVariable` at all.
+   */
+  const [toggleVars, setToggleVars] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -583,6 +593,8 @@ export function ImportPairsDialog({
 
   const key = (p: Pair) => `${p.page}:${p.slug}`;
   const buttonKey = (b: Single) => `${b.page}:${b.row}:${b.col}`;
+  /** The two cue names a toggle button would get, from the module the route uses. */
+  const toggleSlug = (b: Single) => togglePairSlug(b.slug, b.label);
   /** The variable this pair will be bound to: what was chosen, else the guess. */
   const stateVarFor = (p: Pair) => stateVars[key(p)] ?? defaultStateVariable(p.slug, customVariables);
 
@@ -600,7 +612,14 @@ export function ImportPairsDialog({
       const send = pairs
         .filter((p) => chosen.has(key(p)))
         .map((p) => ({ ...p, stateVariable: stateVarFor(p) }));
-      const sendButtons = singles.filter((b) => pickedButtons.has(buttonKey(b)));
+      // `stateVariable` is on a button only when one was chosen. A button
+      // without it is a single cue and a Home Assistant script, as before.
+      const sendButtons = singles
+        .filter((b) => pickedButtons.has(buttonKey(b)))
+        .map((b) => {
+          const variable = toggleVars[buttonKey(b)] ?? "";
+          return variable ? { ...b, stateVariable: variable } : b;
+        });
       const r = await invoke<{ created: string[]; skipped: { name: string; why: string }[] }>(
         "automation:importPairs",
         { pairs: send, buttons: sendButtons },
@@ -630,6 +649,7 @@ export function ImportPairsDialog({
           setPicked(null);
           setPickedButtons(new Set());
           setStateVars({});
+          setToggleVars({});
           setSearch("");
         }
         onOpenChange(v);
@@ -638,7 +658,7 @@ export function ImportPairsDialog({
       <DialogContent className="max-w-2xl">
         <h2 className="text-subheadline font-semibold text-fg">Import from Companion</h2>
         <p className="mb-2 mt-1 text-caption1 text-fg-muted">
-          Every cue is created with <span className="text-fg">no service is live</span> on it and a two
+          Every cue is created with <span className="text-fg">no service is live</span> on it and a three
           second cooldown. Pairs that drive a projector, television, plug or lighting console are ticked
           for you; nothing else is.
         </p>
@@ -755,6 +775,14 @@ export function ImportPairsDialog({
               <p className="pb-1 text-caption2 text-fg-subtle">
                 Every other labelled button. Each becomes one cue and one Home Assistant script — nothing
                 here is ticked for you.
+                {customVariables.length > 0 && (
+                  <>
+                    {" "}
+                    A button that is really a <span className="text-fg">toggle</span> — one key for both
+                    directions — becomes an ON/OFF pair instead when you give it a state variable, so Home
+                    Assistant gets a switch rather than a button that snaps back.
+                  </>
+                )}
               </p>
               <Input
                 value={search}
@@ -768,32 +796,70 @@ export function ImportPairsDialog({
                   {singles.length === 0 ? "Every labelled button is part of a pair." : "Nothing matches."}
                 </p>
               )}
-              {shown.map((b) => (
-                <label
-                  key={buttonKey(b)}
-                  className="flex items-center gap-2 border-b border-line py-1.5"
-                >
-                  <Checkbox
-                    checked={pickedButtons.has(buttonKey(b))}
-                    disabled={b.exists}
-                    aria-label={`${b.label} · ${b.pageName}`}
-                    onCheckedChange={(v) => {
-                      const next = new Set(pickedButtons);
-                      if (v) next.add(buttonKey(b));
-                      else next.delete(buttonKey(b));
-                      setPickedButtons(next);
-                    }}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-footnote text-fg">{b.label}</span>
-                    <span className="block truncate text-caption2 text-fg-subtle">
-                      {b.pageName} · {b.slug}
-                      {b.exists ? " · already imported" : ""}
-                    </span>
-                  </span>
-                  <KindTag kind="script" />
-                </label>
-              ))}
+              {shown.map((b) => {
+                const chosenVar = toggleVars[buttonKey(b)] ?? "";
+                return (
+                  // A DIV with the label around the checkbox and the words only,
+                  // exactly as the pairs rows are: with the whole row as one
+                  // <label>, every click on the select also toggled the
+                  // checkbox, so choosing a variable unticked the button it was
+                  // for.
+                  <div key={buttonKey(b)} className="flex items-center gap-2 border-b border-line py-1.5">
+                    <label className="flex min-w-0 flex-1 items-center gap-2">
+                      <Checkbox
+                        checked={pickedButtons.has(buttonKey(b))}
+                        disabled={b.exists}
+                        aria-label={`${b.label} · ${b.pageName}`}
+                        onCheckedChange={(v) => {
+                          const next = new Set(pickedButtons);
+                          if (v) next.add(buttonKey(b));
+                          else next.delete(buttonKey(b));
+                          setPickedButtons(next);
+                        }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-footnote text-fg">{b.label}</span>
+                        <span className="block truncate text-caption2 text-fg-subtle">
+                          {b.pageName} · {chosenVar ? `${toggleSlug(b)}_on / ${toggleSlug(b)}_off` : b.slug}
+                          {b.exists ? " · already imported" : ""}
+                        </span>
+                      </span>
+                    </label>
+                    {/* Offered only when Companion HAS custom variables, and
+                        never for a button that is already imported. */}
+                    {customVariables.length > 0 && !b.exists && (
+                      <Select
+                        value={chosenVar}
+                        onValueChange={(v) => {
+                          setToggleVars({ ...toggleVars, [buttonKey(b)]: v });
+                          // Choosing a variable TICKS the row. Nothing here is
+                          // ticked for you, but picking a variable for one
+                          // button is the operator saying they want that button
+                          // — and in a browser the choice otherwise sat there
+                          // with the footer still reading "Import 3 pairs" and
+                          // the button imported as nothing at all. Clearing it
+                          // does not untick: unticking is the checkbox's job.
+                          if (v) setPickedButtons(new Set(pickedButtons).add(buttonKey(b)));
+                        }}
+                      >
+                        <SelectTrigger
+                          className="w-40 shrink-0"
+                          aria-label={`Toggle with state for ${b.label} · ${b.pageName}`}
+                        >
+                          <SelectValue placeholder="Not a toggle" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Not a toggle</SelectItem>
+                          {customVariables.map((name) => (
+                            <SelectItem key={name} value={name}>{name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <KindTag kind={chosenVar ? "switch" : "script"} />
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

@@ -101,7 +101,7 @@ snapshot, no schedule reaches it.
 
 | Answer | |
 |---|---|
-| `200` | dispatched. `{ok, detail}`, plus `simulated: true` while the engine is in simulate mode — the call succeeded and nothing reached a device |
+| `200` | dispatched. `{ok, detail}`, plus `simulated: true` while the engine is in simulate mode — the call succeeded and nothing reached a device. A cue on a pair with a [state variable](#real-state) also carries `state`, and answers `{detail: "already on", skipped: true}` without pressing when the device is already there |
 | `202` | this cue is set to **Ask twice**. `{confirm, expiresInSec}`; call again within 30 s with `?confirm=<token>`, or in the body. A confirmation is **single use** and lapses after 30 s — replaying one is answered with a fresh confirmation, never a second press |
 | `401` | no token, or a revoked one |
 | `404` | no cue by that name |
@@ -160,7 +160,7 @@ reports that rather than what it last asked for. See
 [Real state](#real-state) — a variable named after the pair (`projectors` or
 `projectors_state`) is picked for you.
 
-Each imported pair becomes two rules with **no service is live** and a two-second
+Each imported pair becomes two rules with **no service is live** and a three-second
 cooldown. They are ordinary rules afterwards — edit, disable or delete them like
 any other. Re-running the import skips names that already exist and tells you
 which.
@@ -174,12 +174,49 @@ is left out: a cue called nothing cannot be called.
 **Nothing in this section is ticked for you.** A pair is plainly a thing being
 turned on and off; a single button is whatever somebody put on a Companion page,
 and a pre-ticked camera shot or playback macro is a cue somebody can say by
-accident. Search by label, page or cue name and tick what you want.
+accident. Search by label, page or cue name and tick what you want. Choosing a
+**Toggle with state** variable for a row ticks that row, because picking one is
+saying you want that button.
 
-They carry the same **no service is live** condition and two-second cooldown as a
+They carry the same **no service is live** condition and three-second cooldown as a
 pair's halves, and the same page-naming rule applies when the same label is on two
 pages. In Home Assistant a single button becomes a `script` rather than a switch —
-there is no on and no off to give a switch a state.
+there is no on and no off to give a switch a state — unless it is a **toggle**.
+
+#### Toggle buttons
+
+A button that is really a **toggle** — one key that turns the thing on and off in
+turn, with no OFF partner — is the exception. Imported as a single cue it becomes
+a `script`, which HomeKit shows as a momentary button that snaps back: every tap
+presses the toggle again, and the light ends up whichever way the taps happened to
+land.
+
+Give the row a **Toggle with state** variable and it is imported as an ON/OFF
+**pair** instead. Both cues press the same button; the variable is what tells the
+two directions apart, so `<name>_on` presses when the variable says off — and when
+it cannot be read at all — but not when it already says on. `<name>_off` mirrors
+it. See [Real state](#real-state). A trailing direction word — `ON`, `OFF`,
+`Startup`, `Shutdown` or `Toggle` — comes off the name first: "VCR Light ON"
+becomes `vcr_light_on` and `vcr_light_off`, not `vcr_light_on_off`.
+
+In Companion, set the variable from the button's own toggle branches — a **Set
+custom variable** action to `on` in the branch that turns the thing on, and one to
+`off` in the branch that turns it off. A button with no variable is a single cue
+and a `script`.
+
+A toggle already imported is not offered again: the dialog knows its two cue
+names as well as its own. Importing one whose name is taken creates **neither**
+half — a lone `_off` cue would carry no variable and would pair itself with
+whatever `<name>_on` was already there.
+
+A toggle **needs** the variable. Two cues pointed at one button with nothing bound
+generate a switch that reports what it last asked for while the device does the
+opposite every other press; the generated YAML carries a `# WARNING` comment on it,
+the rule's **State variable** field says so, and the server logs:
+
+```
+[cues] pair vcr_light presses one button with no state variable
+```
 
 ### When a button moves
 
@@ -342,8 +379,21 @@ In Home Assistant an unknown pair reads *off*, because a template switch has no
 third state — the reason is on the sensor's attribute and on the rule's row. It
 stays **pressable**: the generated switch carries no `availability_template`, on
 purpose, because an unavailable entity cannot be commanded and an unreachable
-Companion would then also stop you turning the device on. Pressing a cue never
-depends on the state variable.
+Companion would then also stop you turning the device on. A state that cannot be
+read always presses.
+
+**A bound cue is idempotent.** Calling `<pair>_on` while the variable already
+says `on` presses nothing and answers `200 {detail: "already on", state: "on",
+skipped: true}`; the Activity log records it as `skipped`. That is what makes a
+[toggle button](#toggle-buttons) safe, and it also absorbs a Home Assistant that
+repeats `turn_on`, or an assistant that hears the same sentence twice. Only a
+call is checked — a rule the engine fires from a trigger of its own presses
+without reading anything.
+
+The read is the same one `/api/cues/states` makes, so it costs one round of
+Companion reads shared with any poller, and its answer is served for five
+seconds. An unreachable Companion makes a bound cue wait up to **three seconds**
+before it presses — the read's timeout. It still presses.
 
 If the whole read fails rather than one pair — the server could not answer at all
 — Settings → Automation says so in one line above the rules list and shows no

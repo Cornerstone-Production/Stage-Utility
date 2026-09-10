@@ -169,7 +169,7 @@ the trigger and action's own names.
 | **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
-| **State variable** | on the `_on` half of an ON/OFF pair: a Companion custom variable your own buttons set to `on`/`off`, so the generated Home Assistant switch reports what the device is doing rather than what it was asked to do. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) |
+| **State variable** | on the `_on` half of an ON/OFF pair, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button: a Companion custom variable your own buttons set to `on`/`off`, so the generated Home Assistant switch reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
 | **Once per service** | honoured on a call as well as on a trigger: a second call in the same service occurrence is refused `once-per-service` |
 
@@ -177,6 +177,24 @@ The rule's own conditions, cooldown and enable switch all apply to a call exactl
 as they do to a trigger — a cue is a rule, not a second path through the engine.
 Every call, allowed or refused, is in the Activity log with the calling token's
 label.
+
+**A bound cue only presses when it needs to.** When a cue is half of a pair with
+a [State variable](integrations/companion.md#real-state), the variable is read
+before the press. If it already says what the call is asking for, nothing is
+pressed and the answer is `200 {ok: true, detail: "already on", state: "on",
+skipped: true}` — mirrored for off. This is checked before the cue's cooldown,
+so a repeated call is answered "already on" rather than refused `cooldown`. The Activity log records it as its own
+outcome, `skipped`, not as a suppression: nothing refused the call.
+
+```
+09:14:02  Projectors ON    —    skipped: already on, not pressed
+```
+
+A state that cannot be read — the variable missing, Companion unreachable, a
+value matching neither — **presses**, and the answer carries `state: "unknown"`.
+A read never stops a press, though an unreachable Companion delays one by up to
+three seconds. Only a call is checked this way; a rule the engine
+fires from a trigger of its own presses without reading anything.
 
 A cue that presses a Companion button remembers which button, not just where it
 was: if somebody moves it, the coordinates follow it and the rule's row says so;
