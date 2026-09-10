@@ -830,7 +830,17 @@ export function ImportPairsDialog({
                     {customVariables.length > 0 && !b.exists && (
                       <Select
                         value={chosenVar}
-                        onValueChange={(v) => setToggleVars({ ...toggleVars, [buttonKey(b)]: v })}
+                        onValueChange={(v) => {
+                          setToggleVars({ ...toggleVars, [buttonKey(b)]: v });
+                          // Choosing a variable TICKS the row. Nothing here is
+                          // ticked for you, but picking a variable for one
+                          // button is the operator saying they want that button
+                          // — and in a browser the choice otherwise sat there
+                          // with the footer still reading "Import 3 pairs" and
+                          // the button imported as nothing at all. Clearing it
+                          // does not untick: unticking is the checkbox's job.
+                          if (v) setPickedButtons(new Set(pickedButtons).add(buttonKey(b)));
+                        }}
                       >
                         <SelectTrigger
                           className="w-40 shrink-0"

@@ -635,6 +635,32 @@ describe("the per-button Toggle select", () => {
     assert.equal(toggleSelect("House Lights ON · Room A: Screens") === null, true);
   });
 
+  test("choosing a variable ticks that row, so the choice is not lost", async () => {
+    // Found in a browser: the select changed, the footer still read "Import 1
+    // pair", and pressing Import created nothing for the button whose variable
+    // had just been chosen. Picking a variable for one button is the operator
+    // saying they want that button.
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    assert.equal(footer(), "Import 1 pair");
+    await act(async () => {
+      fireEvent.change(toggleSelect("House Lights ON · Room A: Screens")!, {
+        target: { value: "house_lights_state" },
+      });
+    });
+    assert.equal(footer(), "Import 1 pair and 1 button");
+    assert.deepEqual(
+      boxes().map((b) => b.checked),
+      ["true", "false", "true", "false"],
+      "the row whose variable was chosen is the one that got ticked",
+    );
+    // Clearing it does NOT untick — unticking is the checkbox's job.
+    await act(async () => {
+      fireEvent.change(toggleSelect("House Lights ON · Room A: Screens")!, { target: { value: "" } });
+    });
+    assert.equal(footer(), "Import 1 pair and 1 button");
+  });
+
   test("what is chosen reaches the request, for THAT button only", async () => {
     CUSTOM_VARIABLES = ["house_lights_state"];
     await mount();
@@ -643,9 +669,8 @@ describe("the per-button Toggle select", () => {
         target: { value: "house_lights_state" },
       });
     });
-    await act(async () => {
-      screen.getByLabelText("House Lights ON · Room A: Screens").click();
-    });
+    // No click on House Lights: choosing its variable ticked it. Cam 1 is
+    // ticked by hand, and is the button that must NOT carry a variable.
     await act(async () => {
       screen.getByLabelText("Cam 1 · Room A: Cameras").click();
     });
