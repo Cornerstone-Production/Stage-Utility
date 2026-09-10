@@ -22,7 +22,7 @@
 // Companion, which is rarely and never mid-service. It is cached for five
 // minutes; the picker's Refresh button busts it.
 
-import { errorMessage } from "./errors.js";
+import { fetchFailureMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import {
   type CompanionButton,
@@ -127,24 +127,6 @@ class CompanionApi {
   /** In-flight fetch, so a page of pickers opening at once reads one export. */
   private inFlight: Promise<ExportResult> | null = null;
 
-  /**
-   * A caught fetch failure, said usefully.
-   *
-   * Node's own message for every network failure is the word "fetch failed",
-   * with the real reason — ECONNREFUSED, EHOSTUNREACH, the address and the port
-   * — one level down on `cause`. Driving the picker against a dead port put
-   * "Could not read Companion's configuration: fetch failed" on screen, which
-   * tells an operator nothing at all.
-   */
-  private static why(e: unknown, target: string): string {
-    const top = errorMessage(e);
-    const cause = e instanceof Error && e.cause !== undefined ? errorMessage(e.cause) : "";
-    const said = cause && cause !== top ? cause : top === "fetch failed" ? `could not reach ${target}` : top;
-    // The cause usually already names the address ("connect ECONNREFUSED
-    // 127.0.0.1:8799"); appending it again reads as two different failures.
-    return said.includes(target.replace(/^https?:\/\//, "")) ? said : `${said} (${target})`;
-  }
-
   private async baseUrl(): Promise<string | null> {
     const target = await companionDeps.getTarget();
     if (!target) return null;
@@ -200,7 +182,7 @@ class CompanionApi {
     } catch (e) {
       // `base` is "" when getTarget itself failed, and "17/2/6 at " reads as a
       // truncated sentence — the coordinate alone is what is left to say.
-      const detail = CompanionApi.why(e, base ? `${loc.page}/${loc.row}/${loc.col} at ${base}` : where);
+      const detail = fetchFailureMessage(e, base ? `${loc.page}/${loc.row}/${loc.col} at ${base}` : where);
       console.warn(`[companion] press ${where} failed: ${scrub(detail)}`);
       return { ok: false, status: null, detail };
     }
@@ -272,7 +254,7 @@ class CompanionApi {
       this.cache = { at: Date.now(), buttons, pairs, build, customVariables };
       return { ok: true, buttons, pairs, build, customVariables, cachedAt: this.cache.at };
     } catch (e) {
-      const reason = CompanionApi.why(e, base);
+      const reason = fetchFailureMessage(e, base);
       console.warn(`[companion] export unavailable: ${scrub(reason)}`);
       return { ok: false, reason };
     }
@@ -372,7 +354,7 @@ class CompanionApi {
       // when the message does not already name it, and every message contains
       // "", so an unknown host reads as the failure alone rather than as
       // "... ()".
-      return { error: CompanionApi.why(e, base) };
+      return { error: fetchFailureMessage(e, base) };
     }
   }
 

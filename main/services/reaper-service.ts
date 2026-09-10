@@ -16,7 +16,7 @@
 // polls while running, steps to a slower cadence when nobody's watching the
 // channel, and backs off exponentially while REAPER is unreachable.
 
-import { errorMessage } from "./errors.js";
+import { fetchFailureMessage } from "./errors.js";
 import type { ReaperStatusDTO } from "../types/stage.js";
 import { StatusIntegration } from "./integration-base.js";
 
@@ -109,7 +109,7 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
       }
       return { ok: true, message: `Connected to REAPER at ${host}:${port}` };
     } catch (err) {
-      return { ok: false, message: errorMessage(err) };
+      return { ok: false, message: fetchFailureMessage(err, `${host}:${port}`) };
     }
   }
 
@@ -165,7 +165,10 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
       if (this.running) this.scheduleIn(0);
       return { ok: true, detail: `sent ${id}` };
     } catch (err) {
-      const detail = errorMessage(err);
+      // NOT errorMessage: Node says "fetch failed" for every network failure and
+      // puts ECONNREFUSED and the address on `cause`. "REAPER transport failed:
+      // fetch failed" is a line an operator can do nothing with at 9am.
+      const detail = fetchFailureMessage(err, `${host}:${port}`);
       console.warn(`[reaper] transport ${command} failed: ${detail}`);
       return { ok: false, detail };
     }
@@ -188,7 +191,7 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
       // unattended box that is the whole point of automation.
       this.scheduleIn(this.inDemand ? POLL_MS : IDLE_POLL_MS);
     } catch (err) {
-      const msg = errorMessage(err);
+      const msg = fetchFailureMessage(err, `${this.host}:${this.port}`);
       if (this.attempt === 0) console.warn(`[reaper] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       this.goOffline();
