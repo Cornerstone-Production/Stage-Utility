@@ -31,6 +31,7 @@ import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, CALL_CHANNEL, CALL_TRIGGER_ID, isValidCueName, triggersForChannel } from "./automation-triggers.js";
 import { cuePairs, stateBindingProblem } from "./cue-pairs.js";
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
+import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
 import { parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
@@ -525,6 +526,16 @@ class AutomationEngine {
     // either would have the app overriding a truthful reading with a command
     // nothing carried out.
     if (desired && result.ok && !this.settings.simulate) cueStates.noteCommand(desired);
+    // A pair with NO binding whose connections the verified table does not
+    // cover: the press is what learning has to watch, because a variable's two
+    // values can only be read off a device that has just been told to move.
+    // Fire and forget — the window is eight seconds and the caller is a voice
+    // assistant holding the line. Same three conditions as the command above:
+    // a simulated or failed press moved nothing, so there is nothing to watch.
+    if (!desired && result.ok && !this.settings.simulate) {
+      const learning = this.learningPressOf(rule);
+      if (learning) notePressForLearning(learning);
+    }
     // `state` is what was read BEFORE the press — including `unknown`, which is
     // the caller's evidence that the press went ahead without knowing what the
     // device was doing rather than because the device needed it.
@@ -564,6 +575,30 @@ class AutomationEngine {
       });
       if (pair.on.id === rule.id) return of("on");
       if (pair.off.id === rule.id) return of("off");
+    }
+    return null;
+  }
+
+  /**
+   * The pair half this cue is when its pair is LEARNING, or null.
+   *
+   * The mirror of desiredStateOf for the other case: a pair with no binding at
+   * all, whose `_on` half carries the candidate variables a probe found. The
+   * params travel with it because the watcher decides from them whether there
+   * is anything to watch, and reading them again over there would be a second
+   * walk of the rules.
+   */
+  private learningPressOf(
+    rule: Rule,
+  ): { ruleId: string; base: string; want: "on" | "off"; params: Record<string, string | number> } | null {
+    if (rule.trigger.id !== CALL_TRIGGER_ID) return null;
+    for (const pair of cuePairs(this.rules)) {
+      if (pair.binding !== null) continue;
+      const want = pair.on.id === rule.id ? "on" : pair.off.id === rule.id ? "off" : null;
+      if (!want) continue;
+      // The `_on` half's params, whichever half was pressed: that is where the
+      // candidates and the learning state live, exactly as the binding does.
+      return { ruleId: pair.on.id, base: pair.base, want, params: pair.on.trigger.params };
     }
     return null;
   }
