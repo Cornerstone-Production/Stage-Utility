@@ -166,9 +166,23 @@ whenever it is called. The rules list marks every cue that is on with a
 clearly visible **any time** badge, so the ones that can fire mid-service are
 easy to spot in a long list.
 
-The rules list has a **Search rules** field above it, filtering live by rule
-name, cue name, spoken name, former names, a Companion button's label, and
-the trigger and action's own names.
+The rules list is in two sections. **Home Assistant** holds every cue that has
+an entity there — pairs as switches, single cues as buttons. **Everything else**
+holds the cues whose **Home Assistant** switch is off and every rule with a
+trigger other than Called by name. An ON/OFF pair is ONE row, named by the words
+it is spoken as; expanding it shows both halves' editors.
+
+A cue's editor has a **Home Assistant** switch under Allowed during a service.
+Off, the cue is voice-only: no entity is created for it, it is left out of the
+generated YAML and the manifest, and it moves to Everything else.
+`POST /api/cues/<name>` still fires it. For a pair the switch covers both halves
+— one switch, hidden or shown together — and Home Assistant removes the entity
+within a few seconds, breaking automations there that refer to it. See
+[Keeping a cue out of Home Assistant](integrations/companion.md#keeping-a-cue-out-of-home-assistant).
+
+The **Search rules** field is pinned to the top of the list and filters live by
+rule name, cue name, spoken name, former names, a Companion button's label, and
+the trigger and action's own names. A pair shows whenever either half matches.
 
 | | |
 |---|---|
@@ -176,6 +190,7 @@ the trigger and action's own names.
 | **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
+| **Home Assistant** | on by default. Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
 | **State variable** | on the `_on` half of an ON/OFF pair, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `VCR-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
 | **Learning** | shown on the `_on` half of a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |

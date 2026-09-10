@@ -8,8 +8,11 @@ import {
 } from "@main/services/app-state-sources";
 import {
   cuePairs,
+  homeVisibilityParams,
   implicitStateBinding,
+  isHiddenFromHome,
   isTogglePair,
+  spokenCueName,
   stateBindingOf,
   stateBindingParams,
   STATE_ANY_OTHER,
@@ -36,7 +39,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfiguredIntegrations } from "../../main/use-integration-states";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { DownloadIcon, OctagonXIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  DownloadIcon,
+  OctagonXIcon,
+  PlayIcon,
+  PlusIcon,
+  SearchIcon,
+  Trash2Icon,
+} from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import {
@@ -101,6 +112,33 @@ interface Rule {
   oncePerService: boolean;
   confirmRequired?: boolean;
 }
+
+/**
+ * One ON/OFF pair as the rules list shows it: ONE row, holding both halves.
+ *
+ * `name` is the words the pair is called — a switch in Home Assistant is called
+ * this, and so is the row.
+ */
+interface PairRowData {
+  base: string;
+  name: string;
+  onName: string;
+  offName: string;
+  hidden: boolean;
+  on: Rule;
+  off: Rule;
+}
+
+/**
+ * One row in a section: a pair, or a single rule.
+ *
+ * `sortBy` is carried rather than recomputed at sort time — a pair's is the
+ * words it is called, a cue's is the same, and a rule with any other trigger
+ * never reaches the comparison.
+ */
+type RuleListEntry =
+  | { kind: "pair"; key: string; sortBy: string; pair: PairRowData }
+  | { kind: "rule"; key: string; sortBy: string; rule: Rule };
 
 /** One bound pair's state, as `GET /api/cues/states` sends it. */
 interface CueStateRow {
@@ -542,6 +580,64 @@ function ServiceGuardField({
 }
 
 /**
+ * This cue's Home Assistant visibility, and where the flag is written.
+ *
+ * `writeTo` is a pair's ON half — where a pair's settings live, exactly as the
+ * state binding does — and the rule itself for a cue with no partner. The OFF
+ * half shows the SAME switch reading the same value: an operator who opened
+ * that half and found no switch would conclude the setting is per-cue, and hide
+ * one direction of a thing that only has one entity.
+ */
+interface HomeVisibility {
+  hidden: boolean;
+  /** The words a switch for this pair is called, or null for a single cue. */
+  pairName: string | null;
+  writeTo: Rule;
+}
+
+/**
+ * The one switch over `homeAssistant` — see cue-pairs.ts for what it stores.
+ *
+ * The sentence beside it names the entity that exists, because "hidden" and
+ * "shown" on their own do not say what appears where: a pair is ONE switch in
+ * Home Assistant and in Apple Home, not two buttons.
+ */
+function HomeVisibilityField({
+  hidden,
+  pairName,
+  onChange,
+}: {
+  hidden: boolean;
+  pairName: string | null;
+  onChange: (hidden: boolean) => void;
+}) {
+  const shownText =
+    pairName === null
+      ? "Shown as a button in Home Assistant and Apple Home."
+      : `Shown. One switch, ${pairName}, in Home Assistant and Apple Home.`;
+  return (
+    <Row label="Home Assistant">
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex items-center gap-2">
+          <Switch
+            checked={!hidden}
+            onCheckedChange={(v) => onChange(!v)}
+            aria-label="Shown in Home Assistant"
+          />
+          <span className="min-w-0 text-caption1 text-fg-muted" data-cue-home={hidden ? "hidden" : "shown"}>
+            {hidden ? "Hidden. Voice only." : shownText}
+          </span>
+        </span>
+        <span className="text-caption2 text-fg-subtle">
+          Turn off to keep this cue voice-only. It disappears from Home Assistant within a few
+          seconds; automations there that refer to it stop working.
+        </span>
+      </span>
+    </Row>
+  );
+}
+
+/**
  * The three state-binding fields, on the `_on` half of a pair and nowhere else.
  *
  * A binding on a cue with no partner reads a variable nothing ever shows, so the
@@ -822,7 +918,7 @@ function RuleCard({
   dynamicOptions,
   pairBase,
   pairIsToggle,
-  cueState,
+  home,
   customVariables,
   inferredSource,
   appSources,
@@ -835,8 +931,8 @@ function RuleCard({
   pairBase: string | null;
   /** This rule's pair presses one button both ways. See isTogglePair. */
   pairIsToggle: boolean;
-  /** This pair's state, when it has a binding and the route answered. */
-  cueState: CueStateRow | null;
+  /** This cue's Home Assistant visibility. Null for a rule that is not a cue. */
+  home: HomeVisibility | null;
   customVariables: string[];
   /** Where this rule's own Companion button says its device reports state. */
   inferredSource: InferredStateSource | null;
@@ -872,6 +968,43 @@ function RuleCard({
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * The flag, written where the pair keeps it.
+   *
+   * The ON half (and a single cue) goes through this card's DRAFT, exactly as
+   * the service guard does — one Save for everything typed. The OFF half writes
+   * the PARTNER rule immediately, because a draft here cannot carry a change to
+   * another rule and a Save button that saved a neighbour is worse than a
+   * switch that takes effect at once. The IPC is the same one `save` uses.
+   */
+  function setHomeHidden(hidden: boolean) {
+    const target = home?.writeTo;
+    if (!target) return;
+    if (target.id === rule.id) {
+      setDraft((d) => ({
+        ...d,
+        trigger: { ...d.trigger, params: { ...d.trigger.params, ...homeVisibilityParams(hidden) } },
+      }));
+      return;
+    }
+    void (async () => {
+      try {
+        await invoke("automation:updateRule", {
+          id: target.id,
+          patch: {
+            trigger: {
+              ...target.trigger,
+              params: { ...target.trigger.params, ...homeVisibilityParams(hidden) },
+            },
+          },
+        });
+        onChanged();
+      } catch (e) {
+        toast.error(errorMessage(e));
+      }
+    })();
   }
 
   async function testFire() {
@@ -932,11 +1065,11 @@ function RuleCard({
               editor and its picker. Renders nothing for any other action, and
               nothing for a rule that has never been reconciled. */}
           {rule.action.id === "companion.press" && <CueButtonStatus params={rule.action.params} />}
-          {/* What the device is actually doing, for a pair bound to a Companion
-              custom variable. Inside the row's own button like the status pill
-              above, so pressing the thing saying `unknown` opens the editor
-              that can fix it. */}
-          {cueState && pairBase !== null && <CuePairState base={pairBase} state={cueState} />}
+          {/* The pair's state pill is NOT here. It lives on the PairRow this
+              card is inside — one pair is one row, and this card is collapsed
+              inside it most of the time, so a pill here is a reading nobody
+              sees. Pressing the pair row is still what opens the editor that
+              can fix an `unknown`. */}
         </button>
         <Button variant="transparent" size="small" onClick={() => void testFire()} aria-label="Test fire">
           <PlayIcon className="size-3.5" /> Test
@@ -1030,6 +1163,21 @@ function RuleCard({
             <ServiceGuardField
               conditions={draft.conditions}
               onChange={(conditions) => setDraft({ ...draft, conditions })}
+            />
+          )}
+          {/* Directly under the service guard, and for a cue only: it is the
+              other thing about a cue that is not about when it fires. A pair's
+              two halves show the same switch — see HomeVisibility. */}
+          {draft.trigger.id === CALL_TRIGGER_ID && home !== null && (
+            <HomeVisibilityField
+              // The ON half reads its own DRAFT, so the switch moves the moment
+              // it is pressed rather than after Save. The OFF half reads the
+              // pair, which is what its own press writes.
+              hidden={
+                home.writeTo.id === rule.id ? isHiddenFromHome(draft.trigger.params) : home.hidden
+              }
+              pairName={home.pairName}
+              onChange={setHomeHidden}
             />
           )}
           {draft.conditions.length === 0 && (
@@ -1173,6 +1321,112 @@ function RuleCard({
   );
 }
 
+/**
+ * One ON/OFF pair, as ONE row.
+ *
+ * A pair is one thing — one switch in Home Assistant, one thing an operator
+ * turns on and off — and two rows for it is the list saying otherwise. The two
+ * halves are still edited by the same RuleCard, unforked, stacked inside when
+ * the row is expanded: the halves differ in what they press and in nothing
+ * else, and a second editor written for a pair would be a second place for the
+ * cue-name and Companion-button fields to drift.
+ *
+ * The halves are NOT rendered while it is collapsed — `{open && children}`
+ * mounts them on expand — so a hundred pairs is a hundred rows rather than two
+ * hundred editors.
+ */
+function PairRow({
+  base,
+  name,
+  onName,
+  offName,
+  hidden,
+  cueState,
+  children,
+}: {
+  base: string;
+  name: string;
+  onName: string;
+  offName: string;
+  hidden: boolean;
+  cueState: CueStateRow | null;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-lg border border-line bg-surface p-3" data-cue-pair-row={base}>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={`${name} pair`}
+        >
+          <ChevronRightIcon
+            className={"size-3.5 shrink-0 text-fg-subtle transition-transform " + (open ? "rotate-90" : "")}
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-footnote font-medium text-fg" data-cue-pair-name={name}>
+              {name}
+            </span>
+            <span className="block truncate font-mono text-caption2 text-fg-subtle">
+              {onName} / {offName}
+            </span>
+          </span>
+          {cueState && <CuePairState base={base} state={cueState} />}
+          {/* Compact, and only ever one word: the row is a summary, and the
+              sentence explaining what hidden means is in the editor below. */}
+          <span
+            data-cue-home={hidden ? "hidden" : "shown"}
+            className={
+              "shrink-0 rounded-md px-1.5 py-0.5 text-caption2 " +
+              (hidden ? "text-fg-subtle" : "bg-field text-fg-muted")
+            }
+          >
+            {hidden ? "voice only" : "Home"}
+          </span>
+        </button>
+      </div>
+      {open && <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * A list section's heading — the name, how many ROWS are under it (a pair is
+ * one), and one sentence saying what lands here.
+ *
+ * The sentence is not decoration: "Everything else" holding both a hidden cue
+ * and a PCO-triggered rule is not something a title can say.
+ */
+function ListSection({
+  title,
+  blurb,
+  count,
+  children,
+}: {
+  title: string;
+  blurb: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2" data-rule-section={title}>
+      <div className="pt-1">
+        <div className="flex items-baseline gap-2">
+          <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">{title}</span>
+          <span className="text-caption2 text-fg-subtle" data-rule-section-count={String(count)}>
+            {count}
+          </span>
+        </div>
+        <p className="text-caption2 text-fg-subtle">{blurb}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ── Section ───────────────────────────────────────────────────────────────────
 
 export function AutomationSection() {
@@ -1255,6 +1509,59 @@ export function AutomationSection() {
   );
   const anyBinding = useMemo(() => pairs.some((p) => p.binding !== null), [pairs]);
 
+  /**
+   * The pairs as ROWS, holding this component's own rule objects.
+   *
+   * `cuePairs` answers with the rules it was given, which are these — but
+   * looked up again by id rather than cast, because the module's `Rule` is the
+   * server's and this file deliberately models the wire shape itself.
+   */
+  const pairRows = useMemo(() => {
+    const byId = new Map(rules.map((r) => [r.id, r] as const));
+    const out: PairRowData[] = [];
+    for (const p of pairs) {
+      const on = byId.get(p.on.id);
+      const off = byId.get(p.off.id);
+      if (!on || !off) continue;
+      out.push({
+        base: p.base,
+        name: spokenCueName(on.trigger.params, p.base),
+        onName: p.onName,
+        offName: p.offName,
+        hidden: p.hiddenFromHome,
+        on,
+        off,
+      });
+    }
+    return out;
+  }, [pairs, rules]);
+
+  /** Every rule that is half of a pair, so the singles are what is left. */
+  const pairedRuleIds = useMemo(
+    () => new Set(pairRows.flatMap((p) => [p.on.id, p.off.id])),
+    [pairRows],
+  );
+
+  /**
+   * Where each cue's Home Assistant flag is written, by rule id.
+   *
+   * A pair's two halves both point at the ON half, so the switch is the same
+   * setting whichever half is open. See HomeVisibility.
+   */
+  const homeFor = useMemo(() => {
+    const out = new Map<string, HomeVisibility>();
+    for (const p of pairRows) {
+      const entry: HomeVisibility = { hidden: p.hidden, pairName: p.name, writeTo: p.on };
+      out.set(p.on.id, entry);
+      out.set(p.off.id, entry);
+    }
+    for (const r of rules) {
+      if (r.trigger.id !== CALL_TRIGGER_ID || pairedRuleIds.has(r.id)) continue;
+      out.set(r.id, { hidden: isHiddenFromHome(r.trigger.params), pairName: null, writeTo: r });
+    }
+    return out;
+  }, [pairRows, pairedRuleIds, rules]);
+
   // The search field's value, in component state only — it is a filter over
   // what is on screen right now, not something a maintainer with hundreds of
   // cues would want restored on the next visit.
@@ -1270,6 +1577,48 @@ export function AutomationSection() {
       ),
     );
   }, [rules, search, registry]);
+
+  /**
+   * The two sections, in the order they render.
+   *
+   * A PAIR IS ONE ROW and shows whenever EITHER half matches the query — the
+   * two halves are one thing, and a search for the off cue that hid the row it
+   * lives on would be a pair that cannot be found by half its own names.
+   *
+   * Ordering: pairs first, then single cues, each alphabetical by the words the
+   * cue is called; rules with any other trigger keep their stored order after
+   * the cues, because that order is the operator's own and nothing about a
+   * trigger name is worth sorting by.
+   */
+  const sections = useMemo(() => {
+    const matched = new Set(filteredRules.map((r) => r.id));
+    const home: RuleListEntry[] = [];
+    const other: RuleListEntry[] = [];
+
+    const byName = (a: { sortBy: string }, b: { sortBy: string }) => a.sortBy.localeCompare(b.sortBy);
+    const pairEntries = pairRows
+      .filter((p) => matched.has(p.on.id) || matched.has(p.off.id))
+      .map((p) => ({ kind: "pair" as const, key: p.on.id, sortBy: p.name, pair: p }))
+      .sort(byName);
+    const singles = filteredRules
+      .filter((r) => r.trigger.id === CALL_TRIGGER_ID && !pairedRuleIds.has(r.id))
+      .map((r) => ({
+        kind: "rule" as const,
+        key: r.id,
+        sortBy: spokenCueName(r.trigger.params, String(r.trigger.params.name ?? r.name)),
+        rule: r,
+      }))
+      .sort(byName);
+
+    for (const e of pairEntries) (e.pair.hidden ? other : home).push(e);
+    for (const e of singles) (isHiddenFromHome(e.rule.trigger.params) ? other : home).push(e);
+    // Everything that is not a cue at all, in the order the operator has them.
+    for (const r of filteredRules) {
+      if (r.trigger.id === CALL_TRIGGER_ID) continue;
+      other.push({ kind: "rule", key: r.id, sortBy: r.name, rule: r });
+    }
+    return { home, other };
+  }, [filteredRules, pairRows, pairedRuleIds]);
 
   // The custom variables Companion has, for the editor's select. Read from the
   // same offer the import dialog uses, and only worth asking for when there is
@@ -1326,6 +1675,50 @@ export function AutomationSection() {
     await invoke("automation:setSettings", patch);
     refresh();
   }
+
+  const card = (r: Rule) => (
+    <RuleCard
+      key={r.id}
+      rule={r}
+      registry={registry!}
+      dynamicOptions={dynamicOptions}
+      pairBase={pairBases.get(r.id) ?? null}
+      pairIsToggle={togglePairs.has(r.id)}
+      home={homeFor.get(r.id) ?? null}
+      customVariables={companionPairs?.customVariables ?? []}
+      inferredSource={inferredFor(r)}
+      appSources={appSources}
+      onChanged={refresh}
+    />
+  );
+
+  /**
+   * One row. A pair is the PairRow with its two halves' cards inside it, and
+   * everything else is the card on its own.
+   *
+   * The pair's own state pill is on the pair row rather than on the ON half's
+   * card, which is where it used to be: the card is now inside a row that is
+   * collapsed most of the time, and a state nobody can see is a state nobody
+   * acts on.
+   */
+  const renderEntry = (entry: RuleListEntry) => {
+    if (entry.kind === "rule") return card(entry.rule);
+    const p = entry.pair;
+    return (
+      <PairRow
+        key={entry.key}
+        base={p.base}
+        name={p.name}
+        onName={p.onName}
+        offName={p.offName}
+        hidden={p.hidden}
+        cueState={cueStateFor(cueStateData?.states, p.base)}
+      >
+        {card(p.on)}
+        {card(p.off)}
+      </PairRow>
+    );
+  };
 
   return (
     // The same wrapper every other section uses. This one had no horizontal or
@@ -1405,7 +1798,31 @@ export function AutomationSection() {
             </p>
           ) : (
             <>
-              <div className="flex items-center gap-2">
+              {/* PINNED. The app has exactly one scroller — the shell's
+                  `<main>`; `html`, `body` and `#root` are all `overflow:
+                  hidden` (see renderer/app/shell.tsx) — and this list is
+                  rendered directly inside it, so `sticky top-0` sticks to the
+                  top of the pane rather than to a window that never scrolls.
+                  The background is the page's own, with a hairline under it, so
+                  rows pass beneath it instead of showing through.
+                  NOT unit-tested: jsdom loads no stylesheet, so `position:
+                  sticky` and a background are not observable in it at all and a
+                  test could only assert the class string is spelled how it is
+                  spelled. Driven in a browser. */}
+              <div
+                className={
+                  "sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg py-2 " +
+                  // The pane has 16px of its own top padding, and `sticky
+                  // top-0` sticks BELOW it — leaving a strip at the top of the
+                  // pane that rows scrolled through, half a row of text
+                  // hanging above the bar. This paints that strip in the page
+                  // background. A negative `top` would cover it too and would
+                  // hang the field off the top of the pane whenever the
+                  // padding is not there (it is dropped with the top band).
+                  "relative before:pointer-events-none before:absolute before:inset-x-0 " +
+                  "before:bottom-full before:h-4 before:bg-bg before:content-['']"
+                }
+              >
                 <span className="relative min-w-0 flex-1">
                   <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
                   <Input
@@ -1422,24 +1839,29 @@ export function AutomationSection() {
                   </span>
                 )}
               </div>
-              {filteredRules.length === 0 ? (
+              {sections.home.length === 0 && sections.other.length === 0 ? (
                 <p className="text-caption1 text-fg-muted">No rules match.</p>
               ) : (
-                filteredRules.map((r) => (
-                  <RuleCard
-                    key={r.id}
-                    rule={r}
-                    registry={registry}
-                    dynamicOptions={dynamicOptions}
-                    pairBase={pairBases.get(r.id) ?? null}
-                    pairIsToggle={togglePairs.has(r.id)}
-                    cueState={cueStateFor(cueStateData?.states, pairBases.get(r.id) ?? null)}
-                    customVariables={companionPairs?.customVariables ?? []}
-                    inferredSource={inferredFor(r)}
-                    appSources={appSources}
-                    onChanged={refresh}
-                  />
-                ))
+                <>
+                  {sections.home.length > 0 && (
+                    <ListSection
+                      title="Home Assistant"
+                      blurb="Cues shown in Home Assistant and Apple Home. Pairs are switches, singles are buttons."
+                      count={sections.home.length}
+                    >
+                      {sections.home.map(renderEntry)}
+                    </ListSection>
+                  )}
+                  {sections.other.length > 0 && (
+                    <ListSection
+                      title="Everything else"
+                      blurb="Cues kept out of Home Assistant, and rules with other triggers."
+                      count={sections.other.length}
+                    >
+                      {sections.other.map(renderEntry)}
+                    </ListSection>
+                  )}
+                </>
               )}
             </>
           )}

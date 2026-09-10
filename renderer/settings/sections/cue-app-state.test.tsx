@@ -113,7 +113,7 @@ let CONFIGURED: string[] = [];
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
 
-const { render, cleanup, act, screen } = await import("@testing-library/react");
+const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
@@ -142,9 +142,33 @@ async function mount() {
   return view;
 }
 
+/**
+ * Expand every ON/OFF pair row.
+ *
+ * A pair is ONE collapsed row in the list and its two halves' editors are
+ * mounted only when it is expanded, so a test that opens a half has to open the
+ * pair first. Idempotent: a row already open has no `aria-expanded="false"`
+ * button left to press.
+ */
+async function expandPairs(): Promise<void> {
+  for (const el of document.querySelectorAll('[data-cue-pair-row] button[aria-expanded="false"]')) {
+    await act(async () => {
+      (el as HTMLElement).click();
+    });
+  }
+  await settle();
+}
+
 async function open(name: string): Promise<void> {
+  await expandPairs();
+  // BY THE ROW'S OWN MARKER, not by its text: a pair row shows the words the
+  // pair is called, and a fixture whose `says` is its cue name puts the same
+  // string on the pair row and on the half's card — `getByText` then throws
+  // "found multiple elements" rather than opening anything.
+  const label = document.querySelector(`[data-rule-name="${name}"]`);
+  assert.ok(label, `no row called ${name}`);
   await act(async () => {
-    screen.getByText(name).click();
+    (label.closest("button") as HTMLElement).click();
   });
   await settle();
 }

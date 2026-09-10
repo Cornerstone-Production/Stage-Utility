@@ -127,7 +127,25 @@ const cue = (over: Partial<StubRule> = {}): StubRule => ({
 
 const badge = (): string => document.querySelector("[data-service-guard]")?.getAttribute("data-service-guard") ?? "none";
 
+/**
+ * Expand every ON/OFF pair row.
+ *
+ * A pair is ONE collapsed row in the list and its two halves' editors are
+ * mounted only when it is expanded, so a test that opens a half has to open the
+ * pair first. Idempotent: a row already open has no `aria-expanded="false"`
+ * button left to press.
+ */
+async function expandPairs(): Promise<void> {
+  for (const el of document.querySelectorAll('[data-cue-pair-row] button[aria-expanded="false"]')) {
+    await act(async () => {
+      (el as HTMLElement).click();
+    });
+  }
+  await settle();
+}
+
 async function openRow() {
+  await expandPairs();
   const nameButtons = [...document.querySelectorAll("button")];
   const rowButton = nameButtons.find((b) => b.textContent?.includes("Projectors ON"));
   assert.ok(rowButton, "row button not found");
