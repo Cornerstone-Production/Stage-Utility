@@ -156,6 +156,19 @@ function installCompanionStub(): void {
         ? new Response("Not found", { status: 404 })
         : new Response(value, { status: 200 });
     }
+    // A MODULE variable, which Companion serves at its own path. Held in the
+    // same map under `<label>:<name>` — the spelling a binding uses — so a test
+    // that binds one reads it back through the real dispatch rather than
+    // through a second stub that could answer for a URL nothing builds.
+    const moduleVariable = /\/api\/variable\/([^/]+)\/([^/]+)\/value$/.exec(url);
+    if (moduleVariable) {
+      const ref = `${decodeURIComponent(moduleVariable[1]!)}:${decodeURIComponent(moduleVariable[2]!)}`;
+      variableReads.push(ref);
+      const value = variables[ref];
+      return value === undefined
+        ? new Response("Not found", { status: 404 })
+        : new Response(value, { status: 200 });
+    }
     void init;
     return Response.json(companionExportFixture());
   };
@@ -1856,6 +1869,86 @@ describe("importing a pair with a state variable", () => {
       }
     ).states;
     assert.equal(states.lobby_tvs?.state, "on");
+  });
+
+  test("an offer carries its inferred source's VALUES onto the _on half", async () => {
+    // The whole point of the values travelling: a kasa plug's `power_state`
+    // holds `On`, not `on`. Imported without them the pair reads unknown
+    // forever, and there is nothing on screen that looks wrong.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const offered = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        pairs: {
+          slug: string;
+          page: number;
+          base: string;
+          stateSource: { variable: string; onValue: string; offValue: string } | null;
+        }[];
+      }
+      // "Projectors" is on two pages in the fixture, so the slug is
+      // page-qualified. Only the page 1 pair drives a PJLink projector.
+    ).pairs.find((p) => p.page === 1 && p.base === "Projectors")!;
+    // The offer itself names it, so the dialog needs no second request.
+    assert.equal(offered.stateSource?.variable, "Projectors:powerState");
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: {
+        pairs: [
+          {
+            ...offered,
+            stateVariable: offered.stateSource!.variable,
+            stateOnValue: offered.stateSource!.onValue,
+            stateOffValue: offered.stateSource!.offValue,
+          },
+        ],
+      },
+    });
+    const slug = offered.slug;
+    assert.deepEqual((r.json as { created: string[] }).created, [`${slug}_on`, `${slug}_off`]);
+
+    const byName = new Map(
+      automationEngine.cueRules().map((x) => [String(x.trigger.params.name), x]),
+    );
+    assert.equal(String(byName.get(`${slug}_on`)?.trigger.params.stateVariable), "Projectors:powerState");
+    assert.equal(String(byName.get(`${slug}_on`)?.trigger.params.stateOnValue), "On");
+    assert.equal(String(byName.get(`${slug}_on`)?.trigger.params.stateOffValue), "Off");
+    // The `_off` half inherits all three, as it always did.
+    assert.equal(byName.get(`${slug}_off`)?.trigger.params.stateVariable, undefined);
+
+    // And it reads back through the MODULE endpoint, end to end.
+    variables["Projectors:powerState"] = "On";
+    cueStates.invalidate();
+    const states = (
+      (await callRoute(cueRoutes, "/api/cues/states")).json as {
+        states: Record<string, { state: string; variable: string }>;
+      }
+    ).states;
+    assert.equal(states[slug]?.variable, "Projectors:powerState");
+    assert.equal(states[slug]?.state, "on");
+    // A binding whose values were left at the on/off defaults would have read
+    // "On" as neither.
+    delete variables["Projectors:powerState"];
+  });
+
+  test("on and off values that are the same are refused before either half exists", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs", stateOnValue: "1", stateOffValue: "1" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.match(skipped[0]!.why, /could never be read/);
+    assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
   });
 
   test("a state variable Companion could not have skips the pair, creating NEITHER half", async () => {

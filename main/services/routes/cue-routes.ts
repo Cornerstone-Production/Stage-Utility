@@ -37,13 +37,13 @@ import { automationEngine } from "../automation-engine.js";
 import { companionApi } from "../companion-api.js";
 import {
   cueSlugs,
-  isCompanionVariableRef,
   isSuggestedPair,
   singleButtons,
   slugForCue,
   splitToggleLabel,
   togglePairSlug,
 } from "../companion-export.js";
+import { stateBindingParams, stateBindingProblem } from "../cue-pairs.js";
 import { fingerprintParams } from "../companion-fingerprint.js";
 import { runCompanionReconcile } from "../companion-reconcile.js";
 import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-tokens.js";
@@ -277,6 +277,11 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
         // unticked. See isSuggestedPair; this used to be a list of one site's
         // page names.
         suggested: isSuggestedPair(p),
+        // Where this pair's device already reports its own state, or null.
+        // The binding lives on the `_on` half, so that half's button is the
+        // evidence; the `_off` half is read only when the ON button is a macro
+        // that names no device. See companion-state-source.ts.
+        stateSource: p.on.stateSource ?? p.off.stateSource,
         exists: !!slug && (taken.has(`${slug}_on`) || taken.has(`${slug}_off`)),
       };
     });
@@ -403,6 +408,29 @@ function asButton(v: unknown): ImportButton | null {
 }
 
 /**
+ * The state binding an offer asks for, as the three params a rule stores.
+ *
+ * The VALUES come from the offer as well as the variable, because the dialog
+ * may have chosen a module variable the button itself named — `power_state` on
+ * a kasa plug holds `On`, not `on`, and the comparison is case-sensitive. Every
+ * key is blank for an offer with no binding, which stateBindingOf reads as no
+ * binding at all.
+ *
+ * Untrusted, like everything else off the request body: what comes back goes
+ * straight into stateBindingProblem, which is the same check the rule editor
+ * saves through.
+ */
+function bindingFromOffer(o: Record<string, unknown>): Record<string, string> {
+  const variable = String(o.stateVariable ?? "").trim();
+  if (!variable) return stateBindingParams(null);
+  return stateBindingParams({
+    variable,
+    onValue: String(o.stateOnValue ?? "").trim(),
+    offValue: String(o.stateOffValue ?? "").trim(),
+  });
+}
+
+/**
  * The `companion.press` params for an imported button: the coordinates, the
  * label, and the fingerprint that lets a reconcile follow it.
  *
@@ -456,7 +484,7 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
     // The Companion custom variable this pair's state is read from, chosen in
     // the dialog. Optional; blank is an optimistic pair, as every pair was
     // before this existed.
-    const stateVariable = String(p.stateVariable ?? "").trim();
+    const binding = bindingFromOffer(p);
 
     if (!slug || !on || !off) {
       skipped.push({ name: base || "(unnamed)", why: "incomplete pair" });
@@ -464,12 +492,12 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
     }
     // Checked BEFORE either half is created: addRule would refuse the `_on`
     // rule and create the `_off` one, leaving half a pair behind for a typo in
-    // a field that is not even the cue's name.
-    if (stateVariable && !isCompanionVariableRef(stateVariable)) {
-      skipped.push({
-        name: slug,
-        why: `"${stateVariable}" is not a Companion variable name`,
-      });
+    // a field that is not even the cue's name. Through the SAME check the rule
+    // editor saves against, so an inferred binding whose values are "On"/"Off"
+    // and a hand-typed one are refused for the same reasons.
+    const problem = stateBindingProblem(binding);
+    if (problem) {
+      skipped.push({ name: slug, why: problem });
       continue;
     }
 
@@ -480,7 +508,7 @@ async function importPairs(raw: unknown[]): Promise<ImportResult> {
     const pageName = String(p.pageName ?? "").trim();
     const spoken = slug !== slugForCue(base) && pageName ? `${pageName} ${base}` : base;
 
-    await addPairRules({ slug, spoken, stateVariable, buttons: { on, off }, label: base }, {
+    await addPairRules({ slug, spoken, binding, buttons: { on, off }, label: base }, {
       created,
       skipped,
     });
@@ -506,8 +534,11 @@ async function addPairRules(
     slug: string;
     /** The words, already disambiguated by page where it was needed. */
     spoken: string;
-    /** The binding for the `_on` half, or "" for an optimistic pair. */
-    stateVariable: string;
+    /**
+     * The binding params for the `_on` half — every key blank for an optimistic
+     * pair. See bindingFromOffer.
+     */
+    binding: Record<string, string>;
     buttons: { on: ImportButton; off: ImportButton };
     /** The button label to fall back on when the offer carried none. */
     label: string;
@@ -525,10 +556,14 @@ async function addPairRules(
           name,
           says: `${pair.spoken} ${suffix}`,
           // On the `_on` half only; the `_off` half inherits it by name. See
-          // cue-pairs.ts. The on/off VALUES are not offered here — the
-          // defaults are what a Companion button sets, and anything else is
-          // an edit to the rule.
-          ...(suffix === "on" && pair.stateVariable ? { stateVariable: pair.stateVariable } : {}),
+          // cue-pairs.ts.
+          //
+          // The VALUES travel with it. A custom variable an operator's own
+          // buttons set holds "on"/"off" and needs neither, but an INFERRED
+          // module variable holds `On`/`Off` — or `On-Air`/`Off-Air` — and the
+          // comparison is case-sensitive, so a binding imported without them is
+          // a pair that reads unknown forever with nothing on screen saying why.
+          ...(suffix === "on" ? pair.binding : {}),
         },
       },
       conditions: [{ id: "service.is-not-live", params: {} }],
@@ -590,13 +625,14 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
     const spoken = slug !== slugForCue(label) && pageName ? `${pageName} ${label}` : label;
 
     // A toggle: one button that is both directions, told apart by a variable.
-    const stateVariable = String(o.stateVariable ?? "").trim();
-    if (stateVariable) {
+    const binding = bindingFromOffer(o);
+    if (binding.stateVariable) {
       // Checked BEFORE either half is created, exactly as the pairs import
       // does: a typo in a field that is not even the cue's name must not leave
       // half a pair behind.
-      if (!isCompanionVariableRef(stateVariable)) {
-        skipped.push({ name: slug, why: `"${stateVariable}" is not a Companion variable name` });
+      const problem = stateBindingProblem(binding);
+      if (problem) {
+        skipped.push({ name: slug, why: problem });
         continue;
       }
       // The DIRECTION word comes off the label first — "VCR Light ON" is a
@@ -634,7 +670,7 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
         {
           slug: pairSlug,
           spoken: spokenBase,
-          stateVariable,
+          binding,
           // The SAME button both ways: that is what a toggle is.
           buttons: { on: button, off: button },
           label: base,

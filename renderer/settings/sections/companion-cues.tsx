@@ -22,6 +22,7 @@
 import { errorMessage } from "@main/services/errors";
 import { defaultStateVariable } from "@main/services/cue-pairs";
 import { togglePairSlug } from "@main/services/companion-export";
+import type { InferredStateSource } from "@main/services/companion-state-source";
 import {
   type ButtonFingerprint,
   fingerprintParams,
@@ -66,6 +67,13 @@ export interface CompanionButton {
   drives: string[];
   /** The button's sorted action ids — its identity when somebody moves it. */
   actionIds: string[];
+  /**
+   * Where this button's own device already reports its state, or null.
+   *
+   * Inferred from what it drives (companion-state-source.ts). Optional on the
+   * wire so an older server's answer still renders.
+   */
+  stateSource?: InferredStateSource | null;
 }
 
 interface ButtonsReply {
@@ -93,6 +101,8 @@ interface Pair {
   on: CompanionButton;
   off: CompanionButton;
   suggested: boolean;
+  /** Where this pair's device already reports its state, off its `_on` button. */
+  stateSource?: InferredStateSource | null;
   exists: boolean;
 }
 
@@ -595,8 +605,58 @@ export function ImportPairsDialog({
   const buttonKey = (b: Single) => `${b.page}:${b.row}:${b.col}`;
   /** The two cue names a toggle button would get, from the module the route uses. */
   const toggleSlug = (b: Single) => togglePairSlug(b.slug, b.label);
-  /** The variable this pair will be bound to: what was chosen, else the guess. */
-  const stateVarFor = (p: Pair) => stateVars[key(p)] ?? defaultStateVariable(p.slug, customVariables);
+  /**
+   * The variable a single button will be bound to: what was chosen, else its
+   * own inferred source.
+   *
+   * A button whose device reports its own state is a TOGGLE by default — one
+   * key that goes both ways, which is what a switch in Home Assistant needs.
+   * It stays UNTICKED like every other single button: the default is about what
+   * KIND of thing it would become, never about importing it.
+   */
+  const toggleVarFor = (b: Single) => toggleVars[buttonKey(b)] ?? b.stateSource?.variable ?? "";
+  /**
+   * The variable this pair will be bound to: what was chosen, else the button's
+   * own inferred source, else a custom variable named after the pair.
+   *
+   * The INFERENCE wins over the name match because it is evidence rather than a
+   * guess — it is the connection the button drives, read out of Companion's own
+   * document, where `projectors_state` merely happens to be spelled like the
+   * pair.
+   */
+  const stateVarFor = (p: Pair) =>
+    stateVars[key(p)] ?? p.stateSource?.variable ?? defaultStateVariable(p.slug, customVariables);
+
+  /**
+   * The three binding params one offer sends.
+   *
+   * The VALUES go with the variable, and only when the chosen variable IS the
+   * inferred one: a kasa plug's `power_state` holds `On`, not `on`, and the
+   * comparison is case-sensitive, so a pair imported without them reads unknown
+   * forever. A custom variable an operator's own buttons set gets no values and
+   * falls back to the server's on/off defaults.
+   */
+  const bindingFor = (variable: string, source: InferredStateSource | null | undefined) =>
+    variable && source && variable === source.variable
+      ? { stateVariable: variable, stateOnValue: source.onValue, stateOffValue: source.offValue }
+      : { stateVariable: variable };
+
+  /**
+   * What the State select offers: Companion's custom variables, plus this
+   * button's own inferred source labelled as such.
+   *
+   * The inferred one is FIRST and says so. An operator looking at
+   * "VCR-Overhead-Light:power_state (inferred)" can tell at a glance that
+   * nothing has to be built in Companion for it to work, which is the whole
+   * point of it being offered.
+   */
+  const optionsFor = (source: InferredStateSource | null | undefined) => {
+    const inferred = source && !customVariables.includes(source.variable) ? [source] : [];
+    return [
+      ...inferred.map((s) => ({ value: s.variable, text: `${s.variable} (inferred)` })),
+      ...customVariables.map((name) => ({ value: name, text: name })),
+    ];
+  };
 
   // Single buttons are NEVER pre-ticked, and this is not an oversight. A pair is
   // plainly a thing being turned on and off; a single button is whatever
@@ -611,14 +671,14 @@ export function ImportPairsDialog({
       // rather than needing a second edit. Blank is an optimistic pair.
       const send = pairs
         .filter((p) => chosen.has(key(p)))
-        .map((p) => ({ ...p, stateVariable: stateVarFor(p) }));
+        .map((p) => ({ ...p, ...bindingFor(stateVarFor(p), p.stateSource) }));
       // `stateVariable` is on a button only when one was chosen. A button
       // without it is a single cue and a Home Assistant script, as before.
       const sendButtons = singles
         .filter((b) => pickedButtons.has(buttonKey(b)))
         .map((b) => {
-          const variable = toggleVars[buttonKey(b)] ?? "";
-          return variable ? { ...b, stateVariable: variable } : b;
+          const variable = toggleVarFor(b);
+          return variable ? { ...b, ...bindingFor(variable, b.stateSource) } : b;
         });
       const r = await invoke<{ created: string[]; skipped: { name: string; why: string }[] }>(
         "automation:importPairs",
@@ -690,7 +750,7 @@ export function ImportPairsDialog({
             <p className="pb-1 text-caption2 text-fg-subtle">
               Buttons whose labels differ only by ON/OFF. Each becomes two cues and one Home Assistant
               switch.
-              {customVariables.length > 0 && (
+              {(customVariables.length > 0 || pairs.some((p) => p.stateSource)) && (
                 <>
                   {" "}
                   Pick a <span className="text-fg">state</span> variable and the switch reports what the
@@ -730,7 +790,7 @@ export function ImportPairsDialog({
                 {/* Offered only when Companion HAS custom variables, and never
                     for a pair that is already imported — its cues exist, and
                     the binding is an edit to the rule from here on. */}
-                {customVariables.length > 0 && !p.exists && (
+                {(customVariables.length > 0 || p.stateSource) && !p.exists && (
                   <Select value={stateVarFor(p)} onValueChange={(v) => setStateVars({ ...stateVars, [key(p)]: v })}>
                     {/* The PAGE is in the accessible name, exactly as the
                         checkbox's is: the fixture Companion has "Projectors" on
@@ -745,8 +805,8 @@ export function ImportPairsDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="">No state</SelectItem>
-                      {customVariables.map((name) => (
-                        <SelectItem key={name} value={name}>{name}</SelectItem>
+                      {optionsFor(p.stateSource).map((o) => (
+                        <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -775,7 +835,7 @@ export function ImportPairsDialog({
               <p className="pb-1 text-caption2 text-fg-subtle">
                 Every other labelled button. Each becomes one cue and one Home Assistant script — nothing
                 here is ticked for you.
-                {customVariables.length > 0 && (
+                {(customVariables.length > 0 || singles.some((b) => b.stateSource)) && (
                   <>
                     {" "}
                     A button that is really a <span className="text-fg">toggle</span> — one key for both
@@ -797,7 +857,7 @@ export function ImportPairsDialog({
                 </p>
               )}
               {shown.map((b) => {
-                const chosenVar = toggleVars[buttonKey(b)] ?? "";
+                const chosenVar = toggleVarFor(b);
                 return (
                   // A DIV with the label around the checkbox and the words only,
                   // exactly as the pairs rows are: with the whole row as one
@@ -827,7 +887,7 @@ export function ImportPairsDialog({
                     </label>
                     {/* Offered only when Companion HAS custom variables, and
                         never for a button that is already imported. */}
-                    {customVariables.length > 0 && !b.exists && (
+                    {(customVariables.length > 0 || b.stateSource) && !b.exists && (
                       <Select
                         value={chosenVar}
                         onValueChange={(v) => {
@@ -850,8 +910,8 @@ export function ImportPairsDialog({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="">Not a toggle</SelectItem>
-                          {customVariables.map((name) => (
-                            <SelectItem key={name} value={name}>{name}</SelectItem>
+                          {optionsFor(b.stateSource).map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
