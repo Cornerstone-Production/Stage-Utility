@@ -1226,7 +1226,15 @@ export function RuleEditorDialog({
         if (!o) onClose();
       }}
     >
-      <DialogContent className="max-w-2xl" data-rule-editor={isPair ? target.pair.base : onDraft.id}>
+      {/* `max-h-[92vh]` with a COLUMN layout, not a body cap alone: the header
+          and footer are about 160px together, so a body capped at 80vh of a
+          700px window is a dialog taller than the window — and the dialog is
+          centred, so what goes off the bottom is the footer and its Save.
+          Driven at 1280x800 and 1280x700. */}
+      <DialogContent
+        className="flex max-h-[92vh] max-w-2xl flex-col"
+        data-rule-editor={isPair ? target.pair.base : onDraft.id}
+      >
         <DialogHeader>
           <div className="flex min-w-0 items-center gap-2 pr-8">
             <DialogTitle className="min-w-0 truncate">{title}</DialogTitle>
@@ -1246,7 +1254,7 @@ export function RuleEditorDialog({
             can reach. Not unit-tested — jsdom loads no stylesheet and reports
             every offsetHeight as 0, so a max height and an overflow are not
             observable in it at all. Driven in a browser at 1280x800. */}
-        <div className="max-h-[80vh] overflow-y-auto pr-1">
+        <div className="min-h-0 max-h-[80vh] flex-1 overflow-y-auto pr-1">
           {isPair && (
             <div className="mb-3 flex flex-col gap-1 rounded-lg border border-line bg-surface p-3" data-pair-settings="">
               <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">
