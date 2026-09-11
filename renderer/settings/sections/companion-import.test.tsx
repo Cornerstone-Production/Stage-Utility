@@ -253,17 +253,46 @@ describe("the import dialog", () => {
     );
   });
 
-  test("the search filters the single buttons and leaves the pairs alone", async () => {
+  test("the search filters BOTH sections, and the count says how many are left", async () => {
+    // One field over the whole dialog. A field that filtered only the singles
+    // left an operator who could not find a button unable to tell whether it
+    // was offered as half of a pair — which is the question the two sections
+    // exist to answer.
     await mount();
     await act(async () => {
-      fireEvent.change(screen.getByLabelText("Search single buttons"), { target: { value: "cam" } });
+      fireEvent.change(screen.getByLabelText("Search buttons"), { target: { value: "cam" } });
     });
     assert.deepEqual(singleRowNames(), ["Cam 1"]);
     assert.equal(
       document.querySelectorAll("[data-cue-kind='switch']").length,
-      1,
-      "the search must not filter the pairs — they have their own section",
+      0,
+      "the pair matches nothing typed, so its row must be gone too",
     );
+    assert.equal(document.querySelector("[data-import-search-count]")?.textContent, "1 of 4");
+  });
+
+  test("a query that matches a pair by its OFF cue name keeps the pair row", async () => {
+    // `projectors_off` is the name in somebody's Home Assistant config, and it
+    // is on the row — a matcher reading only the base would not find it.
+    await mount();
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Search buttons"), { target: { value: "projectors_off" } });
+    });
+    assert.equal(document.querySelectorAll("[data-cue-kind='switch']").length, 1);
+    assert.deepEqual(singleRowNames(), []);
+  });
+
+  test("a section with no matches says so under its heading, rather than vanishing", async () => {
+    await mount();
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Search buttons"), { target: { value: "cam" } });
+    });
+    // Both headings are still there — a heading that disappears reads as "this
+    // Companion has no pairs", a different answer from "none of them match".
+    const text = document.body.textContent ?? "";
+    assert.match(text, /ON\/OFF pairs/);
+    assert.match(text, /Single buttons/);
+    assert.match(text, /No matches/);
   });
 
   test("ticking a button changes the footer and posts BOTH lists", async () => {
@@ -365,7 +394,7 @@ describe("Select all / Clear per section", () => {
       assert.equal(footer(), "Import");
 
       await act(async () => {
-        screen.getByRole("button", { name: "Select all pairs" }).click();
+        screen.getByRole("button", { name: "Select all 1 shown pairs" }).click();
       });
       assert.deepEqual(boxes(), [
         { name: "Projectors · Room A: Screens", checked: "true", disabled: false },
@@ -375,6 +404,27 @@ describe("Select all / Clear per section", () => {
         { name: "Cam 1 · Room A: Cameras", checked: "false", disabled: false },
       ]);
       assert.equal(footer(), "Import 1 pair", "the already-imported pair must not have been ticked");
+    } finally {
+      PAIRS.length = 1;
+    }
+  });
+
+  test("pairs Select all with a search active ticks only the shown pairs", async () => {
+    // The same rule as the singles': Select all over pairs the search has
+    // hidden is an import of things the operator cannot see.
+    PAIRS.push({ ...PAIRS[0]!, page: 2, slug: "lighting", base: "Lighting", suggested: false });
+    try {
+      await mount();
+      assert.equal(footer(), "Import 1 pair");
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText("Search buttons"), { target: { value: "projectors" } });
+      });
+      assert.equal(document.querySelectorAll("[data-cue-kind='switch']").length, 1);
+
+      await act(async () => {
+        screen.getByRole("button", { name: "Select all 1 shown pairs" }).click();
+      });
+      assert.equal(footer(), "Import 1 pair", "the hidden pair must not have been ticked");
     } finally {
       PAIRS.length = 1;
     }
@@ -400,28 +450,27 @@ describe("Select all / Clear per section", () => {
   test("singles Select all with a search active ticks only the shown rows", async () => {
     await mount();
     await act(async () => {
-      fireEvent.change(screen.getByLabelText("Search single buttons"), { target: { value: "cam" } });
+      fireEvent.change(screen.getByLabelText("Search buttons"), { target: { value: "cam" } });
     });
     assert.deepEqual(singleRowNames(), ["Cam 1"]);
 
     await act(async () => {
-      screen.getByRole("button", { name: "Select all 1 shown" }).click();
+      screen.getByRole("button", { name: "Select all 1 shown buttons" }).click();
     });
     // Take Screens and House Lights ON are hidden by the search, so they are
     // not even rendered here — the assertion that they were never ticked is
     // in the request the footer's count implies: 1 pair + 1 button, not 3.
+    // The PAIR's box is gone too: one query filters both sections. Its tick
+    // survives being filtered out, which is why the footer still counts it.
     assert.deepEqual(
       boxes().map((b) => ({ name: b.name, checked: b.checked })),
-      [
-        { name: "Projectors · Room A: Screens", checked: "true" },
-        { name: "Cam 1 · Room A: Cameras", checked: "true" },
-      ],
+      [{ name: "Cam 1 · Room A: Cameras", checked: "true" }],
     );
     assert.equal(footer(), "Import 1 pair and 1 button");
 
     // Clear the search and confirm the two hidden rows were never ticked.
     await act(async () => {
-      fireEvent.change(screen.getByLabelText("Search single buttons"), { target: { value: "" } });
+      fireEvent.change(screen.getByLabelText("Search buttons"), { target: { value: "" } });
     });
     assert.deepEqual(
       boxes().map((b) => b.checked),

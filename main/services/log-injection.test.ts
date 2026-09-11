@@ -71,6 +71,7 @@ const REQUEST_FACING = [
   // Its read failure line carries whatever cue-states could not read, which
   // reaches Companion over HTTP with a variable name typed into a rule.
   "cue-live.ts",
+  "cue-manifest.ts",
   "cue-routes.ts",
   // Logs the Companion variable name a cue is bound to, which arrives as a rule
   // param over HTTP.
@@ -236,6 +237,10 @@ function requestFacingFiles(): string[] {
     // Companion sent back.
     // Its read failure line carries whatever cue-states could not read, which
     // reaches Companion over HTTP with a variable name typed into a rule.
+    // Scanned rather than excluded even though its one line carries a COUNT and
+    // nothing else: the file is reached by `GET /api/cues/manifest`, and the
+    // next line added to it will be under the scan rather than outside it.
+    path.join(HERE, "cue-manifest.ts"),
     path.join(HERE, "cue-live.ts"),
     path.join(HERE, "cue-states.ts"),
     // Every value on its lines is either a cue name — typed into an HTTP body

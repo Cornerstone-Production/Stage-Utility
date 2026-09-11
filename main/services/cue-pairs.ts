@@ -33,6 +33,10 @@
 // somebody found a select would be optimistic for no reason. An explicit
 // `stateVariable` on either half always wins over the implicit one, so a pair
 // can still be pointed somewhere else, or left unbound, by hand.
+//
+// HIDDEN FROM HOME is the other per-cue setting stored the same way: a cue the
+// operator wants over voice but not as an entity in the house. See
+// isHiddenFromHome — absent means shown, so nothing an upgrade finds changes.
 
 import {
   APP_STATE_SOURCES,
@@ -121,6 +125,29 @@ export function stateBindingParams(binding: Partial<StateBinding> | null): Recor
   };
 }
 
+/** The stored value of `homeAssistant` that means "keep this cue out of Home". */
+export const HOME_HIDDEN = "hidden";
+
+/**
+ * Is this cue deliberately kept out of Home Assistant?
+ *
+ * ABSENT MEANS SHOWN, and so does any other value: the flag was added to cues
+ * that already existed, and a rules file written before it must not lose every
+ * entity in the house on upgrade. Only the exact string `hidden` hides.
+ *
+ * Voice is unaffected either way — `POST /api/cues/<name>` fires a hidden cue
+ * exactly as it fires a shown one. Hidden is about which entities Home
+ * Assistant is told to create, and nothing else.
+ */
+export function isHiddenFromHome(params: Record<string, string | number>): boolean {
+  return String(params.homeAssistant ?? "").trim().toLowerCase() === HOME_HIDDEN;
+}
+
+/** The stored form. Written blank for shown, so clearing the switch saves. */
+export function homeVisibilityParams(hidden: boolean): Record<string, string> {
+  return { homeAssistant: hidden ? HOME_HIDDEN : "" };
+}
+
 /**
  * Why this binding cannot be saved, or null when it can.
  *
@@ -176,6 +203,11 @@ export interface CuePair {
   viaFormerName: boolean;
   /** Where this pair's real state is read from, or null for an optimistic pair. */
   binding: StateBinding | null;
+  /**
+   * The pair is kept out of Home Assistant — one switch the operator turned
+   * off, not a cue that failed. The ON half owns the flag; see cuePairs.
+   */
+  hiddenFromHome: boolean;
 }
 
 /** One cue rule, with everything it answers to, current name first. */
@@ -253,6 +285,15 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
           stateBindingOf(cue.rule.trigger.params) ??
           stateBindingOf(off.rule.trigger.params) ??
           implicitStateBinding(cue.rule.action),
+        // Same rule as the binding: the ON half is where a pair's settings
+        // live, with the OFF half as a fallback, so a hand-edited rules file
+        // carrying it on the other side is not a setting that saves and does
+        // nothing. There is no third answer for the ON half to give — shown is
+        // stored blank, which is exactly what absent looks like — so either
+        // half saying `hidden` hides the pair. The editor only ever writes the
+        // ON half, so the two disagree only by hand.
+        hiddenFromHome:
+          isHiddenFromHome(cue.rule.trigger.params) || isHiddenFromHome(off.rule.trigger.params),
       });
     }
   }
@@ -314,6 +355,29 @@ export function isTogglePair(pair: CuePair): boolean {
 /** The pairs that have somewhere to read their state from. */
 export function boundCuePairs(rules: readonly Rule[]): CuePair[] {
   return cuePairs(rules).filter((p) => p.binding !== null);
+}
+
+/**
+ * What to call a cue on a screen — the words, not the rule's name.
+ *
+ * The operator's own `says` first, with a trailing "on" taken off: it is there
+ * so the cue can be SAID and is not part of the thing's name. "Projectors on"
+ * is a sentence; the switch is called Projectors. Falling back to the cue name
+ * humanised, never to the rule's `name` field — a rule may be called "Rule 4",
+ * and a house full of switches called that is worse than one called by its cue.
+ *
+ * Here rather than in cue-manifest.ts, which is where it was, because the rule
+ * editor names the switch an operator is about to hide and cue-manifest reaches
+ * stage-controller — a renderer importing it crashes the page at load.
+ */
+export function spokenCueName(params: Record<string, string | number>, fallback: string): string {
+  const stripped = String(params.says ?? "").trim().replace(/\s+on$/i, "").trim();
+  if (stripped) return stripped;
+  return fallback
+    .split("_")
+    .filter((w) => w !== "")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 /**

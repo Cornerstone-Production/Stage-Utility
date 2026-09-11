@@ -21,6 +21,11 @@
 // A cue is never both. A pair's two halves are exactly the cues whose names end
 // `_on`/`_off` with a partner present, and those are excluded from the scripts.
 //
+// A cue HIDDEN from Home Assistant (see cue-pairs.ts) is in none of the three:
+// no rest_command, no switch, no script. It is voice-only, and a rest_command
+// left behind for it is an entity in Home Assistant the operator asked not to
+// have. A hidden PAIR still pairs, so neither half reappears as a script.
+//
 // The switches go under `template:` and NOT under `switch:` with
 // `platform: template` beneath it. That legacy spelling is what this generated
 // before, and current Home Assistant refuses it outright with the repair
@@ -44,7 +49,7 @@
 
 import { CALL_TRIGGER_ID } from "./automation-triggers.js";
 import { parseAliases } from "./cue-aliases.js";
-import { cuePairs, isTogglePair, type StateBinding } from "./cue-pairs.js";
+import { cuePairs, isHiddenFromHome, isTogglePair, type StateBinding } from "./cue-pairs.js";
 import { scrub } from "./scrub.js";
 import type { Rule } from "../types/automation.js";
 
@@ -54,6 +59,8 @@ interface Cue {
   friendly: string;
   /** Names it used to have and still answers to. See cue-aliases.ts. */
   formerNames: string[];
+  /** Kept out of Home Assistant entirely. See isHiddenFromHome. */
+  hidden: boolean;
 }
 
 /** A cue set the assistant can turn on and off. */
@@ -66,6 +73,8 @@ interface Pair {
   binding: StateBinding | null;
   /** Both halves press the same Companion button. See isTogglePair. */
   toggle: boolean;
+  /** Kept out of Home Assistant entirely — still a pair, just not emitted. */
+  hidden: boolean;
 }
 
 /** The `rest` sensor every bound pair's switch reads its attribute off. */
@@ -138,6 +147,7 @@ function pairsOf(rules: Rule[], cues: Map<string, Cue>): Pair[] {
       off: pair.offName,
       binding: pair.binding,
       toggle: isTogglePair(pair),
+      hidden: pair.hiddenFromHome,
     });
   }
   return out.sort((a, b) => a.base.localeCompare(b.base));
@@ -239,13 +249,29 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
       name,
       friendly: friendlyOf(rule),
       formerNames: parseAliases(rule.trigger.params),
+      hidden: isHiddenFromHome(rule.trigger.params),
     });
   }
 
   const base = baseUrl.replace(/\/+$/, "");
   // Before the header, because the header says whether the switches report real
   // state and that is a property of the pairs.
-  const pairs = pairsOf(rules, cues);
+  // PAIRED before HIDDEN: a hidden pair's halves are still a pair, and a half
+  // that fell out of `paired` would come back as a script — the entity the
+  // operator hid, twice.
+  const allPairs = pairsOf(rules, cues);
+  const paired = new Set(allPairs.flatMap((p) => [p.on, p.off]));
+  const hiddenCues = new Set<string>();
+  for (const pair of allPairs) {
+    if (!pair.hidden) continue;
+    hiddenCues.add(pair.on);
+    hiddenCues.add(pair.off);
+  }
+  for (const cue of cues.values()) {
+    if (!paired.has(cue.name) && cue.hidden) hiddenCues.add(cue.name);
+  }
+  const pairs = allPairs.filter((p) => !p.hidden);
+  const visible = [...cues.values()].filter((c) => !hiddenCues.has(c.name));
   const bound = pairs.filter((p) => p.binding !== null);
   const lines: string[] = [
     "# Stage Utility cues — generated. Paste into configuration.yaml.",
@@ -275,9 +301,18 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     lines.push("# No cues yet. Add a rule triggered by \"Called by name\" and reload this.");
     return lines.join("\n") + "\n";
   }
+  // Returned rather than emitted empty: `rest_command:` with nothing under it
+  // is a null value, and Home Assistant refuses the whole file over it.
+  if (visible.length === 0) {
+    lines.push(
+      "# Every cue here is hidden from Home Assistant. Turn a cue's Home Assistant",
+      "# switch back on in Stage Utility and reload this.",
+    );
+    return lines.join("\n") + "\n";
+  }
 
   lines.push("rest_command:");
-  for (const cue of cues.values()) {
+  for (const cue of visible) {
     // A renamed cue is CALLED OUT, and its former names are deliberately not
     // emitted as commands of their own. They exist so that the copy of this file
     // somebody pasted before the rename keeps working; generating them here
@@ -302,9 +337,8 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     );
   }
 
-  const paired = new Set(pairs.flatMap((p) => [p.on, p.off]));
-  // Every cue that is not half of a pair.
-  const scripts = [...cues.values()].filter((c) => !paired.has(c.name));
+  // Every visible cue that is not half of a pair.
+  const scripts = visible.filter((c) => !paired.has(c.name));
 
   // ONE disambiguation over both kinds. A switch's friendly_name and a script's
   // alias are the same thing to a voice assistant, so they cannot be separated

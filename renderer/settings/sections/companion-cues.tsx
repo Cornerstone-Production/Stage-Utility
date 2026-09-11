@@ -501,6 +501,22 @@ export function matchesButtonSearch(b: Single, search: string): boolean {
   return `${b.pageName} ${b.label} ${b.slug}`.toLowerCase().includes(needle);
 }
 
+/**
+ * Does this pair match what was typed? PURE.
+ *
+ * Every word the ROW shows: the base, the page, and both cue names it would
+ * create. A search that read only the base would miss `projectors_off`, which
+ * is what somebody looking for the pair is most likely to have in front of them
+ * — it is the name in their Home Assistant config.
+ */
+export function matchesPairSearch(p: Pair, search: string): boolean {
+  const needle = search.trim().toLowerCase();
+  if (!needle) return true;
+  return `${p.pageName} ${p.base} ${p.slug} ${p.slug}_on ${p.slug}_off`
+    .toLowerCase()
+    .includes(needle);
+}
+
 /** `switch` / `script` — which Home Assistant object this offer becomes. */
 function KindTag({ kind }: { kind: "switch" | "script" }) {
   return (
@@ -539,7 +555,9 @@ function SectionHeading({
   clearLabel?: string;
 }) {
   return (
-    <div className="sticky top-0 z-10 flex items-baseline gap-2 bg-bg py-1">
+    // `top-9`, not `top-0`: the dialog's search field is pinned above this and
+    // is `h-9`. See the field.
+    <div className="sticky top-9 z-10 flex items-baseline gap-2 bg-bg py-1">
       <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">{title}</span>
       <span className="text-caption2 text-fg-subtle">{count}</span>
       {onSelectAll && onClear && (
@@ -669,7 +687,13 @@ export function ImportPairsDialog({
   // plainly a thing being turned on and off; a single button is whatever
   // somebody put on a Companion page, and a ticked-by-default camera shot or
   // playback macro is a cue somebody can say by accident.
+  // ONE query over both sections. Two fields — one per section — is the
+  // operator typing the same thing twice to find out which half a button is in,
+  // which is the question the dialog exists to answer.
+  const shownPairs = pairs.filter((p) => matchesPairSearch(p, search));
   const shown = singles.filter((b) => matchesButtonSearch(b, search));
+  const matches = shownPairs.length + shown.length;
+  const offered = pairs.length + singles.length;
 
   async function run() {
     setBusy(true);
@@ -733,24 +757,50 @@ export function ImportPairsDialog({
         {data && !data.ok ? (
           <p className="text-caption1 text-fg-muted">Could not read Companion&rsquo;s configuration: {data.reason}</p>
         ) : (
+          // The dialog's own scroller, NOT the page's: this list scrolls inside
+          // the dialog, so the field below sticks to the top of THIS element.
           <div className="max-h-[50vh] overflow-y-auto">
+            {/* `z-20`, above the two section headings, which are sticky at
+                `z-10` and would otherwise slide over the field. */}
+            {/* `h-9` is not decoration: the section headings below stick at
+                `top-9`, so the two numbers are one number. Without it a heading
+                pinned at the same offset as this field and disappeared behind
+                it — the list scrolled with no heading visible at all. */}
+            <div className="sticky top-0 z-20 flex h-9 items-center gap-2 bg-bg">
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search buttons, pages and cue names…"
+                className="h-7 flex-1 text-footnote"
+                aria-label="Search buttons"
+              />
+              {search.trim() !== "" && (
+                <span className="shrink-0 text-caption2 text-fg-muted" data-import-search-count="">
+                  {matches} of {offered}
+                </span>
+              )}
+            </div>
             {isFetching && pairs.length === 0 && singles.length === 0 && (
               <p className="py-4 text-caption1 text-fg-muted">Reading Companion…</p>
             )}
 
             <SectionHeading
               title="ON/OFF pairs"
-              count={pairs.length}
-              selectAllLabel="Select all pairs"
+              count={shownPairs.length}
+              selectAllLabel={`Select all ${shownPairs.filter((p) => !p.exists).length} shown pairs`}
               clearLabel="Clear pairs"
+              // The VISIBLE rows, both ways. Select all over every pair while a
+              // search is on screen is an import of things the operator cannot
+              // see, and Clear over all of them throws away a selection made
+              // before they typed.
               onSelectAll={() => {
                 const next = new Set(chosen);
-                for (const p of pairs) if (!p.exists) next.add(key(p));
+                for (const p of shownPairs) if (!p.exists) next.add(key(p));
                 setPicked(next);
               }}
               onClear={() => {
                 const next = new Set(chosen);
-                for (const p of pairs) next.delete(key(p));
+                for (const p of shownPairs) next.delete(key(p));
                 setPicked(next);
               }}
             />
@@ -758,7 +808,7 @@ export function ImportPairsDialog({
               Buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown or START/STOP.
               Each becomes two cues — <span className="text-fg">_on</span> and{" "}
               <span className="text-fg">_off</span>, whichever words the buttons use — and one Home
-              Assistant switch.
+              Assistant switch. Select all and Clear act on the rows a search has left on screen.
               {(customVariables.length > 0 || pairs.some((p) => p.stateSource)) && (
                 <>
                   {" "}
@@ -767,10 +817,15 @@ export function ImportPairsDialog({
                 </>
               )}
             </p>
-            {pairs.length === 0 && !isFetching && (
-              <p className="py-2 text-caption1 text-fg-muted">No ON/OFF pairs on this Companion.</p>
+            {/* The section stays, with a word, rather than disappearing: a
+                heading that vanishes reads as "this Companion has no pairs",
+                which is a different answer from "none of them match". */}
+            {shownPairs.length === 0 && !isFetching && (
+              <p className="py-2 text-caption1 text-fg-muted">
+                {pairs.length === 0 ? "No ON/OFF pairs on this Companion." : "No matches."}
+              </p>
             )}
-            {pairs.map((p) => (
+            {shownPairs.map((p) => (
               // A DIV with the label around the checkbox and the words only.
               // With the whole row as one <label>, every click on the State
               // select also toggled the checkbox — choosing a variable
@@ -840,8 +895,8 @@ export function ImportPairsDialog({
             <div className="mt-3">
               <SectionHeading
                 title="Single buttons"
-                count={singles.length}
-                selectAllLabel={`Select all ${shown.filter((b) => !b.exists).length} shown`}
+                count={shown.length}
+                selectAllLabel={`Select all ${shown.filter((b) => !b.exists).length} shown buttons`}
                 clearLabel="Clear single buttons"
                 onSelectAll={() => {
                   const next = new Set(pickedButtons);
@@ -856,7 +911,7 @@ export function ImportPairsDialog({
               />
               <p className="pb-1 text-caption2 text-fg-subtle">
                 Every other labelled button. Each becomes one cue and one Home Assistant script — nothing
-                here is ticked for you.
+                here is ticked for you. Select all and Clear act on the rows a search has left on screen.
                 {(customVariables.length > 0 || singles.some((b) => b.stateSource)) && (
                   <>
                     {" "}
@@ -866,16 +921,13 @@ export function ImportPairsDialog({
                   </>
                 )}
               </p>
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search buttons, pages and cue names…"
-                className="mb-1 h-7 text-footnote"
-                aria-label="Search single buttons"
-              />
+              {/* The search field is at the TOP of the dialog now, over both
+                  sections — a field inside one section could only ever filter
+                  that one, and an operator who could not find a button had no
+                  way to tell whether it was imported as half of a pair. */}
               {shown.length === 0 && !isFetching && (
                 <p className="py-2 text-caption1 text-fg-muted">
-                  {singles.length === 0 ? "Every labelled button is part of a pair." : "Nothing matches."}
+                  {singles.length === 0 ? "Every labelled button is part of a pair." : "No matches."}
                 </p>
               )}
               {shown.map((b) => {
