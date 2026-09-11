@@ -41,6 +41,9 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   // Consecutive failed connect attempts, for exponential reconnect back-off.
   private reconnectAttempts = 0;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  // Has this connection already reported a `< REP ERR >`? Reset per socket, so a
+  // reconnect to a device that still refuses the command says so again.
+  private rejectionLogged = false;
   private enabled = false;
   private cfg: ShureConfig = { host: "", port: 2202, channels: 1, meterRateMs: 1000 };
 
@@ -239,6 +242,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     const socket = new net.Socket();
     this.socket = socket;
     this.receiveBuffer = "";
+    this.rejectionLogged = false;
 
     socket.setEncoding("utf8");
     socket.setKeepAlive(true, 10_000);
@@ -332,6 +336,20 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     if (type === "REP" || type === "REPORT") {
       // Format: REP {ch} {FIELD} {value...}  OR  REP {FIELD} {value...} (device-level)
       if (tokens.length < 3) {
+        // `< REP ERR >` is the device REFUSING a command, not a truncated frame.
+        // It fell into the same debug line as a torn packet, so a heartbeat a
+        // charger has never supported was rejected once a minute for the life of
+        // the connection with nothing an operator could read. Once per
+        // connection: the command repeats for ever and the first refusal says it.
+        if ((tokens[1] ?? "").toUpperCase() === "ERR") {
+          if (!this.rejectionLogged) {
+            this.rejectionLogged = true;
+            console.warn(
+              `[shure:${this.id}] device answered < REP ERR > — it does not support a command this driver sent (heartbeat is "${this.heartbeatCommand()}")`,
+            );
+          }
+          return;
+        }
         console.debug(`[shure:${this.id}] short REP message: ${raw}`);
         return;
       }
@@ -370,10 +388,23 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     });
   }
 
+  /**
+   * A read-only command this device is known to answer, sent every 60s purely to
+   * prove the socket is still alive.
+   *
+   * Overridable because it is not the same command on every Shure box. A charger
+   * has no METER_RATE and answers `< REP ERR >`, which the parser could not read
+   * and only logged at debug — so the heartbeat was a command the device refused,
+   * once a minute, invisibly, for the life of the connection.
+   */
+  protected heartbeatCommand(): string {
+    return "GET 1 METER_RATE";
+  }
+
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
-      this.send("GET 1 METER_RATE");
+      this.send(this.heartbeatCommand());
     }, HEARTBEAT_INTERVAL_MS);
   }
 

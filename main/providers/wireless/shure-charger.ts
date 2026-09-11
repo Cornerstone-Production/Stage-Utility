@@ -71,6 +71,18 @@ export class ShureCharger extends ShureBaseProvider {
     return state;
   }
 
+  /**
+   * A charger has no METER_RATE. Verified against the unit: `GET 1 METER_RATE`
+   * answers `< REP ERR >`, `GET 0 <field>` answers `< REP ERR >` for every field
+   * (only `GET 0 ALL` is accepted at channel 0), and the device-level form with
+   * no channel number is answered — `GET DEVICE_ID` returns `REP DEVICE_ID
+   * {MA: 5-8}`. That is the heartbeat: one field, always answered, and its reply
+   * is the name the bays are labelled with, so the probe keeps that fresh too.
+   */
+  protected override heartbeatCommand(): string {
+    return "GET DEVICE_ID";
+  }
+
   protected onConnected(): void {
     console.log(`[shure:${this.id}] sending init commands`);
     this.pollAllBays();
