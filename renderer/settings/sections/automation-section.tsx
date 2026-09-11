@@ -845,6 +845,13 @@ export function AutomationSection() {
           Escape, the overlay and Cancel are the same thing. */}
       {registry && editorTarget && (
         <RuleEditorDialog
+          // KEYED BY WHAT IS BEING EDITED. The drafts are seeded when the
+          // dialog mounts, so a second rule opened into a living instance
+          // would be edited through the first one's draft. Nothing on screen
+          // can do that today — the overlay swallows the press that would —
+          // but the failure is a rule saved over another rule's fields, which
+          // is not something to leave resting on a modal overlay.
+          key={`${editorTarget.kind}:${editing?.id ?? ""}`}
           target={editorTarget}
           onClose={() => setEditing(null)}
           registry={registry}
