@@ -65,6 +65,28 @@ Charger bays are deliberately absent from the first two. A bay is not a mic: an
 empty one would drag "lowest battery" to zero, and a shelf of docked spares would
 pad the online count.
 
+### What a charger bay reports
+
+| Reading | Shown |
+|---|---|
+| Battery %, cycles, health, temperature | under their own toggles |
+| Time until charged | with **Charging**, while the bay is charging |
+| Fault | always — a bay with a failed pack in it |
+| Storage mode | always — the charger stops at about 40% |
+
+A bay whose battery has failed still reports the battery as **docked**, so it is
+not drawn as empty. It shows the charger's own error code (e.g. `Error 007`) in
+place of its figures, because every figure a faulted bay reports is a
+not-a-value marker. A faulted bay is logged on the edge, as
+`[shure:shure-charger] bay 7 faulted: Error 007 (state ERROR)`, and again when it
+clears.
+
+**Storage mode** charges to about 40% and stops. A charger left in it otherwise
+looks like a charger that has given up, so the bays say `storage` while it is on.
+
+Bays are named after the charger's own **Device ID** (its `MA: 5-8` style name,
+set on the unit) where the connection itself has not been named.
+
 ### Battery percentage and time remaining
 
 Percentage answers "how full"; runtime answers "will it last the service", and the

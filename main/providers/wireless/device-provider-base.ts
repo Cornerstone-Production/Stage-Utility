@@ -45,6 +45,18 @@ export interface ChannelState {
   cycles: number | null;
   health: number | null;
   tempC: number | null;
+  /** Minutes until the docked pack is charged, where the charger computes one.
+   *  Null on a bay that is already full, empty or faulted — the charger answers
+   *  "not applicable" there, and a zero would read as "ready now". */
+  timeToFullMinutes: number | null;
+  /** A short operator-readable fault on this bay/channel, e.g. "Error 007". The
+   *  only signal a bay or its battery is bad: a faulted bay still reports a
+   *  battery as DOCKED, so without this it renders as an ordinary occupied bay. */
+  fault: string | null;
+  /** The charger is in storage mode: it charges to about 40% and stops. Without
+   *  it an operator sees 40% and no charging indicator and has no way to know
+   *  why. Device-level, mirrored onto every bay. Null where not applicable. */
+  storageMode: boolean | null;
 }
 
 /** A blank channel: everything unknown until the device says otherwise. */
@@ -67,6 +79,9 @@ export function blankChannel(
     cycles: null,
     health: null,
     tempC: null,
+    timeToFullMinutes: null,
+    fault: null,
+    storageMode: null,
   };
 }
 

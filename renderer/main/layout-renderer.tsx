@@ -2075,13 +2075,27 @@ function ChargerBattery({
     >
       {bays.map((b) => {
         const bay = all.find((x) => x.id === b.id) ?? null;
-        const label = b.label || (bay ? `${bay.connectionName ?? `Charger ${bay.chargerIndex}`} · Bay ${bay.bay}` : "Bay");
+        // The connection's name is the operator's own, so it still wins. `name` is
+        // the charger's DEVICE_ID ("MA: 5-8 · Bay 3") and only fills in where the
+        // connection was left unnamed, which used to read "Charger 1 · Bay 3".
+        const label =
+          b.label ||
+          (bay ?
+            bay.connectionName ? `${bay.connectionName} · Bay ${bay.bay}`
+            : (bay.name ?? `Charger ${bay.chargerIndex} · Bay ${bay.bay}`)
+          : "Bay");
         return (
           <div key={b.id} className="flex items-center justify-between gap-[0.5em] w-full min-w-0">
             <span className="truncate min-w-0 flex-1">{label}</span>
             <span className="flex items-center gap-[0.6em] shrink-0 tabular-nums">
               {!bay || !bay.online ? (
                 <span style={{ opacity: 0.35 }}>empty</span>
+              ) : bay.fault ? (
+                // A faulted bay is NOT an empty one — the battery is physically
+                // docked and every reading it answers is a marker, so the fault is
+                // the whole row. Unconditional: nobody opts in to being told their
+                // battery has failed.
+                <span style={{ color: "var(--red-10)", fontWeight: 700 }}>{bay.fault}</span>
               ) : (
                 <>
                   {showBattery && (
@@ -2092,9 +2106,20 @@ function ChargerBattery({
                   {show.charging && bay.charging && (
                     <ZapIcon style={{ width: "0.85em", height: "0.85em" }} className="inline-block shrink-0 text-green-10" aria-label="charging" />
                   )}
+                  {/* Time to full rides the charging toggle rather than a new one:
+                      "is it charging" and "when is it done" are the same question,
+                      and the charger only answers this while it is charging. */}
+                  {show.charging && bay.timeToFullMinutes != null && (
+                    <span style={{ opacity: 0.7 }}>{runtimeText(bay.timeToFullMinutes)}</span>
+                  )}
                   {show.cycles && <span style={{ opacity: 0.7 }}>{bay.cycles ?? "—"} cyc</span>}
                   {show.health && <span style={{ opacity: 0.7 }}>health {bay.health ?? "—"}%</span>}
                   {show.temp && <span style={{ opacity: 0.7 }}>{bay.tempC ?? "—"}°C</span>}
+                  {/* Storage mode explains a shelf of bays all stopped at ~40%.
+                      Device-level, so every row of that charger carries it. */}
+                  {bay.storageMode && (
+                    <span style={{ opacity: 0.7, color: "var(--yellow-10)" }}>storage</span>
+                  )}
                 </>
               )}
             </span>

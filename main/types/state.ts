@@ -139,6 +139,16 @@ export interface ChargerBayDTO {
   cycles: number | null;
   health: number | null;
   tempC: number | null;
+  /** Minutes until this pack is charged. Null on a bay that is full, empty or
+   *  faulted — the charger answers "not applicable", and a zero would read as
+   *  "ready now". */
+  timeToFullMinutes: number | null;
+  /** A short operator-readable fault, e.g. "Error 007". A faulted bay still
+   *  reports its battery as DOCKED, so without this it renders as an ordinary
+   *  occupied bay with every figure dashed out. */
+  fault: string | null;
+  /** The charger is in storage mode: it charges to about 40% and stops. */
+  storageMode: boolean | null;
 }
 
 /** Scheduled auto-update config. When enabled, the server applies an available

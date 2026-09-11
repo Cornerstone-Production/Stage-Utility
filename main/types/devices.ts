@@ -46,6 +46,15 @@ export interface DeviceStatus {
   cycles: number | null;
   health: number | null;
   tempC: number | null;
+  /** Minutes until the docked pack is charged, where the charger computes one.
+   *  Null on a bay that is full, empty or faulted — the charger answers "not
+   *  applicable" there and a zero would read as "ready now". */
+  timeToFullMinutes?: number | null;
+  /** A short operator-readable fault, e.g. "Error 007". The only signal a charger
+   *  bay or its battery is bad: a faulted bay still reports a battery as docked. */
+  fault?: string | null;
+  /** The charger is in storage mode — it charges to about 40% and stops. */
+  storageMode?: boolean | null;
   updatedAt: string;
 }
 

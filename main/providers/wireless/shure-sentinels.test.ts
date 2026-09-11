@@ -112,6 +112,12 @@ describe("a healthy bay's real readings survive the same guard", () => {
     assert.equal(status.battery, 100);
     assert.equal(status.health, 84);
   });
+
+  it("reads BATT_TIME_TO_FULL 65529 on a full bay as not-applicable", () => {
+    // Four BELOW the lowest sentinel Shure documents, which is why the block here
+    // is the top of the field's width rather than a list of three codes.
+    assert.equal(status.timeToFullMinutes, null);
+  });
 });
 
 describe("the same marker block on the receivers", () => {

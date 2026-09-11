@@ -172,7 +172,10 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   protected allowDynamicChannels = false;
   protected readonly maxDynamicChannels = 64;
 
-  private buildDefaultChannelState(n: number): ChannelState {
+  /** The state a channel starts in. Overridable because `ensureChannel` also
+   *  builds channels — a driver that only customised `initChannelStates` left
+   *  every dynamically discovered channel with the plain defaults. */
+  protected buildDefaultChannelState(n: number): ChannelState {
     return blankChannel(String(n), { deviceType: this.defaultDeviceType });
   }
 

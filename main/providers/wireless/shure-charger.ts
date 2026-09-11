@@ -4,14 +4,16 @@
 // than per RF channel. A bay reports battery charge %, cycle count, health %,
 // temperature and charging state for the docked battery/transmitter.
 //
-// NOTE: the exact command tokens below are the documented SBC220/240 set as best
-// determined without the unit on the bench. They are parsed defensively (several
-// aliases accepted) and every raw frame is logged under SHURE_DEBUG=1, so the
-// token names can be confirmed/adjusted against a live charger the same way the
-// Axient handheld fields were locked in.
+// The token set below is confirmed against a live SBC220 on FW 1.4.53: one
+// `GET 0 ALL` answers device-level MODEL / FW_VER / DEVICE_ID / FLASH /
+// STORAGE_MODE and, per bay, BATT_DETECTED, BATT_TIME_TO_FULL, BATT_STATE,
+// BATT_CHARGE, BATT_CURRENT_CAPACITY(_MAX), BATT_CYCLE, BATT_TEMP_F, BATT_TEMP_C,
+// BATT_CAPACITY_MAX, BATT_HEALTH, BATT_BARS, BATT_ERROR and BATT_MODULE_TYPE.
+// Every raw frame is logged under SHURE_DEBUG=1.
 
 import type { ConfigField } from "../../types/integrations.js";
-import { ShureBaseProvider, shureNumber, stripBraces } from "./shure-base.js";
+import type { ChannelState } from "./device-provider-base.js";
+import { ShureBaseProvider, batteryMinutesFrom, shureNumber, stripBraces } from "./shure-base.js";
 
 export class ShureCharger extends ShureBaseProvider {
   readonly id = "shure-charger";
@@ -37,19 +39,36 @@ export class ShureCharger extends ShureBaseProvider {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private static readonly POLL_MS = 30_000;
 
+  /** The unit's own name (DEVICE_ID), e.g. "MA: 5-8". Device-level, so it is held
+   *  here and applied to each bay — it arrives once per dump, before or after the
+   *  bays depending on frame order, and a bay discovered later still needs it. */
+  private deviceId: string | null = null;
+  /** Per-bay BATT_STATE and BATT_ERROR. A bay is faulted if EITHER says so, and
+   *  the two arrive in separate frames, so the fault is derived from both rather
+   *  than written by whichever landed last. */
+  private bayState = new Map<number, string>();
+  private bayError = new Map<number, number>();
+  /** Faults already logged, so a charger left with a dead pack in it does not
+   *  reprint the same line every poll for a week. */
+  private loggedFaults = new Map<number, string>();
+
   protected initChannelStates(count: number): void {
+    this.bayState.clear();
+    this.bayError.clear();
+    this.loggedFaults.clear();
     super.initChannelStates(count);
-    for (let n = 1; n <= count; n++) {
-      const state = this.channelStates.get(n);
-      if (state) {
-        // Chargers have no RF / audio / frequency.
-        state.rfBars = null;
-        state.rfLevelDbm = null;
-        state.frequencyLabel = null;
-        state.audioLevel = null;
-        state.deviceType = "charger";
-      }
-    }
+  }
+
+  /** A bay starts named after the unit, not after its index. Overridden HERE
+   *  rather than in a loop inside initChannelStates because `GET 0 ALL` dumps
+   *  bays past the configured count and those are built by `ensureChannel` — a
+   *  per-bay loop misses exactly the bays that self-discover. (RF, audio and
+   *  frequency need no clearing: `blankChannel` already leaves them null, and
+   *  `defaultDeviceType` already makes this a charger.) */
+  protected override buildDefaultChannelState(n: number): ChannelState {
+    const state = super.buildDefaultChannelState(n);
+    this.applyDeviceId(n, state);
+    return state;
   }
 
   protected onConnected(): void {
@@ -70,7 +89,7 @@ export class ShureCharger extends ShureBaseProvider {
 
   protected handleReport(channel: number, token: string, rest: string[]): void {
     if (channel === 0) {
-      console.debug(`[shure:${this.id}] device-level REP: ${token} ${rest.join(" ")}`);
+      this.handleDeviceReport(token, rest.join(" "));
       return;
     }
     const state = this.channelStates.get(channel);
@@ -82,13 +101,7 @@ export class ShureCharger extends ShureBaseProvider {
       case "BATT_DETECTED": {
         const present = stripBraces(value).toUpperCase() === "YES";
         state.online = present;
-        if (!present) {
-          state.battery = null;
-          state.charging = null;
-          state.cycles = null;
-          state.health = null;
-          state.tempC = null;
-        }
+        if (!present) this.clearBay(channel, state);
         break;
       }
 
@@ -102,19 +115,24 @@ export class ShureCharger extends ShureBaseProvider {
         break;
       }
 
-      // FULL | CHARGING | NO_BATT | … — drives the charging indicator. NO_BATT is
-      // the empty-bay marker; treat it like an absent battery.
+      // FULL | CHARGING | ERROR | NO_BATT | … — drives the charging indicator.
+      // NO_BATT is the empty-bay marker; treat it like an absent battery.
+      //
+      // ERROR is NOT absence. The bay still answers BATT_DETECTED YES, so the
+      // battery is physically there and must keep reading as docked — reporting
+      // it empty would hide the fault behind the same grey "empty" a spare shelf
+      // shows. It is recorded as a fault instead, and every numeric reading on a
+      // faulted bay is a marker anyway, so the row renders the fault and nothing
+      // else.
       case "BATT_STATE": {
         const v = stripBraces(value).toUpperCase();
+        this.bayState.set(channel, v);
         if (v === "NO_BATT") {
           state.online = false;
-          state.charging = null;
-          state.battery = null;
-          state.cycles = null;
-          state.health = null;
-          state.tempC = null;
+          this.clearBay(channel, state);
         } else {
           state.charging = v === "CHARGING";
+          this.applyFault(channel, state);
         }
         break;
       }
@@ -143,13 +161,109 @@ export class ShureCharger extends ShureBaseProvider {
         break;
       }
 
+      // Minutes until this pack is charged — "will it be ready before the
+      // service" is the question the charger is actually being looked at for.
+      // A full bay answers 65529 ("not applicable") and a faulted one 65534, and
+      // both must be null rather than zero: zero reads as "ready now".
+      case "BATT_TIME_TO_FULL": {
+        state.timeToFullMinutes = batteryMinutesFrom(value);
+        break;
+      }
+
+      // 000 = healthy. Anything else is the only signal the bay or the battery
+      // in it is bad; a faulted bay still reports BATT_DETECTED YES.
+      case "BATT_ERROR": {
+        this.bayError.set(channel, shureNumber(value, { width: 8, min: 0 }) ?? 0);
+        this.applyFault(channel, state);
+        break;
+      }
+
       default:
-        // Other fields in the GET 0 ALL dump (BATT_BARS, BATT_TEMP_C, capacities,
-        // BATT_MODULE_TYPE, BATT_ERROR, device-level MODEL/FW_VER/…) are ignored.
+        // Still ignored from the GET 0 ALL dump: BATT_BARS and BATT_TEMP_C (both
+        // duplicate a field read above, and BATT_TEMP_C is wrong on this
+        // firmware), the three capacity figures, and BATT_MODULE_TYPE.
         break;
     }
 
     this.emitChannel(channel);
+  }
+
+  /**
+   * Device-level `REP {FIELD} {value}` — MODEL, FW_VER, DEVICE_ID, FLASH,
+   * STORAGE_MODE. This used to return early and log, which threw away both of
+   * the two fields an operator can act on.
+   */
+  private handleDeviceReport(token: string, raw: string): void {
+    const value = stripBraces(raw);
+    switch (token) {
+      // Storage mode charges to about 40% and stops. Without it on screen an
+      // operator sees 40% and no charging indicator and nothing to explain it.
+      case "STORAGE_MODE": {
+        const on = value.toUpperCase() === "ON";
+        for (const [n, state] of this.channelStates) {
+          state.storageMode = on;
+          this.emitChannel(n);
+        }
+        console.log(`[shure:${this.id}] storage mode ${on ? "ON — bays charge to ~40% and stop" : "off"}`);
+        break;
+      }
+
+      // The operator's own name for the unit (e.g. "MA: 5-8", meaning it covers
+      // mic assignments 5 to 8). Better than the "Ch 1..8" the picker showed.
+      case "DEVICE_ID": {
+        const id = value || null;
+        if (id === this.deviceId) break;
+        this.deviceId = id;
+        for (const [n, state] of this.channelStates) {
+          this.applyDeviceId(n, state);
+          this.emitChannel(n);
+        }
+        console.log(`[shure:${this.id}] device id: ${id ?? "(none)"}`);
+        break;
+      }
+
+      default:
+        console.debug(`[shure:${this.id}] device-level REP: ${token} ${raw}`);
+        break;
+    }
+  }
+
+  /** Name a bay after the unit the operator named, not after its index. */
+  private applyDeviceId(bay: number, state: ChannelState): void {
+    state.name = this.deviceId ? `${this.deviceId} · Bay ${bay}` : null;
+  }
+
+  /**
+   * Derive this bay's fault from BATT_STATE and BATT_ERROR together.
+   *
+   * They arrive in separate frames (BATT_STATE first in a `GET 0 ALL` dump), so
+   * writing `fault` from whichever landed last would have BATT_ERROR 000 clear a
+   * fault BATT_STATE ERROR had just set. Logged on the EDGE only — a charger left
+   * with a dead pack in it is polled every 30s all week.
+   */
+  private applyFault(bay: number, state: ChannelState): void {
+    const code = this.bayError.get(bay) ?? 0;
+    const faulted = code > 0 || this.bayState.get(bay) === "ERROR";
+    const fault = !faulted ? null : code > 0 ? `Error ${String(code).padStart(3, "0")}` : "Error";
+    state.fault = fault;
+    if (this.loggedFaults.get(bay) === (fault ?? "")) return;
+    this.loggedFaults.set(bay, fault ?? "");
+    if (fault) console.warn(`[shure:${this.id}] bay ${bay} faulted: ${fault} (state ${this.bayState.get(bay) ?? "?"})`);
+    else console.log(`[shure:${this.id}] bay ${bay} fault cleared`);
+  }
+
+  /** Wipe a bay's readings when the battery leaves it. Every field, in one place:
+   *  the list was written out twice and the second copy already lagged. */
+  private clearBay(bay: number, state: ChannelState): void {
+    state.battery = null;
+    state.charging = null;
+    state.cycles = null;
+    state.health = null;
+    state.tempC = null;
+    state.timeToFullMinutes = null;
+    state.fault = null;
+    this.bayError.delete(bay);
+    this.loggedFaults.delete(bay);
   }
 
   // Chargers don't send SAMPLE metering frames.
