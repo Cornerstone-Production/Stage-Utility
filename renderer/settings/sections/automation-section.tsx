@@ -361,6 +361,20 @@ function PairRow({
  * The sentence is not decoration: "Everything else" holding both a hidden cue
  * and a PCO-triggered rule is not something a title can say.
  */
+/**
+ * An option source's answer as an ARRAY, whatever came back.
+ *
+ * `?? []` guards null and undefined and nothing else, so a source that answered
+ * with an object — an error body, a route that changed shape, a mocked fetch
+ * with no case for this URL — reached `.map` and threw inside the useMemo. That
+ * is not a missing dropdown: it unmounts the whole Automation section and the
+ * operator gets a blank page where their rules were. Six sources go through
+ * here rather than six copies of the same ternary.
+ */
+function list<T>(v: T[] | undefined): T[] {
+  return Array.isArray(v) ? v : [];
+}
+
 function ListSection({
   title,
   blurb,
@@ -418,13 +432,37 @@ export function AutomationSection() {
     queryKey: ["automation:plan-items"],
     queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:plan-items"),
   });
+  // Both ProPresenter sources answer with a list whatever the booth machines are
+  // doing — an unreachable one yields an empty list, never an error — so neither
+  // query can stop the editor opening. The macro read is cached server-side for
+  // 30s, which is what keeps re-opening the editor off the LAN.
+  // `osc.send` has declared optionsFrom: "osc-targets" since it was written and
+  // nothing ever answered it, so its Target select offered "Pick one…" and
+  // nothing else — the action could not be configured at all. Local config, so
+  // this costs no network: the same shape as rosstalk-targets beside it, which
+  // was wired and this was not.
+  const { data: oscTargets } = useQuery({
+    queryKey: ["osc:listTargets"],
+    queryFn: () => invoke<{ id: string; name: string }[]>("osc:listTargets"),
+  });
+  const { data: propInstances } = useQuery({
+    queryKey: ["automation:propresenter-instances"],
+    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:propresenter-instances"),
+  });
+  const { data: propMacros } = useQuery({
+    queryKey: ["automation:propresenter-macros"],
+    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:propresenter-macros"),
+  });
   const dynamicOptions = useMemo(
     () => ({
-      "rosstalk-targets": (rt?.targets ?? []).map((t) => ({ value: t.id, label: t.name })),
-      "rosstalk-commands": (rtCmds ?? []).map((c) => ({ value: c.id, label: c.label })),
-      "plan-items": planItems?.items ?? [],
+      "rosstalk-targets": list(rt?.targets).map((t) => ({ value: t.id, label: t.name })),
+      "rosstalk-commands": list(rtCmds).map((c) => ({ value: c.id, label: c.label })),
+      "osc-targets": list(oscTargets).map((t) => ({ value: t.id, label: t.name })),
+      "plan-items": list(planItems?.items),
+      "propresenter-instances": list(propInstances?.items),
+      "propresenter-macros": list(propMacros?.items),
     }),
-    [rt, rtCmds, planItems],
+    [rt, rtCmds, oscTargets, planItems, propInstances, propMacros],
   );
 
   // Which app state sources there is anything to read. An integration that is
