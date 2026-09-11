@@ -347,6 +347,15 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     }
   }
 
+  /** Whether this instance has somewhere to dial. `configured` on the base is
+   *  protected, and the manager has to know which instances are worth asking:
+   *  one that was never set up is not part of the macro union, and reporting it
+   *  as unreachable would put a warning in the log of every site that does not
+   *  use ProPresenter, every time somebody opens the rule editor. */
+  get hasTarget(): boolean {
+    return this.configured;
+  }
+
   /**
    * This instance's macro names, in ProPresenter's own order.
    *
@@ -708,10 +717,7 @@ class ProPresenterManager {
   }
 
   getInstancesDto(): PropInstancesDTO {
-    const list: PropInstanceMeta[] = [
-      { id: "default", name: this.defaultName },
-      ...[...this.extras.keys()].map((id) => ({ id, name: this.names.get(id) ?? id })),
-    ];
+    const list: PropInstanceMeta[] = this.listInstances();
     const status: Record<string, ProPresenterStatusDTO> = {
       default: propresenterService.getStatus(),
     };
@@ -765,19 +771,26 @@ class ProPresenterManager {
   }
 
   /**
-   * Every macro name across every instance, unioned, with where each one lives.
+   * Every macro name across every CONFIGURED instance, unioned, with where each
+   * one lives.
    *
    * Instances are read in parallel and independently: one machine being off
    * costs its own macros, never the other's. An instance that could not be read
    * is named on `unreachable` so the caller can say so — silently dropping it
    * would make its macros look deleted.
+   *
+   * An instance with no host is not asked and is not counted. It is not a
+   * failure — it is an instance that does not exist yet — and counting it would
+   * both log a warning on every editor open at a site that does not use
+   * ProPresenter, and mark every real macro as living on one machine "only"
+   * because the phantom one did not report it.
    */
   async allMacros(): Promise<{
     names: { name: string; instances: string[] }[];
     instanceCount: number;
     unreachable: string[];
   }> {
-    const instances = this.listInstances();
+    const instances = this.listInstances().filter((i) => this.resolve(i.id)?.svc.hasTarget);
     const results = await Promise.all(instances.map((i) => this.listMacros(i.id)));
     // A Map keyed by name preserves first-seen order, which is ProPresenter's
     // own macro order on the primary — the order the operator sees in the app.

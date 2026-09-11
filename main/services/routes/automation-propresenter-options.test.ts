@@ -81,6 +81,24 @@ function primaryAt(p: number): void {
 
 const items = (json: unknown): Option[] => (json as { items: Option[] }).items;
 
+/** Just the macro-list lines. The poller writes its own "unreachable, backing
+ *  off" warning into the same window, and that one is not under test here. */
+const macroWarnings = (lines: string[]): string[] =>
+  lines.filter((l) => l.includes("macro list unavailable"));
+
+/** Run `fn`, collecting what it wrote to console.warn. The log is the only
+ *  place the "configured but off" / "never set up" distinction shows. */
+async function withWarnings<T>(fn: () => Promise<T>): Promise<{ result: T; warnings: string[] }> {
+  const warnings: string[] = [];
+  const real = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+  try {
+    return { result: await fn(), warnings };
+  } finally {
+    console.warn = real;
+  }
+}
+
 describe("GET /api/automation/propresenter-instances", () => {
   it("lists the primary even with no extras configured", async () => {
     propresenterManager.apply("MA", []);
@@ -154,6 +172,53 @@ describe("GET /api/automation/propresenter-macros", () => {
     // Both point at the same stub, so both report the same two macros.
     propresenterManager.apply("MA", [
       { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true },
+    ]);
+    const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
+    assert.deepEqual(items(r.json), [
+      { value: "DOORS", label: "DOORS" },
+      { value: "SONG INTRO", label: "SONG INTRO" },
+    ]);
+  });
+
+  it("a ProPresenter that was never set up says NOTHING in the log", async () => {
+    // The primary has no host. An instance that does not exist yet is not a
+    // failure, and must not be reported unreachable — that would put a warning
+    // in the log of every site that does not use ProPresenter, every time
+    // somebody opened the rule editor. The empty list alone cannot show this:
+    // it is empty either way. The log line is the whole difference.
+    propresenterService.configure("", 0);
+    propresenterService.stop();
+    clearMacroCache();
+    propresenterManager.apply("MA", []);
+    const r = await withWarnings(() =>
+      callRoute(automationRoutes, "/api/automation/propresenter-macros"),
+    );
+    assert.equal(r.result.status, 200);
+    assert.deepEqual(items(r.result.json), []);
+    assert.deepEqual(macroWarnings(r.warnings), []);
+  });
+
+  it("an instance that IS set up and unreachable does say so in the log", async () => {
+    // The other half, so the assertion above cannot pass by the warning being
+    // unreachable code: a machine that was set up and is off is a real failure
+    // and has to leave something for an operator to read.
+    primaryAt(DEAD_PORT);
+    propresenterManager.apply("MA", []);
+    const r = await withWarnings(() =>
+      callRoute(automationRoutes, "/api/automation/propresenter-macros"),
+    );
+    const said = macroWarnings(r.warnings);
+    assert.equal(said.length, 1, r.warnings.join(" | "));
+    assert.match(said[0], /\[propresenter\] macro list unavailable from MA/);
+  });
+
+  it("an unconfigured instance does not mark the real one's macros as 'only'", async () => {
+    // The primary is set up; the extra was added and left disabled, so it has no
+    // host. Counting it would label every real macro "(MA only)" — true of a
+    // machine that is off, a lie about one that does not exist.
+    primaryAt(port);
+    propresenterManager.apply("MA", [
+      { id: "chapel", name: "Chapel", host: "", port: 0, enabled: false },
     ]);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     assert.deepEqual(items(r.json), [
