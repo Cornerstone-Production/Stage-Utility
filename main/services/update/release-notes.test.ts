@@ -226,6 +226,10 @@ describe("the cap is big enough for the notices actually written", () => {
     const intro = parseReleaseIntro(`${real}\n## Install\n\ncurl …\n`) ?? "";
     assert.ok(intro, "the shipped notice produces no intro at all");
     assert.doesNotMatch(intro, /…$/, `the 1.18.0 overview is ${intro.length} characters and is being cut`);
-    assert.match(intro, /REC START and REC STOP import as one pair/, "the closing sentence was cut");
+    // `\s+` between every word, like the 1.11.0 guard above: the overview is a
+    // hard-wrapped file, so a sentence that gains a word re-wraps and a literal
+    // space in this pattern fails on a line break rather than on a truncation —
+    // which is the one thing this is here to catch.
+    assert.match(intro, /REC\s+START\s+and\s+REC\s+STOP\s+import\s+as\s+one\s+pair/, "the closing sentence was cut");
   });
 });

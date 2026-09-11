@@ -1,4 +1,4 @@
-// The "allowed during a service" switch and its two rules-list badges.
+// The "allowed during a service" switch and the rules-list badge over it.
 //
 // `service.is-not-live` is what refuses a cue while a service is live or about
 // to start — automation-conditions.ts, service-guard.ts. This file is the
@@ -127,25 +127,14 @@ const cue = (over: Partial<StubRule> = {}): StubRule => ({
 
 const badge = (): string => document.querySelector("[data-service-guard]")?.getAttribute("data-service-guard") ?? "none";
 
-/**
- * Expand every ON/OFF pair row.
- *
- * A pair is ONE collapsed row in the list and its two halves' editors are
- * mounted only when it is expanded, so a test that opens a half has to open the
- * pair first. Idempotent: a row already open has no `aria-expanded="false"`
- * button left to press.
- */
-async function expandPairs(): Promise<void> {
-  for (const el of document.querySelectorAll('[data-cue-pair-row] button[aria-expanded="false"]')) {
-    await act(async () => {
-      (el as HTMLElement).click();
-    });
-  }
-  await settle();
-}
+/** Every badge on the list, so a pair growing two can be seen. */
+const badges = (): string[] =>
+  [...document.querySelectorAll("[data-service-guard]")].map(
+    (el) => el.getAttribute("data-service-guard") ?? "",
+  );
 
+/** Press the rule's row, which opens its editor in a dialog. */
 async function openRow() {
-  await expandPairs();
   const nameButtons = [...document.querySelectorAll("button")];
   const rowButton = nameButtons.find((b) => b.textContent?.includes("Projectors ON"));
   assert.ok(rowButton, "row button not found");
@@ -184,6 +173,35 @@ describe("the rules-list badge", () => {
     RULES = [cue({ conditions: [{ id: GUARD_ID, params: {} }] })];
     await mount();
     assert.equal(badge(), "on");
+  });
+
+  test("a PAIR's row carries ONE badge, and it is 'off' if either half is", async () => {
+    // The badge used to be on each half's card, which a pair only ever showed
+    // when it was expanded — and the halves are not rendered in the list at
+    // all now. A pair whose off cue can fire mid-service has to be spottable
+    // down a list of two hundred, and one unguarded half is enough: the engine
+    // evaluates each half against its own conditions.
+    RULES = [
+      cue({ id: "rule-on", name: "Projectors ON", trigger: { id: CALL_TRIGGER_ID, params: { name: "projectors_on", says: "the projectors" } } }),
+      cue({
+        id: "rule-off",
+        name: "Projectors OFF",
+        conditions: [],
+        trigger: { id: CALL_TRIGGER_ID, params: { name: "projectors_off" } },
+      }),
+    ];
+    await mount();
+    assert.deepEqual(badges(), ["off"], "a half-guarded pair did not read as any time");
+
+    RULES = [
+      cue({ id: "rule-on", name: "Projectors ON", trigger: { id: CALL_TRIGGER_ID, params: { name: "projectors_on", says: "the projectors" } } }),
+      cue({ id: "rule-off", name: "Projectors OFF", trigger: { id: CALL_TRIGGER_ID, params: { name: "projectors_off" } } }),
+    ];
+    cleanup();
+    client?.clear();
+    await settle();
+    await mount();
+    assert.deepEqual(badges(), ["on"], "a pair guarded on both halves did not read as service-safe");
   });
 });
 
