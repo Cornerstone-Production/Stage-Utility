@@ -312,6 +312,16 @@ describe("the propresenter.macro action", () => {
     assert.deepEqual(macroPaths(), []);
   });
 
+  it("a blank instance is the primary, not a failure", async () => {
+    // The param is optional and blank means the main one, the same as every
+    // other place in the app that names an instance. A rule created through the
+    // API without it — a Companion import, Home Assistant — has to work.
+    configured();
+    propresenterManager.apply("MA", []);
+    const r = await action.run({ macro: "DOORS" }, { simulate: false });
+    assert.deepEqual(r, { ok: true, detail: 'triggered "DOORS" on MA' });
+  });
+
   it("an instance that is no longer configured fails rather than throwing", async () => {
     configured();
     const r = await action.run({ instance: "auditorium-9", macro: "DOORS" }, { simulate: false });

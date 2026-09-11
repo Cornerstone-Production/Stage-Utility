@@ -47,7 +47,8 @@ specific ProPresenter instance.
 
 The **Trigger a ProPresenter macro** [automation](../automation.md) action runs
 one of your own macros — whatever that macro does in ProPresenter, it does here.
-Pick the instance and the macro; nothing else is configured.
+Pick the instance and the macro; nothing else is configured. Leaving the
+instance blank means the primary one.
 
 It uses the same Network API the poll reads, so an instance that is set up needs
 nothing extra. The request is `GET /v1/macro/<name>/trigger`, which is

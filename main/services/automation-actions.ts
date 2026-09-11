@@ -261,7 +261,18 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
       "The macro is stored by NAME, not by its uuid, so it survives a re-import and means the same thing on both " +
       "booth machines; rename it in ProPresenter and the rule stops finding it, and says so.",
     params: [
-      { key: "instance", label: "ProPresenter", type: "enum", optionsFrom: "propresenter-instances" },
+      {
+        key: "instance",
+        label: "ProPresenter",
+        type: "enum",
+        optionsFrom: "propresenter-instances",
+        optional: true,
+        // Blank is the primary, the same as everywhere else in the app that
+        // names an instance (layout objects, the thumbnail proxy). Said out
+        // loud on the form, because "it silently picked the main auditorium"
+        // is not something to discover during a service.
+        help: "Leave blank for the main one.",
+      },
       { key: "macro", label: "Macro", type: "enum", optionsFrom: "propresenter-macros" },
     ],
     run: async (params, ctx) => {
