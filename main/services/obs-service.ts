@@ -11,7 +11,13 @@
 import { errorMessage } from "./errors.js";
 import type { ObsStatusDTO } from "../types/stage.js";
 import { StatusIntegration } from "./integration-base.js";
-import { ObsWebSocketAdapter, type ObsEvent } from "./obs-protocol.js";
+import {
+  closeCodeOf,
+  ObsWebSocketAdapter,
+  standDownReason,
+  type ObsClose,
+  type ObsEvent,
+} from "./obs-protocol.js";
 
 const TIMECODE_POLL_MS = 1000;
 
@@ -121,7 +127,7 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
     const adapter = new ObsWebSocketAdapter(this.host, this.port);
     this.adapter = adapter;
     adapter.onEvent((e) => this.onEvent(adapter, e));
-    adapter.onClose(() => this.onClose(adapter));
+    adapter.onClose((close) => this.onClose(adapter, close));
     try {
       await adapter.connect({ password: this.password });
       if (!this.running) {
@@ -157,11 +163,21 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
       this.startPoll();
     } catch (err) {
       const msg = errorMessage(err);
-      if (this.attempt === 0) console.warn(`[obs] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
-      this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       adapter.close();
       if (this.adapter === adapter) this.adapter = null;
       this.goOffline();
+
+      // 4009 and 4010 arrive here rather than in onClose(): they close the
+      // socket BEFORE the handshake completes, so the only thing this sees is a
+      // rejected promise carrying the code.
+      const reason = standDownReason(closeCodeOf(err));
+      if (reason) {
+        this.standDown(reason, closeCodeOf(err));
+        return;
+      }
+
+      if (this.attempt === 0) console.warn(`[obs] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
+      this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       this.scheduleReconnect();
     }
   }
@@ -172,14 +188,45 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
     if (next !== this.last) this.emit(next);
   }
 
-  private onClose(adapter: ObsWebSocketAdapter): void {
+  private onClose(adapter: ObsWebSocketAdapter, close: ObsClose): void {
     if (!this.running || this.adapter !== adapter) return;
-    if (this.attempt === 0) console.warn("[obs] connection closed — reconnecting");
     this.clearPoll();
     if (this.adapter === adapter) this.adapter = null;
+
+    const reason = standDownReason(close.code);
+    if (reason) {
+      this.standDown(reason, close.code);
+      return;
+    }
+
+    if (this.attempt === 0) console.warn("[obs] connection closed — reconnecting");
     this.report("error", "OBS connection dropped — reconnecting");
     this.goOffline();
     this.scheduleReconnect();
+  }
+
+  /**
+   * Stop trying, and say why.
+   *
+   * obs-websocket documents 4011 as "you must not automatically reconnect" — it
+   * is what OBS's own **Kick** button sends — and reconnecting through it turned
+   * one deliberate kick into a loop that kicked itself back in for as long as the
+   * operator kept pressing the button. 4009 and 4010 are here for a duller
+   * reason: retrying cannot change their answer, so the loop was only noise in
+   * the log and traffic on the wire.
+   *
+   * `stop()` is the whole stand-down: it clears the retry timer, closes the
+   * socket, drops the snapshot to OFFLINE, and leaves `running` false so nothing
+   * schedules another attempt. Saving or testing the OBS integration calls
+   * `configure()`, which restarts it — so the way back is an operator action,
+   * which is the point.
+   */
+  private standDown(reason: string, code: number | null): void {
+    console.warn(
+      `[obs] ${this.host}:${this.port} ${reason} (close code ${code ?? "none"}) — not reconnecting; save or test the OBS integration to try again`,
+    );
+    this.report("error", `OBS ${reason}. Not reconnecting — save or test the OBS integration to try again.`);
+    this.stop();
   }
 
   // Refresh the record timecode once a second while recording (the only value

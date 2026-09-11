@@ -44,6 +44,66 @@ export interface ObsEvent {
   eventData: Record<string, unknown>;
 }
 
+/**
+ * Why the socket closed. `code` is obs-websocket's `WebSocketCloseCode` where it
+ * sent one, and null when the close carried none (our own teardown, a dropped
+ * network).
+ */
+export interface ObsClose {
+  code: number | null;
+  reason: string;
+}
+
+/**
+ * The obs-websocket close codes after which reconnecting cannot work, and what
+ * to tell the operator.
+ *
+ * Only 4011 is documented as "you must not automatically reconnect", and it is
+ * the one the **Kick** button in OBS's session list sends — so a reconnect loop
+ * was the app arguing with an operator who had just told it to go away. The other
+ * two are here because a retry cannot change their answer either: the same
+ * password will fail again, and the same client will negotiate the same RPC
+ * version again. Everything else (1006 network drop, 4000 unknown, a restarted
+ * OBS) still retries, which is the behaviour that matters on a Sunday.
+ *
+ * Values from obs-websocket's protocol.md WebSocketCloseCode enum. Codes 4002-4008
+ * and 4012 describe a MESSAGE this client got wrong, not a session that is over,
+ * and retrying is right for them.
+ */
+export const OBS_STAND_DOWN_CODES: ReadonlyMap<number, string> = new Map([
+  [4009, "rejected the password"],
+  [4010, "refused this obs-websocket RPC version"],
+  [4011, "ended the session (kicked from OBS's session list)"],
+]);
+
+/** Why we must not reconnect after this close code, or null to keep retrying. */
+export function standDownReason(code: number | null | undefined): string | null {
+  return code == null ? null : (OBS_STAND_DOWN_CODES.get(code) ?? null);
+}
+
+/**
+ * A connection that failed with a close code attached.
+ *
+ * The code has to survive the failure because half the stand-down codes arrive
+ * BEFORE the handshake finishes (4009, 4010), where the only thing the service
+ * sees is a rejected promise. Without this they would land in the generic catch
+ * and retry forever on a password that will never be right.
+ */
+export class ObsCloseError extends Error {
+  constructor(
+    message: string,
+    readonly code: number | null,
+  ) {
+    super(message);
+    this.name = "ObsCloseError";
+  }
+}
+
+/** The close code behind a failure, if it carried one. */
+export function closeCodeOf(err: unknown): number | null {
+  return err instanceof ObsCloseError ? err.code : null;
+}
+
 export interface ObsAdapter {
   /** Open the socket, do the Hello/Identify handshake (authenticating if asked). */
   connect(opts: { password?: string | null }): Promise<void>;
@@ -51,8 +111,9 @@ export interface ObsAdapter {
   request(requestType: string, requestData?: Record<string, unknown>): Promise<Record<string, unknown>>;
   /** Register an event listener (op-5 events). */
   onEvent(cb: (e: ObsEvent) => void): void;
-  /** Register a connection-closed listener (fires once). */
-  onClose(cb: () => void): void;
+  /** Register a connection-closed listener (fires once). It is given the close
+   *  code, because some of them mean "do not come back". */
+  onClose(cb: (close: ObsClose) => void): void;
   /** Close the socket (no-op if already closed). */
   close(): void;
 }
@@ -82,7 +143,7 @@ export class ObsWebSocketAdapter implements ObsAdapter {
   private seq = 1;
   private pending = new Map<string, Pending>();
   private eventCbs: ((e: ObsEvent) => void)[] = [];
-  private closeCbs: (() => void)[] = [];
+  private closeCbs: ((close: ObsClose) => void)[] = [];
   private closed = false;
 
   constructor(
@@ -171,14 +232,21 @@ export class ObsWebSocketAdapter implements ObsAdapter {
       });
 
       ws.addEventListener("close", (ev) => {
-        // A close before Identified almost always means auth failed (code 4009)
-        // or the server is unreachable; surface a useful message.
+        const { code, reason } = ev as CloseEvent;
+        // A close before Identified almost always means auth failed (4009), the
+        // server refused our RPC version (4010), or it is unreachable. The code
+        // rides along on the error so the caller can tell "try again in a
+        // moment" from "this will never work".
         if (!settled) {
-          const code = (ev as CloseEvent).code;
-          finishErr(new Error(code === 4009 ? "Authentication failed (wrong password)" : `Connection closed (code ${code})`));
+          finishErr(
+            new ObsCloseError(
+              code === 4009 ? "Authentication failed (wrong password)" : `Connection closed (code ${code})`,
+              typeof code === "number" ? code : null,
+            ),
+          );
           return;
         }
-        this.handleClose();
+        this.handleClose(typeof code === "number" ? code : null, reason ?? "");
       });
     });
   }
@@ -241,7 +309,7 @@ export class ObsWebSocketAdapter implements ObsAdapter {
     this.eventCbs.push(cb);
   }
 
-  onClose(cb: () => void): void {
+  onClose(cb: (close: ObsClose) => void): void {
     this.closeCbs.push(cb);
   }
 
@@ -249,17 +317,17 @@ export class ObsWebSocketAdapter implements ObsAdapter {
     this.ws?.send(JSON.stringify({ op, d }));
   }
 
-  private handleClose(): void {
+  private handleClose(code: number | null = null, reason = ""): void {
     if (this.closed) return;
     this.closed = true;
     for (const [, p] of this.pending) {
       clearTimeout(p.timer);
-      p.reject(new Error("OBS connection closed"));
+      p.reject(new ObsCloseError("OBS connection closed", code));
     }
     this.pending.clear();
     for (const cb of this.closeCbs) {
       try {
-        cb();
+        cb({ code, reason });
       } catch {
         /* ignore */
       }
@@ -269,6 +337,7 @@ export class ObsWebSocketAdapter implements ObsAdapter {
   close(): void {
     const ws = this.ws;
     this.ws = null;
+    // No code: this close is ours, and it must not read as OBS standing us down.
     this.handleClose();
     try {
       ws?.close();

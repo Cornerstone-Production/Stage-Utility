@@ -22,6 +22,21 @@ The service broadcasts the snapshot on the
 timecode). It uses a configure/connect/reconnect loop with exponential backoff
 and goes quiet when unreachable. The password is stored as an encrypted secret.
 
+### When it stops trying
+
+Three obs-websocket close codes end the connection for good rather than starting
+a retry, because retrying cannot change the answer:
+
+| | |
+|---|---|
+| `4011` | OBS ended the session — this is what the **Kick** button in OBS's session list sends, and obs-websocket documents it as "you must not automatically reconnect" |
+| `4009` | the password was rejected |
+| `4010` | OBS refused this obs-websocket RPC version |
+
+Each is logged on a `[obs]` line and shown on the Integrations page. Everything
+else — a network drop, OBS restarting, OBS not running yet — reconnects as
+before. Saving or testing the OBS integration starts it again.
+
 ## Setup
 
 **In OBS:** Tools → **WebSocket Server Settings** → tick *Enable WebSocket
