@@ -1153,23 +1153,31 @@ export function RuleEditorDialog({
 
   async function save() {
     setBusy(true);
+    // Which half is being written, so a refusal says which — the server's
+    // message is about a cue name and does not say which of the two it came
+    // from, and "that name is already taken" on a pair is half an answer.
+    let writing = isPair ? "Turn on" : "";
     try {
       // ON FIRST. It is where the pair's settings live, so a failure on the off
       // half leaves the pair's own settings saved rather than a rules file
       // where the off half claims settings the on half no longer has.
       await invoke("automation:updateRule", { id: onDraft.id, patch: onHalfPatch() });
       if (offDraft) {
+        writing = "Turn off";
         await invoke("automation:updateRule", { id: offDraft.id, patch: offHalfPatch(offDraft) });
       }
-      onChanged();
       onClose();
     } catch (e) {
       // The server refuses a duplicate or malformed cue name with a 400. The
       // dialog stays open with both drafts intact — closing here is how a
       // refused save reads as a save.
-      toast.error(errorMessage(e));
+      toast.error(writing ? `${writing}: ${errorMessage(e)}` : errorMessage(e));
     } finally {
       setBusy(false);
+      // Whatever happened. A pair whose ON half saved and whose OFF half was
+      // refused really has changed, and a list still showing the old row is a
+      // save the operator cannot see.
+      onChanged();
     }
   }
 
@@ -1196,7 +1204,13 @@ export function RuleEditorDialog({
           }
         : {
             title: `Delete ${onDraft.name}?`,
-            message: "The rule and its cue URL go with it.",
+            // A cue's URL goes with it and a rule with any other trigger has
+            // none — saying otherwise would tell an operator to go and update
+            // a Home Assistant config that never mentioned this rule.
+            message:
+              onDraft.trigger.id === CALL_TRIGGER_ID
+                ? `The cue ${String(onDraft.trigger.params.name ?? "")} goes with it. Anything calling that URL stops working.`
+                : "The rule and everything set on it goes with it.",
             confirmLabel: "Delete",
             destructive: true,
           },

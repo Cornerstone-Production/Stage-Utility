@@ -91,6 +91,8 @@ let RULES: StubRule[] = [];
 let requests: { method: string; url: string; body: string | null }[] = [];
 /** What POST /api/automation/rules answers with, so Add rule has an id. */
 let CREATED: StubRule | null = null;
+/** A rule id the server refuses to update, as it refuses a duplicate cue name. */
+let REFUSE: { id: string; error: string } | null = null;
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
   const url = String(input);
@@ -98,6 +100,16 @@ let CREATED: StubRule | null = null;
   if (method !== "GET") {
     requests.push({ method, url, body: typeof init?.body === "string" ? init.body : null });
     const id = url.split("/").pop() ?? "";
+    if (method === "PATCH" && REFUSE?.id === id) {
+      const refusal = REFUSE;
+      return {
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        json: async () => ({ error: refusal.error }),
+        text: async () => JSON.stringify({ error: refusal.error }),
+      };
+    }
     if (method === "PATCH") {
       const patch = JSON.parse(String(init?.body)) as Partial<StubRule>;
       RULES = RULES.map((r) => (r.id === id ? { ...r, ...patch } : r));
@@ -212,6 +224,7 @@ const writes = () => requests.filter((r) => r.url.includes("/api/automation/rule
 beforeEach(() => {
   RULES = [];
   CREATED = null;
+  REFUSE = null;
   requests = [];
 });
 afterEach(async () => {
@@ -416,6 +429,29 @@ describe("a pair", () => {
     assert.deepEqual(
       saved.map((r) => (JSON.parse(String(r.body)) as { conditions: unknown[] }).conditions),
       [[], []],
+    );
+  });
+
+  test("a refused save keeps the dialog open with both drafts intact", async () => {
+    // The server refuses a duplicate or malformed cue name with a 400. A dialog
+    // that closed on that would lose the change and read as a save — and on a
+    // pair the ON half is already written, so the drafts are the only place the
+    // rest of the operator's edit still exists.
+    REFUSE = { id: "rule-projectors_off", error: "cue name already in use" };
+    await mount();
+    await openPair("the projectors");
+    await press(tab("Turn off"), "the Turn off tab");
+    await typeIn(field("Cue name"), "beamers_off", "Cue name");
+    await press(button("Save"), "Save");
+
+    assert.equal(editors(), 1, "a refused save closed the editor");
+    assert.equal(field("Cue name")?.value, "beamers_off", "the refused draft was thrown away");
+    await press(tab("Turn on"), "the Turn on tab");
+    assert.equal(field("Cue name")?.value, "projectors_on", "the other half's draft was thrown away");
+    assert.deepEqual(
+      writes().map((r) => r.url.split("/").pop()),
+      ["rule-projectors_on", "rule-projectors_off"],
+      "the ON half was not written before the refusal",
     );
   });
 
