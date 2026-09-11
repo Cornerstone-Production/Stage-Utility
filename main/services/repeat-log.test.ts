@@ -53,10 +53,30 @@ describe("RepeatLog", () => {
     assert.equal(r.ok(T0 + MIN).line, null);
   });
 
-  it("a recovered run starts over — the next failure is news again", () => {
+  // The two halves of the settle rule, which is the whole point of this class.
+  // A success is only a recovery once it HOLDS: Vea fails by alternating, so a
+  // success between two failures used to clear the flag and make every failure a
+  // fresh "first failure" — 2,837 lines in one day.
+
+  it("a success inside the settle window is not a recovery, and does not un-suppress", () => {
     const r = new RepeatLog("[p]");
     r.fail("boom", T0);
-    r.ok(T0 + MIN);
-    assert.equal(r.fail("boom", T0 + 2 * MIN).line, "[p] boom", "must not stay suppressed across a recovery");
+    assert.equal(r.ok(T0 + MIN).line, null, "a success one minute into an outage is not a recovery");
+    assert.equal(
+      r.fail("boom", T0 + 2 * MIN).line,
+      null,
+      "the run continued, so the same failure is still not news",
+    );
+  });
+
+  it("a success that holds ends the run, and the next failure is news again", () => {
+    const r = new RepeatLog("[p]");
+    r.fail("boom", T0);
+    assert.match(String(r.ok(T0 + 3 * MIN).line), /recovered/, "a success past the settle window recovers");
+    assert.equal(
+      r.fail("boom", T0 + 4 * MIN).line,
+      "[p] boom",
+      "a new outage after a real recovery must be news",
+    );
   });
 });

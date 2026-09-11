@@ -61,6 +61,7 @@
 
 import { clockOf, zonedDateKey } from "./app-timezone.js";
 import { errorMessage } from "./errors.js";
+import { OutageLog } from "./repeat-log.js";
 import { scrub } from "./scrub.js";
 import type { PeopleCountDTO, PeopleHistoryPoint, PeopleZoneCount } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
@@ -431,15 +432,25 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     dateKey: string;
   } | null = null;
   /**
-   * Which parts of the poll are currently degraded, keyed by name.
+   * Which parts of the poll are failing, keyed by name, and when each last spoke.
    *
-   * Both of this file's partial failures — the day aggregates and the live
-   * minute series — used to write a console line on EVERY poll they failed on,
-   * which at 15s is 240 identical records an hour on a LAN-visible /log. A map
-   * rather than a flag each, so the third one cannot be written without the
-   * once-per-transition rule already attached to it.
+   * This was a `Map<string, boolean>` with a once-per-TRANSITION rule, and it was
+   * not enough. Measured in production over five days: 3,519 warning and error
+   * lines from this integration alone, 2,837 of them in one day, against under
+   * 200 for everything else in the app combined.
+   *
+   * A transition guard assumes an outage is a solid block. Vea does not fail that
+   * way — the file's own note above says so, "the two instances' 401s alternating
+   * minute by minute" — and every intervening success silently cleared the flag,
+   * so every failure was a fresh "first failure" and wrote its line. The backoff
+   * in the production log never grew past ~90s, which is the same fact from the
+   * other side: resetBackoff() was running, so the poll really was succeeding
+   * between the failures.
+   *
+   * OutageLog ends a run only on a success that HOLDS, and floors repeats at one
+   * line per kind per 15 minutes whatever the state does. See repeat-log.ts.
    */
-  private degraded = new Map<string, boolean>();
+  private readonly outages = new OutageLog();
   /** When the current token was minted — a token rejected seconds after issue is
    *  a different fault from one that expired. See noteSharedClientSuspicion. */
   private tokenIssuedAt = 0;
@@ -549,7 +560,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     this.zonesCache = null;
     this.spacesCache = null;
     this.carriedDay = null;
-    this.degraded.clear();
+    this.outages.forget();
     // New credentials — nothing learned about the old ones survives, including
     // the exchange rate-limit state.
     this.lastExchangeAt = 0;
@@ -651,13 +662,14 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       for (const s of asRows(await this.apiGet<unknown>("/sensor"))) {
         if (typeof s.sensorId === "string" && typeof s.siteId === "string") m.set(s.sensorId, s.siteId);
       }
-      this.degradationChanged("sensor-join", false);
+      this.recovered("sensor-join");
     } catch (err) {
-      // Once per transition. This ran on every poll of an outage, like the four
-      // others in this file.
-      if (this.degradationChanged("sensor-join", true)) {
+      // Once per outage, not once per poll and not once per flap — see the note
+      // on `outages`, and repeat-log.ts for why a transition flag was not enough.
+      const d = this.failed("sensor-join", err);
+      if (d.log) {
         console.warn(
-          `[sensource] /sensor join failed (zones won't map to locations): ${scrub(errorMessage(err), 120)}`,
+          `[sensource] /sensor join failed (zones won't map to locations): ${scrub(errorMessage(err), 120)}${d.note}`,
         );
       }
     }
@@ -670,11 +682,12 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       for (const s of asRows(await this.apiGet<unknown>("/site"))) {
         if (typeof s.siteId === "string" && typeof s.locationId === "string") m.set(s.siteId, s.locationId);
       }
-      this.degradationChanged("site-join", false);
+      this.recovered("site-join");
     } catch (err) {
-      if (this.degradationChanged("site-join", true)) {
+      const d = this.failed("site-join", err);
+      if (d.log) {
         console.warn(
-          `[sensource] /site join failed (zones won't map to locations): ${scrub(errorMessage(err), 120)}`,
+          `[sensource] /site join failed (zones won't map to locations): ${scrub(errorMessage(err), 120)}${d.note}`,
         );
       }
     }
@@ -731,21 +744,26 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
           .filter((z) => z.locationId === cfg.locationId)
           .map((z) => z.zoneId);
         if (ids.length) {
-          this.degradationChanged("zone-location-map", false);
-          this.degradationChanged("zone-resolution", false);
+          this.recovered("zone-location-map");
+          this.recovered("zone-resolution");
           return new Set(ids);
         }
-        // Once per transition, like the other two degradations in this file.
-        // This ran on every poll of a misconfiguration — the third copy of the
-        // same mistake, and the one an operator sees for weeks at a time.
-        if (this.degradationChanged("zone-location-map", true)) {
+        // A misconfiguration rather than an outage — it lasts until an operator
+        // changes something, which is exactly the shape that must not write a
+        // line per poll for weeks.
+        const d = this.failed("zone-location-map", new Error("no zones map to the selected location"));
+        if (d.log) {
           console.warn(
-            "[sensource] a location is selected but no zones map to it (the API may not expose zone→location); counting all visible zones. Pick specific zones to scope reliably.",
+            "[sensource] a location is selected but no zones map to it (the API may not expose zone→location); counting all visible zones. Pick specific zones to scope reliably." +
+              d.note,
           );
         }
       } catch (err) {
-        if (this.degradationChanged("zone-resolution", true)) {
-          console.warn(`[sensource] zone resolution failed; counting all zones: ${scrub(errorMessage(err), 120)}`);
+        const d = this.failed("zone-resolution", err);
+        if (d.log) {
+          console.warn(
+            `[sensource] zone resolution failed; counting all zones: ${scrub(errorMessage(err), 120)}${d.note}`,
+          );
         }
       }
     }
@@ -767,15 +785,16 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     try {
       const spaces = await this.listSpaces();
       this.spacesCache = { at: now, spaces };
-      if (this.degradationChanged("space-listing", false)) {
-        console.log("[sensource] the space listing is readable again");
-      }
+      const r = this.recovered("space-listing");
+      if (r.log) console.log(`[sensource] the space listing is readable again${r.note}`);
       return spaces;
     } catch (err) {
-      if (this.degradationChanged("space-listing", true)) {
+      const d = this.failed("space-listing", err);
+      if (d.log) {
         console.warn(
           `[sensource] the space listing could not be read (${scrub(errorMessage(err), 120)}); ` +
-            "the building total falls back to the zone-derived net and capacity is unknown",
+            "the building total falls back to the zone-derived net and capacity is unknown" +
+            d.note,
         );
       }
       throw err;
@@ -913,10 +932,12 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       const after = retryAfterMs(res.headers.get("retry-after"));
       const waitMs = Math.max(after ?? 0, EXCHANGE_RATE_LIMIT_MS);
       this.exchangeBlockedUntil = Date.now() + waitMs;
-      if (this.degradationChanged("token-exchange", true)) {
+      const rateLimited = this.failed("token-exchange", new Error("HTTP 429"));
+      if (rateLimited.log) {
         console.warn(
           `[sensource] the token exchange is rate-limited (HTTP 429); waiting ${Math.round(waitMs / 1000)}s. ` +
-            "Two instances sharing one Vea API client will do this to each other — give each its own.",
+            "Two instances sharing one Vea API client will do this to each other — give each its own." +
+            rateLimited.note,
         );
       }
       throw new Error(`Auth rate-limited (HTTP 429) — retrying in ${Math.round(waitMs / 1000)}s`);
@@ -934,8 +955,9 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     }
     const json = (await res.json()) as { access_token?: string; expires_in?: number };
     if (!json.access_token) throw new Error("Auth response had no access_token");
-    if (this.degradationChanged("token-exchange", false)) {
-      console.log("[sensource] the token exchange is answering again");
+    const exchangeBack = this.recovered("token-exchange");
+    if (exchangeBack.log) {
+      console.log(`[sensource] the token exchange is answering again${exchangeBack.note}`);
     }
     this.token = json.access_token;
     this.tokenIssuedAt = Date.now();
@@ -1007,25 +1029,42 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       // writes one line rather than one per distinct body. A body carrying a
       // timestamp made every poll "distinct", which was two lines a poll for as
       // long as it lasted.
-      if (this.degradationChanged(`auth:${path}`, true)) {
+      const refused = this.failed(`auth:${path}`, new SenSourceHttpError(401, path, "", tokenId));
+      if (refused.log) {
         const snippet = scrub(body.replace(/\s+/g, " ").trim(), 120) || "(empty response body)";
-        console.warn(`[sensource] HTTP 401 from ${path}: ${snippet}`);
+        console.warn(`[sensource] HTTP 401 from ${path}: ${snippet}${refused.note}`);
       }
       throw new SenSourceHttpError(401, path, body, tokenId);
     }
     if (!res.ok) throw new SenSourceHttpError(res.status, path, "", tokenId);
-    this.degradationChanged(`auth:${path}`, false);
+    this.recovered(`auth:${path}`);
     return (await res.json()) as T;
   }
 
   // ── Poll ──────────────────────────────────────────────────────────────────
 
-  /** True only on the poll where `key` actually entered or left its degraded
-   *  state, so the caller logs the transition and not the outage. */
-  private degradationChanged(key: string, nowDegraded: boolean): boolean {
-    if ((this.degraded.get(key) ?? false) === nowDegraded) return false;
-    this.degraded.set(key, nowDegraded);
-    return true;
+  /**
+   * Report that `key` failed. True only when the operator should read a line.
+   *
+   * `note` is the tail to append on a reminder — empty on the first failure of a
+   * run — so a long outage still says how long it has been going and how many
+   * attempts it has cost without saying it every poll.
+   */
+  private failed(key: string, err: unknown, now = Date.now()): { log: boolean; note: string } {
+    // The KIND is what distinguishes one outage from another on the same key: a
+    // 401 storm and a 503 storm are different problems and must not collapse into
+    // one run. Status when Vea gave us one, the message otherwise.
+    const kind =
+      err instanceof SenSourceHttpError
+        ? `HTTP ${err.status}`
+        : scrub(errorMessage(err), 60) || "unknown";
+    return this.outages.fail(key, kind, now);
+  }
+
+  /** Report that `key` worked. True only once the run has genuinely settled —
+   *  a success between two failures of a flapping upstream is not a recovery. */
+  private recovered(key: string, now = Date.now()): { log: boolean; note: string } {
+    return this.outages.ok(key, now);
   }
 
   /** Vea's live tracked occupancy — the newest per-minute bucket per space.
@@ -1041,14 +1080,16 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     try {
       const body = await this.apiGet<{ results?: unknown[] }>(`/data/occupancy?${mParams.toString()}`);
       const live = latestSpaceOccupancy(body.results ?? [], allow);
-      if (this.degradationChanged("minute-occupancy", false)) {
-        console.log("[sensource] the live minute occupancy is available again");
+      const minuteBack = this.recovered("minute-occupancy");
+      if (minuteBack.log) {
+        console.log(`[sensource] the live minute occupancy is available again${minuteBack.note}`);
       }
       return live;
     } catch (err) {
-      if (this.degradationChanged("minute-occupancy", true)) {
+      const minuteOut = this.failed("minute-occupancy", err);
+      if (minuteOut.log) {
         console.warn(
-          `[sensource] live minute occupancy unavailable; using the day total: ${scrub(errorMessage(err), 120)}`,
+          `[sensource] live minute occupancy unavailable; using the day total: ${scrub(errorMessage(err), 120)}${minuteOut.note}`,
         );
       }
       return null;
@@ -1218,15 +1259,18 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
           ? `HTTP ${dayOccErr.status}`
           : scrub(errorMessage(dayOccErr), 120);
       if (dayReason) {
-        if (this.degradationChanged("day-aggregates", true)) {
+        const dayOut = this.failed("day-aggregates", dayOccErr ?? new Error(dayReason));
+        if (dayOut.log) {
           console.warn(
-            carried
+            (carried
               ? `[sensource] day aggregates unavailable (${dayReason}); carrying the last good values from ${clockOf(carried.at)}`
-              : `[sensource] day aggregates unavailable (${dayReason}); nothing recent enough to carry, so peak, min, avg and capacity are unavailable`,
+              : `[sensource] day aggregates unavailable (${dayReason}); nothing recent enough to carry, so peak, min, avg and capacity are unavailable`) +
+              dayOut.note,
           );
         }
-      } else if (this.degradationChanged("day-aggregates", false)) {
-        console.log("[sensource] day aggregates are available again");
+      } else {
+        const dayBack = this.recovered("day-aggregates");
+        if (dayBack.log) console.log(`[sensource] day aggregates are available again${dayBack.note}`);
       }
 
       // Override the building total with the authoritative space-occupancy endpoint
