@@ -6,6 +6,7 @@ import { scheduleItems } from "./automation-item-schedule.js";
 import { errorMessage } from "./errors.js";
 import type { PlanNoteDTO } from "./plan-note-checklist.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
+import { PcoRateLimit, describeRate, readRateHeaders, type RateStatus } from "./pco-rate-limit.js";
 import { pickServiceTime } from "./pick-service-time.js";
 import { RepeatLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
@@ -407,9 +408,46 @@ const ATTACH_OPEN_TTL_MS = 2 * 60_000;
 const MAX_PAGES = 6;
 
 const MAX_RETRIES = 3;
-/** Concurrent in-flight PCO requests. PCO allows roughly 100 per 20s per app, so
- *  the ceiling is well under that even when every slot is retrying. */
+/**
+ * Concurrent in-flight PCO requests when there is headroom.
+ *
+ * NOT a budget calculation. PCO's limit is dynamic and per-endpoint — its own
+ * documentation says applications "should never hard-code rate limit values", and
+ * its staff say on the record to rely on the response headers; one report saw a
+ * limit of 10 where the default is 100. The comment that stood here reasoned in
+ * prose about "roughly 100 per 20s", which is exactly the hard-coded value the
+ * docs warn against.
+ *
+ * So this is a fan-out ceiling — what stops a refresh across every service type
+ * becoming one burst — and the REAL limiter is `rateLimit`, which reads what PCO
+ * says on every response and drops the ceiling to TIGHT_CONCURRENT before PCO
+ * has to refuse anything.
+ */
 const MAX_CONCURRENT = 4;
+/** The ceiling while consumption is past the high-water mark. One in flight is
+ *  still forward progress; it just stops the app spending its remaining headroom
+ *  four requests at a time. */
+const TIGHT_CONCURRENT = 1;
+/**
+ * Fraction of the observed limit at which the app starts holding back, and the
+ * fraction it must fall back below to be clear again.
+ *
+ * Two thresholds, not one: a single line at 0.75 flaps on every request that
+ * crosses it, and each crossing is a log line and a cadence change. The gap is
+ * what makes "tight" and "recovered" each happen once per real episode.
+ */
+const RATE_TIGHT_AT = 0.75;
+const RATE_CLEAR_AT = 0.5;
+/**
+ * How long an observation is trusted.
+ *
+ * The headers describe a window that has moved on. Past two periods there is no
+ * reason to believe the count, and holding back on a stale one would throttle the
+ * app for an episode that ended. Falls back to a generous default when PCO sends
+ * no period.
+ */
+const RATE_STALE_PERIODS = 2;
+const RATE_DEFAULT_PERIOD_S = 20;
 // Per-request PCO logging (~2 lines per uncached /live, ~1 Hz during a service) is
 // off unless STAGE_UTILITY_DEBUG=1 — keeps an unrotated stdout log from ballooning.
 const DEBUG_PCO = process.env.STAGE_UTILITY_DEBUG === "1";
@@ -549,6 +587,17 @@ class PcoService {
    * not 3,600 times an hour.
    */
   private readonly rundownErrors = new RepeatLog("[pco] plan rundown unavailable:");
+  /**
+   * What PCO last said about our quota. Read from the three rate headers on
+   * EVERY response, including failures — see pco-rate-limit.ts for why a constant
+   * cannot stand in for them.
+   */
+  private readonly rateLimit = new PcoRateLimit(
+    RATE_STALE_PERIODS,
+    RATE_DEFAULT_PERIOD_S,
+    RATE_TIGHT_AT,
+    RATE_CLEAR_AT,
+  );
 
   private cache = new Map<string, CacheEntry<unknown>>();
 
@@ -642,14 +691,74 @@ class PcoService {
    * — that constructor re-parses its first argument and reads a leading `//` as
    * an authority, which is the exact bug fixed one commit ago.
    */
-  private pcoFetch(
+  private async pcoFetch(
     url: string,
     appId: string,
     secret: string,
     init: RequestInit = {},
     apiVersion?: string,
   ): Promise<Response> {
-    return fetch(pinnedToPco(url), { ...init, headers: this.pcoHeaders(appId, secret, apiVersion) });
+    const response = await fetch(pinnedToPco(url), {
+      ...init,
+      headers: this.pcoHeaders(appId, secret, apiVersion),
+    });
+    // EVERY response, including 401s, 429s and POSTs — PCO puts the three rate
+    // headers on all of them, and a failed request has still been counted
+    // against the window. Reading them here rather than in requestInner is what
+    // makes that true by construction: this is the only call to fetch in the file.
+    this.noteRateHeaders(response);
+    return response;
+  }
+
+  /**
+   * Record what PCO just said about the quota, and say so ONCE per episode.
+   *
+   * Two lines per episode, not two per request: `observe` returns a transition
+   * only on the response that crosses a threshold, and the thresholds have a gap
+   * between them so a request straddling one cannot flap.
+   */
+  private noteRateHeaders(response: Response): void {
+    const now = Date.now();
+    const transition = this.rateLimit.observe(readRateHeaders(response.headers, now), now);
+    if (!transition) return;
+    const status = this.rateLimit.status(now);
+    if (!status) return;
+    if (transition === "tight") {
+      console.warn(
+        `[pco] rate-limit headroom is tight — ${scrub(describeRate(status))}; ` +
+          `holding concurrency at ${scrub(TIGHT_CONCURRENT)} and slowing the live poll until it clears`,
+      );
+    } else {
+      console.log(`[pco] rate-limit headroom recovered — ${scrub(describeRate(status))}`);
+    }
+  }
+
+  /**
+   * What PCO last said about the quota, for a surface an operator reads.
+   *
+   * Null until PCO has answered once — an unconfigured or never-used integration
+   * has no headroom to report, and inventing "100%" for it would be a made-up
+   * number on a diagnostics page.
+   */
+  rateLimitStatus(): RateStatus | null {
+    return this.rateLimit.status(Date.now());
+  }
+
+  /**
+   * Is the app holding back right now?
+   *
+   * Read by the live poller, which is the single largest consumer — at 1 Hz it is
+   * about 20 requests per 20-second window on its own — so slowing it is the
+   * change that actually returns headroom. The gate above only stops a burst.
+   */
+  rateLimitTight(): boolean {
+    return this.rateLimit.tight(Date.now());
+  }
+
+  /** Forget what PCO said about the quota. For tests, and for a credential
+   *  change — one app's window says nothing about another's. */
+  resetRateLimit(): void {
+    this.rateLimit.reset();
   }
 
   private sleep(ms: number): Promise<void> {
@@ -725,6 +834,17 @@ class PcoService {
     return this.request<T>(safe, appId, secret, apiVersion);
   }
 
+  /**
+   * How many requests may be in flight right now.
+   *
+   * Read on every grant rather than captured once, so crossing the high-water
+   * mark takes effect immediately — including for requests already queued behind
+   * a full pool.
+   */
+  private maxConcurrent(): number {
+    return this.rateLimit.tight(Date.now()) ? TIGHT_CONCURRENT : MAX_CONCURRENT;
+  }
+
   /** Wait for a free request slot; resolves with the function that frees it. */
   private acquireSlot(): Promise<() => void> {
     return new Promise((resolve) => {
@@ -735,12 +855,27 @@ class PcoService {
           if (released) return; // a double release would over-grant the pool
           released = true;
           this.inFlight--;
-          this.pending.shift()?.();
+          this.drain();
         });
       };
-      if (this.inFlight < MAX_CONCURRENT) grant();
+      if (this.inFlight < this.maxConcurrent()) grant();
       else this.pending.push(grant);
     });
+  }
+
+  /**
+   * Grant queued slots up to the CURRENT ceiling.
+   *
+   * A release used to hand the slot straight to the next waiter, which kept
+   * `inFlight` at whatever it already was — so dropping the ceiling to
+   * TIGHT_CONCURRENT while four were in flight would have throttled nothing until
+   * the pool happened to drain on its own. Re-checking here is what makes the
+   * tighter ceiling take effect on the next completion.
+   */
+  private drain(): void {
+    while (this.pending.length > 0 && this.inFlight < this.maxConcurrent()) {
+      this.pending.shift()?.();
+    }
   }
 
   private async requestInner<T extends PcoNode = PcoNode>(
@@ -750,9 +885,16 @@ class PcoService {
     apiVersion?: string,
   ): Promise<PcoResponse<T>> {
     if (DEBUG_PCO) console.log(`[pco] GET ${scrub(url)}`);
-    // Retry transient failures (429 rate-limit, 5xx, network) with backoff. PCO
-    // allows ~100 req / 20s per app; a burst (many displays + a refresh) can 429,
-    // which previously threw and dropped data. 401/other-4xx fail fast.
+    // Retry transient failures (429 rate-limit, 5xx, network) with backoff. A
+    // burst (many displays + a refresh) can 429, which previously threw and
+    // dropped data. 401/other-4xx fail fast.
+    //
+    // This is the LAST resort, not the first. Reacting only to a refusal means a
+    // display has already missed a tick by the time anything slows down; the
+    // first resort is the rate headers pcoFetch reads on every response, which
+    // tighten the gate and the live cadence before PCO has to refuse anything.
+    // Deliberately no hard-coded budget here any more — PCO's limit is dynamic
+    // and per-endpoint, and its docs say never to hard-code one.
     for (let attempt = 0; ; attempt++) {
       let response: Response;
       try {

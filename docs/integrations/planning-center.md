@@ -101,6 +101,41 @@ its changelog entry for field or pagination changes, add it to the published-lis
 constant, change the pin, and confirm against a real organisation that the plan,
 roster, photos and calendar still render.
 
+## Rate limits
+
+Planning Center puts three headers on **every** response, success or failure:
+
+```
+X-PCO-API-Request-Rate-Limit     requests allowed in the window
+X-PCO-API-Request-Rate-Period    the window, in seconds
+X-PCO-API-Request-Rate-Count     requests used in it so far
+```
+
+Stage reads all three on every response and holds back **before** being refused.
+The limit is deliberately not hard-coded anywhere: PCO documents it as dynamic and
+per-endpoint, and endpoints have been reported answering with a limit of 10 where
+the default is 100.
+
+Past **75%** of whatever PCO reports, two things happen until consumption falls
+back under **50%**:
+
+- the concurrency gate drops from 4 in-flight requests to 1
+- the live poller's cadence stretches by 4× (1 s → 4 s while an item is live)
+
+The countdown itself ticks client-side from `liveStartAt`, so the slower poll
+costs the freshness of an item **change**, not the smoothness of the clock. The
+two thresholds are separate on purpose — a single line would flap on every request
+that straddles it.
+
+The current headroom is a chip on the **`/log` health strip** (`PCO quota 48/100
+per 20s`, amber and "holding back" while the app is throttling). It is absent
+until PCO has answered once. A 429 is still honoured with its `Retry-After`; that
+is the last resort, not the first.
+
+Conditional requests (`ETag` / `If-Modified-Since`) are deliberately **not** used.
+A 304 counts against the same quota, so they would spend the scarce thing to save
+the plentiful one.
+
 ## Item times
 
 PCO publishes no scheduled time on a plan item — an Item carries a title, a type,

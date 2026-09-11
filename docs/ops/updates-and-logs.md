@@ -133,6 +133,12 @@ This matters because a connection that has been retrying for days is silent by
 design — the services log the first failure and then back off quietly — so the
 log alone cannot tell you a box is unreachable.
 
+One further chip, when Planning Center has answered at least once: **PCO quota**,
+the requests used against the limit PCO reported on its last response
+(`PCO quota 48/100 per 20s`). It turns amber and reads "holding back" once Stage
+is deliberately slowing itself down. See
+[Rate limits](../integrations/planning-center.md#rate-limits).
+
 The lines carry a date heading whenever the date changes, a source dropdown built
 from the `[tag]` each line opens with, a level filter, a text filter, and copy and
 download buttons. Only the newest 2,000 matching lines are drawn; filtering still
