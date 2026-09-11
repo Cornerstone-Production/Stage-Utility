@@ -20,6 +20,14 @@ volatility:
 - **Uncached:** the live on-air timer (`getLive()`), so the countdown stays
   real-time.
 
+The live read is `GET …/live?include=current_item_time` and nothing more. The
+include carries `live_start_at` and `length_offset`, which exist nowhere else,
+plus the id of the item that is live. The live item's **title and length come
+from the cached rundown**, not from the live request — they are the same two PCO
+attributes, and asking for a whole plan's items once a second to read two fields
+both cost a request's worth of payload every second and let `label` (fresh) and
+`currentItemTitle` (cached) disagree after a rename.
+
 A **service window** is the same one the integration reconnect schedule uses:
 PCO's rehearsal and service times widened by the lead and tail configured under
 Settings → Advanced (`service-window.ts`). It compares instants against plan

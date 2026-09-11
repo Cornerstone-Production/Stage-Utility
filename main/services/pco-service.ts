@@ -3,9 +3,11 @@
 
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import { scheduleItems } from "./automation-item-schedule.js";
+import { errorMessage } from "./errors.js";
 import type { PlanNoteDTO } from "./plan-note-checklist.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
 import { pickServiceTime } from "./pick-service-time.js";
+import { RepeatLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
 
 /**
@@ -538,6 +540,15 @@ class PcoService {
   private static loggedLiveActions = false;
   private inFlight = 0;
   private pending: (() => void)[] = [];
+  /**
+   * A failing rundown read, collapsed to one line per outage.
+   *
+   * getLive() reads the rundown on every live tick — 1 Hz while an item is live —
+   * and since `include=items` was dropped the rundown is where the live item's
+   * title and length come from, so its failure is worth saying out loud. Once,
+   * not 3,600 times an hour.
+   */
+  private readonly rundownErrors = new RepeatLog("[pco] plan rundown unavailable:");
 
   private cache = new Map<string, CacheEntry<unknown>>();
 
@@ -1482,6 +1493,23 @@ class PcoService {
    * → the time until the service starts ("preservice" mode, e.g. PCO's "6 days").
    * "none" when neither is available. One /live request (+ a cached plan_times
    * lookup for the service start). NOT cached for the live part — polled live.
+   *
+   * `include=items` is deliberately NOT asked for. This request runs once a
+   * second while an item is live, and the whole `items` include existed to
+   * supply two values — the current item's title and its length. The rundown
+   * from listPlanItems is already fetched on the next line, already cached, and
+   * already carries both under the same names. Dropping the include takes a
+   * whole plan's items off the wire 20 times per 20-second window.
+   *
+   * It also removes a disagreement. `label` came from the include (fresh every
+   * second) while `currentItemTitle` came from the cache (up to 45s old), so
+   * renaming an item mid-service made two fields describing the same item
+   * contradict each other until the cache turned over. Both now come from the
+   * one source.
+   *
+   * `current_item_time` stays: it carries `live_start_at` and `length_offset`,
+   * which exist nowhere else, and the `item` relationship whose id is how the
+   * live item is found in the rundown.
    */
   async getLive(
     appId: string,
@@ -1492,7 +1520,7 @@ class PcoService {
   ): Promise<PcoLiveDTO> {
     const serverNow = new Date().toISOString();
     const base = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}`;
-    const json = await this.request(`${base}/live?include=items,current_item_time`, appId, secret);
+    const json = await this.request(`${base}/live?include=current_item_time`, appId, secret);
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     const included = json.included ?? [];
 
@@ -1505,22 +1533,45 @@ class PcoService {
     const serviceTimeStartsAt = serviceTime?.startsAt ?? null;
 
     // ── "item" mode: a plan item is currently live. ──
-    // (current_item_time must resolve to one of THIS plan's items — its item is in
-    // the `items` include. A session whose item isn't ours, or no session at all,
-    // falls through to the preservice countdown below.)
+    // (current_item_time must resolve to one of THIS plan's items — its item id
+    // has to appear in this plan's rundown. A session whose item isn't ours, or
+    // no session at all, falls through to the preservice countdown below.)
     const currentRef = live?.relationships?.["current_item_time"]?.data;
     const currentId = currentRef && !Array.isArray(currentRef) ? currentRef.id : null;
     const it = currentId ? included.find((n) => n.id === currentId) : null;
     const liveStartAt = it?.attributes?.live_start_at;
     const itemRef = it?.relationships?.["item"]?.data;
     const itemId = itemRef && !Array.isArray(itemRef) ? itemRef.id : null;
-    const itemNode =
-      itemId ? included.find((n) => n.type === "Item" && n.id === itemId) : null;
 
     // Current/next item titles follow the PCO PLAN order (authoritative), not the
     // ProPresenter playlist — so an off-plan presentation can't leak a wrong "next".
     // listPlanItems is cached, so this is essentially free on most live ticks.
-    const planItems = await this.listPlanItems(appId, secret, serviceTypeId, planId).catch(() => []);
+    //
+    // The catch is no longer cosmetic and no longer silent. With `include=items`
+    // gone this rundown is the ONLY source of the live item's title and length,
+    // so a failed read drops the countdown out of item mode rather than merely
+    // blanking "next". Reported once per outage and once on recovery — a live
+    // tick runs at 1 Hz, so a line per attempt would evict the log in minutes.
+    // Not rethrown: a rundown blip must not blank a running countdown, and the
+    // caller (live-poller) has no better answer than "carry the last state",
+    // which is what falling through already does.
+    const planItems = await this.listPlanItems(appId, secret, serviceTypeId, planId).catch(
+      (err: unknown) => {
+        const decision = this.rundownErrors.fail(errorMessage(err), Date.now());
+        if (decision.line) console.warn(scrub(decision.line));
+        return [] as PlanItemDTO[];
+      },
+    );
+    if (planItems.length > 0) {
+      const recovered = this.rundownErrors.ok(Date.now());
+      if (recovered.line) console.log(scrub(recovered.line));
+    }
+    // The live item, from the cached rundown. Both `title` and `lengthSec` used
+    // to come off the `include=items` payload on this same request; they are the
+    // same two PCO attributes (`title`, `length`) under listPlanItems' names.
+    // Finding it here is also the "is this item ours?" check the include used to
+    // perform by its presence.
+    const planItem = itemId ? planItems.find((p) => p.id === itemId) ?? null : null;
     const { currentItemTitle, nextItemTitle } = resolvePlanCurrentNext(planItems, itemId);
     // Item clock for the automation engine (PCO puts no time on an Item). Built
     // from the already-cached rundown and plan times, so it costs no extra request.
@@ -1537,11 +1588,11 @@ class PcoService {
       .filter((t) => t.timeType === "service" || t.timeType === "rehearsal")
       .map((t) => ({ id: t.id, name: t.name, timeType: t.timeType, startsAt: t.startsAt }));
 
-    if (it && typeof liveStartAt === "string" && liveStartAt && itemNode) {
+    if (it && typeof liveStartAt === "string" && liveStartAt && planItem) {
       // "Full Item Length" = the *plan item's* length (ItemTime.length is often 0)
-      // plus any live length_offset the operator set.
-      const planLen =
-        typeof itemNode.attributes.length === "number" ? (itemNode.attributes.length as number) : 0;
+      // plus any live length_offset the operator set. `lengthSec` is PCO's
+      // `length` on the Item, which is the attribute the dropped include carried.
+      const planLen = planItem.lengthSec;
       const offset =
         typeof it.attributes.length_offset === "number" ? it.attributes.length_offset : 0;
       const adjLen = planLen + offset;
@@ -1559,14 +1610,14 @@ class PcoService {
       return {
         mode: "item",
         currentItemId: itemId,
-        label: typeof itemNode.attributes.title === "string" ? itemNode.attributes.title : null,
+        label: planItem.title,
         lengthSec: adjLen > 0 ? adjLen : null,
         liveStartAt,
         targetAt: null,
         serverNow,
         currentItemTitle,
         nextItemTitle,
-        itemType: curIdx >= 0 ? (planItems[curIdx]?.itemType ?? null) : null,
+        itemType: planItem.itemType,
         serviceTimeId,
         serviceTimeStartsAt,
         itemSchedule,
