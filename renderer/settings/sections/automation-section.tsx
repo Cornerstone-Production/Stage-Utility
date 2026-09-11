@@ -436,6 +436,14 @@ export function AutomationSection() {
   // doing — an unreachable one yields an empty list, never an error — so neither
   // query can stop the editor opening. The macro read is cached server-side for
   // 30s, which is what keeps re-opening the editor off the LAN.
+  const { data: propInstances } = useQuery({
+    queryKey: ["automation:propresenter-instances"],
+    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:propresenter-instances"),
+  });
+  const { data: propMacros } = useQuery({
+    queryKey: ["automation:propresenter-macros"],
+    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:propresenter-macros"),
+  });
   // `osc.send` has declared optionsFrom: "osc-targets" since it was written and
   // nothing ever answered it, so its Target select offered "Pick one…" and
   // nothing else — the action could not be configured at all. Local config, so
@@ -444,14 +452,6 @@ export function AutomationSection() {
   const { data: oscTargets } = useQuery({
     queryKey: ["osc:listTargets"],
     queryFn: () => invoke<{ id: string; name: string }[]>("osc:listTargets"),
-  });
-  const { data: propInstances } = useQuery({
-    queryKey: ["automation:propresenter-instances"],
-    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:propresenter-instances"),
-  });
-  const { data: propMacros } = useQuery({
-    queryKey: ["automation:propresenter-macros"],
-    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:propresenter-macros"),
   });
   const dynamicOptions = useMemo(
     () => ({
