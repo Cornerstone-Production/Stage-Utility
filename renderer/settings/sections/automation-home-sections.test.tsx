@@ -7,14 +7,15 @@
 //    The sections are the only place the app says which cues Home Assistant has
 //    been told about; a cue in the wrong one is the operator being told the
 //    opposite of the truth.
-//  - A PAIR IS ONE ROW, and expands to its two halves' editors. Two rows for
-//    one switch is the list disagreeing with Home Assistant about what a pair
-//    is, which is exactly the confusion cue-pairs.ts exists to end.
+//  - A PAIR IS ONE ROW, and opens ONE editor holding both halves. Two rows —
+//    or two stacked editors — for one switch is the list disagreeing with Home
+//    Assistant about what a pair is, which is exactly the confusion
+//    cue-pairs.ts exists to end.
 //  - EITHER HALF'S NAME FINDS THE PAIR. A search for the off cue that hid the
 //    row it lives on would be a pair unreachable by half its own names.
 //  - A SECTION WITH NO ROWS IS NOT RENDERED, so a query that matches only cues
 //    does not leave an empty "Everything else" heading behind.
-//  - THE OFF HALF WRITES THE ON HALF. The flag lives on the ON half (see
+//  - THE PAIR'S SWITCH WRITES THE ON HALF. The flag lives on the ON half (see
 //    cue-pairs.ts); written to the off rule it would be read only as a
 //    fallback, and a pair whose ON half says nothing would hide — until the
 //    operator touched the ON half, which would silently un-hide it.
@@ -24,10 +25,11 @@
 //
 // NOT unit-tested, and driven in a browser instead: that the search bar sticks
 // to the top of the pane and rows scroll under it, that the hairline under it
-// separates it from the first row, and that the chevron rotates on expand.
-// jsdom loads no stylesheet, so `position: sticky`, a background and a
-// transform are not observable in it at all — asserting the class string would
-// only say the class is spelled how it is spelled.
+// separates it from the first row, and that the editor dialog's footer stays on
+// screen while its body scrolls. jsdom loads no stylesheet and reports every
+// offsetHeight as 0, so `position: sticky`, a background and a max height are
+// not observable in it at all — asserting the class string would only say the
+// class is spelled how it is spelled.
 
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
@@ -171,9 +173,12 @@ function rowsUnder(title: string): string[] {
   return out;
 }
 
-/** Every rule editor's name field, which only an OPEN card renders. */
-const openEditors = (): number =>
-  document.querySelectorAll('[data-cue-pair-row] button[aria-label="Test fire"]').length;
+/** How many rule editors are mounted. The dialog is the only thing that mounts one. */
+const openEditors = (): number => document.querySelectorAll("[data-rule-editor]").length;
+
+/** The Home Assistant switches on screen — one per open editor, never per half. */
+const homeSwitches = (): number =>
+  document.querySelectorAll('[aria-label="Shown in Home Assistant"]').length;
 
 const searchField = (): HTMLInputElement =>
   document.querySelector('[aria-label="Search rules"]') as HTMLInputElement;
@@ -283,11 +288,14 @@ describe("a pair", () => {
     assert.match(row?.textContent ?? "", /projectors_on \/ projectors_off/);
   });
 
-  test("mounts neither half's editor until it is expanded", async () => {
+  test("mounts no editor until it is pressed, and then exactly ONE", async () => {
+    // Two editors for one pair is the list disagreeing with Home Assistant
+    // about what a pair is — and it was two, stacked, when the row expanded.
     await mount();
     assert.equal(openEditors(), 0);
     await click(document.querySelector('[aria-label="the projectors pair"]'), "the pair row");
-    assert.equal(openEditors(), 2);
+    assert.equal(openEditors(), 1);
+    assert.equal(homeSwitches(), 1, "the pair's Home Assistant switch rendered more than once");
   });
 
   test("shows for a query that matches only its OFF half", async () => {
@@ -308,24 +316,33 @@ describe("a pair", () => {
     assert.deepEqual(rowsUnder("Everything else"), ["projectors"]);
   });
 
-  test("the switch on the OFF half writes the ON half's rule", async () => {
+  test("the pair's switch writes the ON half's rule, and the ON half FIRST", async () => {
     await mount();
     await click(document.querySelector('[aria-label="the projectors pair"]'), "the pair row");
-    await openCard("Rule projectors_off");
-    // Both halves read the same value, so the switch is the pair's and not the
-    // cue's — an operator who found no switch here would hide one direction of
-    // a thing that has only one entity.
+    // One switch for the pair, in "This pair" — an operator who found none on
+    // one of the halves would hide one direction of a thing with one entity.
     assert.equal(homeSwitchState(), "true");
 
     await click(homeSwitch(), "the Home Assistant switch");
-    // Written straight through, not into this card's draft: the draft belongs
-    // to the OFF rule and the flag does not.
+    await click(
+      [...document.querySelectorAll("button")].find((b) => b.textContent === "Save") ?? null,
+      "Save",
+    );
+
+    // BOTH halves are written, the ON half first: the flag lives there (see
+    // cue-pairs.ts), and a failure on the second leaves the pair's own settings
+    // saved rather than an off rule claiming settings the on rule lost.
     const saved = requests.filter((r) => r.url.includes("/api/automation/rules/"));
     assert.deepEqual(
       saved.map((r) => r.url.split("/").pop()),
-      ["rule-projectors_on"],
+      ["rule-projectors_on", "rule-projectors_off"],
     );
     assert.match(saved[0]?.body ?? "", /"homeAssistant":"hidden"/);
+    assert.equal(
+      /"homeAssistant":"hidden"/.test(saved[1]?.body ?? ""),
+      false,
+      "the off half was hidden too; the flag belongs on the on half alone",
+    );
     assert.deepEqual(rowsUnder("Everything else"), ["projectors"]);
   });
 });

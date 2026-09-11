@@ -7,10 +7,11 @@
 //    binding, and the only other place the state appears is inside Home
 //    Assistant. It goes on the `_on` half and nowhere else: one pair is one
 //    thing, and the `_off` row saying the same word again reads as two devices.
-//  - the FIELDS. `State variable` is offered on the `_on` half of a pair and
-//    nowhere else, because a binding on a cue with no partner reads a variable
-//    that nothing ever shows. Offered everywhere it would be a setting that
-//    saves and does nothing.
+//  - the FIELDS. `State variable` is offered for a PAIR and nowhere else,
+//    because a binding on a cue with no partner reads a variable that nothing
+//    ever shows. Offered everywhere it would be a setting that saves and does
+//    nothing. In the pair's dialog it is in "This pair", once, whichever half
+//    is selected — and it is still saved onto the `_on` rule.
 //
 // And the gate: with no pair bound, NOTHING requests /api/cues/states. That is
 // what keeps an install that does not use this from polling Companion every ten
@@ -175,36 +176,42 @@ const pairPills = (): string[] =>
 const titles = (): string[] =>
   [...document.querySelectorAll("[data-cue-state]")].map((el) => el.getAttribute("title") ?? "");
 
-/**
- * Expand every ON/OFF pair row.
- *
- * A pair is ONE collapsed row in the list and its two halves' editors are
- * mounted only when it is expanded, so a test that opens a half has to open the
- * pair first. Idempotent: a row already open has no `aria-expanded="false"`
- * button left to press.
- */
-async function expandPairs(): Promise<void> {
-  for (const el of document.querySelectorAll('[data-cue-pair-row] button[aria-expanded="false"]')) {
-    await act(async () => {
-      (el as HTMLElement).click();
-    });
-  }
+async function press(el: Element | null, what: string): Promise<void> {
+  assert.ok(el, `nothing to press: ${what}`);
+  await act(async () => {
+    (el as HTMLElement).click();
+  });
   await settle();
 }
 
-/** Open one rule's editor, expanding the pair row it sits inside first. */
+/**
+ * Open the editor for one cue, by its cue name.
+ *
+ * The editor is a DIALOG over the list, and a pair is one row and one dialog:
+ * either half opens the pair's, and the OFF half's own fields are behind the
+ * Turn off tab. A cue with no partner has a row of its own.
+ *
+ * The pair row is found by the two cue names it prints rather than by text
+ * search: a fixture whose `says` is its cue name puts the same string on
+ * several nodes, and `getByText` then throws rather than opening anything.
+ */
 async function open(name: string): Promise<void> {
-  await expandPairs();
-  // BY THE ROW'S OWN MARKER, not by its text: a pair row shows the words the
-  // pair is called, and a fixture whose `says` is its cue name puts the same
-  // string on the pair row and on the half's card — `getByText` then throws
-  // "found multiple elements" rather than opening anything.
+  const pairRow = [...document.querySelectorAll("[data-cue-pair-row]")].find((row) =>
+    [...row.querySelectorAll("span")].some((el) => (el.textContent ?? "").split(" / ").includes(name)),
+  );
+  if (pairRow) {
+    await press(pairRow.querySelector("button"), `the pair row holding ${name}`);
+    if (name.endsWith("_off")) {
+      const tab = [...document.querySelectorAll('[role="tab"]')].find((el) =>
+        (el.textContent ?? "").startsWith("Turn off"),
+      );
+      await press(tab ?? null, "the Turn off tab");
+    }
+    return;
+  }
   const label = document.querySelector(`[data-rule-name="${name}"]`);
   assert.ok(label, `no row called ${name}`);
-  await act(async () => {
-    (label.closest("button") as HTMLElement).click();
-  });
-  await settle();
+  await press(label.closest("button"), name);
 }
 
 /** The accessible names of every field the open editor renders. */
@@ -468,15 +475,22 @@ describe("the state fields in the rule editor", () => {
     assert.equal(names.includes("Value meaning off"), true);
   });
 
-  test("do NOT appear on the _off half", async () => {
+  test("are the PAIR's, rendered once and not per half", async () => {
+    // One pair is one thing. The field used to be on the `_on` half's editor
+    // and absent from the `_off` half's, which meant an operator who opened the
+    // off half found no binding at all; two fields would be two settings for
+    // one pair. In the dialog it is in "This pair", above both halves — so
+    // exactly one, whichever half is selected.
     RULES = [cue("projectors_on", { stateVariable: "projectors_state" }), cue("projectors_off")];
     CUSTOM_VARIABLES = ["projectors_state"];
     await mount();
+    await open("projectors_on");
+    assert.equal(document.querySelectorAll('[aria-label="State variable"]').length, 1);
     await open("projectors_off");
     assert.equal(
-      fieldNames().includes("State variable"),
-      false,
-      "the _off half inherits the binding; a second field for it is two settings for one pair",
+      document.querySelectorAll('[aria-label="State variable"]').length,
+      1,
+      "the Turn off half rendered a second State variable field",
     );
   });
 

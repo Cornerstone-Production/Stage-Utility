@@ -1,33 +1,14 @@
 import { errorMessage } from "@main/services/errors";
-import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
-import {
-  APP_STATE_SOURCES,
-  appStateRef,
-  appStateSourceDef,
-  isAppStateRef,
-} from "@main/services/app-state-sources";
+import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
+import { APP_STATE_SOURCES, appStateRef } from "@main/services/app-state-sources";
 import {
   cuePairs,
-  homeVisibilityParams,
-  implicitStateBinding,
   isHiddenFromHome,
   isTogglePair,
   spokenCueName,
-  stateBindingOf,
-  stateBindingParams,
-  STATE_ANY_OTHER,
-  STATE_OFF_DEFAULT,
-  STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
 import type { InferredStateSource } from "@main/services/companion-state-source";
-import {
-  LEARN_MAX_ATTEMPTS,
-  learnAgainParams,
-  learningHint,
-  parseCandidates,
-  parseLearning,
-} from "@main/services/companion-state-learn";
-import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
+import { hasServiceGuard } from "@main/services/service-guard";
 // The one main type imported rather than restated below. The wire shapes in
 // this file are deliberately local — the renderer models what the API sends —
 // but an OUTCOME is a closed set the server owns, and a second copy of it is a
@@ -35,99 +16,27 @@ import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard"
 // hand, and nothing would have said so if it had not been.
 import type { AutomationOutcome } from "@main/types/automation";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useConfiguredIntegrations } from "../../main/use-integration-states";
-import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+// The editor itself, and the field shapes it and this list share. The list
+// renders the collapsed rows; the dialog is the only thing that mounts an
+// editor.
 import {
-  ChevronRightIcon,
-  DownloadIcon,
-  OctagonXIcon,
-  PlayIcon,
-  PlusIcon,
-  SearchIcon,
-  Trash2Icon,
-} from "lucide-react";
+  CuePairState,
+  RuleEditorDialog,
+  type CueStateRow,
+  type PairRowData,
+  type Registry,
+  type Rule,
+  type RuleEditorTarget,
+} from "./rule-editor-dialog";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useConfiguredIntegrations } from "../../main/use-integration-states";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { DownloadIcon, OctagonXIcon, PlusIcon, SearchIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
-import {
-  Button,
-  Collapsible,
-  InfoHint,
-  Input,
-  NumberInput,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Separator,
-  Status,
-  Switch,
-  toast,
-} from "../../components/ui";
+import { Button, Collapsible, Input, Separator, Switch } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
-import {
-  CompanionPressFields,
-  CueAccessCard,
-  CueButtonStatus,
-  ImportPairsDialog,
-} from "./companion-cues";
-
-// ── Registry shapes (functions are stripped server-side) ──────────────────────
-
-interface ParamSpec {
-  key: string;
-  label: string;
-  type: "number" | "string" | "enum" | "multi-enum" | "key-value";
-  min?: number;
-  max?: number;
-  options?: { value: string; label: string }[];
-  optionsFrom?: string;
-  optional?: boolean;
-  help?: string;
-  keyLabel?: string;
-  valueLabel?: string;
-}
-interface Spec {
-  id: string;
-  label: string;
-  params: ParamSpec[];
-  help?: string;
-}
-interface Registry {
-  triggers: (Spec & { channel: string })[];
-  conditions: Spec[];
-  actions: Spec[];
-}
-
-interface Rule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: { id: string; params: Record<string, string | number> }[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-  confirmRequired?: boolean;
-}
-
-/**
- * One ON/OFF pair as the rules list shows it: ONE row, holding both halves.
- *
- * `name` is the words the pair is called — a switch in Home Assistant is called
- * this, and so is the row.
- */
-interface PairRowData {
-  base: string;
-  name: string;
-  onName: string;
-  offName: string;
-  hidden: boolean;
-  on: Rule;
-  off: Rule;
-}
+import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-cues";
 
 /**
  * One row in a section: a pair, or a single rule.
@@ -139,22 +48,6 @@ interface PairRowData {
 type RuleListEntry =
   | { kind: "pair"; key: string; sortBy: string; pair: PairRowData }
   | { kind: "rule"; key: string; sortBy: string; rule: Rule };
-
-/** One bound pair's state, as `GET /api/cues/states` sends it. */
-interface CueStateRow {
-  on: string;
-  off: string;
-  variable: string;
-  value: string | null;
-  state: "on" | "off" | "unknown";
-  reason?: string;
-  /** True for up to eight seconds after a press, while `state` may still be
-   *  the pre-press reading — see `main/services/cue-states.ts`. */
-  settling?: true;
-  /** What that press asked for. Present exactly when `settling` is. */
-  commanded?: "on" | "off";
-}
-
 interface LogEntry {
   at: string;
   ruleName: string;
@@ -165,200 +58,6 @@ interface LogEntry {
   /** The token label behind a called cue. Absent for anything the engine fired. */
   caller?: string;
 }
-
-// ── Shared row helpers, matching the layout inspector's shape ─────────────────
-
-function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <label className="flex items-center gap-3 py-1">
-      <span className="w-36 shrink-0 text-caption1 text-fg-muted">
-        {label}
-        {hint ? <InfoHint>{hint}</InfoHint> : null}
-      </span>
-      <span className="min-w-0 flex-1">{children}</span>
-    </label>
-  );
-}
-
-const selectCls =
-  "h-7 w-full rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus";
-
-/** The saved JSON object as editable rows. Malformed config yields no rows rather
- *  than throwing — the operator can then just add them. */
-function parseRows(value: string | number | undefined): [string, string][] {
-  try {
-    const parsed: unknown = JSON.parse(String(value ?? "") || "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
-    return Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")] as [string, string]);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * A two-column table stored as a JSON object string.
- *
- * Exists for values that must be typed EXACTLY as some other system spells them —
- * a Dante channel name may carry a numeric prefix or be renamed at will, so nothing
- * can generate it and nothing here validates it. The operator reads it off the
- * other system and types it; the point is that they can see what they typed.
- */
-function KeyValueField({
-  spec,
-  value,
-  onChange,
-}: {
-  spec: ParamSpec;
-  value: string | number | undefined;
-  onChange: (v: string) => void;
-}) {
-  // The rows being edited live here rather than being derived from the saved
-  // value, because a half-typed row cannot be represented in what gets saved: the
-  // param is a JSON OBJECT, and an object has no key for a row whose key is still
-  // blank. Deriving them meant "add row" created a row that was filtered out
-  // before it could render, so the button appeared to do nothing.
-  const [rows, setRows] = useState<[string, string][]>(() => parseRows(value));
-  // What we last sent up, so an echo of our own write does not clobber a blank row
-  // the operator is still filling in.
-  const lastWritten = useRef<string | null>(null);
-
-  useEffect(() => {
-    const incoming = String(value ?? "");
-    if (incoming === lastWritten.current) return;
-    setRows(parseRows(value));
-  }, [value]);
-
-  const write = (next: [string, string][]) => {
-    setRows(next);
-    // Blank keys are dropped on the way out only — they stay visible while typing.
-    const json = JSON.stringify(Object.fromEntries(next.filter(([k]) => k.trim() !== "")));
-    lastWritten.current = json;
-    onChange(json);
-  };
-
-  return (
-    <div className="flex flex-col gap-1.5 py-1">
-      <span className="text-caption1 text-fg-muted">
-        {spec.label}
-        {spec.help ? <InfoHint>{spec.help}</InfoHint> : null}
-      </span>
-      <div className="flex flex-col gap-1">
-        {rows.map(([k, v], i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            <Input
-              value={k}
-              onChange={(e) => write(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}
-              className="h-7 w-20 text-footnote"
-              aria-label={spec.keyLabel ?? "Key"}
-              placeholder={spec.keyLabel ?? "Key"}
-            />
-            <Input
-              value={v}
-              onChange={(e) => write(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))}
-              className="h-7 flex-1 text-footnote"
-              aria-label={spec.valueLabel ?? "Value"}
-              placeholder={spec.valueLabel ?? "Value"}
-            />
-            <button
-              type="button"
-              onClick={() => write(rows.filter((_, j) => j !== i))}
-              className="touch-target rounded p-0.5 text-fg-subtle hover:text-warn-11"
-              aria-label="Remove row"
-            >
-              <Trash2Icon className="size-3.5" />
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={() => write([...rows, ["", ""]])}
-          className="inline-flex w-fit items-center gap-1 rounded px-1 py-0.5 text-caption2 text-fg-subtle hover:text-fg"
-        >
-          <PlusIcon className="size-3" /> row
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** Renders one param from its spec — the reason a new provider needs no UI work. */
-function ParamField({
-  spec,
-  value,
-  onChange,
-  dynamicOptions,
-}: {
-  spec: ParamSpec;
-  value: string | number | undefined;
-  onChange: (v: string | number) => void;
-  dynamicOptions: Record<string, { value: string; label: string }[]>;
-}) {
-  const options = spec.optionsFrom ? (dynamicOptions[spec.optionsFrom] ?? []) : (spec.options ?? []);
-
-  if (spec.type === "key-value") {
-    return <KeyValueField spec={spec} value={value} onChange={onChange} />;
-  }
-
-  if (spec.type === "number") {
-    return (
-      <Row label={spec.label} hint={spec.help}>
-        <NumberInput
-          value={Number(value ?? spec.min ?? 0)}
-          min={spec.min}
-          max={spec.max}
-          onChange={(n) => onChange(n)}
-          className="h-7 text-footnote"
-        />
-      </Row>
-    );
-  }
-  if (spec.type === "enum" || spec.type === "multi-enum") {
-    return (
-      <Row label={spec.label} hint={spec.help}>
-        <select className={selectCls} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}>
-          <option value="">{spec.optional ? "(any)" : "Pick one…"}</option>
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      </Row>
-    );
-  }
-  // A string param can still name a runtime source. It stays typeable on purpose:
-  // the list only knows the plan that is loaded right now, and a rule is written
-  // for every week — so picking is a convenience, not a constraint.
-  if (spec.optionsFrom && options.length > 0) {
-    const listId = `opts-${spec.optionsFrom}`;
-    return (
-      <Row label={spec.label} hint={spec.help}>
-        <>
-          <Input
-            value={String(value ?? "")}
-            list={listId}
-            onChange={(e) => onChange(e.target.value)}
-            className="h-7 text-footnote"
-          />
-          <datalist id={listId}>
-            {options.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </datalist>
-        </>
-      </Row>
-    );
-  }
-
-  return (
-    <Row label={spec.label} hint={spec.help}>
-      <Input
-        value={String(value ?? "")}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-7 text-footnote"
-      />
-    </Row>
-  );
-}
-
 // ── Activity log ──────────────────────────────────────────────────────────────
 
 const OUTCOME_STYLE: Record<AutomationOutcome, string> = {
@@ -427,49 +126,6 @@ function ActivityLog() {
 // ── One rule ──────────────────────────────────────────────────────────────────
 
 /**
- * The names a cue used to answer to, each with a remove.
- *
- * Renders nothing when there are none, which is every cue nobody has renamed.
- * Removing one is an ordinary rule save — it goes through the same Save button
- * and the same server-side name check as any other edit — because a former name
- * is a live URL and dropping it is a decision, not a tidy-up.
- */
-function FormerNamesField({
-  params,
-  onChange,
-}: {
-  params: Record<string, string | number>;
-  onChange: (aliases: string) => void;
-}) {
-  const names = parseAliases(params);
-  if (names.length === 0) return null;
-  return (
-    <Row
-      label="Former names"
-      hint="Names this cue still answers to, kept when its Companion button was relabelled. Remove one and that URL stops resolving — re-paste the Home Assistant config first."
-    >
-      <span className="flex flex-wrap gap-1" data-cue-former-list={names.join(",")}>
-        {names.map((name) => (
-          <span
-            key={name}
-            className="inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-caption1 text-fg-muted"
-          >
-            {name}
-            <button
-              type="button"
-              aria-label={`Remove former name ${name}`}
-              onClick={() => onChange(encodeAliases(names.filter((n) => n !== name)))}
-            >
-              <Trash2Icon className="size-3 text-fg-subtle" />
-            </button>
-          </span>
-        ))}
-      </span>
-    </Row>
-  );
-}
-
-/**
  * One pair's row out of the states answer, or null when it has none.
  *
  * `Object.hasOwn` rather than `states[base]`: the key is the pair's base, which
@@ -486,46 +142,6 @@ function cueStateFor(
   if (!states || base === null || !Object.hasOwn(states, base)) return null;
   return states[base] ?? null;
 }
-
-/**
- * What a bound pair's device is actually doing, on the `_on` half's row.
- *
- * The `_off` half shows nothing: one pair is one thing, and a second pill saying
- * the same word twice reads as two devices. Renders nothing at all for an
- * unbound pair or a cue that is not half of one — an "unknown" pill on every
- * rule in the list would be noise nobody could act on.
- */
-function CuePairState({ base, state }: { base: string; state: CueStateRow }) {
-  // While settling, `commanded` is what the press asked for and is shown
-  // instead of `state` — `state` may still be the pre-press reading for up to
-  // eight seconds (see the settle window in main/services/cue-states.ts), and
-  // it is never `unknown` because a press always commands `on` or `off`.
-  const shown = state.settling ? state.commanded : state.state;
-  const variant = shown === "on" ? "success" : shown === "off" ? "neutral" : "warning";
-  const title = state.settling
-    ? "Pressed just now; the device has not reported back yet"
-    : state.reason
-      ? `${state.variable}: ${state.reason}`
-      : state.variable;
-  return (
-    <span
-      className="flex min-w-0 items-center gap-1.5"
-      // The pair, always, beside the word. `data-cue-state` alone is not enough
-      // to see a pill that should not be there: a row that took its state off
-      // the prototype chain rendered a dot with no word AND no state attribute,
-      // so nothing could count it.
-      data-cue-pair={base}
-      data-cue-state={shown}
-      // The reason on hover rather than on the row: it is a sentence, and the
-      // row already carries the rule name and the summary. While settling it
-      // is replaced with a note that the reading below it is stale.
-      title={title}
-    >
-      <Status variant={variant}>{state.settling ? `${shown}…` : shown}</Status>
-    </span>
-  );
-}
-
 /**
  * "service-safe" (quiet) when the cue carries `service.is-not-live`, or a
  * clearly visible amber "any time" when it does not — so the cues that can
@@ -549,104 +165,6 @@ function ServiceGuardBadge({ conditions }: { conditions: Rule["conditions"] }) {
     </span>
   );
 }
-
-/**
- * The one switch over the `service.is-not-live` condition — see
- * service-guard.ts for what flipping it does to the condition list.
- *
- * Only for a cue: the condition, and the switch reading it, mean nothing on a
- * rule with any other trigger.
- */
-function ServiceGuardField({
-  conditions,
-  onChange,
-}: {
-  conditions: Rule["conditions"];
-  onChange: (next: Rule["conditions"]) => void;
-}) {
-  const allowed = !hasServiceGuard(conditions);
-  return (
-    <Row
-      label="Allowed during a service"
-      hint='Off: refused while a service is live or about to start (the imported default). On: fires whenever it is called.'
-    >
-      <Switch
-        checked={allowed}
-        onCheckedChange={(v) => onChange(withServiceGuard(conditions, !v))}
-        aria-label="Allowed during a service"
-      />
-    </Row>
-  );
-}
-
-/**
- * This cue's Home Assistant visibility, and where the flag is written.
- *
- * `writeTo` is a pair's ON half — where a pair's settings live, exactly as the
- * state binding does — and the rule itself for a cue with no partner. The OFF
- * half shows the SAME switch reading the same value: an operator who opened
- * that half and found no switch would conclude the setting is per-cue, and hide
- * one direction of a thing that only has one entity.
- */
-interface HomeVisibility {
-  hidden: boolean;
-  /** The words a switch for this pair is called, or null for a single cue. */
-  pairName: string | null;
-  writeTo: Rule;
-}
-
-/**
- * The one switch over `homeAssistant` — see cue-pairs.ts for what it stores.
- *
- * The sentence beside it names the entity that exists, because "hidden" and
- * "shown" on their own do not say what appears where: a pair is ONE switch in
- * Home Assistant and in Apple Home, not two buttons.
- */
-function HomeVisibilityField({
-  hidden,
-  pairName,
-  onChange,
-}: {
-  hidden: boolean;
-  pairName: string | null;
-  onChange: (hidden: boolean) => void;
-}) {
-  const shownText =
-    pairName === null
-      ? "Shown as a button in Home Assistant and Apple Home."
-      : `Shown. One switch, ${pairName}, in Home Assistant and Apple Home.`;
-  return (
-    <Row label="Home Assistant">
-      <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="flex items-center gap-2">
-          <Switch
-            checked={!hidden}
-            onCheckedChange={(v) => onChange(!v)}
-            aria-label="Shown in Home Assistant"
-          />
-          <span className="min-w-0 text-caption1 text-fg-muted" data-cue-home={hidden ? "hidden" : "shown"}>
-            {hidden ? "Hidden. Voice only." : shownText}
-          </span>
-        </span>
-        <span className="text-caption2 text-fg-subtle">
-          Turn off to keep this cue voice-only. It disappears from Home Assistant within a few
-          seconds; automations there that refer to it stop working.
-        </span>
-      </span>
-    </Row>
-  );
-}
-
-/**
- * The three state-binding fields, on the `_on` half of a pair and nowhere else.
- *
- * A binding on a cue with no partner reads a variable nothing ever shows, so the
- * fields are not offered there at all rather than offered and ignored.
- *
- * The variable is a SELECT of what Companion has, with a text field as well
- * whenever the export could not be read — otherwise an unreachable Companion
- * would mean an existing binding could not even be seen, let alone cleared.
- */
 /** One button in the Companion offer, as far as the editor reads it. */
 interface OfferedButton {
   page: number;
@@ -669,357 +187,43 @@ interface CompanionPairsReply {
   buttons?: OfferedButton[];
 }
 
+// ── One rule's row ────────────────────────────────────────────────────────────
+
 /**
- * The stored form of an app source, with the two values it reports.
+ * One rule, as a SUMMARY row. Pressing it opens the editor in a dialog.
  *
- * Written out rather than left blank: blank means "the defaults", and a source
- * whose values are not `on`/`off` would then be compared against the wrong two
- * strings with the field on screen looking right — the same trap the inferred
- * Companion source has.
+ * The row carries only what is worth reading in a list of two hundred: whether
+ * the rule is enabled, what it is called, what it used to be called, whether it
+ * can fire mid-service, whether Home Assistant has an entity for it, and the
+ * one-line "When … then …". Everything else — every field, Test and Delete — is
+ * in the dialog, which is the only thing that mounts the editor at all.
  */
-function appBindingFor(ref: string): { variable: string; onValue: string; offValue: string } | null {
-  const def = appStateSourceDef(ref);
-  return def ? { variable: ref, onValue: def.onValue, offValue: def.offValue } : null;
-}
-
-function CueStateFields({
-  params,
-  base,
-  toggle,
-  customVariables,
-  inferred,
-  onAction,
-  appSources,
-  onChange,
-}: {
-  params: Record<string, string | number>;
-  base: string;
-  /** Both halves press the same Companion button. See isTogglePair. */
-  toggle: boolean;
-  customVariables: string[];
-  /** Where this pair's own button says its device reports state, or null. */
-  inferred: InferredStateSource | null;
-  /** The ON half's action as it stands in the draft — what implies a binding. */
-  onAction: Rule["action"];
-  /** App state sources whose integration is set up, so there is something to read. */
-  appSources: string[];
-  onChange: (patch: Record<string, string>) => void;
-}) {
-  const binding = stateBindingOf(params);
-  const variable = String(params.stateVariable ?? "");
-  // What this pair's own action implies, when nothing is stored. The SAME
-  // function the server binds with — a second copy of "a Record cue reads
-  // app:reaper.recording" is how the editor and the switch come to disagree.
-  const implicit = binding ? null : implicitStateBinding(onAction);
-  /** What is being read, stored or implied. */
-  const effective = binding?.variable ?? implicit?.variable ?? "";
-  /** An app source needs no values: it reports exactly `on` and `off`. */
-  const fromApp = isAppStateRef(effective);
-  /** The source's own one-liner, or null when this is not an app source. */
-  const appHint = appStateSourceDef(effective)?.hint ?? null;
-  // What learning has found and how far it got. A pair whose connections the
-  // verified table has no row for is probed by the reconcile and BOUND from
-  // watching a press, so the field has something to say with nothing picked and
-  // nothing inferred. See companion-state-learn.ts.
-  const candidates = parseCandidates(params);
-  const learning = parseLearning(params);
-  const learnable = candidates.length > 0 || learning.stopped !== undefined;
-  // A variable that is bound but no longer in Companion's export — renamed or
-  // deleted — is still offered, so the select shows what the rule actually says.
-  // The INFERRED one is offered too and labelled, because on a Companion with
-  // no custom variables it is the only thing there is to pick.
-  const options = [...new Set([...customVariables, ...(variable ? [variable] : [])])]
-    .filter((name) => !isAppStateRef(name))
-    .sort();
-  // APP SOURCES FIRST. They are read from an integration this app is already
-  // talking to, so there is nothing to build in Companion for them — and the
-  // implied one has to be offered whatever the integration list says, or the
-  // select would show a value that is not among its options.
-  const appOffered = [...APP_STATE_SOURCES].flatMap(([id, def]) => {
-    const ref = appStateRef(id);
-    return appSources.includes(ref) || effective === ref ? [{ value: ref, text: def.label }] : [];
-  });
-  const offered = [
-    ...appOffered,
-    ...(inferred && !options.includes(inferred.variable)
-      ? [{ value: inferred.variable, text: `${inferred.variable} (inferred)` }]
-      : []),
-    ...options.map((name) => ({
-      value: name,
-      text: name === inferred?.variable ? `${name} (inferred)` : name,
-    })),
-  ];
-
-  /**
-   * Write the whole binding, all three params, through the module that owns the
-   * keys.
-   *
-   * The select used to patch `stateVariable` alone. Clearing it therefore left
-   * `stateOnValue` and `stateOffValue` behind, so a pair unbound and later bound
-   * to a different variable inherited the values typed for the old one — a
-   * switch reporting on for a device that is off, with nothing on screen saying
-   * where "POWER=ON" came from. The raw values are carried across rather than
-   * `binding`'s: `binding` resolves a blank to the default, and writing "on"
-   * and "off" out explicitly would turn a field the operator left alone into
-   * one they had filled in.
-   */
-  const setVariable = (next: string) =>
-    onChange(
-      stateBindingParams(
-        next.trim()
-          ? // Picking the INFERRED variable brings its two values with it. A kasa
-            // plug's `power_state` holds `On`, not `on`, and the comparison is
-            // case-sensitive — chosen without them the pair reads unknown
-            // forever, with the field on screen looking right.
-            next.trim() === inferred?.variable
-            ? inferred
-            : // An APP source reports exactly two values and this app knows
-              // which — written out, so the pair is not left comparing against
-              // whatever was typed for the variable it used to read.
-              appBindingFor(next.trim()) ?? {
-                variable: next,
-                onValue: String(params.stateOnValue ?? ""),
-                offValue: String(params.stateOffValue ?? ""),
-              }
-          : null,
-      ),
-    );
-  return (
-    <>
-      <Row
-        label="State variable"
-        hint={
-          // An APP SOURCE first: there is nothing to set up for it, and the
-          // Companion wording below would send an operator to build a custom
-          // variable this pair will never read.
-          //
-          // Then the toggle case, which is the one where blank is not merely
-          // "optimistic": the two halves press the same key, so an optimistic
-          // switch reports the opposite of the truth every other press. Said on
-          // the field, where the operator can fix it.
-          appHint ??
-          (inferred && !binding
-            ? `This pair's button drives a device that reports its own state — ${inferred.variable}. Pick it and nothing has to be built in Companion.`
-            : toggle && !binding
-              ? "Both halves press the same button. Without a state variable, Home Assistant cannot know which way it went."
-              : `A Companion custom variable your ON/OFF buttons set, or a module's own variable as <connection label>:<name>. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`)
-        }
-      >
-        {offered.length > 0 ? (
-          // `effective`, not `variable`: an IMPLIED binding is shown as selected
-          // even though nothing is stored, because it is what the switch really
-          // reads. Choosing anything else — including "No state" — stores that
-          // and the implication stops applying.
-          <Select value={effective} onValueChange={setVariable}>
-            <SelectTrigger className="w-full" aria-label="State variable">
-              <SelectValue placeholder="No state" />
-            </SelectTrigger>
-            <SelectContent>
-              {/* NOT offered while a binding is implied: there is nothing to
-                  clear, so a "No state" that re-rendered as the app source
-                  would be a control that visibly does nothing. */}
-              {!implicit && <SelectItem value="">No state</SelectItem>}
-              {offered.map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : (
-          // Companion could not be read and nothing is bound: a text field, so
-          // the binding can still be typed. Letters, digits, _, - and . are
-          // refused by the server otherwise, with the reason.
-          <Input
-            value={variable}
-            onChange={(e) => setVariable(e.target.value)}
-            placeholder="projectors_state"
-            aria-label="State variable"
-            className="h-7 text-footnote"
-          />
-        )}
-      </Row>
-      {/* LEARNING, as a VISIBLE line rather than a hover hint. Nothing in the
-          verified table covers what this pair drives, so its state source is
-          being learned from what moves when it is pressed — and a blank State
-          variable with no explanation beside it reads as "this pair cannot
-          report its state", which is the opposite of what is about to happen.
-          A tooltip nobody hovers is not an explanation. */}
-      {learnable && (
-        <Row
-          label="Learning"
-          hint="Forget what was learned about this pair and probe its connections again on the next hourly pass. The binding above is left alone."
-        >
-          <span className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 text-caption1 text-fg-subtle">
-              {learning.stopped === "gave-up"
-                ? `Learning gave up after ${LEARN_MAX_ATTEMPTS} presses — nothing this pair drives moved in both directions. Pick a variable, or start again.`
-                : learning.stopped === "bound"
-                  ? "Learned from watching this pair being pressed."
-                  : learningHint(candidates)}
-            </span>
-            {/* CLEARING A BINDING deliberately does NOT restart learning — an
-                operator who unbound a pair on purpose would otherwise have it
-                re-probed and re-bound within the hour — so this is the one
-                control that starts it over. */}
-            <Button
-              type="button"
-              variant="transparent"
-              className="h-7 shrink-0 text-footnote"
-              onClick={() => onChange(learnAgainParams())}
-            >
-              Learn again
-            </Button>
-          </span>
-        </Row>
-      )}
-      {/* An app source reports exactly two values, which this app writes itself,
-          so there is nothing here for an operator to set. Hidden rather than
-          disabled: two fields that cannot change anything are two settings that
-          read as ignored. */}
-      {binding && !fromApp && (
-        <>
-          <Row label="Value meaning on" hint={`What the variable holds when it is on. Blank means "${STATE_ON_DEFAULT}".`}>
-            <Input
-              value={String(params.stateOnValue ?? "")}
-              onChange={(e) => onChange({ stateOnValue: e.target.value })}
-              placeholder={STATE_ON_DEFAULT}
-              aria-label="Value meaning on"
-              className="h-7 text-footnote"
-            />
-          </Row>
-          {/* The `*` sentinel is named on the OFF field only, because that is
-              the only field it is legal on — the server refuses it as the on
-              value. A status variable with several answers (a recorder's
-              transport, say) is bound by spelling out the on value and leaving
-              the rest to `*`. */}
-          <Row
-            label="Value meaning off"
-            hint={
-              `What the variable holds when it is off. Blank means "${STATE_OFF_DEFAULT}"; ` +
-              `"${STATE_ANY_OTHER}" means anything else — any value that is not the on value.`
-            }
-          >
-            <Input
-              value={String(params.stateOffValue ?? "")}
-              onChange={(e) => onChange({ stateOffValue: e.target.value })}
-              placeholder={STATE_OFF_DEFAULT}
-              aria-label="Value meaning off"
-              className="h-7 text-footnote"
-            />
-          </Row>
-        </>
-      )}
-    </>
-  );
-}
-
-function RuleCard({
+function RuleRow({
   rule,
   registry,
-  dynamicOptions,
-  pairBase,
-  pairIsToggle,
-  home,
-  customVariables,
-  inferredSource,
-  appSources,
+  onOpen,
   onChanged,
 }: {
   rule: Rule;
   registry: Registry;
-  dynamicOptions: Record<string, { value: string; label: string }[]>;
-  /** The pair's base when this rule is its `_on` half, else null. */
-  pairBase: string | null;
-  /** This rule's pair presses one button both ways. See isTogglePair. */
-  pairIsToggle: boolean;
-  /** This cue's Home Assistant visibility. Null for a rule that is not a cue. */
-  home: HomeVisibility | null;
-  customVariables: string[];
-  /** Where this rule's own Companion button says its device reports state. */
-  inferredSource: InferredStateSource | null;
-  /** App state sources whose integration is set up. See useConfiguredIntegrations. */
-  appSources: string[];
+  onOpen: () => void;
   onChanged: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Rule>(rule);
-  const [busy, setBusy] = useState(false);
-
-  useResyncOn([rule], () => setDraft(rule));
-
   const formerNames = rule.trigger.id === CALL_TRIGGER_ID ? parseAliases(rule.trigger.params) : [];
-  const trigger = registry.triggers.find((t) => t.id === draft.trigger.id) ?? null;
-  const action = registry.actions.find((a) => a.id === draft.action.id) ?? null;
-  const dirty = JSON.stringify(draft) !== JSON.stringify(rule);
+  const trigger = registry.triggers.find((t) => t.id === rule.trigger.id) ?? null;
+  const action = registry.actions.find((a) => a.id === rule.action.id) ?? null;
+  const isCue = rule.trigger.id === CALL_TRIGGER_ID;
+  const hidden = isHiddenFromHome(rule.trigger.params);
 
-  const summary = `When ${trigger?.label ?? draft.trigger.id}` +
-    (draft.conditions.length ? ` · if ${draft.conditions.length} condition${draft.conditions.length > 1 ? "s" : ""}` : "") +
-    ` · then ${action?.label ?? draft.action.id}`;
-
-  async function save() {
-    setBusy(true);
-    try {
-      await invoke("automation:updateRule", { id: rule.id, patch: draft });
-      onChanged();
-    } catch (e) {
-      // The server refuses a duplicate or malformed cue name with a 400. Without
-      // this the rejection was an unhandled rejection and the editor just sat
-      // there with the operator's change still on screen, apparently saved.
-      toast.error(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /**
-   * The flag, written where the pair keeps it.
-   *
-   * The ON half (and a single cue) goes through this card's DRAFT, exactly as
-   * the service guard does — one Save for everything typed. The OFF half writes
-   * the PARTNER rule immediately, because a draft here cannot carry a change to
-   * another rule and a Save button that saved a neighbour is worse than a
-   * switch that takes effect at once. The IPC is the same one `save` uses.
-   */
-  function setHomeHidden(hidden: boolean) {
-    const target = home?.writeTo;
-    if (!target) return;
-    if (target.id === rule.id) {
-      setDraft((d) => ({
-        ...d,
-        trigger: { ...d.trigger, params: { ...d.trigger.params, ...homeVisibilityParams(hidden) } },
-      }));
-      return;
-    }
-    void (async () => {
-      try {
-        await invoke("automation:updateRule", {
-          id: target.id,
-          patch: {
-            trigger: {
-              ...target.trigger,
-              params: { ...target.trigger.params, ...homeVisibilityParams(hidden) },
-            },
-          },
-        });
-        onChanged();
-      } catch (e) {
-        toast.error(errorMessage(e));
-      }
-    })();
-  }
-
-  async function testFire() {
-    try {
-      const r = await invoke<{ ok: boolean; detail: string }>("automation:testRule", { id: rule.id });
-      if (r.ok) toast.success(`Test fire: ${r.detail}`);
-      else toast.error(`Test fire failed: ${r.detail}`);
-    } catch (e) {
-      toast.error(errorMessage(e));
-    }
-  }
+  const summary = `When ${trigger?.label ?? rule.trigger.id}` +
+    (rule.conditions.length ? ` · if ${rule.conditions.length} condition${rule.conditions.length > 1 ? "s" : ""}` : "") +
+    ` · then ${action?.label ?? rule.action.id}`;
 
   return (
     <div className="rounded-lg border border-line bg-surface p-3">
       <div className="flex items-center gap-2">
+        {/* The one control on the row that is NOT the editor: arming a rule is
+            a thing an operator does down a list, and it writes at once. */}
         <Switch
           checked={rule.enabled}
           onCheckedChange={async (v) => {
@@ -1028,11 +232,7 @@ function RuleCard({
           }}
           aria-label="Enable rule"
         />
-        <button
-          type="button"
-          className="min-w-0 flex-1 text-left"
-          onClick={() => setOpen((o) => !o)}
-        >
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={onOpen}>
           <div className="flex min-w-0 items-baseline gap-2">
             <span data-rule-name={rule.name} className="truncate text-footnote font-medium text-fg">{rule.name}</span>
             {/* The names this cue used to answer to, quietly. A cue is renamed
@@ -1056,7 +256,7 @@ function RuleCard({
                 was {formerNames.join(", ")}
               </span>
             )}
-            {rule.trigger.id === CALL_TRIGGER_ID && <ServiceGuardBadge conditions={rule.conditions} />}
+            {isCue && <ServiceGuardBadge conditions={rule.conditions} />}
           </div>
           <div className="truncate text-caption1 text-fg-muted">{summary}</div>
           {/* What the last reconcile found about this rule's Companion button.
@@ -1065,258 +265,22 @@ function RuleCard({
               editor and its picker. Renders nothing for any other action, and
               nothing for a rule that has never been reconciled. */}
           {rule.action.id === "companion.press" && <CueButtonStatus params={rule.action.params} />}
-          {/* The pair's state pill is NOT here. It lives on the PairRow this
-              card is inside — one pair is one row, and this card is collapsed
-              inside it most of the time, so a pill here is a reading nobody
-              sees. Pressing the pair row is still what opens the editor that
-              can fix an `unknown`. */}
         </button>
-        <Button variant="transparent" size="small" onClick={() => void testFire()} aria-label="Test fire">
-          <PlayIcon className="size-3.5" /> Test
-        </Button>
-        <Button
-          variant="transparent"
-          size="small"
-          iconOnly
-          aria-label="Delete rule"
-          onClick={async () => {
-            await invoke("automation:removeRule", { id: rule.id });
-            onChanged();
-          }}
-        >
-          <Trash2Icon className="size-3.5 text-red-10" />
-        </Button>
-      </div>
-
-      {open && (
-        <div className="mt-3 flex flex-col gap-1 border-t border-line pt-3">
-          <Row label="Name">
-            <Input
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              className="h-7 text-footnote"
-            />
-          </Row>
-
-          <Separator />
-          <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">When</span>
-          <Row label="Trigger">
-            <select
-              className={selectCls}
-              value={draft.trigger.id}
-              onChange={(e) => setDraft({ ...draft, trigger: { id: e.target.value, params: {} } })}
-            >
-              {registry.triggers.map((t) => (
-                <option key={t.id} value={t.id}>{t.label}</option>
-              ))}
-            </select>
-          </Row>
-          {trigger?.params
-            // `aliases` is a list, not a string to type. It renders below as one
-            // chip per former name with a remove — a text field over a
-            // comma-joined list of live URLs is a typo away from a switch in
-            // Home Assistant that stops resolving.
-            // `aliases` is a list; the three `state*` params are rendered by
-            // CueStateFields below, and only for the `_on` half of a pair. Three
-            // text fields on every cue that cannot use them would read as three
-            // settings that do nothing.
-            .filter((p) => p.key !== "aliases" && !p.key.startsWith("state"))
-            .map((p) => (
-              <ParamField
-                key={p.key}
-                spec={p}
-                value={draft.trigger.params[p.key]}
-                dynamicOptions={dynamicOptions}
-                onChange={(v) => setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, [p.key]: v } } })}
-              />
-            ))}
-          {draft.trigger.id === CALL_TRIGGER_ID && (
-            <FormerNamesField
-              params={draft.trigger.params}
-              onChange={(aliases) =>
-                setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, aliases } } })
-              }
-            />
-          )}
-          {draft.trigger.id === CALL_TRIGGER_ID && pairBase !== null && (
-            <CueStateFields
-              params={draft.trigger.params}
-              base={pairBase}
-              toggle={pairIsToggle}
-              customVariables={customVariables}
-              inferred={inferredSource}
-              onAction={draft.action}
-              appSources={appSources}
-              onChange={(patch) =>
-                setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, ...patch } } })
-              }
-            />
-          )}
-
-          <Separator />
-          <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">If</span>
-          {/* The single switch over `service.is-not-live`, for a cue only — the
-              condition means nothing on a rule with any other trigger. A view
-              on the condition below, not a replacement for it: the condition
-              is still there in the list and still removable by hand. */}
-          {draft.trigger.id === CALL_TRIGGER_ID && (
-            <ServiceGuardField
-              conditions={draft.conditions}
-              onChange={(conditions) => setDraft({ ...draft, conditions })}
-            />
-          )}
-          {/* Directly under the service guard, and for a cue only: it is the
-              other thing about a cue that is not about when it fires. A pair's
-              two halves show the same switch — see HomeVisibility. */}
-          {draft.trigger.id === CALL_TRIGGER_ID && home !== null && (
-            <HomeVisibilityField
-              // The ON half reads its own DRAFT, so the switch moves the moment
-              // it is pressed rather than after Save. The OFF half reads the
-              // pair, which is what its own press writes.
-              hidden={
-                home.writeTo.id === rule.id ? isHiddenFromHome(draft.trigger.params) : home.hidden
-              }
-              pairName={home.pairName}
-              onChange={setHomeHidden}
-            />
-          )}
-          {draft.conditions.length === 0 && (
-            <p className="text-caption1 text-fg-subtle">No conditions — the rule fires whenever its trigger does.</p>
-          )}
-          {draft.conditions.map((c, i) => {
-            const spec = registry.conditions.find((x) => x.id === c.id);
-            return (
-              <div key={`${c.id}-${i}`} className="rounded-md border border-line px-2 py-1">
-                <div className="flex items-center gap-2">
-                  <span className="flex-1 text-caption1 text-fg">{spec?.label ?? c.id}</span>
-                  <Button
-                    variant="transparent"
-                    size="small"
-                    iconOnly
-                    aria-label="Remove condition"
-                    onClick={() => setDraft({ ...draft, conditions: draft.conditions.filter((_, j) => j !== i) })}
-                  >
-                    <Trash2Icon className="size-3.5 text-fg-subtle" />
-                  </Button>
-                </div>
-                {spec?.params.map((p) => (
-                  <ParamField
-                    key={p.key}
-                    spec={p}
-                    value={c.params[p.key]}
-                    dynamicOptions={dynamicOptions}
-                    onChange={(v) => {
-                      const next = [...draft.conditions];
-                      next[i] = { ...c, params: { ...c.params, [p.key]: v } };
-                      setDraft({ ...draft, conditions: next });
-                    }}
-                  />
-                ))}
-              </div>
-            );
-          })}
-          <Row label="Add condition">
-            <select
-              className={selectCls}
-              value=""
-              onChange={(e) => {
-                if (!e.target.value) return;
-                setDraft({ ...draft, conditions: [...draft.conditions, { id: e.target.value, params: {} }] });
-              }}
-            >
-              <option value="">Add…</option>
-              {registry.conditions.map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
-            </select>
-          </Row>
-
-          <Separator />
-          <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Then</span>
-          <Row label="Action">
-            <select
-              className={selectCls}
-              value={draft.action.id}
-              onChange={(e) => setDraft({ ...draft, action: { id: e.target.value, params: {} } })}
-            >
-              {registry.actions.map((a) => (
-                <option key={a.id} value={a.id}>{a.label}</option>
-              ))}
-            </select>
-          </Row>
-          {/* One action renders its own params: three coordinates are not
-              something an operator can be expected to know, so companion.press
-              gets a picker that fills them in. The fields stay visible and
-              editable — the picker is a convenience over the same params, not a
-              replacement for them, which is what keeps a button that is not in
-              Companion's export reachable. */}
-          {draft.action.id === "companion.press" ? (
-            <CompanionPressFields
-              params={draft.action.params}
-              onChange={(patch) =>
-                setDraft({ ...draft, action: { ...draft.action, params: { ...draft.action.params, ...patch } } })
-              }
-            />
-          ) : (
-            action?.params.map((p) => (
-              <ParamField
-                key={p.key}
-                spec={p}
-                value={draft.action.params[p.key]}
-                dynamicOptions={dynamicOptions}
-                onChange={(v) => setDraft({ ...draft, action: { ...draft.action, params: { ...draft.action.params, [p.key]: v } } })}
-              />
-            ))
-          )}
-
-          <Separator />
-          <Row
-            label="Cooldown"
-            hint="Seconds before this rule may fire again. Stops a value that oscillates across a threshold firing repeatedly."
+        {/* The same one word a pair's row carries, for a cue with no partner:
+            which side of the Home Assistant / Everything else split this row is
+            on, without reading the heading above it. */}
+        {isCue && (
+          <span
+            data-cue-home={hidden ? "hidden" : "shown"}
+            className={
+              "shrink-0 rounded-md px-1.5 py-0.5 text-caption2 " +
+              (hidden ? "text-fg-subtle" : "bg-field text-fg-muted")
+            }
           >
-            <NumberInput
-              value={draft.cooldownSec}
-              min={0}
-              max={86400}
-              onChange={(n) => setDraft({ ...draft, cooldownSec: n })}
-              className="h-7 text-footnote"
-            />
-          </Row>
-          <Row label="Once per service" hint="Fire at most once per PCO service occurrence.">
-            <Switch
-              checked={draft.oncePerService}
-              onCheckedChange={(v) => setDraft({ ...draft, oncePerService: v })}
-              aria-label="Once per service"
-            />
-          </Row>
-          {/* Only for a called cue: there is nothing to confirm to when a rule
-              fires itself off a state change, and a switch that did nothing on
-              every other rule would be worse than absent. */}
-          {draft.trigger.id === CALL_TRIGGER_ID && (
-            <Row
-              label="Ask twice"
-              hint="The first call is answered with a confirmation and does nothing. A second call within 30 seconds runs it."
-            >
-              <Switch
-                checked={draft.confirmRequired === true}
-                onCheckedChange={(v) => setDraft({ ...draft, confirmRequired: v })}
-                aria-label="Ask twice before running"
-              />
-            </Row>
-          )}
-
-          {dirty && (
-            <div className="flex items-center gap-2 pt-2">
-              <Button variant="accent" size="small" onClick={() => void save()} disabled={busy}>
-                {busy ? "Saving…" : "Save"}
-              </Button>
-              <Button variant="transparent" size="small" onClick={() => setDraft(rule)} disabled={busy}>
-                Discard
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+            {hidden ? "voice only" : "Home"}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -1325,15 +289,9 @@ function RuleCard({
  * One ON/OFF pair, as ONE row.
  *
  * A pair is one thing — one switch in Home Assistant, one thing an operator
- * turns on and off — and two rows for it is the list saying otherwise. The two
- * halves are still edited by the same RuleCard, unforked, stacked inside when
- * the row is expanded: the halves differ in what they press and in nothing
- * else, and a second editor written for a pair would be a second place for the
- * cue-name and Companion-button fields to drift.
- *
- * The halves are NOT rendered while it is collapsed — `{open && children}`
- * mounts them on expand — so a hundred pairs is a hundred rows rather than two
- * hundred editors.
+ * turns on and off — and two rows for it is the list saying otherwise. Pressing
+ * it opens ONE dialog holding both halves: the pair's own settings once, and a
+ * Turn on / Turn off control for the fields that differ.
  */
 function PairRow({
   base,
@@ -1342,7 +300,7 @@ function PairRow({
   offName,
   hidden,
   cueState,
-  children,
+  onOpen,
 }: {
   base: string;
   name: string;
@@ -1350,22 +308,17 @@ function PairRow({
   offName: string;
   hidden: boolean;
   cueState: CueStateRow | null;
-  children: React.ReactNode;
+  onOpen: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   return (
     <div className="rounded-lg border border-line bg-surface p-3" data-cue-pair-row={base}>
       <div className="flex items-center gap-2">
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
+          onClick={onOpen}
           aria-label={`${name} pair`}
         >
-          <ChevronRightIcon
-            className={"size-3.5 shrink-0 text-fg-subtle transition-transform " + (open ? "rotate-90" : "")}
-          />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-footnote font-medium text-fg" data-cue-pair-name={name}>
               {name}
@@ -1376,7 +329,7 @@ function PairRow({
           </span>
           {cueState && <CuePairState base={base} state={cueState} />}
           {/* Compact, and only ever one word: the row is a summary, and the
-              sentence explaining what hidden means is in the editor below. */}
+              sentence explaining what hidden means is in the dialog. */}
           <span
             data-cue-home={hidden ? "hidden" : "shown"}
             className={
@@ -1388,7 +341,6 @@ function PairRow({
           </span>
         </button>
       </div>
-      {open && <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">{children}</div>}
     </div>
   );
 }
@@ -1542,26 +494,6 @@ export function AutomationSection() {
     [pairRows],
   );
 
-  /**
-   * Where each cue's Home Assistant flag is written, by rule id.
-   *
-   * A pair's two halves both point at the ON half, so the switch is the same
-   * setting whichever half is open. See HomeVisibility.
-   */
-  const homeFor = useMemo(() => {
-    const out = new Map<string, HomeVisibility>();
-    for (const p of pairRows) {
-      const entry: HomeVisibility = { hidden: p.hidden, pairName: p.name, writeTo: p.on };
-      out.set(p.on.id, entry);
-      out.set(p.off.id, entry);
-    }
-    for (const r of rules) {
-      if (r.trigger.id !== CALL_TRIGGER_ID || pairedRuleIds.has(r.id)) continue;
-      out.set(r.id, { hidden: isHiddenFromHome(r.trigger.params), pairName: null, writeTo: r });
-    }
-    return out;
-  }, [pairRows, pairedRuleIds, rules]);
-
   // The search field's value, in component state only — it is a filter over
   // what is on screen right now, not something a maintainer with hundreds of
   // cues would want restored on the next visit.
@@ -1676,33 +608,46 @@ export function AutomationSection() {
     refresh();
   }
 
-  const card = (r: Rule) => (
-    <RuleCard
-      key={r.id}
-      rule={r}
-      registry={registry!}
-      dynamicOptions={dynamicOptions}
-      pairBase={pairBases.get(r.id) ?? null}
-      pairIsToggle={togglePairs.has(r.id)}
-      home={homeFor.get(r.id) ?? null}
-      customVariables={companionPairs?.customVariables ?? []}
-      inferredSource={inferredFor(r)}
-      appSources={appSources}
-      onChanged={refresh}
-    />
-  );
-
   /**
-   * One row. A pair is the PairRow with its two halves' cards inside it, and
-   * everything else is the card on its own.
+   * Which rule or pair is being EDITED, by id — never the rule object itself.
    *
-   * The pair's own state pill is on the pair row rather than on the ON half's
-   * card, which is where it used to be: the card is now inside a row that is
-   * collapsed most of the time, and a state nobody can see is a state nobody
-   * acts on.
+   * The dialog resolves its target out of the live query on every render, so a
+   * save, an SSE refresh or a rename lands in the open editor rather than
+   * leaving it holding a rule that no longer exists. A target that has gone —
+   * deleted, or a pair broken by a rename — resolves to null and the dialog
+   * unmounts, which is the only correct thing to show for it.
    */
+  const [editing, setEditing] = useState<{ kind: "rule" | "pair"; id: string } | null>(null);
+  const editorTarget = useMemo<RuleEditorTarget | null>(() => {
+    if (!editing) return null;
+    if (editing.kind === "pair") {
+      const pair = pairRows.find((p) => p.on.id === editing.id);
+      return pair
+        ? {
+            kind: "pair",
+            pair,
+            toggle: togglePairs.has(pair.on.id),
+            cueState: cueStateFor(cueStateData?.states, pair.base),
+          }
+        : null;
+    }
+    const rule = rules.find((r) => r.id === editing.id);
+    return rule ? { kind: "rule", rule } : null;
+  }, [editing, pairRows, rules, togglePairs, cueStateData]);
+
+  /** One row. A pair is ONE row holding both halves; everything else is a rule. */
   const renderEntry = (entry: RuleListEntry) => {
-    if (entry.kind === "rule") return card(entry.rule);
+    if (entry.kind === "rule") {
+      return (
+        <RuleRow
+          key={entry.key}
+          rule={entry.rule}
+          registry={registry!}
+          onOpen={() => setEditing({ kind: "rule", id: entry.rule.id })}
+          onChanged={refresh}
+        />
+      );
+    }
     const p = entry.pair;
     return (
       <PairRow
@@ -1713,10 +658,8 @@ export function AutomationSection() {
         offName={p.offName}
         hidden={p.hidden}
         cueState={cueStateFor(cueStateData?.states, p.base)}
-      >
-        {card(p.on)}
-        {card(p.off)}
-      </PairRow>
+        onOpen={() => setEditing({ kind: "pair", id: p.on.id })}
+      />
     );
   };
 
@@ -1870,7 +813,12 @@ export function AutomationSection() {
               variant="filled"
               size="small"
               onClick={async () => {
-                await invoke("automation:addRule", {
+                // The new rule's own editor, at once. A rule called "Rule 7"
+                // with a log action and no trigger params is not a rule
+                // anybody wanted — it is the start of one, and an operator left
+                // looking at it in a list of two hundred has to find it again
+                // to say what it does.
+                const created = await invoke<Rule>("automation:addRule", {
                   name: `Rule ${rules.length + 1}`,
                   enabled: false,
                   trigger: { id: registry.triggers[0]?.id ?? "", params: {} },
@@ -1880,6 +828,7 @@ export function AutomationSection() {
                   oncePerService: false,
                 });
                 refresh();
+                setEditing({ kind: "rule", id: created.id });
               }}
             >
               <PlusIcon className="size-3.5" /> Add rule
@@ -1889,6 +838,22 @@ export function AutomationSection() {
             </Button>
           </div>
         </div>
+      )}
+
+      {/* The editor, over the list. Mounted only while something is being
+          edited, so its drafts are seeded on open and discarded on close —
+          Escape, the overlay and Cancel are the same thing. */}
+      {registry && editorTarget && (
+        <RuleEditorDialog
+          target={editorTarget}
+          onClose={() => setEditing(null)}
+          registry={registry}
+          dynamicOptions={dynamicOptions}
+          customVariables={companionPairs?.customVariables ?? []}
+          appSources={appSources}
+          inferredFor={inferredFor}
+          onChanged={refresh}
+        />
       )}
 
       <ImportPairsDialog open={importing} onOpenChange={setImporting} onImported={refresh} />
