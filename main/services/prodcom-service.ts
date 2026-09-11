@@ -17,11 +17,9 @@ import type { TranscriptLineDTO } from "../types/stage.js";
 import { broadcast, channelInDemand } from "./broadcaster.js";
 import { scrub } from "./scrub.js";
 import { ConnectionLifecycle } from "./integration-base.js";
+import { createSseReader, keepSocketAlive, parseSseBlock, SSE_MAX_BUFFER, type SseEvent } from "./sse-reader.js";
 
 const RECONNECT_MS = 4000;
-/** Cap on the SSE accumulation buffer — a stream that never terminates an event
- *  would otherwise grow it without bound over weeks of uptime. */
-const MAX_STREAM_BUFFER = 256_000;
 /**
  * How often TCP probes the peer once the stream goes quiet.
  *
@@ -439,30 +437,18 @@ export class ProdComService extends ConnectionLifecycle {
         res.setEncoding("utf8");
         this.armIdleWatchdog();
 
-        // Parse text/event-stream: accumulate until a blank line ends an event.
-        let buf = "";
+        // Parse text/event-stream via the shared reader — a new one per
+        // connection, so a partial event does not survive a reconnect. It caps the
+        // accumulation buffer and resyncs at the next separator on overflow; the
+        // log line is ours because an operator needs to know WHICH stream lost
+        // data.
+        const reader = createSseReader({
+          onOverflow: () =>
+            console.warn(`[prodcom] transcript buffer exceeded ${SSE_MAX_BUFFER} bytes — resyncing`),
+        });
         res.on("data", (chunk: string) => {
           this.armIdleWatchdog();
-          buf += chunk;
-          // A stream that never sends the blank-line terminator would otherwise
-          // grow this without bound in a process that stays up for weeks, and
-          // re-split an ever-longer string on every chunk. The Spectera SSE parser
-          // has carried this cap for a while; this one did not.
-          if (buf.length > MAX_STREAM_BUFFER) {
-            // Drop back to the last line boundary rather than to "". Clearing
-            // mid-event leaves a tail that the next "\n\n" terminates, and
-            // handleEvent treats an unparseable block as a finalised line — so a
-            // truncated fragment could reach the wall as a caption.
-            console.warn(`[prodcom] transcript buffer exceeded ${MAX_STREAM_BUFFER} bytes — resyncing`);
-            const lastBreak = buf.lastIndexOf("\n");
-            buf = lastBreak === -1 ? "" : buf.slice(lastBreak + 1);
-          }
-          let sep: number;
-          while ((sep = buf.indexOf("\n\n")) !== -1) {
-            const raw = buf.slice(0, sep);
-            buf = buf.slice(sep + 2);
-            this.handleEvent(raw);
-          }
+          for (const event of reader.push(chunk)) this.handleSseEvent(event);
         });
         res.on("end", () => {
           this.clearIdleWatchdog();
@@ -477,7 +463,7 @@ export class ProdComService extends ConnectionLifecycle {
     );
     this.req = req;
     // The real liveness check — see SOCKET_KEEPALIVE_MS.
-    req.on("socket", (socket) => socket.setKeepAlive(true, SOCKET_KEEPALIVE_MS));
+    keepSocketAlive(req, SOCKET_KEEPALIVE_MS);
     req.on("error", (e) => {
       // A watchdog armed by the dying stream must not outlive it, or it can
       // destroy the NEXT request while it is still connecting.
@@ -488,14 +474,15 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   // One SSE event block ("event: x\ndata: {...}"). data may be JSON or plain text.
+  // Kept as the (string) entry point the tests drive, and it goes through the same
+  // shared block parser the live stream does.
   protected handleEvent(raw: string): void {
-    const dataLines: string[] = [];
-    for (const line of raw.split("\n")) {
-      if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-      // (event:/id: lines ignored — transcript framing is carried in the payload)
-    }
-    if (dataLines.length === 0) return;
-    const payload = dataLines.join("\n");
+    const event = parseSseBlock(raw);
+    if (event) this.handleSseEvent(event);
+  }
+
+  // (event:/id: names ignored — transcript framing is carried in the payload)
+  private handleSseEvent({ data: payload }: SseEvent): void {
     if (!payload || payload === "[DONE]") return;
 
     // Diagnostic: with PRODCOM_DEBUG set, log every raw transcript frame exactly
