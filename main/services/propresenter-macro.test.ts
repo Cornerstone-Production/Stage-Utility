@@ -1,4 +1,6 @@
-// Triggering a ProPresenter macro from a rule.
+// Triggering a ProPresenter macro from a rule — the service, the manager and
+// the `propresenter.macro` action, together, because they are one feature and
+// one stub serves all three.
 //
 // Every case here runs against a REAL http.createServer on an ephemeral port,
 // not a mocked fetch. The service dials ProPresenter with `http.get`, and the
@@ -13,6 +15,7 @@ import assert from "node:assert/strict";
 import { afterEach, before, after, describe, it } from "node:test";
 import * as http from "node:http";
 
+import { AUTOMATION_ACTIONS } from "./automation-actions.js";
 import { propresenterService, propresenterManager } from "./propresenter-service.js";
 
 /** Every path the stub was asked for, in order. */
@@ -261,5 +264,75 @@ describe("propresenterManager macro routing", () => {
       ["DOORS", "SONG INTRO", "Kids Worship"],
       "the reachable instance's macros still have to be offered",
     );
+  });
+});
+
+describe("the propresenter.macro action", () => {
+  const action = AUTOMATION_ACTIONS["propresenter.macro"];
+
+  afterEach(() => {
+    unconfigured();
+    propresenterManager.apply(null, []);
+  });
+
+  it("simulate contacts ProPresenter not at all", async () => {
+    configured();
+    propresenterManager.apply("MA", []);
+    const r = await action.run({ instance: "default", macro: "SONG INTRO" }, { simulate: true });
+    assert.deepEqual(r, { ok: true, detail: 'would trigger "SONG INTRO"' });
+    // A simulated cue that still dials the booth is a cue that cannot be tested
+    // with the machine off, which is when a rule is usually written.
+    assert.deepEqual(macroPaths(), []);
+  });
+
+  it("triggers the macro on the chosen instance", async () => {
+    configured();
+    propresenterManager.apply("MA", []);
+    const r = await action.run({ instance: "default", macro: "SONG INTRO" }, { simulate: false });
+    assert.deepEqual(r, { ok: true, detail: 'triggered "SONG INTRO" on MA' });
+    assert.deepEqual(macroPaths(), ["/v1/macro/SONG%20INTRO/trigger"]);
+  });
+
+  // Both blank cases are asserted under SIMULATE, which is the half the action
+  // owns: with simulate off the service refuses a blank name with the same
+  // sentence, so a test there would pass with this guard deleted — vacuous.
+  // Ahead of the simulate branch, a rule with nothing chosen would otherwise
+  // test as `would trigger ""` and read as ready.
+  it("a blank macro is refused ahead of simulate, not reported as OK", async () => {
+    configured();
+    const r = await action.run({ instance: "default", macro: "   " }, { simulate: true });
+    assert.deepEqual(r, { ok: false, detail: "no macro chosen" });
+    assert.deepEqual(macroPaths(), []);
+  });
+
+  it("a missing macro param is refused the same way", async () => {
+    configured();
+    const r = await action.run({ instance: "default" }, { simulate: true });
+    assert.deepEqual(r, { ok: false, detail: "no macro chosen" });
+    assert.deepEqual(macroPaths(), []);
+  });
+
+  it("an instance that is no longer configured fails rather than throwing", async () => {
+    configured();
+    const r = await action.run({ instance: "auditorium-9", macro: "DOORS" }, { simulate: false });
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /auditorium-9/);
+  });
+
+  it("an unreachable ProPresenter fails rather than throwing", async () => {
+    propresenterService.configure("127.0.0.1", 9);
+    propresenterService.stop();
+    propresenterManager.apply("MA", []);
+    const r = await action.run({ instance: "default", macro: "DOORS" }, { simulate: false });
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /127\.0\.0\.1:9/);
+  });
+
+  it("a 404 reaches the rule as no-such-macro, not as HTTP 404", async () => {
+    configured();
+    propresenterManager.apply("MA", []);
+    triggerStatus = 404;
+    const r = await action.run({ instance: "default", macro: "SONG INTRO" }, { simulate: false });
+    assert.deepEqual(r, { ok: false, detail: 'no macro called "SONG INTRO" on MA' });
   });
 });

@@ -15,7 +15,15 @@ export interface ParamDef {
   max?: number;
   options?: { value: string; label: string }[];
   /** Options that can only be known at runtime (targets, service types, commands). */
-  optionsFrom?: "rosstalk-targets" | "rosstalk-commands" | "osc-targets" | "service-types" | "displays" | "plan-items";
+  optionsFrom?:
+    | "rosstalk-targets"
+    | "rosstalk-commands"
+    | "osc-targets"
+    | "service-types"
+    | "displays"
+    | "plan-items"
+    | "propresenter-instances"
+    | "propresenter-macros";
   optional?: boolean;
   help?: string;
   /** Column headings for a "key-value" param. */
