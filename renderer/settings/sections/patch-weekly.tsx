@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { invoke } from "../../lib/api";
-import { Collapsible } from "../../components/ui";
+import { Collapsible, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 
 /**
  * Weekly assignment — pick a standing variant per PCO service type. The resolved
@@ -66,16 +66,15 @@ export function PatchWeekly({
             visibleTypes.map((t) => (
               <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
                 <span className="text-footnote text-fg">{t.name}</span>
-                <select
-                  value={assignments.byServiceType[t.id] ?? ""}
-                  onChange={(e) => setStanding(t.id, e.target.value)}
-                  className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:outline-none focus:border-focus"
-                >
-                  <option value="">Default patch</option>
-                  {variants.map((v) => (
-                    <option key={v.id} value={v.id}>{v.name}</option>
-                  ))}
-                </select>
+                <Select value={assignments.byServiceType[t.id] ?? ""} onValueChange={(v) => setStanding(t.id, v)}>
+                  <SelectTrigger className="px-2"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Default patch</SelectItem>
+                    {variants.map((v) => (
+                      <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             ))
           )}
@@ -83,14 +82,17 @@ export function PatchWeekly({
             <div className="mt-1 flex flex-col gap-1 rounded-lg border border-line-strong bg-surface-raised px-3 py-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-footnote font-medium text-fg">This week{plan.planTitle ? ` · ${plan.planTitle}` : ""}</span>
-                <select
-                  value={planEntry?.variantId ?? ""}
-                  onChange={(e) => setPlanVariant(plan.planId!, e.target.value)}
-                  className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:outline-none focus:border-focus"
-                >
-                  <option value="">Use standing{standingForPlan ? ` — ${variants.find((v) => v.id === standingForPlan)?.name ?? "variant"}` : " — Default"}</option>
-                  {variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-                </select>
+                {/* The per-plan override is the one assignment no delete path
+                    cleans up: removing a variant clears it from byServiceType and
+                    leaves byPlan pointing at it. The Select keeps that id visible
+                    rather than reading as "Use standing". */}
+                <Select value={planEntry?.variantId ?? ""} onValueChange={(v) => setPlanVariant(plan.planId!, v)}>
+                  <SelectTrigger className="px-2"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Use standing{standingForPlan ? ` — ${variants.find((v) => v.id === standingForPlan)?.name ?? "variant"}` : " — Default"}</SelectItem>
+                    {variants.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               {planEntry?.tweaks && Object.keys(planEntry.tweaks).length > 0 && (
                 <span className="text-caption2 text-fg-subtle">{Object.keys(planEntry.tweaks).length} one-off tweak{Object.keys(planEntry.tweaks).length === 1 ? "" : "s"} this week — edit via the “This week” target above the table.</span>

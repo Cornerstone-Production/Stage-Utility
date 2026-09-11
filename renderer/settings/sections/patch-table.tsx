@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { XIcon, PlusIcon, WavesIcon } from "lucide-react";
 
-import { Input, Switch } from "../../components/ui";
+import { Input, Switch, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { rippleEndpoints, type RippleField, type RippleCount } from "../../lib/patch-ripple";
 
@@ -62,10 +62,18 @@ function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | undefin
         const listId = labels.length ? `hoplabels-${h.deviceId}` : undefined;
         return (
           <div key={i} className="flex items-center gap-1">
-            <select value={h.deviceId} onChange={(e) => setHop(i, { deviceId: e.target.value })} className="h-6 min-w-0 flex-1 rounded border border-line-strong bg-field px-1.5 text-caption2 text-fg focus:outline-none focus:border-focus">
-              <option value="">— device —</option>
-              {stageDevices.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+            {/* A hop points at a device by id, and deleting a device does not walk
+                the endpoints to clear the hops that name it — so the Select has to
+                keep the id visible rather than let the row read as "— device —". */}
+            <Select value={h.deviceId} onValueChange={(v) => setHop(i, { deviceId: v })}>
+              <SelectTrigger className="h-6 min-w-0 flex-1 rounded px-1.5 text-caption2">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">— device —</SelectItem>
+                {stageDevices.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
             <input value={h.connector} list={listId} onChange={(e) => setHop(i, { connector: e.target.value })} placeholder="ch" className="h-6 w-14 rounded border border-line-strong bg-field px-1.5 text-caption2 tabular-nums text-fg focus:outline-none focus:border-focus" />
             {listId && <datalist id={listId}>{labels.map((l) => <option key={l} value={l} />)}</datalist>}
             <button type="button" onClick={() => remove(i)} className="touch-target rounded p-0.5 text-fg-subtle hover:text-danger-11" aria-label="Remove hop"><XIcon className="size-3.5" /></button>
