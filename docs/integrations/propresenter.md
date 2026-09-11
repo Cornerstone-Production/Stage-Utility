@@ -42,3 +42,33 @@ lower — 500 ms feels instant — at the cost of twice the requests; anything u
 **On a layout:** add slide objects — current/next slide text, current/next slide
 notes, current/next section, slide progress, slide thumbnail. Each can target a
 specific ProPresenter instance.
+
+## Triggering a macro from a rule
+
+The **Trigger a ProPresenter macro** [automation](../automation.md) action runs
+one of your own macros — whatever that macro does in ProPresenter, it does here.
+Pick the instance and the macro; nothing else is configured.
+
+It uses the same Network API the poll reads, so an instance that is set up needs
+nothing extra. The request is `GET /v1/macro/<name>/trigger`, which is
+ProPresenter's own design for a command.
+
+The macro is identified by its **name**, not by its uuid. A name means the same
+thing on every machine and survives re-importing a library, where a uuid is
+per-machine and does not — so one rule works in both auditoriums. The trade is
+that renaming a macro in ProPresenter stops the rule finding it; the action then
+fails with `no macro called "SONG INTRO" on MA`, which is also what the log says:
+
+```
+[propresenter] macro "SONG INTRO" triggered on MA
+[propresenter] macro "SONG INTRO" failed: no such macro on MA (404)
+```
+
+The macro dropdown lists the names every configured instance reports, read fresh
+at most every 30 seconds. An instance that is switched off contributes nothing
+and never blocks the editor from opening; when more than one is configured, a
+name only some of them have is marked `DOORS (MA only)`. A macro already chosen
+on a rule is shown whether or not the machine holding it is reachable.
+
+With **Simulate mode** on, the action reports what it would trigger and contacts
+nothing — a rule can be written and tested with the booth machine off.
