@@ -170,7 +170,24 @@ The rules list is in two sections. **Home Assistant** holds every cue that has
 an entity there — pairs as switches, single cues as buttons. **Everything else**
 holds the cues whose **Home Assistant** switch is off and every rule with a
 trigger other than Called by name. An ON/OFF pair is ONE row, named by the words
-it is spoken as; expanding it shows both halves' editors.
+it is spoken as.
+
+A row is a summary: the enable switch, the name, any former names, the
+service-guard badge, whether Home Assistant has an entity for it, and the
+one-line *when … then*. Pressing the row — anywhere but the enable switch —
+opens the editor in a dialog over the list, so the list and the search field
+stay where they are. **Test** and **Delete** are in its footer beside **Cancel**
+and **Save**; Escape, the overlay and Cancel all discard the draft, and a save
+the server refuses leaves the dialog open with the change still in it. Deleting
+asks first, naming the cues that go.
+
+A pair opens ONE dialog. **This pair** holds the settings that belong to the
+pair rather than to one direction of it — Home Assistant, Allowed during a
+service, State variable, Room — and a **Turn on** / **Turn off** control below
+it swaps the fields that differ: cue name, spoken as, former names, the button
+it presses, cooldown, once per service, enabled. Saving writes both halves, and
+the pair's own settings land on the `_on` rule. **Test** fires the half that is
+selected and says which.
 
 A cue's editor has a **Home Assistant** switch under Allowed during a service.
 Off, the cue is voice-only: no entity is created for it, it is left out of the
@@ -191,8 +208,8 @@ the trigger and action's own names. A pair shows whenever either half matches.
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
 | **Home Assistant** | on by default. Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
-| **State variable** | on the `_on` half of an ON/OFF pair, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `VCR-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
-| **Learning** | shown on the `_on` half of a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
+| **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `VCR-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
+| **Learning** | shown in **This pair** for a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
 | **Once per service** | honoured on a call as well as on a trigger: a second call in the same service occurrence is refused `once-per-service` |
 
@@ -320,8 +337,9 @@ outcome is recorded, including skips and the reason for them.
 **Simulate mode** (on by default) — rules evaluate fully and the resolved action is
 logged, but nothing reaches a device. Leave it on while you build.
 
-**Per-rule enable and Test fire** — Test runs the action immediately, ignoring the
-trigger, so you can prove the action before arming the rule. It respects simulate.
+**Per-rule enable and Test fire** — the enable switch is on the row; **Test** is in
+the editor's footer. Test runs the action immediately, ignoring the trigger, so you
+can prove the action before arming the rule. It respects simulate.
 
 **Disarm all** — stops every rule at once regardless of its own switch, and persists
 across a restart. Simulate is for building; disarm is for stopping.
