@@ -53,29 +53,45 @@ is stored encrypted (secret key `secret`).
 ## API version
 
 PCO versions each product by date. A request selects one with an
-`X-PCO-API-Version: YYYY-MM-DD` header, and PCO resolves it by an equal-or-earlier
-match. A request that sends no header is served whatever version is set as the
+`X-PCO-API-Version: YYYY-MM-DD` header, and PCO resolves it to the newest
+published version **at or before** that date — silently, with no error and no
+warning. A request that sends no header is served whatever version is set as the
 app's default in PCO's developer console — a setting outside this repository that
 differs between installs.
 
-Stage pins the version explicitly, in `PCO_API_VERSION` in `pco-service.ts`:
+**A version string is per product.** Each PCO product keeps its own independent
+list of dates, so a date that is current for one is very likely unpublished on
+another and is quietly downgraded to whatever that product shipped before it.
+Take a pin from the product's own version list — for example
+<https://api.planningcenteronline.com/calendar/v2/documentation>, which serves the
+list as JSON without a credential — never from a sibling client.
 
-```
-X-PCO-API-Version: 2018-11-01
-```
+Stage pins each product separately, and each list of published versions lives
+beside its pin:
+
+| Product | Constant | Pinned | File |
+|---|---|---|---|
+| Services | `PCO_API_VERSION` | `2018-11-01` | `pco-service.ts` |
+| Calendar | `CALENDAR_API_VERSION` | `2026-06-22` | `pco-calendar-service.ts` |
 
 Always an exact date, never a "give me the newest" sentinel — a floating request
 would let a PCO release change field names, defaults or pagination under a running
 install with no code change here. Services publishes exactly two versions,
-`2018-08-01` (withdrawn 2 April 2024) and `2018-11-01`, so the pin is both the
-newest and the only one still served. The single documented difference between
-them is that `2018-11-01` makes the `/people` endpoint respect the "Can view
-people not on My Teams" permission; Stage calls no `/people` endpoint.
+`2018-08-01` (deprecated, documented as identical) and `2018-11-01`, so its pin is
+the newest. The single documented difference between them is that `2018-11-01`
+makes the `/people` endpoint respect the "Can view people not on My Teams"
+permission; Stage calls no `/people` endpoint. Calendar publishes five —
+`2018-08-01`, `2020-04-08`, `2021-07-20`, `2022-07-07` and `2026-06-22` — and its
+pin is the newest of those.
 
-To bump it: take the newest date from the version selector at
-<https://api.planningcenteronline.com/docs/apps/services>, read that version's
-changelog entry for field or pagination changes, change the constant, and confirm
-against a real organisation that the plan, roster and photos still render.
+Both pins are typed as a union of their own product's published versions, so
+another product's date does not compile, and `pco-api-version.test.ts` runs PCO's
+resolution rule over each list and fails when a pin does not resolve to itself.
+
+To bump either: take the newest date from **that product's** version list, read
+its changelog entry for field or pagination changes, add it to the published-list
+constant, change the pin, and confirm against a real organisation that the plan,
+roster, photos and calendar still render.
 
 ## Item times
 
@@ -129,9 +145,12 @@ narrowed to Production but not to a single position within it.
 A second PCO product, read by a second client (`pco-calendar-service.ts`) against
 `https://api.planningcenteronline.com/calendar/v2`, sharing the Services client's
 credentials, concurrency gate and retry budget. It pins
-`X-PCO-API-Version: 2018-11-01`; Calendar is versioned by date and an app sending
-no header gets whatever default is configured in PCO's developer console, which
-is not part of this repository.
+`X-PCO-API-Version: 2026-06-22`, Calendar's newest published version — taken from
+Calendar's own list, not from the Services client beside it (see
+[API version](#api-version)). That version's only behaviour change redacts event
+data on the **booking and conflict** endpoints; the three collections read here —
+`event_instances`, `calendars` and `tags` — are not among them and do not
+traverse from them.
 
 One request draws a month. `event_instances` is asked for the events
 **overlapping** the visible six-week grid — `starts_at <= gridEnd` **and**

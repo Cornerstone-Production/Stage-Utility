@@ -27,11 +27,25 @@ import { scrub } from "./scrub.js";
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 
 /**
+ * Every version Planning Center SERVICES publishes, newest first.
+ *
+ * THIS LIST IS PER PRODUCT AND IS NOT TRANSFERABLE. See the note on
+ * `resolvePcoApiVersion` for the trap; the short version is that each PCO
+ * product keeps its own, entirely independent, list of dates, and a date that is
+ * current for one product is very likely to be unpublished — and therefore
+ * silently downgraded — on another.
+ *
+ * Read from https://api.planningcenteronline.com/services/v2/documentation on
+ * 2026-09-11, which serves this list as JSON without a credential.
+ */
+export const SERVICES_API_VERSIONS = ["2018-11-01", "2018-08-01"] as const;
+export type ServicesApiVersion = (typeof SERVICES_API_VERSIONS)[number];
+
+/**
  * The Services API version this client is written against.
  *
  * PCO versions each product by DATE, selected with an `X-PCO-API-Version:
- * YYYY-MM-DD` request header and resolved by an equal-or-earlier match. Send no
- * header at all — which this client did until now — and the version is whatever
+ * YYYY-MM-DD` request header. Send no header at all and the version is whatever
  * is configured as the app's default in PCO's developer console: a setting that
  * lives outside this repository, differs between installs, and is older than
  * whatever the code was written against. Pinning here makes the contract a
@@ -41,17 +55,60 @@ const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
  * request would let a PCO release change field names, defaults or pagination
  * under a running install with no change in this repository.
  *
- * Chosen 2026-08-29. Services publishes exactly two versions — 2018-08-01,
- * withdrawn 2 April 2024, and 2018-11-01 — so this is both the newest and the
- * only one still served. The one documented difference between them is that
+ * The TYPE is the guard. `ServicesApiVersion` is a union of the dates Services
+ * actually publishes, so pasting another product's date here does not compile —
+ * which is exactly how the Calendar pin went wrong for a year. pco-api-version.test.ts
+ * checks the same thing at runtime, by resolving the pin the way PCO does.
+ *
+ * Services publishes exactly two versions: 2018-08-01, deprecated and documented
+ * as "now identical to 2018-11-01", and 2018-11-01. So this is both the newest
+ * and the only one with distinct behaviour. The one documented difference is that
  * 2018-11-01 makes the `/people` endpoint respect the "Can view people not on My
  * Teams" permission; this client calls no `/people` endpoint.
  *
- * To bump: open https://api.planningcenteronline.com/docs/apps/services, take the
- * newest date from the version selector, read its changelog entry for field or
- * pagination changes, then change this string.
+ * To bump: read the version list at
+ * https://api.planningcenteronline.com/services/v2/documentation — SERVICES's own,
+ * never another product's — add the new date to SERVICES_API_VERSIONS, read its
+ * `details` for field or pagination changes, then change this string.
  */
-export const PCO_API_VERSION = "2018-11-01";
+export const PCO_API_VERSION: ServicesApiVersion = "2018-11-01";
+
+/**
+ * The version PCO will actually serve for `requested`, given what `published` has.
+ *
+ * PCO's documented algorithm: the newest published version at or BEFORE the
+ * requested date. There is no error, no warning and no header saying it happened
+ * — an unpublished date is silently downgraded, and the only way to notice is to
+ * compare a response against the shape you expected.
+ *
+ * This exists because that silence cost a year. The Calendar client was pinned to
+ * `2018-11-01`, copied across from Services with a comment explaining that one app
+ * should state one contract date. Calendar has never published 2018-11-01: its
+ * versions are 2018-08-01, 2020-04-08, 2021-07-20, 2022-07-07 and 2026-06-22. So
+ * every Calendar request resolved to 2018-08-01, the oldest version Calendar has,
+ * five revisions behind current — while Services, reading the same string, landed
+ * on its own newest. Nothing failed, nothing logged, and the comment telling the
+ * next reader how to bump it was never acted on because the shared-date reasoning
+ * looked like a reason not to.
+ *
+ * A version string is a fact about ONE product. The two lists above and in
+ * pco-calendar-service.ts are per product for that reason, and the test asserts
+ * `resolvePcoApiVersion(list, pin) === pin` for each — a pin that resolves to
+ * something else is a pin that is not in force.
+ *
+ * @param published every date the product publishes, in any order.
+ * @returns the version PCO serves, or null when `requested` predates them all
+ *   (PCO answers 400 for a date before a product's first version).
+ */
+export function resolvePcoApiVersion(published: readonly string[], requested: string): string | null {
+  // Lexicographic comparison is date order for zero-padded YYYY-MM-DD, which is
+  // the only shape PCO publishes or accepts.
+  let best: string | null = null;
+  for (const v of published) {
+    if (v <= requested && (best === null || v > best)) best = v;
+  }
+  return best;
+}
 
 /**
  * Is `candidate` an absolute URL on the same origin as `base`?
