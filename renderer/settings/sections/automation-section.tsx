@@ -149,10 +149,11 @@ function cueStateFor(
  * opened one at a time.
  *
  * Only for a cue (`call.by-name`): the condition means nothing on a rule that
- * cannot be called.
+ * cannot be called. A PAIR is guarded only when BOTH halves are — the engine
+ * evaluates each half against its own conditions, so one unguarded half is a
+ * pair that can fire mid-service.
  */
-function ServiceGuardBadge({ conditions }: { conditions: Rule["conditions"] }) {
-  const guarded = hasServiceGuard(conditions);
+function ServiceGuardBadge({ guarded }: { guarded: boolean }) {
   return (
     <span
       data-service-guard={guarded ? "on" : "off"}
@@ -256,7 +257,7 @@ function RuleRow({
                 was {formerNames.join(", ")}
               </span>
             )}
-            {isCue && <ServiceGuardBadge conditions={rule.conditions} />}
+            {isCue && <ServiceGuardBadge guarded={hasServiceGuard(rule.conditions)} />}
           </div>
           <div className="truncate text-caption1 text-fg-muted">{summary}</div>
           {/* What the last reconcile found about this rule's Companion button.
@@ -299,6 +300,7 @@ function PairRow({
   onName,
   offName,
   hidden,
+  guarded,
   cueState,
   onOpen,
 }: {
@@ -307,6 +309,8 @@ function PairRow({
   onName: string;
   offName: string;
   hidden: boolean;
+  /** BOTH halves carry `service.is-not-live`. See ServiceGuardBadge. */
+  guarded: boolean;
   cueState: CueStateRow | null;
   onOpen: () => void;
 }) {
@@ -327,6 +331,11 @@ function PairRow({
               {onName} / {offName}
             </span>
           </span>
+          {/* The pair's, over both halves. It was on each half's card, which
+              is a badge nobody saw: the halves are only rendered inside the
+              dialog now, and a cue that can fire mid-service has to be
+              spottable down a list of two hundred. */}
+          <ServiceGuardBadge guarded={guarded} />
           {cueState && <CuePairState base={base} state={cueState} />}
           {/* Compact, and only ever one word: the row is a summary, and the
               sentence explaining what hidden means is in the dialog. */}
@@ -657,6 +666,7 @@ export function AutomationSection() {
         onName={p.onName}
         offName={p.offName}
         hidden={p.hidden}
+        guarded={hasServiceGuard(p.on.conditions) && hasServiceGuard(p.off.conditions)}
         cueState={cueStateFor(cueStateData?.states, p.base)}
         onOpen={() => setEditing({ kind: "pair", id: p.on.id })}
       />

@@ -164,7 +164,10 @@ condition in one control: off (the imported default) refuses the cue while a
 service is live or about to start, on removes the condition and lets it fire
 whenever it is called. The rules list marks every cue that is on with a
 clearly visible **any time** badge, so the ones that can fire mid-service are
-easy to spot in a long list.
+easy to spot in a long list. A pair's row carries one badge over both halves,
+and reads **any time** if either half can fire — each half is evaluated against
+its own conditions, so one unguarded half is a pair that can fire mid-service.
+Its switch, in the pair's dialog, writes both halves at once.
 
 The rules list is in two sections. **Home Assistant** holds every cue that has
 an entity there — pairs as switches, single cues as buttons. **Everything else**
