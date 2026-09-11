@@ -22,6 +22,24 @@
 //   - The auth header is `X-Bearer`, not `Bearer`.
 //   - The token endpoint wants grant_type "password_cookie" with the account
 //     username and password. There is no scoped credential for this API.
+//
+// TWO ENDPOINTS, because one of them cannot answer on its own.
+//
+//   /encoders/status?wide=true  is the live state — and ONLY the live state.
+//     Its rows are {uuid, status, operationalState, lastUpdate,
+//     preferredVersion, updateRequired}. There is no name on them and no start
+//     time on them, which is how two raw uuids ended up on a wall.
+//   /events                     is the broadcast list, and carries both:
+//     {uuid, name, encoderName, encoderId, scheduleId, startTime, stopAfter,
+//      hlsUrl, cloudUrl, codec, format}. Joined on `encoderId` it supplies the
+//     encoder NAME for the sub-line and a REAL broadcast start time.
+//
+// The join is cached and is allowed to fail. A names lookup that went down must
+// never take the live/off-air readout with it, so refreshEvents() returns its
+// failure to connect() rather than throwing through it.
+//
+// /schedules exists and answers HTTP 400 "No valid filtering field was
+// provided" — it wants a filter nobody has identified. Not used.
 
 import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
@@ -54,6 +72,15 @@ const RESI_DEBUG = process.env.RESI_DEBUG === "1";
 const POLL_MS = 15_000;
 /** Nobody watching: the automation engine still wants to know we went live. */
 const IDLE_POLL_MS = 120_000;
+/**
+ * How long the /events join is reused before it is asked for again.
+ *
+ * Independent of POLL_MS on purpose. Encoder names change roughly never, and a
+ * broadcast's start time is worth having within a minute of it appearing — so a
+ * minute buys everything a 15-second poll would and costs a quarter of the
+ * requests on an API this file is a guest on.
+ */
+const EVENTS_CACHE_MS = 60_000;
 
 const OFFLINE: StreamStatusDTO = {
   connected: false,
@@ -66,17 +93,105 @@ const OFFLINE: StreamStatusDTO = {
  *  naming only what is read keeps a field rename from looking like a rewrite. */
 export interface ResiEncoder {
   uuid: string;
+  /** NOT sent by /encoders/status. Kept because the field would be free to read
+   *  if Resi ever added it, and because a reader who sees it here should know
+   *  that today the name comes from the /events join instead. */
   name?: string | null;
   status?: string | null;
   videoInputSource?: unknown;
   /** "stop" while the encoder is not running. Contradicts a stale `status`. */
   operationalState?: string | null;
   lastUpdate?: string | null;
-  /** Resi has not been observed to send a start time. If a payload turns out to
-   *  carry one, prefer it over our own first-observed moment — see
-   *  `startedAtFrom`. */
+  /** Not observed on this endpoint either. A start time comes from the matching
+   *  /events row — see `startedAtFrom`, which reads all three. */
   startedAt?: string | null;
   startTime?: string | null;
+}
+
+/**
+ * One broadcast, from `GET /customers/{id}/events`.
+ *
+ * The rows are newest-first as Resi returns them, but nothing here relies on
+ * that: both readers below pick by `startTime` so a change of ordering cannot
+ * quietly put last month's name on today's encoder.
+ */
+export interface ResiEvent {
+  uuid?: string;
+  /** The BROADCAST's name ("11:30a"), not the encoder's. */
+  name?: string | null;
+  encoderId?: string | null;
+  encoderName?: string | null;
+  scheduleId?: string | null;
+  /** ISO. The real moment this broadcast began. */
+  startTime?: string | null;
+  /** ISO. Resi's own scheduled auto-stop for it. */
+  stopAfter?: string | null;
+}
+
+/**
+ * How long past its scheduled stop an event row still describes a live encoder.
+ *
+ * `stopAfter` is Resi's own auto-stop, and in a capture of eleven rows the
+ * windows for one encoder never overlapped — consecutive services sat five
+ * minutes apart. So "now is inside the window" is a reliable match, and this
+ * grace covers a broadcast that runs past its scheduled end WITHOUT letting last
+ * week's row vouch for today's stream.
+ *
+ * Erring short on purpose. A start time we cannot justify is worse than none —
+ * that is the whole lesson of `startedFor` below, where an unjustified clock put
+ * 0:00 on the wall over an hour-old broadcast.
+ */
+const EVENT_OVERRUN_GRACE_MS = 15 * 60_000;
+
+/**
+ * Encoder id -> encoder name, from the broadcast list.
+ *
+ * THE fix for two raw uuids on a wall: the status endpoint has no name field at
+ * all, so this is the only place a name can come from. Newest row per encoder
+ * wins, so an encoder renamed in Resi reads as its new name rather than
+ * whichever row happened to come back first.
+ */
+export function encoderNamesFrom(events: readonly ResiEvent[]): Map<string, string> {
+  const best = new Map<string, { name: string; start: number }>();
+  for (const row of events) {
+    const id = row.encoderId?.trim();
+    const name = row.encoderName?.trim();
+    if (!id || !name) continue;
+    const parsed = Date.parse(row.startTime ?? "");
+    const start = Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+    const prev = best.get(id);
+    if (!prev || start > prev.start) best.set(id, { name, start });
+  }
+  return new Map([...best].map(([id, v]) => [id, v.name]));
+}
+
+/**
+ * The event row describing what this encoder is broadcasting RIGHT NOW, or null.
+ *
+ * Deliberately strict. A row qualifies only when it has both a start that has
+ * passed and a stop that has not (plus the grace above); anything missing a
+ * usable window is skipped rather than guessed at, and the caller falls back to
+ * the start we observed ourselves.
+ *
+ * UNCONFIRMED: whether Resi adds a row while a stream is running or only once it
+ * finishes. Written to work either way — if rows only appear afterwards, nothing
+ * matches mid-broadcast and the observed start still answers.
+ */
+export function currentEventFor(
+  events: readonly ResiEvent[],
+  encoderId: string,
+  now: number,
+): ResiEvent | null {
+  let best: { row: ResiEvent; start: number } | null = null;
+  for (const row of events) {
+    if (row.encoderId?.trim() !== encoderId) continue;
+    const start = Date.parse(row.startTime ?? "");
+    if (!Number.isFinite(start) || start > now) continue;
+    const stop = Date.parse(row.stopAfter ?? "");
+    if (!Number.isFinite(stop) || now > stop + EVENT_OVERRUN_GRACE_MS) continue;
+    if (!best || start > best.start) best = { row, start };
+  }
+  return best?.row ?? null;
 }
 
 /**
@@ -136,15 +251,23 @@ export function encoderIsLive(e: ResiEncoder, now: number = Date.now()): boolean
 }
 
 /**
- * A start time from the payload, if it has one.
+ * A start time Resi itself reports for this encoder, if there is one.
  *
- * Kept as its own function because it is the open question in this integration:
- * the fields are guesses at names Resi may or may not send, and the caller falls
- * back to the first moment WE saw the stream. Anything unparseable is treated as
- * absent rather than passed on, so a garbage stamp cannot become a wrong clock.
+ * Three sources, in order. The first two are fields on the encoder payload that
+ * Resi has never been seen to send — kept because they would be free to read the
+ * day it does. The third is the real one: the `startTime` of the /events row
+ * whose window contains `now`.
+ *
+ * Anything unparseable is treated as absent rather than passed on, so a garbage
+ * stamp cannot become a wrong clock.
  */
-export function startedAtFrom(e: ResiEncoder): string | null {
-  for (const v of [e.startedAt, e.startTime]) {
+export function startedAtFrom(
+  e: ResiEncoder,
+  events: readonly ResiEvent[] = [],
+  now: number = Date.now(),
+): string | null {
+  const reported = currentEventFor(events, e.uuid, now)?.startTime ?? null;
+  for (const v of [e.startedAt, e.startTime, reported]) {
     if (typeof v !== "string" || !v) continue;
     const t = Date.parse(v);
     if (Number.isFinite(t)) return new Date(t).toISOString();
@@ -172,8 +295,15 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
   /** RESI_DEBUG: whether the one-off payload dump has already gone out. */
   private loggedShape = false;
 
-  /** Encoder id -> name, for the sub-line. Refreshed with the status poll. */
+  /** Encoder id -> name, for the sub-line. Built from the /events join. */
   private names = new Map<string, string>();
+
+  /** The cached /events join, and when it was last asked for. */
+  private events: ResiEvent[] = [];
+  private eventsFetchedAt = 0;
+  /** Why the join is currently unavailable, or null. Held so connect() logs the
+   *  transition rather than the same line every poll. */
+  private eventsError: string | null = null;
 
   constructor() {
     super("resi", "resi:status", OFFLINE);
@@ -186,11 +316,16 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
   configure(username: string, password: string, encoderIds: string[] = []): void {
     const nextUser = username?.trim() || null;
     const nextPass = password || null;
-    // Credentials changed: the cached token belongs to the old account.
+    // Credentials changed: the cached token belongs to the old account, and so
+    // do the encoder names and broadcast rows joined with it.
     if (nextUser !== this.username || nextPass !== this.password) {
       this.token = null;
       this.tokenExpiresAt = 0;
       this.customerId = null;
+      this.events = [];
+      this.eventsFetchedAt = 0;
+      this.eventsError = null;
+      this.names.clear();
     }
     this.username = nextUser;
     this.password = nextPass;
@@ -227,12 +362,26 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
     }
   }
 
-  /** Encoders to choose from, for the picker. Throws so the caller can report. */
+  /**
+   * Encoders to choose from, for the picker. Throws so the caller can report.
+   *
+   * The /events join is the SAME fix the sub-line needed: `e.name` is never
+   * there, so this picker offered a list of bare uuids to choose between. The
+   * join is fetched unconditionally here rather than read from the cache — the
+   * operator has just opened the picker, so a fresh answer is worth one request.
+   */
   async listEncoders(): Promise<{ id: string; name: string }[]> {
     const token = await this.ensureToken();
     const customerId = await this.ensureCustomerId(token);
-    const list = await this.fetchEncoderStatus(token, customerId);
-    return list.map((e) => ({ id: e.uuid, name: e.name || e.uuid }));
+    const [list, events] = await Promise.all([
+      this.fetchEncoderStatus(token, customerId),
+      // A picker that can still name most encoders beats one that errors
+      // because the join blinked. An empty list names none, which is the old
+      // behaviour rather than a new failure.
+      this.fetchEvents(token, customerId).catch(() => [] as ResiEvent[]),
+    ]);
+    const named = encoderNamesFrom(events);
+    return list.map((e) => ({ id: e.uuid, name: e.name || named.get(e.uuid) || e.uuid }));
   }
 
   private async json<T>(url: string, init: RequestInit): Promise<T> {
@@ -291,6 +440,44 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
     return Array.isArray(list) ? list : [];
   }
 
+  private async fetchEvents(token: string, customerId: string): Promise<ResiEvent[]> {
+    const list = await this.json<ResiEvent[]>(
+      `${API}/customers/${encodeURIComponent(customerId)}/events`,
+      { headers: { Authorization: `X-Bearer ${token}` } },
+    );
+    return Array.isArray(list) ? list : [];
+  }
+
+  /**
+   * Refresh the cached /events join if it is due.
+   *
+   * RETURNS the failure rather than throwing it or swallowing it. Throwing would
+   * put the whole integration into its error path over a missing NAME; swallowing
+   * would leave an operator with a wall full of uuids and nothing to read. The
+   * caller decides, and logs the transition.
+   *
+   * A failed attempt still stamps `eventsFetchedAt`, so a join that has stopped
+   * answering is retried on the same cadence as one that works rather than on
+   * every poll.
+   *
+   * @returns null on success, or why the join is unavailable.
+   */
+  private async refreshEvents(token: string, customerId: string): Promise<string | null> {
+    if (this.eventsFetchedAt && Date.now() - this.eventsFetchedAt < EVENTS_CACHE_MS) return this.eventsError;
+    try {
+      const rows = await this.fetchEvents(token, customerId);
+      this.eventsFetchedAt = Date.now();
+      this.events = rows;
+      // Merged, not replaced: an encoder whose last broadcast has aged off the
+      // list keeps the name we already learned rather than reverting to a uuid.
+      for (const [id, name] of encoderNamesFrom(rows)) this.names.set(id, name);
+      return null;
+    } catch (err) {
+      this.eventsFetchedAt = Date.now();
+      return errorMessage(err);
+    }
+  }
+
   protected async connect(): Promise<void> {
     if (!this.running || !this.configured) return;
     try {
@@ -298,6 +485,21 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
       const customerId = await this.ensureCustomerId(token);
       const all = await this.fetchEncoderStatus(token, customerId);
       if (!this.running) return;
+
+      // Deliberately AFTER the status call and deliberately not fatal: this is
+      // the join that supplies names and a reported start, and the readout it
+      // decorates has to survive without it.
+      const eventsError = await this.refreshEvents(token, customerId);
+      if (eventsError !== this.eventsError) {
+        this.eventsError = eventsError;
+        if (eventsError) {
+          console.warn(
+            `[resi] broadcast list unavailable (${eventsError}) — encoder names fall back to ids and the elapsed clock to what we observed`,
+          );
+        } else {
+          console.log("[resi] broadcast list readable again — encoder names and reported start times are back");
+        }
+      }
 
       for (const e of all) if (e.name) this.names.set(e.uuid, e.name);
       const watched = selectedEncoders(all, this.encoderIds);
@@ -312,9 +514,7 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
         connected: true,
         live: live.length > 0,
         startedAt: this.startedFor(live),
-        detail: live.length
-          ? live.map((e) => this.names.get(e.uuid) ?? e.uuid).join(" + ")
-          : watched.map((e) => this.names.get(e.uuid) ?? e.uuid).join(" + ") || null,
+        detail: this.nameList(live.length ? live : watched),
       });
 
       this.scheduleIn(this.inDemand ? POLL_MS : IDLE_POLL_MS);
@@ -328,6 +528,19 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
       this.goOffline();
       this.scheduleReconnect();
     }
+  }
+
+  /**
+   * The sub-line: what these encoders are called.
+   *
+   * ONE writer, because there were three — live, watched, and the settings
+   * picker — each spelling the same uuid fallback by hand, and the wall showed
+   * `5a905d3b-… + eb43036d-…` because all three were reading a `name` field the
+   * status endpoint does not send. Falling back to the uuid is still right when
+   * the join has never answered; it is just no longer the normal case.
+   */
+  private nameList(encoders: readonly ResiEncoder[]): string | null {
+    return encoders.map((e) => this.names.get(e.uuid) ?? e.uuid).join(" + ") || null;
   }
 
   /**
@@ -348,10 +561,10 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
    *
    * Three answers, in order of how much they can be trusted:
    *
-   *   1. A start time in the payload. Resi has not been observed to send one,
-   *      but `startedAtFrom` looks, and it wins if it ever appears.
-   *   2. A start we already established for this stream — either from a payload
-   *      or from watching it go live. Persisted, so a server restarted
+   *   1. A start time Resi reports — today, the `startTime` of the /events row
+   *      whose window contains now. `startedAtFrom` finds it and it wins.
+   *   2. A start we already established for this stream — either reported or
+   *      from watching it go live. Persisted, so a server restarted
    *      mid-service still agrees with the number that was on the wall a minute
    *      ago, rather than resetting to zero at exactly the moment somebody is
    *      looking at it.
@@ -361,6 +574,10 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
    * came up reading 0:00 the moment the integration was configured — the clock
    * timed how long the INTEGRATION had been running, not the broadcast. Null
    * now, and the widgets show LIVE with no number, which is the truth.
+   *
+   * Case 3 is also still reachable with the join working: if Resi only writes an
+   * event row once a broadcast has FINISHED, no row matches mid-service and this
+   * falls straight back to what it always did.
    */
   private startedFor(live: ResiEncoder[]): string | null {
     if (!live.length) {
@@ -371,7 +588,8 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
       return null;
     }
 
-    const reported = live.map(startedAtFrom).filter((x): x is string => !!x);
+    const now = Date.now();
+    const reported = live.map((e) => startedAtFrom(e, this.events, now)).filter((x): x is string => !!x);
     if (reported.length) {
       const earliest = new Date(Math.min(...reported.map((x) => Date.parse(x)))).toISOString();
       streamStartStore.remember("resi", earliest);
