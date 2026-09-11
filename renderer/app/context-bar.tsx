@@ -78,6 +78,10 @@ export interface BarItemContext {
   state: StageState | null | undefined;
   bar: ContextBarState;
   now: number;
+  /** The server's clock minus this browser's. The recording item reads OBS's
+   *  interpolated record clock off a server-stamped anchor, so it needs the same
+   *  correction the countdown above it already applies. */
+  skewMs: number;
   obs: ReturnType<typeof useObsState>;
   reaper: ReturnType<typeof useReaperState>;
   integrations: ReturnType<typeof useIntegrations>;
@@ -154,7 +158,7 @@ export function useBarContext(): BarItemContext {
   const skewMs = useServerSkew(pcoLive?.serverNow);
 
   const bar = contextBarState(pcoLive, now, skewMs);
-  return { state, bar, now, obs, reaper, integrations, resi, youtube, scores };
+  return { state, bar, now, skewMs, obs, reaper, integrations, resi, youtube, scores };
 }
 
 /** The strip's own layout. Shared with the configurator's preview, so a bar that
@@ -421,7 +425,7 @@ export function integrationHealth(states: readonly IntegrationState[] | undefine
  * to drop, and dropping one brings back a bar that rearranges itself.
  */
 export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
-  const { state, bar, now, obs, reaper, integrations, resi, youtube } = ctx;
+  const { state, bar, now, skewMs, obs, reaper, integrations, resi, youtube } = ctx;
   switch (id) {
     case "clock": {
       // THE SECONDS ARE THE ONE PLACE THE LADDER TOUCHES DIGITS, and it is worth
@@ -575,7 +579,7 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
     case "recording": {
       // The same indicator Home draws, from the same function — including
       // "connected but not rolling", which is the state worth surfacing.
-      const ind = recordIndicator(recorders(obs, reaper));
+      const ind = recordIndicator(recorders(obs, reaper, now, skewMs));
       // Offline is not worth a colour, and neither is standby: it is what the
       // bar sits in all week. Rolling is the thing worth saying, and it gets the
       // green the streaming item beside it uses.

@@ -176,8 +176,24 @@ export interface ObsStatusDTO extends RevisionedStatus {
   recordPaused: boolean;
   streaming: boolean;
   virtualCam: boolean;
-  /** "HH:MM:SS" record duration while recording, else null. */
-  recordTimecode: string | null;
+  /**
+   * An ANCHOR, not a clock: OBS's `outputDuration` (milliseconds recorded) as it
+   * stood at `recordSampledAt`. Null when not recording.
+   *
+   * This used to be a formatted "HH:MM:SS" string refreshed by a 1 Hz poll,
+   * which meant an SSE frame per second to every connected browser for the whole
+   * length of a recording. The anchor is re-read only when OBS says the record
+   * state changed and on a slow keepalive; the display interpolates. Exactly the
+   * trade `PvpLayerDTO.anchorElapsedSec` makes, for the same reason.
+   *
+   * `recordPaused` is the rate: a paused recording holds at the anchor rather
+   * than creeping forward. Read both through
+   * `main/services/obs-record-clock.ts` rather than by hand.
+   */
+  recordAnchorMs: number | null;
+  /** ISO moment `recordAnchorMs` was read, stamped by this server — so a display
+   *  corrects it with the same clock skew it applies to the PCO countdown. */
+  recordSampledAt: string | null;
 }
 
 /** Live REAPER transport state (pushed on "reaper:status"). `connected` is the

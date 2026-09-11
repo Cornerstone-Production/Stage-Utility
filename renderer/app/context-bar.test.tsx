@@ -196,6 +196,7 @@ describe("nothing appears or disappears", () => {
     state: null,
     bar: contextBarState(null, NOW, 0),
     now: NOW,
+    skewMs: 0,
     obs: null,
     reaper: null,
     integrations: { states: [], labels: {} },
@@ -247,7 +248,7 @@ describe("nothing appears or disappears", () => {
     const rolling = {
       ...idle,
       bar: contextBarState(LIVE_ITEM, NOW, 0),
-      obs: { connected: true, recording: false, recordTimecode: null },
+      obs: { connected: true, recording: false, recordPaused: false, recordAnchorMs: null, recordSampledAt: null },
       integrations: {
         states: [{ id: "obs", enabled: true, configured: true, connection: "disconnected" }],
         labels: { obs: "OBS" },
@@ -378,6 +379,7 @@ describe("what a rung leaves behind", () => {
     state: null,
     bar: contextBarState(null, NOW, 0),
     now: NOW,
+    skewMs: 0,
     obs: null,
     reaper: null,
     integrations: { states: [], labels: {} },
@@ -551,6 +553,7 @@ describe("the bar and its probe are the same loop", () => {
     state: { serviceTypeName: SERVICE_TYPE, planTitle: PLAN_TITLE } as unknown as StageState,
     bar: contextBarState(LIVE_ITEM, NOW, 0),
     now: NOW,
+    skewMs: 0,
     obs: null,
     reaper: null,
     integrations: { states: [], labels: {} },

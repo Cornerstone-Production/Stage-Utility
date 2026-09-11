@@ -52,8 +52,10 @@ class StubEventSource {
 const NOW = Date.parse("2026-08-31T15:20:41.000Z");
 const SINCE = new Date(NOW - 95_000).toISOString();
 
-const OBS_LIVE: ObsStatusDTO = { connected: true, recording: true, recordPaused: false, streaming: true, virtualCam: false, recordTimecode: "00:07:12" };
-const OBS_IDLE: ObsStatusDTO = { connected: true, recording: false, recordPaused: false, streaming: false, virtualCam: false, recordTimecode: null };
+// 7m12s in, anchored at NOW so the interpolated timecode reads "00:07:12"
+// however long the test takes to get there.
+const OBS_LIVE: ObsStatusDTO = { connected: true, recording: true, recordPaused: false, streaming: true, virtualCam: false, recordAnchorMs: 432_000, recordSampledAt: new Date(NOW).toISOString() };
+const OBS_IDLE: ObsStatusDTO = { connected: true, recording: false, recordPaused: false, streaming: false, virtualCam: false, recordAnchorMs: null, recordSampledAt: null };
 const REAPER_LIVE: ReaperStatusDTO = { connected: true, recording: true, recordPaused: false, playing: true, positionSeconds: 432, positionString: "0:07:12.480" };
 const REAPER_IDLE: ReaperStatusDTO = { connected: true, recording: false, recordPaused: false, playing: false, positionSeconds: 0, positionString: "0:00.000" };
 const STREAM_LIVE: StreamStatusDTO = { connected: true, live: true, startedAt: SINCE, detail: "Main encoder" };
