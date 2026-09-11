@@ -126,10 +126,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   ): boolean {
     switch (token) {
       case "BATT_CHARGE": {
-        const charge = safeInt(value);
-        if (!Number.isNaN(charge)) {
-          state.battery = charge === 255 ? null : clamp(charge, 0, 100);
-        }
+        state.battery = shureNumber(value, { width: 8, min: 0, max: 100 });
         console.debug(`[shure:${this.id}] ch${channel} BATT_CHARGE: ${value}`);
         return true;
       }
@@ -409,19 +406,65 @@ export function safeInt(s: string | undefined): number {
 }
 
 /**
+ * The top of a Shure numeric field is reserved for "this is not a value".
+ *
+ * Shure has no valid/invalid flag: a field that cannot answer sends a code at the
+ * top of its own range instead. The documented ones for a 16-bit field are 65535
+ * unknown, 65534 calculating and 65533 error — but they are not the whole block.
+ * A live SBC220 (FW 1.4.53) answers BATT_TIME_TO_FULL with **65529** on a bay that
+ * is already full, four below the lowest documented sentinel, and answers every
+ * byte-wide field on a faulted bay with **254** rather than the documented 255.
+ *
+ * So the rule here is the field's WIDTH, not a list of codes: the top eight codes
+ * of the range are markers. 0xFFF8..0xFFFF (65528..65535) for a 16-bit field,
+ * 0xF8..0xFF (248..255) for a byte. Eight is the smallest power-of-two block that
+ * covers every marker seen on the wire, and it costs nothing real — no field this
+ * reads has a legitimate value within eight counts of the top of its range. 65528
+ * minutes is forty-five days; 65528 charge cycles is sixty times a Shure pack's
+ * rated life; 248 °F is a fire, and the percent and bar fields top out at 100 and
+ * 5. Guess low on the boundary and a faulted bay renders "65534 cyc" and "123°C",
+ * which is what it did.
+ */
+const SENTINEL_BLOCK = 8;
+const FIELD_TOP: Record<ShureFieldWidth, number> = { 8: 0xff, 16: 0xffff };
+
+/** How many bits wide the device's field is — which is what decides where its
+ *  not-a-value markers start. */
+export type ShureFieldWidth = 8 | 16;
+
+/**
+ * Read one numeric Shure field, or null if the device is not answering.
+ *
+ * ONE implementation on purpose. Each driver had hand-rolled its own comparison
+ * against a remembered sentinel — `=== 255` here, `>= 65535` there — and the two
+ * that guessed the boundary shipped a charger bay reading "65534 cyc" and "123°C"
+ * on a stage display. `min`/`max` are the field's own plausible range, applied
+ * after the marker check so an out-of-range reading is a dash rather than a
+ * clamp: inventing 100% for a bay that reported 254 is worse than saying nothing.
+ */
+export function shureNumber(
+  value: string | undefined,
+  opts: { width: ShureFieldWidth; min?: number; max?: number },
+): number | null {
+  const n = safeInt(value);
+  if (Number.isNaN(n)) return null;
+  if (n >= FIELD_TOP[opts.width] - (SENTINEL_BLOCK - 1)) return null;
+  if (opts.min !== undefined && n < opts.min) return null;
+  if (opts.max !== undefined && n > opts.max) return null;
+  return n;
+}
+
+/**
  * Battery runtime remaining, in whole minutes, from a Shure runtime field.
  *
- * Shure sends whole minutes with three sentinels at the top of the 16-bit range:
- * 65535 unknown, 65534 calculating, 65533 error. Read naively those become a
- * battery with forty-five days left on it, which is why this lives in one place
- * rather than in each driver that reads a runtime field — Axient calls the field
- * TX_BATT_MINS and ULX-D calls it BATT_RUN_TIME, but the encoding is identical
- * and the sentinels are the part that is easy to get wrong.
+ * Axient calls the field TX_BATT_MINS, ULX-D calls it BATT_RUN_TIME and an SBC
+ * charger calls its counterpart BATT_TIME_TO_FULL, but the encoding is identical:
+ * whole minutes in a 16-bit field whose top is markers. Named separately from
+ * `shureNumber` because "minutes" is the unit three drivers and the charger all
+ * read, and one name for it is one place to be wrong.
  */
 export function batteryMinutesFrom(value: string | undefined): number | null {
-  const minutes = safeInt(value);
-  if (Number.isNaN(minutes) || minutes < 0 || minutes >= 65533) return null;
-  return minutes;
+  return shureNumber(value, { width: 16, min: 0 });
 }
 
 // Re-exported, not redefined. There were three copies of clamp in this repo —

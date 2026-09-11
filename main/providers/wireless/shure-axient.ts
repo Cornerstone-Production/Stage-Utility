@@ -15,6 +15,7 @@ import {
   normalisedDb,
   rfBarsFromDbm,
   safeInt,
+  shureNumber,
   stripBraces,
 } from "./shure-base.js";
 
@@ -91,16 +92,15 @@ export class ShureAxient extends ShureBaseProvider {
       }
 
       case "BATT_BARS": {
-        const bars = safeInt(value);
-        if (!Number.isNaN(bars)) {
-          if (bars === 255) {
-            state.battery = null;
-            state.online = false;
-          } else {
-            // Only use bars as battery fallback if no BATT_CHARGE has arrived yet.
-            if (state.battery === null) state.battery = bars * 20;
-            state.online = true;
-          }
+        // 0–5 bars in a byte field; the top of the byte is "no transmitter".
+        const bars = shureNumber(value, { width: 8, min: 0, max: 5 });
+        if (bars === null) {
+          state.battery = null;
+          state.online = false;
+        } else {
+          // Only use bars as battery fallback if no BATT_CHARGE has arrived yet.
+          if (state.battery === null) state.battery = bars * 20;
+          state.online = true;
         }
         console.debug(`[shure:${this.id}] ch${channel} BATT_BARS: ${value}`);
         break;
@@ -138,30 +138,23 @@ export class ShureAxient extends ShureBaseProvider {
       }
 
       case "TX_BATT_CHARGE_PERCENT": {
-        const charge = safeInt(value);
-        if (!Number.isNaN(charge)) {
-          if (charge === 255 || charge < 0 || charge > 100) {
-            state.battery = null; // unknown / no TX
-          } else {
-            state.battery = clamp(charge, 0, 100);
-            state.online = true;
-          }
-        }
+        const charge = shureNumber(value, { width: 8, min: 0, max: 100 });
+        state.battery = charge; // null = unknown / no TX
+        if (charge !== null) state.online = true;
         console.debug(`[shure:${this.id}] ch${channel} TX_BATT_CHARGE_PERCENT: ${value}`);
         break;
       }
 
       case "TX_BATT_BARS": {
-        const bars = safeInt(value);
-        if (!Number.isNaN(bars)) {
-          if (bars === 255) {
-            state.battery = null;
-            state.online = false; // 255 = no transmitter linked
-          } else {
-            // Only a fallback if a precise percent hasn't arrived.
-            if (state.battery === null) state.battery = clamp(bars, 0, 5) * 20;
-            state.online = true;
-          }
+        // 0–5 bars in a byte field; the top of the byte is "no transmitter linked".
+        const bars = shureNumber(value, { width: 8, min: 0, max: 5 });
+        if (bars === null) {
+          state.battery = null;
+          state.online = false;
+        } else {
+          // Only a fallback if a precise percent hasn't arrived.
+          if (state.battery === null) state.battery = bars * 20;
+          state.online = true;
         }
         console.debug(`[shure:${this.id}] ch${channel} TX_BATT_BARS: ${value}`);
         break;

@@ -11,7 +11,7 @@
 // Axient handheld fields were locked in.
 
 import type { ConfigField } from "../../types/integrations.js";
-import { ShureBaseProvider, safeInt, stripBraces } from "./shure-base.js";
+import { ShureBaseProvider, shureNumber, stripBraces } from "./shure-base.js";
 
 export class ShureCharger extends ShureBaseProvider {
   readonly id = "shure-charger";
@@ -92,14 +92,13 @@ export class ShureCharger extends ShureBaseProvider {
         break;
       }
 
-      // Charge percent (0–100, zero-padded e.g. "087"). An EMPTY bay reports the
-      // sentinel 255 (verified on FW 1.4.53) — must become null, NOT clamp to 100,
-      // or an empty bay shows a bogus full battery. Frame order in `GET 0 ALL` puts
-      // BATT_DETECTED before BATT_CHARGE, so without this an empty bay ends up
-      // online=false yet battery=100.
+      // Charge percent (0–100, zero-padded e.g. "087"). An empty or faulted bay
+      // answers with a marker at the top of the byte (255 empty, 254 faulted on FW
+      // 1.4.53) — must become null, NOT clamp to 100, or the bay shows a bogus full
+      // battery. Frame order in `GET 0 ALL` puts BATT_DETECTED before BATT_CHARGE,
+      // so without this an empty bay ends up online=false yet battery=100.
       case "BATT_CHARGE": {
-        const n = safeInt(value);
-        state.battery = Number.isNaN(n) || n < 0 || n > 100 ? null : n;
+        state.battery = shureNumber(value, { width: 8, min: 0, max: 100 });
         break;
       }
 
@@ -120,26 +119,27 @@ export class ShureCharger extends ShureBaseProvider {
         break;
       }
 
-      // Charge cycles (zero-padded e.g. "00569"). Empty bay → 65535 sentinel.
+      // Charge cycles (zero-padded e.g. "00569"), a 16-bit field. An empty bay
+      // answers 65535 and a faulted one 65534 — the old guard here was `>= 65535`,
+      // so a faulted bay rendered "65534 cyc" on every display with cycles on.
       case "BATT_CYCLE": {
-        const n = safeInt(value);
-        state.cycles = Number.isNaN(n) || n >= 65535 ? null : n;
+        state.cycles = shureNumber(value, { width: 16, min: 0 });
         break;
       }
 
-      // State-of-health percent. Empty bay → 255 sentinel.
+      // State-of-health percent (byte; 255 empty, 254 faulted).
       case "BATT_HEALTH": {
-        const n = safeInt(value);
-        state.health = Number.isNaN(n) || n < 0 || n > 100 ? null : n;
+        state.health = shureNumber(value, { width: 8, min: 0, max: 100 });
         break;
       }
 
       // Temperature: read from Fahrenheit and convert. The SBC220's BATT_TEMP_C
-      // field is unreliable on tested firmware (reports e.g. 062 while _F says
-      // 111°F ≈ 44°C), so we source from _F. Empty bay → 255 sentinel.
+      // field is unreliable on tested firmware (reports e.g. 064 while _F says
+      // 115°F ≈ 46°C), so we source from _F. A byte field: 255 empty, 254 faulted
+      // — the old guard was `>= 255`, so a faulted bay rendered 123°C.
       case "BATT_TEMP_F": {
-        const f = safeInt(value);
-        state.tempC = Number.isNaN(f) || f >= 255 ? null : Math.round(((f - 32) * 5) / 9);
+        const f = shureNumber(value, { width: 8, min: -40, max: 200 });
+        state.tempC = f === null ? null : Math.round(((f - 32) * 5) / 9);
         break;
       }
 

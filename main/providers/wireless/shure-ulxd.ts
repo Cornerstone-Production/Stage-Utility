@@ -8,6 +8,7 @@ import {
   normalisedDb,
   rfBarsFromDbm,
   safeInt,
+  shureNumber,
   stripBraces,
 } from "./shure-base.js";
 
@@ -68,16 +69,14 @@ export class ShureUlxd extends ShureBaseProvider {
       }
 
       case "BATT_BARS": {
-        const bars = safeInt(value);
-        if (!Number.isNaN(bars)) {
-          if (bars === 255) {
-            // 255 = no TX present
-            state.battery = null;
-            state.online = false;
-          } else {
-            state.battery = state.battery ?? bars * 20; // fallback if no BATT_CHARGE
-            state.online = true;
-          }
+        // 000–005 bars in a byte field; the top of the byte is "no TX present".
+        const bars = shureNumber(value, { width: 8, min: 0, max: 5 });
+        if (bars === null) {
+          state.battery = null;
+          state.online = false;
+        } else {
+          state.battery = state.battery ?? bars * 20; // fallback if no BATT_CHARGE
+          state.online = true;
         }
         console.debug(`[shure:${this.id}] ch${channel} BATT_BARS: ${value}`);
         break;
