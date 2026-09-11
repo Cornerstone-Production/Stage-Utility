@@ -82,11 +82,10 @@ export class ShureUlxd extends ShureBaseProvider {
         break;
       }
 
-      case "MUTE_STATUS": {
-        // Stored for completeness; does not affect online flag.
-        console.debug(`[shure:${this.id}] ch${channel} MUTE_STATUS: ${value}`);
-        break;
-      }
+      // A ULX-D reports mute as AUDIO_MUTE (receiver) and TX_MUTE_STATUS (ULXD6/8
+      // handheld), and interference as RF_INT_DET. All three are on the base —
+      // this driver used to carry a `MUTE_STATUS` case, which is not a token a
+      // ULX-D sends, and handle RF_INT_DET nowhere at all.
 
       case "TX_TYPE":
       case "TX_MODEL": {

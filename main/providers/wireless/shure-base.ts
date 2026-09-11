@@ -149,9 +149,102 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
         return true;
       }
 
+      // ── Mute ────────────────────────────────────────────────────────────────
+      // Here rather than per driver because both families send it and NEITHER
+      // driver was reading a token its gear sends. The Axient driver handled
+      // `MUTE_MODE_STATUS` and an AD4 sends `TX_MUTE_MODE_STATUS`; the ULX-D
+      // driver handled `MUTE_STATUS` and a ULX-D sends `AUDIO_MUTE` /
+      // `TX_MUTE_STATUS`. Both logged the value and stored nothing anyway, so a
+      // muted pack drew five bars and a full battery and looked perfect.
+      //
+      // Polarity is PER TOKEN and cannot be a shared word list: `AUDIO_MUTE ON`
+      // means muted, and `TX_MUTE_MODE_STATUS ON` means the audio is OPEN (that
+      // one says MUTE when it is muted). Getting this backwards is worse than not
+      // shipping it — every unmuted pack on the wall would read MUTED.
+      case "AUDIO_MUTE":
+      case "TX_MUTE_STATUS":
+      case "MUTE_STATUS": {
+        this.applyMute(channel, token === "AUDIO_MUTE" ? "rx" : "tx", onOffMute(value), state);
+        return true;
+      }
+
+      case "TX_MUTE_MODE_STATUS":
+      case "MUTE_MODE_STATUS": {
+        this.applyMute(channel, "tx", muteModeMute(value), state);
+        return true;
+      }
+
+      // The physical button and the talk switch are NOT the mute state, and are
+      // deliberately not mapped to it. TX_MUTE_BUTTON_STATUS is PRESSED/RELEASED
+      // and on a ULXD6/8 the button can be momentary or latching, so PRESSED does
+      // not mean muted — TX_MUTE_STATUS is the real state on the same models.
+      // TX_TALK_SWITCH is a push-to-talk whose resting state is OFF; reading that
+      // as muted would mark every pack that has one muted for the whole service.
+      case "TX_MUTE_BUTTON_STATUS":
+      case "TX_TALK_SWITCH": {
+        console.debug(`[shure:${this.id}] ch${channel} ${token}: ${value} (not a mute state)`);
+        return true;
+      }
+
+      // ── Interference ────────────────────────────────────────────────────────
+      // INTERFERENCE_STATUS (NONE/DETECTED) is the AD spelling and RF_INT_DET
+      // (NONE/CRITICAL) the ULX-D one. Both were handled by a console.log in the
+      // Axient driver and by nothing at all in ULX-D.
+      case "INTERFERENCE_STATUS":
+      case "INTERFERENCE_STATUS2":
+      case "RF_INT_DET": {
+        const v = value.trim().toUpperCase();
+        const detected = v === "UNKNOWN" || v === "UNKN" || v === "" ? null : v !== "NONE";
+        if (detected !== state.interference) {
+          state.interference = detected;
+          if (detected) console.warn(`[shure:${this.id}] ch${channel} RF interference: ${token}=${value}`);
+          else if (detected === false) console.log(`[shure:${this.id}] ch${channel} RF interference cleared`);
+        }
+        return true;
+      }
+
+      // Channel quality 0-5, 255 unknown. Metered, so it also arrives inside
+      // SAMPLE — see the Axient driver, which reads it from token 3.
+      case "CHAN_QUALITY": {
+        state.quality = shureNumber(value, { width: 8, min: 0, max: 5 });
+        return true;
+      }
+
       default:
         return false;
     }
+  }
+
+  /**
+   * Mute sources, per channel.
+   *
+   * A receiver-side mute (`AUDIO_MUTE`) and a transmitter-side mute
+   * (`TX_MUTE_*`) are different fields that silence the same channel, and each
+   * arrives on its own cadence. Writing one field from whichever landed last
+   * would have a pack muted at the transmitter un-mute itself the next time
+   * `AUDIO_MUTE OFF` came round, so both are remembered and `muted` is their OR.
+   */
+  private muteSources = new Map<number, { rx: boolean | null; tx: boolean | null }>();
+
+  private applyMute(
+    channel: number,
+    side: "rx" | "tx",
+    value: boolean | null,
+    state: ChannelState,
+  ): void {
+    const sources = this.muteSources.get(channel) ?? { rx: null, tx: null };
+    sources[side] = value;
+    this.muteSources.set(channel, sources);
+    const known = [sources.rx, sources.tx].filter((v): v is boolean => v !== null);
+    const muted = known.length === 0 ? null : known.some(Boolean);
+    if (muted === state.muted) return;
+    state.muted = muted;
+    console.log(`[shure:${this.id}] ch${channel} ${muted === null ? "mute state unknown" : muted ? "MUTED" : "unmuted"}`);
+  }
+
+  /** Forget a channel's mute sources — a reset, or a channel rebuilt. */
+  protected clearMuteSources(): void {
+    this.muteSources.clear();
   }
 
 
@@ -184,6 +277,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
 
   /** Initialise (or reset) channel states to their offline defaults. */
   protected initChannelStates(count: number): void {
+    this.clearMuteSources();
     this.channelStates.clear();
     for (let n = 1; n <= count; n++) {
       this.channelStates.set(n, this.buildDefaultChannelState(n));
@@ -528,6 +622,29 @@ export function rfBarsFromDbm(dbm: number): number {
 }
 
 /** Strip Shure name braces: `{Name}` â `Name`. */
+/**
+ * `AUDIO_MUTE` / `TX_MUTE_STATUS`: ON = muted, OFF = open, UNKN = no answer.
+ *
+ * Deliberately NOT merged with muteModeMute below into one word list: the same
+ * word means the opposite thing on the other token, and one shared list is how
+ * that gets missed. Verified against Shure's own command-string references for
+ * AD4 and ULX-D.
+ */
+export function onOffMute(value: string): boolean | null {
+  const v = value.trim().toUpperCase();
+  if (v === "ON") return true;
+  if (v === "OFF") return false;
+  return null;
+}
+
+/** `TX_MUTE_MODE_STATUS`: MUTE = muted, ON = audio OPEN, UNKNOWN = no answer. */
+export function muteModeMute(value: string): boolean | null {
+  const v = value.trim().toUpperCase();
+  if (v === "MUTE" || v === "MUTED") return true;
+  if (v === "ON") return false;
+  return null;
+}
+
 export function stripBraces(s: string): string {
   return s.replace(/^\{/, "").replace(/\}$/, "").trim();
 }

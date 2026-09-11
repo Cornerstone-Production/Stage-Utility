@@ -41,6 +41,16 @@ export interface ChannelState {
   charging: boolean | null;
   frequencyLabel: string | null;
   audioLevel: number | null;
+  /** The channel is muted — at the receiver, or at the pack. A muted pack still
+   *  reports five bars and a full battery, so without this it looks perfect on a
+   *  stage display while nothing comes out of it. */
+  muted: boolean | null;
+  /** Channel quality 0-5. NOT signal strength: it accounts for interference, so a
+   *  pack can sit at five bars of RF with a quality of two. It is the figure
+   *  Wireless Workbench leads with. */
+  quality: number | null;
+  /** The receiver is reporting RF interference on this channel. */
+  interference: boolean | null;
   /** Charger-bay telemetry (null for mics and IEMs). */
   cycles: number | null;
   health: number | null;
@@ -76,6 +86,9 @@ export function blankChannel(
     charging: null,
     frequencyLabel: null,
     audioLevel: null,
+    muted: null,
+    quality: null,
+    interference: null,
     cycles: null,
     health: null,
     tempC: null,

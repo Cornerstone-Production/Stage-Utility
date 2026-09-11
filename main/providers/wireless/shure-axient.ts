@@ -106,12 +106,6 @@ export class ShureAxient extends ShureBaseProvider {
         break;
       }
 
-      case "MUTE_MODE_STATUS": {
-        // "ON" = unmuted, "MUTE" = muted — does not affect online status.
-        console.debug(`[shure:${this.id}] ch${channel} MUTE_MODE_STATUS: ${value}`);
-        break;
-      }
-
       case "TX_TYPE":
       case "TX_MODEL": {
         if (value === "UNKNOWN" || value === "UNKN") {
@@ -160,12 +154,9 @@ export class ShureAxient extends ShureBaseProvider {
         break;
       }
 
-      case "INTERFERENCE_STATUS":
-      case "RF_INT_DET": {
-        // Log RF interference events — not mapped to DeviceStatus shape yet.
-        console.log(`[shure:${this.id}] ch${channel} RF interference: ${token}=${value}`);
-        break;
-      }
+      // Mute, interference and channel quality are on the base: an AD4 and a
+      // ULX-D spell all three differently, and each driver had its own spelling
+      // that its own gear does not send. See handleCommonReport.
 
       default:
         // The tokens every family answers the same way live on the base. Only
@@ -180,10 +171,11 @@ export class ShureAxient extends ShureBaseProvider {
   }
 
   // ── SAMPLE messages ───────────────────────────────────────────────────────
-  // AD SAMPLE format (from Bitfocus shure-axient module):
-  // SAMPLE {ch} ALL {quality} {audioLED} {audioPeak} {audioLevel} {antennaStr} {bmA} {rfA} {bmB} {rfB} ...
-  // Indices:      0      1    2      3         4           5           6           7        8    9   10   11
+  // AD SAMPLE format, per Shure's AD4 command-string reference:
+  // < SAMPLE {ch} ALL qual audBitmap audPeak audRms rfAntStats rfBitmapA rfRssiA rfBitmapB rfRssiB >
+  // Indices:      0      1    2   3      4        5       6        7          8        9        10      11
   //
+  // quality  = tokens[3]  (CHAN_QUALITY, 0-5; metered, so it only arrives here)
   // rfLevelA = tokens[9]  - 120
   // rfLevelB = tokens[11] - 120
   // rfBars   = max(tokens[8], tokens[10]) clamped 0..5 (these are bar values direct from device)
@@ -196,6 +188,13 @@ export class ShureAxient extends ShureBaseProvider {
     // SLOT-level metering: `SAMPLE {ch} SLOT {n} ALL ...` — everything from "ALL"
     // onward shifts right by two tokens vs. the channel-level `SAMPLE {ch} ALL ...`.
     const off = (tokens[2] ?? "").toUpperCase() === "SLOT" ? 2 : 0;
+
+    // Channel quality: named in this file's own comment for the whole of its life
+    // and read by nothing. It is NOT signal strength — it accounts for
+    // interference, so a pack can sit at five bars with a quality of two, and it
+    // is the figure Wireless Workbench leads with. CHAN_QUALITY is a metered
+    // property: the device sends no REP when it changes, only this.
+    state.quality = shureNumber(tokens[3 + off], { width: 8, min: 0, max: 5 });
 
     const bmA = safeInt(tokens[8 + off]);
     const rfARaw = safeInt(tokens[9 + off]);
@@ -226,7 +225,7 @@ export class ShureAxient extends ShureBaseProvider {
     }
 
     console.debug(
-      `[shure:${this.id}] ch${channel} SAMPLE rfDbm=${state.rfLevelDbm} rfBars=${state.rfBars} audio=${state.audioLevel?.toFixed(2)}`,
+      `[shure:${this.id}] ch${channel} SAMPLE rfDbm=${state.rfLevelDbm} rfBars=${state.rfBars} qual=${state.quality ?? "?"} audio=${state.audioLevel?.toFixed(2)}`,
     );
 
     this.emitChannel(channel);

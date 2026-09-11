@@ -42,6 +42,15 @@ export interface DeviceStatus {
   charging: boolean | null;
   frequencyLabel: string | null;
   audioLevel: number | null;
+  /** The channel is muted, at the receiver or at the pack. A muted pack still
+   *  reports five bars and a full battery, so on a stage display it looks
+   *  perfect while nothing comes out of it. */
+  muted?: boolean | null;
+  /** Channel quality 0-5. NOT signal strength: it accounts for interference, so
+   *  a pack can sit at five bars of RF with a quality of two. */
+  quality?: number | null;
+  /** The receiver reports RF interference on this channel. */
+  interference?: boolean | null;
   /** Charger-bay telemetry (SBC-series chargers). null/absent for mics & IEMs. */
   cycles: number | null;
   health: number | null;

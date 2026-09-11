@@ -56,9 +56,11 @@ meter rate is set once and applies to all wireless gear.
 
 **On a layout:** add object → wireless:
 - **Wireless summary** — online count (`online/total`), the lowest battery %, and
-  optionally the shortest runtime left across the fleet.
-- **Wireless channel** — one channel's RF bars, battery %, runtime remaining,
-  frequency and audio level (each toggleable).
+  optionally the shortest runtime left across the fleet. Muted packs are counted
+  here too (`1 muted`).
+- **Wireless channel** — one channel's RF bars, channel quality, battery %,
+  runtime remaining, frequency and audio level (each toggleable), plus mute and
+  interference, which are not.
 - **Charger battery** — a charger bay's battery state.
 
 Charger bays are deliberately absent from the first two. A bay is not a mic: an
@@ -108,6 +110,36 @@ the gear provides one:
 The reading is coloured against a service rather than a percentage: green past 90
 minutes, amber past 30, red below — enough for a service, enough for one that has
 started, and time to go and swap it.
+
+### Mute, quality and interference
+
+A muted pack still reports five bars and a full battery, so the telemetry alone
+cannot tell you anything is wrong. A channel the receiver reports as muted reads
+**MUTED** in place of its headline figure — the figures move down a line rather
+than disappearing — and the fleet summary counts it. Neither is behind a toggle:
+a mute is a fault, not a metric.
+
+Mute is read from the receiver's own fields, and a mute at either end counts. A
+channel muted at the transmitter stays muted on screen when the receiver reports
+its own mute is off:
+
+| Provider | Mute reported by |
+|---|---|
+| Shure Axient Digital | `AUDIO_MUTE`, `TX_MUTE_MODE_STATUS` |
+| Shure ULX-D | `AUDIO_MUTE`, `TX_MUTE_STATUS` (ULXD6/8) |
+
+A transmitter's mute *button* (`TX_MUTE_BUTTON_STATUS`) and a talk switch
+(`TX_TALK_SWITCH`) are deliberately not read as mute: the button can be momentary
+or latching, and a push-to-talk rests in the off position all service.
+
+**Channel quality** (`Q0`–`Q5`) shows with RF bars. It is not signal strength —
+it accounts for interference, so a pack can sit at five bars with a quality of
+two, which is the reading that predicts a dropout.
+
+**RF interference** shows as `RF INT` whenever the receiver reports it
+(`INTERFERENCE_STATUS` on Axient, `RF_INT_DET` on ULX-D) and is logged on the
+edge: `[shure:shure-axient] ch2 RF interference: INTERFERENCE_STATUS=DETECTED`,
+and again when it clears.
 
 ## Reconnecting
 
