@@ -358,6 +358,7 @@ interface Reachable {
   playlistRetryBaseMs: number;
   playlistRetryMaxMs: number;
   pollMs: number;
+  req: unknown;
   scheduleIn(ms: number): void;
   connect(): Promise<void>;
   running: boolean;
@@ -636,6 +637,35 @@ describe("a ProPresenter that refuses the subscription", () => {
     } finally {
       delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
     }
+  });
+
+  it("a subscribe that fails leaves no dead request handle behind", async () => {
+    // The unsupported branch forgets `req` with a comment explaining why. The
+    // failed branch did not, and it is the same situation: the caller is about
+    // to back off and re-dial, and endStream's ONLY guard is that `stream` and
+    // `req` are both null — a late event on a handle left in place tears down
+    // and schedules a second reconnect racing the one connect() just armed.
+    //
+    // The late event itself cannot be staged against a stub, so what is asserted
+    // is the invariant it depends on: a subscribe that produced no stream leaves
+    // no handle behind. One connect() is driven by hand rather than through the
+    // retry loop, because the retry installs a fresh handle within 30ms.
+    resetSubscribe = true;
+    propresenterService.configure("127.0.0.1", port);
+    propresenterService.stop(); // no automatic retry racing the assertion
+    const svc = inner(propresenterService);
+    svc.running = true;
+    await svc.connect();
+    const leftBehind = svc.req;
+    propresenterService.stop();
+
+    assert.equal(
+      leftBehind,
+      null,
+      "the failed subscribe left its dead request handle in place, so a late " +
+        "event on it reaches endStream and schedules a reconnect on top of the " +
+        "one the failure already scheduled",
+    );
   });
 
   it("the fallback poll still backs off when nobody is watching", async () => {

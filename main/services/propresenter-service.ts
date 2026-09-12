@@ -562,7 +562,11 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     // Listeners first: destroying a held response emits 'error'/'aborted', and a
     // handler still attached would schedule a reconnect for a stream we closed
     // on purpose — which is a second timer racing the one stop() just cleared.
-    stream?.removeAllListeners();
+    //
+    // BY NAME. A bare removeAllListeners() strips Node's own internal listeners
+    // on the response too, and gets away with it only because the destroy below
+    // follows immediately; these three are the ones subscribe() attaches.
+    for (const event of ["data", "end", "error"] as const) stream?.removeAllListeners(event);
     stream?.destroy();
     req?.destroy();
   }
@@ -836,7 +840,15 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
         // Fires both before the response (never connected) and after (the socket
         // died mid-stream). Only the first is an outcome; the second is an end.
         if (settled) this.endStream(errorMessage(err));
-        else settle({ kind: "failed", error: err });
+        else {
+          // Same reason as the unsupported branch above, and the other half of
+          // the same fix: the caller is about to back off and re-dial, and a
+          // late event on this dead handle would reach endStream — whose only
+          // guard is these two fields — and schedule a second reconnect racing
+          // the first.
+          this.req = null;
+          settle({ kind: "failed", error: err });
+        }
       });
       req.end(body);
     });
