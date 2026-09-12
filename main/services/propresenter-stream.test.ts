@@ -275,9 +275,13 @@ const loggedMatching = (re: RegExp): string[] => logged.filter((l) => re.test(l)
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Comfortably past PUBLISH_COALESCE_MS plus a round trip to the stub. */
+const PUBLISH_SETTLE_MS = 60;
+
 interface Reachable {
   streamIdleMs: number;
   streamFallback: boolean;
+  playlistRetryAt: number;
   pollMs: number;
   scheduleIn(ms: number): void;
   connect(): Promise<void>;
@@ -668,6 +672,113 @@ describe("the presentation document against the reader's buffer cap", () => {
     push(frame(WIRE.active, big));
     await until("the oversized document to publish", () => status().slideCount != null);
     assert.equal(status().slideCount, TOTAL_SLIDES);
+  });
+});
+
+// ── The playlist that cannot be read ─────────────────────────────────────────
+
+describe("a playlist the API refuses", () => {
+  /** Every `/v1/playlist/<uuid>` read — NOT `/v1/playlist/active`, which is a frame. */
+  const playlistReads = (): string[] => seen.filter((s) => s === `GET /v1/playlist/${PLAYLIST_UUID}`);
+
+  /** Push one playlist frame and wait for the publish it causes to settle. */
+  async function frameAndSettle(): Promise<void> {
+    push(frame(WIRE.playlist, PLAYLIST_FRAME));
+    await sleep(PUBLISH_SETTLE_MS);
+  }
+
+  it("is read once, not once per frame, for as long as it keeps failing", async () => {
+    // The bug: the uuid was recorded only on the success path, so the "has the
+    // playlist changed?" guard never became false and the read went out again on
+    // every single cycle, for ever. A Planning Center linked playlist answers 404
+    // here, so the failing branch is a normal Sunday and not an outage.
+    playlistStatus = 404;
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+
+    for (let i = 0; i < 8; i++) await frameAndSettle();
+
+    assert.deepEqual(
+      playlistReads(),
+      [`GET /v1/playlist/${PLAYLIST_UUID}`],
+      `a playlist that 404s was read ${playlistReads().length} times in eight frames — ` +
+        "the failure is not recorded, so it is retried for ever with no back-off",
+    );
+  });
+
+  it("says so once, with the reason and the address", async () => {
+    playlistStatus = 404;
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    for (let i = 0; i < 4; i++) await frameAndSettle();
+
+    const lines = loggedMatching(/playlist unreadable/);
+    assert.equal(lines.length, 1, `logged ${lines.length} times, not once`);
+    assert.match(lines[0], /HTTP 404/);
+    assert.match(lines[0], /127\.0\.0\.1:/);
+    assert.match(lines[0], /retrying in 30s/);
+  });
+
+  it("still publishes everything else, with no next item", async () => {
+    // The read is not rethrown: failing the whole status frame because one
+    // optional field could not be resolved would blank the slide and the timers
+    // with it. The failure comes back as `nextServiceItem: null`.
+    playlistStatus = 404;
+    await streaming();
+    await until("the burst to publish", () => status().currentSlideText === "line one");
+    const s = status();
+    assert.equal(s.currentServiceItem, "Opening Song");
+    assert.equal(s.nextServiceItem, null);
+    assert.equal(s.slideCount, TOTAL_SLIDES, "the rest of the frame was lost with the playlist");
+  });
+
+  it("does retry once the back-off comes due, and recovers", async () => {
+    playlistStatus = 404;
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    await frameAndSettle();
+    assert.equal(playlistReads().length, 1);
+
+    // Bring the retry forward rather than waiting thirty seconds for it.
+    inner(propresenterService).playlistRetryAt = Date.now() - 1;
+    playlistStatus = 200;
+    await frameAndSettle();
+    assert.equal(playlistReads().length, 2, "the back-off never came due — one failure is permanent");
+    await until("the recovered playlist to publish", () => status().nextServiceItem === "Message");
+
+    // Recovered: the back-off is cleared, so the cache is a cache again.
+    for (let i = 0; i < 4; i++) await frameAndSettle();
+    assert.equal(playlistReads().length, 2, "a recovered playlist is being re-read every frame");
+  });
+
+  it("a DIFFERENT playlist is read at once, not after the broken one's back-off", async () => {
+    // The operator switching to a readable playlist must not be made to wait out
+    // a timer set by the one that failed.
+    playlistStatus = 404;
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    await frameAndSettle();
+    assert.equal(playlistReads().length, 1);
+
+    playlistStatus = 200;
+    const other = "44444444-4444-4444-8444-444444444444";
+    push(
+      frame(WIRE.playlist, {
+        presentation: {
+          playlist: { uuid: other, name: "Second", index: 4 },
+          item: { uuid: "i-1", name: "Opening Song", index: 1 },
+        },
+      }),
+    );
+    await until(
+      "the new playlist to be read immediately",
+      () => seen.includes(`GET /v1/playlist/${other}`),
+      1000,
+    );
   });
 });
 

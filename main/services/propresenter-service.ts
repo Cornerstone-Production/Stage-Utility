@@ -108,6 +108,19 @@ const STREAM_IDLE_MS = 15_000;
  * stays up for weeks; the cost of being under is a blank panel nobody can explain.
  */
 const STREAM_MAX_BUFFER = 1_000_000;
+
+/**
+ * How long a playlist that could not be read waits before it is asked for again,
+ * doubling to a ceiling.
+ *
+ * `/v1/playlist/<uuid>` answers 404 for a Planning Center linked playlist, so
+ * this is the ordinary case here rather than an outage. Thirty seconds is short
+ * enough that an operator who fixes the playlist mid-service sees the "next item"
+ * name come back within a song, and the ceiling keeps a permanently-404ing one to
+ * six reads an hour instead of one per frame.
+ */
+const PLAYLIST_RETRY_BASE_MS = 30_000;
+const PLAYLIST_RETRY_MAX_MS = 10 * 60_000;
 // The macro list is asked for every time the rule editor opens, once per
 // configured instance, and it changes only when somebody edits ProPresenter.
 // Thirty seconds rather than the Companion export's five minutes: that list has
@@ -372,9 +385,12 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   // Macro-name cache, per instance. See listMacros.
   private macroCache: { at: number; names: string[] } | null = null;
 
-  // Playlist item cache (items change rarely — refetch only when the playlist changes).
+  // Playlist item cache (items change rarely — refetch only when the playlist
+  // changes, or when a recorded failure comes due). See resolveServiceItems.
   private playlistUuid: string | null = null;
   private playlistItems: { name: string; index: number }[] = [];
+  private playlistRetryAt = 0;
+  private playlistFailures = 0;
 
   /**
    * Latest frame per subscribed endpoint. buildStatus() takes exactly these five
@@ -472,6 +488,8 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     // service can't leak a stale "next item" from the previous playlist.
     this.playlistUuid = null;
     this.playlistItems = [];
+    this.playlistRetryAt = 0;
+    this.playlistFailures = 0;
     this.closeStream();
     this.frames = { active: null, slide: null, slideIndex: null, playlistActive: null, timers: null };
     // Re-probe the subscription on the next start(). An operator who upgrades
@@ -882,8 +900,19 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     this.scheduleIn(this.inDemand ? this.pollMs : IDLE_INTERVAL_MS);
   }
 
-  // Current + next service (playlist) item names. Caches the items list and only
-  // re-fetches /v1/playlist/{uuid} when the active playlist changes.
+  /**
+   * Current + next service (playlist) item names.
+   *
+   * Caches the items list and re-reads `/v1/playlist/{uuid}` only when the active
+   * playlist changes — or when a recorded failure comes due for a retry.
+   *
+   * THE UUID IS RECORDED EITHER WAY. It used to be assigned only on the success
+   * path, so a playlist that could not be read never satisfied the "has it
+   * changed?" guard and was re-fetched on every single cycle, for ever. That is
+   * not hypothetical: the API answers 404 for a Planning Center linked playlist,
+   * which is a normal Sunday here, so the failing branch was the steady state and
+   * it cost a request per poll on top of the six.
+   */
   private async resolveServiceItems(
     host: string,
     port: number,
@@ -894,7 +923,16 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     const curIndex = asNumber(pick(playlistActive, "presentation", "item", "index"));
     if (!pUuid) return { current: curName, next: null };
 
-    if (pUuid !== this.playlistUuid) {
+    // A different playlist is read at once; the same one that failed waits out
+    // its back-off. Checked in that order on purpose — an operator switching to
+    // a readable playlist must not be made to wait for the broken one's timer.
+    const changed = pUuid !== this.playlistUuid;
+    const retryDue = this.playlistRetryAt > 0 && Date.now() >= this.playlistRetryAt;
+    if (changed || retryDue) {
+      if (changed) {
+        this.playlistFailures = 0;
+        this.playlistRetryAt = 0;
+      }
       try {
         const pl = await getJson(host, port, `/v1/playlist/${pUuid}`);
         const items = pick(pl, "items");
@@ -907,8 +945,30 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
               .filter((it) => it.name)
           : [];
         this.playlistUuid = pUuid;
-      } catch {
+        this.playlistFailures = 0;
+        this.playlistRetryAt = 0;
+      } catch (err) {
+        // Not rethrown, and this is the one place in this file that degrades
+        // rather than propagates: the caller is about to publish a whole status
+        // frame, and failing it because one optional field could not be resolved
+        // would blank the slide, the sections and the timers along with it. The
+        // failure IS returned — `next` comes back null, which is what the display
+        // shows — and it is on the log with the reason and the address.
+        this.playlistUuid = pUuid; // recorded on failure too: see the note above
         this.playlistItems = [];
+        this.playlistFailures++;
+        const wait = Math.min(
+          PLAYLIST_RETRY_BASE_MS * 2 ** (this.playlistFailures - 1),
+          PLAYLIST_RETRY_MAX_MS,
+        );
+        this.playlistRetryAt = Date.now() + wait;
+        if (this.playlistFailures === 1) {
+          // Once per playlist, not once per frame. The retry is quiet after this.
+          console.warn(
+            `[propresenter] playlist unreadable on ${host}:${port} (${errorMessage(err)}) — ` +
+              `no next-item name, retrying in ${Math.round(wait / 1000)}s`,
+          );
+        }
       }
     }
 
