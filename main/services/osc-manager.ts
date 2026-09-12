@@ -55,6 +55,9 @@ class OscManager {
    *  every reapply and refreshed on a timer. */
   private resolvedIps = new Map<string, string>();
   private resolveTimer: ReturnType<typeof setInterval> | null = null;
+  /** The last set of resolve failures reported, so a standing one is said once
+   *  rather than every five minutes. */
+  private lastResolveFailure = "";
   /** Said once per process: a device sending more than MAX_ARGS is a standing
    *  condition, not an event, and one line per packet would bury the log. */
   private warnedLongMessage = false;
@@ -274,16 +277,26 @@ class OscManager {
     void this.reportResolve();
   }
 
-  /** The only caller that can act on a resolve failure, and all it can do is
-   *  say so — the target keeps working for SEND (dgram resolves the hostname
-   *  itself); what it loses is being told apart from every other sender. */
+  /**
+   * The only caller that can act on a resolve failure, and all it can do is say
+   * so — the target keeps working for SEND (dgram resolves the hostname itself);
+   * what it loses is being told apart from every other sender.
+   *
+   * Said when it CHANGES, not every pass. A name that will never resolve is a
+   * standing condition, and a warning repeated every five minutes for the rest
+   * of the week is a log an operator learns to scroll past.
+   */
   private async reportResolve(): Promise<void> {
     const { resolved, failed } = await this.resolveHosts();
-    if (failed.length > 0) {
-      console.warn(
-        `[osc] could not resolve ${failed.join("; ")} — feedback from ` +
-          `${failed.length === 1 ? "it" : "them"} lands under the wildcard only`,
-      );
+    const key = failed.join("; ");
+    if (key !== this.lastResolveFailure) {
+      this.lastResolveFailure = key;
+      if (failed.length > 0) {
+        console.warn(
+          `[osc] could not resolve ${key} — feedback from ` +
+            `${failed.length === 1 ? "it" : "them"} lands under the wildcard only`,
+        );
+      }
     }
     if (resolved > 0) console.log(`[osc] ${resolved} address(es) resolved for hostname targets`);
   }
