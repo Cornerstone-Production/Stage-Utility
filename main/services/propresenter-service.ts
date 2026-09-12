@@ -2,9 +2,17 @@
 // official local HTTP API (LAN, no auth) and broadcasts it on "propresenter:status"
 // for the dashboard + stage displays.
 //
-// Polls a few REST endpoints once per second while connected (simpler/robust vs
-// chunked streaming; 1s latency is fine and a LAN poll is cheap). Connect/poll/
-// reconnect lifecycle mirrors the wireless providers.
+// Holds ONE server-sent-event stream per instance rather than polling. The old
+// shape was six requests per cycle (`/version` plus five reads, plus a sixth when
+// the playlist changed) against every configured machine: with two auditoriums,
+// one at 500ms and one at 1000ms, roughly 18 requests a second all week, and
+// slide latency of up to a poll interval. `POST /v1/status/updates?sse` replaces
+// all of it — a snapshot frame per endpoint on subscribe, then a frame when one
+// changes, and no requests at all in between.
+//
+// The one poll left is the FALLBACK (see `streamFallback`): `status/updates`
+// needs a ProPresenter far below the one this is verified against, but a hard
+// dependency on it would turn an unexpected version into an outage.
 //
 // Field paths are verified against ProPresenter 21.3 (API v1) but written
 // defensively (every field degrades to null), so a different point-release shows
@@ -22,17 +30,97 @@ import * as http from "http";
 import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta, PropInstanceConn } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
+import { createSseReader, keepSocketAlive } from "./sse-reader.js";
 
-const POLL_INTERVAL_MS = 1000; // once/sec is plenty for slide/timer changes (was 500)
+const POLL_INTERVAL_MS = 1000; // fallback poll only — see streamFallback
 // Reconnect back-off when the machine is unreachable (off for the week, etc.): start
 // at 5s and double, clamped by the service-window scheduler (≤2 min in/near a service,
-// stretched toward the idle ceiling otherwise). Resets to the fast poll on reconnect.
+// stretched toward the idle ceiling otherwise). Resets once the stream delivers data.
 const ERROR_BASE_MS = 5000;
-// When no client is watching this instance's channel, drop to a slow keepalive
-// instead of hammering 6 requests/sec — the badge/data stay fresh enough and refresh
-// immediately when someone connects (hydrated on connect + fast poll resumes).
+// FALLBACK POLL ONLY. When no client is watching this instance's channel, the poll
+// drops to a slow keepalive instead of hammering 6 requests/sec. The STREAM has no
+// such gate — see the note above subscribe().
 const IDLE_INTERVAL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 4000;
+
+/**
+ * The endpoints one subscription carries, and the order they are asked for.
+ *
+ * `timer/system_time` earns its place by ticking once a second whether or not
+ * anything on stage moves: it is the heartbeat the silence watchdog below counts,
+ * and without it a stream of only slow-changing endpoints is indistinguishable
+ * from a dead one during a sermon.
+ */
+const STREAM_ENDPOINTS = [
+  "status/slide",
+  "presentation/slide_index",
+  "presentation/active",
+  "playlist/active",
+  "timers/current",
+  "timer/system_time",
+] as const;
+
+/**
+ * How long the six snapshot frames (or a slide's two) are allowed to gather
+ * before one DTO is published.
+ *
+ * A slide advance is `status/slide` AND `presentation/slide_index`, sent as two
+ * frames; publishing between them broadcasts new text against the old index, and
+ * because the channel is change-driven that mismatched frame really does reach
+ * every display. Short enough to be imperceptible next to the poll interval it
+ * replaces, which was 500-1000ms.
+ */
+const PUBLISH_COALESCE_MS = 20;
+
+/**
+ * How often TCP probes the peer once the stream goes quiet.
+ *
+ * The primary liveness check, and the reason it is not an application timer: a
+ * half-open socket — the booth Mac unplugged, its switch port dropped — emits
+ * neither 'end' nor 'error', so no reconnect is ever scheduled and the stage
+ * display keeps showing the slide from before the drop for the rest of the
+ * service. This file has made the neighbouring mistake before: a timeout sat on
+ * test() while the long-lived path had none.
+ */
+const SOCKET_KEEPALIVE_MS = 30_000;
+
+/**
+ * Backstop for what keepalive is slow to see: fifteen missed heartbeats.
+ *
+ * Safe ONLY because `timer/system_time` is subscribed and ticks at 1Hz — a
+ * silence watchdog over a set of slow-changing endpoints would fire during every
+ * quiet stretch and reconnect all week. A false trip costs one re-subscribe and
+ * blanks nothing; a missed dead stream costs the rest of the service, so the
+ * threshold leans tight.
+ */
+const STREAM_IDLE_MS = 15_000;
+
+/**
+ * Buffer cap for this stream, four times the shared default.
+ *
+ * `presentation/active` carries the whole document — every group, slide, note and
+ * arrangement — and the shared reader drops an unterminated run once it passes
+ * the cap, so a document larger than this one would silently lose the frame that
+ * drives sections, slide count and progress. A five-section worship song measured
+ * 14,305 bytes on ProPresenter 21.3; a sermon deck is the untested worst case, so
+ * the cap is set at ~70x the measurement rather than the 18x the 256,000 default
+ * would give. The cost of the headroom is a transient megabyte in a process that
+ * stays up for weeks; the cost of being under is a blank panel nobody can explain.
+ */
+const STREAM_MAX_BUFFER = 1_000_000;
+
+/**
+ * How long a playlist that could not be read waits before it is asked for again,
+ * doubling to a ceiling.
+ *
+ * `/v1/playlist/<uuid>` answers 404 for a Planning Center linked playlist, so
+ * this is the ordinary case here rather than an outage. Thirty seconds is short
+ * enough that an operator who fixes the playlist mid-service sees the "next item"
+ * name come back within a song, and the ceiling keeps a permanently-404ing one to
+ * six reads an hour instead of one per frame.
+ */
+const PLAYLIST_RETRY_BASE_MS = 30_000;
+const PLAYLIST_RETRY_MAX_MS = 10 * 60_000;
 // The macro list is asked for every time the rule editor opens, once per
 // configured instance, and it changes only when somebody edits ProPresenter.
 // Thirty seconds rather than the Companion export's five minutes: that list has
@@ -258,6 +346,32 @@ function playOrderSections(active: unknown): { name: string; colorHex: string }[
   return groups.flatMap(expand);
 }
 
+/**
+ * What `POST /v1/status/updates?sse` did.
+ *
+ * Three cases and not a boolean, because they want three different things:
+ * hold the stream, fall back to polling for good, or back off and re-dial. A
+ * two-state answer is how "this ProPresenter is too old" and "the machine just
+ * went away" end up sharing a code path, and one of those must not be permanent.
+ */
+type SubscribeOutcome =
+  | { kind: "streaming" }
+  | { kind: "unsupported"; status: number }
+  | { kind: "failed"; error: Error };
+
+/**
+ * An SSE event name reduced to the endpoint it reports on, or null.
+ *
+ * Tolerates the leading slash that four of the six frames carry and the two
+ * `presentation/*` ones do not, and the `vN/` the `?sse` framing prepends and
+ * the chunked-JSON framing omits. See handleStreamEvent for the captured names.
+ */
+function streamEndpointOf(name: string | null): string | null {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^\/?(?:v\d+\/)?/, "") || null;
+}
+
 class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   private host: string | null = null;
   private port: number | null = null;
@@ -271,9 +385,42 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   // Macro-name cache, per instance. See listMacros.
   private macroCache: { at: number; names: string[] } | null = null;
 
-  // Playlist item cache (items change rarely — refetch only when the playlist changes).
+  // Playlist item cache (items change rarely — refetch only when the playlist
+  // changes, or when a recorded failure comes due). See resolveServiceItems.
   private playlistUuid: string | null = null;
   private playlistItems: { name: string; index: number }[] = [];
+  private playlistRetryAt = 0;
+  private playlistFailures = 0;
+
+  /**
+   * Latest frame per subscribed endpoint. buildStatus() takes exactly these five
+   * — the poll used to hand it the results of five parallel GETs, and it now gets
+   * the last thing the stream said instead, which is the same data one frame
+   * fresher. `timer/system_time` is deliberately absent: it feeds the watchdog
+   * and contributes nothing to the DTO, so a heartbeat must not cost a rebuild.
+   */
+  private frames: {
+    active: unknown;
+    slide: unknown;
+    slideIndex: unknown;
+    playlistActive: unknown;
+    timers: unknown;
+  } = { active: null, slide: null, slideIndex: null, playlistActive: null, timers: null };
+
+  /** The held response, so teardown can hang up on it. */
+  private stream: http.IncomingMessage | null = null;
+  private req: http.ClientRequest | null = null;
+  private publishTimer: ReturnType<typeof setTimeout> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Set once this instance's ProPresenter refuses the subscription; see connect(). */
+  private streamFallback = false;
+  /** Last delay handed to scheduleIn — the reconnect log line needs the number
+   *  the base class computed, and duplicating that expression here is how two
+   *  copies of a back-off drift apart. */
+  private nextDelayMs = 0;
+  /** STREAM_IDLE_MS, as an instance field so a test can shorten it rather than
+   *  spend fifteen seconds proving the watchdog fires. */
+  private streamIdleMs = STREAM_IDLE_MS;
 
   readonly id: string;
   private onEmitCb: (() => void) | null = null;
@@ -309,7 +456,8 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   configure(host: string, port: number, pollMs?: number): void {
     this.host = host?.trim() || null;
     this.port = port > 0 ? Math.floor(port) : null;
-    // Clamp to a sane floor so a bad setting can't hammer ProPresenter.
+    // Clamp to a sane floor so a bad setting can't hammer ProPresenter. Only the
+    // fallback poll reads this; the stream has no cadence to set.
     this.pollMs = pollMs && pollMs >= 200 ? Math.floor(pollMs) : POLL_INTERVAL_MS;
     this.resetReport();
     this.restart();
@@ -317,8 +465,20 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
 
   override start(): void {
     if (this.running || !this.configured) return;
-    console.log(`[propresenter] polling ${this.host}:${this.port}`);
     super.start();
+  }
+
+  /**
+   * Record the delay the base class chose, then arm it.
+   *
+   * The "reconnecting in Ns" log line has to say the real number, and the only
+   * place that number exists is inside scheduleReconnect(). Reading it here beats
+   * a second copy of `base * 2 ** attempt`, capped by serviceWindow, that would
+   * start telling the operator a different figure the first time either changes.
+   */
+  protected override scheduleIn(delayMs: number): void {
+    this.nextDelayMs = delayMs;
+    super.scheduleIn(delayMs);
   }
 
   protected override teardown(): void {
@@ -328,6 +488,33 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     // service can't leak a stale "next item" from the previous playlist.
     this.playlistUuid = null;
     this.playlistItems = [];
+    this.playlistRetryAt = 0;
+    this.playlistFailures = 0;
+    this.closeStream();
+    this.frames = { active: null, slide: null, slideIndex: null, playlistActive: null, timers: null };
+    // Re-probe the subscription on the next start(). An operator who upgrades
+    // ProPresenter and reconfigures the integration gets the stream back without
+    // restarting Stage; short of that the fallback is for the life of the run,
+    // which the log line says out loud.
+    this.streamFallback = false;
+  }
+
+  /** Hang up on the held stream and disarm everything it armed. */
+  private closeStream(): void {
+    if (this.publishTimer) {
+      clearTimeout(this.publishTimer);
+      this.publishTimer = null;
+    }
+    this.clearIdleWatchdog();
+    const { stream, req } = this;
+    this.stream = null;
+    this.req = null;
+    // Listeners first: destroying a held response emits 'error'/'aborted', and a
+    // handler still attached would schedule a reconnect for a stream we closed
+    // on purpose — which is a second timer racing the one stop() just cleared.
+    stream?.removeAllListeners();
+    stream?.destroy();
+    req?.destroy();
   }
 
   /** Current thumbnail source for the proxy route, or null when unavailable. */
@@ -441,29 +628,38 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     const host = this.host;
     const port = this.port;
     try {
-      // Connectivity probe — gates the card badge. Data fetches below degrade to
-      // null independently so a missing field never looks like a disconnect.
+      // Connectivity probe — gates the card badge and is the same request the
+      // Test button makes. Kept ahead of the subscription so an unreachable
+      // machine reads as unreachable rather than as an unsupported endpoint.
       await getJson(host, port, "/version");
+      // stop() can land inside that await; without this the subscription below
+      // opens a stream nothing will ever close.
+      if (!this.running) return;
 
-      const [active, slide, slideIndex, playlistActive, timers] = await Promise.all([
-        getJson(host, port, "/v1/presentation/active").catch(() => null),
-        getJson(host, port, "/v1/status/slide").catch(() => null),
-        getJson(host, port, "/v1/presentation/slide_index").catch(() => null),
-        getJson(host, port, "/v1/playlist/active").catch(() => null),
-        getJson(host, port, "/v1/timers/current").catch(() => null),
-      ]);
+      if (this.streamFallback) {
+        await this.pollOnce(host, port);
+        return;
+      }
 
-      const services = await this.resolveServiceItems(host, port, playlistActive);
-
-      this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
-      this.report("connected", `Connected to ${host}:${port}`);
-      this.resetBackoff(); // reconnected
-      // Fast poll only while something consumes this instance; else keepalive.
-      // `inDemand` and not an SSE-subscriber check: nothing in-process reads this
-      // payload today, so the two are identical — but the moment one does, a
-      // browser-only check would quietly hand it five-second-old slides instead.
-      this.scheduleIn(this.inDemand ? this.pollMs : IDLE_INTERVAL_MS);
+      const outcome = await this.subscribe(host, port);
+      if (outcome.kind === "unsupported") {
+        console.warn(
+          `[propresenter] status/updates unsupported (HTTP ${outcome.status}) — falling back to polling`,
+        );
+        this.streamFallback = true;
+        await this.pollOnce(host, port);
+        return;
+      }
+      // "failed" is a transport failure on the subscribe itself — the machine
+      // answered /version and then went away, which is an outage and not an
+      // unsupported endpoint. Into the shared catch, so it backs off like one.
+      if (outcome.kind === "failed") throw outcome.error;
+      // "streaming": nothing more to schedule. The stream drives from here, and
+      // holding it open is the whole point — see the note above subscribe().
     } catch (err) {
+      // stop() destroys the in-flight request, which surfaces here as a failure.
+      // A deliberate shutdown is not an outage and must not write one to the log.
+      if (!this.running) return;
       const msg = errorMessage(err);
       // Log only the first failure of an outage, then stay quiet until it recovers —
       // a machine off all week shouldn't spam the log every retry.
@@ -474,8 +670,280 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     }
   }
 
-  // Current + next service (playlist) item names. Caches the items list and only
-  // re-fetches /v1/playlist/{uuid} when the active playlist changes.
+  /**
+   * Open the one held stream, and say what came back.
+   *
+   * NO DEMAND GATE, deliberately, and this reverses what the poll did. Five
+   * requests a second at nobody was worth dropping to a five-second keepalive;
+   * an idle subscription costs one ~40-byte heartbeat frame a second and no
+   * requests at all, so it is cheaper than the keepalive poll that gate fell
+   * back to. Closing it when the last browser leaves would buy nothing and cost
+   * the first display that opens a blank panel until the subscribe completes —
+   * and it would put the in-process consumers `inDemand` exists to count back
+   * in the same hole.
+   *
+   * Never throws: the three outcomes are all things the caller must tell apart.
+   */
+  private subscribe(host: string, port: number): Promise<SubscribeOutcome> {
+    return new Promise((resolve) => {
+      const body = JSON.stringify(STREAM_ENDPOINTS);
+      let settled = false;
+      const settle = (outcome: SubscribeOutcome): void => {
+        if (settled) return;
+        settled = true;
+        resolve(outcome);
+      };
+
+      // Declared ahead of the request so the response handler can clear it. As a
+      // `const` after the http.request() call it sits in a temporal dead zone
+      // that only Node's promise never to call the handler synchronously keeps
+      // safe, and that is not a thing to depend on.
+      let headerTimer: ReturnType<typeof setTimeout> | null = null;
+      const clearHeaderTimer = (): void => {
+        if (headerTimer) clearTimeout(headerTimer);
+        headerTimer = null;
+      };
+
+      const req = http.request(
+        {
+          host,
+          port,
+          method: "POST",
+          path: "/v1/status/updates?sse",
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(body),
+            Accept: "text/event-stream",
+          },
+        },
+        (res) => {
+          clearHeaderTimer();
+          const status = res.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            res.resume();
+            res.destroy();
+            // Forget the request: the caller is about to start polling, and a
+            // late 'error' on this dead handle must not schedule a reconnect on
+            // top of the poll timer. endStream's guard reads these two fields.
+            this.req = null;
+            settle({ kind: "unsupported", status });
+            return;
+          }
+          // Deliberately NOT gated on a text/event-stream content-type: 21.3
+          // answers this request with `transfer-encoding: chunked` and no
+          // content-type at all, so requiring one would reject the live shape.
+          this.stream = res;
+          res.setEncoding("utf8");
+          console.log(`[propresenter] streaming ${STREAM_ENDPOINTS.length} endpoints from ${host}:${port}`);
+          this.report("connected", `Streaming from ${host}:${port}`);
+
+          const reader = createSseReader({
+            maxBuffer: STREAM_MAX_BUFFER,
+            onOverflow: () =>
+              console.warn(
+                `[propresenter] status buffer exceeded ${STREAM_MAX_BUFFER} chars from ${host}:${port} — resyncing`,
+              ),
+          });
+          res.on("data", (chunk: string) => {
+            // Data, not a 2xx, is what proves the stream is real. Resetting the
+            // back-off on the response header instead would let a peer that
+            // accepts the subscribe and hangs up immediately spin at the base
+            // delay for ever.
+            this.resetBackoff();
+            this.armIdleWatchdog();
+            for (const event of reader.push(chunk)) this.handleStreamEvent(event.event, event.data);
+          });
+          res.on("end", () => this.endStream("closed by ProPresenter"));
+          res.on("error", (err) => this.endStream(errorMessage(err)));
+          this.armIdleWatchdog();
+          settle({ kind: "streaming" });
+        },
+      );
+      this.req = req;
+      // A deadline on the RESPONSE HEADERS only, cleared the moment they arrive.
+      //
+      // Not `timeout:` on the request, which is a socket-inactivity timer and
+      // would go on killing a perfectly healthy stream every time the stage is
+      // quiet — the exact shape of the bug this file has already shipped once,
+      // where a timeout sat on test() and not on the long-lived path. Without
+      // something here, a peer that accepts the TCP connection and then never
+      // answers leaves this promise pending for ever: connect() never returns,
+      // nothing is scheduled, and the instance is wedged with no log line.
+      headerTimer = setTimeout(() => {
+        req.destroy(new Error(`no response to status/updates within ${REQUEST_TIMEOUT_MS}ms`));
+      }, REQUEST_TIMEOUT_MS);
+      // The primary liveness check — see SOCKET_KEEPALIVE_MS.
+      keepSocketAlive(req, SOCKET_KEEPALIVE_MS);
+      req.on("error", (err) => {
+        clearHeaderTimer();
+        // Fires both before the response (never connected) and after (the socket
+        // died mid-stream). Only the first is an outcome; the second is an end.
+        if (settled) this.endStream(errorMessage(err));
+        else settle({ kind: "failed", error: err });
+      });
+      req.end(body);
+    });
+  }
+
+  /** The stream is over. Log it once per outage, then back off and re-dial. */
+  private endStream(reason: string): void {
+    if (!this.stream && !this.req) return; // already torn down on purpose
+    this.closeStream();
+    if (!this.running) return;
+    // `attempt` is 0 for the first end after data last flowed, so an isolated
+    // drop is logged and a peer flapping open/closed says it once. The badge is
+    // left alone on purpose: the next connect() probes /version, and a machine
+    // that is genuinely gone fails THERE and reports the error with an address
+    // in it. Flipping it here would flap the card green/red on every reconnect.
+    const first = this.attempt === 0;
+    this.scheduleReconnect();
+    if (first) {
+      console.warn(
+        `[propresenter] stream ended (${reason}) — reconnecting in ${Math.round(this.nextDelayMs / 1000)}s`,
+      );
+    }
+  }
+
+  /** Restart the silence watchdog. See STREAM_IDLE_MS. */
+  private armIdleWatchdog(): void {
+    this.clearIdleWatchdog();
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      this.endStream(`no heartbeat for ${Math.round(this.streamIdleMs / 1000)}s`);
+    }, this.streamIdleMs);
+  }
+
+  private clearIdleWatchdog(): void {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
+
+  /**
+   * File one frame under the endpoint it belongs to, and queue a publish.
+   *
+   * THE EVENT NAME IS NOT THE NAME THAT WAS SUBSCRIBED. Verified on 21.3 against
+   * the exact six-endpoint subscription above:
+   *
+   *   subscribed                    arrives as
+   *   status/slide                  event: /v1/status/slide
+   *   timers/current                event: /v1/timers/current
+   *   playlist/active               event: /v1/playlist/active
+   *   timer/system_time             event: /v1/timer/system_time
+   *   presentation/slide_index      event: v1/presentation/slide_index
+   *   presentation/active           event: v1/presentation/current
+   *
+   * Three separate traps in one list. The name is version-prefixed, so matching
+   * the subscribed name finds nothing at all. The leading slash is on four of the
+   * six and absent from the two `presentation/*` ones, so demanding it loses
+   * sections, slide count and progress. And `presentation/active` is delivered
+   * under a different endpoint name entirely — `presentation/current` — which is
+   * the 14KB document every one of those fields is derived from.
+   *
+   * Hence: strip an optional leading slash and an optional `vN/`, then match, and
+   * accept both names for the document. Unknown endpoints are ignored rather than
+   * logged — a point release adding a frame must not fill the log.
+   */
+  private handleStreamEvent(name: string | null, data: string): void {
+    const endpoint = streamEndpointOf(name);
+    if (!endpoint) return;
+    // The heartbeat. It has already re-armed the watchdog in the data handler and
+    // contributes nothing to the DTO, so it must not cost a rebuild of the whole
+    // presentation once a second.
+    if (endpoint === "timer/system_time") return;
+
+    let parsed: unknown;
+    try {
+      parsed = data ? JSON.parse(data) : null;
+    } catch {
+      // A frame this app cannot read is one field going stale, not a reason to
+      // drop a healthy stream. Named so an operator can see WHICH endpoint.
+      console.warn(`[propresenter] ignored an unreadable ${endpoint} frame`);
+      return;
+    }
+
+    switch (endpoint) {
+      case "status/slide":
+        this.frames.slide = parsed;
+        break;
+      case "presentation/slide_index":
+        this.frames.slideIndex = parsed;
+        break;
+      case "presentation/active":
+      case "presentation/current":
+        this.frames.active = parsed;
+        break;
+      case "playlist/active":
+        this.frames.playlistActive = parsed;
+        break;
+      case "timers/current":
+        this.frames.timers = parsed;
+        break;
+      default:
+        return; // not one of ours
+    }
+    this.queuePublish();
+  }
+
+  /** Collapse a burst of frames into one DTO. See PUBLISH_COALESCE_MS. */
+  private queuePublish(): void {
+    if (this.publishTimer) return;
+    this.publishTimer = setTimeout(() => {
+      this.publishTimer = null;
+      void this.publish();
+    }, PUBLISH_COALESCE_MS);
+  }
+
+  private async publish(): Promise<void> {
+    if (!this.running || !this.host || !this.port) return;
+    const { active, slide, slideIndex, playlistActive, timers } = this.frames;
+    const services = await this.resolveServiceItems(this.host, this.port, playlistActive);
+    if (!this.running) return; // stop() landed inside the playlist fetch
+    this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
+  }
+
+  /**
+   * One round of the old six-request poll — the fallback, and nothing else.
+   *
+   * Unchanged from what shipped, demand gate included: this path really does
+   * five requests a cycle, so backing off when nothing is watching is still the
+   * right trade for it.
+   */
+  private async pollOnce(host: string, port: number): Promise<void> {
+    const [active, slide, slideIndex, playlistActive, timers] = await Promise.all([
+      getJson(host, port, "/v1/presentation/active").catch(() => null),
+      getJson(host, port, "/v1/status/slide").catch(() => null),
+      getJson(host, port, "/v1/presentation/slide_index").catch(() => null),
+      getJson(host, port, "/v1/playlist/active").catch(() => null),
+      getJson(host, port, "/v1/timers/current").catch(() => null),
+    ]);
+
+    const services = await this.resolveServiceItems(host, port, playlistActive);
+
+    this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
+    this.report("connected", `Connected to ${host}:${port}`);
+    this.resetBackoff(); // reconnected
+    // Fast poll only while something consumes this instance; else keepalive.
+    // `inDemand` and not an SSE-subscriber check: nothing in-process reads this
+    // payload today, so the two are identical — but the moment one does, a
+    // browser-only check would quietly hand it five-second-old slides instead.
+    this.scheduleIn(this.inDemand ? this.pollMs : IDLE_INTERVAL_MS);
+  }
+
+  /**
+   * Current + next service (playlist) item names.
+   *
+   * Caches the items list and re-reads `/v1/playlist/{uuid}` only when the active
+   * playlist changes — or when a recorded failure comes due for a retry.
+   *
+   * THE UUID IS RECORDED EITHER WAY. It used to be assigned only on the success
+   * path, so a playlist that could not be read never satisfied the "has it
+   * changed?" guard and was re-fetched on every single cycle, for ever. That is
+   * not hypothetical: the API answers 404 for a Planning Center linked playlist,
+   * which is a normal Sunday here, so the failing branch was the steady state and
+   * it cost a request per poll on top of the six.
+   */
   private async resolveServiceItems(
     host: string,
     port: number,
@@ -486,7 +954,16 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     const curIndex = asNumber(pick(playlistActive, "presentation", "item", "index"));
     if (!pUuid) return { current: curName, next: null };
 
-    if (pUuid !== this.playlistUuid) {
+    // A different playlist is read at once; the same one that failed waits out
+    // its back-off. Checked in that order on purpose — an operator switching to
+    // a readable playlist must not be made to wait for the broken one's timer.
+    const changed = pUuid !== this.playlistUuid;
+    const retryDue = this.playlistRetryAt > 0 && Date.now() >= this.playlistRetryAt;
+    if (changed || retryDue) {
+      if (changed) {
+        this.playlistFailures = 0;
+        this.playlistRetryAt = 0;
+      }
       try {
         const pl = await getJson(host, port, `/v1/playlist/${pUuid}`);
         const items = pick(pl, "items");
@@ -499,8 +976,30 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
               .filter((it) => it.name)
           : [];
         this.playlistUuid = pUuid;
-      } catch {
+        this.playlistFailures = 0;
+        this.playlistRetryAt = 0;
+      } catch (err) {
+        // Not rethrown, and this is the one place in this file that degrades
+        // rather than propagates: the caller is about to publish a whole status
+        // frame, and failing it because one optional field could not be resolved
+        // would blank the slide, the sections and the timers along with it. The
+        // failure IS returned — `next` comes back null, which is what the display
+        // shows — and it is on the log with the reason and the address.
+        this.playlistUuid = pUuid; // recorded on failure too: see the note above
         this.playlistItems = [];
+        this.playlistFailures++;
+        const wait = Math.min(
+          PLAYLIST_RETRY_BASE_MS * 2 ** (this.playlistFailures - 1),
+          PLAYLIST_RETRY_MAX_MS,
+        );
+        this.playlistRetryAt = Date.now() + wait;
+        if (this.playlistFailures === 1) {
+          // Once per playlist, not once per frame. The retry is quiet after this.
+          console.warn(
+            `[propresenter] playlist unreadable on ${host}:${port} (${errorMessage(err)}) — ` +
+              `no next-item name, retrying in ${Math.round(wait / 1000)}s`,
+          );
+        }
       }
     }
 

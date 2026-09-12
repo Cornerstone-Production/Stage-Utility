@@ -24,12 +24,13 @@ let seen: string[] = [];
 /**
  * Just the MACRO requests.
  *
- * `configure()` starts the poller, and its first six requests are already in
- * flight by the time `stop()` lands — they arrive at the stub whenever they
- * arrive. Filtering to `/v1/macro` (which covers both `/v1/macros` and
- * `/v1/macro/<name>/trigger`, and no polled endpoint) keeps every assertion
- * below about the thing under test, including the "contacts nothing" ones:
- * those claim no MACRO request went out, which is exactly the claim.
+ * `configure()` starts the status connection, and its `/version` probe and
+ * `POST /v1/status/updates?sse` are already in flight by the time `stop()`
+ * lands — they arrive at the stub whenever they arrive. Filtering to
+ * `/v1/macro` (which covers both `/v1/macros` and `/v1/macro/<name>/trigger`,
+ * and nothing the status connection asks for) keeps every assertion below about
+ * the thing under test, including the "contacts nothing" ones: those claim no
+ * MACRO request went out, which is exactly the claim.
  */
 const macroPaths = (): string[] => seen.filter((p) => p.startsWith("/v1/macro"));
 /** What the stub answers for a trigger; the macro list is always the same. */
