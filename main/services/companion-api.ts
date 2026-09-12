@@ -27,6 +27,7 @@ import { fetchFailureMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import {
   type ConnectionHealth,
+  type ConnectionsResult,
   connectionSentence,
   parseConnections,
   summariseConnections,
@@ -139,17 +140,7 @@ export type ExportResult =
  */
 export type VariableResult = { value: string } | { error: string };
 
-/**
- * What Companion says about its own connections, or why there is no answer.
- *
- * `unsupported` is its own outcome and not an error. `GET /api/connections` is a
- * 5.x addition — a 4.x Companion answers 404 for it, and reporting that as a
- * fault would put a red sentence on the row of every older install for a
- * diagnostic it was never going to have.
- */
-export type ConnectionsResult =
-  | { ok: true; health: ConnectionHealth; cachedAt: number }
-  | { ok: false; unsupported: boolean; reason: string };
+export type { ConnectionsResult };
 
 class CompanionApi {
   private cache: ExportCache | null = null;

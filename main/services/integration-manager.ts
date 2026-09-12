@@ -954,12 +954,51 @@ class IntegrationManager {
   /** Live count of connected Companion-module clients (pushed from remote-server
    *  as SSE streams marked with the X-Companion-Module header connect/close). */
   private companionClients = 0;
+  /**
+   * What the last connection read said, or null for nothing to say.
+   *
+   * Held rather than written straight to the row, because two independent things
+   * write that one message: a module connecting or dropping, and the hourly
+   * reconcile's health read. Whichever ran last used to be the whole message, so
+   * a module reconnecting five minutes after a reconcile erased "12 of 52
+   * connection(s) in error" with nothing to bring it back for an hour.
+   */
+  private companionHealth: string | null = null;
+
   setCompanionClients(count: number): void {
     this.companionClients = count;
+    this.applyCompanionRow();
+  }
+
+  /**
+   * What Companion reports about its own connections, from the hourly reconcile.
+   *
+   * See companion-connections.ts. null clears it — a Companion too old to have
+   * the endpoint, or a host that just changed.
+   */
+  setCompanionHealth(sentence: string | null): void {
+    this.companionHealth = sentence;
+    this.applyCompanionRow();
+  }
+
+  /**
+   * The Companion row: the inbound client count, then the connection health.
+   *
+   * The CONNECTION STATE tracks the module clients alone and is deliberately not
+   * moved by the health. Companion answering while a bulb is unplugged is not
+   * this integration being down, and a red row for a light in an office is a row
+   * an operator learns to ignore.
+   */
+  private applyCompanionRow(): void {
+    const count = this.companionClients;
+    const parts = [
+      count > 0 ? `${count} Companion client(s) connected` : null,
+      this.companionHealth,
+    ].filter((p): p is string => p !== null);
     this.setConnectionState(
       "companion",
       count > 0 ? "connected" : "disconnected",
-      count > 0 ? `${count} Companion client(s) connected` : null,
+      parts.length ? parts.join(". ") : null,
     );
     this.broadcastStates();
   }
@@ -1090,6 +1129,10 @@ class IntegrationManager {
       // picker offer another Companion's buttons at coordinates this one will
       // press regardless.
       companionApi.invalidate();
+      // The connection counts belonged to it too. Left on the row, "12 of 52
+      // connection(s) in error" would go on describing a box this app no longer
+      // talks to until the next reconcile an hour later.
+      this.setCompanionHealth(null);
       // And the hourly reconcile follows the host: added here it starts without
       // a restart, and cleared here it stops rather than dialling an address
       // nobody has configured. Boot is the only other place it is started.

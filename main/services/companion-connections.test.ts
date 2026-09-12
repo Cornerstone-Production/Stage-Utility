@@ -17,6 +17,7 @@ import {
   type CompanionConnection,
   connectionDetail,
   connectionSentence,
+  healthReport,
   parseConnections,
   summariseConnections,
 } from "./companion-connections.js";
@@ -228,5 +229,55 @@ describe("connectionSentence", () => {
 
   test("errors alone omit the second half rather than saying `0 not reporting`", () => {
     assert.equal(of(entry("a", "m", true, good), entry("b", "m", true, failure)), "1 of 2 connection(s) in error");
+  });
+});
+
+describe("healthReport", () => {
+  const okResult = (...cs: unknown[]) => ({
+    ok: true as const,
+    health: summariseConnections(parseConnections(cs)),
+    cachedAt: 0,
+  });
+
+  // The hourly pass writes to the same /log page an operator reads on a Sunday
+  // morning. "52 connection(s) ok" twenty-four times a day is what buries the
+  // pass that found twelve in error.
+  test("a clean read logs NOTHING, and still says so on the row", () => {
+    const r = healthReport(okResult(entry("a", "generic-pjlink", true, good)));
+    assert.equal(r.log, null);
+    assert.equal(r.sentence, "1 connection(s) ok");
+  });
+
+  test("a read with errors logs the detail, modules and all", () => {
+    const r = healthReport(
+      okResult(entry("a", "generic-pjlink", true, good), entry("b", "red-rcp2", true, connecting)),
+    );
+    assert.equal(r.sentence, "1 of 2 connection(s) in error");
+    assert.equal(r.log, "1 of 2 connection(s) in error: 1 red-rcp2 (Connecting)");
+  });
+
+  // Not a fault, and not silence-worthy either: a connection that is not
+  // reporting is why a switch bound to it reads unknown.
+  test("unknowns alone are logged too", () => {
+    const r = healthReport(okResult(entry("a", "tplink-kasasmartplug", true, null)));
+    assert.equal(r.log, "1 of 1 connection(s) not reporting: 1 tplink-kasasmartplug");
+  });
+
+  // A 4.x Companion never had the endpoint. "unavailable" on every one of them
+  // is a red sentence about a diagnostic that was not coming.
+  test("an unsupported build says nothing anywhere", () => {
+    assert.deepEqual(healthReport({ ok: false, unsupported: true, reason: "old" }), {
+      sentence: null,
+      log: null,
+    });
+  });
+
+  // The caller has ALREADY read the export off the same Companion, so this is a
+  // new fact and not the box being off — and the export's own failure line does
+  // not cover it.
+  test("any other failure is said on the row AND in the log", () => {
+    const r = healthReport({ ok: false, unsupported: false, reason: "Companion answered HTTP 500" });
+    assert.equal(r.sentence, "connection status unavailable: Companion answered HTTP 500");
+    assert.equal(r.log, r.sentence);
   });
 });

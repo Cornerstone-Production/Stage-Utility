@@ -38,6 +38,7 @@ import { errorMessage } from "./errors.js";
 import { scrub, scrubError } from "./scrub.js";
 import { automationEngine } from "./automation-engine.js";
 import { companionApi } from "./companion-api.js";
+import { healthReport } from "./companion-connections.js";
 import {
   type CompanionButton,
   type PairHalf,
@@ -640,6 +641,12 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
   const result = await companionApi.fetchExport();
   if (!result.ok) return null;
 
+  // AFTER the export, so this only ever asks a Companion that just answered, and
+  // on this pass rather than on a timer of its own — the hourly sweep is already
+  // the thing that dials Companion for housekeeping. See companion-connections.ts
+  // for why a connection's health is what explains a switch reading unknown.
+  await reportConnectionHealth();
+
   const rules = automationEngine.listRules();
   const nowIso = new Date().toISOString();
   // Every cue in the engine, press action or not: the rename pass has to see
@@ -777,6 +784,35 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
     );
   }
   return { checked, applied, counts, failed };
+}
+
+/**
+ * Read what Companion says about its own connections, put it on the row and, when
+ * it is not clean, in the log.
+ *
+ * NEVER throws and never fails the pass around it: connection health is a
+ * diagnostic, and a reconcile that abandoned twenty cues because a status read
+ * timed out would be worse than one that says nothing about the bulbs.
+ *
+ * The integration manager is reached through a DYNAMIC import for the same
+ * reason companion-api reaches it that way — it imports the services it drives,
+ * so a static import here would close a cycle.
+ */
+async function reportConnectionHealth(): Promise<void> {
+  try {
+    const { sentence, log } = healthReport(await companionApi.readConnections());
+    // A warning, not a log: every line this writes is a connection that is not
+    // answering, which is the thing an operator came to /log to find.
+    if (log) console.warn(`[companion] ${scrub(log, LOG_MAX)}`);
+    const { integrationManager } = await import("./integration-manager.js");
+    integrationManager.setCompanionHealth(sentence);
+  } catch (err) {
+    // Reported, not swallowed. This is the whole failure surface of the health
+    // read — companionApi.readConnections returns its failures rather than
+    // throwing, so anything landing here is the row update or the import, and a
+    // pass that said nothing at all is how a diagnostic quietly stops existing.
+    console.error("[companion] connection status could not be reported:", scrubError(err));
+  }
 }
 
 /** Hourly. Long enough that a Companion being edited settles, short enough that
