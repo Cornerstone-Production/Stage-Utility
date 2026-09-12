@@ -1420,9 +1420,9 @@ class IntegrationManager {
     const enabled = this.states.get("propresenter")?.enabled ?? false;
     const { host, port, pollMs } = this.getPropresenterTarget();
     if (enabled && host && port) {
-      // configure() starts polling; the listener flips this to connected/error
-      // on the first tick.
-      this.setConnectionState("propresenter", "connecting", `Polling ${host}:${port}`);
+      // configure() opens the status stream; the listener flips this to
+      // connected/error once it is up, or once the fallback poll answers.
+      this.setConnectionState("propresenter", "connecting", `Connecting to ${host}:${port}`);
       propresenterService.configure(host, port, pollMs ?? undefined);
     } else {
       propresenterService.stop();

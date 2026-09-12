@@ -160,11 +160,18 @@ export function createSseReader(options: SseReaderOptions = {}): SseReader {
 /**
  * Ask TCP to probe the peer every `intervalMs` once the stream goes quiet.
  *
- * This — not an application-level timer — is what detects a dead link. A
+ * A BACKSTOP, not the primary check, and the difference matters. `setKeepAlive`
+ * sets only the idle time before the FIRST probe; the probe interval and the
+ * count that follow are OS defaults — on Linux nine probes at 75s, so roughly
+ * eleven minutes before the peer is declared dead. Nothing that takes eleven
+ * minutes re-dials inside a service.
+ *
+ * What this buys is that the socket eventually dies rather than leaking. A
  * half-open socket (the box unplugged, its switch port dropped) emits neither
- * 'end' nor 'error', so a reconnect is never scheduled and the panel keeps
- * reading "connected" while the display shows the last line from before the drop,
- * for the rest of the service.
+ * 'end' nor 'error', so without it nothing is ever scheduled and the panel reads
+ * "connected" for the rest of the service. Every caller still needs its own
+ * application-level idle watchdog for the timely half — see the one on the
+ * ProPresenter stream, which fires in fifteen seconds.
  */
 export function keepSocketAlive(req: ClientRequest, intervalMs: number): void {
   req.on("socket", (socket) => socket.setKeepAlive(true, intervalMs));
