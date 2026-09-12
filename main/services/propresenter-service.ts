@@ -445,6 +445,13 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   /** STREAM_IDLE_MS, as an instance field so a test can shorten it rather than
    *  spend fifteen seconds proving the watchdog fires. */
   private streamIdleMs = STREAM_IDLE_MS;
+  /** PLAYLIST_RETRY_BASE_MS and PLAYLIST_RETRY_MAX_MS, for the same reason: the
+   *  doubling and the ceiling are only observable by letting real deadlines
+   *  elapse, and at the shipped numbers that is thirty minutes of waiting. A
+   *  test that writes `playlistRetryAt` itself instead exercises the consumer
+   *  and leaves the line that SETS the deadline unguarded. */
+  private playlistRetryBaseMs = PLAYLIST_RETRY_BASE_MS;
+  private playlistRetryMaxMs = PLAYLIST_RETRY_MAX_MS;
 
   readonly id: string;
   private onEmitCb: (() => void) | null = null;
@@ -1081,8 +1088,8 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
         this.playlistItems = [];
         this.playlistFailures++;
         const wait = Math.min(
-          PLAYLIST_RETRY_BASE_MS * 2 ** (this.playlistFailures - 1),
-          PLAYLIST_RETRY_MAX_MS,
+          this.playlistRetryBaseMs * 2 ** (this.playlistFailures - 1),
+          this.playlistRetryMaxMs,
         );
         this.playlistRetryAt = Date.now() + wait;
         if (this.playlistFailures === 1) {

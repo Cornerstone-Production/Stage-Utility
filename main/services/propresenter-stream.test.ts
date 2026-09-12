@@ -996,6 +996,9 @@ describe("a playlist the API refuses", () => {
   });
 
   it("does retry once the back-off comes due, and recovers", async () => {
+    // The consumer half: the deadline is written here rather than waited out, so
+    // this covers the `retryDue` read and the clearing on success. The producer
+    // that sets the deadline is guarded separately above.
     playlistStatus = 404;
     burstOn = false;
     heartbeatOn = false;
@@ -1013,6 +1016,51 @@ describe("a playlist the API refuses", () => {
     // Recovered: the back-off is cleared, so the cache is a cache again.
     for (let i = 0; i < 4; i++) await frameAndSettle();
     assert.equal(playlistReads().length, 2, "a recovered playlist is being re-read every frame");
+  });
+
+  it("sets the deadline itself, doubles it, and stops at the ceiling", async () => {
+    // The producer half. resolveServiceItems SETS playlistRetryAt and reads it
+    // one frame later; the case below writes the field itself, so it exercises
+    // only the read half — replacing the line that sets the deadline with
+    // `= 0` left all of this file green. Here the real deadlines are allowed to
+    // elapse, shortened the way the idle watchdog is, and what is asserted is
+    // the gaps between the reads the STUB saw.
+    //
+    // A Planning Center linked playlist 404s, which the docs describe as the
+    // normal Sunday, so a producer that never comes due is not an edge case: it
+    // is the next-item name staying null for the rest of the run.
+    const BASE = 200;
+    const CEILING = 500; // reached at the third failure — 200, 400, 800 capped
+    const SLACK = 150; // a deadline is noticed on the next frame, not on the dot
+    playlistStatus = 404;
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+
+    const svc = inner(propresenterService);
+    svc.playlistRetryBaseMs = BASE;
+    svc.playlistRetryMaxMs = CEILING;
+    // The retry is frame-driven, so something has to keep sending frames.
+    const ticker = setInterval(() => push(frame(WIRE.playlist, PLAYLIST_FRAME)), 10);
+    try {
+      await until("five playlist reads to come due", () => playlistReadAt.length >= 5, 6000);
+    } finally {
+      clearInterval(ticker);
+      svc.playlistRetryBaseMs = 30_000;
+      svc.playlistRetryMaxMs = 10 * 60_000;
+    }
+
+    const gaps = playlistReadAt.slice(1).map((at, i) => at - playlistReadAt[i]);
+    const wanted = [BASE, BASE * 2, CEILING, CEILING];
+    wanted.forEach((want, i) => {
+      const why =
+        `retry ${i + 2} came ${gaps[i]}ms after retry ${i + 1}, not ${want}ms. ` +
+        `All four gaps: ${gaps.join(", ")}ms, against ${wanted.join(", ")}ms — ` +
+        "the deadline is set by resolveServiceItems, doubles per consecutive " +
+        "failure, and stops at the ceiling rather than reaching 800 and 1600";
+      assert.ok(gaps[i] >= want, why);
+      assert.ok(gaps[i] < want + SLACK, why);
+    });
   });
 
   it("a DIFFERENT playlist is read at once, not after the broken one's back-off", async () => {
