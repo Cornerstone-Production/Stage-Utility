@@ -116,9 +116,10 @@ integrations use — a normal week lands near 2,000 units.
 The viewer count and the scheduled start are free: both arrive inside a response
 the poll already makes.
 
-The obvious-looking `search.list?eventType=live` is not used: it costs 100 units
-a call, so polling it through a single service would spend most of the day's
-budget.
+The obvious-looking `search.list?eventType=live` is not used, and the reason is a
+rate limit rather than a price. Search has its own daily allowance of **100
+calls** — 1 unit each, separate from the 10,000 — which works out at one every
+fifteen minutes against a poll that runs every twenty seconds.
 
 If the quota does run out, the integration says so and waits half an hour rather
 than retrying into a door that stays shut until midnight Pacific.

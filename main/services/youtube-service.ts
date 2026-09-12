@@ -20,12 +20,18 @@
 // authenticated channel — which is why the second mode exists at all rather
 // than being a lighter spelling of the first.
 //
-// QUOTA IS A REAL CONSTRAINT either way. A project gets 10,000 units a day.
-// OAuth costs 1 unit a poll; the key path costs 2 (playlist, then videos) after
-// a one-off channel lookup that is cached for the life of the process. What is
-// NOT affordable is the obvious-looking `search.list?eventType=live`: it costs
-// 100 units a call, so polling it once a minute through a single service would
-// spend nearly twice the day's budget. It is not used here for that reason.
+// QUOTA IS A REAL CONSTRAINT either way. A project gets 10,000 units a day
+// across every endpoint but two. OAuth costs 1 unit a poll; the key path costs
+// 2 (playlist, then videos) after a one-off channel lookup that is cached for
+// the life of the process.
+//
+// What is NOT affordable is the obvious-looking `search.list?eventType=live`,
+// and the reason is a rate limit rather than a price: search has its OWN daily
+// bucket of 100 CALLS, each costing 1 unit, separate from the 10,000. So the
+// call is nearly free and still unusable — 100 a day is one every fifteen
+// minutes, against a poll that runs every twenty seconds. It is not used here
+// for that reason, and an optimiser reading "100 units" would reach for exactly
+// the wrong fix.
 //
 // The two readings YouTube gives away are surfaced for the same reason: both
 // `concurrentViewers` and `scheduledStartTime` arrive inside a response the
