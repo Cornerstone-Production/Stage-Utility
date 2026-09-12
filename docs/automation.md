@@ -33,8 +33,9 @@ poll after.
 | Plan item is due | an item's scheduled moment passes — see [Firing an item on time](#firing-an-item-on-time) |
 | People count rises above | attendance or occupancy crosses a threshold upward |
 | People count falls below | crosses it downward |
-| Recording starts | OBS or REAPER begins recording |
-| Recording stops | stops. A recorder going offline does not count — that is unknown, not stopped |
+| OBS starts recording | OBS begins recording |
+| OBS stops recording | it stops. A recorder going offline does not count — that is unknown, not stopped |
+| REAPER starts / stops recording | REAPER's own transport, read from its web interface. Same rule about offline |
 | *X* connects / disconnects | any integration's link comes up or drops. One pair per integration, named for it — "OBS connects", "Smaart disconnects" |
 | Resi goes live / stops streaming | a watched Resi encoder starts or stops. Unreachable does not count |
 | YouTube goes live / stops streaming | a broadcast on your channel reaches `live`, or leaves it |
@@ -68,6 +69,13 @@ Nothing treats a device going offline as a value. A missing reading is unknown,
 so a pack dropping off the network is not a low battery, an unreachable OBS is
 not "stopped streaming", and an integration vanishing from a payload is not a
 disconnect.
+
+Each recorder has its **own** pair of triggers, named for its machine. There is
+no "either recorder" trigger: the two publish separate state, and OBS starting
+while REAPER is already rolling is not the moment recording began. Pick the
+machine you mean, or build two rules. To ask about the other recorder while a
+rule fires on this one, add the **OBS is recording** or **REAPER is recording**
+condition.
 
 ProVideoPlayer layers, playlists and cues are matched **by name, not by id** — an
 id is opaque and changes when a workspace is rebuilt from a template. **Renaming

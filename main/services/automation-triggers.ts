@@ -237,42 +237,106 @@ type Obs = { connected?: boolean; recording?: boolean; streaming?: boolean; virt
 const asObs = (v: unknown): Obs => (v && typeof v === "object" ? (v as Obs) : {});
 
 /**
- * Start/stop pair for one boolean OBS output (streaming, virtual cam).
+ * Start/stop pair for one boolean output on one device — OBS's stream, its
+ * virtual camera, and each recorder's transport.
  *
- * The stop half deliberately refuses to fire when OBS has gone unreachable: a
- * dropped connection reports every output as false, and treating that as "stopped"
- * would fire a stop rule because a machine went offline. Unknown is not a value.
+ * ONE generator rather than the shape written out per output. It was written out
+ * twice (obs streaming, obs virtual cam) and then a third time by hand for the
+ * recording pair, and the hand-written copy is the one that had no `help` on its
+ * stop half. Adding REAPER would have made it four.
+ *
+ * The ids are passed in rather than derived, because the recording pair's are
+ * `recording.started`/`recording.stopped` — no `obs.` prefix, since they predate
+ * there being a second recorder. A saved rule names its trigger by id, so those
+ * two cannot be renamed to match the others without every existing recording
+ * rule silently never firing again.
+ *
+ * The stop half deliberately refuses to fire when the device has gone
+ * unreachable: a dropped connection reports every output as false, and treating
+ * that as "stopped" would fire a stop rule because a machine went offline.
+ * Unknown is not a value.
  */
+function outputTriggers(spec: {
+  channel: string;
+  /** Reads the flag out of that channel's snapshot. */
+  read: (snap: unknown) => boolean | undefined;
+  /** The device's name, for the "unreachable is unknown" help. */
+  device: string;
+  started: { id: string; label: string };
+  stopped: { id: string; label: string };
+}): Record<string, TriggerDef> {
+  const { channel, read, device, started, stopped } = spec;
+  return {
+    [started.id]: def({
+      id: started.id,
+      label: started.label,
+      channel,
+      params: [],
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        return read(prev) !== true && read(next) === true;
+      },
+    }),
+    [stopped.id]: def({
+      id: stopped.id,
+      label: stopped.label,
+      channel,
+      params: [],
+      help: `Does not fire when ${device} simply goes offline — unreachable is unknown, not stopped.`,
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        // Every snapshot this reads (OBS, REAPER) carries `connected`, and both
+        // report their outputs false while offline.
+        if (asRec(next).connected === false) return false;
+        return read(prev) === true && read(next) === false;
+      },
+    }),
+  };
+}
+
+/** Start/stop pair for one boolean OBS output (streaming, virtual cam). */
 function obsOutputTriggers(
   key: "streaming" | "virtualCam",
   slug: string,
   label: string,
 ): Record<string, TriggerDef> {
-  return {
-    [`obs.${slug}-started`]: def({
-      id: `obs.${slug}-started`,
-      label: `OBS starts ${label}`,
-      channel: "obs:status",
-      params: [],
-      didFire: (prev, next) => {
-        if (prev === null) return false;
-        return asObs(prev)[key] !== true && asObs(next)[key] === true;
-      },
-    }),
-    [`obs.${slug}-stopped`]: def({
-      id: `obs.${slug}-stopped`,
-      label: `OBS stops ${label}`,
-      channel: "obs:status",
-      params: [],
-      help: "Does not fire when OBS simply goes offline — unreachable is unknown, not stopped.",
-      didFire: (prev, next) => {
-        if (prev === null) return false;
-        const n = asObs(next);
-        if (n.connected === false) return false;
-        return asObs(prev)[key] === true && n[key] === false;
-      },
-    }),
-  };
+  return outputTriggers({
+    channel: "obs:status",
+    read: (snap) => asObs(snap)[key],
+    device: "OBS",
+    started: { id: `obs.${slug}-started`, label: `OBS starts ${label}` },
+    stopped: { id: `obs.${slug}-stopped`, label: `OBS stops ${label}` },
+  });
+}
+
+/**
+ * Start/stop pair for one recorder's transport.
+ *
+ * TWO RECORDERS, TWO PAIRS, NAMED FOR THEIR MACHINE. `recording.started` was
+ * labelled "Recording starts" while being bound to `obs:status` alone, so the
+ * one generic-sounding entry in the list was the OBS-only one and REAPER had
+ * none at all. A second pair labelled just as generically would leave an
+ * operator picking blind, and a `source` param covering both is not expressible:
+ * a trigger watches ONE channel, the two recorders publish two, and "either
+ * recorder" has no single edge — OBS starting while REAPER already rolls is not
+ * the moment recording began.
+ *
+ * So the OBS pair keeps its ids and gains OBS in its label, and REAPER gets its
+ * own. Ids are untouched: a saved rule names its trigger by id, and the engine
+ * skips a rule whose id is not in this registry — silently.
+ */
+function recorderTriggers(
+  channel: string,
+  device: string,
+  ids: { started: string; stopped: string },
+): Record<string, TriggerDef> {
+  return outputTriggers({
+    channel,
+    read: (snap) => asRec(snap).recording,
+    device,
+    started: { id: ids.started, label: `${device} starts recording` },
+    stopped: { id: ids.stopped, label: `${device} stops recording` },
+  });
 }
 
 /**
@@ -560,6 +624,15 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
 
   ...obsOutputTriggers("streaming", "streaming", "streaming"),
   ...obsOutputTriggers("virtualCam", "virtualcam", "the virtual camera"),
+
+  // The two recorders, beside each other and beside OBS's other outputs, because
+  // this list is a <select> in registry order and "which recorder is this one?"
+  // is the question an operator asks here.
+  ...recorderTriggers("obs:status", "OBS", { started: "recording.started", stopped: "recording.stopped" }),
+  ...recorderTriggers("reaper:status", "REAPER", {
+    started: "reaper.recording-started",
+    stopped: "reaper.recording-stopped",
+  }),
 
   ...streamTriggers("resi", "resi:status", "Resi"),
   ...streamTriggers("youtube", "youtube:status", "YouTube"),
@@ -971,33 +1044,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
       if (a === null || b === null) return false;
       const th = Number(params.threshold);
       return Number.isFinite(th) && a >= th && b < th;
-    },
-  }),
-
-  "recording.started": def({
-    id: "recording.started",
-    label: "Recording starts",
-    channel: "obs:status",
-    params: [],
-    didFire: (prev, next) => {
-      if (prev === null) return false;
-      return !asRec(prev).recording && asRec(next).recording === true;
-    },
-  }),
-
-  "recording.stopped": def({
-    id: "recording.stopped",
-    label: "Recording stops",
-    channel: "obs:status",
-    params: [],
-    didFire: (prev, next) => {
-      if (prev === null) return false;
-      const p = asRec(prev);
-      const n = asRec(next);
-      // A recorder dropping off the network is UNKNOWN, not "stopped" — firing a
-      // stop rule because a machine went offline would be wrong.
-      if (n.connected === false) return false;
-      return p.recording === true && n.recording === false;
     },
   }),
 };
