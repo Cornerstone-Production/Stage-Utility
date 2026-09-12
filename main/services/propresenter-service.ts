@@ -412,6 +412,30 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   private req: http.ClientRequest | null = null;
   private publishTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Which run of this instance is current. Bumped by stop(), captured at the top
+   * of every async method, and re-checked after EVERY await in place of
+   * `running`.
+   *
+   * `running` is not sufficient and never was. configure() calls restart(),
+   * which is `stop(); start()` SYNCHRONOUSLY, so `running` goes false and back to
+   * true inside one tick: a connect() parked on the /version round trip resumes,
+   * sees `running === true`, and subscribes with the host and port it captured
+   * before the reconfigure. subscribe() then overwrites `stream` and `req`, and
+   * whichever assignment loses is never destroyed — closeStream() only knows the
+   * last pair — so a second stream is held open on the booth machine for the life
+   * of the process with its data handler still feeding the same frame buffer. The
+   * manager calls configure() on every settings write, a bare poll-interval
+   * change included, so the window is one HTTP round trip wide and reachable.
+   *
+   * A counter rather than a boolean because the question is "is this still MY
+   * run", which a flag that has been set back to true cannot answer.
+   */
+  private epoch = 0;
+  /** True while publish() is inside the playlist fetch; see publishSerially. */
+  private publishing = false;
+  /** A frame landed while a publish was in flight — run one more when it ends. */
+  private publishAgain = false;
   /** Set once this instance's ProPresenter refuses the subscription; see connect(). */
   private streamFallback = false;
   /** Last delay handed to scheduleIn — the reconnect log line needs the number
@@ -466,6 +490,21 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   override start(): void {
     if (this.running || !this.configured) return;
     super.start();
+  }
+
+  /**
+   * End this run before tearing anything down, so every continuation parked on
+   * an await abandons its work when it resumes. See `epoch`.
+   */
+  override stop(): void {
+    this.epoch++;
+    super.stop();
+  }
+
+  /** Has the run that captured `epoch` been stopped or superseded? Checked after
+   *  every await, because `running` alone cannot see a restart. */
+  private stale(epoch: number): boolean {
+    return !this.running || epoch !== this.epoch;
   }
 
   /**
@@ -627,27 +666,33 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     if (!this.running || !this.host || !this.port) return;
     const host = this.host;
     const port = this.port;
+    const epoch = this.epoch;
     try {
       // Connectivity probe — gates the card badge and is the same request the
       // Test button makes. Kept ahead of the subscription so an unreachable
       // machine reads as unreachable rather than as an unsupported endpoint.
       await getJson(host, port, "/version");
-      // stop() can land inside that await; without this the subscription below
-      // opens a stream nothing will ever close.
-      if (!this.running) return;
+      // stop() — or a restart, which puts `running` back to true inside the same
+      // tick — can land inside that await. Without this the subscription below
+      // opens a second stream nothing will ever close. See `epoch`.
+      if (this.stale(epoch)) return;
 
       if (this.streamFallback) {
-        await this.pollOnce(host, port);
+        await this.pollOnce(host, port, epoch);
         return;
       }
 
       const outcome = await this.subscribe(host, port);
+      // Same gap on the way out: a run that ended while the subscribe was in
+      // flight must not pin the NEXT run into the fallback, nor report an
+      // outage for a socket its own stop() destroyed.
+      if (this.stale(epoch)) return;
       if (outcome.kind === "unsupported") {
         console.warn(
           `[propresenter] status/updates unsupported (HTTP ${outcome.status}) — falling back to polling`,
         );
         this.streamFallback = true;
-        await this.pollOnce(host, port);
+        await this.pollOnce(host, port, epoch);
         return;
       }
       // "failed" is a transport failure on the subscribe itself — the machine
@@ -658,8 +703,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       // holding it open is the whole point — see the note above subscribe().
     } catch (err) {
       // stop() destroys the in-flight request, which surfaces here as a failure.
-      // A deliberate shutdown is not an outage and must not write one to the log.
-      if (!this.running) return;
+      // A deliberate shutdown is not an outage and must not write one to the log,
+      // and a superseded run must not schedule a reconnect racing the live one.
+      if (this.stale(epoch)) return;
       const msg = errorMessage(err);
       // Log only the first failure of an outage, then stay quiet until it recovers —
       // a machine off all week shouldn't spam the log every retry.
@@ -891,15 +937,50 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     if (this.publishTimer) return;
     this.publishTimer = setTimeout(() => {
       this.publishTimer = null;
-      void this.publish();
+      void this.publishSerially();
     }, PUBLISH_COALESCE_MS);
+  }
+
+  /**
+   * One publish at a time, and never a lost frame.
+   *
+   * The timer above nulls itself BEFORE publish() runs, so a frame arriving while
+   * publish is inside the playlist fetch arms a fresh timer and a second publish
+   * starts alongside the first. In the steady state the fetch resolves in a
+   * microtask and nothing interleaves — but the moment the playlist changes or a
+   * retry comes due there is a real request in flight, and two publishes both
+   * read the playlist identifier that has not been reassigned yet: two identical
+   * requests, both emitting, and if the first is slower the OLDER frame
+   * broadcasts last. That is the mismatched frame PUBLISH_COALESCE_MS exists to
+   * keep off every display, arriving by the other door.
+   *
+   * Re-queued rather than dropped: the frame that lost the race is the newest
+   * one, and dropping it leaves the display a slide behind until something else
+   * changes.
+   */
+  private async publishSerially(): Promise<void> {
+    if (this.publishing) {
+      this.publishAgain = true;
+      return;
+    }
+    this.publishing = true;
+    try {
+      do {
+        this.publishAgain = false;
+        await this.publish();
+      } while (this.publishAgain && this.running);
+    } finally {
+      this.publishing = false;
+    }
   }
 
   private async publish(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
+    const epoch = this.epoch;
     const { active, slide, slideIndex, playlistActive, timers } = this.frames;
-    const services = await this.resolveServiceItems(this.host, this.port, playlistActive);
-    if (!this.running) return; // stop() landed inside the playlist fetch
+    const services = await this.resolveServiceItems(this.host, this.port, playlistActive, epoch);
+    // stop() — or a restart — landed inside the playlist fetch.
+    if (this.stale(epoch)) return;
     this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
   }
 
@@ -910,7 +991,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
    * five requests a cycle, so backing off when nothing is watching is still the
    * right trade for it.
    */
-  private async pollOnce(host: string, port: number): Promise<void> {
+  private async pollOnce(host: string, port: number, epoch: number): Promise<void> {
     const [active, slide, slideIndex, playlistActive, timers] = await Promise.all([
       getJson(host, port, "/v1/presentation/active").catch(() => null),
       getJson(host, port, "/v1/status/slide").catch(() => null),
@@ -918,8 +999,13 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       getJson(host, port, "/v1/playlist/active").catch(() => null),
       getJson(host, port, "/v1/timers/current").catch(() => null),
     ]);
+    // Five round trips wide. A stopped instance emitting "connected" here undoes
+    // the OFFLINE frame stop() just published; a superseded one emits the old
+    // machine's slide onto the new one's channel.
+    if (this.stale(epoch)) return;
 
-    const services = await this.resolveServiceItems(host, port, playlistActive);
+    const services = await this.resolveServiceItems(host, port, playlistActive, epoch);
+    if (this.stale(epoch)) return;
 
     this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
     this.report("connected", `Connected to ${host}:${port}`);
@@ -948,6 +1034,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     host: string,
     port: number,
     playlistActive: unknown,
+    epoch: number,
   ): Promise<{ current: string | null; next: string | null }> {
     const pUuid = asString(pick(playlistActive, "presentation", "playlist", "uuid"));
     const curName = asString(pick(playlistActive, "presentation", "item", "name"));
@@ -966,6 +1053,10 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       }
       try {
         const pl = await getJson(host, port, `/v1/playlist/${pUuid}`);
+        // teardown() empties this cache precisely so a reconnect to a different
+        // (or edited) service cannot leak a stale "next item". A read that was
+        // already in flight must not put the old one straight back.
+        if (this.stale(epoch)) return { current: curName, next: null };
         const items = pick(pl, "items");
         this.playlistItems = Array.isArray(items)
           ? items
@@ -979,6 +1070,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
         this.playlistFailures = 0;
         this.playlistRetryAt = 0;
       } catch (err) {
+        if (this.stale(epoch)) return { current: curName, next: null };
         // Not rethrown, and this is the one place in this file that degrades
         // rather than propagates: the caller is about to publish a whole status
         // frame, and failing it because one optional field could not be resolved

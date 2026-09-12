@@ -34,7 +34,7 @@ import { afterEach, after, before, describe, it } from "node:test";
 import * as http from "node:http";
 
 import { propresenterService, propresenterManager } from "./propresenter-service.js";
-import { setSubscriberCheck } from "./broadcaster.js";
+import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { SSE_MAX_BUFFER } from "./sse-reader.js";
 import type { ProPresenterStatusDTO } from "../types/stage.js";
 
@@ -122,6 +122,19 @@ const SLIDE_INDEX_FRAME = {
     presentation_id: { uuid: PRESENTATION_UUID, name: "Opening Song", index: 4 },
   },
 };
+/** The NEXT slide, one group on: index 3 is "Chorus 1"'s first slide. Together
+ *  with ADVANCED_INDEX this is one advance, which ProPresenter sends as two
+ *  frames — and publishing between them is a frame nobody should ever see. */
+const ADVANCED_SLIDE = {
+  current: { text: "chorus one", notes: "", uuid: "s-4" },
+  next: { text: "chorus two", notes: "", uuid: "s-5" },
+};
+const ADVANCED_INDEX = {
+  presentation_index: {
+    index: 3,
+    presentation_id: { uuid: PRESENTATION_UUID, name: "Opening Song", index: 4 },
+  },
+};
 const PLAYLIST_FRAME = {
   presentation: {
     playlist: { uuid: PLAYLIST_UUID, name: "Sunday", index: 3 },
@@ -167,6 +180,25 @@ let resetSubscribe = false;
 let stalled: http.ServerResponse[] = [];
 /** The body of the last subscription request, so a case can read the endpoints. */
 let lastSubscribeBody = "";
+/** Hold every /version response until releaseVersion(), parking a connect on it. */
+let holdVersion = false;
+/** The /version responses currently parked. */
+let heldVersion: http.ServerResponse[] = [];
+/** Delay on `/v1/playlist/<uuid>`, so a case can hold a real request in flight. */
+let playlistDelayMs = 0;
+/** When each `/v1/playlist/<uuid>` read reached the stub — the back-off's own
+ *  deadlines, measured rather than written by the test. */
+let playlistReadAt: number[] = [];
+
+/** Answer every parked /version, letting the connects behind them resume. */
+function releaseVersion(): void {
+  const parked = heldVersion;
+  heldVersion = [];
+  for (const res of parked) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ host_description: "ProPresenter 21.3", api_version: "v1" }));
+  }
+}
 
 /** Push a chunk to every held stream. */
 function push(chunk: string): void {
@@ -191,6 +223,12 @@ before(async () => {
     seen.push(`${req.method} ${url}`);
 
     if (url === "/version") {
+      // Parked, not answered: this is the await a connect() sits on while a
+      // reconfigure restarts the instance underneath it.
+      if (holdVersion) {
+        heldVersion.push(res);
+        return;
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ host_description: "ProPresenter 21.3", api_version: "v1" }));
       return;
@@ -234,13 +272,18 @@ before(async () => {
     }
 
     if (url.startsWith("/v1/playlist/") && url !== "/v1/playlist/active") {
-      if (playlistStatus !== 200) {
-        res.writeHead(playlistStatus);
-        res.end();
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(PLAYLIST_ITEMS));
+      playlistReadAt.push(Date.now());
+      const answer = (): void => {
+        if (playlistStatus !== 200) {
+          res.writeHead(playlistStatus);
+          res.end();
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(PLAYLIST_ITEMS));
+      };
+      if (playlistDelayMs) setTimeout(answer, playlistDelayMs);
+      else answer();
       return;
     }
 
@@ -290,6 +333,19 @@ console.warn = (...a: unknown[]) => logged.push(a.map(String).join(" "));
 
 const loggedMatching = (re: RegExp): string[] => logged.filter((l) => re.test(l));
 
+// ── Broadcast capture ────────────────────────────────────────────────────────
+//
+// Every frame that actually went out on "propresenter:status", in order. The bus
+// has no listener removal, so this is registered once for the file and cleared
+// per case, exactly as the log capture is. Two of the cases below assert on the
+// COUNT: a coalescing window and a serialised publish are both invisible in the
+// final state and visible only in how many frames reached the channel.
+
+let published: ProPresenterStatusDTO[] = [];
+addBroadcastListener((channel, payload) => {
+  if (channel === "propresenter:status") published.push(payload as ProPresenterStatusDTO);
+});
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Comfortably past PUBLISH_COALESCE_MS plus a round trip to the stub. */
@@ -299,6 +355,8 @@ interface Reachable {
   streamIdleMs: number;
   streamFallback: boolean;
   playlistRetryAt: number;
+  playlistRetryBaseMs: number;
+  playlistRetryMaxMs: number;
   pollMs: number;
   scheduleIn(ms: number): void;
   connect(): Promise<void>;
@@ -341,12 +399,18 @@ afterEach(() => {
   streams = [];
   seen = [];
   logged = [];
+  published = [];
+  playlistReadAt = [];
   subscribeStatus = 200;
   playlistStatus = 200;
+  playlistDelayMs = 0;
   heartbeatOn = true;
   burstOn = true;
   stallSubscribe = false;
   resetSubscribe = false;
+  holdVersion = false;
+  for (const r of heldVersion) r.destroy();
+  heldVersion = [];
   for (const s of stalled) s.destroy();
   stalled = [];
   propresenterService.configure("", 0);
@@ -736,6 +800,116 @@ describe("a stream that has died without saying so", () => {
     seen = [];
     await sleep(150);
     assert.deepEqual(seen, [], "a stopped instance kept dialling");
+  });
+});
+
+// ── How many publishes, and when ─────────────────────────────────────────────
+//
+// Three cases about an async gap. None of them changes the state the panel ends
+// up in, so none can be seen through getStatus(): they are visible only in how
+// many requests went out and how many frames reached the channel.
+
+describe("one run, one publish at a time", () => {
+  it("a reconfigure inside the version round trip leaves exactly one stream", async () => {
+    // configure() is restart(), which is `stop(); start()` SYNCHRONOUSLY:
+    // `running` goes false and back to true inside one tick. A connect() parked
+    // on the /version await resumes, sees `running === true`, and subscribes
+    // with the host and port it captured before the reconfigure. subscribe()
+    // overwrites `stream` and `req`, and whichever assignment loses is never
+    // destroyed — closeStream() only knows the last pair. The booth machine is
+    // then holding a second server-sent-event stream for the life of the
+    // process, its data handler still feeding the same frame buffer.
+    //
+    // The manager calls configure() on EVERY settings write, a bare
+    // poll-interval edit included, so the window is one round trip wide.
+    holdVersion = true;
+    propresenterService.configure("127.0.0.1", port);
+    await until("the first connect to park on /version", () => heldVersion.length === 1);
+    propresenterService.configure("127.0.0.1", port, 900); // the poll-interval edit
+    await until("the second connect to park on /version", () => heldVersion.length === 2);
+
+    holdVersion = false;
+    releaseVersion(); // both parked connects resume
+
+    await until("a stream to be held", () => streams.length > 0);
+    await sleep(200); // room for the abandoned run to open a second one
+
+    assert.equal(
+      subscribes().length,
+      1,
+      "two subscriptions went out for one instance — the run the reconfigure " +
+        "abandoned resumed anyway and opened a stream nothing will ever close",
+    );
+    assert.equal(streams.length, 1, "the stub is holding a second, orphaned stream");
+  });
+
+  it("holds one publish at a time across a real playlist request", async () => {
+    // queuePublish nulls its timer BEFORE publish() runs, so a frame arriving
+    // while publish is inside the playlist fetch starts a second publish beside
+    // the first. In the steady state that fetch resolves in a microtask and
+    // nothing interleaves, which is why no other case here catches it — but the
+    // moment the playlist changes there is a real request in flight, and both
+    // publishes read an identifier neither has recorded yet: two identical
+    // requests, both emitting, and if the first is slower the OLDER frame
+    // broadcasts last.
+    playlistDelayMs = 250;
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+
+    push(frame(WIRE.playlist, PLAYLIST_FRAME)); // the change → one playlist read
+    await until("the playlist read to reach the stub", () => playlistReadAt.length === 1);
+    // Frames keep arriving while it is in flight. A service does not pause.
+    for (let i = 0; i < 5; i++) {
+      push(frame(WIRE.slide, { current: { text: `line ${i}`, notes: "" }, next: null }));
+      await sleep(30);
+    }
+    await until("the delayed playlist to land", () => status().nextServiceItem === "Message");
+    await sleep(PUBLISH_SETTLE_MS);
+
+    assert.equal(
+      playlistReadAt.length,
+      1,
+      `one playlist change cost ${playlistReadAt.length} identical requests — publishes ran ` +
+        "concurrently across the fetch, each reading an identifier the other had not recorded",
+    );
+    // And nothing was dropped to get there: re-queued, not discarded.
+    assert.equal(
+      status().currentSlideText,
+      "line 4",
+      "the frames that arrived during the fetch were dropped rather than re-queued",
+    );
+  });
+
+  it("collapses a slide advance into ONE frame, never the mismatched half of one", async () => {
+    // A slide advance is status/slide AND presentation/slide_index, sent as two
+    // frames. Publishing between them broadcasts the new words against the
+    // previous index — wrong section, wrong progress — and because the channel
+    // is change-driven that frame really does reach every display and sits
+    // there until something else changes.
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    push(
+      frame(WIRE.active, presentationDoc()) +
+        frame(WIRE.slide, SLIDE_FRAME) +
+        frame(WIRE.slideIndex, SLIDE_INDEX_FRAME),
+    );
+    await until("the first slide to publish", () => status().slideIndex === 2);
+    await sleep(PUBLISH_SETTLE_MS);
+    published = [];
+
+    // The advance, as ProPresenter sends it.
+    push(frame(WIRE.slide, ADVANCED_SLIDE) + frame(WIRE.slideIndex, ADVANCED_INDEX));
+    await until("the advance to publish", () => status().slideIndex === 4);
+    await sleep(PUBLISH_SETTLE_MS);
+
+    assert.deepEqual(
+      published.map((f) => [f.currentSlideText, f.slideIndex, f.currentSection?.name]),
+      [["chorus one", 4, "Chorus 1"]],
+      "the advance reached the channel as more than one frame, and the first of " +
+        "them carries the new slide text against the previous index and section",
+    );
   });
 });
 
