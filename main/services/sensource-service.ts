@@ -1601,11 +1601,20 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       this.appendHistory(dto);
       this.emit(dto);
       this.resetBackoff();
+      const pollBack = this.recovered("poll");
+      if (pollBack.log) console.log(`[sensource] the poll is answering again${pollBack.note}`);
       ok = true;
     } catch (err) {
       const msg = errorMessage(err);
-      // First failure only: an outage used to write one line per poll, forever.
-      if (this.attempt === 0) console.error("[sensource] poll error:", msg);
+      // Once per OUTAGE. This was `if (this.attempt === 0)`, which is the same
+      // transition rule the rest of this file has just moved off, defeated the
+      // same way: resetBackoff() above runs on every successful poll, so an
+      // upstream that alternates resets the counter and every failure is a fresh
+      // "first failure". The production backoff never grew past ~90s, which is
+      // that fact from the other side — the poll really was succeeding between
+      // the failures. The last `attempt === 0` gate in this integration.
+      const pollOut = this.failed("poll", err);
+      if (pollOut.log) console.error(`[sensource] poll error: ${scrub(msg, 200)}${pollOut.note}`);
       this.report("error", msg);
       this.goOffline();
     } finally {

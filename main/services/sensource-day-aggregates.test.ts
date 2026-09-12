@@ -476,6 +476,42 @@ describe("SenSource day aggregates", () => {
     );
   });
 
+  it("logs a poll failing on alternating polls once, not once per failure", async () => {
+    // The last `if (this.attempt === 0)` gate in this integration, and it fails
+    // for the same reason the degraded-flags did: resetBackoff() runs on every
+    // successful poll, so an alternating upstream made every failure a fresh
+    // first failure. The measured backoff in production never grew past ~90s,
+    // which is that same fact seen from the other side.
+    //
+    // Traffic, not the day aggregates: losing traffic ends the poll, which is the
+    // path that writes "poll error".
+    let trafficOk = true;
+    stubFetch({ trafficStatus: () => (trafficOk ? 200 : 500) });
+
+    for (let i = 0; i < 8; i++) {
+      clock += 15_000;
+      trafficOk = i % 2 === 0;
+      await poll();
+    }
+
+    const errs = logs.filter((l) => l.includes("poll error"));
+    assert.equal(
+      errs.length,
+      1,
+      `four failures across an alternating outage wrote ${errs.length} lines:\n${errs.join("\n")}`,
+    );
+
+    // And a poll that stays up past the settle window says so, once.
+    trafficOk = true;
+    for (let i = 0; i < 10; i++) {
+      clock += 15_000;
+      await poll();
+    }
+    const back = logs.filter((l) => l.includes("the poll is answering again"));
+    assert.equal(back.length, 1, `the recovery logged ${back.length} times`);
+    assert.match(back[0], /after 4 failed attempts/, "the recovery did not account for the outage");
+  });
+
   it("keeps attendance continuous when the day request fails", async () => {
     // C2. The zone-derived total counts doors the space total does not, so
     // publishing it on the degraded polls made attendance alternate 1600 / 2020
