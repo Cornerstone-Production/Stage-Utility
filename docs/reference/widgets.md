@@ -134,7 +134,10 @@ clock has drifted still marks the right day.
 | **Scores** *(Home)* | Followed teams' scores, on your own page | ESPN public scoreboard |
 
 **Streaming status** can be pinned to one platform, or left on **any**, where it
-answers for whichever is live.
+answers for whichever is live. Where the platform reports one, it also shows the
+live viewer count beside the elapsed clock, and turns amber when a scheduled
+broadcast is past its start time with nothing going out — only YouTube reports
+either, and only on its public path. See [YouTube](../integrations/youtube.md).
 
 **Live scores** shows one game: a team you follow, or **any followed team**, which
 picks whichever of them is playing and prefers the one that scored most recently.

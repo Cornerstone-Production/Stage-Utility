@@ -60,6 +60,11 @@ const REAPER_LIVE: ReaperStatusDTO = { connected: true, recording: true, recordP
 const REAPER_IDLE: ReaperStatusDTO = { connected: true, recording: false, recordPaused: false, playing: false, positionSeconds: 0, positionString: "0:00.000" };
 const STREAM_LIVE: StreamStatusDTO = { connected: true, live: true, startedAt: SINCE, detail: "Main encoder" };
 const STREAM_IDLE: StreamStatusDTO = { connected: true, live: false, startedAt: null, detail: null };
+// YouTube reports two things Resi cannot. No viewer count and no scheduled time
+// here: this file compares a Home card against the same object on a wall, and a
+// reading only one of the pair could show is a different test's job.
+const YT_LIVE: YouTubeStatusDTO = { ...STREAM_LIVE, viewers: null, scheduledStartAt: null };
+const YT_IDLE: YouTubeStatusDTO = { ...STREAM_IDLE, viewers: null, scheduledStartAt: null };
 
 /** Two followed games with different teams and different scores, so "any
  *  followed team" (which takes the first) and a pin to the SECOND cannot draw
@@ -323,7 +328,7 @@ function ctxFor(home: boolean, live: boolean) {
     obs: live ? OBS_LIVE : OBS_IDLE,
     reaper: live ? REAPER_LIVE : REAPER_IDLE,
     resi: live ? STREAM_LIVE : STREAM_IDLE,
-    youtube: live ? STREAM_LIVE : STREAM_IDLE,
+    youtube: live ? YT_LIVE : YT_IDLE,
     pvp: live ? activePvpLive : PVP_IDLE,
     spl: live ? SPL_LIVE : SPL_IDLE,
     // The WALL scores object reads ctx; the Home card opens its own hook. Both

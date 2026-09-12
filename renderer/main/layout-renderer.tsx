@@ -71,7 +71,7 @@ export interface LayoutRenderCtx {
   pvpSkewMs: number;
   scores: ScoresStatusDTO | null;
   resi: StreamStatusDTO | null;
-  youtube: StreamStatusDTO | null;
+  youtube: YouTubeStatusDTO | null;
   osc: OscFeedbackDTO | null;
   /** Global RossTalk simulate mode, so a button can show it is not really sending.
    *  Defaults to TRUE when unknown — the direction that cannot cause a stray send. */
@@ -735,8 +735,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     const chosen = only ? all.filter((x) => x.name === only) : all;
     const ind = streamIndicator(chosen, ctx.now, { showElapsed: opts.showElapsed });
     const live = ind.state === "live";
-    // Tally-light mode: nothing on screen unless something is going out.
-    if (!live && (opts.hideWhenIdle ?? false)) return null;
+    // A scheduled broadcast the clock has passed with nothing going out. Off
+    // air, but the one off-air moment worth a colour — see streamIndicator.
+    const late = ind.state === "late";
+    // Tally-light mode: nothing on screen unless something is going out. LATE is
+    // the exception: a tally light that hides exactly when the stream failed to
+    // start is a light that has switched itself off for the one event it exists
+    // to report.
+    if (!live && !late && (opts.hideWhenIdle ?? false)) return null;
 
     // FILLED BY DEFAULT, the same as obs-status and reaper-status.
     //
@@ -756,8 +762,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       caption: only ?? "Streaming",
       // The elapsed clock takes the caption row's end slot while live, exactly
       // as a recorder's timecode does in statusReadout — see the note there.
-      // The quiet states are one word with nothing to add.
-      captionEnd: live ? ind.sub : null,
+      // The quiet states are one word with nothing to add; LATE has the one
+      // thing worth adding, which is how long ago it should have started.
+      captionEnd: live || late ? ind.sub : null,
       upper: true,
       // QUIET IS ONE THING. Off air and unreachable both read at the same
       // strength, because both mean "nothing is going out" and the WORD already
@@ -768,9 +775,16 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // when they cannot be reached -- it was the brightest quiet thing in the
       // row and read as the one still doing something. Reported twice as the
       // streaming widgets not matching the grey their neighbours wear.
-      dim: !live,
-      fill: live && filled ? "var(--green-9)" : null,
-      valueColor: live && !filled ? "var(--green-10)" : null,
+      //
+      // LATE is the one quiet state that is not quiet. It is off air at a
+      // moment somebody scheduled a broadcast for, which is the failure this
+      // wall exists to show. Amber rather than the recorder's red, so a room
+      // carrying both still has exactly one red — and through the SEMANTIC warn
+      // token rather than a raw scale step, because "this needs attention" is
+      // what is meant and a re-themed app should carry it.
+      dim: !live && !late,
+      fill: live && filled ? "var(--green-9)" : late && filled ? "var(--color-warn-9)" : null,
+      valueColor: live && !filled ? "var(--green-10)" : late && !filled ? "var(--color-warn-11)" : null,
     });
   };
 

@@ -27,13 +27,18 @@
 // 100 units a call, so polling it once a minute through a single service would
 // spend nearly twice the day's budget. It is not used here for that reason.
 //
+// The two readings YouTube gives away are surfaced for the same reason: both
+// `concurrentViewers` and `scheduledStartTime` arrive inside a response the
+// poll already makes, so neither is a request and neither is a unit. Nothing
+// here fetches a number it was not already being sent.
+//
 // Cadence rides the same service-window clamp every other integration uses:
 // quick while it matters, slow the rest of the week. A 403 that mentions quota
 // backs off to half an hour rather than hammering a door that will not open
 // again until midnight Pacific.
 
 import { errorMessage } from "./errors.js";
-import type { StreamStatusDTO } from "../types/stage.js";
+import type { YouTubeStatusDTO } from "../types/stage.js";
 import { StatusIntegration } from "./integration-base.js";
 
 const OAUTH_TOKEN = "https://oauth2.googleapis.com/token";
@@ -53,11 +58,13 @@ const QUOTA_BACKOFF_MS = 1_800_000;
  *  two streams in a morning — should not fall off the end. */
 const RECENT_UPLOADS = 5;
 
-const OFFLINE: StreamStatusDTO = {
+const OFFLINE: YouTubeStatusDTO = {
   connected: false,
   live: false,
   startedAt: null,
   detail: null,
+  viewers: null,
+  scheduledStartAt: null,
 };
 
 export type YouTubeMode = "key" | "oauth";
@@ -72,20 +79,29 @@ export interface YouTubeConfig {
   refreshToken: string;
 }
 
-/** As much of a liveBroadcast as the OAuth path reads. */
+/** As much of a liveBroadcast as the OAuth path reads. `scheduledStartTime` is
+ *  in the `snippet` this path already asks for, so reading it costs nothing. */
 export interface YouTubeBroadcast {
   id?: string;
-  snippet?: { title?: string | null; actualStartTime?: string | null } | null;
+  snippet?: {
+    title?: string | null;
+    actualStartTime?: string | null;
+    scheduledStartTime?: string | null;
+  } | null;
   status?: { lifeCycleStatus?: string | null } | null;
 }
 
-/** As much of a video as the API-key path reads. */
+/** As much of a video as the API-key path reads. Every field is in the
+ *  `liveStreamingDetails` part the poll already asks for. */
 export interface YouTubeVideo {
   id?: string;
   snippet?: { title?: string | null; liveBroadcastContent?: string | null } | null;
   liveStreamingDetails?: {
     actualStartTime?: string | null;
     actualEndTime?: string | null;
+    scheduledStartTime?: string | null;
+    /** A STRING in the JSON — YouTube serialises unsigned longs that way. */
+    concurrentViewers?: string | null;
   } | null;
 }
 
@@ -119,6 +135,59 @@ export function videoIsLive(v: YouTubeVideo): boolean {
   if ((v.snippet?.liveBroadcastContent ?? "").trim().toLowerCase() === "live") return true;
   const d = v.liveStreamingDetails;
   return !!d?.actualStartTime && !d?.actualEndTime;
+}
+
+/**
+ * Concurrent viewers across everything live, or null when nothing said.
+ *
+ * SUMMED, because the question is how many people are watching us, and two
+ * simultaneous live videos on one channel is a thing that happens.
+ *
+ * Null and zero are different answers and are kept apart. YouTube omits
+ * `concurrentViewers` when the owner has hidden the count and on a broadcast
+ * too new to have one, and a widget reading "0 watching" over a stream with an
+ * audience is worse than one reading nothing at all. Zero is only reported when
+ * YouTube actually said zero.
+ */
+export function concurrentViewers(list: readonly YouTubeVideo[]): number | null {
+  let total: number | null = null;
+  for (const v of list) {
+    const raw = v.liveStreamingDetails?.concurrentViewers;
+    if (raw == null) continue;
+    // A string in the JSON, but a number would parse too and Number("") is 0 —
+    // which is exactly the wrong answer, so an empty value is skipped.
+    const n = typeof raw === "string" && raw.trim() === "" ? NaN : Number(raw);
+    if (!Number.isFinite(n) || n < 0) continue;
+    total = (total ?? 0) + Math.floor(n);
+  }
+  return total;
+}
+
+/**
+ * The scheduled start nearest to `now` among the broadcasts that have not
+ * started, or null.
+ *
+ * UPCOMING only — a video with a scheduled time but no `actualStartTime` and no
+ * `actualEndTime`. A finished stream keeps its `scheduledStartTime` for ever,
+ * and reading that back would report every past service as a start that never
+ * happened.
+ *
+ * Nearest to now, in either direction, because both halves are wanted: "it
+ * begins in ten minutes" and "it should have begun three minutes ago" are the
+ * same field read from the two sides of one instant. Where a channel has
+ * several scheduled — a morning and an evening service — the one being asked
+ * about is the one closest to the present.
+ */
+export function nextScheduledStart(list: readonly YouTubeVideo[], now: number): string | null {
+  let best: number | null = null;
+  for (const v of list) {
+    const d = v.liveStreamingDetails;
+    if (!d?.scheduledStartTime || d.actualStartTime || d.actualEndTime) continue;
+    const t = Date.parse(d.scheduledStartTime);
+    if (!Number.isFinite(t)) continue;
+    if (best == null || Math.abs(t - now) < Math.abs(best - now)) best = t;
+  }
+  return best == null ? null : new Date(best).toISOString();
 }
 
 /** The earliest actual start among the live broadcasts, or null. */
@@ -160,6 +229,13 @@ export function isQuotaError(status: number, body: string): boolean {
   return status === 403 && /quota/i.test(body);
 }
 
+/** Everything one look at YouTube learns — the DTO minus `connected`, which is
+ *  whether the look itself succeeded. */
+type Seen = Omit<YouTubeStatusDTO, "connected" | "rev">;
+
+/** Reachable, and there is nothing to report. */
+const NOTHING_SEEN: Seen = { live: false, startedAt: null, detail: null, viewers: null, scheduledStartAt: null };
+
 const EMPTY: YouTubeConfig = {
   mode: "key",
   apiKey: "",
@@ -169,7 +245,7 @@ const EMPTY: YouTubeConfig = {
   refreshToken: "",
 };
 
-class YouTubeService extends StatusIntegration<StreamStatusDTO> {
+class YouTubeService extends StatusIntegration<YouTubeStatusDTO> {
   private cfg: YouTubeConfig = EMPTY;
 
   private accessToken: string | null = null;
@@ -203,7 +279,15 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
 
   override start(): void {
     if (this.running || !this.configured) return;
-    console.log(`[youtube] polling live status (${this.cfg.mode === "key" ? "public channel" : "OAuth"})`);
+    // The OAuth line says what that mode CANNOT see. Both absences are silent
+    // on a widget — no viewer count reads exactly like a hidden one, and a
+    // broadcast that never started is simply off air — so "why is it not amber"
+    // has no other answer anywhere at 9am on a Sunday. Once, at start.
+    console.log(
+      this.cfg.mode === "key"
+        ? "[youtube] polling live status (public channel)"
+        : "[youtube] polling live status (OAuth) — no viewer count on this path, and a missed scheduled start is not visible until the broadcast is live",
+    );
     super.start();
   }
 
@@ -321,7 +405,7 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
   }
 
   /** Public path: recent uploads, then their live details. Two units. */
-  private async lookPublic(cfg: YouTubeConfig): Promise<{ live: boolean; startedAt: string | null; detail: string | null }> {
+  private async lookPublic(cfg: YouTubeConfig): Promise<Seen> {
     const uploads = await this.resolveUploads(cfg);
 
     const playlist = await this.json<{ items?: { contentDetails?: { videoId?: string } }[] }>(
@@ -330,15 +414,20 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
       cfg.apiKey,
     );
     const ids = (playlist.items ?? []).map((i) => i.contentDetails?.videoId).filter((x): x is string => !!x);
-    if (!ids.length) return { live: false, startedAt: null, detail: null };
+    if (!ids.length) return { ...NOTHING_SEEN };
 
     const videos = await this.json<{ items?: YouTubeVideo[] }>(
       `${API}/videos?part=snippet%2CliveStreamingDetails&id=${ids.map(encodeURIComponent).join("%2C")}`,
       undefined,
       cfg.apiKey,
     );
-    const live = (videos.items ?? []).filter(videoIsLive);
-    if (!live.length) return { live: false, startedAt: null, detail: null };
+    const items = videos.items ?? [];
+    // Read off the SAME response whether or not anything is live — a scheduled
+    // start matters most when nothing is, which is the whole point of it.
+    const scheduledStartAt = nextScheduledStart(items, Date.now());
+
+    const live = items.filter(videoIsLive);
+    if (!live.length) return { ...NOTHING_SEEN, scheduledStartAt };
 
     const starts = live
       .map((v) => v.liveStreamingDetails?.actualStartTime)
@@ -349,11 +438,31 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
       live: true,
       startedAt: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
       detail: live.map((v) => v.snippet?.title ?? v.id ?? "").filter(Boolean).join(" + ") || null,
+      viewers: concurrentViewers(live),
+      scheduledStartAt,
     };
   }
 
-  /** OAuth path: our own broadcasts, private ones included. One unit. */
-  private async lookOwn(cfg: YouTubeConfig): Promise<{ live: boolean; startedAt: string | null; detail: string | null }> {
+  /**
+   * OAuth path: our own broadcasts, private ones included. One unit.
+   *
+   * TWO OF THE FOUR READINGS ARE NOT AVAILABLE HERE, and adding them would cost
+   * a request per poll each, which is why neither is added:
+   *
+   *   viewers — a `liveBroadcast` carries no audience figure. The count lives on
+   *     the VIDEO of the same id, so it would be a second `videos.list` every
+   *     poll. At the 20-second in-demand cadence that is 180 extra units an hour
+   *     against a 10,000-a-day budget, on a wall display that is on all day.
+   *   a MISSED start — `broadcastStatus` takes exactly one value and this asks
+   *     for `active`, so a broadcast that is scheduled and has not begun is not
+   *     in the answer at all. Seeing it means a second call for `upcoming`, on
+   *     every poll of the 99% of the week when nothing is live.
+   *
+   * `scheduledStartTime` of a broadcast that IS live is free — it is in the
+   * `snippet` already asked for — so a late start is still visible here. Only
+   * the alarm before anything goes out needs the API-key path.
+   */
+  private async lookOwn(cfg: YouTubeConfig): Promise<Seen> {
     const token = await this.ensureAccessToken(cfg);
     const body = await this.json<{ items?: YouTubeBroadcast[] }>(
       // liveBroadcasts.list takes EXACTLY ONE filter — broadcastStatus, id or
@@ -365,18 +474,22 @@ class YouTubeService extends StatusIntegration<StreamStatusDTO> {
       { headers: { Authorization: `Bearer ${token}` } },
     );
     const live = (body.items ?? []).filter(broadcastIsLive);
+    const scheduled = live
+      .map((b) => b.snippet?.scheduledStartTime)
+      .filter((x): x is string => !!x)
+      .map((x) => Date.parse(x))
+      .filter(Number.isFinite);
     return {
       live: live.length > 0,
       startedAt: earliestStart(live),
       detail: live.map((b) => b.snippet?.title ?? b.id ?? "").filter(Boolean).join(" + ") || null,
+      viewers: null,
+      scheduledStartAt: scheduled.length ? new Date(Math.min(...scheduled)).toISOString() : null,
     };
   }
 
   /** Whichever way this connection is set up to ask. */
-  private async look(
-    cfg: YouTubeConfig,
-    opts: { fresh?: boolean } = {},
-  ): Promise<{ live: boolean; startedAt: string | null; detail: string | null }> {
+  private async look(cfg: YouTubeConfig, opts: { fresh?: boolean } = {}): Promise<Seen> {
     // The test button must not report success off a cached channel lookup made
     // with the credentials the operator is in the middle of replacing.
     if (opts.fresh) this.uploadsPlaylist = null;

@@ -43,7 +43,7 @@ import {
 } from "./bar-items";
 import { useBarFit } from "./bar-fit";
 import { useIsMobile, useCoarsePointer } from "../lib/use-media-query";
-import { recordIndicator, recorders, streamingStat, streamers } from "./recording-status";
+import { formatDuration, lateBySec, recordIndicator, recorders, streamingStat, streamers } from "./recording-status";
 import { useObsState } from "../main/use-obs-state";
 import { useReaperState } from "../main/use-reaper-state";
 import { useIntegrations } from "../main/use-integration-states";
@@ -86,7 +86,7 @@ export interface BarItemContext {
   reaper: ReturnType<typeof useReaperState>;
   integrations: ReturnType<typeof useIntegrations>;
   resi: StreamStatusDTO | null;
-  youtube: StreamStatusDTO | null;
+  youtube: YouTubeStatusDTO | null;
   scores: ScoresStatusDTO | null;
   /** True while this is the configurator's inert preview strip. Items that are
    *  interactive in the bar render as plain readings in there. */
@@ -564,7 +564,8 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
     case "streaming": {
       // The same judgement Home makes, from the same function — including
       // "connected but not live", which mid-service is the state worth seeing.
-      const st = streamingStat(streamers(resi, youtube, obs), now);
+      const list = streamers(resi, youtube, obs);
+      const st = streamingStat(list, now);
       // No tone is streamingStat's "no platform is even connected" — unknown,
       // not off air, and the one streaming state not worth a colour.
       if (!st.tone) return <Idle glyph={RadioOffIcon}>No stream</Idle>;
@@ -572,7 +573,24 @@ export function renderBarItem(id: BarItemId, ctx: BarItemContext): ReactNode {
       // a red word on a bar that is always on screen stops meaning anything long
       // before the morning it matters. Going out is the thing worth a colour, and
       // it gets the same green the widgets use.
-      if (st.tone === "danger") return <Idle glyph={RadioTowerIcon}>Off air</Idle>;
+      if (st.tone === "danger") {
+        // The exception, and the reason the rule above holds the rest of the
+        // week: a broadcast was scheduled, the time has gone and nothing is out.
+        // Amber, so the bar still has exactly one red and it means "act now".
+        const late = list
+          .filter((s) => s.connected)
+          .map((s) => lateBySec(s, now))
+          .filter((x): x is number => x != null)
+          .sort((a, b) => b - a)[0];
+        if (late != null) {
+          return (
+            <span className="text-footnote font-mono tabular-nums text-warn-11">
+              {`${formatDuration(late)} late`}
+            </span>
+          );
+        }
+        return <Idle glyph={RadioTowerIcon}>Off air</Idle>;
+      }
       return <span className="text-footnote font-mono tabular-nums text-live-11">{st.value}</span>;
     }
 

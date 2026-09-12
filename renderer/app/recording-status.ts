@@ -110,6 +110,42 @@ export interface Streamer {
   live: boolean;
   /** ISO start, or null when the platform will not say since when. */
   startedAt?: string | null;
+  /** People watching right now, where the platform reports one. Only YouTube
+   *  does, and only on the API-key path — see YouTubeStatusDTO.viewers. */
+  viewers?: number | null;
+  /** ISO moment this was scheduled to begin, or null. Only YouTube reports one.
+   *  Read through `lateBySec`, never compared by hand. */
+  scheduledStartAt?: string | null;
+}
+
+/**
+ * How many seconds past its scheduled start something is, or null.
+ *
+ * Null means "not an alarm", which is four different things: nothing is
+ * scheduled, it is already live, the scheduled time has not arrived, or it is
+ * so far past that this is history rather than news.
+ *
+ * COMPUTED ON THE CLIENT, from a fixed timestamp the server pushed once. The
+ * server could work out "late" itself, but the number grows every second, so it
+ * would be a frame a second to every browser — which is the bug the OBS record
+ * clock was just fixed for, and the reason `scheduledStartAt` is a moment
+ * rather than a countdown.
+ */
+export function lateBySec(s: Pick<Streamer, "live" | "scheduledStartAt">, now: number): number | null {
+  if (s.live || !s.scheduledStartAt) return null;
+  const at = Date.parse(s.scheduledStartAt);
+  if (!Number.isFinite(at)) return null;
+  const lateMs = now - at;
+  // A MINUTE of grace. A stream that goes out forty seconds after its scheduled
+  // time is not a problem anyone needs telling about, and a widget that flashes
+  // red at every start is one nobody reads by the third Sunday.
+  //
+  // And an upper bound, because an upcoming broadcast that was never started
+  // keeps its scheduled time for as long as it sits on the channel — without
+  // one, a broadcast cancelled in March leaves the widget red until somebody
+  // deletes it. Two hours is past the end of any service this is raised for.
+  if (lateMs < 60_000 || lateMs > 2 * 60 * 60_000) return null;
+  return Math.floor(lateMs / 1000);
 }
 
 /**
@@ -157,12 +193,19 @@ export function sourceOptions(
 
 export function streamers(
   resi: { connected: boolean; live: boolean; startedAt: string | null } | null,
-  youtube: { connected: boolean; live: boolean; startedAt: string | null } | null,
+  youtube: YouTubeStatusDTO | null,
   obs: { connected: boolean; streaming: boolean } | null,
 ): Streamer[] {
   return [
     { name: "Resi", connected: !!resi?.connected, live: !!resi?.live, startedAt: resi?.startedAt ?? null },
-    { name: "YouTube", connected: !!youtube?.connected, live: !!youtube?.live, startedAt: youtube?.startedAt ?? null },
+    {
+      name: "YouTube",
+      connected: !!youtube?.connected,
+      live: !!youtube?.live,
+      startedAt: youtube?.startedAt ?? null,
+      viewers: youtube?.viewers ?? null,
+      scheduledStartAt: youtube?.scheduledStartAt ?? null,
+    },
     // OBS has no start time for its stream — obs-websocket reports the output
     // is active, not when it began — so elapsed comes from whoever else is live,
     // or is absent.
@@ -236,6 +279,14 @@ export function streamingStat(
  * Off air is its own state and not a shade of offline — "Resi is reachable and
  * is not streaming" is the single most useful thing this can say mid-service.
  *
+ * LATE is off air with a reason, and the fourth state exists because those two
+ * want opposite treatment. The note on the context bar's streaming item is that
+ * off air must stay quiet: it is what the bar sits in all week, and a red word
+ * that is always there stops meaning anything long before the morning it
+ * matters. Late is the morning it matters — a broadcast was scheduled, the time
+ * has passed and nothing is going out — and it is the one off-air moment that
+ * has earned the colour. Only YouTube can report it; see `lateBySec`.
+ *
  * The sub-line is always supplied, and the WALL widgets drop it for the two
  * quiet states: a wall wants one word, and Home wants the third line saying
  * which platform is or is not connected. One judgement, two presentations.
@@ -244,7 +295,7 @@ export function streamIndicator(
   list: readonly Streamer[],
   now: number,
   opts: { showElapsed?: boolean; name?: string | null } = {},
-): { value: string; sub: string | null; state: "offline" | "idle" | "live" } {
+): { value: string; sub: string | null; state: "offline" | "idle" | "late" | "live" } {
   const st = streamingStat(list, now);
   const named = opts.name;
   // No tone is streamingStat's "nothing is even connected". That is a platform
@@ -257,16 +308,42 @@ export function streamIndicator(
     };
   }
   if (st.tone !== "live") {
+    // The most overdue of whatever is connected. Where two platforms are both
+    // waiting on the same service, the one that should have started first is
+    // the one worth reporting.
+    const late = list
+      .filter((s) => s.connected)
+      .map((s) => lateBySec(s, now))
+      .filter((x): x is number => x != null)
+      .sort((a, b) => b - a)[0];
+    if (late != null) {
+      return { value: "Off air", sub: `${formatDuration(late)} late`, state: "late" };
+    }
     return { value: "Off air", sub: named ? `${named} connected` : st.sub, state: "idle" };
   }
   // Live: the word, with the elapsed time as the sub-line. streamingStat's value
   // IS the elapsed reading, or "LIVE" when the platform will not say since when.
   const elapsed = st.value === "LIVE" ? null : st.value;
+  // The audience rides the same line. It is not "elapsed", but it is the same
+  // running reading, and a wall widget has exactly one slot for one — a second
+  // line is paid for out of the size of the word above it, which is the fix
+  // that made every status tile too small once already.
+  const watching = list.find((s) => s.live && s.viewers != null)?.viewers;
+  const reading = [elapsed, watching == null ? null : `${watching} watching`].filter(Boolean).join(" · ");
   return {
     value: "Live",
-    sub: opts.showElapsed === false ? null : elapsed,
+    sub: opts.showElapsed === false || !reading ? null : reading,
     state: "live",
   };
+}
+
+/** "H:MM:SS" past an hour, else "M:SS". The shape `elapsedSince` returns, from
+ *  a count of seconds rather than a start time. */
+export function formatDuration(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = String(sec % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
 
 /** The loudest current SPL reading across every meter, which is the number

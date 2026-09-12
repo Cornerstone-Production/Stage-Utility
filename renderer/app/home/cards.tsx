@@ -209,11 +209,15 @@ export function Stat({
   value: string;
   sub?: string;
   to?: string;
-  /** Only the two colours a stat ever earns. Everything else — offline,
+  /** Only the colours a stat actually earns. Everything else — offline,
    *  standby, off air — is the page's own foreground: on Home the caption and
    *  the sub-line carry the grey, and a card that greyed its value too read as
-   *  disabled beside the ones that had not. */
-  tone?: "danger" | "live";
+   *  disabled beside the ones that had not.
+   *
+   *  `warn` is the third and it is deliberately hard to earn: off air is not it,
+   *  because off air is what the page sits in all week. A broadcast that was
+   *  SCHEDULED and has not started is. */
+  tone?: "danger" | "warn" | "live";
 }) {
   const body = (
     <Readout
@@ -226,6 +230,7 @@ export function Stat({
       // white a display uses.
       valueColor={
         tone === "danger" ? "var(--color-danger-11)"
+        : tone === "warn" ? "var(--color-warn-11)"
         : tone === "live" ? "var(--color-live-11)"
         : null
       }
@@ -646,7 +651,9 @@ export function StreamingCard({
       label={platform === "any" ? "Streaming" : platform}
       value={ind.value}
       sub={ind.sub ?? undefined}
-      tone={ind.state === "live" ? "live" : undefined}
+      // Late is off air past a scheduled start, and the one off-air moment worth
+      // a colour on a page that sits in off air all week — see streamIndicator.
+      tone={ind.state === "live" ? "live" : ind.state === "late" ? "warn" : undefined}
     />
   );
 }

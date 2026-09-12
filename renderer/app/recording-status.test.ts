@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { recordIndicator, loudestSpl, pinnedSpl, meterOptions, LOUDEST_METER, STREAMER_FOR, RECORDER_FOR, sourceOptions } from "./recording-status.js";
+import { recordIndicator, lateBySec, streamIndicator, loudestSpl, pinnedSpl, meterOptions, LOUDEST_METER, STREAMER_FOR, RECORDER_FOR, sourceOptions } from "./recording-status.js";
+import type { Streamer } from "./recording-status.js";
 
 // Mid-service, recording and SPL are the two things you cannot recover after the
 // fact, so these read the state rather than restate it. The distinction that
@@ -191,5 +192,125 @@ describe("the recording indicator", () => {
       recordIndicator([rec({ connected: false }), rec({ name: "REAPER", connected: false })]).sub,
       "no recorder connected",
     );
+  });
+});
+
+// ── Off air past a scheduled start ──────────────────────────────────────────
+//
+// The state the app could not describe: a broadcast was scheduled, the time has
+// gone, and nothing is going out. Only YouTube reports a scheduled start, and
+// only the API-key path can see one for a broadcast that has not begun — see
+// docs/integrations/youtube.md.
+//
+// Judged on the CLIENT from a fixed timestamp the server pushed once, for the
+// reason the OBS record clock is: the number grows every second, and computing
+// it on the server would be an SSE frame a second to every browser.
+
+describe("lateBySec", () => {
+  const NOW = Date.parse("2026-09-06T14:05:00.000Z");
+  const at = (offsetSec: number) => new Date(NOW + offsetSec * 1000).toISOString();
+
+  test("counts the seconds since a start that did not happen", () => {
+    assert.equal(lateBySec({ live: false, scheduledStartAt: at(-300) }, NOW), 300);
+  });
+
+  test("something live is never late, however long after its scheduled time it began", () => {
+    // It IS going out. A red widget over a stream with an audience is the worst
+    // reading this could produce.
+    assert.equal(lateBySec({ live: true, scheduledStartAt: at(-3600) }, NOW), null);
+  });
+
+  test("a start still to come is not late", () => {
+    assert.equal(lateBySec({ live: false, scheduledStartAt: at(600) }, NOW), null);
+  });
+
+  test("the first minute is grace, not an alarm", () => {
+    // A stream that goes out forty seconds after its scheduled time is not a
+    // problem anyone needs telling about, and a widget that flashes red at every
+    // start is one nobody reads by the third Sunday.
+    assert.equal(lateBySec({ live: false, scheduledStartAt: at(-59) }, NOW), null);
+    assert.equal(lateBySec({ live: false, scheduledStartAt: at(-61) }, NOW), 61);
+  });
+
+  test("a broadcast scheduled and abandoned months ago stops being an alarm", () => {
+    // THE RED THAT WOULD NEVER GO OUT. An upcoming broadcast keeps its scheduled
+    // time for as long as it sits on the channel, so with no upper bound one
+    // cancelled in March leaves the widget red until somebody deletes it.
+    assert.equal(lateBySec({ live: false, scheduledStartAt: at(-3 * 60 * 60) }, NOW), null);
+    assert.equal(lateBySec({ live: false, scheduledStartAt: at(-119 * 60) }, NOW), 119 * 60);
+  });
+
+  test("nothing scheduled, and an unparseable time, are both simply not an alarm", () => {
+    assert.equal(lateBySec({ live: false, scheduledStartAt: null }, NOW), null);
+    assert.equal(lateBySec({ live: false, scheduledStartAt: "shortly" }, NOW), null);
+  });
+});
+
+describe("the streaming indicator, off air past a scheduled start", () => {
+  const NOW = Date.parse("2026-09-06T14:05:00.000Z");
+  const at = (offsetSec: number) => new Date(NOW + offsetSec * 1000).toISOString();
+  const yt = (over: Partial<Streamer> = {}): Streamer =>
+    ({ name: "YouTube", connected: true, live: false, ...over });
+
+  test("off air with nothing scheduled stays quiet", () => {
+    // It is what the page sits in all week. A colour here is a colour that means
+    // nothing by the third Sunday.
+    const ind = streamIndicator([yt()], NOW);
+    assert.equal(ind.value, "Off air");
+    assert.equal(ind.state, "idle");
+  });
+
+  test("off air past a scheduled start is its own state, and says how late", () => {
+    const ind = streamIndicator([yt({ scheduledStartAt: at(-372) })], NOW);
+    assert.equal(ind.value, "Off air", "the state word is unchanged — it IS off air");
+    assert.equal(ind.state, "late", "the one off-air moment that has earned a colour");
+    assert.equal(ind.sub, "6:12 late");
+  });
+
+  test("a platform that is not connected cannot be late", () => {
+    // Unreachable is a different failure with a different fix, and reporting it
+    // as a missed start would send the operator to the wrong box.
+    const ind = streamIndicator([yt({ connected: false, scheduledStartAt: at(-372) })], NOW);
+    assert.equal(ind.state, "offline");
+  });
+
+  test("one platform live is enough, whatever another had scheduled", () => {
+    const ind = streamIndicator(
+      [yt({ scheduledStartAt: at(-372) }), { name: "Resi", connected: true, live: true, startedAt: at(-90) }],
+      NOW,
+    );
+    assert.equal(ind.state, "live");
+  });
+
+  test("with two overdue, it reports the one that should have started first", () => {
+    const ind = streamIndicator(
+      [yt({ scheduledStartAt: at(-120) }), yt({ name: "Resi", scheduledStartAt: at(-600) })],
+      NOW,
+    );
+    assert.equal(ind.sub, "10:00 late");
+  });
+});
+
+describe("the streaming indicator, viewers", () => {
+  const NOW = Date.parse("2026-09-06T14:05:00.000Z");
+  const live = (over: Partial<Streamer> = {}): Streamer =>
+    ({ name: "YouTube", connected: true, live: true, startedAt: new Date(NOW - 95_000).toISOString(), ...over });
+
+  test("the audience rides the same line as the clock", () => {
+    // A wall widget has exactly one slot for a running reading — a second line
+    // is paid for out of the size of the word above it.
+    assert.equal(streamIndicator([live({ viewers: 137 })], NOW).sub, "1:35 · 137 watching");
+  });
+
+  test("no viewer count leaves the clock exactly as it was", () => {
+    assert.equal(streamIndicator([live()], NOW).sub, "1:35");
+  });
+
+  test("a reported zero is shown, because YouTube said it", () => {
+    assert.equal(streamIndicator([live({ viewers: 0 })], NOW).sub, "1:35 · 0 watching");
+  });
+
+  test("the elapsed switch drops the whole reading, audience included", () => {
+    assert.equal(streamIndicator([live({ viewers: 137 })], NOW, { showElapsed: false }).sub, null);
   });
 });
