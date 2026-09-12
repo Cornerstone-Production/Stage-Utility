@@ -14,13 +14,32 @@ WebSocket (JSON message protocol, default port `4455`, optional password):
 - It then stays live on the `Outputs` event group: `RecordStateChanged`,
   `StreamStateChanged` and `VirtualcamStateChanged` fold into the status
   snapshot. `recording` stays true while a recording is paused.
-- While recording, a 1 Hz poll (`GetRecordStatus`) refreshes the record
-  timecode, trimmed from `HH:MM:SS.mmm` to whole seconds.
+The service broadcasts the snapshot on the `obs:status` channel on change. It
+uses a configure/connect/reconnect loop with exponential backoff and goes quiet
+when unreachable. The password is stored as an encrypted secret.
 
-The service broadcasts the snapshot on the
-`obs:status` channel on change (and each second while recording, to tick the
-timecode). It uses a configure/connect/reconnect loop with exponential backoff
-and goes quiet when unreachable. The password is stored as an encrypted secret.
+### The record timecode
+
+The snapshot carries an **anchor**, not a ticking string: `recordAnchorMs` is
+OBS's `outputDuration` (milliseconds recorded) as it stood at `recordSampledAt`,
+and each display reads it forward against the server's clock. So a recording
+that is simply rolling costs no requests to OBS and no frames to any browser.
+
+The anchor is re-read with `GetRecordStatus`:
+
+- on every `RecordStateChanged`, which is how OBS reports a start, a stop, a
+  pause and a resume alike, and
+- on a 30-second keepalive, because `outputDuration` counts what was *recorded* —
+  it falls behind wall-clock when frames drop or the disk stalls, and a wall
+  counting seconds that were never written is worth correcting.
+
+A paused recording holds at its anchor rather than creeping forward, and is not
+re-read: OBS stops advancing `outputDuration` while paused, so there is nothing
+to correct. An idle OBS is asked nothing at all.
+
+A keepalive that cannot reach OBS logs one `[obs] record anchor` warning per
+streak and one line when it recovers. The timecode keeps running from the last
+good anchor meanwhile, so it may drift from OBS until the next successful read.
 
 ### When it stops trying
 

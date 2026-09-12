@@ -176,8 +176,24 @@ export interface ObsStatusDTO extends RevisionedStatus {
   recordPaused: boolean;
   streaming: boolean;
   virtualCam: boolean;
-  /** "HH:MM:SS" record duration while recording, else null. */
-  recordTimecode: string | null;
+  /**
+   * An ANCHOR, not a clock: OBS's `outputDuration` (milliseconds recorded) as it
+   * stood at `recordSampledAt`. Null when not recording.
+   *
+   * This used to be a formatted "HH:MM:SS" string refreshed by a 1 Hz poll,
+   * which meant an SSE frame per second to every connected browser for the whole
+   * length of a recording. The anchor is re-read only when OBS says the record
+   * state changed and on a slow keepalive; the display interpolates. Exactly the
+   * trade `PvpLayerDTO.anchorElapsedSec` makes, for the same reason.
+   *
+   * `recordPaused` is the rate: a paused recording holds at the anchor rather
+   * than creeping forward. Read both through
+   * `main/services/obs-record-clock.ts` rather than by hand.
+   */
+  recordAnchorMs: number | null;
+  /** ISO moment `recordAnchorMs` was read, stamped by this server — so a display
+   *  corrects it with the same clock skew it applies to the PCO countdown. */
+  recordSampledAt: string | null;
 }
 
 /** Live REAPER transport state (pushed on "reaper:status"). `connected` is the
@@ -218,6 +234,44 @@ export interface StreamStatusDTO extends RevisionedStatus {
    *  connection state, reported once on the Integrations page rather than
    *  twice in two shapes. */
   detail: string | null;
+}
+
+/**
+ * YouTube's stream status: the shared shape, plus the two things only YouTube
+ * knows (pushed on "youtube:status").
+ *
+ * A SEPARATE interface rather than two more nullable fields on StreamStatusDTO.
+ * Resi publishes that same DTO and knows neither number, so the fields would be
+ * permanently null there — a shape that says a platform could report a viewer
+ * count when it cannot. Widening the shared one is also how a field ends up
+ * unset on one of two producers and read on both.
+ *
+ * Both fields come out of a response the poll already makes, so neither costs a
+ * request or a quota unit. See docs/integrations/youtube.md for what each auth
+ * mode can actually see.
+ */
+export interface YouTubeStatusDTO extends StreamStatusDTO {
+  /**
+   * People watching right now, summed across whatever is live, or null.
+   *
+   * Null is "YouTube did not say", which is three different things and none of
+   * them is zero: the owner has hidden the count, the broadcast is too new for
+   * one, or this is the OAuth path — `liveBroadcasts.list` carries no viewer
+   * figure, and fetching one would be a second request per poll.
+   */
+  viewers: number | null;
+  /**
+   * When the broadcast was scheduled to begin, or null.
+   *
+   * The point of it is the state nothing else here can describe: it is past
+   * this time and `live` is false. On the API-key path an upcoming broadcast
+   * sits in the channel's uploads with a scheduled time and no start, so the
+   * app can say so before anyone notices. On the OAuth path this is the
+   * scheduled time of a broadcast that IS live — enough to see a late start,
+   * not enough to raise the alarm. Read it through `streamLateBySec` rather
+   * than comparing by hand.
+   */
+  scheduledStartAt: string | null;
 }
 
 /** Live people counts from the SenSource Vea integration (pushed on

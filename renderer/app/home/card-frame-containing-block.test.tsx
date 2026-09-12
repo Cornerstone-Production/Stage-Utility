@@ -54,10 +54,20 @@ after(() => {
 const OBJ: LayoutObject =
   ({ id: "obs", x: 0, y: 0, w: 0.2, h: 0.12, z: 0, config: { type: "obs-status" }, style: defaultStyle("obs-status" as never) }) as never;
 
-/** OBS mid-recording, on Home — the state that paints a filled ground. */
+/** OBS mid-recording, on Home — the state that paints a filled ground. Typed
+ *  rather than cast: behind `as never` this seed kept a `recordTimecode` field
+ *  that had already become an anchor, and nothing said so. */
 const RECORDING = makeRenderCtx({
   home: true,
-  obs: { connected: true, recording: true, recordPaused: false, streaming: false, virtualCam: false, recordTimecode: "00:35:09" } as never,
+  obs: {
+    connected: true,
+    recording: true,
+    recordPaused: false,
+    streaming: false,
+    virtualCam: false,
+    recordAnchorMs: 2_109_000, // 00:35:09
+    recordSampledAt: new Date().toISOString(),
+  },
 });
 
 /** The first ancestor a `position: absolute` child would resolve against. */
