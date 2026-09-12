@@ -21,7 +21,9 @@ import * as fsp from "node:fs/promises";
 // the data directory at import. Point it somewhere disposable first.
 process.env.STAGE_UTILITY_DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "companion-api-"));
 
-const { companionApi, companionDeps, VARIABLE_TIMEOUT_MS } = await import("./companion-api.js");
+const { companionApi, companionDeps, CONNECTIONS_TIMEOUT_MS, VARIABLE_TIMEOUT_MS } = await import(
+  "./companion-api.js"
+);
 const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
 const { companionExportFixture } = await import("./fixtures/companion-export.js");
 
@@ -386,14 +388,39 @@ describe("readConnections", () => {
     assert.equal(r.health.worst, "error");
   });
 
-  // Without a signal a Companion that accepts the connection and never answers
-  // holds the hourly reconcile open.
-  test("the request is timed", async () => {
+  // A Companion that accepts the connection and never answers holds the hourly
+  // reconcile open. `instanceof AbortSignal` does NOT catch that — it was the
+  // first form of this test and it stayed green against
+  // `new AbortController().signal`, a signal that never fires. So this waits the
+  // real three seconds and pins the constant, the way readCustomVariable's
+  // timeout below does, and for the same reason: `mock.timers` cannot drive
+  // `AbortSignal.timeout`. `timeout` is on the test because the red state of
+  // this guard is a read that never settles.
+  test("a Companion that never answers is an error, not a hang", { timeout: 10_000 }, async () => {
     target({ host: "10.0.0.5", port: 8000 });
-    const calls = stubBoth(() => Response.json(connectionsBody()));
+    companionDeps.fetch = async (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | null | undefined;
+        assert.ok(signal instanceof AbortSignal, "the read was sent with no timeout");
+        signal.addEventListener("abort", () => reject(signal.reason));
+      });
 
-    await companionApi.readConnections();
-    assert.ok(calls[0]!.signal instanceof AbortSignal, "the read was sent with no timeout");
+    const started = Date.now();
+    const r = await companionApi.readConnections({ force: true });
+    const took = Date.now() - started;
+
+    assert.equal(r.ok, false, "a hung read came back as a health summary");
+    assert.match(r.ok === false ? r.reason : "", /timeout/i);
+    // Not `unsupported`: a Companion that never answers is not an old one, and
+    // the unsupported bucket is deliberately silent.
+    assert.equal(r.ok === false ? r.unsupported : true, false);
+    // The CONSTANT, not just that something aborted eventually. A timeout raised
+    // to a minute would still abort, and would still be an hourly sweep held
+    // open for a minute.
+    assert.ok(
+      took >= CONNECTIONS_TIMEOUT_MS - 100 && took < CONNECTIONS_TIMEOUT_MS + 1500,
+      `the read took ${took} ms, not about ${CONNECTIONS_TIMEOUT_MS} ms`,
+    );
   });
 
   test("404 is `unsupported`, which is not the same answer as a failure", async () => {
@@ -556,14 +583,20 @@ describe("readCustomVariable", () => {
 
 // ── The host, resolved inside the try ─────────────────────────────────────────
 //
-// Every one of these three is documented as never throwing, and each resolved
-// its base URL BEFORE its try: `baseUrl()` awaits getTarget, which reaches the
-// integration manager and its config store. A rejection there escaped all three.
+// Every one of these FOUR is documented as never throwing, and three of them
+// once resolved the base URL BEFORE the try: `baseUrl()` awaits getTarget, which
+// reaches the integration manager and its config store. A rejection there
+// escaped all three.
 //
 // It matters most for the variable read, because its caller reads every bound
 // pair in one batch — one rejection took out every other pair's state and the
 // `GET /api/cues/states` route with it. For `press` it is worse in kind: an
-// automation action that throws stops the engine.
+// automation action that throws stops the engine. For readConnections it is the
+// hourly reconcile, which now calls it as the last thing it does.
+//
+// readConnections is the fourth, added with the endpoint rather than after it —
+// it shipped carrying the comment that names this exact bug and no case here,
+// which is the three-of-four shape this repo pays for over and over.
 describe("a getTarget failure", () => {
   const boom = () => {
     companionDeps.getTarget = async () => {
@@ -593,6 +626,19 @@ describe("a getTarget failure", () => {
     const r = await companionApi.fetchExport({ force: true });
     assert.equal(r.ok, false);
     assert.match(r.ok === false ? r.reason : "", /secrets\.bin is unreadable/);
+  });
+
+  test("readConnections returns it rather than throwing", async () => {
+    boom();
+    stub(() => Response.json([]));
+    const r = await companionApi.readConnections({ force: true });
+    assert.equal(r.ok, false);
+    assert.match(r.ok === false ? r.reason : "", /secrets\.bin is unreadable/);
+    // NOT `unsupported`. A config store that will not open says nothing about
+    // which Companion build is on the other end, and reporting it as "this
+    // Companion is too old" would put the row's one honest failure into the
+    // bucket that is deliberately silent.
+    assert.equal(r.ok === false ? r.unsupported : true, false);
   });
 });
 

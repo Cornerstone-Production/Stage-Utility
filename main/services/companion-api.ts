@@ -68,8 +68,27 @@ const EXPORT_CACHE_MS = 5 * 60 * 1000;
  * pass. Long enough for one purpose only — pressing Test runs the reconcile,
  * and both of them want the health, so a minute is what stops one button press
  * asking Companion for the same list twice.
+ *
+ * It does NOT save a request on the cue picker's Refresh, which calls
+ * `invalidate()` first by design. Refresh means read Companion again.
  */
 const CONNECTIONS_CACHE_MS = 60_000;
+/**
+ * A connection-list read.
+ *
+ * The same three seconds as a variable read, and for a measured reason rather
+ * than by analogy: the live install's list is 84 entries and about 10 KB, which
+ * came back instantly, and a Companion that has not produced 10 KB in three
+ * seconds is not about to. Nothing waits on this — a timeout leaves the row's
+ * last sentence in place and writes nothing — so the cost of being wrong short
+ * is one missing hourly line, and the cost of being wrong long is an hourly
+ * sweep held open.
+ *
+ * Exported so its own guard can pin it by elapsed time. A guard that only
+ * checked a signal was PRESENT stayed green against a signal that never fires,
+ * which is the whole bug.
+ */
+export const CONNECTIONS_TIMEOUT_MS = 3000;
 
 export interface CompanionTarget {
   host: string;
@@ -415,10 +434,7 @@ class CompanionApi {
       }
       base = resolved;
       const res = await companionDeps.fetch(`${base}/api/connections`, {
-        // The press timeout, not the variable one: nothing on a Home Assistant
-        // poll waits for this, and an 84-entry list off a busy Companion is
-        // worth more than three seconds.
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(CONNECTIONS_TIMEOUT_MS),
       });
       if (res.status === 404) {
         return {
