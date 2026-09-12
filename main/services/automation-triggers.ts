@@ -48,6 +48,22 @@ function def(t: TriggerDef): TriggerDef {
   return t;
 }
 
+/**
+ * Did a reading CROSS a threshold between two snapshots?
+ *
+ * NO BASELINE, NO CROSSING: a null on either side means the value could not be
+ * read, and an unreadable value has not crossed anything. That refusal is why
+ * this is one function — it was written out at five call sites (SPL both ways,
+ * people count both ways, service overrun, and now inbound OSC), each of them a
+ * place where forgetting it turns "the meter came back online" into "the room
+ * got loud". A non-finite threshold is the same answer for the same reason.
+ */
+function crossed(a: number | null, b: number | null, th: number, dir: "above" | "below"): boolean {
+  if (a === null || b === null) return false;
+  if (!Number.isFinite(th)) return false;
+  return dir === "above" ? a <= th && b > th : a >= th && b < th;
+}
+
 // ── ProVideoPlayer ──────────────────────────────────────────────────────────
 //
 // Structurally typed against PvpLayerDTO rather than importing it, and NOT
@@ -237,42 +253,113 @@ type Obs = { connected?: boolean; recording?: boolean; streaming?: boolean; virt
 const asObs = (v: unknown): Obs => (v && typeof v === "object" ? (v as Obs) : {});
 
 /**
- * Start/stop pair for one boolean OBS output (streaming, virtual cam).
+ * Start/stop pair for one boolean output on one device — OBS's stream, its
+ * virtual camera, and each recorder's transport.
  *
- * The stop half deliberately refuses to fire when OBS has gone unreachable: a
- * dropped connection reports every output as false, and treating that as "stopped"
- * would fire a stop rule because a machine went offline. Unknown is not a value.
+ * ONE generator rather than the shape written out per output. It was written out
+ * twice (obs streaming, obs virtual cam) and then a third time by hand for the
+ * recording pair, and the hand-written copy is the one that had no `help` on its
+ * stop half. Adding REAPER would have made it four.
+ *
+ * The ids are passed in rather than derived, because the recording pair's are
+ * `recording.started`/`recording.stopped` — no `obs.` prefix, since they predate
+ * there being a second recorder. A saved rule names its trigger by id, so those
+ * two cannot be renamed to match the others without every existing recording
+ * rule silently never firing again.
+ *
+ * The stop half deliberately refuses to fire when the device has gone
+ * unreachable: a dropped connection reports every output as false, and treating
+ * that as "stopped" would fire a stop rule because a machine went offline.
+ * Unknown is not a value.
  */
+function outputTriggers(spec: {
+  channel: string;
+  /** Reads the flag out of that channel's snapshot. */
+  read: (snap: unknown) => boolean | undefined;
+  /**
+   * Is the device reachable in this snapshot? A field, not a hardcoded
+   * `.connected` read inside the stop half: every channel this serves today
+   * happens to name it `connected`, and the next one that does not would
+   * silently lose its offline guard rather than fail to compile.
+   */
+  reachable: (snap: unknown) => boolean;
+  /** The device's name, for the "unreachable is unknown" help. */
+  device: string;
+  started: { id: string; label: string };
+  stopped: { id: string; label: string };
+}): Record<string, TriggerDef> {
+  const { channel, read, reachable, device, started, stopped } = spec;
+  return {
+    [started.id]: def({
+      id: started.id,
+      label: started.label,
+      channel,
+      params: [],
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        return read(prev) !== true && read(next) === true;
+      },
+    }),
+    [stopped.id]: def({
+      id: stopped.id,
+      label: stopped.label,
+      channel,
+      params: [],
+      help: `Does not fire when ${device} simply goes offline — unreachable is unknown, not stopped.`,
+      didFire: (prev, next) => {
+        if (prev === null) return false;
+        if (!reachable(next)) return false;
+        return read(prev) === true && read(next) === false;
+      },
+    }),
+  };
+}
+
+/** Start/stop pair for one boolean OBS output (streaming, virtual cam). */
 function obsOutputTriggers(
   key: "streaming" | "virtualCam",
   slug: string,
   label: string,
 ): Record<string, TriggerDef> {
-  return {
-    [`obs.${slug}-started`]: def({
-      id: `obs.${slug}-started`,
-      label: `OBS starts ${label}`,
-      channel: "obs:status",
-      params: [],
-      didFire: (prev, next) => {
-        if (prev === null) return false;
-        return asObs(prev)[key] !== true && asObs(next)[key] === true;
-      },
-    }),
-    [`obs.${slug}-stopped`]: def({
-      id: `obs.${slug}-stopped`,
-      label: `OBS stops ${label}`,
-      channel: "obs:status",
-      params: [],
-      help: "Does not fire when OBS simply goes offline — unreachable is unknown, not stopped.",
-      didFire: (prev, next) => {
-        if (prev === null) return false;
-        const n = asObs(next);
-        if (n.connected === false) return false;
-        return asObs(prev)[key] === true && n[key] === false;
-      },
-    }),
-  };
+  return outputTriggers({
+    channel: "obs:status",
+    read: (snap) => asObs(snap)[key],
+    reachable: (snap) => asObs(snap).connected !== false,
+    device: "OBS",
+    started: { id: `obs.${slug}-started`, label: `OBS starts ${label}` },
+    stopped: { id: `obs.${slug}-stopped`, label: `OBS stops ${label}` },
+  });
+}
+
+/**
+ * Start/stop pair for one recorder's transport.
+ *
+ * TWO RECORDERS, TWO PAIRS, NAMED FOR THEIR MACHINE. `recording.started` was
+ * labelled "Recording starts" while being bound to `obs:status` alone, so the
+ * one generic-sounding entry in the list was the OBS-only one and REAPER had
+ * none at all. A second pair labelled just as generically would leave an
+ * operator picking blind, and a `source` param covering both is not expressible:
+ * a trigger watches ONE channel, the two recorders publish two, and "either
+ * recorder" has no single edge — OBS starting while REAPER already rolls is not
+ * the moment recording began.
+ *
+ * So the OBS pair keeps its ids and gains OBS in its label, and REAPER gets its
+ * own. Ids are untouched: a saved rule names its trigger by id, and the engine
+ * skips a rule whose id is not in this registry — silently.
+ */
+function recorderTriggers(
+  channel: string,
+  device: string,
+  ids: { started: string; stopped: string },
+): Record<string, TriggerDef> {
+  return outputTriggers({
+    channel,
+    read: (snap) => asRec(snap).recording,
+    reachable: (snap) => asRec(snap).connected !== false,
+    device,
+    started: { id: ids.started, label: `${device} starts recording` },
+    stopped: { id: ids.stopped, label: `${device} stops recording` },
+  });
 }
 
 /**
@@ -311,6 +398,85 @@ function streamTriggers(platform: string, channel: string, label: string): Recor
       },
     }),
   };
+}
+
+// ── Inbound OSC ─────────────────────────────────────────────────────────────
+//
+// `osc:feedback` carries the whole feedback map — every address every target
+// has sent — re-broadcast whenever any one of them changes. So the edge is
+// always "did the value at MY key change", never "is it this value now": a
+// level test would fire on somebody else's fader.
+//
+// Keys are `targetId::address` for the first argument and `targetId::address#N`
+// for the rest, plus a `*::` copy of each. See osc-manager.ts.
+
+/** The values map out of an `osc:feedback` payload, defensively. */
+const asOscValues = (v: unknown): Record<string, unknown> => {
+  const raw = v && typeof v === "object" ? (v as { values?: unknown }).values : null;
+  return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+};
+
+/** One key's value, or undefined when this snapshot has never carried it.
+ *
+ *  `hasOwn` is not load-bearing and no test guards it: feedback values are
+ *  `number | string | boolean`, never undefined, so a bare read is
+ *  observationally identical and the key is always `target::/address`, which
+ *  cannot name a prototype property. It is here because "is this key present"
+ *  is the question, and asking it directly is one call. */
+function oscValueAt(snapshot: unknown, key: string): unknown {
+  const values = asOscValues(snapshot);
+  return Object.hasOwn(values, key) ? values[key] : undefined;
+}
+
+/** The feedback key a rule's params name, or null when it names no address. */
+function oscKeyOf(params: Record<string, unknown>): string | null {
+  const address = String(params.address ?? "").trim();
+  if (!address.startsWith("/")) return null;
+  const target = String(params.target ?? "").trim() || "*";
+  const index = Math.trunc(Number(params.argument ?? 0));
+  const suffix = Number.isFinite(index) && index > 0 ? `#${index}` : "";
+  return `${target}::${address}${suffix}`;
+}
+
+/** A received value as a number, for the crossing matches. Booleans count as
+ *  1 and 0 — plenty of gear answers an on/off with OSC's `T`/`F` rather than a
+ *  float, and "crossed above 0.5" should still mean something there. */
+function oscNumber(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * Does a received value equal what the rule was told to watch for?
+ *
+ * The rule's side is always text — an OSC argument can arrive as an int, a
+ * float, a string or a bare `T`/`F`, and the operator typing the field does not
+ * know which their console picked. So: numeric when both read as numbers (`1`
+ * matches a float `1.0` and the string `"1"`), `true`/`false`/`1`/`0` for a
+ * boolean, and otherwise a trimmed case-insensitive string compare, because
+ * gear sends "ON" and "on" for the same thing.
+ *
+ * A blank rule value matches NOTHING rather than everything — an unfinished
+ * rule must not fire on every message the address ever carries.
+ */
+function oscEquals(value: unknown, want: unknown): boolean {
+  const w = String(want ?? "").trim();
+  if (w === "") return false;
+  if (typeof value === "boolean") {
+    const t = w.toLowerCase();
+    return value ? t === "true" || t === "1" : t === "false" || t === "0";
+  }
+  const b = Number(w);
+  if (typeof value === "number") return Number.isFinite(b) && value === b;
+  if (typeof value !== "string") return false;
+  const a = Number(value);
+  if (value.trim() !== "" && Number.isFinite(a) && Number.isFinite(b)) return a === b;
+  return value.trim().toLowerCase() === w.toLowerCase();
 }
 
 type Line = { id?: string; text?: string; channelName?: string | null };
@@ -353,12 +519,7 @@ function splCrossed(
 ): boolean {
   const meter = String(params.meter ?? "").trim();
   const metric = String(params.metric ?? "").trim();
-  const a = splLevel(prev, meter, metric);
-  const b = splLevel(next, meter, metric);
-  if (a === null || b === null) return false; // no baseline, no crossing
-  const th = Number(params.threshold);
-  if (!Number.isFinite(th)) return false;
-  return dir === "above" ? a <= th && b > th : a >= th && b < th;
+  return crossed(splLevel(prev, meter, metric), splLevel(next, meter, metric), Number(params.threshold), dir);
 }
 
 /** slots:devices broadcasts Record<slotId, DeviceStatus>; the label a rule names
@@ -561,8 +722,131 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
   ...obsOutputTriggers("streaming", "streaming", "streaming"),
   ...obsOutputTriggers("virtualCam", "virtualcam", "the virtual camera"),
 
+  // The two recorders, beside each other and beside OBS's other outputs, because
+  // this list is a <select> in registry order and "which recorder is this one?"
+  // is the question an operator asks here.
+  ...recorderTriggers("obs:status", "OBS", { started: "recording.started", stopped: "recording.stopped" }),
+  ...recorderTriggers("reaper:status", "REAPER", {
+    started: "reaper.recording-started",
+    stopped: "reaper.recording-stopped",
+  }),
+
   ...streamTriggers("resi", "resi:status", "Resi"),
   ...streamTriggers("youtube", "youtube:status", "YouTube"),
+
+  /**
+   * Anything on the network that can send a UDP packet.
+   *
+   * The app has received OSC since the integration was written and did nothing
+   * with it but tint a layout button. This is the same feedback map, read as an
+   * edge: one address, one argument of it, and one of three comparisons.
+   *
+   * ONE trigger with a `match` param rather than three triggers, because the
+   * address, target and argument fields would be identical in all three and a
+   * picker with three near-identical rows is the naming trap this file already
+   * has one of.
+   *
+   * TWO THINGS IT CANNOT DO, both consequences of the channel being a throttled
+   * snapshot rather than an event stream, and both in the help text because an
+   * operator will otherwise build a rule that quietly never fires:
+   *
+   *  - A BANG (a message with no arguments) is stored as `true` and stays
+   *    `true`, so it is an edge at most once — and ZERO times when it is the
+   *    first thing to arrive on the channel after a restart, because the engine
+   *    seeds `prev` on the first snapshot and never evaluates it. The feedback
+   *    map is in memory only, so for a sender nobody else shares the port with,
+   *    "the first thing after a restart" is every time.
+   *  - Two changes inside the 200 ms throttle window collapse into one
+   *    broadcast. `/x 1` then `/x 0` inside that window is one snapshot showing
+   *    `0`, and the `1` never existed as far as any rule is concerned.
+   */
+  "osc.value": def({
+    id: "osc.value",
+    label: "An OSC message arrives",
+    channel: "osc:feedback",
+    help:
+      "Fires when the value at this address CHANGES to match. A message repeating a value it " +
+      "already had is not a change, so an address that only ever sends one thing may never fire " +
+      "at all — pick one that carries a value. Two changes inside 200ms collapse into one.",
+    params: [
+      {
+        key: "address",
+        label: "OSC address",
+        type: "string",
+        help: "Exactly as the device sends it, starting with a slash — /record, /ch/01/mix/on.",
+      },
+      {
+        key: "target",
+        label: "From target",
+        type: "enum",
+        optionsFrom: "osc-targets",
+        optional: true,
+        help:
+          "Leave blank for any sender. A named target must be configured with the address it " +
+          "sends FROM, or by a hostname that resolves to it.",
+      },
+      {
+        key: "argument",
+        label: "Argument",
+        type: "number",
+        min: 0,
+        max: 7,
+        optional: true,
+        help: "0 is the first argument. Use 1 for the value in a channel-and-value reply.",
+      },
+      {
+        key: "match",
+        label: "Match",
+        type: "enum",
+        options: [
+          { value: "equals", label: "equals" },
+          { value: "above", label: "crossed above" },
+          { value: "below", label: "crossed below" },
+        ],
+      },
+      {
+        key: "value",
+        label: "Value",
+        type: "string",
+        help:
+          "What to compare against — the value for equals, the threshold for a crossing. " +
+          "1 matches a float 1.0; true/false match an OSC T/F.",
+      },
+    ],
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      const key = oscKeyOf(params);
+      if (key === null) return false;
+      const before = oscValueAt(prev, key);
+      const after = oscValueAt(next, key);
+      // Absent means this snapshot has never carried the address. Nothing to
+      // compare, and a device that has gone quiet has not sent a zero.
+      if (after === undefined) return false;
+      // EQUALS unless a crossing is asked for by name. `?? "equals"` covered
+      // null and undefined but not "", which is what the editor stores when an
+      // operator picks a Match and then re-picks "Pick one…" — a saved rule
+      // whose behaviour was decided by a fall-through rather than by anyone.
+      const match = params.match === "above" || params.match === "below" ? params.match : "equals";
+      if (match === "above" || match === "below") {
+        // BLANK IS NOT ZERO, and this is the only threshold in the registry
+        // that can be blank — every other one is a `number` param the editor
+        // renders through NumberInput, which cannot store "". `Number("")` is 0
+        // AND finite, so without this a rule saved with "crossed above" and
+        // nothing typed in Value would arm itself on zero and fire the moment
+        // the address went positive. The equals branch below refuses a blank
+        // for the same reason.
+        const raw = String(params.value ?? "").trim();
+        if (raw === "") return false;
+        return crossed(oscNumber(before), oscNumber(after), Number(raw), match);
+      }
+      // EQUALS is an edge too: the value must have CHANGED into a match. The
+      // channel re-sends every address whenever any one of them moves, so a
+      // level test would fire this rule every time somebody touched a fader
+      // somewhere else on the desk. An absent `before` counts as changed — the
+      // first time an address appears with the value is the moment it happened.
+      return before !== after && oscEquals(after, params.value);
+    },
+  }),
 
   ...pvpFlagTriggers(
     "hidden",
@@ -805,12 +1089,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
     help: "Measured across finished items, so it is checked as each item ends.",
     didFire: (prev, next, params) => {
       if (prev === null) return false;
-      const th = Number(params.minutes);
-      if (!Number.isFinite(th)) return false;
-      const a = overrunMinutes(prev);
-      const b = overrunMinutes(next);
-      if (a === null || b === null) return false;
-      return a <= th && b > th;
+      return crossed(overrunMinutes(prev), overrunMinutes(next), Number(params.minutes), "above");
     },
   }),
 
@@ -950,11 +1229,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
     didFire: (prev, next, params) => {
       if (prev === null) return false;
       const metric = String(params.metric ?? "attendance");
-      const a = metricOf(prev, metric);
-      const b = metricOf(next, metric);
-      if (a === null || b === null) return false; // no baseline, no crossing
-      const th = Number(params.threshold);
-      return Number.isFinite(th) && a <= th && b > th;
+      return crossed(metricOf(prev, metric), metricOf(next, metric), Number(params.threshold), "above");
     },
   }),
 
@@ -966,38 +1241,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
     didFire: (prev, next, params) => {
       if (prev === null) return false;
       const metric = String(params.metric ?? "attendance");
-      const a = metricOf(prev, metric);
-      const b = metricOf(next, metric);
-      if (a === null || b === null) return false;
-      const th = Number(params.threshold);
-      return Number.isFinite(th) && a >= th && b < th;
-    },
-  }),
-
-  "recording.started": def({
-    id: "recording.started",
-    label: "Recording starts",
-    channel: "obs:status",
-    params: [],
-    didFire: (prev, next) => {
-      if (prev === null) return false;
-      return !asRec(prev).recording && asRec(next).recording === true;
-    },
-  }),
-
-  "recording.stopped": def({
-    id: "recording.stopped",
-    label: "Recording stops",
-    channel: "obs:status",
-    params: [],
-    didFire: (prev, next) => {
-      if (prev === null) return false;
-      const p = asRec(prev);
-      const n = asRec(next);
-      // A recorder dropping off the network is UNKNOWN, not "stopped" — firing a
-      // stop rule because a machine went offline would be wrong.
-      if (n.connected === false) return false;
-      return p.recording === true && n.recording === false;
+      return crossed(metricOf(prev, metric), metricOf(next, metric), Number(params.threshold), "below");
     },
   }),
 };

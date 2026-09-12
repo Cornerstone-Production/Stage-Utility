@@ -43,3 +43,9 @@ recording.
 A `_on`/`_off` cue pair built from Record and Stop reports its real state to Home
 Assistant, read from this poll rather than from Companion. See
 [Automation](../automation.md#state-from-stage-utility).
+
+The transport is also readable: **REAPER starts recording** and **REAPER stops
+recording** are triggers, and **REAPER is recording** is a condition. An enabled
+rule using any of them holds the poll at its active cadence with no browser
+open. The stop trigger does not fire when REAPER simply becomes unreachable —
+that is unknown, not stopped.

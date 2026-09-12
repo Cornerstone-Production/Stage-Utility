@@ -368,15 +368,21 @@ describe("demand is registered for everything automation reads", () => {
     );
   });
 
-  it("reaper:status has exactly the two no trigger channel would have given it", () => {
-    // reaper:status carries no trigger. Its two automation surfaces are both
-    // PULLED rather than broadcast: the reaper.is-recording CONDITION, and a cue
-    // pair bound to `app:reaper.recording` (app-state-sources.ts), whose state
-    // Home Assistant reads straight off this poll.
+  it("reaper:status has exactly three demand sources", () => {
+    // Three, one per way REAPER's poll is consumed, and they arrive by three
+    // different routes:
     //
-    // An EXACT count, so dropping either registration shows up here rather than
-    // as a qualifier — or a switch in somebody's house — quietly answering from
-    // a five-second-old snapshot.
-    assert.equal(channelDemandSourceCount("reaper:status"), 2);
+    //  1. the trigger loop, for reaper.recording-started / -stopped. ONE
+    //     registration however many triggers name the channel — the loop walks
+    //     a Set of channels.
+    //  2. the reaper.is-recording CONDITION, which is PULLED at fire time and
+    //     so never reaches the bus for the trigger loop to see.
+    //  3. a cue pair bound to `app:reaper.recording` (app-state-sources.ts),
+    //     whose state Home Assistant reads straight off this poll.
+    //
+    // An EXACT count, so dropping any one registration shows up here rather
+    // than as a qualifier — or a switch in somebody's house — quietly answering
+    // from a five-second-old snapshot.
+    assert.equal(channelDemandSourceCount("reaper:status"), 3);
   });
 });
