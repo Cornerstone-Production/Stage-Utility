@@ -492,7 +492,9 @@ What it never does:
 It asks Companion **once**. The candidate set is recorded and what happens next
 is a press — Learn again is what re-asks. A connection that answers for none of
 the 19 is retried hourly three times, because a module that has not finished
-connecting publishes no variables yet, and then left alone:
+connecting publishes no variables yet — see
+[When Companion cannot reach the device](#when-companion-cannot-reach-the-device)
+for how to tell that apart from a name that does not exist — and then left alone:
 
 ```
 [cues] pair projectors: none of the 19 candidate state variables exist on GrandMA3 after 3 tries; pick one on the rule
@@ -681,13 +683,18 @@ the same 404 it answers for a variable that does not exist. So a pair reading
 *unknown* looks identical whether the binding is wrong or the projector is
 unplugged, and the binding is usually fine.
 
-The **connection status** on the Companion row tells the two apart. It comes from
-Companion's own `GET /api/connections`, read on **Test** and on the hourly
-reconcile — never on a timer of its own — and reads like this:
+The **connection status** tells the two apart. It comes from Companion's own
+`GET /api/connections`, read on **Test** and on the hourly reconcile — never on a
+timer of its own — and appears in Settings → Integrations → **Bitfocus
+Companion** under **Status**, beside the connected-client count:
 
 ```
 2 Companion client(s) connected. 12 of 52 connection(s) in error, 10 not reporting
 ```
+
+It is there with no Companion module attached, which is when it matters most.
+`GET /api/integrations` carries the same line as the row's `message`, for
+reading it from somewhere else.
 
 | Bucket | Companion's status | Means |
 |---|---|---|
@@ -695,10 +702,10 @@ reconcile — never on a timer of its own — and reads like this:
 | in error | `error` | Companion cannot reach the device — connecting, refused, offline |
 | not reporting | no status, or one this app has not verified | the connection has published nothing yet; its variables 404 |
 
-Connections **disabled** in Companion are not counted. The row's own connection
-state still follows the module clients alone — gear behind Companion being down
-is a fact about the building, not about this integration — so the row stays green
-and the count is the warning.
+Connections **disabled** in Companion are not counted. The row's own connected /
+no-clients state still follows the module clients alone — gear behind Companion
+being down is a fact about the building, not about this integration — so nothing
+turns red and the count is the warning.
 
 When anything is not ok, the hourly pass writes one line naming the modules and
 Companion's own words for what is wrong:
