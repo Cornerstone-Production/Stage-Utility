@@ -127,6 +127,10 @@ function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: 
               Setting this correctly is what stops a command reaching the wrong kind of device.
             </InfoHint>
           </span>
+          {/* Left as a raw <select>: RossTalkFamily is a fixed two-value union
+              (main/types/rosstalk.ts) that has never grown or shrunk, and a
+              missing config.family already resolves to "carbonite" above — the
+              stored value can never fall outside these two options. */}
           <select
             value={family}
             onChange={(e) => {
