@@ -18,6 +18,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { oscManager, oscDeps } = await import("./osc-manager.js");
+const { oscStore } = await import("./osc-store.js");
 const { encodeMessage } = await import("./osc-codec.js");
 
 const BY_IP = "11111111-1111-4111-8111-111111111111";
@@ -70,9 +71,14 @@ after(() => {
   oscManager.stop();
 });
 
-/** Put the target list back — one test removes a target — and re-resolve.
- *  Each test below uses its own address, so stored values do not collide. */
+/** Put the target list back and re-resolve. Through the STORE, not by writing
+ *  the file: DataStore.load answers from an in-memory cache once it has read
+ *  once, so a direct write after that is invisible to reloadTargets. Two tests
+ *  change the list — one removes a target, one replaces it — and every test
+ *  below starts from the canonical two. Each uses its own address, so stored
+ *  values do not collide. */
 beforeEach(async () => {
+  await oscStore.save(TARGETS);
   await oscManager.reloadTargets();
   await settle();
 });
@@ -121,6 +127,71 @@ describe("which target a packet is attributed to", () => {
     assert.equal(values()[`${BY_IP}::/ch/01/mix/on`], 1);
     // Restore for the rest of the file.
     oscDeps.lookup = async (hostname) => (hostname === NAME_HOST ? [NAME_IP] : []);
+  });
+});
+
+describe("two targets on one address", () => {
+  test("only the first is attributed, and the operator is told", async () => {
+    // A packet carries a source ADDRESS and no port, so an X32 entry for
+    // sending and a second entry for its /xremote subscribe are the same sender
+    // as far as this can tell. A layout button survives on the wildcard; a rule
+    // scoped to the second target builds a key nothing ever writes and fires
+    // never. Silently, before this.
+    const SHARED = "192.0.2.50";
+    const A = "aaaaaaaa-0000-4000-8000-000000000001";
+    const B = "bbbbbbbb-0000-4000-8000-000000000002";
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+    try {
+      await oscStore.save([
+        { id: A, name: "Desk send", enabled: true, config: { host: SHARED, port: 10023 } },
+        { id: B, name: "Desk subscribe", enabled: true, config: { host: SHARED, port: 10024 } },
+      ]);
+      await oscManager.reloadTargets();
+      await settle();
+      oscManager.receive(encodeMessage("/shared", [{ type: "i", value: 1 }]), SHARED);
+      const keys = Object.keys(values()).filter((k) => k.endsWith("::/shared")).sort();
+      assert.deepEqual(keys, [`${A}::/shared`, "*::/shared"].sort(), "the FIRST target wins the key");
+      assert.ok(
+        warnings.some((w) => w.includes(SHARED) && w.includes("Desk send") && w.includes("Desk subscribe")),
+        "nothing warned that two enabled targets share an address — a rule scoped to the second " +
+          `would fire never, silently. Warnings seen: ${JSON.stringify(warnings)}`,
+      );
+    } finally {
+      console.warn = realWarn;
+    }
+  });
+
+  test("two NAMES resolving to one address break the tie the same way", async () => {
+    // The literal lookup is a `find` (first wins) and the resolved map was a
+    // `set` (last wins). Two targets on one box would be attributed to
+    // DIFFERENT ones depending on whether the operator typed an address or a
+    // name — same config, opposite answer, nothing saying so.
+    const A = "cccccccc-0000-4000-8000-000000000003";
+    const B = "dddddddd-0000-4000-8000-000000000004";
+    const ONE_IP = "192.0.2.60";
+    const realWarn = console.warn;
+    console.warn = () => {};
+    try {
+      oscDeps.lookup = async () => [ONE_IP];
+      await oscStore.save([
+        { id: A, name: "By name one", enabled: true, config: { host: "one.invalid", port: 10023 } },
+        { id: B, name: "By name two", enabled: true, config: { host: "two.invalid", port: 10024 } },
+      ]);
+      await oscManager.reloadTargets();
+      await settle();
+      oscManager.receive(encodeMessage("/tie", [{ type: "i", value: 1 }]), ONE_IP);
+      assert.equal(
+        values()[`${A}::/tie`],
+        1,
+        "the FIRST configured target must win, exactly as the literal-address lookup does",
+      );
+      assert.equal(values()[`${B}::/tie`], undefined);
+    } finally {
+      console.warn = realWarn;
+      oscDeps.lookup = async (hostname) => (hostname === NAME_HOST ? [NAME_IP] : []);
+    }
   });
 });
 

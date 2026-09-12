@@ -60,6 +60,8 @@ class OscManager {
   /** The last set of resolve failures reported, so a standing one is said once
    *  rather than every five minutes. */
   private lastResolveFailure = "";
+  /** The same, for targets sharing one address. See warnAboutSharedAddresses. */
+  private lastSharedAddress = "";
   /** Said once per process: a device sending more than MAX_ARGS is a standing
    *  condition, not an event, and one line per packet would bury the log. */
   private warnedLongMessage = false;
@@ -158,7 +160,9 @@ class OscManager {
       try {
         this.sendSocket.close();
       } catch {
-        /* already closed */
+        // Deliberate, and the same shape closeRecv() has always had: this runs
+        // during shutdown, dgram throws only when the socket is already closed,
+        // and there is no caller left who could act on it.
       }
       this.sendSocket = null;
     }
@@ -276,9 +280,9 @@ class OscManager {
   private startResolving(): void {
     if (this.resolveTimer) clearInterval(this.resolveTimer);
     this.resolveTimer = setInterval(() => {
-      this.resolving = this.reportResolve();
+      this.resolving = this.safeResolve();
     }, RESOLVE_INTERVAL_MS);
-    this.resolving = this.reportResolve();
+    this.resolving = this.safeResolve();
   }
 
   /**
@@ -292,6 +296,24 @@ class OscManager {
    */
   whenResolved(): Promise<void> {
     return this.resolving;
+  }
+
+  /**
+   * The end of the chain, so a throw stops here.
+   *
+   * Not a swallow: reportResolve is the top of a background task started by a
+   * timer, so there is no caller above it to hand a failure to and nothing
+   * downstream that could act on one. What there IS, without this, is an
+   * unhandled rejection from a timer nobody owns — which on this Node takes the
+   * process down. resolveHosts already returns its DNS failures rather than
+   * throwing them; this covers everything else.
+   */
+  private async safeResolve(): Promise<void> {
+    try {
+      await this.reportResolve();
+    } catch (err) {
+      console.error(`[osc] the hostname resolve pass failed outright: ${errorMessage(err)}`);
+    }
   }
 
   /**
@@ -333,11 +355,16 @@ class OscManager {
       const { host } = this.addrOf(t);
       if (!host || isIP(host)) continue;
       try {
-        for (const ip of await oscDeps.lookup(host)) next.set(ip, t.id);
+        // FIRST CONFIGURED WINS, matching the literal lookup below, which is a
+        // `find`. Two targets on one address can only ever have one of them
+        // attributed, and the two tie-breaks disagreeing would make WHICH one
+        // depend on whether the target was typed as a name or an address.
+        for (const ip of await oscDeps.lookup(host)) if (!next.has(ip)) next.set(ip, t.id);
       } catch (err) {
         failed.push(`${t.name} (${host}): ${errorMessage(err)}`);
       }
     }
+    this.warnAboutSharedAddresses();
     // Logged only when it CHANGES: a five-minute refresh that says the same
     // thing forever is noise an operator learns to scroll past.
     const changed =
@@ -359,6 +386,44 @@ class OscManager {
   private resolveTargetId(sourceIp: string): string {
     const literal = this.targets.find((t) => this.addrOf(t).host === sourceIp);
     return literal?.id ?? this.resolvedIps.get(sourceIp) ?? "*";
+  }
+
+  /**
+   * Two enabled targets configured with the same address.
+   *
+   * A packet carries a source ADDRESS and no port, so there is nothing in it to
+   * tell an X32 entry for sending from a second entry for its /xremote
+   * subscribe, or QLab from Companion on one Mac. Only the first target gets
+   * its own key; the rest are reachable only through the wildcard.
+   *
+   * A layout BUTTON survives that — resolveOscActive falls back to the wildcard.
+   * A RULE does not: a trigger scoped to the second target builds one key, that
+   * key is never written, and the rule fires never with nothing anywhere saying
+   * why. Which is what this line is for.
+   */
+  private warnAboutSharedAddresses(): void {
+    const byAddress = new Map<string, string[]>();
+    for (const t of this.targets) {
+      if (!t.enabled) continue;
+      const { host } = this.addrOf(t);
+      if (!host) continue;
+      const ip = isIP(host) ? host : [...this.resolvedIps].find(([, id]) => id === t.id)?.[0];
+      if (!ip) continue;
+      byAddress.set(ip, [...(byAddress.get(ip) ?? []), t.name]);
+    }
+    const shared = [...byAddress]
+      .filter(([, names]) => names.length > 1)
+      .map(([ip, names]) => `${ip} (${names.join(", ")})`)
+      .sort();
+    const key = shared.join("; ");
+    if (key === this.lastSharedAddress) return;
+    this.lastSharedAddress = key;
+    if (shared.length > 0) {
+      console.warn(
+        `[osc] more than one enabled target sends from ${key} — a packet carries no port, so ` +
+          "only the first is attributed and a rule scoped to the others will never fire",
+      );
+    }
   }
 
   private bindFeedback(): void {
@@ -445,7 +510,7 @@ class OscManager {
     // cross a threshold on a value nothing has sent for an hour. Swept to
     // MAX_ARGS rather than "up to the first gap", so a null in the middle of an
     // earlier message cannot strand a key above it.
-    for (let i = Math.max(args.length, 1); i <= MAX_ARGS; i++) {
+    for (let i = Math.max(args.length, 1); i < MAX_ARGS; i++) {
       const key = `${base}#${i}`;
       if (!(key in this.feedback)) continue;
       delete this.feedback[key];

@@ -68,11 +68,17 @@ describe("the osc.value edge", () => {
     assert.equal(t.didFire(feed({ "*::/record": 1 }), feed({}), P, NOW), false);
   });
 
-  test("1 matches a float 1.0 and the string \"1\"", () => {
+  test("the rule's text is compared as a NUMBER when both sides read as one", () => {
     // The operator types text and cannot know whether their console picked i, f
-    // or s for the argument.
-    assert.equal(t.didFire(feed({ "*::/record": 0 }), feed({ "*::/record": 1.0 }), P, NOW), true);
-    assert.equal(t.didFire(feed({ "*::/record": "0" }), feed({ "*::/record": "1" }), P, NOW), true);
+    // or s for the argument. Every case here is one a plain string compare gets
+    // WRONG — `1.0 === 1` in JS, so a received float proves nothing; it is
+    // "1.0" on the RULE side that needs the coercion.
+    const eq = (recv: number | string | boolean, want: string) =>
+      t.didFire(feed({ "*::/record": "seed" }), feed({ "*::/record": recv }), { ...P, value: want }, NOW);
+    assert.equal(eq(1, "1.0"), true, 'a rule typed "1.0" must match a received 1');
+    assert.equal(eq(0.5, ".5"), true, 'a rule typed ".5" must match a received 0.5');
+    assert.equal(eq("1", "1.0"), true, 'a string-typed reply of "1" must match a rule typed "1.0"');
+    assert.equal(eq(2, "1.0"), false, "and it must still not match a different number");
   });
 
   test("true/false match an OSC T/F", () => {
@@ -88,7 +94,16 @@ describe("the osc.value edge", () => {
 
   test("a blank value matches nothing", () => {
     // An unfinished rule must not fire on every message the address carries.
+    //
+    // Asserted against a received ZERO and a received EMPTY STRING, because
+    // those are the two the missing check lets through: `Number("")` is 0, so a
+    // blank rule value silently means "equals zero" and a received 1 misses it
+    // whether the check is there or not.
     const p = { address: "/record", match: "equals", value: "" };
+    assert.equal(t.didFire(feed({ "*::/record": 5 }), feed({ "*::/record": 0 }), p, NOW), false,
+      "a blank rule value armed itself on zero");
+    assert.equal(t.didFire(feed({ "*::/record": "x" }), feed({ "*::/record": "" }), p, NOW), false,
+      "a blank rule value matched an empty string");
     assert.equal(t.didFire(feed({}), feed({ "*::/record": 1 }), p, NOW), false);
   });
 
@@ -132,7 +147,20 @@ describe("the osc.value edge", () => {
   });
 
   test("a non-numeric value cannot cross anything", () => {
+    // The discriminating case is a non-numeric BEFORE and a numeric AFTER: two
+    // non-numeric strings coerce to the same thing under any reading, so they
+    // cannot cross whether oscNumber refuses them or quietly calls them zero.
     const p = { address: "/mode", match: "above", value: "0.5" };
+    assert.equal(
+      t.didFire(feed({ "*::/mode": "show" }), feed({ "*::/mode": 1 }), p, NOW),
+      false,
+      "a word is not a baseline — reading it as zero invents a crossing",
+    );
+    assert.equal(
+      t.didFire(feed({ "*::/mode": 1 }), feed({ "*::/mode": "show" }), { ...p, match: "below" }, NOW),
+      false,
+      "a value that has become a word has not fallen below anything",
+    );
     assert.equal(t.didFire(feed({ "*::/mode": "show" }), feed({ "*::/mode": "rehearsal" }), p, NOW), false);
   });
 
@@ -172,6 +200,21 @@ describe("the osc.value edge", () => {
       ),
       false,
     );
+  });
+
+  test("a Match nobody picked reads as equals, rather than as nothing", () => {
+    // The editor stores "" when an operator picks a Match and then re-picks
+    // "Pick one…", and there is no required-param validation to stop the save.
+    // Reading that as equals is the house answer — an unconfigured rule fires
+    // rather than silently never firing, the same call PVP's blank layer param
+    // makes — and it is now a decision in the code rather than a fall-through.
+    for (const match of ["", "nonsense", undefined]) {
+      assert.equal(
+        t.didFire(feed({ "*::/record": 0 }), feed({ "*::/record": 1 }), { address: "/record", match, value: "1" }, NOW),
+        true,
+        `match ${JSON.stringify(match)} must behave as equals, not as a rule that can never fire`,
+      );
+    }
   });
 
   test("it is registered on the channel the manager broadcasts", () => {
@@ -274,11 +317,41 @@ describe("a rule driven by real inbound OSC", () => {
   });
 
   test("an unrelated address moving does not fire the rule", async () => {
+    // The watched address is left AT the value the rule wants, and then left
+    // alone. A level test would fire on every one of the /e2e/noisy snapshots
+    // that follow, because each carries /e2e/quiet still reading 1 — which is
+    // the whole failure mode, and a watched address sitting at a NON-matching
+    // value would hide it behind the value check instead.
     await onlyRule({ address: "/e2e/quiet", match: "equals", value: "1" });
     await deliver("/e2e/quiet", [{ type: "i", value: 0 }]);
+    await deliver("/e2e/quiet", [{ type: "i", value: 1 }]); // the one real edge
+    assert.equal(fires(), 1, "the edge into the value must fire once");
     await deliver("/e2e/noisy", [{ type: "i", value: 1 }]);
     await deliver("/e2e/noisy", [{ type: "i", value: 2 }]);
-    assert.equal(fires(), 0);
+    await deliver("/e2e/noisy", [{ type: "i", value: 3 }]);
+    assert.equal(fires(), 1, "a rule fired again because a DIFFERENT address moved");
+  });
+
+  test("a BANG is swallowed when it is the first thing on the channel", async () => {
+    // Documented, not a defect: the engine seeds `prev` on the first snapshot
+    // per channel and never evaluates it, which is the guard that stops a
+    // restart mid-service firing every rule at once. A bang is stored as `true`
+    // and stays `true`, so a sender that has the feedback port to itself and
+    // only ever bangs produces exactly one snapshot — the baseline — and the
+    // rule never fires at all.
+    //
+    // Pinned because docs/automation.md and the trigger's help text now say so,
+    // and they said the opposite until this was driven.
+    await onlyRule({ address: "/e2e/bang", match: "equals", value: "true" });
+    for (let i = 0; i < 4; i++) await deliver("/e2e/bang", []);
+    assert.equal(fires(), 0, "a bang alone on a fresh channel must not be claimed to fire once");
+  });
+
+  test("a BANG fires once when the channel already carries traffic", async () => {
+    await onlyRule({ address: "/e2e/bang2", match: "equals", value: "true" });
+    await deliver("/e2e/other", [{ type: "i", value: 1 }]); // seeds the channel
+    for (let i = 0; i < 4; i++) await deliver("/e2e/bang2", []);
+    assert.equal(fires(), 1, "once seeded, the bang's one edge must fire — and only once");
   });
 
   test("an enabled OSC rule puts osc:feedback in demand", async () => {

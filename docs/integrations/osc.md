@@ -36,7 +36,10 @@ feedback arrives as soon as gear is pointed at the port.
 | A shorter message than the last one | clears the `#N` keys the longer one left, so nothing stale reads as current |
 
 Every value is stored twice: once under the sending target's id and once under
-`*`.
+`*`. The `*` copy is **shared across senders**: two devices sending the same
+address overwrite each other there, and a short message from one clears the
+`#N` keys a longer message from the other left. Scope to a target when more
+than one device sends the same address.
 
 **Which target sent it** is decided by the source address. A target configured
 with an IP matches it directly. A target configured by **hostname** is resolved
@@ -44,6 +47,13 @@ to its addresses at startup, whenever targets change, and every five minutes
 after that — consoles sit on DHCP. A name that will not resolve is logged, and
 that target's feedback lands under the wildcard alone, indistinguishable from
 any other sender.
+
+A packet carries no port, so **two enabled targets on one address cannot be told
+apart**: an X32 entry for sending plus a second entry for its `/xremote`
+subscribe, or QLab and Companion on one Mac. The first target in the list gets
+the attribution and the rest reach only the wildcard, which a button tolerates
+and a rule scoped to one of them does not. This is logged on an `[osc]` line
+when it happens.
 
 Target changes are broadcast on `osc:targets-changed`; targets and the feedback
 port persist on disk (no secrets involved).

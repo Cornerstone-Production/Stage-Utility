@@ -260,12 +260,19 @@ function outputTriggers(spec: {
   channel: string;
   /** Reads the flag out of that channel's snapshot. */
   read: (snap: unknown) => boolean | undefined;
+  /**
+   * Is the device reachable in this snapshot? A field, not a hardcoded
+   * `.connected` read inside the stop half: every channel this serves today
+   * happens to name it `connected`, and the next one that does not would
+   * silently lose its offline guard rather than fail to compile.
+   */
+  reachable: (snap: unknown) => boolean;
   /** The device's name, for the "unreachable is unknown" help. */
   device: string;
   started: { id: string; label: string };
   stopped: { id: string; label: string };
 }): Record<string, TriggerDef> {
-  const { channel, read, device, started, stopped } = spec;
+  const { channel, read, reachable, device, started, stopped } = spec;
   return {
     [started.id]: def({
       id: started.id,
@@ -285,9 +292,7 @@ function outputTriggers(spec: {
       help: `Does not fire when ${device} simply goes offline — unreachable is unknown, not stopped.`,
       didFire: (prev, next) => {
         if (prev === null) return false;
-        // Every snapshot this reads (OBS, REAPER) carries `connected`, and both
-        // report their outputs false while offline.
-        if (asRec(next).connected === false) return false;
+        if (!reachable(next)) return false;
         return read(prev) === true && read(next) === false;
       },
     }),
@@ -303,6 +308,7 @@ function obsOutputTriggers(
   return outputTriggers({
     channel: "obs:status",
     read: (snap) => asObs(snap)[key],
+    reachable: (snap) => asObs(snap).connected !== false,
     device: "OBS",
     started: { id: `obs.${slug}-started`, label: `OBS starts ${label}` },
     stopped: { id: `obs.${slug}-stopped`, label: `OBS stops ${label}` },
@@ -333,6 +339,7 @@ function recorderTriggers(
   return outputTriggers({
     channel,
     read: (snap) => asRec(snap).recording,
+    reachable: (snap) => asRec(snap).connected !== false,
     device,
     started: { id: ids.started, label: `${device} starts recording` },
     stopped: { id: ids.stopped, label: `${device} stops recording` },
@@ -394,9 +401,12 @@ const asOscValues = (v: unknown): Record<string, unknown> => {
 };
 
 /** One key's value, or undefined when this snapshot has never carried it.
- *  `hasOwn` rather than a bare read, so "absent" is asked as a question rather
- *  than inferred from a value — the crossing matches need to tell an address
- *  that has never been seen from one carrying a value. */
+ *
+ *  `hasOwn` is not load-bearing and no test guards it: feedback values are
+ *  `number | string | boolean`, never undefined, so a bare read is
+ *  observationally identical and the key is always `target::/address`, which
+ *  cannot name a prototype property. It is here because "is this key present"
+ *  is the question, and asking it directly is one call. */
 function oscValueAt(snapshot: unknown, key: string): unknown {
   const values = asOscValues(snapshot);
   return Object.hasOwn(values, key) ? values[key] : undefined;
@@ -730,7 +740,11 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
    * operator will otherwise build a rule that quietly never fires:
    *
    *  - A BANG (a message with no arguments) is stored as `true` and stays
-   *    `true`, so it is an edge exactly once and never again.
+   *    `true`, so it is an edge at most once — and ZERO times when it is the
+   *    first thing to arrive on the channel after a restart, because the engine
+   *    seeds `prev` on the first snapshot and never evaluates it. The feedback
+   *    map is in memory only, so for a sender nobody else shares the port with,
+   *    "the first thing after a restart" is every time.
    *  - Two changes inside the 200 ms throttle window collapse into one
    *    broadcast. `/x 1` then `/x 0` inside that window is one snapshot showing
    *    `0`, and the `1` never existed as far as any rule is concerned.
@@ -741,8 +755,8 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
     channel: "osc:feedback",
     help:
       "Fires when the value at this address CHANGES to match. A message repeating a value it " +
-      "already had is not a change, so an address that only ever sends one thing fires once. " +
-      "Two changes inside 200ms collapse into one.",
+      "already had is not a change, so an address that only ever sends one thing may never fire " +
+      "at all — pick one that carries a value. Two changes inside 200ms collapse into one.",
     params: [
       {
         key: "address",
@@ -797,7 +811,11 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
       // Absent means this snapshot has never carried the address. Nothing to
       // compare, and a device that has gone quiet has not sent a zero.
       if (after === undefined) return false;
-      const match = String(params.match ?? "equals");
+      // EQUALS unless a crossing is asked for by name. `?? "equals"` covered
+      // null and undefined but not "", which is what the editor stores when an
+      // operator picks a Match and then re-picks "Pick one…" — a saved rule
+      // whose behaviour was decided by a fall-through rather than by anyone.
+      const match = params.match === "above" || params.match === "below" ? params.match : "equals";
       if (match === "above" || match === "below") {
         const a = oscNumber(before);
         const b = oscNumber(after);

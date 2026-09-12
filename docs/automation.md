@@ -104,8 +104,14 @@ Like every trigger here it fires on a **change**, not on a state. Two
 consequences worth knowing before you build a rule:
 
 - A **bang** — a message with no arguments — is stored as `true` and stays
-  `true`, so it is a change exactly once and never again. Use an address that
-  carries a value.
+  `true`, so it is a change **at most** once, and **not at all** if it is the
+  first thing to arrive on the channel after a restart: the first snapshot after
+  the app starts is a baseline and is never read as an event. Nothing is
+  remembered across a restart, so for a sender that has the feedback port to
+  itself that is every time. **Use an address that carries a value.**
+- For the same reason the first message on any address after a restart is a
+  baseline, not an event. A rule on `/record` will not fire on the `1` that was
+  already there when the app came back up — it fires on the next change.
 - Feedback is broadcast at most every 200 ms. Two changes inside that window
   arrive as one snapshot, so `/x 1` immediately followed by `/x 0` is a single
   change to `0` and the `1` never happened as far as a rule is concerned.
