@@ -159,6 +159,10 @@ let heartbeats: ReturnType<typeof setInterval>[] = [];
 let heartbeatOn = true;
 /** Send the six-frame snapshot burst on subscribe, as the real one does? */
 let burstOn = true;
+/** Accept the subscribe connection and then never answer it at all. */
+let stallSubscribe = false;
+/** Sockets held open by a stalled subscribe, closed in the reset. */
+let stalled: http.ServerResponse[] = [];
 /** The body of the last subscription request, so a case can read the endpoints. */
 let lastSubscribeBody = "";
 
@@ -194,6 +198,11 @@ before(async () => {
       lastSubscribeBody = "";
       req.setEncoding("utf8");
       req.on("data", (c: string) => (lastSubscribeBody += c));
+      if (stallSubscribe) {
+        // Connected, and then nothing: no status line, no headers, no body.
+        stalled.push(res);
+        return;
+      }
       if (subscribeStatus < 200 || subscribeStatus >= 300) {
         res.writeHead(subscribeStatus);
         res.end();
@@ -328,6 +337,9 @@ afterEach(() => {
   playlistStatus = 200;
   heartbeatOn = true;
   burstOn = true;
+  stallSubscribe = false;
+  for (const s of stalled) s.destroy();
+  stalled = [];
   propresenterService.configure("", 0);
   propresenterService.stop();
 });
@@ -639,6 +651,48 @@ describe("a stream that has died without saying so", () => {
     } finally {
       delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
     }
+  });
+
+  it("a peer that accepts the connection and never answers does not wedge it", async () => {
+    // No response headers, ever — a machine mid-crash, or a proxy that connected
+    // upstream and stalled. Without a deadline on the HEADERS the subscribe
+    // promise never settles: connect() never returns, nothing is scheduled, and
+    // the instance sits there for the rest of the service with nothing in the log.
+    //
+    // The deadline is on the headers and NOT `timeout:` on the request, because
+    // that is a socket-inactivity timer and would kill a healthy stream every
+    // time the stage went quiet.
+    subscribeStatus = 204; // unused; the handler below never replies at all
+    stallSubscribe = true;
+    Object.defineProperty(propresenterService, "reconnectBaseMs", {
+      get: () => 30,
+      configurable: true,
+    });
+    try {
+      propresenterService.configure("127.0.0.1", port);
+      await until(
+        "the stalled subscribe to give up and re-dial",
+        () => subscribes().length >= 2,
+        12_000,
+      );
+    } finally {
+      delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
+    }
+  });
+
+  it("stopping a connecting instance does not log an outage", async () => {
+    // stop() destroys the in-flight request, which reaches the same catch a dead
+    // machine does. A deliberate shutdown writing "unreachable — backing off" is
+    // a false alarm in the one place an operator goes looking for real ones.
+    propresenterService.configure("127.0.0.1", port);
+    propresenterService.stop();
+    await sleep(200);
+    const cried = loggedMatching(/unreachable/);
+    assert.equal(
+      cried.length,
+      0,
+      `stopping the integration wrote an outage to the log: ${JSON.stringify(cried)}`,
+    );
   });
 
   it("stopping the service leaves no timer and no socket behind", async () => {

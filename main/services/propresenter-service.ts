@@ -657,6 +657,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       // "streaming": nothing more to schedule. The stream drives from here, and
       // holding it open is the whole point — see the note above subscribe().
     } catch (err) {
+      // stop() destroys the in-flight request, which surfaces here as a failure.
+      // A deliberate shutdown is not an outage and must not write one to the log.
+      if (!this.running) return;
       const msg = errorMessage(err);
       // Log only the first failure of an outage, then stay quiet until it recovers —
       // a machine off all week shouldn't spam the log every retry.
@@ -704,10 +707,15 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
           },
         },
         (res) => {
+          clearTimeout(headerTimer);
           const status = res.statusCode ?? 0;
           if (status < 200 || status >= 300) {
             res.resume();
             res.destroy();
+            // Forget the request: the caller is about to start polling, and a
+            // late 'error' on this dead handle must not schedule a reconnect on
+            // top of the poll timer. endStream's guard reads these two fields.
+            this.req = null;
             settle({ kind: "unsupported", status });
             return;
           }
@@ -742,9 +750,22 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
         },
       );
       this.req = req;
+      // A deadline on the RESPONSE HEADERS only, cleared the moment they arrive.
+      //
+      // Not `timeout:` on the request, which is a socket-inactivity timer and
+      // would go on killing a perfectly healthy stream every time the stage is
+      // quiet — the exact shape of the bug this file has already shipped once,
+      // where a timeout sat on test() and not on the long-lived path. Without
+      // something here, a peer that accepts the TCP connection and then never
+      // answers leaves this promise pending for ever: connect() never returns,
+      // nothing is scheduled, and the instance is wedged with no log line.
+      const headerTimer = setTimeout(() => {
+        req.destroy(new Error(`no response to status/updates within ${REQUEST_TIMEOUT_MS}ms`));
+      }, REQUEST_TIMEOUT_MS);
       // The primary liveness check — see SOCKET_KEEPALIVE_MS.
       keepSocketAlive(req, SOCKET_KEEPALIVE_MS);
       req.on("error", (err) => {
+        clearTimeout(headerTimer);
         // Fires both before the response (never connected) and after (the socket
         // died mid-stream). Only the first is an outcome; the second is an end.
         if (settled) this.endStream(errorMessage(err));
