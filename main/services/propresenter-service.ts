@@ -73,19 +73,30 @@ const STREAM_ENDPOINTS = [
 const PUBLISH_COALESCE_MS = 20;
 
 /**
- * How often TCP probes the peer once the stream goes quiet.
+ * How long the socket may sit quiet before TCP starts probing the peer.
  *
- * The primary liveness check, and the reason it is not an application timer: a
- * half-open socket — the booth Mac unplugged, its switch port dropped — emits
- * neither 'end' nor 'error', so no reconnect is ever scheduled and the stage
- * display keeps showing the slide from before the drop for the rest of the
- * service. This file has made the neighbouring mistake before: a timeout sat on
- * test() while the long-lived path had none.
+ * THE BACKSTOP, not the primary check, and this number is only the idle time
+ * before the FIRST probe. The retry interval and the probe count are the
+ * operating system's, and the defaults macOS and Linux both ship — a probe every
+ * 75 seconds, eight or nine of them — put a dead peer ten to twelve minutes
+ * away. No service runs long enough for that to matter, so this never fires
+ * first; STREAM_IDLE_MS below is what actually re-dials a half-open socket
+ * inside a service. Kept because it costs nothing and does eventually close out
+ * a stream held across a quiet week.
  */
 const SOCKET_KEEPALIVE_MS = 30_000;
 
 /**
- * Backstop for what keepalive is slow to see: fifteen missed heartbeats.
+ * How long the stream may say nothing before it is given up on: fifteen missed
+ * heartbeats.
+ *
+ * THE PRIMARY LIVENESS CHECK — DO NOT DELETE IT on the strength of the socket
+ * keepalive above. A half-open socket — the booth Mac unplugged, its switch port
+ * dropped — emits neither 'end' nor 'error', so nothing closes, nothing errors,
+ * and the stage display keeps showing the slide from before the drop for the
+ * rest of the service. Keepalive is eleven minutes from noticing that; this is
+ * fifteen seconds from it. This file has already shipped the neighbouring
+ * mistake once, a timeout on test() and none on the long-lived path.
  *
  * Safe ONLY because `timer/system_time` is subscribed and ticks at 1Hz — a
  * silence watchdog over a set of slow-changing endpoints would fire during every
@@ -834,7 +845,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       headerTimer = setTimeout(() => {
         req.destroy(new Error(`no response to status/updates within ${REQUEST_TIMEOUT_MS}ms`));
       }, REQUEST_TIMEOUT_MS);
-      // The primary liveness check — see SOCKET_KEEPALIVE_MS.
+      // The backstop, for a stream held across a quiet week. The watchdog armed
+      // on the response is what notices a drop inside a service — see
+      // SOCKET_KEEPALIVE_MS and STREAM_IDLE_MS.
       keepSocketAlive(req, SOCKET_KEEPALIVE_MS);
       req.on("error", (err) => {
         clearHeaderTimer();
@@ -874,7 +887,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     }
   }
 
-  /** Restart the silence watchdog. See STREAM_IDLE_MS. */
+  /** Restart the silence watchdog — the primary liveness check. See STREAM_IDLE_MS. */
   private armIdleWatchdog(): void {
     this.clearIdleWatchdog();
     this.idleTimer = setTimeout(() => {

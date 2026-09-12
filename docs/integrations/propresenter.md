@@ -19,9 +19,11 @@ POST /v1/status/updates?sse
 
 A snapshot frame arrives per endpoint immediately, then a frame whenever one of
 them changes, so a slide advance reaches a display as fast as the network
-carries it. `timer/system_time` ticks once a second and is the heartbeat: TCP
-keepalive plus a 15-second silence watchdog notice a stream that has died
-without closing, which a half-open socket does. The stream stays open for as
+carries it. `timer/system_time` ticks once a second and is the heartbeat: a
+15-second silence watchdog is what notices a stream that has died without
+closing, which a half-open socket does. TCP keepalive is set on the socket as
+well, but only as a backstop — the operating system's own probe schedule puts a
+dead peer ten minutes or more away, so nothing inside a service waits for it. The stream stays open for as
 long as the instance is configured, watched or not — an idle stream is cheaper
 than any keepalive poll.
 
