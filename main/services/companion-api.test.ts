@@ -374,7 +374,7 @@ describe("readConnections", () => {
     target({ host: "10.0.0.5", port: 8000 });
     const calls = stubBoth(() => Response.json(connectionsBody()));
 
-    const r = await companionApi.readConnections();
+    const r = await companionApi.readConnections({ force: true });
     assert.deepEqual(
       calls.map((c) => `${c.method} ${c.url}`),
       ["GET http://10.0.0.5:8000/api/connections"],
@@ -427,7 +427,7 @@ describe("readConnections", () => {
     target({ host: "10.0.0.5", port: 8000 });
     stubBoth(() => new Response("Not found", { status: 404 }));
 
-    const r = await companionApi.readConnections();
+    const r = await companionApi.readConnections({ force: true });
     assert.equal(r.ok, false);
     assert.ok(!r.ok);
     assert.equal(r.unsupported, true);
@@ -438,7 +438,7 @@ describe("readConnections", () => {
     target({ host: "10.0.0.5", port: 8000 });
     stubBoth(() => new Response("nope", { status: 500 }));
 
-    const r = await companionApi.readConnections();
+    const r = await companionApi.readConnections({ force: true });
     assert.ok(!r.ok);
     assert.equal(r.unsupported, false);
     assert.match(r.reason, /HTTP 500/);
@@ -452,14 +452,14 @@ describe("readConnections", () => {
       throw new TypeError("fetch failed");
     };
 
-    const r = await companionApi.readConnections();
+    const r = await companionApi.readConnections({ force: true });
     assert.ok(!r.ok);
     assert.equal(r.unsupported, false);
   });
 
   test("no host configured is a result too", async () => {
     target(null);
-    const r = await companionApi.readConnections();
+    const r = await companionApi.readConnections({ force: true });
     assert.ok(!r.ok);
     assert.match(r.reason, /host is not configured/);
   });
