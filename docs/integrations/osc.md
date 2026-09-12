@@ -21,6 +21,30 @@ manager uses Node's built-in `dgram` plus a hand-rolled OSC codec.
   broadcast on the `osc:feedback` channel, throttled to ~200 ms. A button binds
   to a feedback address to reflect the device's current value.
 
+The receive socket is open whether or not the OSC integration is enabled, so
+feedback arrives as soon as gear is pointed at the port.
+
+### What a received message becomes
+
+| | |
+|---|---|
+| Argument 0 | stored under `targetId::address` — the key a button binds to |
+| Arguments 1-7 | stored under `targetId::address#1` … `#7`. `#` cannot appear in an OSC address, so a suffix never collides with a real one |
+| Argument 8 and up | dropped, with one `[osc]` warning per run |
+| No arguments at all | stored as `true` — a bang |
+| A null argument (`N`, or a blob) | skipped. The last real value for that slot stands |
+| A shorter message than the last one | clears the `#N` keys the longer one left, so nothing stale reads as current |
+
+Every value is stored twice: once under the sending target's id and once under
+`*`.
+
+**Which target sent it** is decided by the source address. A target configured
+with an IP matches it directly. A target configured by **hostname** is resolved
+to its addresses at startup, whenever targets change, and every five minutes
+after that — consoles sit on DHCP. A name that will not resolve is logged, and
+that target's feedback lands under the wildcard alone, indistinguishable from
+any other sender.
+
 Target changes are broadcast on `osc:targets-changed`; targets and the feedback
 port persist on disk (no secrets involved).
 
