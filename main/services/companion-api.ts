@@ -392,6 +392,12 @@ class CompanionApi {
    * Nothing is logged here. The two callers each have something different to say
    * about the answer, and a line written at this level would appear twice for
    * one Test.
+   *
+   * No in-flight dedupe, unlike fetchExport, and that is a decision rather than
+   * an omission: the export is 4 MB and a page of pickers can open at once,
+   * while this is a small list with exactly two callers — a Test somebody
+   * pressed, and an hourly sweep. The only way to overlap them is to press Test
+   * on the hour, and the cost of that is one extra small GET.
    */
   async readConnections(opts: { force?: boolean } = {}): Promise<ConnectionsResult> {
     const now = Date.now();
