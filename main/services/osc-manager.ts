@@ -55,6 +55,8 @@ class OscManager {
    *  every reapply and refreshed on a timer. */
   private resolvedIps = new Map<string, string>();
   private resolveTimer: ReturnType<typeof setInterval> | null = null;
+  /** The resolve pass in flight. See whenResolved(). */
+  private resolving: Promise<void> = Promise.resolve();
   /** The last set of resolve failures reported, so a standing one is said once
    *  rather than every five minutes. */
   private lastResolveFailure = "";
@@ -273,8 +275,23 @@ class OscManager {
   /** Resolve hostname targets now, and keep them resolved. */
   private startResolving(): void {
     if (this.resolveTimer) clearInterval(this.resolveTimer);
-    this.resolveTimer = setInterval(() => void this.reportResolve(), RESOLVE_INTERVAL_MS);
-    void this.reportResolve();
+    this.resolveTimer = setInterval(() => {
+      this.resolving = this.reportResolve();
+    }, RESOLVE_INTERVAL_MS);
+    this.resolving = this.reportResolve();
+  }
+
+  /**
+   * Exposed for tests — the resolve pass in flight, if any.
+   *
+   * Nothing in the server waits for it, and nothing should: it is a background
+   * refresh and no request may block on DNS. But a test that delivers a packet
+   * from a hostname target's address has to know the mapping has landed, and
+   * sleeping a fixed number of milliseconds for an async chain is how a guard
+   * becomes a coin toss on a loaded machine. This one did, once.
+   */
+  whenResolved(): Promise<void> {
+    return this.resolving;
   }
 
   /**

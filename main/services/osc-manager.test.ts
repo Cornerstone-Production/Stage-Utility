@@ -33,9 +33,11 @@ const TARGETS = [
   { id: BY_NAME, name: "Desk by name", enabled: true, config: { host: NAME_HOST, port: 8000 } },
 ];
 
-/** The resolve pass is fired without being awaited (it is a background refresh),
- *  so let the microtasks it queues run before reading the map through receive(). */
-const settle = () => new Promise((r) => setTimeout(r, 0));
+/** The resolve pass is a background refresh nothing in the server waits for, so
+ *  the manager hands it out (whenResolved) rather than the test guessing how
+ *  many milliseconds an async DNS chain takes — which on a loaded machine is
+ *  how a guard becomes a coin toss. It flaked exactly that way before this. */
+const settle = () => oscManager.whenResolved();
 
 /** A UDP port nothing is on, found by binding 0 and reading what the OS gave. */
 async function freePort(): Promise<number> {
