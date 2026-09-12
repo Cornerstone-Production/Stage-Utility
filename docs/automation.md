@@ -41,6 +41,7 @@ poll after.
 | YouTube goes live / stops streaming | a broadcast on your channel reaches `live`, or leaves it |
 | OBS starts / stops streaming | the stream output starts or stops |
 | OBS starts / stops the virtual camera | the virtual camera output starts or stops |
+| An OSC message arrives | a value at an OSC address changes to equal, or crosses, what you name — see [Inbound OSC](#inbound-osc) |
 | A phrase is said on ProdCom | a **new** transcript line contains your text, optionally on one channel only |
 | Baptism timer starts | the timer leaves idle |
 | Baptism moves to another phase | testimony to baptism, or either back to idle |
@@ -82,6 +83,36 @@ id is opaque and changes when a workspace is rebuilt from a template. **Renaming
 the layer in ProVideoPlayer stops the rule**, silently. Nothing else will tell
 you. A name that is only digits cannot be used at all: PVP reads an all-digits
 value as a position rather than a name.
+
+### Inbound OSC
+
+**An OSC message arrives** makes the app drivable by anything on the network that
+can send a UDP packet. Point the device's OSC reply at this server on the
+feedback port (default `9000`, Settings → Integrations → OSC) and the values
+land where a rule can read them. REAPER's own OSC control surface transmits
+transport state, so it is the easy first sender.
+
+| Field | |
+|---|---|
+| **OSC address** | exactly as the device sends it, starting with a slash |
+| **From target** | blank for any sender; a configured target to accept it only from that one |
+| **Argument** | `0` is the first. Use `1` for the value in a channel-and-value reply |
+| **Match** | equals, crossed above, crossed below |
+| **Value** | the value for equals, the threshold for a crossing. `1` matches a float `1.0`; `true`/`false` match an OSC `T`/`F`; strings compare case-insensitively |
+
+Like every trigger here it fires on a **change**, not on a state. Two
+consequences worth knowing before you build a rule:
+
+- A **bang** — a message with no arguments — is stored as `true` and stays
+  `true`, so it is a change exactly once and never again. Use an address that
+  carries a value.
+- Feedback is broadcast at most every 200 ms. Two changes inside that window
+  arrive as one snapshot, so `/x 1` immediately followed by `/x 0` is a single
+  change to `0` and the `1` never happened as far as a rule is concerned.
+
+Scoping to a target needs the app to know which target sent the packet, which it
+decides from the source address — see [OSC](integrations/osc.md). Leave the
+field blank if in doubt.
 
 ## Conditions
 

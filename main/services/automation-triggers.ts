@@ -377,6 +377,82 @@ function streamTriggers(platform: string, channel: string, label: string): Recor
   };
 }
 
+// ── Inbound OSC ─────────────────────────────────────────────────────────────
+//
+// `osc:feedback` carries the whole feedback map — every address every target
+// has sent — re-broadcast whenever any one of them changes. So the edge is
+// always "did the value at MY key change", never "is it this value now": a
+// level test would fire on somebody else's fader.
+//
+// Keys are `targetId::address` for the first argument and `targetId::address#N`
+// for the rest, plus a `*::` copy of each. See osc-manager.ts.
+
+/** The values map out of an `osc:feedback` payload, defensively. */
+const asOscValues = (v: unknown): Record<string, unknown> => {
+  const raw = v && typeof v === "object" ? (v as { values?: unknown }).values : null;
+  return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+};
+
+/** One key's value, or undefined when this snapshot has never carried it.
+ *  `hasOwn` rather than a bare read, so "absent" is asked as a question rather
+ *  than inferred from a value — the crossing matches need to tell an address
+ *  that has never been seen from one carrying a value. */
+function oscValueAt(snapshot: unknown, key: string): unknown {
+  const values = asOscValues(snapshot);
+  return Object.hasOwn(values, key) ? values[key] : undefined;
+}
+
+/** The feedback key a rule's params name, or null when it names no address. */
+function oscKeyOf(params: Record<string, unknown>): string | null {
+  const address = String(params.address ?? "").trim();
+  if (!address.startsWith("/")) return null;
+  const target = String(params.target ?? "").trim() || "*";
+  const index = Math.trunc(Number(params.argument ?? 0));
+  const suffix = Number.isFinite(index) && index > 0 ? `#${index}` : "";
+  return `${target}::${address}${suffix}`;
+}
+
+/** A received value as a number, for the crossing matches. Booleans count as
+ *  1 and 0 — plenty of gear answers an on/off with OSC's `T`/`F` rather than a
+ *  float, and "crossed above 0.5" should still mean something there. */
+function oscNumber(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * Does a received value equal what the rule was told to watch for?
+ *
+ * The rule's side is always text — an OSC argument can arrive as an int, a
+ * float, a string or a bare `T`/`F`, and the operator typing the field does not
+ * know which their console picked. So: numeric when both read as numbers (`1`
+ * matches a float `1.0` and the string `"1"`), `true`/`false`/`1`/`0` for a
+ * boolean, and otherwise a trimmed case-insensitive string compare, because
+ * gear sends "ON" and "on" for the same thing.
+ *
+ * A blank rule value matches NOTHING rather than everything — an unfinished
+ * rule must not fire on every message the address ever carries.
+ */
+function oscEquals(value: unknown, want: unknown): boolean {
+  const w = String(want ?? "").trim();
+  if (w === "") return false;
+  if (typeof value === "boolean") {
+    const t = w.toLowerCase();
+    return value ? t === "true" || t === "1" : t === "false" || t === "0";
+  }
+  const b = Number(w);
+  if (typeof value === "number") return Number.isFinite(b) && value === b;
+  if (typeof value !== "string") return false;
+  const a = Number(value);
+  if (value.trim() !== "" && Number.isFinite(a) && Number.isFinite(b)) return a === b;
+  return value.trim().toLowerCase() === w.toLowerCase();
+}
+
 type Line = { id?: string; text?: string; channelName?: string | null };
 const asLines = (v: unknown): Line[] => (Array.isArray(v) ? (v as Line[]) : []);
 
@@ -636,6 +712,111 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
 
   ...streamTriggers("resi", "resi:status", "Resi"),
   ...streamTriggers("youtube", "youtube:status", "YouTube"),
+
+  /**
+   * Anything on the network that can send a UDP packet.
+   *
+   * The app has received OSC since the integration was written and did nothing
+   * with it but tint a layout button. This is the same feedback map, read as an
+   * edge: one address, one argument of it, and one of three comparisons.
+   *
+   * ONE trigger with a `match` param rather than three triggers, because the
+   * address, target and argument fields would be identical in all three and a
+   * picker with three near-identical rows is the naming trap this file already
+   * has one of.
+   *
+   * TWO THINGS IT CANNOT DO, both consequences of the channel being a throttled
+   * snapshot rather than an event stream, and both in the help text because an
+   * operator will otherwise build a rule that quietly never fires:
+   *
+   *  - A BANG (a message with no arguments) is stored as `true` and stays
+   *    `true`, so it is an edge exactly once and never again.
+   *  - Two changes inside the 200 ms throttle window collapse into one
+   *    broadcast. `/x 1` then `/x 0` inside that window is one snapshot showing
+   *    `0`, and the `1` never existed as far as any rule is concerned.
+   */
+  "osc.value": def({
+    id: "osc.value",
+    label: "An OSC message arrives",
+    channel: "osc:feedback",
+    help:
+      "Fires when the value at this address CHANGES to match. A message repeating a value it " +
+      "already had is not a change, so an address that only ever sends one thing fires once. " +
+      "Two changes inside 200ms collapse into one.",
+    params: [
+      {
+        key: "address",
+        label: "OSC address",
+        type: "string",
+        help: "Exactly as the device sends it, starting with a slash — /record, /ch/01/mix/on.",
+      },
+      {
+        key: "target",
+        label: "From target",
+        type: "enum",
+        optionsFrom: "osc-targets",
+        optional: true,
+        help:
+          "Leave blank for any sender. A named target must be configured with the address it " +
+          "sends FROM, or by a hostname that resolves to it.",
+      },
+      {
+        key: "argument",
+        label: "Argument",
+        type: "number",
+        min: 0,
+        max: 7,
+        optional: true,
+        help: "0 is the first argument. Use 1 for the value in a channel-and-value reply.",
+      },
+      {
+        key: "match",
+        label: "Match",
+        type: "enum",
+        options: [
+          { value: "equals", label: "equals" },
+          { value: "above", label: "crossed above" },
+          { value: "below", label: "crossed below" },
+        ],
+      },
+      {
+        key: "value",
+        label: "Value",
+        type: "string",
+        help:
+          "What to compare against — the value for equals, the threshold for a crossing. " +
+          "1 matches a float 1.0; true/false match an OSC T/F.",
+      },
+    ],
+    didFire: (prev, next, params) => {
+      if (prev === null) return false;
+      const key = oscKeyOf(params);
+      if (key === null) return false;
+      const before = oscValueAt(prev, key);
+      const after = oscValueAt(next, key);
+      // Absent means this snapshot has never carried the address. Nothing to
+      // compare, and a device that has gone quiet has not sent a zero.
+      if (after === undefined) return false;
+      const match = String(params.match ?? "equals");
+      if (match === "above" || match === "below") {
+        const a = oscNumber(before);
+        const b = oscNumber(after);
+        // No baseline, no crossing — the same rule the people-count and SPL
+        // thresholds follow. The first value an address ever carries is not a
+        // crossing, whichever side of the threshold it lands on.
+        if (a === null || b === null) return false;
+        const th = Number(String(params.value ?? "").trim());
+        if (!Number.isFinite(th)) return false;
+        return match === "above" ? a <= th && b > th : a >= th && b < th;
+      }
+      // EQUALS is an edge too: the value must have CHANGED into a match. The
+      // channel re-sends every address whenever any one of them moves, so a
+      // level test would fire this rule every time somebody touched a fader
+      // somewhere else on the desk. An absent `before` counts as changed — the
+      // first time an address appears with the value is the moment it happened.
+      return before !== after && oscEquals(after, params.value);
+    },
+  }),
 
   ...pvpFlagTriggers(
     "hidden",

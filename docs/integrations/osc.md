@@ -61,3 +61,8 @@ feedback listen port if your gear replies on a non-default port.
 **On a layout:** add object → **Control → OSC button**. Set the **target**,
 **label**, **address** and **args**, and optionally bind a **feedback** address
 so the button reflects live device state.
+
+**In a rule:** the **An OSC message arrives** trigger fires when the value at an
+address changes to equal, or crosses, what you name — so anything on the network
+that can send a UDP packet can start a rule. See
+[Automation](../automation.md#inbound-osc).
