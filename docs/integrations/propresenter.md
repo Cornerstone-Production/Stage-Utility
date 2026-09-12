@@ -53,7 +53,15 @@ one auditorium being switched off does not affect the other.
 [propresenter] status/updates unsupported (HTTP 404) — falling back to polling
 [propresenter] playlist unreadable on 192.168.0.123:1025 (HTTP 404) — no next-item name, retrying in 30s
 [propresenter] 192.168.0.123:1025 unreachable (connect ECONNREFUSED) — backing off, will keep retrying quietly
+[propresenter] unreadable presentation/current frame from 192.168.0.123:1025 (Unexpected end of JSON input) — that field stops advancing, staying quiet about the rest
+[propresenter] status buffer exceeded 1000000 chars from 192.168.0.123:1025 — resyncing
 ```
+
+The last two are the ones to look for when a panel goes half-blank while the
+rest of it keeps up: a frame that would not parse, and a document too large for
+the reader's buffer. The unreadable-frame line names the endpoint, the reason
+and the machine, and is said once per endpoint per stream rather than once per
+slide advance; the buffer line is said once per overrun.
 
 ## Setup
 

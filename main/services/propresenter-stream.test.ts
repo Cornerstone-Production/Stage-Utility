@@ -913,6 +913,73 @@ describe("one run, one publish at a time", () => {
   });
 });
 
+// ── A frame this app cannot read ─────────────────────────────────────────────
+
+describe("a frame that will not parse", () => {
+  /** One block the reader frames correctly and JSON.parse cannot finish. */
+  const truncated = (event: string): string =>
+    `event: ${event}\r\ndata: {"current":{"text":\r\n\r\n`;
+
+  it("says which endpoint, why, and from where — once per stream", async () => {
+    // The degrade is right: one endpoint going stale must not drop a healthy
+    // stream. The message is the deliverable. Without the reason an operator
+    // cannot tell a truncated frame from a schema change, without the address
+    // they cannot tell which auditorium, and without the once-per-stream bound
+    // a schema change writes a line per slide advance for the whole service.
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    for (let i = 0; i < 4; i++) {
+      push(truncated(WIRE.slide));
+      await sleep(20);
+    }
+    // Everything else still lands: the stream was not dropped over it.
+    push(frame(WIRE.active, presentationDoc()) + frame(WIRE.slideIndex, SLIDE_INDEX_FRAME));
+    await until("the readable frames to publish", () => status().slideCount != null);
+
+    const lines = loggedMatching(/unreadable/);
+    assert.equal(
+      lines.length,
+      1,
+      `logged ${lines.length} times, not once — a malformed frame arrives on every ` +
+        `slide advance: ${JSON.stringify(lines)}`,
+    );
+    assert.match(
+      lines[0],
+      /^\[propresenter\] unreadable status\/slide frame from 127\.0\.0\.1:\d+ \(.+\) —/,
+      "the line does not carry the endpoint, the address and the reason",
+    );
+    assert.match(lines[0], /JSON/, "the parse error itself is not in the line");
+    assert.equal(streams.length, 1, "an unreadable frame dropped the whole stream");
+    assert.equal(status().slideCount, TOTAL_SLIDES);
+  });
+
+  it("says it again for a different endpoint, and again on a new stream", async () => {
+    // Per endpoint, because a schema change on the document must not be hidden
+    // by one on the slide; and per stream, because a re-dial is a fresh chance
+    // for the operator to see it.
+    burstOn = false;
+    heartbeatOn = false;
+    Object.defineProperty(propresenterService, "reconnectBaseMs", {
+      get: () => 30,
+      configurable: true,
+    });
+    try {
+      await streaming();
+      push(truncated(WIRE.slide) + truncated(WIRE.timers));
+      await until("both endpoints to be reported", () => loggedMatching(/unreadable/).length === 2);
+
+      for (const st of streams) st.end();
+      await until("the stream to be re-dialled", () => subscribes().length >= 2);
+      await until("the new stream to be held", () => streams.length === 1);
+      push(truncated(WIRE.slide));
+      await until("the new stream to report it too", () => loggedMatching(/unreadable/).length === 3);
+    } finally {
+      delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
+    }
+  });
+});
+
 // ── The buffer cap ───────────────────────────────────────────────────────────
 
 describe("the presentation document against the reader's buffer cap", () => {

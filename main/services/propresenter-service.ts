@@ -436,6 +436,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   private publishing = false;
   /** A frame landed while a publish was in flight — run one more when it ends. */
   private publishAgain = false;
+  /** Endpoints already reported unreadable on THIS stream. Cleared with the
+   *  stream, so a re-dial that hits the same schema says so again once. */
+  private unreadable = new Set<string>();
   /** Set once this instance's ProPresenter refuses the subscription; see connect(). */
   private streamFallback = false;
   /** Last delay handed to scheduleIn — the reconnect log line needs the number
@@ -552,6 +555,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       this.publishTimer = null;
     }
     this.clearIdleWatchdog();
+    this.unreadable.clear();
     const { stream, req } = this;
     this.stream = null;
     this.req = null;
@@ -909,10 +913,25 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     let parsed: unknown;
     try {
       parsed = data ? JSON.parse(data) : null;
-    } catch {
-      // A frame this app cannot read is one field going stale, not a reason to
-      // drop a healthy stream. Named so an operator can see WHICH endpoint.
-      console.warn(`[propresenter] ignored an unreadable ${endpoint} frame`);
+    } catch (err) {
+      // Degraded rather than rethrown, for the same reason the playlist read a
+      // hundred lines below is: a frame this app cannot read is ONE field going
+      // stale, and dropping a healthy stream over it would blank the slide, the
+      // sections and the timers with it. The failure is returned to the operator
+      // as that field simply ceasing to advance, and it is on the log with the
+      // endpoint, the reason and the address — a truncated frame and a schema
+      // change are the same blank panel and different fixes.
+      //
+      // Once per endpoint per stream, matching the playlist's discipline: a
+      // schema change fires on every slide advance, and a line each would be the
+      // whole log by the end of a service.
+      if (!this.unreadable.has(endpoint)) {
+        this.unreadable.add(endpoint);
+        console.warn(
+          `[propresenter] unreadable ${endpoint} frame from ${this.host}:${this.port} ` +
+            `(${errorMessage(err)}) — that field stops advancing, staying quiet about the rest`,
+        );
+      }
       return;
     }
 
