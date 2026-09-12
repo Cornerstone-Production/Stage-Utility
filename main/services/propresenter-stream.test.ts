@@ -342,9 +342,9 @@ const loggedMatching = (re: RegExp): string[] => logged.filter((l) => re.test(l)
 //
 // Every frame that actually went out on "propresenter:status", in order. The bus
 // has no listener removal, so this is registered once for the file and cleared
-// per case, exactly as the log capture is. Two of the cases below assert on the
-// COUNT: a coalescing window and a serialised publish are both invisible in the
-// final state and visible only in how many frames reached the channel.
+// per case, exactly as the log capture is. The coalescing window is what needs
+// it: collapsing two frames into one changes nothing about the state the panel
+// ends up in, and is visible only in how many frames reached the channel.
 
 let published: ProPresenterStatusDTO[] = [];
 addBroadcastListener((channel, payload) => {
