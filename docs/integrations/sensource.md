@@ -112,11 +112,40 @@ poll drops to once a minute, and a consumer arriving mid-wait pre-empts it rathe
 than sitting out the rest. It never polls *faster* than the interval you set, so
 raising it to stay inside an API quota does what you expect.
 
-A failing endpoint backs off instead of retrying at full rate, and logs the first
-failure rather than one line per attempt. Outside the service window it goes
-dormant with the other integrations. A partial failure — the day aggregates, or
-the live minute series — is logged when it starts and when it clears, never once
-per poll.
+A failing endpoint backs off instead of retrying at full rate. Outside the service
+window it goes dormant with the other integrations. See
+[Logging an outage](#logging-an-outage) for what a failure writes to `/log`.
+
+## Logging an outage
+
+Each part of the poll that can fail on its own — the day aggregates, the live
+minute series, the `/space` listing, the zone→location join, the token exchange,
+each rejected path — is its own **outage**, logged once when it starts and once
+when it ends, never once per poll.
+
+A run does not end on the first success. It ends on a success that **holds** for
+four poll intervals (at least two minutes). Vea fails by alternating: a request
+is rejected, the next succeeds, the one after is rejected again. Under a
+once-per-transition rule the intervening success clears the state and every
+rejection is a fresh first failure, which is how this integration once wrote
+3,527 warning and error lines in five days — 2,837 of them in one day — against
+under 200 for everything else in the app combined. An alternating outage is one
+run and one line.
+
+- **A different kind of failure is always news.** A 503 arriving during a 401
+  storm is a different problem and gets its own line, so a credentials error
+  cannot mask the network error that replaced it.
+- **A run that lasts reminds you every 15 minutes**, with how many attempts it
+  has cost and how long it has been going, so a broken endpoint is never silent.
+- **The recovery line accounts for the run** it ended — nothing suppressed is
+  dropped without being counted somewhere.
+- **A response whose text changes every time** (a timestamp, a request id) cannot
+  turn that into a line per poll.
+
+The window is four *polls* rather than a fixed two minutes because the interval
+has no ceiling. At the 300s an operator might set to stay inside an API quota, a
+fixed window shorter than one poll would be outlasted by every success and the
+rule would collapse back to once-per-transition.
 
 ## Auth
 
@@ -153,9 +182,8 @@ Stage will not make that worse, and says so on the log when it sees it:
   or waits a minute when the response does not carry one.
 
 The first rejected response of an outage is logged with what Vea said, per
-request — so the reason is on `/log` once, whatever the body says. A response
-whose text changes every time (a timestamp, a request id) does not turn that into
-a line per poll.
+request — so the reason is on `/log` once, on the terms in
+[Logging an outage](#logging-an-outage).
 
 The trend buffer behind the people-graph samples on its own 45s clock rather than
 once per poll, so its ~3h span does not shrink when the interval drops.
