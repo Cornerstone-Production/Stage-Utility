@@ -833,9 +833,12 @@ describe("a button's own inferred state source", () => {
   });
 
   test("it is offered with no custom variables at all, and says it was inferred", async () => {
-    // The Companion this was built against has no custom variables whatsoever.
-    // Before the inference there was nothing to offer and the select was not
-    // rendered; now the only entry is the one nobody had to build.
+    // A Companion with no custom variables at all. Before the inference there
+    // was nothing to offer and the select was not rendered; now the only entry
+    // is the one nobody had to build. (This comment used to say the install
+    // this was built against had none; its 5.0.3+9703 export has ten — but ten
+    // against forty pairs is the same problem, and the case below is real for
+    // any install that has never made one.)
     CUSTOM_VARIABLES = [];
     PAIRS[0]!.stateSource = PJLINK;
     try {

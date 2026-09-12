@@ -54,8 +54,10 @@ sits alongside them.
 | **Companion Host** | Companion's IP. Leave blank and nothing outbound happens |
 | **API Port** | Companion's web and HTTP API port, `8000` by default. Companion's **Settings → Protocols → HTTP** must be on |
 
-**Test** reads Companion's configuration and reports its build and how many
-buttons it found. It never presses anything.
+**Test** reads Companion's configuration and reports its build, how many buttons
+it found and how many of Companion's own connections are healthy — see
+[When Companion cannot reach the device](#when-companion-cannot-reach-the-device).
+It never presses anything.
 
 Everything outbound comes from Companion's own configuration export
 (`/int/export/full`), which is unauthenticated **unless the Companion admin has
@@ -580,6 +582,43 @@ Companion reads shared with any poller, and its answer is served for five
 seconds. An unreachable Companion makes a bound cue wait up to **three seconds**
 before it presses — the read's timeout. It still presses.
 
+#### A Companion trigger, when the device has a feedback but no variable
+
+Some modules show a device's state as a **feedback** and publish no variable for
+it — a router crosspoint (`generic-swp08`), a console fader (`yamaha-rcp`), and
+every other module in the [no row](#inferred-from-what-the-button-drives) list
+that also lights a key up. An HTTP client cannot read a feedback's result, so
+Stage Utility offers no inferred source and the learning probe finds nothing to
+watch.
+
+One Companion **trigger** turns that feedback into a custom variable, and the
+binding above then reports real state with nothing to change in Stage Utility.
+Two triggers per device, one each way:
+
+In Companion, **Triggers → Add trigger**:
+
+1. **Event** — *On condition becoming true*.
+2. **Condition** — the same feedback the button uses, configured the same way.
+   The condition list takes feedbacks; drop in the one that is true when the
+   device is on.
+3. **Action** — internal **Set custom variable**, naming your variable and the
+   value `on`.
+
+Then a second trigger, identical, with the feedback **inverted** and the value
+`off`. Companion's feedbacks carry an *Invert* toggle, so this is the same
+feedback twice rather than two different ones.
+
+In Stage Utility, bind the pair to that variable exactly as in
+[A custom variable your buttons set](#a-custom-variable-your-buttons-set). Set
+**Value meaning on** and **Value meaning off** to whatever the two triggers
+write.
+
+Why this beats setting the variable from the buttons: a trigger fires on what
+the **device** reports, so the variable also moves when somebody switches the
+thing at the wall, or from another control surface. Setting it from the ON and
+OFF buttons only records what Companion was **asked** to do, which is the
+optimism the binding exists to remove.
+
 #### The settle window
 
 Companion polls the device on its own interval — one to five seconds for a smart
@@ -634,6 +673,43 @@ Nothing polls Companion in the background: the variables are read when
 install nobody polls costs nothing. The one exception is the eight seconds after
 a press — see [The settle window](#the-settle-window) — which reads one variable
 a second and stops as soon as it agrees.
+
+#### When Companion cannot reach the device
+
+Companion answers **404** for a variable on a connection that has not come up —
+the same 404 it answers for a variable that does not exist. So a pair reading
+*unknown* looks identical whether the binding is wrong or the projector is
+unplugged, and the binding is usually fine.
+
+The **connection status** on the Companion row tells the two apart. It comes from
+Companion's own `GET /api/connections`, read on **Test** and on the hourly
+reconcile — never on a timer of its own — and reads like this:
+
+```
+2 Companion client(s) connected. 12 of 52 connection(s) in error, 10 not reporting
+```
+
+| Bucket | Companion's status | Means |
+|---|---|---|
+| ok | `good` | the connection is up; its variables read |
+| in error | `error` | Companion cannot reach the device — connecting, refused, offline |
+| not reporting | no status, or one this app has not verified | the connection has published nothing yet; its variables 404 |
+
+Connections **disabled** in Companion are not counted. The row's own connection
+state still follows the module clients alone — gear behind Companion being down
+is a fact about the building, not about this integration — so the row stays green
+and the count is the warning.
+
+When anything is not ok, the hourly pass writes one line naming the modules and
+Companion's own words for what is wrong:
+
+```
+[companion] 12 of 52 connection(s) in error, 10 not reporting: 6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), 1 vizio-smartcast (Connection Failure), 10 tplink-kasasmartplug
+```
+
+A clean pass logs nothing. `/api/connections` is a **Companion 5.x** endpoint; on
+anything older the row simply carries no connection status, which is not
+reported as a fault.
 
 ### For Home Assistant
 

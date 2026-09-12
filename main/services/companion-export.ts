@@ -779,11 +779,13 @@ export function isCompanionVariableRef(ref: string): boolean {
  * description, the default and the sort order — none of which this app has any
  * use for. Only the keys are read.
  *
- * An export with no custom variables omits the key entirely on some builds (the
- * 5.0.3 document this was written against has no `custom_variables` at all), so
+ * An export with no custom variables omits the key entirely on some builds, so
  * an absent map is an empty list and never an error. An array of
  * `{ name }` objects is read too, so a hand-built or future document does not
- * come back silently empty.
+ * come back silently empty. The defensiveness is not hypothetical, but the
+ * claim that used to be here — that the 5.0.3 document this was written against
+ * had no `custom_variables` at all — was wrong: 5.0.3+9703's export carries the
+ * key as an object of ten.
  *
  * Names Companion itself could not have are dropped: a key that is not a legal
  * variable name cannot be read back through the value API, and offering it in
