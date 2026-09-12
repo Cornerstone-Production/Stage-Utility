@@ -88,6 +88,9 @@ Nothing is shown either when the channel owner has hidden the count in YouTube
 Studio, or in the first moments of a broadcast before YouTube has one. A hidden
 count reads as no count, never as nobody watching.
 
+**Elapsed time** turns the whole reading off, audience included: a widget has one
+slot for a running number, and the switch owns it.
+
 ### A start that did not happen
 
 A broadcast scheduled in YouTube that is past its start time with nothing live
