@@ -68,6 +68,12 @@ const REGISTRY = {
       ],
     },
     { id: "pco.plan-item", label: "A plan item starts", channel: "pco:plan", params: [] },
+    {
+      id: "occupancy.threshold",
+      label: "Occupancy crosses a threshold",
+      channel: "people:changed",
+      params: [{ key: "metric", label: "Metric", type: "enum", options: [{ value: "attendance", label: "Attendance" }] }],
+    },
   ],
   conditions: [{ id: "service.is-not-live", label: "No service is live", params: [] }],
   actions: [
@@ -195,6 +201,14 @@ function field(label: string): HTMLInputElement | null {
     (el.textContent ?? "").startsWith(label),
   );
   return row?.querySelector("input") ?? null;
+}
+
+/** The native <select> Row renders for a field, by the label its row carries. */
+function selectField(label: string): HTMLSelectElement | null {
+  const row = [...document.querySelectorAll("label")].find((el) =>
+    (el.textContent ?? "").startsWith(label),
+  );
+  return row?.querySelector("select") ?? null;
 }
 
 const button = (text: string): HTMLButtonElement | null =>
@@ -504,5 +518,75 @@ describe("Add rule", () => {
     await press(button("Add rule"), "Add rule");
     assert.equal(editor(), "rule-new", "the new rule was added with nowhere to say what it does");
     assert.equal(field("Name")?.value, "Rule 2");
+  });
+});
+
+// The class of bug this guards: a native <select> whose value matches no
+// <option> renders BLANK rather than the value it was given (see select.tsx).
+// A rule saved under an older release can still name a trigger, action or enum
+// param value this registry no longer lists — a type renamed or retired since.
+// Reverting any of the three Select conversions below back to a raw <select>
+// (rule-editor-dialog.tsx's Trigger row, Action row, or ParamField's
+// enum/multi-enum branch) turns these tests red.
+describe("a rule naming a trigger, action or param value the registry no longer lists", () => {
+  test("the Trigger and Action selects still show the stored ids, not blank", async () => {
+    RULES = [
+      {
+        id: "rule-retired",
+        name: "Rule retired",
+        enabled: true,
+        trigger: { id: "obs.retired-trigger", params: {} },
+        conditions: [],
+        action: { id: "action.retired", params: {} },
+        cooldownSec: 0,
+        oncePerService: false,
+      },
+    ];
+    await mount();
+    await openRow("Rule retired");
+
+    const trigger = selectField("Trigger");
+    assert.ok(trigger, "no Trigger select rendered");
+    assert.notEqual(trigger!.selectedIndex, -1, "the Trigger control rendered blank");
+    assert.equal(trigger!.value, "obs.retired-trigger", "the stored trigger id must be what the control reads");
+    const triggerOpt = [...trigger!.options].find((o) => o.value === "obs.retired-trigger");
+    assert.ok(
+      triggerOpt?.textContent?.includes("not found"),
+      `the stored trigger id must be labelled as no longer offered, got ${JSON.stringify(triggerOpt?.textContent)}`,
+    );
+
+    const action = selectField("Action");
+    assert.ok(action, "no Action select rendered");
+    assert.notEqual(action!.selectedIndex, -1, "the Action control rendered blank");
+    assert.equal(action!.value, "action.retired", "the stored action id must be what the control reads");
+  });
+
+  test("a stale enum param value is shown on its ParamField Select, not blank", async () => {
+    RULES = [
+      {
+        id: "rule-stale-metric",
+        name: "Rule stale metric",
+        enabled: true,
+        // "occupancy.threshold" IS in the registry, so its params render — the
+        // "metric" value below is what has gone stale, not the trigger itself.
+        trigger: { id: "occupancy.threshold", params: { metric: "occupancy" } },
+        conditions: [],
+        action: { id: "log.message", params: {} },
+        cooldownSec: 0,
+        oncePerService: false,
+      },
+    ];
+    await mount();
+    await openRow("Rule stale metric");
+
+    const metric = selectField("Metric");
+    assert.ok(metric, "no Metric select rendered");
+    assert.notEqual(metric!.selectedIndex, -1, "the Metric control rendered blank");
+    assert.equal(metric!.value, "occupancy", "the stored metric value must be what the control reads");
+    const metricOpt = [...metric!.options].find((o) => o.value === "occupancy");
+    assert.ok(
+      metricOpt?.textContent?.includes("not found"),
+      `the stored metric value must be labelled as no longer offered, got ${JSON.stringify(metricOpt?.textContent)}`,
+    );
   });
 });

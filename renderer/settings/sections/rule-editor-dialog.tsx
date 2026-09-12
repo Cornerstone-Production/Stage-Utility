@@ -297,27 +297,23 @@ function ParamField({
     );
   }
   if (spec.type === "enum" || spec.type === "multi-enum") {
-    // A RUNTIME source can be empty or incomplete: a ProPresenter that is off
-    // offers no macros, and a RossTalk target deleted since the rule was written
-    // is gone from the list while the rule still names it. A <select> whose
-    // value is not among its options renders BLANK, so the field would read
-    // "nothing chosen" for a rule that has in fact chosen something — and the
-    // operator's next move is to re-pick a setting that was never lost. The
-    // stored value is carried as its own option, marked, so the form says what
-    // the rule actually holds.
     const current = String(value ?? "");
-    const shown =
-      spec.optionsFrom && current && !options.some((o) => o.value === current)
-        ? [...options, { value: current, label: `${current} (not in the current list)` }]
-        : options;
     return (
       <Row label={spec.label} hint={spec.help}>
-        <select className={selectCls} value={current} onChange={(e) => onChange(e.target.value)}>
-          <option value="">{spec.optional ? "(any)" : "Pick one…"}</option>
-          {shown.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
+        {/* A RUNTIME source can be empty or incomplete: a ProPresenter that is off
+            offers no macros, and a RossTalk target deleted since the rule was
+            written is gone from the list while the rule still names it. Select
+            carries a stored value with no matching option as its own option
+            rather than rendering blank — see missingValue in select.tsx. */}
+        <Select value={current} onValueChange={onChange}>
+          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>
+            {options.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Row>
     );
   }
@@ -826,15 +822,18 @@ export function RuleEditorBody({
       <Separator />
       <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">When</span>
       <Row label="Trigger">
-        <select
-          className={selectCls}
-          value={draft.trigger.id}
-          onChange={(e) => setDraft({ ...draft, trigger: { id: e.target.value, params: {} } })}
-        >
-          {registry.triggers.map((t) => (
-            <option key={t.id} value={t.id}>{t.label}</option>
-          ))}
-        </select>
+        {/* A rule saved under an older release can still name a trigger this
+            version's registry no longer lists (a type renamed or retired) — the
+            Select keeps that id visible rather than silently swapping the rule
+            to whichever trigger the browser picks first. */}
+        <Select value={draft.trigger.id} onValueChange={(id) => setDraft({ ...draft, trigger: { id, params: {} } })}>
+          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {registry.triggers.map((t) => (
+              <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Row>
       {trigger?.params
         // `aliases` is a list, not a string to type. It renders below as one
@@ -940,6 +939,11 @@ export function RuleEditorBody({
         );
       })}
       <Row label="Add condition">
+        {/* Left as a raw <select>: its value is bound to "" permanently — a
+            transient picker that appends whatever id it is showing right now to
+            `draft.conditions` and immediately resets, never redisplaying a
+            stored value. It cannot render a value its own option list does not
+            carry. */}
         <select
           className={selectCls}
           value=""
@@ -958,15 +962,16 @@ export function RuleEditorBody({
       <Separator />
       <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Then</span>
       <Row label="Action">
-        <select
-          className={selectCls}
-          value={draft.action.id}
-          onChange={(e) => setDraft({ ...draft, action: { id: e.target.value, params: {} } })}
-        >
-          {registry.actions.map((a) => (
-            <option key={a.id} value={a.id}>{a.label}</option>
-          ))}
-        </select>
+        {/* Same staleness risk as the Trigger select above: an older release's
+            rule can still name an action this registry no longer lists. */}
+        <Select value={draft.action.id} onValueChange={(id) => setDraft({ ...draft, action: { id, params: {} } })}>
+          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {registry.actions.map((a) => (
+              <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Row>
       {/* One action renders its own params: three coordinates are not
           something an operator can be expected to know, so companion.press

@@ -134,8 +134,13 @@ export function Select({
       if (!React.isValidElement(child)) return null;
       if (child.type === SelectItem) {
         const p = child.props as ItemProps;
+        // `className` reaches the <option>. Windows and Linux browsers paint an
+        // option's own background in the open list, which is the only way a dark
+        // kiosk header keeps its list readable — the prop was declared on
+        // ItemProps and silently dropped, so a caller that set it got a white
+        // list and no error.
         return (
-          <option value={p.value} disabled={p.disabled}>
+          <option value={p.value} disabled={p.disabled} className={p.className}>
             {textOf(p.children)}
           </option>
         );
