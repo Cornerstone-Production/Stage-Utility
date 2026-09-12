@@ -641,12 +641,6 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
   const result = await companionApi.fetchExport();
   if (!result.ok) return null;
 
-  // AFTER the export, so this only ever asks a Companion that just answered, and
-  // on this pass rather than on a timer of its own — the hourly sweep is already
-  // the thing that dials Companion for housekeeping. See companion-connections.ts
-  // for why a connection's health is what explains a switch reading unknown.
-  await reportConnectionHealth();
-
   const rules = automationEngine.listRules();
   const nowIso = new Date().toISOString();
   // Every cue in the engine, press action or not: the rename pass has to see
@@ -783,6 +777,13 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
         `${scrub(counts.moved)} moved, ${scrub(counts.missing)} missing`,
     );
   }
+
+  // LAST, and on this pass rather than on a timer of its own — the hourly sweep
+  // is already the thing that dials Companion for housekeeping. After the writes
+  // so nothing above can be abandoned by it, and after the export so it only
+  // ever asks a Companion that just answered. See companion-connections.ts for
+  // why a connection's health is what explains a switch reading unknown.
+  await reportConnectionHealth();
   return { checked, applied, counts, failed };
 }
 
@@ -790,29 +791,30 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
  * Read what Companion says about its own connections, put it on the row and, when
  * it is not clean, in the log.
  *
- * NEVER throws and never fails the pass around it: connection health is a
- * diagnostic, and a reconcile that abandoned twenty cues because a status read
- * timed out would be worse than one that says nothing about the bulbs.
+ * NO try/catch, deliberately. The only catch that would fit here is one that
+ * logs and carries on, which this repo forbids outright — and there is nothing
+ * to catch that `setCompanionClients` beside it does not already leave
+ * unguarded, so adding a swallow to one of the two would be the same shape as
+ * every fix-one-of-three this codebase has paid for. The read itself returns its
+ * failures rather than throwing (see companionApi.readConnections), and that
+ * failure is reported: it becomes the row's sentence and a log line.
+ *
+ * Called LAST in the pass for the same reason. Every cue write is already
+ * committed by then, so a throw out of here cannot abandon them, and it reaches
+ * a caller that handles it — both timers wrap the run in `.catch`, and the Test
+ * button's own try turns it into a message on the row.
  *
  * The integration manager is reached through a DYNAMIC import for the same
  * reason companion-api reaches it that way — it imports the services it drives,
  * so a static import here would close a cycle.
  */
 async function reportConnectionHealth(): Promise<void> {
-  try {
-    const { sentence, log } = healthReport(await companionApi.readConnections());
-    // A warning, not a log: every line this writes is a connection that is not
-    // answering, which is the thing an operator came to /log to find.
-    if (log) console.warn(`[companion] ${scrub(log, LOG_MAX)}`);
-    const { integrationManager } = await import("./integration-manager.js");
-    integrationManager.setCompanionHealth(sentence);
-  } catch (err) {
-    // Reported, not swallowed. This is the whole failure surface of the health
-    // read — companionApi.readConnections returns its failures rather than
-    // throwing, so anything landing here is the row update or the import, and a
-    // pass that said nothing at all is how a diagnostic quietly stops existing.
-    console.error("[companion] connection status could not be reported:", scrubError(err));
-  }
+  const { sentence, log } = healthReport(await companionApi.readConnections());
+  // A warning, not a log: every line this writes is a connection that is not
+  // answering, which is the thing an operator came to /log to find.
+  if (log) console.warn(`[companion] ${scrub(log, LOG_MAX)}`);
+  const { integrationManager } = await import("./integration-manager.js");
+  integrationManager.setCompanionHealth(sentence);
 }
 
 /** Hourly. Long enough that a Companion being edited settles, short enough that
