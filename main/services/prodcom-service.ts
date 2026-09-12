@@ -131,6 +131,10 @@ const PARTIAL_LOG_AFTER_MS = 60_000;
 /** How often the still-open log repeats for a partial that keeps surviving. */
 const PARTIAL_LOG_REPEAT_MS = 5 * 60_000;
 
+/** `source` on a TranscriptEntry: what produced the line. Only `audio` is
+ *  somebody speaking; see shouldCaption(). */
+type EntrySource = "audio" | "typed" | "automation";
+
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
@@ -226,6 +230,10 @@ export class ProdComService extends ConnectionLifecycle {
   private channelsFetchedAt = 0;
   private channelRefreshInFlight = false;
 
+  /** How many entries of each non-audio `source` this connection has skipped —
+   *  the count exists so the log line fires once per kind, not once per line. */
+  private skippedSources = new Map<string, number>();
+
   private seq = 0;
   private transcriptTimer: ReturnType<typeof setTimeout> | null = null;
   private transcriptDirty = false;
@@ -289,6 +297,7 @@ export class ProdComService extends ConnectionLifecycle {
     this.clearIdleWatchdog();
     this.req?.destroy();
     this.req = null;
+    this.skippedSources.clear();
     // In-flight speech does not survive the stream. Whatever was mid-utterance
     // when the connection went will be re-sent or finalised on the other side; an
     // orphan kept here would sit under every real line until a restart. Finals are
@@ -598,7 +607,30 @@ export class ProdComService extends ConnectionLifecycle {
   /** Normalise one TranscriptEntry and, if it is speech, put it in the buffer. */
   private acceptEntry(entry: Record<string, unknown>): void {
     const line = this.normalizeLine(entry);
-    if (line) this.ingest(line);
+    if (!line) return;
+    if (!this.shouldCaption(entry)) return;
+    this.ingest(line);
+  }
+
+  /**
+   * Whether an entry belongs on a caption display.
+   *
+   * `source` is required on every TranscriptEntry and is one of `audio`, `typed`
+   * or `automation`. Only the first is somebody speaking. The other two were
+   * rendered identically until now, so an operator typing "cam 2 go wide" into a
+   * comms channel put that sentence on the stage and lobby walls as though it had
+   * been said aloud. An entry with no `source` at all is treated as speech — a
+   * build that predates the field should not lose its captions.
+   */
+  private shouldCaption(entry: Record<string, unknown>): boolean {
+    const source = str(entry, "source") as EntrySource | null;
+    if (source === null || source === "audio") return true;
+    const seen = (this.skippedSources.get(source) ?? 0) + 1;
+    this.skippedSources.set(source, seen);
+    if (seen === 1) {
+      console.log(`[prodcom] not captioning "${source}" entries — they are not spoken audio`);
+    }
+    return false;
   }
 
   /**
@@ -881,6 +913,7 @@ export class ProdComService extends ConnectionLifecycle {
       if (!entry) continue;
       const line = this.normalizeLine(entry);
       if (!line?.isFinal) continue;
+      if (!this.shouldCaption(entry)) continue;
       const parsed = Date.parse(line.at);
       const at = Number.isNaN(parsed) ? this.now() : parsed;
       if (at < cutoff) {

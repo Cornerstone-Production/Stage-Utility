@@ -34,6 +34,12 @@ older than that horizon are skipped on backfill even when the server returned
 them. So a reconnect cannot re-import a service from days ago just because
 ProdCom's own history still holds it.
 
+Only entries whose `source` is `audio` become captions. A message an operator
+typed into a comms channel (`typed`) and a line ProdCom's own automations
+produced (`automation`) are skipped and logged once per kind per connection —
+they are not something somebody said, and a stage or lobby wall is not where they
+belong.
+
 Per-speaker colour comes from the channel list, not from the transcript entry: a
 transcript entry has no colour field. The channel record is also the current
 name, so a channel renamed mid-service is labelled correctly; where no channel
@@ -64,6 +70,7 @@ The `/log` page has the evidence when something looks wrong:
   `[prodcom] backfill failed after P page(s) (…)` when a page did not answer
 - `[prodcom] backfill skipped N line(s) older than 4h`
 - `[prodcom] channel list unavailable (…)` when colours could not be read
+- `[prodcom] not captioning "typed" entries — they are not spoken audio`
 - `[prodcom] no transcript data for 900s — treating the stream as dead`
 - `[prodcom] partial on channel … in progress for Ns` at one minute and every
   five after, `[prodcom] final on channel … with no partial in flight` when a

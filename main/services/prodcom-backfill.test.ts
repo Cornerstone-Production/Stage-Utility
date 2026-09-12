@@ -278,3 +278,34 @@ describe("the pre-shared key goes out under one header", () => {
     }
   });
 });
+
+describe("only spoken audio becomes a caption", () => {
+  it("skips a typed comms message and an automation line, and logs each kind once", async (t) => {
+    let svc: TestProdCom | null = null;
+    const lines = await withLogs(async () => {
+      const c = await connected(t, {
+        entries: [
+          row("spoken", 5, { source: "audio" }),
+          row("cam-2-go-wide", 4, { source: "typed" }),
+          row("also-typed", 4, { source: "typed" }),
+          row("automation-said-this", 3, { source: "automation" }),
+          // A build predating the field must not lose its captions.
+          row("no-source-field", 2, { source: undefined }),
+        ],
+      });
+      svc = c.svc;
+      await c.stub.waitForRequest(isTranscriptPage);
+      await c.svc.settled();
+    });
+
+    assert.deepEqual(
+      svc!.captions().map((c) => c.text),
+      ["spoken", "no-source-field"],
+      "a message somebody typed into a comms channel is not something somebody said",
+    );
+    assert.deepEqual(lines.filter((l) => l.startsWith("[prodcom] not captioning")), [
+      '[prodcom] not captioning "typed" entries — they are not spoken audio',
+      '[prodcom] not captioning "automation" entries — they are not spoken audio',
+    ]);
+  });
+});
