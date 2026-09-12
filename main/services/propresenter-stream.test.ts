@@ -33,7 +33,12 @@ import assert from "node:assert/strict";
 import { afterEach, after, before, describe, it } from "node:test";
 import * as http from "node:http";
 
-import { propresenterService, propresenterManager } from "./propresenter-service.js";
+import {
+  IDLE_INTERVAL_MS,
+  POLL_INTERVAL_MS,
+  propresenterService,
+  propresenterManager,
+} from "./propresenter-service.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { SSE_MAX_BUFFER } from "./sse-reader.js";
 import type { ProPresenterStatusDTO } from "../types/stage.js";
@@ -384,9 +389,12 @@ const subscribes = (): string[] => seen.filter((s) => s.startsWith("POST /v1/sta
 const polls = (): string[] =>
   seen.filter((s) => s.startsWith("GET /v1/") && !s.startsWith("GET /v1/playlist/3"));
 
-/** Configure the primary at the stub and wait until its stream is up. */
-async function streaming(): Promise<void> {
-  propresenterService.configure("127.0.0.1", port);
+/** Configure the primary at the stub and wait until its stream is up. `pollMs`
+ *  is the FALLBACK cadence and changes nothing on the stream path — it is there
+ *  so a case can pin it low enough that a poll wrongly re-armed beside the
+ *  stream fires inside the case's own wait. */
+async function streaming(pollMs?: number): Promise<void> {
+  propresenterService.configure("127.0.0.1", port, pollMs);
   await until("the subscription to reach the stub", () => streams.length > 0);
 }
 
@@ -516,8 +524,14 @@ describe("the event name ProPresenter actually sends", () => {
 // ── The point of the change ──────────────────────────────────────────────────
 
 describe("a held stream costs no requests", () => {
-  it("makes two requests to connect and none at all thereafter", async () => {
-    await streaming();
+  it("makes three requests to connect — probe, subscribe, playlist — and none after", async () => {
+    // The poll interval is pinned to its 200ms floor, and the wait below is past
+    // two of them. That is load-bearing: at the 1000ms default this case cannot
+    // fail on the regression it exists for. Re-arming the poll beside the stream
+    // — `scheduleIn(this.pollMs)` after a "streaming" outcome, the natural way
+    // this comes back — left it green, because the poll it armed was slower than
+    // the case's own wait.
+    await streaming(200);
     await until("the burst to publish", () => status().currentSlideText === "line one");
     // /version, the subscribe, and one playlist read for the items list.
     const atRest = [...seen];
@@ -532,7 +546,7 @@ describe("a held stream costs no requests", () => {
       push(frame(WIRE.slide, { current: { text: `line ${i}`, notes: "" }, next: null }));
     }
     await until("the last slide to publish", () => status().currentSlideText === "line 19");
-    await sleep(120); // long enough for the old poll to have fired twice
+    await sleep(500); // two of the configured 200ms intervals, and then some
 
     assert.deepEqual(
       seen,
@@ -680,9 +694,13 @@ describe("a ProPresenter that refuses the subscription", () => {
     const svc = inner(propresenterService);
     /** One real poll, reporting the delay it chose next. The timer is never armed
      *  (a live poll against the stub would run for the rest of the file) but the
-     *  expression that CHOOSES the delay — the gate — runs for real. */
+     *  expression that CHOOSES the delay — the gate — runs for real.
+     *
+     *  DELETED afterwards, not reassigned: `svc.scheduleIn = original` puts a
+     *  bound own property over the prototype method and leaves it there, so a
+     *  later case runs against a copy bound to whatever `svc` was then. The
+     *  reconnectBaseMs override in this file already uses delete. */
     const scheduledDelayMs = async (): Promise<number> => {
-      const original = svc.scheduleIn.bind(svc);
       let scheduled: number | null = null;
       svc.scheduleIn = (ms: number) => {
         scheduled = ms;
@@ -690,7 +708,7 @@ describe("a ProPresenter that refuses the subscription", () => {
       try {
         await svc.connect();
       } finally {
-        svc.scheduleIn = original;
+        delete (svc as unknown as Record<string, unknown>).scheduleIn;
       }
       if (scheduled === null) {
         assert.fail("the fallback poll scheduled nothing at all — it never reached the gate");
@@ -704,10 +722,14 @@ describe("a ProPresenter that refuses the subscription", () => {
     const active = await scheduledDelayMs();
     ppWanted = false;
 
-    assert.ok(
-      active < idle,
-      `the fallback poll scheduled ${active}ms with a consumer and ${idle}ms with none — ` +
-        "the gate is gone from the one path that still makes five requests a cycle",
+    // Both numbers, not "active < idle": that is satisfied by a one-millisecond
+    // difference, and both cadences are knowable from the source.
+    assert.deepEqual(
+      { active, idle },
+      { active: POLL_INTERVAL_MS, idle: IDLE_INTERVAL_MS },
+      "the fallback poll's cadence is not the configured interval with a consumer " +
+        "and the keepalive with none — the gate is gone from the one path that " +
+        "still makes five requests a cycle",
     );
   });
 });

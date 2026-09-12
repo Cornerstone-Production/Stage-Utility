@@ -32,15 +32,20 @@ import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
 import { createSseReader, keepSocketAlive } from "./sse-reader.js";
 
-const POLL_INTERVAL_MS = 1000; // fallback poll only — see streamFallback
+/** Fallback poll only — see streamFallback. Exported so the case that pins the
+ *  fallback's demand gate can assert the two cadences rather than "one is
+ *  smaller than the other", which a one-millisecond difference satisfies. */
+export const POLL_INTERVAL_MS = 1000;
 // Reconnect back-off when the machine is unreachable (off for the week, etc.): start
 // at 5s and double, clamped by the service-window scheduler (≤2 min in/near a service,
 // stretched toward the idle ceiling otherwise). Resets once the stream delivers data.
 const ERROR_BASE_MS = 5000;
-// FALLBACK POLL ONLY. When no client is watching this instance's channel, the poll
-// drops to a slow keepalive instead of hammering 6 requests/sec. The STREAM has no
-// such gate — see the note above subscribe().
-const IDLE_INTERVAL_MS = 5000;
+// FALLBACK POLL ONLY. When NOTHING is using this instance's channel — no browser
+// subscribed and no in-process consumer registered, which is what `inDemand`
+// asks and a browser check alone does not — the poll drops to a slow keepalive
+// instead of hammering 6 requests/sec. The STREAM has no such gate — see the
+// note above subscribe().
+export const IDLE_INTERVAL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 4000;
 
 /**

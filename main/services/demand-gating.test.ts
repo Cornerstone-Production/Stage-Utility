@@ -120,7 +120,6 @@ interface Poller {
  * CHOOSES the delay — the gate under test — runs for real.
  */
 async function scheduledDelayMs(svc: Poller): Promise<number> {
-  const original = svc.scheduleIn.bind(svc);
   let scheduled: number | null = null;
   svc.scheduleIn = (ms: number) => {
     scheduled = ms;
@@ -129,7 +128,10 @@ async function scheduledDelayMs(svc: Poller): Promise<number> {
     svc.running = true;
     await svc.connect();
   } finally {
-    svc.scheduleIn = original;
+    // DELETED, not reassigned: `svc.scheduleIn = svc.scheduleIn.bind(svc)` puts a
+    // bound own property over the prototype method and leaves it there for every
+    // later case in the file.
+    delete (svc as unknown as Record<string, unknown>).scheduleIn;
   }
   if (scheduled === null) assert.fail("the poll scheduled nothing at all — it never reached the gate");
   return scheduled;
