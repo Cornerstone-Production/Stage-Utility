@@ -584,15 +584,23 @@ export function LiveStatusCard({
  */
 export function RecordingCard({
   recorder = "any",
+  now,
+  skewMs,
   showElapsed = true,
 }: {
   recorder?: string;
+  /** The clock comes DOWN, from the one tick the page already runs — the same
+   *  argument StreamingCard makes below. OBS's record timecode is interpolated
+   *  from a server-stamped anchor now rather than pushed once a second, so this
+   *  card needs both the tick and the skew to read it. */
+  now: number;
+  skewMs: number;
   /** Home's "Elapsed time" switch. Off, the card drops the running timecode and
    *  keeps the state — the same thing the same switch does to the streaming card
    *  beside it, which is why it carries the same name. */
   showElapsed?: boolean;
 }) {
-  const list = recorders(useObsState(), useReaperState());
+  const list = recorders(useObsState(), useReaperState(), now, skewMs);
   const chosen = recorder === "any" ? list : list.filter((r) => r.name === recorder);
   const ind = recordIndicator(chosen);
   // Only LIVE takes a colour. Everything else is the page's own foreground, the
@@ -970,11 +978,11 @@ export function HomeCard({
     case "home-live-status":
       return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
     case "home-recording":
-      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} showElapsed={c.showElapsed ?? true} />;
+      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} skewMs={skewMs} showElapsed={c.showElapsed ?? true} />;
     case "home-recording-obs":
-      return <RecordingCard recorder="OBS" />;
+      return <RecordingCard recorder="OBS" now={now} skewMs={skewMs} />;
     case "home-recording-reaper":
-      return <RecordingCard recorder="REAPER" />;
+      return <RecordingCard recorder="REAPER" now={now} skewMs={skewMs} />;
     case "home-streaming":
       return (
         <StreamingCard

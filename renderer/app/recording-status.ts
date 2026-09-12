@@ -5,6 +5,8 @@
 // and a compact strip. Shared LOGIC, separate rendering: a second copy of the
 // connected-but-stopped judgement is a second place for the same bug.
 
+import { obsRecordTimecode, type RecordAnchor } from "@main/services/obs-record-clock";
+
 /**
  * One thing that can be recording.
  *
@@ -27,13 +29,21 @@ export interface Recorder {
  *
  * THE place a new recording integration is added. One entry here and the Home
  * widget, the context bar and anything else asking the question all cover it.
+ *
+ * `now` and `skewMs` are passed in because OBS's record clock is INTERPOLATED
+ * rather than pushed — the server sends an anchor twice a minute instead of a
+ * formatted string every second, and this reads it forward. Same argument
+ * `streamingStat` makes for taking `now`: a caller that ticks a clock already has
+ * one, and a function that reads the clock itself cannot be tested.
  */
 export function recorders(
-  obs: { connected: boolean; recording: boolean; recordTimecode: string | null } | null,
+  obs: RecordAnchor & { connected: boolean } | null,
   reaper: { connected: boolean; recording: boolean; positionString?: string | null } | null,
+  now: number,
+  skewMs = 0,
 ): Recorder[] {
   return [
-    { name: "OBS", connected: !!obs?.connected, recording: !!obs?.recording, timecode: obs?.recordTimecode ?? null },
+    { name: "OBS", connected: !!obs?.connected, recording: !!obs?.recording, timecode: obsRecordTimecode(obs, now, skewMs) },
     // REAPER reports the transport position rather than a record timer, and while
     // it is rolling that IS how far into the take you are. Same source the REAPER
     // status object's `showPosition` uses, so the two cannot disagree.

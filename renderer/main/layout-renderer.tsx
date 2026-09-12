@@ -19,6 +19,7 @@ import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useDisplayPresence } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
+import { obsRecordTimecode } from "@main/services/obs-record-clock";
 import { streamers, streamIndicator, STREAMER_FOR } from "../app/recording-status";
 import { usePvpState, usePvpSkewMs } from "./use-pvp-state";
 import { useReaperState } from "./use-reaper-state";
@@ -1235,7 +1236,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         activeText: c.recordingText ?? activeDefault,
         idleText: c.idleText ?? idleDefault,
         offlineText: c.offlineText ?? STATUS_TEXT.obs.offline,
-        sub: mode === "recording" && c.showTimecode ? (obs?.recordTimecode ?? null) : null,
+        sub: mode === "recording" && c.showTimecode ? obsRecordTimecode(obs, ctx.now, ctx.skewMs) : null,
       });
     }
     case "stream-status":

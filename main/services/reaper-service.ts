@@ -199,8 +199,30 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
     }
   }
 
-  // Overrides the base's shallow compare: while recording, tick EVERY poll so a
-  // timecode display advances, which a change-only broadcast would freeze.
+  /**
+   * Overrides the base's shallow compare: while recording, tick EVERY poll so a
+   * timecode display advances, which a change-only broadcast would freeze.
+   *
+   * THIS IS THE SHAPE obs-service.ts NO LONGER HAS, and it was left here on
+   * purpose rather than overlooked. OBS's record clock was the same 1 Hz frame
+   * to every connected browser; it now ships an ANCHOR and the display reads it
+   * forward. REAPER cannot copy that as it stands, for a reason about the
+   * number rather than about the transport:
+   *
+   * `outputDuration` is the RECORDING's own elapsed time, and OBS's DTO carries
+   * a complete rate for it — `recordPaused` is 0 or 1. `positionSeconds` is the
+   * TIMELINE CURSOR, and nothing in a `/_/TRANSPORT` line says how fast it is
+   * moving: REAPER's play rate is a project setting the line does not report,
+   * and `isRepeatOn` (field 3, which parseTransport discards) means the cursor
+   * can wrap backwards mid-recording. Interpolating from it would be guessing.
+   * `positionString` is also REAPER's own text, so reading it forward means
+   * this app formats the number instead — a visible change to two widgets, not
+   * a quiet saving.
+   *
+   * So it is a design question about REAPER, not a mechanical copy of the OBS
+   * change, and it wants a real REAPER to answer. The 1 Hz frame is gated on
+   * `inDemand` meanwhile, so nothing is paying for it with no display attached.
+   */
   protected override changed(p: ReaperStatusDTO, next: ReaperStatusDTO): boolean {
     const stateChanged =
       p.connected !== next.connected ||
