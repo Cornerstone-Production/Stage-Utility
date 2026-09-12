@@ -704,7 +704,8 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       if (this.stale(epoch)) return;
       if (outcome.kind === "unsupported") {
         console.warn(
-          `[propresenter] status/updates unsupported (HTTP ${outcome.status}) — falling back to polling`,
+          `[propresenter] status/updates unsupported (HTTP ${outcome.status}) — ` +
+            "falling back to polling for the rest of this run",
         );
         this.streamFallback = true;
         await this.pollOnce(host, port, epoch);
@@ -1322,7 +1323,8 @@ class ProPresenterManager {
         svc = new ProPresenterService(e.id);
         svc.setEmitListener(() => this.broadcastCombined());
         // Surface reachability the same way the primary does (connecting → the
-        // service's listener flips it to connected/error on the first tick).
+        // service's listener flips it to connected/error on the first tick, and
+        // says "Streaming from" or "Connected to" depending which path it took).
         svc.setConnectionListener((state, message) => {
           this.conn.set(e.id, { state, message });
           this.broadcastCombined();
@@ -1331,7 +1333,9 @@ class ProPresenterManager {
       }
       this.names.set(e.id, e.name?.trim() || e.id);
       if (e.enabled !== false && e.host && e.port > 0) {
-        this.conn.set(e.id, { state: "connecting", message: `Polling ${e.host}:${e.port}` });
+        // "Connecting to", not "Polling": this instance holds a stream, and only
+        // the fallback polls at all. The message survives until the first tick.
+        this.conn.set(e.id, { state: "connecting", message: `Connecting to ${e.host}:${e.port}` });
         svc.configure(e.host, e.port, e.pollMs);
       } else {
         svc.stop();

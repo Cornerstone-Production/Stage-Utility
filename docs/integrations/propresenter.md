@@ -33,7 +33,9 @@ frame, and everything else on the panel is unaffected.
 
 If a ProPresenter refuses `status/updates`, the service falls back to polling
 the same endpoints as REST reads, at the configured poll interval, and says so
-in the log.
+in the log. The fallback lasts for the rest of the run: the subscription is
+re-probed when the integration is reconfigured or Stage restarts, not on every
+poll cycle.
 
 Fields are read defensively (each degrades to null) and assembled into a
 `ProPresenterStatusDTO` broadcast on the `propresenter:status` channel. Every
@@ -50,7 +52,7 @@ one auditorium being switched off does not affect the other.
 ```
 [propresenter] streaming 6 endpoints from 192.168.0.123:1025
 [propresenter] stream ended (closed by ProPresenter) — reconnecting in 5s
-[propresenter] status/updates unsupported (HTTP 404) — falling back to polling
+[propresenter] status/updates unsupported (HTTP 404) — falling back to polling for the rest of this run
 [propresenter] playlist unreadable on 192.168.0.123:1025 (HTTP 404) — no next-item name, retrying in 30s
 [propresenter] 192.168.0.123:1025 unreachable (connect ECONNREFUSED) — backing off, will keep retrying quietly
 [propresenter] unreadable presentation/current frame from 192.168.0.123:1025 (Unexpected end of JSON input) — that field stops advancing, staying quiet about the rest

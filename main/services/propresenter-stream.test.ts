@@ -587,7 +587,8 @@ describe("a ProPresenter that refuses the subscription", () => {
     propresenterService.configure("127.0.0.1", port);
     await until("the poll to publish", () => status().currentSlideText === "line one");
     assert.deepEqual(loggedMatching(/status\/updates unsupported/), [
-      "[propresenter] status/updates unsupported (HTTP 501) — falling back to polling",
+      "[propresenter] status/updates unsupported (HTTP 501) — falling back to polling " +
+        "for the rest of this run",
     ]);
   });
 
@@ -1206,6 +1207,27 @@ describe("two auditoriums, each on its own stream", () => {
     assert.equal(streams.length, 1, "the primary's stream was dropped by the other instance");
     assert.equal(propresenterManager.getInstancesDto().status.chapel?.connected, false);
     assert.equal(propresenterManager.getInstancesDto().status.default.connected, true);
+  });
+
+  it("an extra instance says it is CONNECTING, not polling", async () => {
+    // The point of this branch is that it does not poll. The stream path reports
+    // "Streaming from" and the fallback reports "Connected to"; the connecting
+    // state for an extra instance still said "Polling", which is the one thing
+    // it never does.
+    propresenterManager.apply("MA", [
+      { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true },
+    ]);
+    assert.deepEqual(propresenterManager.getInstancesDto().conn.chapel, {
+      state: "connecting",
+      message: `Connecting to 127.0.0.1:${port}`,
+    });
+    // And it really is transient — the stream replaces it with its own.
+    await until(
+      "the stream to replace the connecting message",
+      () =>
+        propresenterManager.getInstancesDto().conn.chapel?.message ===
+        `Streaming from 127.0.0.1:${port}`,
+    );
   });
 
   it("each instance holds its own stream", async () => {
