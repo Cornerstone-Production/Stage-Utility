@@ -48,6 +48,22 @@ function def(t: TriggerDef): TriggerDef {
   return t;
 }
 
+/**
+ * Did a reading CROSS a threshold between two snapshots?
+ *
+ * NO BASELINE, NO CROSSING: a null on either side means the value could not be
+ * read, and an unreadable value has not crossed anything. That refusal is why
+ * this is one function — it was written out at five call sites (SPL both ways,
+ * people count both ways, service overrun, and now inbound OSC), each of them a
+ * place where forgetting it turns "the meter came back online" into "the room
+ * got loud". A non-finite threshold is the same answer for the same reason.
+ */
+function crossed(a: number | null, b: number | null, th: number, dir: "above" | "below"): boolean {
+  if (a === null || b === null) return false;
+  if (!Number.isFinite(th)) return false;
+  return dir === "above" ? a <= th && b > th : a >= th && b < th;
+}
+
 // ── ProVideoPlayer ──────────────────────────────────────────────────────────
 //
 // Structurally typed against PvpLayerDTO rather than importing it, and NOT
@@ -503,12 +519,7 @@ function splCrossed(
 ): boolean {
   const meter = String(params.meter ?? "").trim();
   const metric = String(params.metric ?? "").trim();
-  const a = splLevel(prev, meter, metric);
-  const b = splLevel(next, meter, metric);
-  if (a === null || b === null) return false; // no baseline, no crossing
-  const th = Number(params.threshold);
-  if (!Number.isFinite(th)) return false;
-  return dir === "above" ? a <= th && b > th : a >= th && b < th;
+  return crossed(splLevel(prev, meter, metric), splLevel(next, meter, metric), Number(params.threshold), dir);
 }
 
 /** slots:devices broadcasts Record<slotId, DeviceStatus>; the label a rule names
@@ -817,21 +828,16 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
       // whose behaviour was decided by a fall-through rather than by anyone.
       const match = params.match === "above" || params.match === "below" ? params.match : "equals";
       if (match === "above" || match === "below") {
-        const a = oscNumber(before);
-        const b = oscNumber(after);
-        // No baseline, no crossing — the same rule the people-count and SPL
-        // thresholds follow. The first value an address ever carries is not a
-        // crossing, whichever side of the threshold it lands on.
-        if (a === null || b === null) return false;
-        // BLANK IS NOT ZERO. `Number("")` is 0 and finite, so a rule saved with
-        // "crossed above" and nothing typed in Value would arm itself on zero —
-        // firing the moment the address went positive, which nobody asked for.
-        // The equals branch below refuses a blank for the same reason.
+        // BLANK IS NOT ZERO, and this is the only threshold in the registry
+        // that can be blank — every other one is a `number` param the editor
+        // renders through NumberInput, which cannot store "". `Number("")` is 0
+        // AND finite, so without this a rule saved with "crossed above" and
+        // nothing typed in Value would arm itself on zero and fire the moment
+        // the address went positive. The equals branch below refuses a blank
+        // for the same reason.
         const raw = String(params.value ?? "").trim();
         if (raw === "") return false;
-        const th = Number(raw);
-        if (!Number.isFinite(th)) return false;
-        return match === "above" ? a <= th && b > th : a >= th && b < th;
+        return crossed(oscNumber(before), oscNumber(after), Number(raw), match);
       }
       // EQUALS is an edge too: the value must have CHANGED into a match. The
       // channel re-sends every address whenever any one of them moves, so a
@@ -1083,12 +1089,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
     help: "Measured across finished items, so it is checked as each item ends.",
     didFire: (prev, next, params) => {
       if (prev === null) return false;
-      const th = Number(params.minutes);
-      if (!Number.isFinite(th)) return false;
-      const a = overrunMinutes(prev);
-      const b = overrunMinutes(next);
-      if (a === null || b === null) return false;
-      return a <= th && b > th;
+      return crossed(overrunMinutes(prev), overrunMinutes(next), Number(params.minutes), "above");
     },
   }),
 
@@ -1228,11 +1229,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
     didFire: (prev, next, params) => {
       if (prev === null) return false;
       const metric = String(params.metric ?? "attendance");
-      const a = metricOf(prev, metric);
-      const b = metricOf(next, metric);
-      if (a === null || b === null) return false; // no baseline, no crossing
-      const th = Number(params.threshold);
-      return Number.isFinite(th) && a <= th && b > th;
+      return crossed(metricOf(prev, metric), metricOf(next, metric), Number(params.threshold), "above");
     },
   }),
 
@@ -1244,11 +1241,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
     didFire: (prev, next, params) => {
       if (prev === null) return false;
       const metric = String(params.metric ?? "attendance");
-      const a = metricOf(prev, metric);
-      const b = metricOf(next, metric);
-      if (a === null || b === null) return false;
-      const th = Number(params.threshold);
-      return Number.isFinite(th) && a >= th && b < th;
+      return crossed(metricOf(prev, metric), metricOf(next, metric), Number(params.threshold), "below");
     },
   }),
 };
