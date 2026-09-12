@@ -40,6 +40,10 @@ const connections: Record<string, ExportConnection> = {
   ptz: { label: "SA-PTZ-Camera", moduleId: "panasonic-cameras" },
   cine: { label: "MA-CAM-1", moduleId: "red-rcp2" },
   mixer: { label: "Mixer", moduleId: "yamaha-rcp" },
+  // A video router. Its module publishes no variable for a crosspoint, and the
+  // live install carries 69 `crosspoint_connected` feedbacks on it — the biggest
+  // population of feedback-only evidence on the box.
+  router: { label: "MA-Router", moduleId: "generic-swp08" },
   unlabelled: { label: "", moduleId: "tplink-kasasmartplug" },
 };
 
@@ -407,6 +411,40 @@ describe("which connection the inference reads", () => {
       null,
     );
     assert.equal(inferStateSource(button([], []), connections), null);
+  });
+
+  // The dangerous half of the case above, and the reason it is separate: a
+  // FEEDBACK is the FIRST evidence inferStateSource looks at, and `powerState`
+  // is the one it looks for by name. A device whose state exists only as a
+  // feedback — a router crosspoint, a console fader — must still infer nothing,
+  // because an HTTP client cannot read a feedback's result. Offered a source
+  // here, the pair would bind to a name Companion answers 404 for and read
+  // unknown forever with nothing on screen saying why.
+  test("a FEEDBACK-only device is offered nothing, including a powerState one", () => {
+    for (const definitionId of ["powerState", "crosspoint_connected", "MIXER_Current/Cue/StInCh/On"]) {
+      for (const connectionId of ["router", "mixer"]) {
+        assert.equal(
+          inferStateSource(button([{ definitionId, connectionId }], []), connections),
+          null,
+          `${connections[connectionId]!.moduleId} was offered a source from its ${definitionId} feedback`,
+        );
+      }
+    }
+  });
+
+  // And with a feedback AND an action, both on the unknown module: neither piece
+  // of evidence may become a guess.
+  test("a feedback-only device with actions of its own is still offered nothing", () => {
+    assert.equal(
+      inferStateSource(
+        button(
+          [{ definitionId: "crosspoint_connected", connectionId: "router" }],
+          [{ definitionId: "set_crosspoint", connectionId: "router" }],
+        ),
+        connections,
+      ),
+      null,
+    );
   });
 
   test("a connection with no label cannot be named in a variable reference", () => {

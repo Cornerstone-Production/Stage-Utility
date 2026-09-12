@@ -21,7 +21,9 @@ import * as fsp from "node:fs/promises";
 // the data directory at import. Point it somewhere disposable first.
 process.env.STAGE_UTILITY_DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "companion-api-"));
 
-const { companionApi, companionDeps, VARIABLE_TIMEOUT_MS } = await import("./companion-api.js");
+const { companionApi, companionDeps, CONNECTIONS_TIMEOUT_MS, VARIABLE_TIMEOUT_MS } = await import(
+  "./companion-api.js"
+);
 const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
 const { companionExportFixture } = await import("./fixtures/companion-export.js");
 
@@ -271,10 +273,28 @@ describe("fetchExport", () => {
   });
 });
 
+/**
+ * Companion's connection list, in the shape `GET /api/connections` answers.
+ *
+ * `status: null` on an enabled connection is deliberate and is what ten of the
+ * live install's fifty-two enabled connections look like — see
+ * companion-connections.test.ts.
+ */
+const connectionsBody = (): unknown => [
+  { id: "a", label: "MA_HL_Projector", moduleId: "generic-pjlink", enabled: true, status: { category: "good", level: "ok", message: null } },
+  { id: "b", label: "Bulb", moduleId: "tplink-kasasmartbulb", enabled: true, status: { category: "error", level: "Connecting", message: null } },
+  { id: "c", label: "Plug", moduleId: "tplink-kasasmartplug", enabled: true, status: null },
+  { id: "d", label: "Off", moduleId: "obs-studio", enabled: false, status: null },
+];
+
+/** Answer the export URL with the fixture and the connections URL with the list. */
+const stubBoth = (connections: () => Response) =>
+  stub((url) => (url.includes("/api/connections") ? connections() : Response.json(companionExportFixture())));
+
 describe("testConnection", () => {
   test("reports the Companion build and the button count", async () => {
     target({ host: "10.0.0.5", port: 8000 });
-    stub(() => Response.json(companionExportFixture()));
+    stubBoth(() => Response.json(connectionsBody()));
 
     const r = await companionApi.testConnection();
     assert.equal(r.ok, true);
@@ -285,7 +305,7 @@ describe("testConnection", () => {
 
   test("presses nothing", async () => {
     target({ host: "10.0.0.5", port: 8000 });
-    const calls = stub(() => Response.json(companionExportFixture()));
+    const calls = stubBoth(() => Response.json(connectionsBody()));
 
     await companionApi.testConnection();
     assert.equal(calls.filter((c) => c.url.includes("/press")).length, 0);
@@ -296,6 +316,187 @@ describe("testConnection", () => {
     const r = await companionApi.testConnection();
     assert.equal(r.ok, false);
     assert.match(r.message, /Host is required/);
+  });
+
+  // Why Test carries it at all: "Companion answered" is not the question an
+  // operator presses Test to settle. A cue bound to a module variable reads
+  // unknown when the CONNECTION is down, and nothing else on the page said so.
+  test("carries the connection health in the same sentence", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => Response.json(connectionsBody()));
+
+    const r = await companionApi.testConnection();
+    assert.match(r.message, /1 of 3 connection\(s\) in error, 1 not reporting/);
+  });
+
+  test("gear being down is not a failed test — Companion answered", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => Response.json(connectionsBody()));
+
+    const r = await companionApi.testConnection();
+    assert.equal(r.ok, true);
+  });
+
+  test("forces the connection read past the cache, like the export", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stubBoth(() => Response.json(connectionsBody()));
+
+    await companionApi.readConnections();
+    await companionApi.testConnection();
+
+    assert.equal(calls.filter((c) => c.url.endsWith("/api/connections")).length, 2);
+  });
+
+  // A 4.x Companion has no such endpoint. Saying "unavailable" on every one of
+  // them would be a red sentence about a diagnostic that was never coming.
+  test("a Companion too old to have the endpoint says nothing about it", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => new Response("Not found", { status: 404 }));
+
+    const r = await companionApi.testConnection();
+    assert.equal(r.ok, true);
+    assert.match(r.message, /6 on\/off pair\(s\)$/);
+  });
+
+  // The other way round: the export worked, so a connection list that did not
+  // is a fact the operator has not been told anywhere else.
+  test("a connection read that fails for any OTHER reason is said out loud", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => new Response("nope", { status: 500 }));
+
+    const r = await companionApi.testConnection();
+    assert.match(r.message, /connection status unavailable: Companion answered HTTP 500/);
+  });
+});
+
+describe("readConnections", () => {
+  test("reads Companion's own endpoint and sums it up", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stubBoth(() => Response.json(connectionsBody()));
+
+    const r = await companionApi.readConnections({ force: true });
+    assert.deepEqual(
+      calls.map((c) => `${c.method} ${c.url}`),
+      ["GET http://10.0.0.5:8000/api/connections"],
+    );
+    assert.equal(r.ok, true);
+    assert.ok(r.ok);
+    assert.deepEqual(
+      { total: r.health.total, enabled: r.health.enabled, ok: r.health.ok, unknown: r.health.unknown, error: r.health.error },
+      { total: 4, enabled: 3, ok: 1, unknown: 1, error: 1 },
+    );
+    assert.equal(r.health.worst, "error");
+  });
+
+  // A Companion that accepts the connection and never answers holds the hourly
+  // reconcile open. `instanceof AbortSignal` does NOT catch that — it was the
+  // first form of this test and it stayed green against
+  // `new AbortController().signal`, a signal that never fires. So this waits the
+  // real three seconds and pins the constant, the way readCustomVariable's
+  // timeout below does, and for the same reason: `mock.timers` cannot drive
+  // `AbortSignal.timeout`. `timeout` is on the test because the red state of
+  // this guard is a read that never settles.
+  test("a Companion that never answers is an error, not a hang", { timeout: 10_000 }, async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    companionDeps.fetch = async (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | null | undefined;
+        assert.ok(signal instanceof AbortSignal, "the read was sent with no timeout");
+        signal.addEventListener("abort", () => reject(signal.reason));
+      });
+
+    const started = Date.now();
+    const r = await companionApi.readConnections({ force: true });
+    const took = Date.now() - started;
+
+    assert.equal(r.ok, false, "a hung read came back as a health summary");
+    assert.match(r.ok === false ? r.reason : "", /timeout/i);
+    // Not `unsupported`: a Companion that never answers is not an old one, and
+    // the unsupported bucket is deliberately silent.
+    assert.equal(r.ok === false ? r.unsupported : true, false);
+    // The CONSTANT, not just that something aborted eventually. A timeout raised
+    // to a minute would still abort, and would still be an hourly sweep held
+    // open for a minute.
+    assert.ok(
+      took >= CONNECTIONS_TIMEOUT_MS - 100 && took < CONNECTIONS_TIMEOUT_MS + 1500,
+      `the read took ${took} ms, not about ${CONNECTIONS_TIMEOUT_MS} ms`,
+    );
+  });
+
+  test("404 is `unsupported`, which is not the same answer as a failure", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => new Response("Not found", { status: 404 }));
+
+    const r = await companionApi.readConnections({ force: true });
+    assert.equal(r.ok, false);
+    assert.ok(!r.ok);
+    assert.equal(r.unsupported, true);
+    assert.match(r.reason, /5\.x and later/);
+  });
+
+  test("any other status is a failure, and is NOT unsupported", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => new Response("nope", { status: 500 }));
+
+    const r = await companionApi.readConnections({ force: true });
+    assert.ok(!r.ok);
+    assert.equal(r.unsupported, false);
+    assert.match(r.reason, /HTTP 500/);
+  });
+
+  // NEVER throws: the reconcile calls this on a timer and a rejection out of a
+  // housekeeping pass takes the rest of the pass with it.
+  test("a network failure comes back as a result, not a throw", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    companionDeps.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+
+    const r = await companionApi.readConnections({ force: true });
+    assert.ok(!r.ok);
+    assert.equal(r.unsupported, false);
+  });
+
+  test("no host configured is a result too", async () => {
+    target(null);
+    const r = await companionApi.readConnections({ force: true });
+    assert.ok(!r.ok);
+    assert.match(r.reason, /host is not configured/);
+  });
+
+  test("a second read inside the window reuses the first, so one Test is one GET", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stubBoth(() => Response.json(connectionsBody()));
+
+    await companionApi.readConnections();
+    await companionApi.readConnections();
+
+    assert.equal(calls.filter((c) => c.url.endsWith("/api/connections")).length, 1);
+  });
+
+  // The cached list belongs to the OLD host. invalidate() runs when the
+  // Companion host is changed, and a stale count from another box is worse than
+  // none.
+  test("invalidate drops it", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stubBoth(() => Response.json(connectionsBody()));
+
+    await companionApi.readConnections();
+    companionApi.invalidate();
+    await companionApi.readConnections();
+
+    assert.equal(calls.filter((c) => c.url.endsWith("/api/connections")).length, 2);
+  });
+
+  test("a failure is not cached — the next read asks again", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    let fail = true;
+    const calls = stubBoth(() => (fail ? new Response("nope", { status: 500 }) : Response.json(connectionsBody())));
+
+    assert.ok(!(await companionApi.readConnections()).ok);
+    fail = false;
+    assert.ok((await companionApi.readConnections()).ok);
+    assert.equal(calls.filter((c) => c.url.endsWith("/api/connections")).length, 2);
   });
 });
 
@@ -382,14 +583,20 @@ describe("readCustomVariable", () => {
 
 // ── The host, resolved inside the try ─────────────────────────────────────────
 //
-// Every one of these three is documented as never throwing, and each resolved
-// its base URL BEFORE its try: `baseUrl()` awaits getTarget, which reaches the
-// integration manager and its config store. A rejection there escaped all three.
+// Every one of these FOUR is documented as never throwing, and three of them
+// once resolved the base URL BEFORE the try: `baseUrl()` awaits getTarget, which
+// reaches the integration manager and its config store. A rejection there
+// escaped all three.
 //
 // It matters most for the variable read, because its caller reads every bound
 // pair in one batch — one rejection took out every other pair's state and the
 // `GET /api/cues/states` route with it. For `press` it is worse in kind: an
-// automation action that throws stops the engine.
+// automation action that throws stops the engine. For readConnections it is the
+// hourly reconcile, which now calls it as the last thing it does.
+//
+// readConnections is the fourth, added with the endpoint rather than after it —
+// it shipped carrying the comment that names this exact bug and no case here,
+// which is the three-of-four shape this repo pays for over and over.
 describe("a getTarget failure", () => {
   const boom = () => {
     companionDeps.getTarget = async () => {
@@ -419,6 +626,19 @@ describe("a getTarget failure", () => {
     const r = await companionApi.fetchExport({ force: true });
     assert.equal(r.ok, false);
     assert.match(r.ok === false ? r.reason : "", /secrets\.bin is unreadable/);
+  });
+
+  test("readConnections returns it rather than throwing", async () => {
+    boom();
+    stub(() => Response.json([]));
+    const r = await companionApi.readConnections({ force: true });
+    assert.equal(r.ok, false);
+    assert.match(r.ok === false ? r.reason : "", /secrets\.bin is unreadable/);
+    // NOT `unsupported`. A config store that will not open says nothing about
+    // which Companion build is on the other end, and reporting it as "this
+    // Companion is too old" would put the row's one honest failure into the
+    // bucket that is deliberately silent.
+    assert.equal(r.ok === false ? r.unsupported : true, false);
   });
 });
 

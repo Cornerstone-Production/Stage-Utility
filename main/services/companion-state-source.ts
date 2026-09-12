@@ -7,8 +7,10 @@
 // A cue pair reports what it ASKED FOR unless somebody tells this app where the
 // truth is — which until now meant a Companion CUSTOM VARIABLE the operator's
 // own buttons set. That is real work, done by hand, for every device, and an
-// install with no custom variables at all (the 5.0.3 one this was built against
-// had none) could not have a single honest switch.
+// install with few custom variables and forty on/off pairs could not have an
+// honest switch on most of them. (The 5.0.3+9703 install this was built against
+// has ten custom variables and forty pairs. An earlier comment here said it had
+// none at all, which was wrong.)
 //
 // But the modules already publish it. `$(VCR-Overhead-Light:power_state)` is the
 // kasa module's own reading of the plug, updated by its 2-second poll, and

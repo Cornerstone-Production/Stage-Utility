@@ -367,9 +367,10 @@ describe("customVariableNames", () => {
   });
 
   test("an export with no custom variables is an empty list, not an error", () => {
-    // The 5.0.3 export this was built against has no `custom_variables` key at
-    // all. Reading that as a failure would make the import dialog unusable on
-    // an install that simply has none.
+    // Some builds omit the `custom_variables` key entirely. Reading that as a
+    // failure would make the import dialog unusable on an install that simply
+    // has none. (This file used to claim the 5.0.3 export it was written
+    // against had no such key; 5.0.3+9703's has one, an object of ten.)
     assert.deepEqual(customVariableNames({ version: 12, type: "full", pages: {} }), []);
     assert.deepEqual(customVariableNames({ custom_variables: {} }), []);
     assert.deepEqual(customVariableNames(null), []);
