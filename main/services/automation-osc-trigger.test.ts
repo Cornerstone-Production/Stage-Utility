@@ -115,6 +115,22 @@ describe("the osc.value edge", () => {
     );
   });
 
+  test("a blank threshold is not a threshold of zero", () => {
+    // `Number("")` is 0 AND finite, so a half-built "crossed above" rule with
+    // nothing typed in Value would arm itself on zero and fire the moment the
+    // address went positive.
+    const p = { address: "/spl", match: "above", value: "" };
+    assert.equal(
+      t.didFire(feed({ "*::/spl": -1 }), feed({ "*::/spl": 1 }), p, NOW),
+      false,
+      "a crossing with no threshold typed fired on zero",
+    );
+    assert.equal(
+      t.didFire(feed({ "*::/spl": 1 }), feed({ "*::/spl": -1 }), { ...p, match: "below" }, NOW),
+      false,
+    );
+  });
+
   test("a non-numeric value cannot cross anything", () => {
     const p = { address: "/mode", match: "above", value: "0.5" };
     assert.equal(t.didFire(feed({ "*::/mode": "show" }), feed({ "*::/mode": "rehearsal" }), p, NOW), false);

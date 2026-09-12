@@ -805,7 +805,13 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
         // thresholds follow. The first value an address ever carries is not a
         // crossing, whichever side of the threshold it lands on.
         if (a === null || b === null) return false;
-        const th = Number(String(params.value ?? "").trim());
+        // BLANK IS NOT ZERO. `Number("")` is 0 and finite, so a rule saved with
+        // "crossed above" and nothing typed in Value would arm itself on zero —
+        // firing the moment the address went positive, which nobody asked for.
+        // The equals branch below refuses a blank for the same reason.
+        const raw = String(params.value ?? "").trim();
+        if (raw === "") return false;
+        const th = Number(raw);
         if (!Number.isFinite(th)) return false;
         return match === "above" ? a <= th && b > th : a >= th && b < th;
       }
