@@ -166,6 +166,23 @@ describe("summariseConnections", () => {
     ]);
   });
 
+  // Companion's own level words contain spaces — `Connection Failure` is one —
+  // so a key joined on any single character can be forged by a value carrying
+  // it, and two different states add up as one row with the wrong count.
+  test("a module id and a level that could be joined the other way stay two rows", () => {
+    const h = summariseConnections(
+      parseConnections([
+        entry("a", "vendor", true, { category: "error", level: "b Connection Failure", message: null }),
+        entry("b", "vendor b", true, { category: "error", level: "Connection Failure", message: null }),
+      ]),
+    );
+    assert.equal(h.problems.length, 2);
+    assert.deepEqual(
+      h.problems.map((p) => `${p.moduleId}/${p.level}/${p.count}`).sort(),
+      ["vendor b/Connection Failure/1", "vendor/b Connection Failure/1"],
+    );
+  });
+
   test("errors sort ahead of unknowns however many of each there are", () => {
     const h = summariseConnections(
       parseConnections([
