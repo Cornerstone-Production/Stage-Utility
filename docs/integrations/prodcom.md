@@ -6,15 +6,21 @@ object.
 
 ## How it works
 
-ProdCom (prodcom.io) exposes an HTTP Application API (default port 24480) and
-publishes its own specification: `GET /api/v1/openapi.yaml`, rendered at `/docs`
-on the box. Field names here come from that document, not from guesswork.
+ProdCom (prodcom.io) exposes an HTTP + WebSocket Application API (default port
+24480) and publishes its own specification: `GET /api/v1/openapi.yaml`, rendered
+at `/docs` on the box. Field names here come from that document, not from
+guesswork.
 
-`prodcom-service.ts` holds one long-lived connection to
-`GET /api/v1/transcript/stream`, normalises each event into a
-`TranscriptLineDTO`, keeps a rolling buffer (up to 100 lines from the last four
-hours), and re-broadcasts on the `prodcom:transcript` channel. It reconnects
-(~4 s) if the stream drops.
+`prodcom-service.ts` holds one WebSocket to `GET /api/v1/ws`, subscribes to the
+`transcript` stream, normalises each entry into a `TranscriptLineDTO`, keeps a
+rolling buffer (up to 100 lines from the last four hours), and re-broadcasts on
+the `prodcom:transcript` channel. It reconnects (~4 s) if the connection drops.
+
+ProdCom sends a `{"type":"ping"}` heartbeat over that socket every 30 seconds
+whether or not anyone is speaking, and the app answers it. Three missed
+heartbeats (90 s of total silence) means the box is gone, not that the room is
+quiet, so the connection is dropped and reopened. This is the only liveness
+check the WebSocket path needs.
 
 On (re)connect the app primes itself from two REST reads, in this order:
 
@@ -49,12 +55,15 @@ display picks its own colour.
 If a key is required, it is sent as `Authorization: Bearer <key>` — the one
 security scheme the specification declares.
 
-A dropped cable or a switch port going down leaves the socket half-open — no
-close arrives, so nothing would notice. TCP keepalive probes the box every 30s
-once the stream is quiet and reconnects when it stops answering, which is why a
-silent room does not trip it: a live box answers the probe whether or not anyone
-is speaking. A box that answers TCP while its application has stopped producing
-is caught by a 15-minute data-silence timer.
+### The SSE fallback
+
+If the WebSocket will not come up, the app falls back to the older
+`GET /api/v1/transcript/stream` and keeps offering the WebSocket again every
+third reconnect. That stream sends no keepalive of any kind, so on that path a
+dropped cable is caught by TCP keepalive probing the box every 30 s, and a box
+that answers TCP while its application has stopped is caught by a 15-minute
+data-silence timer — which cannot tell a dead box from a quiet evening, and is
+the reason the WebSocket is preferred.
 
 ### Diagnostics
 
@@ -66,20 +75,23 @@ a sweep every five seconds clears a stale partial even when nobody else speaks.
 
 The `/log` page has the evidence when something looks wrong:
 
+- `[prodcom] websocket open — streams offered: …` on every connection
+- `[prodcom] no websocket frame for 90s — heartbeat missed …` when the box goes
+- `[prodcom] websocket unavailable (…) — falling back to the transcript SSE stream`
 - `[prodcom] backfill: N line(s) over P page(s)`, and
   `[prodcom] backfill failed after P page(s) (…)` when a page did not answer
 - `[prodcom] backfill skipped N line(s) older than 4h`
 - `[prodcom] channel list unavailable (…)` when colours could not be read
 - `[prodcom] not captioning "typed" entries — they are not spoken audio`
-- `[prodcom] no transcript data for 900s — treating the stream as dead`
 - `[prodcom] partial on channel … in progress for Ns` at one minute and every
   five after, `[prodcom] final on channel … with no partial in flight` when a
   final lands on a channel that has no partial while others do (the renamed
   channel case), and `[prodcom] transcript cleared by operator` naming every live
   partial and its age when the clear button is pressed
 
-Text is never logged, only its length. `PRODCOM_DEBUG=1` logs every raw frame
-verbatim.
+Text is never logged, only its length. `PRODCOM_DEBUG=1` logs every raw
+WebSocket and SSE frame verbatim, which is how to capture the shape of a live
+transcript event.
 
 ## Setup
 
