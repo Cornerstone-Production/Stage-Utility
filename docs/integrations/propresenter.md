@@ -19,11 +19,13 @@ POST /v1/status/updates?sse
 
 A snapshot frame arrives per endpoint immediately, then a frame whenever one of
 them changes, so a slide advance reaches a display as fast as the network
-carries it. `timer/system_time` ticks once a second and is the heartbeat: TCP
-keepalive plus a 15-second silence watchdog notice a stream that has died
-without closing, which a half-open socket does. The stream stays open for as
-long as the instance is configured, watched or not — an idle stream is cheaper
-than any keepalive poll.
+carries it. `timer/system_time` ticks once a second and is the heartbeat: a
+15-second silence watchdog is what notices a stream that has died without
+closing, which a half-open socket does. TCP keepalive is set on the socket as
+well, but only as a backstop — the operating system's own probe schedule puts a
+dead peer ten minutes or more away, so nothing inside a service waits for it.
+The stream stays open for as long as the instance is configured, watched or
+not — an idle stream is cheaper than any keepalive poll.
 
 `/v1/playlist/<uuid>` is the one request made after connecting, and only when
 the active playlist changes. It supplies the "next service item" name. A
@@ -33,7 +35,9 @@ frame, and everything else on the panel is unaffected.
 
 If a ProPresenter refuses `status/updates`, the service falls back to polling
 the same endpoints as REST reads, at the configured poll interval, and says so
-in the log.
+in the log. The fallback lasts for the rest of the run: the subscription is
+re-probed when the integration is reconfigured or Stage restarts, not on every
+poll cycle.
 
 Fields are read defensively (each degrades to null) and assembled into a
 `ProPresenterStatusDTO` broadcast on the `propresenter:status` channel. Every
@@ -50,10 +54,18 @@ one auditorium being switched off does not affect the other.
 ```
 [propresenter] streaming 6 endpoints from 192.168.0.123:1025
 [propresenter] stream ended (closed by ProPresenter) — reconnecting in 5s
-[propresenter] status/updates unsupported (HTTP 404) — falling back to polling
+[propresenter] status/updates unsupported (HTTP 404) — falling back to polling for the rest of this run
 [propresenter] playlist unreadable on 192.168.0.123:1025 (HTTP 404) — no next-item name, retrying in 30s
 [propresenter] 192.168.0.123:1025 unreachable (connect ECONNREFUSED) — backing off, will keep retrying quietly
+[propresenter] unreadable presentation/current frame from 192.168.0.123:1025 (Unexpected end of JSON input) — that field stops advancing, staying quiet about the rest
+[propresenter] status buffer exceeded 1000000 chars from 192.168.0.123:1025 — resyncing
 ```
+
+The last two are the ones to look for when a panel goes half-blank while the
+rest of it keeps up: a frame that would not parse, and a document too large for
+the reader's buffer. The unreadable-frame line names the endpoint, the reason
+and the machine, and is said once per endpoint per stream rather than once per
+slide advance; the buffer line is said once per overrun.
 
 ## Setup
 
@@ -66,8 +78,9 @@ the **port** (default 1025). The machine must be on the same network as Stage.
 
 **Poll interval** applies only to the fallback: on a ProPresenter that supports
 `status/updates`, updates are pushed and there is no interval. Left blank the
-fallback polls at **1000 ms**, dropping to a 5 s keepalive when no display is
-watching; anything under 200 ms is ignored.
+fallback polls at **1000 ms**, dropping to a 5 s keepalive when nothing is
+reading the channel — open displays and in-process consumers such as an
+automation rule both count; anything under 200 ms is ignored.
 
 **On a layout:** add slide objects — current/next slide text, current/next slide
 notes, current/next section, slide progress, slide thumbnail. Each can target a

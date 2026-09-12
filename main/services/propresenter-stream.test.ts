@@ -33,8 +33,13 @@ import assert from "node:assert/strict";
 import { afterEach, after, before, describe, it } from "node:test";
 import * as http from "node:http";
 
-import { propresenterService, propresenterManager } from "./propresenter-service.js";
-import { setSubscriberCheck } from "./broadcaster.js";
+import {
+  IDLE_INTERVAL_MS,
+  POLL_INTERVAL_MS,
+  propresenterService,
+  propresenterManager,
+} from "./propresenter-service.js";
+import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { SSE_MAX_BUFFER } from "./sse-reader.js";
 import type { ProPresenterStatusDTO } from "../types/stage.js";
 
@@ -122,6 +127,19 @@ const SLIDE_INDEX_FRAME = {
     presentation_id: { uuid: PRESENTATION_UUID, name: "Opening Song", index: 4 },
   },
 };
+/** The NEXT slide, one group on: index 3 is "Chorus 1"'s first slide. Together
+ *  with ADVANCED_INDEX this is one advance, which ProPresenter sends as two
+ *  frames — and publishing between them is a frame nobody should ever see. */
+const ADVANCED_SLIDE = {
+  current: { text: "chorus one", notes: "", uuid: "s-4" },
+  next: { text: "chorus two", notes: "", uuid: "s-5" },
+};
+const ADVANCED_INDEX = {
+  presentation_index: {
+    index: 3,
+    presentation_id: { uuid: PRESENTATION_UUID, name: "Opening Song", index: 4 },
+  },
+};
 const PLAYLIST_FRAME = {
   presentation: {
     playlist: { uuid: PLAYLIST_UUID, name: "Sunday", index: 3 },
@@ -167,6 +185,25 @@ let resetSubscribe = false;
 let stalled: http.ServerResponse[] = [];
 /** The body of the last subscription request, so a case can read the endpoints. */
 let lastSubscribeBody = "";
+/** Hold every /version response until releaseVersion(), parking a connect on it. */
+let holdVersion = false;
+/** The /version responses currently parked. */
+let heldVersion: http.ServerResponse[] = [];
+/** Delay on `/v1/playlist/<uuid>`, so a case can hold a real request in flight. */
+let playlistDelayMs = 0;
+/** When each `/v1/playlist/<uuid>` read reached the stub — the back-off's own
+ *  deadlines, measured rather than written by the test. */
+let playlistReadAt: number[] = [];
+
+/** Answer every parked /version, letting the connects behind them resume. */
+function releaseVersion(): void {
+  const parked = heldVersion;
+  heldVersion = [];
+  for (const res of parked) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ host_description: "ProPresenter 21.3", api_version: "v1" }));
+  }
+}
 
 /** Push a chunk to every held stream. */
 function push(chunk: string): void {
@@ -191,6 +228,12 @@ before(async () => {
     seen.push(`${req.method} ${url}`);
 
     if (url === "/version") {
+      // Parked, not answered: this is the await a connect() sits on while a
+      // reconfigure restarts the instance underneath it.
+      if (holdVersion) {
+        heldVersion.push(res);
+        return;
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ host_description: "ProPresenter 21.3", api_version: "v1" }));
       return;
@@ -234,13 +277,18 @@ before(async () => {
     }
 
     if (url.startsWith("/v1/playlist/") && url !== "/v1/playlist/active") {
-      if (playlistStatus !== 200) {
-        res.writeHead(playlistStatus);
-        res.end();
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(PLAYLIST_ITEMS));
+      playlistReadAt.push(Date.now());
+      const answer = (): void => {
+        if (playlistStatus !== 200) {
+          res.writeHead(playlistStatus);
+          res.end();
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(PLAYLIST_ITEMS));
+      };
+      if (playlistDelayMs) setTimeout(answer, playlistDelayMs);
+      else answer();
       return;
     }
 
@@ -290,6 +338,19 @@ console.warn = (...a: unknown[]) => logged.push(a.map(String).join(" "));
 
 const loggedMatching = (re: RegExp): string[] => logged.filter((l) => re.test(l));
 
+// ── Broadcast capture ────────────────────────────────────────────────────────
+//
+// Every frame that actually went out on "propresenter:status", in order. The bus
+// has no listener removal, so this is registered once for the file and cleared
+// per case, exactly as the log capture is. The coalescing window is what needs
+// it: collapsing two frames into one changes nothing about the state the panel
+// ends up in, and is visible only in how many frames reached the channel.
+
+let published: ProPresenterStatusDTO[] = [];
+addBroadcastListener((channel, payload) => {
+  if (channel === "propresenter:status") published.push(payload as ProPresenterStatusDTO);
+});
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Comfortably past PUBLISH_COALESCE_MS plus a round trip to the stub. */
@@ -299,7 +360,10 @@ interface Reachable {
   streamIdleMs: number;
   streamFallback: boolean;
   playlistRetryAt: number;
+  playlistRetryBaseMs: number;
+  playlistRetryMaxMs: number;
   pollMs: number;
+  req: unknown;
   scheduleIn(ms: number): void;
   connect(): Promise<void>;
   running: boolean;
@@ -325,9 +389,12 @@ const subscribes = (): string[] => seen.filter((s) => s.startsWith("POST /v1/sta
 const polls = (): string[] =>
   seen.filter((s) => s.startsWith("GET /v1/") && !s.startsWith("GET /v1/playlist/3"));
 
-/** Configure the primary at the stub and wait until its stream is up. */
-async function streaming(): Promise<void> {
-  propresenterService.configure("127.0.0.1", port);
+/** Configure the primary at the stub and wait until its stream is up. `pollMs`
+ *  is the FALLBACK cadence and changes nothing on the stream path — it is there
+ *  so a case can pin it low enough that a poll wrongly re-armed beside the
+ *  stream fires inside the case's own wait. */
+async function streaming(pollMs?: number): Promise<void> {
+  propresenterService.configure("127.0.0.1", port, pollMs);
   await until("the subscription to reach the stub", () => streams.length > 0);
 }
 
@@ -341,12 +408,18 @@ afterEach(() => {
   streams = [];
   seen = [];
   logged = [];
+  published = [];
+  playlistReadAt = [];
   subscribeStatus = 200;
   playlistStatus = 200;
+  playlistDelayMs = 0;
   heartbeatOn = true;
   burstOn = true;
   stallSubscribe = false;
   resetSubscribe = false;
+  holdVersion = false;
+  for (const r of heldVersion) r.destroy();
+  heldVersion = [];
   for (const s of stalled) s.destroy();
   stalled = [];
   propresenterService.configure("", 0);
@@ -451,8 +524,14 @@ describe("the event name ProPresenter actually sends", () => {
 // ── The point of the change ──────────────────────────────────────────────────
 
 describe("a held stream costs no requests", () => {
-  it("makes two requests to connect and none at all thereafter", async () => {
-    await streaming();
+  it("makes three requests to connect — probe, subscribe, playlist — and none after", async () => {
+    // The poll interval is pinned to its 200ms floor, and the wait below is past
+    // two of them. That is load-bearing: at the 1000ms default this case cannot
+    // fail on the regression it exists for. Re-arming the poll beside the stream
+    // — `scheduleIn(this.pollMs)` after a "streaming" outcome, the natural way
+    // this comes back — left it green, because the poll it armed was slower than
+    // the case's own wait.
+    await streaming(200);
     await until("the burst to publish", () => status().currentSlideText === "line one");
     // /version, the subscribe, and one playlist read for the items list.
     const atRest = [...seen];
@@ -467,7 +546,7 @@ describe("a held stream costs no requests", () => {
       push(frame(WIRE.slide, { current: { text: `line ${i}`, notes: "" }, next: null }));
     }
     await until("the last slide to publish", () => status().currentSlideText === "line 19");
-    await sleep(120); // long enough for the old poll to have fired twice
+    await sleep(500); // two of the configured 200ms intervals, and then some
 
     assert.deepEqual(
       seen,
@@ -522,7 +601,8 @@ describe("a ProPresenter that refuses the subscription", () => {
     propresenterService.configure("127.0.0.1", port);
     await until("the poll to publish", () => status().currentSlideText === "line one");
     assert.deepEqual(loggedMatching(/status\/updates unsupported/), [
-      "[propresenter] status/updates unsupported (HTTP 501) — falling back to polling",
+      "[propresenter] status/updates unsupported (HTTP 501) — falling back to polling " +
+        "for the rest of this run",
     ]);
   });
 
@@ -574,6 +654,35 @@ describe("a ProPresenter that refuses the subscription", () => {
     }
   });
 
+  it("a subscribe that fails leaves no dead request handle behind", async () => {
+    // The unsupported branch forgets `req` with a comment explaining why. The
+    // failed branch did not, and it is the same situation: the caller is about
+    // to back off and re-dial, and endStream's ONLY guard is that `stream` and
+    // `req` are both null — a late event on a handle left in place tears down
+    // and schedules a second reconnect racing the one connect() just armed.
+    //
+    // The late event itself cannot be staged against a stub, so what is asserted
+    // is the invariant it depends on: a subscribe that produced no stream leaves
+    // no handle behind. One connect() is driven by hand rather than through the
+    // retry loop, because the retry installs a fresh handle within 30ms.
+    resetSubscribe = true;
+    propresenterService.configure("127.0.0.1", port);
+    propresenterService.stop(); // no automatic retry racing the assertion
+    const svc = inner(propresenterService);
+    svc.running = true;
+    await svc.connect();
+    const leftBehind = svc.req;
+    propresenterService.stop();
+
+    assert.equal(
+      leftBehind,
+      null,
+      "the failed subscribe left its dead request handle in place, so a late " +
+        "event on it reaches endStream and schedules a reconnect on top of the " +
+        "one the failure already scheduled",
+    );
+  });
+
   it("the fallback poll still backs off when nobody is watching", async () => {
     // The demand gate the stream drops still belongs on this path: it really does
     // make five requests a cycle. This is the case demand-gating.test.ts points at
@@ -585,9 +694,13 @@ describe("a ProPresenter that refuses the subscription", () => {
     const svc = inner(propresenterService);
     /** One real poll, reporting the delay it chose next. The timer is never armed
      *  (a live poll against the stub would run for the rest of the file) but the
-     *  expression that CHOOSES the delay — the gate — runs for real. */
+     *  expression that CHOOSES the delay — the gate — runs for real.
+     *
+     *  DELETED afterwards, not reassigned: `svc.scheduleIn = original` puts a
+     *  bound own property over the prototype method and leaves it there, so a
+     *  later case runs against a copy bound to whatever `svc` was then. The
+     *  reconnectBaseMs override in this file already uses delete. */
     const scheduledDelayMs = async (): Promise<number> => {
-      const original = svc.scheduleIn.bind(svc);
       let scheduled: number | null = null;
       svc.scheduleIn = (ms: number) => {
         scheduled = ms;
@@ -595,7 +708,7 @@ describe("a ProPresenter that refuses the subscription", () => {
       try {
         await svc.connect();
       } finally {
-        svc.scheduleIn = original;
+        delete (svc as unknown as Record<string, unknown>).scheduleIn;
       }
       if (scheduled === null) {
         assert.fail("the fallback poll scheduled nothing at all — it never reached the gate");
@@ -609,10 +722,14 @@ describe("a ProPresenter that refuses the subscription", () => {
     const active = await scheduledDelayMs();
     ppWanted = false;
 
-    assert.ok(
-      active < idle,
-      `the fallback poll scheduled ${active}ms with a consumer and ${idle}ms with none — ` +
-        "the gate is gone from the one path that still makes five requests a cycle",
+    // Both numbers, not "active < idle": that is satisfied by a one-millisecond
+    // difference, and both cadences are knowable from the source.
+    assert.deepEqual(
+      { active, idle },
+      { active: POLL_INTERVAL_MS, idle: IDLE_INTERVAL_MS },
+      "the fallback poll's cadence is not the configured interval with a consumer " +
+        "and the keepalive with none — the gate is gone from the one path that " +
+        "still makes five requests a cycle",
     );
   });
 });
@@ -739,6 +856,183 @@ describe("a stream that has died without saying so", () => {
   });
 });
 
+// ── How many publishes, and when ─────────────────────────────────────────────
+//
+// Three cases about an async gap. None of them changes the state the panel ends
+// up in, so none can be seen through getStatus(): they are visible only in how
+// many requests went out and how many frames reached the channel.
+
+describe("one run, one publish at a time", () => {
+  it("a reconfigure inside the version round trip leaves exactly one stream", async () => {
+    // configure() is restart(), which is `stop(); start()` SYNCHRONOUSLY:
+    // `running` goes false and back to true inside one tick. A connect() parked
+    // on the /version await resumes, sees `running === true`, and subscribes
+    // with the host and port it captured before the reconfigure. subscribe()
+    // overwrites `stream` and `req`, and whichever assignment loses is never
+    // destroyed — closeStream() only knows the last pair. The booth machine is
+    // then holding a second server-sent-event stream for the life of the
+    // process, its data handler still feeding the same frame buffer.
+    //
+    // The manager calls configure() on EVERY settings write, a bare
+    // poll-interval edit included, so the window is one round trip wide.
+    holdVersion = true;
+    propresenterService.configure("127.0.0.1", port);
+    await until("the first connect to park on /version", () => heldVersion.length === 1);
+    propresenterService.configure("127.0.0.1", port, 900); // the poll-interval edit
+    await until("the second connect to park on /version", () => heldVersion.length === 2);
+
+    holdVersion = false;
+    releaseVersion(); // both parked connects resume
+
+    await until("a stream to be held", () => streams.length > 0);
+    await sleep(200); // room for the abandoned run to open a second one
+
+    assert.equal(
+      subscribes().length,
+      1,
+      "two subscriptions went out for one instance — the run the reconfigure " +
+        "abandoned resumed anyway and opened a stream nothing will ever close",
+    );
+    assert.equal(streams.length, 1, "the stub is holding a second, orphaned stream");
+  });
+
+  it("holds one publish at a time across a real playlist request", async () => {
+    // queuePublish nulls its timer BEFORE publish() runs, so a frame arriving
+    // while publish is inside the playlist fetch starts a second publish beside
+    // the first. In the steady state that fetch resolves in a microtask and
+    // nothing interleaves, which is why no other case here catches it — but the
+    // moment the playlist changes there is a real request in flight, and both
+    // publishes read an identifier neither has recorded yet: two identical
+    // requests, both emitting, and if the first is slower the OLDER frame
+    // broadcasts last.
+    playlistDelayMs = 250;
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+
+    push(frame(WIRE.playlist, PLAYLIST_FRAME)); // the change → one playlist read
+    await until("the playlist read to reach the stub", () => playlistReadAt.length === 1);
+    // Frames keep arriving while it is in flight. A service does not pause.
+    for (let i = 0; i < 5; i++) {
+      push(frame(WIRE.slide, { current: { text: `line ${i}`, notes: "" }, next: null }));
+      await sleep(30);
+    }
+    await until("the delayed playlist to land", () => status().nextServiceItem === "Message");
+    await sleep(PUBLISH_SETTLE_MS);
+
+    assert.equal(
+      playlistReadAt.length,
+      1,
+      `one playlist change cost ${playlistReadAt.length} identical requests — publishes ran ` +
+        "concurrently across the fetch, each reading an identifier the other had not recorded",
+    );
+    // And nothing was dropped to get there: re-queued, not discarded.
+    assert.equal(
+      status().currentSlideText,
+      "line 4",
+      "the frames that arrived during the fetch were dropped rather than re-queued",
+    );
+  });
+
+  it("collapses a slide advance into ONE frame, never the mismatched half of one", async () => {
+    // A slide advance is status/slide AND presentation/slide_index, sent as two
+    // frames. Publishing between them broadcasts the new words against the
+    // previous index — wrong section, wrong progress — and because the channel
+    // is change-driven that frame really does reach every display and sits
+    // there until something else changes.
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    push(
+      frame(WIRE.active, presentationDoc()) +
+        frame(WIRE.slide, SLIDE_FRAME) +
+        frame(WIRE.slideIndex, SLIDE_INDEX_FRAME),
+    );
+    await until("the first slide to publish", () => status().slideIndex === 2);
+    await sleep(PUBLISH_SETTLE_MS);
+    published = [];
+
+    // The advance, as ProPresenter sends it.
+    push(frame(WIRE.slide, ADVANCED_SLIDE) + frame(WIRE.slideIndex, ADVANCED_INDEX));
+    await until("the advance to publish", () => status().slideIndex === 4);
+    await sleep(PUBLISH_SETTLE_MS);
+
+    assert.deepEqual(
+      published.map((f) => [f.currentSlideText, f.slideIndex, f.currentSection?.name]),
+      [["chorus one", 4, "Chorus 1"]],
+      "the advance reached the channel as more than one frame, and the first of " +
+        "them carries the new slide text against the previous index and section",
+    );
+  });
+});
+
+// ── A frame this app cannot read ─────────────────────────────────────────────
+
+describe("a frame that will not parse", () => {
+  /** One block the reader frames correctly and JSON.parse cannot finish. */
+  const truncated = (event: string): string =>
+    `event: ${event}\r\ndata: {"current":{"text":\r\n\r\n`;
+
+  it("says which endpoint, why, and from where — once per stream", async () => {
+    // The degrade is right: one endpoint going stale must not drop a healthy
+    // stream. The message is the deliverable. Without the reason an operator
+    // cannot tell a truncated frame from a schema change, without the address
+    // they cannot tell which auditorium, and without the once-per-stream bound
+    // a schema change writes a line per slide advance for the whole service.
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    for (let i = 0; i < 4; i++) {
+      push(truncated(WIRE.slide));
+      await sleep(20);
+    }
+    // Everything else still lands: the stream was not dropped over it.
+    push(frame(WIRE.active, presentationDoc()) + frame(WIRE.slideIndex, SLIDE_INDEX_FRAME));
+    await until("the readable frames to publish", () => status().slideCount != null);
+
+    const lines = loggedMatching(/unreadable/);
+    assert.equal(
+      lines.length,
+      1,
+      `logged ${lines.length} times, not once — a malformed frame arrives on every ` +
+        `slide advance: ${JSON.stringify(lines)}`,
+    );
+    assert.match(
+      lines[0],
+      /^\[propresenter\] unreadable status\/slide frame from 127\.0\.0\.1:\d+ \(.+\) —/,
+      "the line does not carry the endpoint, the address and the reason",
+    );
+    assert.match(lines[0], /JSON/, "the parse error itself is not in the line");
+    assert.equal(streams.length, 1, "an unreadable frame dropped the whole stream");
+    assert.equal(status().slideCount, TOTAL_SLIDES);
+  });
+
+  it("says it again for a different endpoint, and again on a new stream", async () => {
+    // Per endpoint, because a schema change on the document must not be hidden
+    // by one on the slide; and per stream, because a re-dial is a fresh chance
+    // for the operator to see it.
+    burstOn = false;
+    heartbeatOn = false;
+    Object.defineProperty(propresenterService, "reconnectBaseMs", {
+      get: () => 30,
+      configurable: true,
+    });
+    try {
+      await streaming();
+      push(truncated(WIRE.slide) + truncated(WIRE.timers));
+      await until("both endpoints to be reported", () => loggedMatching(/unreadable/).length === 2);
+
+      for (const st of streams) st.end();
+      await until("the stream to be re-dialled", () => subscribes().length >= 2);
+      await until("the new stream to be held", () => streams.length === 1);
+      push(truncated(WIRE.slide));
+      await until("the new stream to report it too", () => loggedMatching(/unreadable/).length === 3);
+    } finally {
+      delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
+    }
+  });
+});
+
 // ── The buffer cap ───────────────────────────────────────────────────────────
 
 describe("the presentation document against the reader's buffer cap", () => {
@@ -822,6 +1116,9 @@ describe("a playlist the API refuses", () => {
   });
 
   it("does retry once the back-off comes due, and recovers", async () => {
+    // The consumer half: the deadline is written here rather than waited out, so
+    // this covers the `retryDue` read and the clearing on success. The producer
+    // that sets the deadline is guarded separately above.
     playlistStatus = 404;
     burstOn = false;
     heartbeatOn = false;
@@ -839,6 +1136,51 @@ describe("a playlist the API refuses", () => {
     // Recovered: the back-off is cleared, so the cache is a cache again.
     for (let i = 0; i < 4; i++) await frameAndSettle();
     assert.equal(playlistReads().length, 2, "a recovered playlist is being re-read every frame");
+  });
+
+  it("sets the deadline itself, doubles it, and stops at the ceiling", async () => {
+    // The producer half. resolveServiceItems SETS playlistRetryAt and reads it
+    // one frame later; the case below writes the field itself, so it exercises
+    // only the read half — replacing the line that sets the deadline with
+    // `= 0` left all of this file green. Here the real deadlines are allowed to
+    // elapse, shortened the way the idle watchdog is, and what is asserted is
+    // the gaps between the reads the STUB saw.
+    //
+    // A Planning Center linked playlist 404s, which the docs describe as the
+    // normal Sunday, so a producer that never comes due is not an edge case: it
+    // is the next-item name staying null for the rest of the run.
+    const BASE = 200;
+    const CEILING = 500; // reached at the third failure — 200, 400, 800 capped
+    const SLACK = 150; // a deadline is noticed on the next frame, not on the dot
+    playlistStatus = 404;
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+
+    const svc = inner(propresenterService);
+    svc.playlistRetryBaseMs = BASE;
+    svc.playlistRetryMaxMs = CEILING;
+    // The retry is frame-driven, so something has to keep sending frames.
+    const ticker = setInterval(() => push(frame(WIRE.playlist, PLAYLIST_FRAME)), 10);
+    try {
+      await until("five playlist reads to come due", () => playlistReadAt.length >= 5, 6000);
+    } finally {
+      clearInterval(ticker);
+      svc.playlistRetryBaseMs = 30_000;
+      svc.playlistRetryMaxMs = 10 * 60_000;
+    }
+
+    const gaps = playlistReadAt.slice(1).map((at, i) => at - playlistReadAt[i]);
+    const wanted = [BASE, BASE * 2, CEILING, CEILING];
+    wanted.forEach((want, i) => {
+      const why =
+        `retry ${i + 2} came ${gaps[i]}ms after retry ${i + 1}, not ${want}ms. ` +
+        `All four gaps: ${gaps.join(", ")}ms, against ${wanted.join(", ")}ms — ` +
+        "the deadline is set by resolveServiceItems, doubles per consecutive " +
+        "failure, and stops at the ceiling rather than reaching 800 and 1600";
+      assert.ok(gaps[i] >= want, why);
+      assert.ok(gaps[i] < want + SLACK, why);
+    });
   });
 
   it("a DIFFERENT playlist is read at once, not after the broken one's back-off", async () => {
@@ -887,6 +1229,27 @@ describe("two auditoriums, each on its own stream", () => {
     assert.equal(streams.length, 1, "the primary's stream was dropped by the other instance");
     assert.equal(propresenterManager.getInstancesDto().status.chapel?.connected, false);
     assert.equal(propresenterManager.getInstancesDto().status.default.connected, true);
+  });
+
+  it("an extra instance says it is CONNECTING, not polling", async () => {
+    // The point of this branch is that it does not poll. The stream path reports
+    // "Streaming from" and the fallback reports "Connected to"; the connecting
+    // state for an extra instance still said "Polling", which is the one thing
+    // it never does.
+    propresenterManager.apply("MA", [
+      { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true },
+    ]);
+    assert.deepEqual(propresenterManager.getInstancesDto().conn.chapel, {
+      state: "connecting",
+      message: `Connecting to 127.0.0.1:${port}`,
+    });
+    // And it really is transient — the stream replaces it with its own.
+    await until(
+      "the stream to replace the connecting message",
+      () =>
+        propresenterManager.getInstancesDto().conn.chapel?.message ===
+        `Streaming from 127.0.0.1:${port}`,
+    );
   });
 
   it("each instance holds its own stream", async () => {
