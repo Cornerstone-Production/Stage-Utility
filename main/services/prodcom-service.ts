@@ -481,19 +481,20 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   /**
-   * Auth headers only — every caller adds its own Accept, rather than this
-   * hard-coding `Accept: text/event-stream` and having it ride along on the
-   * JSON reads below.
+   * The one auth scheme ProdCom declares.
+   *
+   * The spec's `components.securitySchemes` has exactly one entry, `bearerAuth`
+   * (`type: http, scheme: bearer`): "include the API key in the Authorization
+   * header: `Bearer <key>`". This used to send `X-API-Key` alongside it on the
+   * theory that "the auth header name isn't documented". It is documented, and
+   * it is not that, so the second copy of the operator's pre-shared key stops
+   * going out on every request.
+   *
+   * Auth only — every caller adds its own Accept, rather than this hard-coding
+   * `Accept: text/event-stream` and having it ride along on the JSON reads.
    */
   private authHeaders(apiKey: string | null): Record<string, string> {
-    const h: Record<string, string> = {};
-    // Auth header name isn't documented — send the two common forms when a key is
-    // set (servers ignore unknown headers). Narrow this once captured in-app.
-    if (apiKey) {
-      h["Authorization"] = `Bearer ${apiKey}`;
-      h["X-API-Key"] = apiKey;
-    }
-    return h;
+    return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
   }
 
   /**

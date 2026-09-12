@@ -248,3 +248,33 @@ describe("per-speaker colour comes from the channel list", () => {
     ]);
   });
 });
+
+describe("the pre-shared key goes out under one header", () => {
+  it("sends Authorization: Bearer and nothing else, on every read", async (t) => {
+    const stub = await startProdComStub({ channels: CHANNELS, entries: [row("only", 3)], requireBearer: "s3cret" });
+    const svc = new TestProdCom();
+    t.after(async () => {
+      svc.stop();
+      await stub.close();
+    });
+    svc.configure("127.0.0.1", stub.port, "s3cret");
+    await stub.waitForRequest(isTranscriptPage);
+    await svc.settled();
+
+    // A 401 would leave the buffer empty, so this is the read having been
+    // authorised rather than merely attempted.
+    assert.deepEqual(svc.captions().map((c) => c.text), ["only"]);
+
+    const reads = stub.requests.filter((r) => r.url.startsWith("/api/v1/"));
+    assert.ok(reads.length >= 2, `expected the channel and transcript reads, got ${reads.length}`);
+    for (const r of reads) {
+      assert.equal(r.headers["authorization"], "Bearer s3cret", `no bearer on ${r.url}`);
+      assert.equal(
+        r.headers["x-api-key"],
+        undefined,
+        "ProdCom's spec declares exactly one security scheme, bearerAuth; the invented second header sent " +
+          `the operator's key a second time on every request, and it is still going out on ${r.url}`,
+      );
+    }
+  });
+});

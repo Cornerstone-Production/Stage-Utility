@@ -40,6 +40,9 @@ name, so a channel renamed mid-service is labelled correctly; where no channel
 record is available the entry's own denormalised `channelName` is used and the
 display picks its own colour.
 
+If a key is required, it is sent as `Authorization: Bearer <key>` — the one
+security scheme the specification declares.
+
 A dropped cable or a switch port going down leaves the socket half-open — no
 close arrives, so nothing would notice. TCP keepalive probes the box every 30s
 once the stream is quiet and reconnects when it stops answering, which is why a
