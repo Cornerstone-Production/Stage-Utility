@@ -35,7 +35,8 @@ TSL input **port**, and note the tile's **TSL display address**.
 
 **In Stage:** Settings → Integrations → **Ross MultiViewer (TSL UMD)** → enter the
 **Switcher Host** (IP/hostname on the same network) and **TSL Port**, enable it,
-and **Test connection** (opens a TCP socket and sends a probe packet). Then, in
+and **Test connection** (opens a TCP socket and sends nothing, so a test
+cannot overwrite a tile). Then, in
 the feeds panel, add one or more **feeds** mapping a count → tile TSL address. The
 host/port and feed mappings are all saved as non-secret config (no secret is
 stored).

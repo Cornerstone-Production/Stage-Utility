@@ -42,10 +42,28 @@ export interface DeviceStatus {
   charging: boolean | null;
   frequencyLabel: string | null;
   audioLevel: number | null;
+  /** The channel is muted, at the receiver or at the pack. A muted pack still
+   *  reports five bars and a full battery, so on a stage display it looks
+   *  perfect while nothing comes out of it. */
+  muted?: boolean | null;
+  /** Channel quality 0-5. NOT signal strength: it accounts for interference, so
+   *  a pack can sit at five bars of RF with a quality of two. */
+  quality?: number | null;
+  /** The receiver reports RF interference on this channel. */
+  interference?: boolean | null;
   /** Charger-bay telemetry (SBC-series chargers). null/absent for mics & IEMs. */
   cycles: number | null;
   health: number | null;
   tempC: number | null;
+  /** Minutes until the docked pack is charged, where the charger computes one.
+   *  Null on a bay that is full, empty or faulted — the charger answers "not
+   *  applicable" there and a zero would read as "ready now". */
+  timeToFullMinutes?: number | null;
+  /** A short operator-readable fault, e.g. "Error 007". The only signal a charger
+   *  bay or its battery is bad: a faulted bay still reports a battery as docked. */
+  fault?: string | null;
+  /** The charger is in storage mode — it charges to about 40% and stops. */
+  storageMode?: boolean | null;
   updatedAt: string;
 }
 

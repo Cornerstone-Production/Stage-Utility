@@ -41,6 +41,9 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   // Consecutive failed connect attempts, for exponential reconnect back-off.
   private reconnectAttempts = 0;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  // Has this connection already reported a `< REP ERR >`? Reset per socket, so a
+  // reconnect to a device that still refuses the command says so again.
+  private rejectionLogged = false;
   private enabled = false;
   private cfg: ShureConfig = { host: "", port: 2202, channels: 1, meterRateMs: 1000 };
 
@@ -126,10 +129,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   ): boolean {
     switch (token) {
       case "BATT_CHARGE": {
-        const charge = safeInt(value);
-        if (!Number.isNaN(charge)) {
-          state.battery = charge === 255 ? null : clamp(charge, 0, 100);
-        }
+        state.battery = shureNumber(value, { width: 8, min: 0, max: 100 });
         console.debug(`[shure:${this.id}] ch${channel} BATT_CHARGE: ${value}`);
         return true;
       }
@@ -149,9 +149,102 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
         return true;
       }
 
+      // ── Mute ────────────────────────────────────────────────────────────────
+      // Here rather than per driver because both families send it and NEITHER
+      // driver was reading a token its gear sends. The Axient driver handled
+      // `MUTE_MODE_STATUS` and an AD4 sends `TX_MUTE_MODE_STATUS`; the ULX-D
+      // driver handled `MUTE_STATUS` and a ULX-D sends `AUDIO_MUTE` /
+      // `TX_MUTE_STATUS`. Both logged the value and stored nothing anyway, so a
+      // muted pack drew five bars and a full battery and looked perfect.
+      //
+      // Polarity is PER TOKEN and cannot be a shared word list: `AUDIO_MUTE ON`
+      // means muted, and `TX_MUTE_MODE_STATUS ON` means the audio is OPEN (that
+      // one says MUTE when it is muted). Getting this backwards is worse than not
+      // shipping it — every unmuted pack on the wall would read MUTED.
+      case "AUDIO_MUTE":
+      case "TX_MUTE_STATUS":
+      case "MUTE_STATUS": {
+        this.applyMute(channel, token === "AUDIO_MUTE" ? "rx" : "tx", onOffMute(value), state);
+        return true;
+      }
+
+      case "TX_MUTE_MODE_STATUS":
+      case "MUTE_MODE_STATUS": {
+        this.applyMute(channel, "tx", muteModeMute(value), state);
+        return true;
+      }
+
+      // The physical button and the talk switch are NOT the mute state, and are
+      // deliberately not mapped to it. TX_MUTE_BUTTON_STATUS is PRESSED/RELEASED
+      // and on a ULXD6/8 the button can be momentary or latching, so PRESSED does
+      // not mean muted — TX_MUTE_STATUS is the real state on the same models.
+      // TX_TALK_SWITCH is a push-to-talk whose resting state is OFF; reading that
+      // as muted would mark every pack that has one muted for the whole service.
+      case "TX_MUTE_BUTTON_STATUS":
+      case "TX_TALK_SWITCH": {
+        console.debug(`[shure:${this.id}] ch${channel} ${token}: ${value} (not a mute state)`);
+        return true;
+      }
+
+      // ── Interference ────────────────────────────────────────────────────────
+      // INTERFERENCE_STATUS (NONE/DETECTED) is the AD spelling and RF_INT_DET
+      // (NONE/CRITICAL) the ULX-D one. Both were handled by a console.log in the
+      // Axient driver and by nothing at all in ULX-D.
+      case "INTERFERENCE_STATUS":
+      case "INTERFERENCE_STATUS2":
+      case "RF_INT_DET": {
+        const v = value.trim().toUpperCase();
+        const detected = v === "UNKNOWN" || v === "UNKN" || v === "" ? null : v !== "NONE";
+        if (detected !== state.interference) {
+          state.interference = detected;
+          if (detected) console.warn(`[shure:${this.id}] ch${channel} RF interference: ${token}=${value}`);
+          else if (detected === false) console.log(`[shure:${this.id}] ch${channel} RF interference cleared`);
+        }
+        return true;
+      }
+
+      // Channel quality 0-5, 255 unknown. Metered, so it also arrives inside
+      // SAMPLE — see the Axient driver, which reads it from token 3.
+      case "CHAN_QUALITY": {
+        state.quality = shureNumber(value, { width: 8, min: 0, max: 5 });
+        return true;
+      }
+
       default:
         return false;
     }
+  }
+
+  /**
+   * Mute sources, per channel.
+   *
+   * A receiver-side mute (`AUDIO_MUTE`) and a transmitter-side mute
+   * (`TX_MUTE_*`) are different fields that silence the same channel, and each
+   * arrives on its own cadence. Writing one field from whichever landed last
+   * would have a pack muted at the transmitter un-mute itself the next time
+   * `AUDIO_MUTE OFF` came round, so both are remembered and `muted` is their OR.
+   */
+  private muteSources = new Map<number, { rx: boolean | null; tx: boolean | null }>();
+
+  private applyMute(
+    channel: number,
+    side: "rx" | "tx",
+    value: boolean | null,
+    state: ChannelState,
+  ): void {
+    const sources = this.muteSources.get(channel) ?? { rx: null, tx: null };
+    sources[side] = value;
+    this.muteSources.set(channel, sources);
+    const known = [sources.rx, sources.tx].filter((v): v is boolean => v !== null);
+    const muted = known.length === 0 ? null : known.some(Boolean);
+    if (muted === state.muted) return;
+    state.muted = muted;
+    console.log(`[shure:${this.id}] ch${channel} ${muted === null ? "mute state unknown" : muted ? "MUTED" : "unmuted"}`);
+  }
+
+  /** Forget a channel's mute sources — a reset, or a channel rebuilt. */
+  protected clearMuteSources(): void {
+    this.muteSources.clear();
   }
 
 
@@ -175,12 +268,16 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   protected allowDynamicChannels = false;
   protected readonly maxDynamicChannels = 64;
 
-  private buildDefaultChannelState(n: number): ChannelState {
+  /** The state a channel starts in. Overridable because `ensureChannel` also
+   *  builds channels — a driver that only customised `initChannelStates` left
+   *  every dynamically discovered channel with the plain defaults. */
+  protected buildDefaultChannelState(n: number): ChannelState {
     return blankChannel(String(n), { deviceType: this.defaultDeviceType });
   }
 
   /** Initialise (or reset) channel states to their offline defaults. */
   protected initChannelStates(count: number): void {
+    this.clearMuteSources();
     this.channelStates.clear();
     for (let n = 1; n <= count; n++) {
       this.channelStates.set(n, this.buildDefaultChannelState(n));
@@ -239,6 +336,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     const socket = new net.Socket();
     this.socket = socket;
     this.receiveBuffer = "";
+    this.rejectionLogged = false;
 
     socket.setEncoding("utf8");
     socket.setKeepAlive(true, 10_000);
@@ -332,6 +430,20 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     if (type === "REP" || type === "REPORT") {
       // Format: REP {ch} {FIELD} {value...}  OR  REP {FIELD} {value...} (device-level)
       if (tokens.length < 3) {
+        // `< REP ERR >` is the device REFUSING a command, not a truncated frame.
+        // It fell into the same debug line as a torn packet, so a heartbeat a
+        // charger has never supported was rejected once a minute for the life of
+        // the connection with nothing an operator could read. Once per
+        // connection: the command repeats for ever and the first refusal says it.
+        if ((tokens[1] ?? "").toUpperCase() === "ERR") {
+          if (!this.rejectionLogged) {
+            this.rejectionLogged = true;
+            console.warn(
+              `[shure:${this.id}] device answered < REP ERR > — it does not support a command this driver sent (heartbeat is "${this.heartbeatCommand()}")`,
+            );
+          }
+          return;
+        }
         console.debug(`[shure:${this.id}] short REP message: ${raw}`);
         return;
       }
@@ -370,10 +482,23 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     });
   }
 
+  /**
+   * A read-only command this device is known to answer, sent every 60s purely to
+   * prove the socket is still alive.
+   *
+   * Overridable because it is not the same command on every Shure box. A charger
+   * has no METER_RATE and answers `< REP ERR >`, which the parser could not read
+   * and only logged at debug — so the heartbeat was a command the device refused,
+   * once a minute, invisibly, for the life of the connection.
+   */
+  protected heartbeatCommand(): string {
+    return "GET 1 METER_RATE";
+  }
+
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
-      this.send("GET 1 METER_RATE");
+      this.send(this.heartbeatCommand());
     }, HEARTBEAT_INTERVAL_MS);
   }
 
@@ -409,19 +534,65 @@ export function safeInt(s: string | undefined): number {
 }
 
 /**
+ * The top of a Shure numeric field is reserved for "this is not a value".
+ *
+ * Shure has no valid/invalid flag: a field that cannot answer sends a code at the
+ * top of its own range instead. The documented ones for a 16-bit field are 65535
+ * unknown, 65534 calculating and 65533 error — but they are not the whole block.
+ * A live SBC220 (FW 1.4.53) answers BATT_TIME_TO_FULL with **65529** on a bay that
+ * is already full, four below the lowest documented sentinel, and answers every
+ * byte-wide field on a faulted bay with **254** rather than the documented 255.
+ *
+ * So the rule here is the field's WIDTH, not a list of codes: the top eight codes
+ * of the range are markers. 0xFFF8..0xFFFF (65528..65535) for a 16-bit field,
+ * 0xF8..0xFF (248..255) for a byte. Eight is the smallest power-of-two block that
+ * covers every marker seen on the wire, and it costs nothing real — no field this
+ * reads has a legitimate value within eight counts of the top of its range. 65528
+ * minutes is forty-five days; 65528 charge cycles is sixty times a Shure pack's
+ * rated life; 248 °F is a fire, and the percent and bar fields top out at 100 and
+ * 5. Guess low on the boundary and a faulted bay renders "65534 cyc" and "123°C",
+ * which is what it did.
+ */
+const SENTINEL_BLOCK = 8;
+const FIELD_TOP: Record<ShureFieldWidth, number> = { 8: 0xff, 16: 0xffff };
+
+/** How many bits wide the device's field is — which is what decides where its
+ *  not-a-value markers start. */
+export type ShureFieldWidth = 8 | 16;
+
+/**
+ * Read one numeric Shure field, or null if the device is not answering.
+ *
+ * ONE implementation on purpose. Each driver had hand-rolled its own comparison
+ * against a remembered sentinel — `=== 255` here, `>= 65535` there — and the two
+ * that guessed the boundary shipped a charger bay reading "65534 cyc" and "123°C"
+ * on a stage display. `min`/`max` are the field's own plausible range, applied
+ * after the marker check so an out-of-range reading is a dash rather than a
+ * clamp: inventing 100% for a bay that reported 254 is worse than saying nothing.
+ */
+export function shureNumber(
+  value: string | undefined,
+  opts: { width: ShureFieldWidth; min?: number; max?: number },
+): number | null {
+  const n = safeInt(value);
+  if (Number.isNaN(n)) return null;
+  if (n >= FIELD_TOP[opts.width] - (SENTINEL_BLOCK - 1)) return null;
+  if (opts.min !== undefined && n < opts.min) return null;
+  if (opts.max !== undefined && n > opts.max) return null;
+  return n;
+}
+
+/**
  * Battery runtime remaining, in whole minutes, from a Shure runtime field.
  *
- * Shure sends whole minutes with three sentinels at the top of the 16-bit range:
- * 65535 unknown, 65534 calculating, 65533 error. Read naively those become a
- * battery with forty-five days left on it, which is why this lives in one place
- * rather than in each driver that reads a runtime field — Axient calls the field
- * TX_BATT_MINS and ULX-D calls it BATT_RUN_TIME, but the encoding is identical
- * and the sentinels are the part that is easy to get wrong.
+ * Axient calls the field TX_BATT_MINS, ULX-D calls it BATT_RUN_TIME and an SBC
+ * charger calls its counterpart BATT_TIME_TO_FULL, but the encoding is identical:
+ * whole minutes in a 16-bit field whose top is markers. Named separately from
+ * `shureNumber` because "minutes" is the unit three drivers and the charger all
+ * read, and one name for it is one place to be wrong.
  */
 export function batteryMinutesFrom(value: string | undefined): number | null {
-  const minutes = safeInt(value);
-  if (Number.isNaN(minutes) || minutes < 0 || minutes >= 65533) return null;
-  return minutes;
+  return shureNumber(value, { width: 16, min: 0 });
 }
 
 // Re-exported, not redefined. There were three copies of clamp in this repo —
@@ -451,6 +622,29 @@ export function rfBarsFromDbm(dbm: number): number {
 }
 
 /** Strip Shure name braces: `{Name}` â `Name`. */
+/**
+ * `AUDIO_MUTE` / `TX_MUTE_STATUS`: ON = muted, OFF = open, UNKN = no answer.
+ *
+ * Deliberately NOT merged with muteModeMute below into one word list: the same
+ * word means the opposite thing on the other token, and one shared list is how
+ * that gets missed. Verified against Shure's own command-string references for
+ * AD4 and ULX-D.
+ */
+export function onOffMute(value: string): boolean | null {
+  const v = value.trim().toUpperCase();
+  if (v === "ON") return true;
+  if (v === "OFF") return false;
+  return null;
+}
+
+/** `TX_MUTE_MODE_STATUS`: MUTE = muted, ON = audio OPEN, UNKNOWN = no answer. */
+export function muteModeMute(value: string): boolean | null {
+  const v = value.trim().toUpperCase();
+  if (v === "MUTE" || v === "MUTED") return true;
+  if (v === "ON") return false;
+  return null;
+}
+
 export function stripBraces(s: string): string {
   return s.replace(/^\{/, "").replace(/\}$/, "").trim();
 }

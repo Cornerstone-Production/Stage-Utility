@@ -1380,10 +1380,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // The count is the value; the lowest battery is what qualifies it. They
       // were two figures side by side in different colours, which reads as two
       // separate readouts sharing a box.
-      const quals = [
-        showBattery && lowest != null ? `${lowest}% lowest` : null,
-        showRuntime && soonest != null ? `${runtimeText(soonest)} left` : null,
-      ].filter(Boolean);
+      // A muted pack is ONLINE, so the count cannot show it and the lowest
+      // battery cannot either — the fleet tile would read a clean "12/12" over a
+      // dead mic. Not behind a toggle, for the same reason the channel tile's
+      // MUTED is not: this is a fault, not a metric.
+      const mutedCount = live.filter((d) => d.muted === true).length;
+      const batteryQual = showBattery && lowest != null ? `${lowest}% lowest` : null;
+      const runtimeQual = showRuntime && soonest != null ? `${runtimeText(soonest)} left` : null;
+      const mutedQual = mutedCount > 0 ? `${mutedCount} muted` : null;
       // With the count off, the tile is a single figure — battery if it is on,
       // otherwise runtime, so turning battery off does not leave a blank tile.
       //
@@ -1392,11 +1396,18 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // tile ends up showing minutes coloured by battery thresholds.
       const batteryLeads = showBattery || !showRuntime;
       const headline = batteryLeads ? `${lowest ?? "—"}%` : (runtimeText(soonest) ?? "—");
+      // Whichever figure became the headline is not repeated under it. Named
+      // rather than sliced off by index: the list is no longer two entries long,
+      // and `slice(1)` dropped the mute warning whenever both toggles were off.
+      const quals = (
+        showOnline ? [batteryQual, runtimeQual, mutedQual]
+        : [batteryLeads ? runtimeQual : batteryQual, mutedQual]
+      ).filter(Boolean);
       return (
         <Readout
           caption={(c.showLabel ?? false) && c.label ? c.label : null}
           value={showOnline ? `${online}/${ch.length}` : headline}
-          sub={showOnline ? quals.join("  ") || null : quals.slice(1).join("  ") || null}
+          sub={quals.join("  ") || null}
           valueColor={showOnline ? null : batteryLeads ? batteryColor(lowest) : runtimeColor(soonest)}
           mono
             align={o.style?.textAlign}
@@ -1423,17 +1434,35 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       const quals = [
         // The one that did not get the headline still gets said.
         battery && runtime ? runtime : null,
+        // Quality rides the RF toggle: bars and quality are the same question
+        // ("how good is the radio"), and quality is the half that accounts for
+        // interference — five bars with a quality of two is a real reading.
         show.rf && d.rfBars != null ? rfBarsGlyph(d.rfBars) : null,
+        show.rf && d.quality != null ? `Q${d.quality}` : null,
         show.frequency && d.frequencyLabel ? d.frequencyLabel : null,
         show.audio && d.audioLevel != null ? `${Math.round(d.audioLevel * 100)}%` : null,
+        // Not behind a toggle. Interference is a fault, and nobody opts in to
+        // being told their channel is being sat on.
+        d.interference ? "RF INT" : null,
       ].filter(Boolean);
+      // A muted pack reports five bars and a full battery, so the ONLY thing that
+      // can say it is muted is the widget, and it has to say it where the figure
+      // an operator reads first is. The figures are not lost — everything that
+      // would have been the headline moves down a line.
+      const muted = d.muted === true && d.online;
       return (
         <Readout
           caption={(c.showLabel ?? true) ? d.name ?? d.channelId : null}
-          value={headline ?? quals[0] ?? "—"}
-          sub={(headline ? quals : quals.slice(1)).join("  ") || null}
+          value={muted ? "MUTED" : (headline ?? quals[0] ?? "—")}
+          sub={
+            (muted ? [headline, ...quals].filter(Boolean)
+            : headline ? quals
+            : quals.slice(1)
+            ).join("  ") || null
+          }
           valueColor={
-            battery && d.battery != null ? batteryColor(d.battery)
+            muted ? "var(--red-10)"
+            : battery && d.battery != null ? batteryColor(d.battery)
             : runtime ? runtimeColor(d.batteryMinutes)
             : null
           }
@@ -2075,13 +2104,27 @@ function ChargerBattery({
     >
       {bays.map((b) => {
         const bay = all.find((x) => x.id === b.id) ?? null;
-        const label = b.label || (bay ? `${bay.connectionName ?? `Charger ${bay.chargerIndex}`} · Bay ${bay.bay}` : "Bay");
+        // The connection's name is the operator's own, so it still wins. `name` is
+        // the charger's DEVICE_ID ("MA: 5-8 · Bay 3") and only fills in where the
+        // connection was left unnamed, which used to read "Charger 1 · Bay 3".
+        const label =
+          b.label ||
+          (bay ?
+            bay.connectionName ? `${bay.connectionName} · Bay ${bay.bay}`
+            : (bay.name ?? `Charger ${bay.chargerIndex} · Bay ${bay.bay}`)
+          : "Bay");
         return (
           <div key={b.id} className="flex items-center justify-between gap-[0.5em] w-full min-w-0">
             <span className="truncate min-w-0 flex-1">{label}</span>
             <span className="flex items-center gap-[0.6em] shrink-0 tabular-nums">
               {!bay || !bay.online ? (
                 <span style={{ opacity: 0.35 }}>empty</span>
+              ) : bay.fault ? (
+                // A faulted bay is NOT an empty one — the battery is physically
+                // docked and every reading it answers is a marker, so the fault is
+                // the whole row. Unconditional: nobody opts in to being told their
+                // battery has failed.
+                <span style={{ color: "var(--red-10)", fontWeight: 700 }}>{bay.fault}</span>
               ) : (
                 <>
                   {showBattery && (
@@ -2092,9 +2135,20 @@ function ChargerBattery({
                   {show.charging && bay.charging && (
                     <ZapIcon style={{ width: "0.85em", height: "0.85em" }} className="inline-block shrink-0 text-green-10" aria-label="charging" />
                   )}
+                  {/* Time to full rides the charging toggle rather than a new one:
+                      "is it charging" and "when is it done" are the same question,
+                      and the charger only answers this while it is charging. */}
+                  {show.charging && bay.timeToFullMinutes != null && (
+                    <span style={{ opacity: 0.7 }}>{runtimeText(bay.timeToFullMinutes)}</span>
+                  )}
                   {show.cycles && <span style={{ opacity: 0.7 }}>{bay.cycles ?? "—"} cyc</span>}
                   {show.health && <span style={{ opacity: 0.7 }}>health {bay.health ?? "—"}%</span>}
                   {show.temp && <span style={{ opacity: 0.7 }}>{bay.tempC ?? "—"}°C</span>}
+                  {/* Storage mode explains a shelf of bays all stopped at ~40%.
+                      Device-level, so every row of that charger carries it. */}
+                  {bay.storageMode && (
+                    <span style={{ opacity: 0.7, color: "var(--yellow-10)" }}>storage</span>
+                  )}
                 </>
               )}
             </span>
