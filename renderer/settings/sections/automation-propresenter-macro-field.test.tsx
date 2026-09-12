@@ -182,7 +182,7 @@ describe("the ProPresenter macro field", () => {
     RULES = [rule("SONG INTRO")];
     MACRO_ITEMS = [];
     await open();
-    assert.deepEqual(macroOptions(), ["|Pick one…", "SONG INTRO|SONG INTRO (not in the current list)"]);
+    assert.deepEqual(macroOptions(), ["|Pick one…", "SONG INTRO|SONG INTRO · not found"]);
     assert.equal(macroValue(), "SONG INTRO", "the field lost the macro the rule holds");
   });
 
@@ -194,7 +194,7 @@ describe("the ProPresenter macro field", () => {
     assert.deepEqual(macroOptions(), [
       "|Pick one…",
       "DOORS|DOORS",
-      "SONG INTRO|SONG INTRO (not in the current list)",
+      "SONG INTRO|SONG INTRO · not found",
     ]);
     assert.equal(macroValue(), "SONG INTRO");
   });

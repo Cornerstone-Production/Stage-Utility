@@ -148,6 +148,6 @@ describe("the OSC target field", () => {
     assert.equal(screen.getAllByText("Mute the wedge").length > 0, true);
     // No real options — and the rule's own target still shown, marked, by the
     // stored-value fallback. The two behave correctly together.
-    assert.deepEqual(targetOptions(), ["|Pick one…", "x32|x32 (not in the current list)"]);
+    assert.deepEqual(targetOptions(), ["|Pick one…", "x32|x32 · not found"]);
   });
 });
