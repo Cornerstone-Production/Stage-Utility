@@ -814,7 +814,12 @@ async function reportConnectionHealth(): Promise<void> {
   // answering, which is the thing an operator came to /log to find.
   if (log) console.warn(`[companion] ${scrub(log, LOG_MAX)}`);
   const { integrationManager } = await import("./integration-manager.js");
-  integrationManager.setCompanionHealth(sentence);
+  // Never `failed`. This is only reached having ALREADY read the export off the
+  // same Companion, so the outbound half demonstrably works — which is also why
+  // it is right for this to supersede a Test that failed an hour ago.
+  // Connections in error behind a Companion that answered are gear in the
+  // building, and a red integration row for a bulb is a row nobody reads.
+  integrationManager.setCompanionOutbound(sentence);
 }
 
 /** Hourly. Long enough that a Companion being edited settles, short enough that

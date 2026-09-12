@@ -50,11 +50,17 @@ function CopyField({ label, value }: { label: string; value: string }) {
 // fields, so we show the raw LAN IP and port split out (from state.lanUrl, not the
 // DNS publicUrl), plus the row's own status line.
 //
-// The Status field is the ONLY place the Companion row's message is rendered.
-// ConnectionBadge, which every integration card and dialog header uses, shows a
-// message only while the row is in `error` — and the Companion row is never in
-// error, because nothing dials out to fail. Anything written to that message
-// that is not shown here is written nowhere.
+// The Status field is where the Companion row's message is read. ConnectionBadge,
+// which every integration card and dialog header uses, shows a message only while
+// the row is in `error`, and the Companion row is in error for exactly one
+// reason: a Test that could not reach Companion (integration-manager's
+// applyCompanionRow). Every other thing that message carries — the module-client
+// count, the connection health from the hourly reconcile — is shown here or
+// nowhere.
+//
+// An earlier version of this comment said the row was "never in error, because
+// nothing dials out to fail". That was wrong: the outbound half dials out and
+// fails whenever Companion is switched off.
 export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
   const { state: stage } = useStageState();
   const lanUrl = stage?.lanUrl ?? null;

@@ -1,10 +1,11 @@
-// The Companion panel's Status field is the ONLY place the row's message renders.
+// The Companion panel's Status field is where the row's message is read.
 //
 // ConnectionBadge — which every integration card and every dialog header uses —
-// shows a message only while the row is in `error`. The Companion row is never in
-// error: nothing dials out to fail, so it is `connected` with a module attached
-// and `disconnected` without one. Anything written to `state.message` and not
-// shown by this panel is written nowhere.
+// shows a message only while the row is in `error`, and the Companion row is in
+// error for exactly one reason: a Test that could not reach Companion. It is
+// `connected` with a module attached and `disconnected` without one the rest of
+// the time, so everything else `state.message` carries is shown by this panel or
+// by nothing.
 //
 // The field used to be gated on `connection === "connected"`, which is "a
 // Companion module is attached". Two things the message carries are true with

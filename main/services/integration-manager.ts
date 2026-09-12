@@ -955,15 +955,23 @@ class IntegrationManager {
    *  as SSE streams marked with the X-Companion-Module header connect/close). */
   private companionClients = 0;
   /**
-   * What the last connection read said, or null for nothing to say.
+   * What the OUTBOUND half last said, or null for nothing to say.
    *
-   * Held rather than written straight to the row, because two independent things
-   * write that one message: a module connecting or dropping, and the hourly
-   * reconcile's health read. Whichever ran last used to be the whole message, so
-   * a module reconnecting five minutes after a reconcile erased "12 of 52
-   * connection(s) in error" with nothing to bring it back for an hour.
+   * Companion's row is two independent facts on one message line, and each has
+   * its own writer: how many modules are dialled IN (setCompanionClients, from
+   * remote-server as SSE streams open and close) and what this app found when it
+   * last dialled OUT. Whichever wrote last used to be the whole message, so a
+   * module reconnecting erased "12 of 52 connection(s) in error", and — worse —
+   * erased the reason a Test had failed and flipped the row from error back to
+   * connected. Both now compose in applyCompanionRow.
+   *
+   * ONE slot for the outbound half, holding either the Test's answer or the
+   * hourly reconcile's connection health, because they are one fact reported at
+   * two moments. Last writer wins WITHIN the slot, and that is correct: the
+   * reconcile only reaches its health read having just read the export off the
+   * same Companion, so it is newer evidence than a Test that failed an hour ago.
    */
-  private companionHealth: string | null = null;
+  private companionOutbound: { failed: boolean; message: string } | null = null;
 
   setCompanionClients(count: number): void {
     this.companionClients = count;
@@ -971,33 +979,39 @@ class IntegrationManager {
   }
 
   /**
-   * What Companion reports about its own connections, from the hourly reconcile.
+   * What this app found the last time it dialled Companion.
    *
-   * See companion-connections.ts. null clears it — a Companion too old to have
-   * the endpoint, or a host that just changed.
+   * `message` null clears the slot — a host that just changed, no host at all, or
+   * a Companion too old to report its connection status. `failed` is what puts
+   * the row in error, and only a Test sets it: see applyCompanionRow.
    */
-  setCompanionHealth(sentence: string | null): void {
-    this.companionHealth = sentence;
+  setCompanionOutbound(message: string | null, opts: { failed?: boolean } = {}): void {
+    this.companionOutbound = message === null ? null : { failed: opts.failed ?? false, message };
     this.applyCompanionRow();
   }
 
   /**
-   * The Companion row: the inbound client count, then the connection health.
+   * The Companion row: the inbound client count, then whatever the outbound half
+   * last said.
    *
-   * The CONNECTION STATE tracks the module clients alone and is deliberately not
-   * moved by the health. Companion answering while a bulb is unplugged is not
-   * this integration being down, and a red row for a light in an office is a row
-   * an operator learns to ignore.
+   * `error` comes from a FAILED TEST and from nothing else. A Test is this app
+   * dialling Companion and being unable to, which is this integration being
+   * down; connections in error behind a Companion that answered are gear in the
+   * building, and a red row for a light in an office is a row an operator learns
+   * to ignore. Note that the row therefore CAN be in error — an earlier comment
+   * on companion-info-panel.tsx claimed it never was, which was wrong and is the
+   * ordinary case for a Companion that is switched off.
    */
   private applyCompanionRow(): void {
     const count = this.companionClients;
+    const out = this.companionOutbound;
     const parts = [
       count > 0 ? `${count} Companion client(s) connected` : null,
-      this.companionHealth,
+      out?.message ?? null,
     ].filter((p): p is string => p !== null);
     this.setConnectionState(
       "companion",
-      count > 0 ? "connected" : "disconnected",
+      out?.failed ? "error" : count > 0 ? "connected" : "disconnected",
       parts.length ? parts.join(". ") : null,
     );
     this.broadcastStates();
@@ -1129,10 +1143,11 @@ class IntegrationManager {
       // picker offer another Companion's buttons at coordinates this one will
       // press regardless.
       companionApi.invalidate();
-      // The connection counts belonged to it too. Left on the row, "12 of 52
-      // connection(s) in error" would go on describing a box this app no longer
-      // talks to until the next reconcile an hour later.
-      this.setCompanionHealth(null);
+      // Everything the outbound half had to say belonged to the OLD host — the
+      // connection counts, and the last Test's answer. Left on the row, "12 of
+      // 52 connection(s) in error" would go on describing a box this app no
+      // longer talks to until the next reconcile an hour later.
+      this.setCompanionOutbound(null);
       // And the hourly reconcile follows the host: added here it starts without
       // a restart, and cleared here it stops rather than dialling an address
       // nobody has configured. Boot is the only other place it is started.
@@ -1244,8 +1259,10 @@ class IntegrationManager {
         // outbound to test and the inbound count is the whole answer, exactly as
         // before this integration gained config.
         if (!this.getCompanionTarget()) {
-          this.setConnectionState("companion", n > 0 ? "connected" : "disconnected", inbound);
-          this.broadcastStates();
+          // Through the composition, not around it. Writing the row directly
+          // here is what erased the health and the last Test's reason, and this
+          // was the third of three writers.
+          this.setCompanionOutbound(null);
           return { ok: true, message: inbound };
         }
 
@@ -1262,16 +1279,16 @@ class IntegrationManager {
           const { runCompanionReconcile } = await import("./companion-reconcile.js");
           unsaved = (await runCompanionReconcile())?.failed.length ?? 0;
         }
-        const msg =
-          `${inbound}. ${outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`}` +
+        // What the OUTBOUND half found, without the inbound count: the count is
+        // the other slot and applyCompanionRow puts the two together. Repeating
+        // it here would print it twice on the row.
+        const said =
+          (outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`) +
           (unsaved > 0 ? ` ${unsaved} cue status(es) could not be saved.` : "");
-        this.setConnectionState(
-          "companion",
-          outbound.ok ? "connected" : "error",
-          msg,
-        );
-        this.broadcastStates();
-        return { ok: outbound.ok, message: msg };
+        this.setCompanionOutbound(said, { failed: !outbound.ok });
+        // The RETURNED message keeps both halves. It is the Test button's own
+        // one-shot answer in the dialog footer, which composes nothing.
+        return { ok: outbound.ok, message: `${inbound}. ${said}` };
       }
 
       if (id === "propresenter") {
