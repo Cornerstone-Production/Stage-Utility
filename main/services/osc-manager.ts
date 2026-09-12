@@ -335,7 +335,7 @@ class OscManager {
    * The literal host match comes FIRST — that is what every IP-configured target
    * has always used, and it does not wait on a DNS pass having finished. A
    * target configured by NAME falls through to the resolved map, which is why
-   * one exists: `"console.local" === "10.0.0.5"` is never true, so its values
+   * one exists: `"console.local" === "192.0.2.5"` is never true, so its values
    * landed under the wildcard alone and neither a button nor a rule could tell
    * it from any other sender on the network.
    */
