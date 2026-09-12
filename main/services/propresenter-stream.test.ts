@@ -161,6 +161,8 @@ let heartbeatOn = true;
 let burstOn = true;
 /** Accept the subscribe connection and then never answer it at all. */
 let stallSubscribe = false;
+/** Accept the subscribe connection and then kill the socket, unanswered. */
+let resetSubscribe = false;
 /** Sockets held open by a stalled subscribe, closed in the reset. */
 let stalled: http.ServerResponse[] = [];
 /** The body of the last subscription request, so a case can read the endpoints. */
@@ -201,6 +203,12 @@ before(async () => {
       if (stallSubscribe) {
         // Connected, and then nothing: no status line, no headers, no body.
         stalled.push(res);
+        return;
+      }
+      if (resetSubscribe) {
+        // Connected, then the socket dies before any response — a machine that
+        // answered /version and went away between the two requests.
+        res.destroy();
         return;
       }
       if (subscribeStatus < 200 || subscribeStatus >= 300) {
@@ -338,6 +346,7 @@ afterEach(() => {
   heartbeatOn = true;
   burstOn = true;
   stallSubscribe = false;
+  resetSubscribe = false;
   for (const s of stalled) s.destroy();
   stalled = [];
   propresenterService.configure("", 0);
@@ -534,11 +543,35 @@ describe("a ProPresenter that refuses the subscription", () => {
 
   it("a transport failure on the subscribe is an outage, NOT an unsupported endpoint", async () => {
     // The distinction matters: pinning the fallback on a machine that merely went
-    // away would leave it polling for the rest of the run once it came back.
-    await streaming();
-    await until("the burst to publish", () => status().currentSlideText === "line one");
-    assert.equal(inner(propresenterService).streamFallback, false);
-    assert.deepEqual(loggedMatching(/unsupported/), []);
+    // away would leave it polling for the rest of the run once it came back. The
+    // stub answers /version and then kills the subscribe socket unanswered, which
+    // is what a machine rebooting between the two requests does.
+    resetSubscribe = true;
+    Object.defineProperty(propresenterService, "reconnectBaseMs", {
+      get: () => 30,
+      configurable: true,
+    });
+    try {
+      propresenterService.configure("127.0.0.1", port);
+      await until("the killed subscribe to be retried", () => subscribes().length >= 2);
+
+      assert.equal(
+        inner(propresenterService).streamFallback,
+        false,
+        "a machine that went away was written off as too old to stream — it will poll " +
+          "for the rest of the run even once it is back",
+      );
+      const unsupported = loggedMatching(/unsupported/);
+      assert.equal(
+        unsupported.length,
+        0,
+        `an outage was logged as an unsupported endpoint: ${JSON.stringify(unsupported)}`,
+      );
+      // And it really is retried as a subscribe, not silently downgraded.
+      assert.deepEqual(polls(), [], "it fell back to polling instead of re-dialling the stream");
+    } finally {
+      delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
+    }
   });
 
   it("the fallback poll still backs off when nobody is watching", async () => {

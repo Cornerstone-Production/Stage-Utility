@@ -694,6 +694,16 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
         resolve(outcome);
       };
 
+      // Declared ahead of the request so the response handler can clear it. As a
+      // `const` after the http.request() call it sits in a temporal dead zone
+      // that only Node's promise never to call the handler synchronously keeps
+      // safe, and that is not a thing to depend on.
+      let headerTimer: ReturnType<typeof setTimeout> | null = null;
+      const clearHeaderTimer = (): void => {
+        if (headerTimer) clearTimeout(headerTimer);
+        headerTimer = null;
+      };
+
       const req = http.request(
         {
           host,
@@ -707,7 +717,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
           },
         },
         (res) => {
-          clearTimeout(headerTimer);
+          clearHeaderTimer();
           const status = res.statusCode ?? 0;
           if (status < 200 || status >= 300) {
             res.resume();
@@ -759,13 +769,13 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       // something here, a peer that accepts the TCP connection and then never
       // answers leaves this promise pending for ever: connect() never returns,
       // nothing is scheduled, and the instance is wedged with no log line.
-      const headerTimer = setTimeout(() => {
+      headerTimer = setTimeout(() => {
         req.destroy(new Error(`no response to status/updates within ${REQUEST_TIMEOUT_MS}ms`));
       }, REQUEST_TIMEOUT_MS);
       // The primary liveness check — see SOCKET_KEEPALIVE_MS.
       keepSocketAlive(req, SOCKET_KEEPALIVE_MS);
       req.on("error", (err) => {
-        clearTimeout(headerTimer);
+        clearHeaderTimer();
         // Fires both before the response (never connected) and after (the socket
         // died mid-stream). Only the first is an outcome; the second is an end.
         if (settled) this.endStream(errorMessage(err));
