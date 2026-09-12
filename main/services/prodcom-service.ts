@@ -281,8 +281,8 @@ export class ProdComService extends ConnectionLifecycle {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** False once a WebSocket upgrade has failed, until WS_RETRY_EVERY reconnects
-   *  later. Reset by configure()/start() so an operator fixing the box gets an
-   *  immediate retry rather than waiting out the counter. */
+   *  later. Reset by configure(), so an operator who has just fixed the box gets
+   *  an immediate attempt rather than waiting out the counter. */
   private useWebSocket = true;
   private sseReconnects = 0;
   /** Whether the live connection is the WebSocket — drives which watchdog runs
@@ -400,12 +400,11 @@ export class ProdComService extends ConnectionLifecycle {
     ws.onmessage = null;
     ws.onerror = null;
     ws.onclose = null;
-    try {
-      ws.close();
-    } catch {
-      // Already closing or never opened — nothing to release. Deliberately not
-      // rethrown: the caller is tearing down and has no better action to take.
-    }
+    // No try/catch: close() with no arguments cannot throw in any readyState —
+    // the only failure the spec defines is an out-of-range code or an oversized
+    // reason, and neither is passed. An empty catch here would have been a
+    // swallow guarding nothing.
+    ws.close();
   }
 
   /** Restart the silence timer. Called on connect and on every chunk/frame. */
@@ -1026,7 +1025,8 @@ export class ProdComService extends ConnectionLifecycle {
    * the very first broadcast rather than arriving grey and correcting later.
    */
   private async primeFromRest(host: string, port: number): Promise<void> {
-    await this.fetchChannels(host, port);
+    const channels = await this.fetchChannels(host, port);
+    if (channels.error) this.logChannelFailure(channels.error);
     const result = await this.backfill(host, port);
     if (result.error) {
       console.warn(
@@ -1046,22 +1046,18 @@ export class ProdComService extends ConnectionLifecycle {
    * "channel" category is wrong — so this is a REST read on connect plus a
    * throttled refresh when a line turns up on an id we have never seen.
    */
-  private async fetchChannels(host: string, port: number): Promise<void> {
+  private async fetchChannels(host: string, port: number): Promise<{ error?: string }> {
     let body: string;
     try {
       body = await this.getJson(host, port, "/api/v1/channels");
     } catch (e) {
-      console.warn(
-        `[prodcom] channel list unavailable (${errorMessage(e)}) — ` +
-          `captions fall back to per-channel colours chosen by the display`,
-      );
-      return;
+      // Returned, not logged here: both callers reach this, and the one that
+      // matters to an operator is the connect-time read.
+      return { error: errorMessage(e) };
     }
     const rows = asRecord(safeJson(body))?.["data"];
-    if (!Array.isArray(rows)) {
-      console.warn("[prodcom] channel list had no data array — captions fall back to display-chosen colours");
-      return;
-    }
+    if (!Array.isArray(rows)) return { error: "response had no data array" };
+
     const next = new Map<string, ChannelMeta>();
     for (const row of rows) {
       const rec = asRecord(row);
@@ -1071,6 +1067,16 @@ export class ProdComService extends ConnectionLifecycle {
     }
     this.channels = next;
     this.channelsFetchedAt = this.now();
+    return {};
+  }
+
+  /** The one operator-facing line for a channel-list failure, so both callers
+   *  say the same thing. */
+  private logChannelFailure(error: string): void {
+    console.warn(
+      `[prodcom] channel list unavailable (${error}) — ` +
+        `captions fall back to per-channel colours chosen by the display`,
+    );
   }
 
   /** A line arrived on an unknown channel id. Re-read the list, at most once per
@@ -1085,9 +1091,13 @@ export class ProdComService extends ConnectionLifecycle {
     // Stamp before the fetch, or a box that keeps failing would be re-asked on
     // every single line.
     this.channelsFetchedAt = this.now();
-    void this.fetchChannels(host, port).finally(() => {
-      this.channelRefreshInFlight = false;
-    });
+    void this.fetchChannels(host, port)
+      .then((r) => {
+        if (r.error) this.logChannelFailure(r.error);
+      })
+      .finally(() => {
+        this.channelRefreshInFlight = false;
+      });
   }
 
   /**
