@@ -47,8 +47,10 @@ function rippleHasValue(field: RippleField, value: unknown): boolean {
   return String(value ?? "").trim() !== "";
 }
 
-/** Compact editor for one endpoint's ordered From (in) / To (out) hop chain. */
-function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | undefined; stageDevices: PatchDevice[]; onChange: (hops: PatchHop[]) => void }) {
+/** Compact editor for one endpoint's ordered From (in) / To (out) hop chain.
+ *  Exported for patch-table.test.tsx — it is the one place in this file a
+ *  stored id (a hop's deviceId) can outlive the list it was chosen from. */
+export function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | undefined; stageDevices: PatchDevice[]; onChange: (hops: PatchHop[]) => void }) {
   const hops = path ?? [];
   const setHop = (i: number, patch: Partial<PatchHop>) => onChange(hops.map((h, j) => (j === i ? { ...h, ...patch } : h)));
   const add = () => onChange([...hops, { deviceId: stageDevices[0]?.id ?? "", connector: "" }]);
