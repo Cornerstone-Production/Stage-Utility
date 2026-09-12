@@ -1105,6 +1105,42 @@ describe("SenSource token rejection", () => {
     assert.equal(emitted.length, 3, "the poll stopped publishing the counts it did have");
   });
 
+  it("closes a 401 outage with a line, not with silence", async () => {
+    // Five of the ten recovered() decisions in this file were computed and thrown
+    // away, so five kinds of outage opened with a line and ended without one.
+    // This is the operationally important one: a 401 storm on a single endpoint
+    // announced itself and then cleared in total silence, so an operator watching
+    // /log had nothing that said it was over.
+    let dayOk = false;
+    stubFetch({ dayStatus: () => (dayOk ? 200 : 401) });
+    svc.token = "old";
+    svc.tokenGen = 1;
+    svc.tokenIssuedAt = clock - 30 * 60_000;
+    svc.tokenExpiresAt = clock + 40 * 60_000;
+
+    for (let i = 0; i < 3; i++) {
+      await poll();
+      clock += 15_000;
+    }
+    assert.equal(
+      logs.filter((l) => l.includes("HTTP 401 from")).length,
+      1,
+      "the outage did not open with a line, so there is nothing to close",
+    );
+
+    // Past the settle window, so this is a recovery and not a gap in a flap.
+    dayOk = true;
+    for (let i = 0; i < 12; i++) {
+      await poll();
+      clock += 15_000;
+    }
+
+    const back = logs.filter((l) => l.includes("is answering again"));
+    assert.equal(back.length, 1, `the 401 outage closed with ${back.length} lines:\n${logs.join("\n")}`);
+    assert.match(back[0], /data\/occupancy/, "the line did not say WHICH endpoint came back");
+    assert.match(back[0], /after \d+ failed attempt/, "the line did not account for the run");
+  });
+
   it("logs what Vea said once per outage, however much the body varies", async () => {
     // The cap this replaces counted DISTINCT bodies, so a response carrying a
     // timestamp was distinct every time and the cap never bit: two lines a poll

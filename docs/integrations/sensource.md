@@ -197,6 +197,10 @@ run and one line.
   cannot mask the network error that replaced it.
 - **A run that lasts reminds you every 15 minutes**, with how many attempts it
   has cost and how long it has been going, so a broken endpoint is never silent.
+- **Every part that can open an outage also closes one.** A 401 storm on one
+  endpoint, an unreadable `/space` listing, a broken zone join: each writes a line
+  when it clears, naming what the run cost. An outage that opens with a line and
+  ends in silence leaves an operator watching `/log` with no way to know.
 - **The recovery line accounts for the run** it ended — nothing suppressed is
   dropped without being counted somewhere.
 - **A response whose text changes every time** (a timestamp, a request id) cannot

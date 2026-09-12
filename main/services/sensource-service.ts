@@ -955,7 +955,8 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       for (const s of asRows(await this.apiGet<unknown>("/sensor"))) {
         if (typeof s.sensorId === "string" && typeof s.siteId === "string") m.set(s.sensorId, s.siteId);
       }
-      this.recovered("sensor-join");
+      const joinBack = this.recovered("sensor-join");
+      if (joinBack.log) console.log(`[sensource] the /sensor join is readable again${joinBack.note}`);
     } catch (err) {
       // Once per outage, not once per poll and not once per flap — see the note
       // on `outages`, and repeat-log.ts for why a transition flag was not enough.
@@ -975,7 +976,8 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       for (const s of asRows(await this.apiGet<unknown>("/site"))) {
         if (typeof s.siteId === "string" && typeof s.locationId === "string") m.set(s.siteId, s.locationId);
       }
-      this.recovered("site-join");
+      const siteBack = this.recovered("site-join");
+      if (siteBack.log) console.log(`[sensource] the /site join is readable again${siteBack.note}`);
     } catch (err) {
       const d = this.failed("site-join", err);
       if (d.log) {
@@ -1037,8 +1039,12 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
           .filter((z) => z.locationId === cfg.locationId)
           .map((z) => z.zoneId);
         if (ids.length) {
-          this.recovered("zone-location-map");
-          this.recovered("zone-resolution");
+          const mapBack = this.recovered("zone-location-map");
+          if (mapBack.log) {
+            console.log(`[sensource] the selected location maps to zones again${mapBack.note}`);
+          }
+          const zoneBack = this.recovered("zone-resolution");
+          if (zoneBack.log) console.log(`[sensource] zone resolution is working again${zoneBack.note}`);
           return new Set(ids);
         }
         // A misconfiguration rather than an outage — it lasts until an operator
@@ -1330,7 +1336,11 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       throw new SenSourceHttpError(401, path, body, tokenId);
     }
     if (!res.ok) throw new SenSourceHttpError(res.status, path, "", tokenId);
-    this.recovered(`auth:${path}`);
+    // The operationally important one: a 401 storm opened with a line naming what
+    // Vea said and used to close in total silence, so an operator watching /log
+    // never learned it had cleared.
+    const authBack = this.recovered(`auth:${path}`);
+    if (authBack.log) console.log(`[sensource] ${path} is answering again${authBack.note}`);
     return (await res.json()) as T;
   }
 
