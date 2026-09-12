@@ -175,7 +175,9 @@ describe("the hourly health line", () => {
     } finally {
       release();
     }
-    assert.deepEqual(health(), ["[companion] 2 of 5 connection(s) in error: 2 tplink-kasasmartbulb (Connecting)"]);
+    assert.deepEqual(health(), [
+      "[companion] 2 of 5 connection(s) in error: Bulb-1, Bulb-2 (Connecting)",
+    ]);
   });
 
   test("a fault that MOVES is written again — that is the pass worth reading", async () => {

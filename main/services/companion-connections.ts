@@ -54,6 +54,12 @@ export interface CompanionConnection {
    * Every field is nullable and every field has been seen null: a disabled Dante
    * controller on the live install answers
    * `{ category: null, level: null, message: "Disabled" }`.
+   *
+   * `message` is read and nothing reads it back. It is one of the three fields
+   * of Companion's own status object and this interface is that object — a
+   * parser that silently dropped a third of the payload is how the next person
+   * to need it concludes Companion does not send it. It is the only field here
+   * with no consumer.
    */
   status: { category: string | null; level: string | null; message: string | null } | null;
 }
@@ -67,7 +73,22 @@ export interface ConnectionProblem {
   /** Companion's own level word (`Connecting`, `Connection Failure`), or "" for none. */
   level: string;
   count: number;
+  /** Which bucket the group is in, so the line can say when it is not an error. */
+  bucket: Exclude<ConnectionHealthLevel, "ok">;
+  /**
+   * The labels in this group, in the order Companion listed them.
+   *
+   * A group of one is worth naming — "SA-HL-Stage-TV (Connection Failure)" sends
+   * an operator to a television, where "1 vizio-smartcast" sends them to a list
+   * of twelve. A group of six bulbs is not: six device names on an hourly line
+   * is the noise the grouping exists to avoid. connectionDetail decides where
+   * the line falls.
+   */
+  labels: string[];
 }
+
+/** Above this many in a group, the module id says more than the names do. */
+const NAME_THEM_UP_TO = 3;
 
 /** What Companion's connection list adds up to. */
 export interface ConnectionHealth {
@@ -112,6 +133,7 @@ const rec = (v: unknown): Record<string, unknown> =>
 export function parseConnections(raw: unknown): CompanionConnection[] {
   if (!Array.isArray(raw)) return [];
   const out: CompanionConnection[] = [];
+  const orNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
   for (const entry of raw) {
     const c = rec(entry);
     const id = str(c.id).trim();
@@ -126,9 +148,9 @@ export function parseConnections(raw: unknown): CompanionConnection[] {
         s === null || s === undefined
           ? null
           : {
-              category: typeof rec(s).category === "string" ? (rec(s).category as string) : null,
-              level: typeof rec(s).level === "string" ? (rec(s).level as string) : null,
-              message: typeof rec(s).message === "string" ? (rec(s).message as string) : null,
+              category: orNull(rec(s).category),
+              level: orNull(rec(s).level),
+              message: orNull(rec(s).message),
             },
     });
   }
@@ -156,29 +178,31 @@ export function summariseConnections(connections: readonly CompanionConnection[]
   const counts: Record<ConnectionHealthLevel, number> = { ok: 0, unknown: 0, error: 0 };
   // Keyed by module and level together: a module with four cameras failing and
   // two connecting is two rows, because the two say different things.
-  const groups = new Map<string, ConnectionProblem & { level_: ConnectionHealthLevel }>();
+  const groups = new Map<string, ConnectionProblem>();
   for (const c of enabled) {
-    const level = levelOf(c);
-    counts[level]++;
-    if (level === "ok") continue;
-    const word = c.status?.level?.trim() ?? "";
+    const bucket = levelOf(c);
+    counts[bucket]++;
+    if (bucket === "ok") continue;
+    const level = c.status?.level?.trim() ?? "";
     // JSON, not a separator character. Companion's level words contain
     // spaces (`Connection Failure`), so any single-character join can be
     // forged by a value that contains it, and two different states would
     // add up as one row.
-    const key = JSON.stringify([c.moduleId, word, level]);
+    const key = JSON.stringify([c.moduleId, level, bucket]);
     const found = groups.get(key);
-    if (found) found.count++;
-    else groups.set(key, { moduleId: c.moduleId, level: word, count: 1, level_: level });
+    if (found) {
+      found.count++;
+      found.labels.push(c.label);
+    } else {
+      groups.set(key, { moduleId: c.moduleId, level, count: 1, bucket, labels: [c.label] });
+    }
   }
-  const problems = [...groups.values()]
-    .sort(
-      (a, b) =>
-        WORST_FIRST.indexOf(a.level_) - WORST_FIRST.indexOf(b.level_) ||
-        b.count - a.count ||
-        a.moduleId.localeCompare(b.moduleId),
-    )
-    .map(({ moduleId, level, count }) => ({ moduleId, level, count }));
+  const problems = [...groups.values()].sort(
+    (a, b) =>
+      WORST_FIRST.indexOf(a.bucket) - WORST_FIRST.indexOf(b.bucket) ||
+      b.count - a.count ||
+      a.moduleId.localeCompare(b.moduleId),
+  );
   return {
     total: connections.length,
     enabled: enabled.length,
@@ -214,9 +238,20 @@ export function connectionSentence(health: ConnectionHealth): string {
  * stays silent on a clean hourly pass.
  */
 export function connectionDetail(health: ConnectionHealth): string {
-  const groups = health.problems.map(
-    (p) => `${p.count} ${p.moduleId || "unnamed module"}${p.level ? ` (${p.level})` : ""}`,
-  );
+  const groups = health.problems.map((p) => {
+    // Few enough to name: the labels ARE the answer, and a count in front of
+    // them would only repeat what the list already shows.
+    const who =
+      p.count <= NAME_THEM_UP_TO && p.labels.every((l) => l !== "")
+        ? p.labels.join(", ")
+        : `${p.count} ${p.moduleId || "unnamed module"}`;
+    // Companion's level word alone would read the same for two buckets on one
+    // module — `error/Connecting` and a `warning/Connecting` both render
+    // "(Connecting)" — so an unknown group says which it is. An error group does
+    // not: the sentence in front of it already said how many are in error.
+    const why = [p.level, p.bucket === "unknown" ? "not reporting" : ""].filter(Boolean).join(", ");
+    return why ? `${who} (${why})` : who;
+  });
   return groups.length ? `${connectionSentence(health)}: ${groups.join(", ")}` : connectionSentence(health);
 }
 

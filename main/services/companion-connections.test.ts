@@ -125,7 +125,12 @@ describe("summariseConnections", () => {
     );
     assert.equal(h.unknown, 1);
     assert.equal(h.ok, 0);
-    assert.deepEqual(h.problems, [{ moduleId: "obs-studio", level: "Slow", count: 1 }]);
+    assert.deepEqual(h.problems, [
+      { moduleId: "obs-studio", level: "Slow", count: 1, bucket: "unknown", labels: ["a-label"] },
+    ]);
+    // And the line says which bucket, so it does not read the same as an
+    // `error/Slow` on the same module would.
+    assert.equal(connectionDetail(h), "1 of 1 connection(s) not reporting: a-label (Slow, not reporting)");
   });
 
   test("the category is matched case-insensitively, and trimmed", () => {
@@ -160,10 +165,10 @@ describe("summariseConnections", () => {
         entry("c", "red-rcp2", true, failure),
       ]),
     );
-    assert.deepEqual(h.problems, [
-      { moduleId: "red-rcp2", level: "Connecting", count: 2 },
-      { moduleId: "red-rcp2", level: "Connection Failure", count: 1 },
-    ]);
+    assert.deepEqual(
+      h.problems.map((x) => `${x.moduleId}/${x.level}/${x.count}`),
+      ["red-rcp2/Connecting/2", "red-rcp2/Connection Failure/1"],
+    );
   });
 
   // Companion's own level words contain spaces — `Connection Failure` is one —
@@ -183,6 +188,30 @@ describe("summariseConnections", () => {
     );
   });
 
+  // The label is the whole reason it is parsed. It is also the join key a cue's
+  // binding uses — `<label>:<variable>` — so naming it is what connects "the
+  // projector cue reads unknown" to "the projector's connection is down".
+  test("a small group is NAMED and a large one is counted", () => {
+    const detail = (n: number) =>
+      connectionDetail(
+        summariseConnections(
+          parseConnections(Array.from({ length: n }, (_, i) => entry(`dev${i}`, "vizio-smartcast", true, failure))),
+        ),
+      );
+    assert.match(detail(1), /: dev0-label \(Connection Failure\)$/);
+    assert.match(detail(3), /: dev0-label, dev1-label, dev2-label \(Connection Failure\)$/);
+    assert.match(detail(4), /: 4 vizio-smartcast \(Connection Failure\)$/);
+  });
+
+  // A connection Companion never labelled cannot be named, and "" , "" , "" in
+  // a log line is worse than a count.
+  test("a group of unlabelled connections falls back to the count", () => {
+    const h = summariseConnections(
+      parseConnections([{ id: "x", moduleId: "vizio-smartcast", enabled: true, status: failure }]),
+    );
+    assert.match(connectionDetail(h), /: 1 vizio-smartcast \(Connection Failure\)$/);
+  });
+
   test("errors sort ahead of unknowns however many of each there are", () => {
     const h = summariseConnections(
       parseConnections([
@@ -190,10 +219,10 @@ describe("summariseConnections", () => {
         entry("t", "vizio-smartcast", true, failure),
       ]),
     );
-    assert.deepEqual(h.problems, [
-      { moduleId: "vizio-smartcast", level: "Connection Failure", count: 1 },
-      { moduleId: "tplink-kasasmartplug", level: "", count: 9 },
-    ]);
+    assert.deepEqual(
+      h.problems.map((x) => `${x.moduleId}/${x.level}/${x.count}/${x.bucket}`),
+      ["vizio-smartcast/Connection Failure/1/error", "tplink-kasasmartplug//9/unknown"],
+    );
   });
 });
 
@@ -203,7 +232,7 @@ describe("the live install", () => {
     ...Array.from({ length: 30 }, (_, i) => entry(`ok${i}`, "generic-pjlink", true, good)),
     ...Array.from({ length: 6 }, (_, i) => entry(`bulb${i}`, "tplink-kasasmartbulb", true, connecting)),
     ...Array.from({ length: 5 }, (_, i) => entry(`cam${i}`, "red-rcp2", true, connecting)),
-    entry("tv", "vizio-smartcast", true, failure),
+    { id: "tv", label: "SA-HL-Stage-TV", moduleId: "vizio-smartcast", enabled: true, status: failure },
     ...Array.from({ length: 10 }, (_, i) => entry(`plug${i}`, "tplink-kasasmartplug", true, null)),
     ...Array.from({ length: 32 }, (_, i) => entry(`off${i}`, "vizio-smartcast", false, null)),
   ]);
@@ -223,12 +252,17 @@ describe("the live install", () => {
     );
   });
 
-  test("the log line names the modules, worst first, commonest first", () => {
+  // Worst first, commonest first, and the group of ONE is named. "1
+  // vizio-smartcast" sends an operator to a list of twelve televisions;
+  // "SA-HL-Stage-TV" sends them to the one that is actually down. Six bulbs stay
+  // a module and a count, because six device names on an hourly line is the
+  // noise the grouping exists to avoid.
+  test("the log line, worst first, commonest first, naming a group of one", () => {
     assert.equal(
       connectionDetail(summariseConnections(live)),
       "12 of 52 connection(s) in error, 10 not reporting: " +
         "6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), " +
-        "1 vizio-smartcast (Connection Failure), 10 tplink-kasasmartplug",
+        "SA-HL-Stage-TV (Connection Failure), 10 tplink-kasasmartplug (not reporting)",
     );
   });
 });
@@ -270,14 +304,14 @@ describe("healthReport", () => {
       okResult(entry("a", "generic-pjlink", true, good), entry("b", "red-rcp2", true, connecting)),
     );
     assert.equal(r.sentence, "1 of 2 connection(s) in error");
-    assert.equal(r.log, "1 of 2 connection(s) in error: 1 red-rcp2 (Connecting)");
+    assert.equal(r.log, "1 of 2 connection(s) in error: b-label (Connecting)");
   });
 
   // Not a fault, and not silence-worthy either: a connection that is not
   // reporting is why a switch bound to it reads unknown.
   test("unknowns alone are logged too", () => {
     const r = healthReport(okResult(entry("a", "tplink-kasasmartplug", true, null)));
-    assert.equal(r.log, "1 of 1 connection(s) not reporting: 1 tplink-kasasmartplug");
+    assert.equal(r.log, "1 of 1 connection(s) not reporting: a-label (not reporting)");
   });
 
   // A 4.x Companion never had the endpoint. "unavailable" on every one of them

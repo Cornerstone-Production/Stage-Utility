@@ -725,7 +725,7 @@ When anything is not ok, the hourly pass writes one line naming the modules and
 Companion's own words for what is wrong:
 
 ```
-[companion] 12 of 52 connection(s) in error, 10 not reporting: 6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), 1 vizio-smartcast (Connection Failure), 10 tplink-kasasmartplug
+[companion] 12 of 52 connection(s) in error, 10 not reporting: 6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), SA-HL-Stage-TV (Connection Failure), 10 tplink-kasasmartplug (not reporting)
 ```
 
 **Only when it changes**, and never on a clean pass. An install with a fault
