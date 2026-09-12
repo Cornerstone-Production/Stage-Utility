@@ -271,10 +271,28 @@ describe("fetchExport", () => {
   });
 });
 
+/**
+ * Companion's connection list, in the shape `GET /api/connections` answers.
+ *
+ * `status: null` on an enabled connection is deliberate and is what ten of the
+ * live install's fifty-two enabled connections look like — see
+ * companion-connections.test.ts.
+ */
+const connectionsBody = (): unknown => [
+  { id: "a", label: "MA_HL_Projector", moduleId: "generic-pjlink", enabled: true, status: { category: "good", level: "ok", message: null } },
+  { id: "b", label: "Bulb", moduleId: "tplink-kasasmartbulb", enabled: true, status: { category: "error", level: "Connecting", message: null } },
+  { id: "c", label: "Plug", moduleId: "tplink-kasasmartplug", enabled: true, status: null },
+  { id: "d", label: "Off", moduleId: "obs-studio", enabled: false, status: null },
+];
+
+/** Answer the export URL with the fixture and the connections URL with the list. */
+const stubBoth = (connections: () => Response) =>
+  stub((url) => (url.includes("/api/connections") ? connections() : Response.json(companionExportFixture())));
+
 describe("testConnection", () => {
   test("reports the Companion build and the button count", async () => {
     target({ host: "10.0.0.5", port: 8000 });
-    stub(() => Response.json(companionExportFixture()));
+    stubBoth(() => Response.json(connectionsBody()));
 
     const r = await companionApi.testConnection();
     assert.equal(r.ok, true);
@@ -285,7 +303,7 @@ describe("testConnection", () => {
 
   test("presses nothing", async () => {
     target({ host: "10.0.0.5", port: 8000 });
-    const calls = stub(() => Response.json(companionExportFixture()));
+    const calls = stubBoth(() => Response.json(connectionsBody()));
 
     await companionApi.testConnection();
     assert.equal(calls.filter((c) => c.url.includes("/press")).length, 0);
@@ -296,6 +314,162 @@ describe("testConnection", () => {
     const r = await companionApi.testConnection();
     assert.equal(r.ok, false);
     assert.match(r.message, /Host is required/);
+  });
+
+  // Why Test carries it at all: "Companion answered" is not the question an
+  // operator presses Test to settle. A cue bound to a module variable reads
+  // unknown when the CONNECTION is down, and nothing else on the page said so.
+  test("carries the connection health in the same sentence", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => Response.json(connectionsBody()));
+
+    const r = await companionApi.testConnection();
+    assert.match(r.message, /1 of 3 connection\(s\) in error, 1 not reporting/);
+  });
+
+  test("gear being down is not a failed test — Companion answered", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => Response.json(connectionsBody()));
+
+    const r = await companionApi.testConnection();
+    assert.equal(r.ok, true);
+  });
+
+  test("forces the connection read past the cache, like the export", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stubBoth(() => Response.json(connectionsBody()));
+
+    await companionApi.readConnections();
+    await companionApi.testConnection();
+
+    assert.equal(calls.filter((c) => c.url.endsWith("/api/connections")).length, 2);
+  });
+
+  // A 4.x Companion has no such endpoint. Saying "unavailable" on every one of
+  // them would be a red sentence about a diagnostic that was never coming.
+  test("a Companion too old to have the endpoint says nothing about it", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => new Response("Not found", { status: 404 }));
+
+    const r = await companionApi.testConnection();
+    assert.equal(r.ok, true);
+    assert.match(r.message, /6 on\/off pair\(s\)$/);
+  });
+
+  // The other way round: the export worked, so a connection list that did not
+  // is a fact the operator has not been told anywhere else.
+  test("a connection read that fails for any OTHER reason is said out loud", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => new Response("nope", { status: 500 }));
+
+    const r = await companionApi.testConnection();
+    assert.match(r.message, /connection status unavailable: Companion answered HTTP 500/);
+  });
+});
+
+describe("readConnections", () => {
+  test("reads Companion's own endpoint and sums it up", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stubBoth(() => Response.json(connectionsBody()));
+
+    const r = await companionApi.readConnections();
+    assert.deepEqual(
+      calls.map((c) => `${c.method} ${c.url}`),
+      ["GET http://10.0.0.5:8000/api/connections"],
+    );
+    assert.equal(r.ok, true);
+    assert.ok(r.ok);
+    assert.deepEqual(
+      { total: r.health.total, enabled: r.health.enabled, ok: r.health.ok, unknown: r.health.unknown, error: r.health.error },
+      { total: 4, enabled: 3, ok: 1, unknown: 1, error: 1 },
+    );
+    assert.equal(r.health.worst, "error");
+  });
+
+  // Without a signal a Companion that accepts the connection and never answers
+  // holds the hourly reconcile open.
+  test("the request is timed", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stubBoth(() => Response.json(connectionsBody()));
+
+    await companionApi.readConnections();
+    assert.ok(calls[0]!.signal instanceof AbortSignal, "the read was sent with no timeout");
+  });
+
+  test("404 is `unsupported`, which is not the same answer as a failure", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => new Response("Not found", { status: 404 }));
+
+    const r = await companionApi.readConnections();
+    assert.equal(r.ok, false);
+    assert.ok(!r.ok);
+    assert.equal(r.unsupported, true);
+    assert.match(r.reason, /5\.x and later/);
+  });
+
+  test("any other status is a failure, and is NOT unsupported", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    stubBoth(() => new Response("nope", { status: 500 }));
+
+    const r = await companionApi.readConnections();
+    assert.ok(!r.ok);
+    assert.equal(r.unsupported, false);
+    assert.match(r.reason, /HTTP 500/);
+  });
+
+  // NEVER throws: the reconcile calls this on a timer and a rejection out of a
+  // housekeeping pass takes the rest of the pass with it.
+  test("a network failure comes back as a result, not a throw", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    companionDeps.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+
+    const r = await companionApi.readConnections();
+    assert.ok(!r.ok);
+    assert.equal(r.unsupported, false);
+  });
+
+  test("no host configured is a result too", async () => {
+    target(null);
+    const r = await companionApi.readConnections();
+    assert.ok(!r.ok);
+    assert.match(r.reason, /host is not configured/);
+  });
+
+  test("a second read inside the window reuses the first, so one Test is one GET", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stubBoth(() => Response.json(connectionsBody()));
+
+    await companionApi.readConnections();
+    await companionApi.readConnections();
+
+    assert.equal(calls.filter((c) => c.url.endsWith("/api/connections")).length, 1);
+  });
+
+  // The cached list belongs to the OLD host. invalidate() runs when the
+  // Companion host is changed, and a stale count from another box is worse than
+  // none.
+  test("invalidate drops it", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    const calls = stubBoth(() => Response.json(connectionsBody()));
+
+    await companionApi.readConnections();
+    companionApi.invalidate();
+    await companionApi.readConnections();
+
+    assert.equal(calls.filter((c) => c.url.endsWith("/api/connections")).length, 2);
+  });
+
+  test("a failure is not cached — the next read asks again", async () => {
+    target({ host: "10.0.0.5", port: 8000 });
+    let fail = true;
+    const calls = stubBoth(() => (fail ? new Response("nope", { status: 500 }) : Response.json(connectionsBody())));
+
+    assert.ok(!(await companionApi.readConnections()).ok);
+    fail = false;
+    assert.ok((await companionApi.readConnections()).ok);
+    assert.equal(calls.filter((c) => c.url.endsWith("/api/connections")).length, 2);
   });
 });
 
