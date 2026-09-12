@@ -10,9 +10,13 @@
 // defensively (every field degrades to null), so a different point-release shows
 // blanks rather than crashing. Tune in buildStatus()/sectionsFor() if anything
 // reads blank (device shows exact shapes at Settings → Network → API Documentation).
+//
+// It also WRITES, in exactly one place: `triggerMacro` runs an operator's own
+// ProPresenter macro for the `propresenter.macro` automation action. Nothing else
+// here sends anything ProPresenter acts on.
 
 import { clamp } from "./clamp.js";
-import { errorMessage } from "./errors.js";
+import { errorMessage, fetchFailureMessage } from "./errors.js";
 import * as http from "http";
 
 import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, PropInstanceMeta, PropInstanceConn } from "../types/stage.js";
@@ -29,6 +33,12 @@ const ERROR_BASE_MS = 5000;
 // immediately when someone connects (hydrated on connect + fast poll resumes).
 const IDLE_INTERVAL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 4000;
+// The macro list is asked for every time the rule editor opens, once per
+// configured instance, and it changes only when somebody edits ProPresenter.
+// Thirty seconds rather than the Companion export's five minutes: that list has
+// a Refresh button and this one does not, so a macro added mid-setup has to show
+// up on the next open rather than after a coffee break.
+const MACRO_CACHE_MS = 30_000;
 /** Thumbnail width requested from ProPresenter (px). */
 export const THUMBNAIL_QUALITY = 400;
 
@@ -78,6 +88,46 @@ function getJson(host: string, port: number, path: string): Promise<unknown> {
     req.on("timeout", () => req.destroy(new Error("timeout")));
     req.on("error", reject);
   });
+}
+
+/**
+ * One request whose BODY does not matter — resolves ProPresenter's status code.
+ *
+ * Sibling of getJson rather than a second HTTP client: same `http.get`, same
+ * timeout, same rejection on a transport failure. It exists because getJson
+ * rejects everything >= 400 with the same `HTTP <n>` Error, and a 404 from
+ * `/v1/macro/<name>/trigger` is the ONE status worth telling apart — it means
+ * the macro was renamed or deleted, which is the failure that actually happens
+ * months later.
+ */
+function getStatusCode(host: string, port: number, path: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = http.get({ host, port, path, timeout: REQUEST_TIMEOUT_MS }, (res) => {
+      res.resume(); // drain, so the socket is freed rather than held open
+      resolve(res.statusCode ?? 0);
+    });
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    req.on("error", reject);
+  });
+}
+
+/** What a macro trigger did, or why it did nothing. Never thrown — returned. */
+export interface MacroResult {
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * One instance's macro names, and why they are missing when they are.
+ *
+ * Both halves, because the union across instances CAN partially fail: a booth
+ * machine that is off must not make its macros look deleted without anyone
+ * being told. The caller decides what to do with `error` — the option route
+ * still answers with a list, because the rule editor has to open.
+ */
+export interface MacroListResult {
+  names: string[];
+  error: string | null;
 }
 
 // Safe nested getter: pick(obj, "a", "b") → obj?.a?.b (unknown-typed).
@@ -218,6 +268,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   private activeUuid: string | null = null;
   private slideIdxZero: number | null = null;
 
+  // Macro-name cache, per instance. See listMacros.
+  private macroCache: { at: number; names: string[] } | null = null;
+
   // Playlist item cache (items change rarely — refetch only when the playlist changes).
   private playlistUuid: string | null = null;
   private playlistItems: { name: string; index: number }[] = [];
@@ -291,6 +344,95 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       return { ok: true, message: `Connected to ${desc ?? "ProPresenter"}` };
     } catch (err) {
       return { ok: false, message: errorMessage(err) };
+    }
+  }
+
+  /** Whether this instance has somewhere to dial. `configured` on the base is
+   *  protected, and the manager has to know which instances are worth asking:
+   *  one that was never set up is not part of the macro union, and reporting it
+   *  as unreachable would put a warning in the log of every site that does not
+   *  use ProPresenter, every time somebody opens the rule editor. */
+  get hasTarget(): boolean {
+    return this.configured;
+  }
+
+  /**
+   * This instance's macro names, in ProPresenter's own order.
+   *
+   * Cached briefly (see MACRO_CACHE_MS): the rule editor asks every configured
+   * instance every time it opens, and that is a LAN round trip per booth machine
+   * for a list that changes when somebody edits ProPresenter.
+   *
+   * A failure comes back on `error` rather than as a throw — the caller has to
+   * be able to answer the editor with a list either way.
+   */
+  async listMacros(): Promise<MacroListResult> {
+    const { host, port } = this;
+    if (!host || !port) return { names: [], error: "ProPresenter is not configured" };
+    const now = Date.now();
+    if (this.macroCache && now - this.macroCache.at < MACRO_CACHE_MS) {
+      return { names: this.macroCache.names, error: null };
+    }
+    try {
+      const body = await getJson(host, port, "/v1/macros");
+      const names = Array.isArray(body)
+        ? body.map((m) => asString(pick(m, "id", "name"))).filter((n): n is string => !!n)
+        : [];
+      this.macroCache = { at: Date.now(), names };
+      return { names, error: null };
+    } catch (err) {
+      // Not cached: a failed read must not pin an empty list for the next
+      // MACRO_CACHE_MS, or the editor opened during a reboot stays empty long
+      // after the machine came back.
+      return { names: [], error: fetchFailureMessage(err, `${host}:${port}`) };
+    }
+  }
+
+  /**
+   * Run one macro BY NAME, for the `propresenter.macro` action.
+   *
+   * NEVER THROWS: not configured, unreachable and "no such macro" all come back
+   * as `{ ok: false }`, exactly as reaperService.transport does, so one booth
+   * machine that is off cannot stop the engine.
+   *
+   * `label` is the instance's display name — the operator picked "MA", not
+   * `inst-2`, and the log line has to say the word they would recognise.
+   *
+   * The trigger is `GET /v1/macro/<id>/trigger`. A GET that changes state is
+   * ProPresenter's own design, not a mistake here. `<id>` takes a uuid, a name
+   * or an index; the NAME is what is stored, because names are portable across
+   * the two booth machines and survive a re-import where a uuid is per-machine —
+   * the same reasoning as plan-items storing a title rather than an id.
+   */
+  async triggerMacro(macro: string, label: string): Promise<MacroResult> {
+    const name = String(macro ?? "").trim();
+    if (!name) return { ok: false, detail: "no macro chosen" };
+    const { host, port } = this;
+    if (!host || !port) return { ok: false, detail: `${label} is not configured` };
+    try {
+      // Names contain spaces (SONG INTRO), so the name is a single encoded path
+      // segment — unencoded it would be three segments and a 404 at best.
+      const status = await getStatusCode(host, port, `/v1/macro/${encodeURIComponent(name)}/trigger`);
+      if (status === 404) {
+        // The failure that will actually happen months from now is a renamed or
+        // deleted macro. "HTTP 404" alone costs a Sunday morning; the reason
+        // names the macro and the machine. The log line carries the macro in its
+        // prefix already, so the reason there does not repeat it.
+        console.warn(`[propresenter] macro "${name}" failed: no such macro on ${label} (404)`);
+        return { ok: false, detail: `no macro called "${name}" on ${label}` };
+      }
+      if (status >= 400) {
+        console.warn(`[propresenter] macro "${name}" failed: HTTP ${status} on ${label}`);
+        return { ok: false, detail: `${label} answered HTTP ${status}` };
+      }
+      console.log(`[propresenter] macro "${name}" triggered on ${label}`);
+      return { ok: true, detail: `triggered "${name}" on ${label}` };
+    } catch (err) {
+      // NOT errorMessage: a destroyed request says only "timeout", and the
+      // operator needs to know which machine did not answer.
+      const detail = fetchFailureMessage(err, `${host}:${port}`);
+      console.warn(`[propresenter] macro "${name}" failed: ${detail}`);
+      return { ok: false, detail };
     }
   }
 
@@ -575,10 +717,7 @@ class ProPresenterManager {
   }
 
   getInstancesDto(): PropInstancesDTO {
-    const list: PropInstanceMeta[] = [
-      { id: "default", name: this.defaultName },
-      ...[...this.extras.keys()].map((id) => ({ id, name: this.names.get(id) ?? id })),
-    ];
+    const list: PropInstanceMeta[] = this.listInstances();
     const status: Record<string, ProPresenterStatusDTO> = {
       default: propresenterService.getStatus(),
     };
@@ -601,6 +740,97 @@ class ProPresenterManager {
   getThumbnailTarget(id: string | null | undefined) {
     if (!id || id === "default") return propresenterService.getThumbnailTarget();
     return this.extras.get(id)?.getThumbnailTarget() ?? null;
+  }
+
+  /** Every instance a rule can address: the primary plus the configured extras. */
+  listInstances(): { id: string; name: string }[] {
+    return [
+      { id: "default", name: this.defaultName },
+      ...[...this.extras.keys()].map((id) => ({ id, name: this.names.get(id) ?? id })),
+    ];
+  }
+
+  /** The service + display name behind an instance id, or null for one that is
+   *  not there. Blank/"default" means the primary, the same as everywhere else
+   *  a layout object names an instance. */
+  private resolve(id: string | null | undefined): { svc: ProPresenterService; label: string } | null {
+    if (!id || id === "default") return { svc: propresenterService, label: this.defaultName };
+    const svc = this.extras.get(id);
+    return svc ? { svc, label: this.names.get(id) ?? id } : null;
+  }
+
+  /**
+   * Macro names on one instance. An unknown instance id is a RETURNED failure,
+   * not a throw: an operator can delete an instance a rule still names, and that
+   * has to read as a failed action rather than a crashed engine.
+   */
+  async listMacros(instanceId: string | null | undefined): Promise<MacroListResult> {
+    const target = this.resolve(instanceId);
+    if (!target) return { names: [], error: `no ProPresenter instance "${instanceId}"` };
+    return target.svc.listMacros();
+  }
+
+  /**
+   * Every macro name across every CONFIGURED instance, unioned, with where each
+   * one lives.
+   *
+   * Instances are read in parallel and independently: one machine being off
+   * costs its own macros, never the other's. An instance that could not be read
+   * is named on `unreachable` so the caller can say so — silently dropping it
+   * would make its macros look deleted.
+   *
+   * An instance with no host is not asked and is not counted. It is not a
+   * failure — it is an instance that does not exist yet — and counting it would
+   * both log a warning on every editor open at a site that does not use
+   * ProPresenter, and mark every real macro as living on one machine "only"
+   * because the phantom one did not report it.
+   */
+  async allMacros(): Promise<{
+    names: { name: string; instances: string[] }[];
+    instanceCount: number;
+    unreachable: string[];
+  }> {
+    const instances = this.listInstances().filter((i) => this.resolve(i.id)?.svc.hasTarget);
+    const results = await Promise.all(instances.map((i) => this.listMacros(i.id)));
+    // A Map keyed by name preserves first-seen order, which is ProPresenter's
+    // own macro order on the primary — the order the operator sees in the app.
+    const byName = new Map<string, string[]>();
+    const unreachable: string[] = [];
+    results.forEach((r, idx) => {
+      const label = instances[idx].name;
+      if (r.error) {
+        unreachable.push(label);
+        return;
+      }
+      for (const name of r.names) {
+        const seen = byName.get(name);
+        if (seen) {
+          if (!seen.includes(label)) seen.push(label);
+        } else {
+          byName.set(name, [label]);
+        }
+      }
+    });
+    if (unreachable.length) {
+      console.warn(`[propresenter] macro list unavailable from ${unreachable.join(", ")} — offering the rest`);
+    }
+    return {
+      names: [...byName].map(([name, on]) => ({ name, instances: on })),
+      instanceCount: instances.length,
+      unreachable,
+    };
+  }
+
+  /** Trigger a macro by name on one instance, for the `propresenter.macro`
+   *  action. Never throws — see ProPresenterService.triggerMacro. */
+  async triggerMacro(instanceId: string | null | undefined, macro: string): Promise<MacroResult> {
+    const target = this.resolve(instanceId);
+    if (!target) {
+      const detail = `no ProPresenter instance "${instanceId}" — re-pick it on this rule`;
+      console.warn(`[propresenter] macro "${String(macro ?? "").trim()}" failed: ${detail}`);
+      return { ok: false, detail };
+    }
+    return target.svc.triggerMacro(macro, target.label);
   }
 }
 

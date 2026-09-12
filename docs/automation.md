@@ -119,6 +119,7 @@ for "idle", because before it runs we do not know that it is idle.
 | Send an OSC message | to an OSC target |
 | Advance PCO Live one item | steps the live plan forward once |
 | REAPER transport | Record, Stop or Play, through the same web interface the [REAPER](integrations/reaper.md) integration polls. Record does nothing when REAPER is already recording |
+| Trigger a ProPresenter macro | runs one of your own ProPresenter macros, on a chosen instance — see [Triggering a macro from a rule](integrations/propresenter.md#triggering-a-macro-from-a-rule) |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
 | Press a Companion button | presses one button at a page/row/column. Reports "dispatched", never "on" — see [Pressing a button](integrations/companion.md#pressing-a-button) |
@@ -145,6 +146,25 @@ for "idle", because before it runs we do not know that it is idle.
 > host and port. REAPER's Record is a TOGGLE: pressed while it is recording it
 > stops the recording, so the action reads the transport first and sends nothing
 > when REAPER is already rolling. Stop and Play go out unconditionally.
+
+> **Trigger a ProPresenter macro** needs ProPresenter's Network API switched on
+> — the same prerequisite as the [ProPresenter](integrations/propresenter.md)
+> integration, and the same host and port. The macro runs on the instance you
+> pick, and whatever the macro does in ProPresenter it does here; Stage Utility
+> never inspects it.
+>
+> The macro is identified by its **name**, not by its internal id. Names mean
+> the same thing on every machine and survive a re-import, where an id does
+> not — so the same rule works in both auditoriums, and re-importing a
+> ProPresenter library does not quietly break every rule. The cost is that
+> renaming a macro in ProPresenter stops the rule finding it; the action then
+> fails with `no macro called "SONG INTRO" on MA` rather than a bare 404.
+>
+> The macro dropdown lists what every configured instance reports, so an
+> instance that is switched off simply contributes nothing — the rule editor
+> still opens. When more than one instance is set up, a name only some of them
+> have is marked, `DOORS (MA only)`. A macro already chosen on a rule is always
+> shown, marked, even while the machine that has it is off.
 
 ## Cues
 

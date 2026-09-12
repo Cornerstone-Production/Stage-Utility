@@ -297,11 +297,24 @@ function ParamField({
     );
   }
   if (spec.type === "enum" || spec.type === "multi-enum") {
+    // A RUNTIME source can be empty or incomplete: a ProPresenter that is off
+    // offers no macros, and a RossTalk target deleted since the rule was written
+    // is gone from the list while the rule still names it. A <select> whose
+    // value is not among its options renders BLANK, so the field would read
+    // "nothing chosen" for a rule that has in fact chosen something — and the
+    // operator's next move is to re-pick a setting that was never lost. The
+    // stored value is carried as its own option, marked, so the form says what
+    // the rule actually holds.
+    const current = String(value ?? "");
+    const shown =
+      spec.optionsFrom && current && !options.some((o) => o.value === current)
+        ? [...options, { value: current, label: `${current} (not in the current list)` }]
+        : options;
     return (
       <Row label={spec.label} hint={spec.help}>
-        <select className={selectCls} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}>
+        <select className={selectCls} value={current} onChange={(e) => onChange(e.target.value)}>
           <option value="">{spec.optional ? "(any)" : "Pick one…"}</option>
-          {options.map((o) => (
+          {shown.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>

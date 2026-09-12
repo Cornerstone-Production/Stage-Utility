@@ -181,6 +181,8 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 |--------|------|---------|
 | GET | `/api/automation/registry` | Every trigger, condition and action this build offers |
 | GET | `/api/automation/plan-items` | The current plan's items, for the item pickers |
+| GET | `/api/automation/propresenter-instances` | Every ProPresenter a rule can address, as `{value, label}` |
+| GET | `/api/automation/propresenter-macros` | Macro names across every configured instance, unioned. Empty, never an error, when one is unreachable |
 | GET / POST | `/api/automation/rules` | List (`{rules, settings}`) / create a rule |
 | PATCH / DELETE | `/api/automation/rules/:id` | Update / delete |
 | POST | `/api/automation/rules/:id/test` | Fire the action now, ignoring the trigger. Honours simulate; a refusal is `400` with the reason |

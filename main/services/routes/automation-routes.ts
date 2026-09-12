@@ -11,6 +11,7 @@ import { automationEngine } from "../automation-engine.js";
 import { automationLog } from "../automation-log.js";
 import { AUTOMATION_TRIGGERS } from "../automation-triggers.js";
 import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-tokens.js";
+import { propresenterManager } from "../propresenter-service.js";
 import { scrub } from "../scrub.js";
 import { stageController } from "../stage-controller.js";
 
@@ -73,6 +74,38 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     // The VALUE is the title, not the id. Ids are new objects every plan, so an id
     // picked on Tuesday is dead by Sunday.
     json(res, { items: schedule.map((i) => ({ value: i.title, label: i.title, dueAt: i.dueAt, exact: i.exact })) });
+    return;
+  }
+
+  // Options for params declaring optionsFrom: "propresenter-instances". The
+  // manager's own list, so what the dropdown offers is exactly what a rule can
+  // address — including the primary, whose id is "default" everywhere else a
+  // layout object names an instance.
+  if (method === "GET" && pathname === "/api/automation/propresenter-instances") {
+    json(res, { items: propresenterManager.listInstances().map((i) => ({ value: i.id, label: i.name })) });
+    return;
+  }
+
+  // Options for params declaring optionsFrom: "propresenter-macros", unioned by
+  // NAME across every configured instance. The value IS the name: uuids are
+  // per-machine and die on a re-import, so a macro picked on Tuesday would be
+  // gone by Sunday — the same reasoning as plan-items above.
+  //
+  // Empty (never an error) when a booth machine is off: the rule editor has to
+  // open regardless. The label says which instance a name is missing from, so
+  // an operator can see that a macro only half the building has is only half
+  // the building's.
+  if (method === "GET" && pathname === "/api/automation/propresenter-macros") {
+    const { names, instanceCount } = await propresenterManager.allMacros();
+    json(res, {
+      items: names.map(({ name, instances }) => ({
+        value: name,
+        label:
+          instanceCount > 1 && instances.length < instanceCount
+            ? `${name} (${instances.join(", ")} only)`
+            : name,
+      })),
+    });
     return;
   }
 
