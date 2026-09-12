@@ -15,7 +15,8 @@
 import assert from "node:assert/strict";
 import { test, describe, beforeEach, afterEach } from "node:test";
 
-import { pcoService } from "./pco-service.js";
+import { CALENDAR_API_VERSION, CALENDAR_API_VERSIONS } from "./pco-calendar-service.js";
+import { PCO_API_VERSION, SERVICES_API_VERSIONS, pcoService, resolvePcoApiVersion } from "./pco-service.js";
 
 /** The pinned version, restated here so a bump has to be deliberate in two places. */
 const EXPECTED_VERSION = "2018-11-01";
@@ -145,6 +146,71 @@ describe("X-PCO-API-Version", () => {
     });
     await pcoService.openAttachment("app-id", "secret", "st", "plan", "a1");
     assert.equal(seen[0].method, "POST", "pcoFetch spreads init before headers; a swap would drop the method");
+  });
+});
+
+// ── A pin has to be in ITS OWN product's version list ──────────────────────
+//
+// The bug this exists for: CALENDAR_API_VERSION was "2018-11-01", copied from
+// Services because "one app, one stated contract date" sounded right. Calendar
+// has never published 2018-11-01. PCO resolves an unpublished date DOWN to the
+// newest published one at or before it, silently, so every Calendar request in
+// this app was served 2018-08-01 — Calendar's first version, five revisions
+// behind current — while the identical string on Services resolved to Services'
+// newest. Nothing failed. Nothing logged.
+//
+// So the check is not "is this a date" and not "is this string in a list". It
+// RUNS PCO's own resolution rule over each product's own list and asserts the pin
+// resolves to ITSELF. A pin that resolves to something else is a pin that is not
+// in force, which is precisely the state this repository shipped in.
+//
+// The type system catches the same mistake first (PCO_API_VERSION is typed
+// ServicesApiVersion, CALENDAR_API_VERSION is typed CalendarApiVersion, both
+// unions of their own list), so a copy-across does not compile either. Both,
+// because tsc catches the copy-across and this catches a list that has drifted
+// from what PCO publishes.
+describe("each product's pin is in that product's own version list", () => {
+  const products = [
+    { name: "Services", pin: PCO_API_VERSION as string, published: SERVICES_API_VERSIONS as readonly string[] },
+    { name: "Calendar", pin: CALENDAR_API_VERSION as string, published: CALENDAR_API_VERSIONS as readonly string[] },
+  ];
+
+  for (const { name, pin, published } of products) {
+    test(`${name}: the pin resolves to itself`, () => {
+      const served = resolvePcoApiVersion(published, pin);
+      assert.equal(
+        served,
+        pin,
+        `${name} is pinned to "${pin}", but PCO publishes [${published.join(", ")}] for ${name} and ` +
+          `resolves an unpublished date to the newest one at or before it. This pin is silently served ` +
+          `"${served}". A version string is PER PRODUCT — take it from ${name}'s own version list, never ` +
+          `from another PCO product's.`,
+      );
+    });
+
+    test(`${name}: the pin is the newest published version`, () => {
+      const newest = [...published].sort().at(-1);
+      assert.equal(
+        pin,
+        newest,
+        `${name}'s newest published version is "${newest}" but the pin is "${pin}". Bumping is a ` +
+          `deliberate act — read the new version's changelog entry, then move the pin and this list together.`,
+      );
+    });
+  }
+
+  test("resolvePcoApiVersion models PCO's documented downgrade", () => {
+    // The exact historical bug, as data: Calendar's real list, Services' date.
+    assert.equal(
+      resolvePcoApiVersion(CALENDAR_API_VERSIONS, "2018-11-01"),
+      "2018-08-01",
+      "Services' 2018-11-01 must resolve to Calendar's 2018-08-01 — that downgrade is the whole bug",
+    );
+    // Before a product's first version PCO answers 400 rather than serving one.
+    assert.equal(resolvePcoApiVersion(CALENDAR_API_VERSIONS, "2017-01-01"), null);
+    // Newest at or before, not nearest.
+    assert.equal(resolvePcoApiVersion(CALENDAR_API_VERSIONS, "2029-01-01"), "2026-06-22");
+    assert.equal(resolvePcoApiVersion(CALENDAR_API_VERSIONS, "2021-07-20"), "2021-07-20");
   });
 });
 

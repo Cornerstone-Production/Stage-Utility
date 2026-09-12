@@ -1,10 +1,21 @@
 // live-poller.ts — Polls the PCO Services Live countdown and broadcasts it on
 // the "pco:live" channel for the dashboard display.
 //
-// Adaptive cadence: ~1.5s while a service is live (so the countdown is smooth),
-// ~20s when idle (just enough to notice a service starting). PCO's rate limit is
-// 100 req/20s; even the live cadence (≈13 req/20s) leaves ample headroom. On any
-// error we keep the last state and fall back to the idle cadence.
+// Adaptive cadence: 1s while a live item is running (so the countdown is smooth),
+// 4s for the pre-service countdown, 5 min outside a service window. On any error
+// we keep the last state and fall back to the idle cadence.
+//
+// This is the single largest PCO consumer in the app: at 1s it is about 20
+// requests per 20-second window on its own, roughly a fifth of PCO's DEFAULT
+// budget before anything else asks for anything. (The header here used to say
+// ~1.5s and "≈13 req/20s"; LIVE_INTERVAL_MS has been 1000 for some time, and the
+// arithmetic under the old number was also the wrong shape — 20s ÷ 1.5s is 13,
+// but the interval is the gap between requests, so 1s means 20.)
+//
+// "PCO's rate limit is 100 req/20s" is NOT a fact to plan against. PCO documents
+// the limit as dynamic and per-endpoint and says applications should never
+// hard-code one. So the cadence backs off from what PCO actually reports on its
+// response headers — see pcoService.rateLimitTight() and pco-rate-limit.ts.
 
 import type { PcoLiveDTO } from "../types/stage.js";
 import { errorMessage } from "./errors.js";
@@ -13,7 +24,7 @@ import { broadcast } from "./broadcaster.js";
 import { splRecorder } from "./spl-recorder.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
-import { PcoAuthError } from "./pco-service.js";
+import { PcoAuthError, pcoService } from "./pco-service.js";
 import { RepeatLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
 import { stageController } from "./stage-controller.js";
@@ -34,6 +45,11 @@ const IDLE_INTERVAL_MS = 4000;
 // serviceWindow never sleeps past the next window opening, and fails open when the
 // schedule is unknown, so the ramp-up before rehearsal is unaffected.
 const DORMANT_INTERVAL_MS = 5 * 60_000;
+// Multiplier on the cadence while PCO reports tight headroom. Four is enough to
+// take this poller from about a fifth of a typical window's budget to about a
+// twentieth without stopping it: an item change is still noticed inside four
+// seconds, which is the pre-service cadence and has always been acceptable there.
+const RATE_TIGHT_FACTOR = 4;
 // After an auth failure. Slow enough that genuinely wrong credentials cost
 // almost nothing and say so once rather than once per tick, fast enough that a
 // rotated token or a PCO auth blip heals itself well inside one service.
@@ -195,7 +211,14 @@ class LivePoller {
 
     // Fast cadence while a live item is running (so item switches reflect quickly);
     // a calmer cadence for the preservice countdown (it ticks client-side anyway).
-    const active = live?.mode === "item" ? LIVE_INTERVAL_MS : IDLE_INTERVAL_MS;
+    let active = live?.mode === "item" ? LIVE_INTERVAL_MS : IDLE_INTERVAL_MS;
+    // Past PCO's high-water mark, stretch the cadence rather than wait to be
+    // refused. This poller is the biggest single consumer, so slowing it is the
+    // change that actually returns headroom — the concurrency gate only stops a
+    // burst, and this is a steady drip. The countdown ticks client-side from
+    // liveStartAt, so a longer poll costs the freshness of an item CHANGE, not
+    // the smoothness of the clock. pcoService logs the transition once.
+    if (pcoService.rateLimitTight()) active *= RATE_TIGHT_FACTOR;
     // A live item means a service is happening whatever the schedule says — only
     // the idle cadence is allowed to go dormant.
     this.schedule(

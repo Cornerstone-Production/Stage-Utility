@@ -29,6 +29,25 @@ export interface IntegrationCheck {
   detail: string | null;
 }
 
+/**
+ * Planning Center's quota as PCO last reported it.
+ *
+ * Here rather than in the planning-center row's `detail` because it is not a
+ * connection state: PCO can be perfectly reachable and still be three requests
+ * from refusing the next one. Null when PCO has not answered since boot — an
+ * integration nobody has configured has no headroom to report, and a made-up
+ * "100%" on a diagnostics page is worse than an absent chip.
+ */
+export interface RateCheck {
+  /** Requests used in PCO's window, and how many it allows. */
+  count: number;
+  limit: number;
+  /** The window in seconds, or 0 when PCO did not say. */
+  periodSec: number;
+  /** True while the app is deliberately holding back. */
+  tight: boolean;
+}
+
 export interface LogChecks {
   version: string;
   uptimeSec: number;
@@ -41,6 +60,8 @@ export interface LogChecks {
   errors: number;
   warnings: number;
   integrations: IntegrationCheck[];
+  /** PCO quota headroom, or null when PCO has not been heard from. */
+  pcoRate: RateCheck | null;
 }
 
 export interface LogChecksInput {
@@ -52,6 +73,7 @@ export interface LogChecksInput {
   warnings: number;
   states: readonly IntegrationState[];
   descriptors: readonly Pick<IntegrationDescriptor, "id" | "label">[];
+  pcoRate?: RateCheck | null;
 }
 
 /**
@@ -97,6 +119,19 @@ export function buildLogChecks(input: LogChecksInput): LogChecks {
     errors: input.errors,
     warnings: input.warnings,
     integrations,
+    // Projected onto the four fields the strip renders rather than passed
+    // through. The caller hands over the client's fuller status object, and
+    // spreading it would put its internals — an epoch timestamp, a derived
+    // fraction — on a public JSON surface where nothing reads them and everything
+    // has to keep working.
+    pcoRate: input.pcoRate
+      ? {
+          count: input.pcoRate.count,
+          limit: input.pcoRate.limit,
+          periodSec: input.pcoRate.periodSec,
+          tight: input.pcoRate.tight,
+        }
+      : null,
   };
 }
 
