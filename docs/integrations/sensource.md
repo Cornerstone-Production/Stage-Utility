@@ -42,6 +42,9 @@ SenSource has no push, webhook or streaming endpoint, so the poller
 - A poll whose configuration is replaced while it is in flight publishes nothing
   and carries nothing forward: its answers describe a scope the operator has
   already changed.
+- If the site also has **SafeSpace**, the occupancy — and only the occupancy —
+  comes from there instead, on its own faster interval. See
+  [SafeSpace live occupancy](#safespace-live-occupancy).
 - Counts broadcast on the SSE channel **`people:count`** (skipping re-broadcasts
   when the substantive counts are unchanged); `GET /api/people/count` hydrates a
   freshly loaded display. A rolling trend buffer backs the people-graph.
@@ -61,6 +64,57 @@ static token are stored encrypted.
 
 **On a layout:** add object → **SenSource → people-counter / people-graph /
 people-panel**.
+
+## SafeSpace live occupancy
+
+SafeSpace is SenSource's other product. Where Vea reports a day's worth of
+counting — attendance, per-zone traffic, peak, mean, capacity — SafeSpace
+publishes one number per space: how many people are in it right now, updated far
+more often than Vea's ~78-second refresh.
+
+It is part of this integration rather than a second one, because it is the same
+vendor and the same payload. When a space ID is set, **the occupancy comes from
+SafeSpace and everything else still comes from Vea**. Attendance, the zone
+breakdown, today's peak / lowest / mean and the capacity are unchanged. Nothing
+about SafeSpace is required: leave the field blank and Vea answers everything, as
+it did before.
+
+**Where the space ID comes from.** In SafeSpace, open the space and take the
+live-occupancy value's embed address — the ID is the last path segment of
+`app.safespace.io/api/raw-data/live-occupancy/<space ID>` (their UI may show the
+`display.safespace.io/value/live/<space ID>` form of the same thing, which ends in
+the same ID). Paste that ID into **SafeSpace space ID** on the SenSource card, and
+set **SafeSpace interval** if 10 seconds is not what you want.
+
+**Treat the space ID as a credential.** The endpoint has no key, no token and no
+account check — the ID is the whole of its authority, so anyone who has it can
+read your occupancy from anywhere. Stage keeps it out of every log line: the one
+place that builds a message containing the URL redacts it first, so a failure
+reads `<space id>` rather than the value. It is stored as ordinary
+(non-encrypted) integration config, so it is in a settings export like any other
+field — treat an export the same way you would treat the ID itself.
+
+**What the reading does when it goes wrong.**
+
+- **An empty response is unknown, never zero.** About one reading in six comes
+  back with no number at all. Parsing that as 0 would report an empty building and
+  fire every occupancy threshold in the app, so the last good value stands
+  instead. Nothing is logged for a single empty response — it is the normal case.
+- **A stale reading loses to Vea.** Once the newest SafeSpace value is a minute
+  old, Vea's number is at least as current and the occupancy goes back to it.
+- **A SafeSpace failure falls back to Vea rather than going blank**, and says so
+  once per outage on the terms in [Logging an outage](#logging-an-outage) — not
+  once per reading, which at a 10-second interval would be 360 lines an hour.
+- **Rate limiting is read from the response, not assumed.** SafeSpace reports
+  `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; Stage
+  measures what a request costs from consecutive `Remaining` values and stops
+  asking until the reset the server named, rather than trusting an observed quota.
+  An `HTTP 429` honours `Retry-After`, capped at five minutes.
+
+The published count says which product it came from: the `people:count` payload
+carries `total.occupancySource` (`"vea"` or `"safespace"`), and the integration's
+connection line on the Integrations panel names the source it used on the last
+poll.
 
 ## Service history
 
@@ -184,6 +238,12 @@ Stage will not make that worse, and says so on the log when it sees it:
 The first rejected response of an outage is logged with what Vea said, per
 request — so the reason is on `/log` once, on the terms in
 [Logging an outage](#logging-an-outage).
+
+The SafeSpace reading has its own interval and its own timer, and neither one
+affects the other — a live number is only worth having if it is read often, and
+tying it to a Vea interval raised to save API calls would throw that away. It is
+on the same idle gate: with nothing consuming the count it drops to once a minute,
+and a consumer arriving mid-wait pre-empts it.
 
 The trend buffer behind the people-graph samples on its own 45s clock rather than
 once per poll, so its ~3h span does not shrink when the interval drops.

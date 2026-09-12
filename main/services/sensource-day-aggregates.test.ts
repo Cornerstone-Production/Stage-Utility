@@ -101,6 +101,9 @@ const CFG: SenSourceConfig = {
   pollSeconds: 15,
   locationId: null,
   zoneIds: [],
+  // The Vea half of the integration. SafeSpace has its own file.
+  safeSpaceId: null,
+  safeSpacePollSeconds: 10,
 };
 
 /**
