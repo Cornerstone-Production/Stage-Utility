@@ -13,7 +13,7 @@
 // ── Why a "first failure, then quiet" flag is not enough ───────────────────
 //
 // That is what this file used to be, and it is what sensource-service.ts's
-// per-transition flags were, and the measured result in production was 3,519
+// per-transition flags were, and the measured result in production was 3,527
 // warning and error lines from SenSource alone in five days — 2,837 of them in
 // one day — against under 200 for everything else combined.
 //
@@ -168,7 +168,7 @@ export class OutageLog {
       remember(run, kind, overflow, now);
       return {
         log: true,
-        note: ` — still failing after ${run.count} attempts (${minutes(now - run.firstAt)})`,
+        note: ` — still failing after ${plural(run.count, "attempt")} (${minutes(now - run.firstAt)})`,
       };
     }
     return QUIET;
@@ -189,7 +189,7 @@ export class OutageLog {
     this.runs.delete(key);
     return {
       log: true,
-      note: ` after ${run.count} failed attempts (${minutes(now - run.firstAt)})`,
+      note: ` after ${plural(run.count, "failed attempt")} (${minutes(now - run.firstAt)})`,
     };
   }
 
@@ -251,6 +251,13 @@ export class RepeatLog {
     const d = this.outage.ok("", now);
     return { line: d.log ? `${this.prefix} recovered${d.note}` : null, level: "info" };
   }
+}
+
+/** `1 attempt` / `2 attempts`. A recovery after a single failure read
+ *  "recovered after 1 failed attempts", which is the sort of thing an operator
+ *  reads as a bug in the thing that wrote it. */
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 function minutes(ms: number): string {

@@ -468,8 +468,8 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "placeholder": "10",
         "default": 10,
         "min": 10,
-        "max": 3600,
-        "help": "How often to read the SafeSpace value. Separate from the Vea interval above, because a live number is only worth having if it is read often. SafeSpace rate-limits and Stage reads its limit headers and backs off on its own, but there is nothing to win below 10s. Ignored while the space ID is blank."
+        "max": 60,
+        "help": "How often to read the SafeSpace value. Separate from the Vea interval above, because a live number is only worth having if it is read often. SafeSpace rate-limits and Stage reads its limit headers and backs off on its own, but there is nothing to win below 10s. The ceiling is 60s because a reading older than that is no fresher than Vea's and the occupancy goes back to Vea — to read it less often than that, clear the space ID instead. Ignored while the space ID is blank."
       }
     ]
   },

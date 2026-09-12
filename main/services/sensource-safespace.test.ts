@@ -34,6 +34,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { setAppTimeZone } = await import("./app-timezone.js");
 const { setSubscriberCheck } = await import("./broadcaster.js");
+const { integrationManager } = await import("./integration-manager.js");
 setAppTimeZone("America/Chicago");
 const { sensourceService } = await import("./sensource-service.js");
 import { errorMessage } from "./errors.js";
@@ -121,6 +122,8 @@ interface StubOptions {
   safeSpaceStatus?: () => number;
   /** Fail the Vea day-aggregate request. */
   dayStatus?: () => number;
+  /** Rate headers on each SafeSpace response, so a case can drive the quota. */
+  safeSpaceHeaders?: () => Record<string, string>;
 }
 
 function stubFetch(opts: StubOptions = {}): void {
@@ -134,7 +137,10 @@ function stubFetch(opts: StubOptions = {}): void {
       // A transport failure quotes the URL, which carries the space id — the
       // exact way the credential escapes into an error message.
       if (body === null) throw new TypeError(`fetch failed: ${url}`);
-      return new Response(body, { status: opts.safeSpaceStatus?.() ?? 200 });
+      return new Response(body, {
+        status: opts.safeSpaceStatus?.() ?? 200,
+        headers: opts.safeSpaceHeaders?.() ?? {},
+      });
     }
     if (isAuthHost(url)) {
       return new Response(JSON.stringify({ access_token: "t1", expires_in: 3600 }), { status: 200 });
@@ -279,8 +285,14 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
       await readSafeSpace();
       clock += 10_000;
     }
+    await poll();
 
     assert.deepEqual(fellBack(), [], `an expected empty response was logged:\n${fellBack().join("\n")}`);
+    // Positively, not only by absence: an assertion that nothing was LOGGED
+    // would pass just as well if nothing had been read or published at all.
+    assert.equal(safeSpaceRequests().length, 8, "the reading stopped going out");
+    assert.equal(published().total.occupancy, 417, "the held reading was not what got published");
+    assert.equal(published().total.occupancySource, "safespace");
   });
 
   it("falls back to Vea rather than going blank when SafeSpace fails", async () => {
@@ -317,13 +329,21 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     // The same shape Vea fails in, and the reason a transition flag is not
     // enough: every intervening success would clear it and every failure would
     // be a fresh first failure.
+    //
+    // 70 SECONDS APART, not 10, and that is the whole case. This was written at
+    // the poll cadence and was VACUOUS: inside SAFESPACE_HOLD_MS every failure
+    // still had a young reading behind it, so `usable` was never null, the
+    // OutageLog was never consulted, and the test stayed green with the
+    // de-duplication deleted outright. A different mechanism was suppressing the
+    // lines and the assertion could not tell. Past the hold window each failure
+    // genuinely reaches the log, which is what the run has to absorb.
     let ok = false;
     stubFetch({ safeSpaceStatus: () => (ok ? 200 : 503), safeSpace: () => (ok ? "417" : "") });
 
     for (let i = 0; i < 12; i++) {
       ok = i % 2 === 1;
       await readSafeSpace();
-      clock += 10_000;
+      clock += 70_000;
     }
 
     assert.equal(
@@ -347,7 +367,13 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     }
 
     assert.equal(cameBack().length, 1, `the recovery logged ${cameBack().length} times`);
-    assert.match(cameBack()[0], /after 1 failed attempt/, "the recovery did not account for the outage");
+    // Exact, including the singular: `/after 1 failed attempt/` also matched
+    // "after 1 failed attempts", which is what the string used to be.
+    assert.match(
+      cameBack()[0],
+      /after 1 failed attempt \(/,
+      `the recovery did not account for the outage: ${cameBack()[0]}`,
+    );
   });
 
   it("never lets the space id reach a log line", async () => {
@@ -547,6 +573,74 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     armed = [];
     svc.pollNowIfIdle();
     assert.deepEqual(armed, [], "a flapping consumer read a rate-limited endpoint off-cadence");
+  });
+
+  it("keeps a reading usable up to the next one at the slowest interval the form offers", async () => {
+    // A reading is preferred for SAFESPACE_HOLD_MS. If the form lets an operator
+    // set an interval longer than that, the count spends most of every cycle back
+    // on Vea and flip-flops its source — a setting offered and not usable. The
+    // field once carried the VEA maximum of an hour, purely because that was the
+    // constant already in scope.
+    //
+    // Asserted by DRIVING the interval the descriptor actually offers, not by
+    // comparing it to the constant it is built from: that comparison moves with
+    // whatever it is meant to catch.
+    const field = integrationManager
+      .getDescriptors()
+      .find((d) => d.id === "sensource")
+      ?.configSchema.find((f) => f.key === "safeSpacePollSeconds");
+    const max = Number(field?.max);
+    assert.ok(Number.isFinite(max) && max > 0, "the SafeSpace interval field has no ceiling");
+
+    resetService({ ...CFG, safeSpacePollSeconds: max });
+    let body = "417";
+    stubFetch({ safeSpace: () => body, safeSpaceStatus: () => (body === "" ? 503 : 200) });
+    await poll();
+    await readSafeSpace();
+    assert.equal(published().total.occupancySource, "safespace", "the first reading never took");
+
+    // One whole interval later — the moment the next reading is due — and it
+    // fails. The one before it has to still be standing.
+    clock += max * 1000;
+    body = "";
+    await readSafeSpace();
+    assert.equal(
+      published().total.occupancySource,
+      "safespace",
+      `at the ${max}s the form allows, a single missed reading already drops the count to Vea`,
+    );
+  });
+
+  it("waits out a quota hold instead of waking on the poll cadence through it", async () => {
+    // A held reading already knows when the bucket refills. Re-arming at ten
+    // seconds through a two-minute hold is twelve wake-ups to be told "still
+    // held" — work against a rate-limited endpoint to learn nothing.
+    const remainings = ["4", "2", "0", "0"];
+    let i = 0;
+    stubFetch({
+      safeSpace: () => "417",
+      safeSpaceHeaders: () => ({
+        "X-RateLimit-Limit": "40",
+        "X-RateLimit-Remaining": remainings[Math.min(i++, remainings.length - 1)],
+        "X-RateLimit-Reset": "120",
+      }),
+    });
+    const armed: number[] = [];
+    svc.scheduleSafeSpaceIn = (ms: number) => armed.push(ms);
+
+    // Three reads: the third leaves the bucket unable to pay for a fourth.
+    for (let n = 0; n < 3; n++) {
+      await readSafeSpace();
+      clock += 10_000;
+    }
+    assert.deepEqual(armed, [10_000, 10_000, 10_000], "a normal read did not re-arm at the cadence");
+
+    // The fourth is refused locally, and re-arms for the reset the SERVER named.
+    await readSafeSpace();
+    assert.ok(
+      armed.at(-1)! > 60_000,
+      `a held reading re-armed in ${armed.at(-1)}ms, so it will wake through the whole hold`,
+    );
   });
 
   it("publishes nothing from a reading whose configuration was replaced", async () => {

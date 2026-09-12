@@ -24,6 +24,7 @@ import {
   DEFAULT_POLL_SECONDS as SENSOURCE_DEFAULT_POLL_SECONDS,
   MIN_POLL_SECONDS as SENSOURCE_MIN_POLL_SECONDS,
   SAFESPACE_DEFAULT_POLL_SECONDS,
+  SAFESPACE_MAX_POLL_SECONDS,
   SAFESPACE_MIN_POLL_SECONDS,
   type SenSourceConfig,
   sensourceService,
@@ -546,8 +547,8 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       placeholder: String(SAFESPACE_DEFAULT_POLL_SECONDS),
       default: SAFESPACE_DEFAULT_POLL_SECONDS,
       min: SAFESPACE_MIN_POLL_SECONDS,
-      max: SENSOURCE_MAX_POLL_SECONDS,
-      help: "How often to read the SafeSpace value. Separate from the Vea interval above, because a live number is only worth having if it is read often. SafeSpace rate-limits and Stage reads its limit headers and backs off on its own, but there is nothing to win below 10s. Ignored while the space ID is blank.",
+      max: SAFESPACE_MAX_POLL_SECONDS,
+      help: "How often to read the SafeSpace value. Separate from the Vea interval above, because a live number is only worth having if it is read often. SafeSpace rate-limits and Stage reads its limit headers and backs off on its own, but there is nothing to win below 10s. The ceiling is 60s because a reading older than that is no fresher than Vea's and the occupancy goes back to Vea — to read it less often than that, clear the space ID instead. Ignored while the space ID is blank.",
     },
   ],
 };

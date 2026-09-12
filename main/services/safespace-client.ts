@@ -82,7 +82,12 @@ export function resetDelayMs(raw: string | null, now: number): number | null {
     const at = Date.parse(raw);
     return Number.isFinite(at) ? clampHold(at - now) : null;
   }
-  // 10^9 seconds is 2001; no sane delta reaches it and every epoch value passes it.
+  // Three forms, told apart by magnitude, because no header says which it uses:
+  // 10^12 is already past in MILLISECONDS, 10^9 is an epoch in SECONDS (10^9s is
+  // 2001, which no sane delta reaches), and anything smaller is a delta in
+  // seconds. Without the first branch a millisecond epoch was multiplied by a
+  // thousand again and every hold went to the clamp.
+  if (n >= 1e12) return clampHold(n - now);
   return clampHold(n >= 1e9 ? n * 1000 - now : n * 1000);
 }
 
@@ -127,9 +132,13 @@ export type SafeSpaceReading =
  * same choke point rather than a second copy of it.
  */
 export function redact(text: string, spaceId: string | null): string {
-  const safe = scrub(text, 160);
-  if (!spaceId) return safe;
-  const out = safe.split(spaceId).join(PLACEHOLDER);
+  if (!spaceId) return scrub(text, 160);
+  // BEFORE scrub, not after. scrub truncates at its limit, so redacting second
+  // meant a message long enough to be cut mid-id left the surviving prefix in
+  // the line — the id partially published rather than replaced. Ordering it this
+  // way smuggles nothing: scrub only ESCAPES control characters, it never decodes,
+  // so nothing can reassemble an id that has already been replaced.
+  const out = text.split(spaceId).join(PLACEHOLDER);
   // The URL carries the ENCODED id and a fetch error quotes the URL, so an id
   // holding a space, a slash or a non-ASCII character survives a raw split
   // untouched — `caf\u00e9-space` reaches the log as `caf%C3%A9-space`. Real ids look
@@ -137,7 +146,7 @@ export function redact(text: string, spaceId: string | null): string {
   // id never reaches a log line "not in a URL", and that has to be true of the
   // form the URL actually carries.
   const encoded = encodeURIComponent(spaceId);
-  return encoded === spaceId ? out : out.split(encoded).join(PLACEHOLDER);
+  return scrub(encoded === spaceId ? out : out.split(encoded).join(PLACEHOLDER), 160);
 }
 
 /** What a redacted id reads as. Not an empty string: an operator has to be able
@@ -205,7 +214,11 @@ export class SafeSpaceClient {
     this.observe(res.headers, now);
 
     if (res.status === 429) {
-      const wait = resetDelayMs(res.headers.get("retry-after"), now) ?? DEFAULT_RESET_MS;
+      // The LONGER of the two. observe() has already run and may have taken a
+      // hold from X-RateLimit-Reset; overwriting it with Retry-After meant a 429
+      // carrying `X-RateLimit-Reset: 120` and no Retry-After got twenty seconds.
+      const after = resetDelayMs(res.headers.get("retry-after"), now) ?? DEFAULT_RESET_MS;
+      const wait = Math.max(after, this.holdUntil - now);
       this.holdUntil = now + wait;
       return {
         kind: "failed",

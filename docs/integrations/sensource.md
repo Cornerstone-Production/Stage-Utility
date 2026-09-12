@@ -84,7 +84,10 @@ live-occupancy value's embed address — the ID is the last path segment of
 `app.safespace.io/api/raw-data/live-occupancy/<space ID>` (their UI may show the
 `display.safespace.io/value/live/<space ID>` form of the same thing, which ends in
 the same ID). Paste that ID into **SafeSpace space ID** on the SenSource card, and
-set **SafeSpace interval** if 10 seconds is not what you want.
+set **SafeSpace interval** if 10 seconds is not what you want. That field stops
+at 60 seconds: a reading older than that is no fresher than Vea's, so a longer
+interval would leave the count on Vea for most of every cycle. To read SafeSpace
+less often than that, clear the space ID and let Vea answer everything.
 
 **Treat the space ID as a credential.** The endpoint has no key, no token and no
 account check — the ID is the whole of its authority, so anyone who has it can
@@ -118,9 +121,12 @@ you would handle the ID itself.
   An `HTTP 429` honours `Retry-After`, capped at five minutes.
 
 The published count says which product it came from: the `people:count` payload
-carries `total.occupancySource` (`"vea"` or `"safespace"`), and the integration's
-connection line on the Integrations panel names the source it used on the last
-poll.
+carries `total.occupancySource`, either `"vea"` or `"safespace"`, and a change of
+source is a `[sensource]` line on `/log`. Nothing on a display shows it — read it
+from `GET /api/people/count` or the SSE channel. The Integrations panel's
+connection line names the source too, but it is written when the integration
+connects and is not rewritten on every poll, so treat it as where the count
+started rather than where it is now.
 
 ## Service history
 

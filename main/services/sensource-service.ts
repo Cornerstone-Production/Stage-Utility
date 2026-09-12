@@ -169,6 +169,16 @@ export const SAFESPACE_MIN_POLL_SECONDS = 10;
  * that with margin, and covers five consecutive empties at the default interval.
  */
 const SAFESPACE_HOLD_MS = 60_000;
+/**
+ * Upper bound on the SafeSpace interval FORM FIELD.
+ *
+ * Derived, not chosen: a reading stops being preferred after SAFESPACE_HOLD_MS,
+ * so an interval longer than that leaves the count on Vea for most of every
+ * cycle and flip-flopping its source — a setting the form offered and the
+ * feature could not use. An operator who wants SafeSpace read less often than
+ * this wants it switched off, which the blank space id already does.
+ */
+export const SAFESPACE_MAX_POLL_SECONDS = SAFESPACE_HOLD_MS / 1000;
 
 /** The settle window for a poller ticking every `sec` seconds, which the caller
  *  has already floored — the two pollers in this file have different floors. */
@@ -504,7 +514,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
    * Which parts of the poll are failing, keyed by name, and when each last spoke.
    *
    * This was a `Map<string, boolean>` with a once-per-TRANSITION rule, and it was
-   * not enough. Measured in production over five days: 3,519 warning and error
+   * not enough. Measured in production over five days: 3,527 warning and error
    * lines from this integration alone, 2,837 of them in one day, against under
    * 200 for everything else in the app combined.
    *
@@ -549,6 +559,10 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
    * can be an hour.
    */
   private veaOccupancy: number | null = null;
+  /** True while a SafeSpace reading is in flight — see readSafeSpace. */
+  private safeSpaceInFlight = false;
+  /** True while test() is holding the operator's unsaved config in `this.cfg`. */
+  private testing = false;
   /** True while the pending SafeSpace reading was scheduled at the idle cadence.
    *  Its own flag: `polledIdle` is the VEA poll's and is never set at a Vea
    *  interval of 60s or more, so it cannot speak for this timer. */
@@ -746,6 +760,10 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
    * produce a number nobody reads.
    */
   protected scheduleSafeSpaceIn(delayMs: number): void {
+    // The guard ConnectionLifecycle.scheduleIn opens with. Every caller happens
+    // to be guarded today; the invariant belongs with the timer, not spread over
+    // the three places that arm it.
+    if (!this.running) return;
     if (this.safeSpaceTimer) clearTimeout(this.safeSpaceTimer);
     this.safeSpaceTimer = setTimeout(() => void this.readSafeSpace(), delayMs);
   }
@@ -767,7 +785,16 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
    */
   private async readSafeSpace(): Promise<void> {
     const id = this.cfg?.safeSpaceId;
-    if (!this.running || !id) return;
+    // `testing` is the Test-connection button: test() swaps this.cfg for the
+    // operator's UNSAVED form config across an await, and a reading that landed
+    // in that window would store the unsaved space id's answer as the live
+    // occupancy with nothing to say it had.
+    if (!this.running || !id || this.safeSpaceInFlight || this.testing) return;
+    // Two readings at once interleave their X-RateLimit-Remaining values, and the
+    // cost is MEASURED from consecutive ones — the one thing the client is careful
+    // not to assume. start() calls this directly while pollNowIfIdle can arm a 0ms
+    // timer, so the overlap is reachable.
+    this.safeSpaceInFlight = true;
     const epoch = this.pollEpoch;
     let reading: SafeSpaceReading;
     try {
@@ -777,6 +804,21 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       // reading must still not take the timer down with it.
       reading = { kind: "failed", why: redact(errorMessage(err), id), status: null };
     }
+    try {
+      this.applySafeSpace(reading, epoch);
+    } finally {
+      // In a finally, for the reason connect() next door puts its re-arm in one:
+      // a throw from a log line, from appendHistory, from emit or from a
+      // broadcast listener would otherwise leave the timer unarmed and the
+      // reading dead for good, with an unhandled rejection as the only trace.
+      this.safeSpaceInFlight = false;
+      if (this.running && epoch === this.pollEpoch) this.rearmSafeSpace(reading);
+    }
+  }
+
+  /** Fold one reading into the published count. Separate from readSafeSpace so
+   *  the re-arm can sit in a finally around it. */
+  private applySafeSpace(reading: SafeSpaceReading, epoch: number): void {
     // Reconfigured mid-read: this answer describes a space the operator has
     // replaced, and the new configuration's start() has already armed a timer.
     if (!this.running || epoch !== this.pollEpoch) return;
@@ -802,11 +844,20 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
         if (this.veaOccupancy !== null) this.republishOccupancy(this.veaOccupancy, "vea");
       }
     }
+  }
 
+  /** Queue the next reading at whichever cadence the moment calls for. */
+  private rearmSafeSpace(reading: SafeSpaceReading): void {
     const sec = this.safeSpaceSeconds();
     const demand = this.inDemand;
     this.safeSpacePolledIdle = !demand && IDLE_POLL_MS > sec * 1000;
-    this.scheduleSafeSpaceIn(demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
+    const normal = demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS);
+    // A held reading already knows when the bucket refills, and waking every ten
+    // seconds through a five-minute hold to be told "still held" thirty times is
+    // work for nothing. Never SHORTER than the normal cadence.
+    const wait =
+      reading.kind === "held" ? Math.max(normal, reading.untilMs - Date.now()) : normal;
+    this.scheduleSafeSpaceIn(wait);
   }
 
   /**
@@ -880,6 +931,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     try {
       const prev = this.cfg;
       this.cfg = cfg;
+      this.testing = true;
       this.resetAuth();
       try {
         const locations = await this.listLocations();
@@ -893,6 +945,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
         };
       } finally {
         this.cfg = prev;
+        this.testing = false;
         this.resetAuth();
       }
     } catch (err) {

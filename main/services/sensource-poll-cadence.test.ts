@@ -30,9 +30,13 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-sensource-cadence-"))
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { sensourceService, DEFAULT_POLL_SECONDS, MIN_POLL_SECONDS } = await import(
-  "./sensource-service.js"
-);
+const {
+  sensourceService,
+  DEFAULT_POLL_SECONDS,
+  MIN_POLL_SECONDS,
+  SAFESPACE_DEFAULT_POLL_SECONDS,
+  SAFESPACE_MIN_POLL_SECONDS,
+} = await import("./sensource-service.js");
 const { integrationManager } = await import("./integration-manager.js");
 import type { PeopleCountDTO } from "../types/stage.js";
 
@@ -181,5 +185,36 @@ describe("the poll interval has one definition", () => {
       typeof field!.min === "number" && field!.min >= MIN_POLL_SECONDS,
       `form floor ${field!.min} is below the ${MIN_POLL_SECONDS}s the poller enforces`,
     );
+  });
+});
+
+describe("the SafeSpace interval has one definition too", () => {
+  const field = integrationManager
+    .getDescriptors()
+    .find((d) => d.id === "sensource")
+    ?.configSchema.find((f) => f.key === "safeSpacePollSeconds");
+
+  it("is offered by the settings form, as a number", () => {
+    assert.ok(field, "the SenSource descriptor lost its SafeSpace interval field");
+    assert.equal(field.type, "number");
+  });
+
+  it("shows the form the same default and floor the reading uses", () => {
+    assert.equal(field!.default, SAFESPACE_DEFAULT_POLL_SECONDS);
+    assert.equal(field!.placeholder, String(SAFESPACE_DEFAULT_POLL_SECONDS));
+    assert.ok(
+      typeof field!.min === "number" && field!.min >= SAFESPACE_MIN_POLL_SECONDS,
+      `form floor ${field!.min} is below the ${SAFESPACE_MIN_POLL_SECONDS}s the reading enforces`,
+    );
+  });
+
+  it("offers a space-ID field with no default, because blank means off", () => {
+    const id = integrationManager
+      .getDescriptors()
+      .find((d) => d.id === "sensource")
+      ?.configSchema.find((f) => f.key === "safeSpaceId");
+    assert.ok(id, "the SenSource descriptor lost its SafeSpace space-ID field");
+    assert.equal(id.type, "text");
+    assert.equal(id.default, undefined, "a default space ID would turn the section on for everyone");
   });
 });
