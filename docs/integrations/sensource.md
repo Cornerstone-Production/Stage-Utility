@@ -88,11 +88,17 @@ set **SafeSpace interval** if 10 seconds is not what you want.
 
 **Treat the space ID as a credential.** The endpoint has no key, no token and no
 account check — the ID is the whole of its authority, so anyone who has it can
-read your occupancy from anywhere. Stage keeps it out of every log line: the one
-place that builds a message containing the URL redacts it first, so a failure
-reads `<space id>` rather than the value. It is stored as ordinary
-(non-encrypted) integration config, so it is in a settings export like any other
-field — treat an export the same way you would treat the ID itself.
+read your occupancy from anywhere.
+
+Stage keeps it out of every log line: the one place that builds a message
+containing the URL redacts it first, so a failure on `/log` reads `<space id>`
+rather than the value.
+
+It is not stored with the Vea client secret. It is ordinary non-encrypted
+integration config, which means it rides along in a **config snapshot** (Settings → Advanced → Data → Config snapshots, and in the automatic
+backups) — a bundle otherwise presented as safe to keep on a drive or hand to
+somebody. Handle a snapshot taken from a site with SafeSpace configured the way
+you would handle the ID itself.
 
 **What the reading does when it goes wrong.**
 

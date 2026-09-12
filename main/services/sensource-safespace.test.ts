@@ -46,6 +46,7 @@ type Poller = {
   running: boolean;
   connect: () => Promise<void>;
   readSafeSpace: () => Promise<void>;
+  start: () => void;
   emit: (dto: PeopleCountDTO) => void;
   last: PeopleCountDTO;
   token: string | null;
@@ -393,6 +394,40 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     assert.ok(emitted.length > afterPoll, "a new SafeSpace reading published nothing");
     assert.equal(published().total.occupancy, 512, "the republished snapshot carried the old number");
     assert.equal(published().total.attendance, 1600, "the republish lost Vea's attendance");
+  });
+
+  it("arms the reading from start(), and only when a space ID is set", async () => {
+    // The wiring, driven rather than assumed: everything above calls
+    // readSafeSpace() directly, which would pass just as well if nothing in the
+    // poller's lifecycle ever called it. start() is the only thing that does —
+    // configure() reaches it through restart().
+    stubFetch({ safeSpace: () => "417" });
+    svc.running = false;
+    svc.start();
+    await new Promise((r) => setTimeout(r, 60));
+
+    assert.ok(
+      safeSpaceRequests().length >= 1,
+      "start() never read SafeSpace, so nothing in the lifecycle would",
+    );
+    assert.ok(
+      logs.some((l) => l.includes("reading SafeSpace live occupancy every 10s")),
+      `start() did not say it was reading SafeSpace:\n${logs.join("\n")}`,
+    );
+
+    // ...and with no ID it is silent and sends nothing.
+    resetService({ ...CFG, safeSpaceId: null });
+    stubFetch();
+    svc.running = false;
+    svc.start();
+    await new Promise((r) => setTimeout(r, 60));
+
+    assert.equal(
+      safeSpaceRequests().length,
+      0,
+      `start() read SafeSpace ${safeSpaceRequests().length} time(s) with no space ID`,
+    );
+    assert.deepEqual(logs.filter((l) => l.includes("SafeSpace")), [], "a blank ID was announced");
   });
 
   it("publishes nothing from a reading whose configuration was replaced", async () => {

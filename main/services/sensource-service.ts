@@ -745,10 +745,20 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     if (!this.running || epoch !== this.pollEpoch) return;
 
     const now = Date.now();
-    if (reading.kind === "ok") this.safeSpaceAt = { occupancy: reading.occupancy, at: now };
-    const usable = this.safeSpaceOccupancy(now);
-    this.noteSafeSpaceSource(usable !== null, reading, now);
-    if (usable !== null) this.republishOccupancy(usable);
+    if (reading.kind === "ok") {
+      this.safeSpaceAt = { occupancy: reading.occupancy, at: now };
+      const back = this.recovered("safespace", now);
+      if (back.log) console.log(`[sensource] SafeSpace live occupancy is answering again${back.note}`);
+      this.republishOccupancy(reading.occupancy);
+    } else {
+      // Not this reading's number — but the last one may still be young enough
+      // to stand, which is what carries the occupancy over the one reading in six
+      // that comes back empty. Silent while it does: nothing a display shows has
+      // changed, and the empty response is the normal case.
+      const held = this.safeSpaceOccupancy(now);
+      if (held !== null) this.republishOccupancy(held);
+      else this.noteSafeSpaceOutage(reading, now);
+    }
 
     this.scheduleSafeSpaceIn(
       this.inDemand
@@ -758,43 +768,35 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   }
 
   /**
-   * Say — once per outage — which source the occupancy is coming from.
+   * Say — once per outage — that the occupancy has gone back to Vea.
+   *
+   * Called only when there is no usable SafeSpace number at all, which is the
+   * event an operator can actually see. An empty response with a young value
+   * behind it is NOT reported: about one sample in six is empty by design, and a
+   * line for each would be six an hour saying nothing changed.
    *
    * The KIND is taken from the reading's shape and never from its prose. A
    * "waiting 20s" countdown inside the message would be a different kind on every
    * report, which makes each one a fresh first failure and defeats the reminder
    * floor: the same mistake, one level down, that this integration's per-poll
    * logging was.
-   *
-   * An empty response is NOT reported on its own. About one sample in six is
-   * empty by design; only an empty run long enough to age the held value past
-   * SAFESPACE_HOLD_MS actually changes what a display shows, and that is the
-   * event worth a line.
    */
-  private noteSafeSpaceSource(usable: boolean, reading: SafeSpaceReading, now: number): void {
-    if (usable) {
-      const back = this.recovered("safespace", now);
-      if (back.log) {
-        console.log(`[sensource] SafeSpace live occupancy is answering again${back.note}`);
-      }
-      return;
-    }
+  private noteSafeSpaceOutage(
+    reading: Exclude<SafeSpaceReading, { kind: "ok" }>,
+    now: number,
+  ): void {
     const kind =
-      reading.kind === "failed"
-        ? reading.status
-          ? `HTTP ${reading.status}`
-          : "transport"
-        : reading.kind;
+      reading.kind === "failed" ? (reading.status ? `HTTP ${reading.status}` : "transport") : reading.kind;
     const out = this.outages.fail("safespace", kind, now);
     if (out.log) {
-      // `why` arrives redacted and scrubbed: safespace-client.ts is the ONE choke
-      // point for the space id, because it is the only thing that knows the URL.
-      // A second redact() here was tried and removed — it could not be shown to
-      // do anything, and defence that cannot be proved is how a guard goes green
-      // on the bug it was written for.
-      const why = reading.kind === "ok" ? "the reading went stale" : reading.why;
+      // `reading.why` arrives redacted and scrubbed: safespace-client.ts is the
+      // ONE choke point for the space id, because it is the only thing that knows
+      // the URL. A second redact() here was tried and removed — it could not be
+      // shown to do anything, and defence that cannot be proved is how a guard
+      // goes green on the bug it was written for.
       console.warn(
-        `[sensource] SafeSpace live occupancy unavailable (${why}); the occupancy falls back to Vea${out.note}`,
+        `[sensource] SafeSpace live occupancy unavailable (${reading.why}); ` +
+          `the occupancy falls back to Vea${out.note}`,
       );
     }
   }
