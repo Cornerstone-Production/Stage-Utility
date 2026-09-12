@@ -788,8 +788,23 @@ export async function runCompanionReconcile(): Promise<ReconcileRun | null> {
 }
 
 /**
+ * The last connection-health line written, so an unchanged one is not written
+ * again. null when the last read was clean. See reportConnectionHealth.
+ *
+ * Module state and not a store: it is about this process's log, and a restart
+ * SHOULD write the current state once — that is the line an operator reads after
+ * bringing the box back up.
+ */
+let lastHealthLog: string | null = null;
+
+/** For the guard, which needs two passes in one process to mean two passes. */
+export function resetConnectionHealthLog(): void {
+  lastHealthLog = null;
+}
+
+/**
  * Read what Companion says about its own connections, put it on the row and, when
- * it is not clean, in the log.
+ * it has CHANGED and is not clean, in the log.
  *
  * NO try/catch, deliberately. The only catch that would fit here is one that
  * logs and carries on, which this repo forbids outright — and there is nothing
@@ -812,7 +827,19 @@ async function reportConnectionHealth(): Promise<void> {
   const { sentence, log } = healthReport(await companionApi.readConnections());
   // A warning, not a log: every line this writes is a connection that is not
   // answering, which is the thing an operator came to /log to find.
-  if (log) console.warn(`[companion] ${scrub(log, LOG_MAX)}`);
+  //
+  // ON CHANGE, because the reason a clean read is silent applies harder here.
+  // The rule was written for "52 connection(s) ok twenty-four times a day is
+  // what buries the pass that found twelve in error" — and the install this was
+  // built against sits permanently at twelve in error, so the unchanged rule
+  // wrote that same 200-character line 24 times a day and buried the pass where
+  // the number MOVES, which is the only one worth reading. The row carries the
+  // current state either way; the log carries the transitions.
+  if (log && log !== lastHealthLog) console.warn(`[companion] ${scrub(log, LOG_MAX)}`);
+  // Set even when nothing was logged, and CLEARED on a clean read, so a fault
+  // that comes back after being fixed is logged again rather than suppressed by
+  // a match against something hours old.
+  lastHealthLog = log;
   const { integrationManager } = await import("./integration-manager.js");
   // Never `failed`. This is only reached having ALREADY read the export off the
   // same Companion, so the outbound half demonstrably works — which is also why

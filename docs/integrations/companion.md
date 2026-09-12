@@ -728,7 +728,13 @@ Companion's own words for what is wrong:
 [companion] 12 of 52 connection(s) in error, 10 not reporting: 6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), 1 vizio-smartcast (Connection Failure), 10 tplink-kasasmartplug
 ```
 
-A clean pass logs nothing. `/api/connections` is a **Companion 5.x** endpoint; on
+**Only when it changes**, and never on a clean pass. An install with a fault
+nobody has got to yet would otherwise write the same line 24 times a day and
+bury the pass where the number moved. A fault that clears and comes back is
+written again, and so is the first pass after a restart. The row always carries
+the current state; the log carries the transitions.
+
+`/api/connections` is a **Companion 5.x** endpoint; on
 anything older the row simply carries no connection status, which is not
 reported as a fault.
 
