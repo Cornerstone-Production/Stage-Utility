@@ -39,7 +39,6 @@ const { automationStore } = await import("./automation-store.js");
 const { AUTOMATION_TRIGGERS, CALL_CHANNEL } = await import("./automation-triggers.js");
 const { AUTOMATION_CONDITIONS } = await import("./automation-conditions.js");
 const { reaperService } = await import("./reaper-service.js");
-const { propresenterService } = await import("./propresenter-service.js");
 const { prodcomService } = await import("./prodcom-service.js");
 const { stageController } = await import("./stage-controller.js");
 const { addBroadcastListener, channelDemandSourceCount, setSubscriberCheck } =
@@ -71,8 +70,7 @@ async function setRules(rules: Partial<Rule>[]): Promise<void> {
 
 // ── The gear the pollers poll ────────────────────────────────────────────────
 //
-// A real server on a real socket. Answers REAPER's /_/TRANSPORT and everything
-// ProPresenter asks for, so connect() takes its SUCCESS path — which is the only
+// A real server on a real socket, so connect() takes its SUCCESS path — the only
 // path that reaches the cadence decision under test.
 let gear: http.Server;
 let gearPort = 0;
@@ -95,7 +93,6 @@ before(async () => {
 
 after(async () => {
   reaperService.stop();
-  propresenterService.stop();
   await new Promise<void>((resolve) => gear.close(() => resolve()));
 });
 
@@ -138,10 +135,16 @@ async function scheduledDelayMs(svc: Poller): Promise<number> {
   return scheduled;
 }
 
-/** ProPresenter has no in-process consumer today. This stands in for the one the
- *  next feature adds; the gate has to be right BEFORE that consumer exists. */
-let ppWanted = false;
-propresenterService.addDemandSource(() => ppWanted);
+// ProPresenter used to be the third entry in this table. It is not a poller any
+// more: it holds one server-sent-event stream per instance for as long as the
+// instance is configured, so in the steady state there is no cadence to gate and
+// no work to skip when nobody is watching. Its fallback poll — taken only when a
+// ProPresenter refuses `status/updates` — does still ask `inDemand`, and is
+// covered by "the fallback poll still backs off when nobody is watching" in
+// propresenter-stream.test.ts, which can force that path.
+//
+// Kept here as a note rather than deleted silently: an entry vanishing from a
+// gate table is exactly how one of these regressions gets back in.
 
 const POLLERS: {
   label: string;
@@ -185,13 +188,6 @@ const POLLERS: {
             ]
           : [],
       ),
-  },
-  {
-    label: "ProPresenter",
-    service: propresenterService as unknown as Poller,
-    demand: async (on) => {
-      ppWanted = on;
-    },
   },
 ];
 
