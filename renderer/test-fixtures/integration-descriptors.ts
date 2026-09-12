@@ -453,6 +453,23 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "min": 10,
         "max": 3600,
         "help": "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls."
+      },
+      {
+        "key": "safeSpaceId",
+        "label": "SafeSpace space ID (optional)",
+        "type": "text",
+        "placeholder": "(only if your site has SafeSpace)",
+        "help": "Optional. If your site also has SenSource SafeSpace, paste the space ID from its live-occupancy embed URL (SafeSpace → the space → the address of its live value ends in the ID). It replaces only the occupancy number with SafeSpace's live reading, which is much fresher than Vea's; attendance, zones, peak and capacity keep coming from Vea. Leave blank to use Vea for everything. Treat the ID like a password: anyone who has it can read your occupancy without logging in."
+      },
+      {
+        "key": "safeSpacePollSeconds",
+        "label": "SafeSpace interval (s)",
+        "type": "number",
+        "placeholder": "10",
+        "default": 10,
+        "min": 10,
+        "max": 60,
+        "help": "How often to read the SafeSpace value. Separate from the Vea interval above, because a live number is only worth having if it is read often. SafeSpace rate-limits and Stage reads its limit headers and backs off on its own, but there is nothing to win below 10s. The ceiling is 60s because a reading older than that is no fresher than Vea's and the occupancy goes back to Vea — to read it less often than that, clear the space ID instead. Ignored while the space ID is blank."
       }
     ]
   },

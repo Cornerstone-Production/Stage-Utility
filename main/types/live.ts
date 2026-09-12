@@ -310,6 +310,16 @@ export interface PeopleCountDTO extends RevisionedStatus {
      *  because the day-aggregate request is failing, rather than this poll's.
      *  Absent means they are current (or, on a site with no space, absent). */
     dayAggregatesStale?: boolean;
+    /**
+     * Which product `occupancy` came from.
+     *
+     * Two SenSource products can answer it and they answer differently: Vea's is
+     * derived from the day's ins and outs on the poll interval, SafeSpace's is a
+     * live value read every few seconds. An operator looking at a number that
+     * disagrees with a dashboard needs to know which one they are looking at.
+     * Absent on a snapshot with no occupancy at all.
+     */
+    occupancySource?: "vea" | "safespace";
   };
   zones: PeopleZoneCount[];
   /** Rolling building-total samples (oldest→newest) for the people-graph object.

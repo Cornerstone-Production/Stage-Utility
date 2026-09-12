@@ -23,6 +23,9 @@ import { secretsStore } from "./secrets.js";
 import {
   DEFAULT_POLL_SECONDS as SENSOURCE_DEFAULT_POLL_SECONDS,
   MIN_POLL_SECONDS as SENSOURCE_MIN_POLL_SECONDS,
+  SAFESPACE_DEFAULT_POLL_SECONDS,
+  SAFESPACE_MAX_POLL_SECONDS,
+  SAFESPACE_MIN_POLL_SECONDS,
   type SenSourceConfig,
   sensourceService,
 } from "./sensource-service.js";
@@ -529,6 +532,23 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       min: SENSOURCE_MIN_POLL_SECONDS,
       max: SENSOURCE_MAX_POLL_SECONDS,
       help: "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls.",
+    },
+    {
+      key: "safeSpaceId",
+      label: "SafeSpace space ID (optional)",
+      type: "text",
+      placeholder: "(only if your site has SafeSpace)",
+      help: "Optional. If your site also has SenSource SafeSpace, paste the space ID from its live-occupancy embed URL (SafeSpace → the space → the address of its live value ends in the ID). It replaces only the occupancy number with SafeSpace's live reading, which is much fresher than Vea's; attendance, zones, peak and capacity keep coming from Vea. Leave blank to use Vea for everything. Treat the ID like a password: anyone who has it can read your occupancy without logging in.",
+    },
+    {
+      key: "safeSpacePollSeconds",
+      label: "SafeSpace interval (s)",
+      type: "number",
+      placeholder: String(SAFESPACE_DEFAULT_POLL_SECONDS),
+      default: SAFESPACE_DEFAULT_POLL_SECONDS,
+      min: SAFESPACE_MIN_POLL_SECONDS,
+      max: SAFESPACE_MAX_POLL_SECONDS,
+      help: "How often to read the SafeSpace value. Separate from the Vea interval above, because a live number is only worth having if it is read often. SafeSpace rate-limits and Stage reads its limit headers and backs off on its own, but there is nothing to win below 10s. The ceiling is 60s because a reading older than that is no fresher than Vea's and the occupancy goes back to Vea — to read it less often than that, clear the space ID instead. Ignored while the space ID is blank.",
     },
   ],
 };
@@ -1836,15 +1856,17 @@ class IntegrationManager {
   }
 
   private async getSensourceConfig(): Promise<SenSourceConfig> {
+    /** A saved interval field, which the form may have stored as either type. */
+    const seconds = (raw: unknown): number =>
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim()
+          ? parseInt(raw, 10)
+          : NaN;
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");
-    const rawPoll = cfg.pollSeconds;
-    const pollSeconds =
-      typeof rawPoll === "number"
-        ? rawPoll
-        : typeof rawPoll === "string" && rawPoll.trim()
-          ? parseInt(rawPoll, 10)
-          : NaN;
+    const pollSeconds = seconds(cfg.pollSeconds);
+    const safeSpacePoll = seconds(cfg.safeSpacePollSeconds);
     return {
       clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
       clientSecret: secrets.clientSecret || null,
@@ -1853,6 +1875,14 @@ class IntegrationManager {
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],
+      // Blank is the normal state, and it is not an error — it means the
+      // SafeSpace half is simply off.
+      safeSpaceId:
+        typeof cfg.safeSpaceId === "string" && cfg.safeSpaceId.trim() ? cfg.safeSpaceId.trim() : null,
+      safeSpacePollSeconds:
+        Number.isFinite(safeSpacePoll) && safeSpacePoll > 0
+          ? safeSpacePoll
+          : SAFESPACE_DEFAULT_POLL_SECONDS,
     };
   }
 

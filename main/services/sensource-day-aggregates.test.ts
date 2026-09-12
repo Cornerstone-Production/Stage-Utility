@@ -41,6 +41,7 @@ const { setAppTimeZone, zonedDateKey } = await import("./app-timezone.js");
 setAppTimeZone("America/Chicago");
 const { sensourceService } = await import("./sensource-service.js");
 import { errorMessage } from "./errors.js";
+import { OutageLog } from "./repeat-log.js";
 import type { PeopleCountDTO } from "../types/live.js";
 import type { SenSourceConfig } from "./sensource-service.js";
 
@@ -70,13 +71,26 @@ type Poller = {
     at: number;
     dateKey: string;
   } | null;
-  degraded: Map<string, boolean>;
-  loggedAuthBodies: Set<string>;
+  /**
+   * The real OutageLog, so resetService can clear it between cases.
+   *
+   * Typed as the class and not as a stand-in: this used to be a
+   * `degraded: Map<string, boolean>` that resetService replaced with a fresh Map,
+   * and when the service swapped the map for an OutageLog the assignment went on
+   * compiling — `as unknown as Poller` erases the mismatch — and silently reset
+   * nothing. One open run then leaked across every later case in the file and
+   * suppressed the first failure of each. Calling a METHOD on it means a rename
+   * throws here instead of quietly doing nothing.
+   */
+  outages: OutageLog;
   zonesCache: unknown;
   spacesCache: unknown;
   configure: (cfg: SenSourceConfig) => void;
   scheduleIn: (ms: number) => void;
   scheduleReconnect: () => void;
+  /** Stubbed alongside the scheduler: configure() restarts the poller, and a
+   *  case about what configure() DERIVES must not also start a poll. */
+  restart: () => void;
 };
 const svc = sensourceService as unknown as Poller;
 
@@ -87,7 +101,20 @@ const CFG: SenSourceConfig = {
   pollSeconds: 15,
   locationId: null,
   zoneIds: [],
+  // The Vea half of the integration. SafeSpace has its own file.
+  safeSpaceId: null,
+  safeSpacePollSeconds: 10,
 };
+
+/**
+ * The settle window at CFG's 15s poll — what the service derives for itself in
+ * configure(), pinned here because most of the log assertions below depend on it.
+ *
+ * A failing endpoint is ONE outage until a success has held this long. Eight
+ * polls, so the alternating 401/200 that these cases are built from can never
+ * reach it, and a genuine recovery is announced two minutes in.
+ */
+const SETTLE_MS = 2 * 60_000;
 
 /** Every request the stub saw, in order. */
 /** The token endpoint, matched on the exact host — not a substring, which CodeQL
@@ -234,8 +261,8 @@ function resetService(): void {
   svc.exchangeBlockedUntil = 0;
   svc.lastSharedClientLogAt = 0;
   svc.carriedDay = null;
-  svc.degraded = new Map();
-  svc.loggedAuthBodies = new Set();
+  svc.outages.forget();
+  svc.outages.settleAfter(SETTLE_MS);
   svc.zonesCache = null;
   svc.spacesCache = null;
   // goOffline() emits only when the last snapshot was connected, so a previous
@@ -252,6 +279,12 @@ async function poll(): Promise<void> {
   await svc.connect();
 }
 
+/** The "day aggregates unavailable" lines written so far. Read as a function,
+ *  not captured once: the cases below poll again after asserting. */
+const carriedLines = (): string[] => logs.filter((l) => l.includes("day aggregates unavailable"));
+/** The "day aggregates are available again" lines written so far. */
+const backLines = (): string[] => logs.filter((l) => l.includes("day aggregates are available again"));
+
 describe("SenSource day aggregates", () => {
   beforeEach(() => {
     resetService();
@@ -260,6 +293,7 @@ describe("SenSource day aggregates", () => {
     // The poll re-arms itself through these; a test must not leave a timer live.
     svc.scheduleIn = () => {};
     svc.scheduleReconnect = () => {};
+    svc.restart = () => {};
     svc.emit = (dto: PeopleCountDTO) => {
       emitted.push(dto);
       svc.last = dto;
@@ -304,15 +338,116 @@ describe("SenSource day aggregates", () => {
     assert.equal(emitted[1].total.dayAggregatesStale, true, "a carried total did not say so");
     assert.equal(emitted[0].total.dayAggregatesStale, undefined, "a live total was marked stale");
 
-    // Transitions, not polls. Two separate outages here (polls 2 and 4, with a
-    // good poll between them), so two lines going down and one coming back up —
-    // and never the four the old per-poll warn would have written.
-    const carried = logs.filter((l) => l.includes("day aggregates unavailable"));
-    const back = logs.filter((l) => l.includes("day aggregates are available again"));
-    assert.equal(carried.length, 2, `the carry-forward logged ${carried.length} times:\n${carried.join("\n")}`);
-    assert.equal(back.length, 1, `the recovery logged ${back.length} times`);
-    assert.match(carried[0], /HTTP 401/, "the log line did not say what Vea answered");
-    assert.match(carried[0], /carrying the last good values from \d\d:\d\d:\d\d/);
+    // ONE outage, not one per failure — and this case is the reason the rule
+    // changed. It used to assert two carry-forward lines and one recovery,
+    // because a success cleared the degraded flag and made the next failure a
+    // fresh "first failure". That is not a bug in the flag; it is what a flag
+    // does against an upstream that alternates, and in production it wrote 2,837
+    // lines in one day. A success inside the settle window is now a gap in an
+    // outage rather than the end of one, so the alternation below is one run.
+    assert.equal(
+      carriedLines().length,
+      1,
+      `an alternating outage logged ${carriedLines().length} times:\n${carriedLines().join("\n")}`,
+    );
+    assert.equal(
+      backLines().length,
+      0,
+      `a success 15s into a flapping outage was announced as a recovery:\n${backLines().join("\n")}`,
+    );
+    assert.match(carriedLines()[0], /HTTP 401/, "the log line did not say what Vea answered");
+    assert.match(carriedLines()[0], /carrying the last good values from \d\d:\d\d:\d\d/);
+
+    // The other half, without which "no recovery line" would also be satisfied
+    // by never writing one: a success that HOLDS past the settle window ends the
+    // run, says how much it cost, and says it once.
+    dayOk = true;
+    for (let i = 0; i < 10; i++) {
+      clock += 15_000;
+      await poll();
+    }
+    assert.equal(
+      backLines().length,
+      1,
+      `a settled recovery logged ${backLines().length} times:\n${backLines().join("\n")}`,
+    );
+    assert.match(
+      backLines()[0],
+      /available again after 2 failed attempts \(\d+ min\)/,
+      "the recovery did not account for the failures it was suppressing",
+    );
+
+    // And the run really ENDED rather than the log merely going quiet: the next
+    // failure is news again.
+    dayOk = false;
+    clock += 15_000;
+    await poll();
+    assert.equal(
+      carriedLines().length,
+      2,
+      "a failure after a settled recovery was suppressed as part of the old outage",
+    );
+  });
+
+  it("re-derives the settle window from the interval the operator configured", () => {
+    // The case below proves OutageLog holds a long window; this one proves the
+    // service ASKS for one. configure() is the only place a new interval is
+    // learned, so it is the only place the window can be re-derived, and without
+    // that line the rule holds at the default interval and nowhere else.
+    svc.configure({ ...CFG, pollSeconds: 300 });
+
+    const t = clock;
+    svc.outages.fail("k", "HTTP 401", t);
+    assert.equal(
+      svc.outages.ok("k", t + 5 * 60_000).log,
+      false,
+      "a success five minutes into a 300s-poll outage ended the run; the window is still an absolute two minutes",
+    );
+    assert.equal(
+      svc.outages.ok("k", t + 25 * 60_000).log,
+      true,
+      "a success 25 minutes past the last failure never recovered; the window is not four polls",
+    );
+  });
+
+  it("keeps an alternating outage to ONE RUN at an interval longer than the settle default", async () => {
+    // The hole an absolute settle window leaves. OutageLog's own default is two
+    // minutes; the poll interval field accepts up to an hour and its help text
+    // invites raising it to cut API calls. At 300s every success outlasts a fixed
+    // two-minute window, every failure is a fresh first failure, and the shape
+    // that wrote 2,837 lines in one day is back at a slower rate. So the window
+    // is SETTLE_POLLS polls of whatever is configured, floored at the default.
+    svc.outages.settleAfter(4 * 300_000);
+    let dayOk = true;
+    stubFetch({ dayStatus: () => (dayOk ? 200 : 401) });
+
+    for (let i = 0; i < 6; i++) {
+      clock += 300_000;
+      dayOk = i % 2 === 0;
+      await poll();
+    }
+
+    // Three failures across half an hour. The old rule wrote a line on each and a
+    // recovery between them — six. The new one writes the opening line and, half
+    // an hour in, the fifteen-minute reminder that the SAME run is still going.
+    assert.equal(
+      backLines().length,
+      0,
+      `a success one poll into a flapping outage was announced as a recovery:\n${backLines().join("\n")}`,
+    );
+    assert.equal(
+      carriedLines().length,
+      2,
+      `a 300s poll alternating for half an hour logged ${carriedLines().length} times:\n${carriedLines().join("\n")}`,
+    );
+    assert.doesNotMatch(carriedLines()[0], /still failing/, "the run opened on a reminder");
+    // A reminder and not a fresh first failure is the whole assertion: it says
+    // the two intervening successes did not end the run.
+    assert.match(
+      carriedLines()[1],
+      /still failing after 3 attempts \(\d+ min\)/,
+      "the second line was a new outage, so a success 300s in had ended the first",
+    );
   });
 
   it("logs one line for a RUN of rejected polls, not one per poll", async () => {
@@ -339,6 +474,42 @@ describe("SenSource day aggregates", () => {
       1,
       `three failing polls wrote ${carried.length} lines:\n${carried.join("\n")}`,
     );
+  });
+
+  it("logs a poll failing on alternating polls once, not once per failure", async () => {
+    // The last `if (this.attempt === 0)` gate in this integration, and it fails
+    // for the same reason the degraded-flags did: resetBackoff() runs on every
+    // successful poll, so an alternating upstream made every failure a fresh
+    // first failure. The measured backoff in production never grew past ~90s,
+    // which is that same fact seen from the other side.
+    //
+    // Traffic, not the day aggregates: losing traffic ends the poll, which is the
+    // path that writes "poll error".
+    let trafficOk = true;
+    stubFetch({ trafficStatus: () => (trafficOk ? 200 : 500) });
+
+    for (let i = 0; i < 8; i++) {
+      clock += 15_000;
+      trafficOk = i % 2 === 0;
+      await poll();
+    }
+
+    const errs = logs.filter((l) => l.includes("poll error"));
+    assert.equal(
+      errs.length,
+      1,
+      `four failures across an alternating outage wrote ${errs.length} lines:\n${errs.join("\n")}`,
+    );
+
+    // And a poll that stays up past the settle window says so, once.
+    trafficOk = true;
+    for (let i = 0; i < 10; i++) {
+      clock += 15_000;
+      await poll();
+    }
+    const back = logs.filter((l) => l.includes("the poll is answering again"));
+    assert.equal(back.length, 1, `the recovery logged ${back.length} times`);
+    assert.match(back[0], /after 4 failed attempts/, "the recovery did not account for the outage");
   });
 
   it("keeps attendance continuous when the day request fails", async () => {
@@ -585,6 +756,7 @@ describe("SenSource token rejection", () => {
     Date.now = () => clock;
     svc.scheduleIn = () => {};
     svc.scheduleReconnect = () => {};
+    svc.restart = () => {};
     svc.emit = (dto: PeopleCountDTO) => {
       emitted.push(dto);
       svc.last = dto;
@@ -931,6 +1103,42 @@ describe("SenSource token rejection", () => {
     );
     assert.match(said[0], /HTTP 500/, "the line did not say what the endpoint answered");
     assert.equal(emitted.length, 3, "the poll stopped publishing the counts it did have");
+  });
+
+  it("closes a 401 outage with a line, not with silence", async () => {
+    // Five of the ten recovered() decisions in this file were computed and thrown
+    // away, so five kinds of outage opened with a line and ended without one.
+    // This is the operationally important one: a 401 storm on a single endpoint
+    // announced itself and then cleared in total silence, so an operator watching
+    // /log had nothing that said it was over.
+    let dayOk = false;
+    stubFetch({ dayStatus: () => (dayOk ? 200 : 401) });
+    svc.token = "old";
+    svc.tokenGen = 1;
+    svc.tokenIssuedAt = clock - 30 * 60_000;
+    svc.tokenExpiresAt = clock + 40 * 60_000;
+
+    for (let i = 0; i < 3; i++) {
+      await poll();
+      clock += 15_000;
+    }
+    assert.equal(
+      logs.filter((l) => l.includes("HTTP 401 from")).length,
+      1,
+      "the outage did not open with a line, so there is nothing to close",
+    );
+
+    // Past the settle window, so this is a recovery and not a gap in a flap.
+    dayOk = true;
+    for (let i = 0; i < 12; i++) {
+      await poll();
+      clock += 15_000;
+    }
+
+    const back = logs.filter((l) => l.includes("is answering again"));
+    assert.equal(back.length, 1, `the 401 outage closed with ${back.length} lines:\n${logs.join("\n")}`);
+    assert.match(back[0], /data\/occupancy/, "the line did not say WHICH endpoint came back");
+    assert.match(back[0], /after \d+ failed attempt/, "the line did not account for the run");
   });
 
   it("logs what Vea said once per outage, however much the body varies", async () => {
