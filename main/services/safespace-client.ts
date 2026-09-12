@@ -129,8 +129,20 @@ export type SafeSpaceReading =
 export function redact(text: string, spaceId: string | null): string {
   const safe = scrub(text, 160);
   if (!spaceId) return safe;
-  return safe.split(spaceId).join("<space id>");
+  const out = safe.split(spaceId).join(PLACEHOLDER);
+  // The URL carries the ENCODED id and a fetch error quotes the URL, so an id
+  // holding a space, a slash or a non-ASCII character survives a raw split
+  // untouched — `caf\u00e9-space` reaches the log as `caf%C3%A9-space`. Real ids look
+  // alphanumeric and this is belt and braces, but the header above promises the
+  // id never reaches a log line "not in a URL", and that has to be true of the
+  // form the URL actually carries.
+  const encoded = encodeURIComponent(spaceId);
+  return encoded === spaceId ? out : out.split(encoded).join(PLACEHOLDER);
 }
+
+/** What a redacted id reads as. Not an empty string: an operator has to be able
+ *  to see that something was removed rather than that nothing was there. */
+const PLACEHOLDER = "<space id>";
 
 /**
  * The live-occupancy endpoint for one space, with the quota the server reports.

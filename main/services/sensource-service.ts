@@ -170,9 +170,9 @@ export const SAFESPACE_MIN_POLL_SECONDS = 10;
  */
 const SAFESPACE_HOLD_MS = 60_000;
 
-/** The settle window for a given configured interval. See SETTLE_POLLS. */
-function settleWindowMs(pollSeconds: number): number {
-  const sec = Math.max(MIN_POLL_SECONDS, pollSeconds || DEFAULT_POLL_SECONDS);
+/** The settle window for a poller ticking every `sec` seconds, which the caller
+ *  has already floored — the two pollers in this file have different floors. */
+function settleWindowMs(sec: number): number {
   return Math.max(DEFAULT_SETTLE_MS, SETTLE_POLLS * sec * 1000);
 }
 
@@ -521,12 +521,38 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
    * one line per kind per 15 minutes whatever the state does. See repeat-log.ts.
    */
   private readonly outages = new OutageLog(settleWindowMs(DEFAULT_POLL_SECONDS));
+  /**
+   * The SafeSpace reading's outage log. Its own, not a key in `outages`.
+   *
+   * An OutageLog has ONE settle window and this file now has TWO pollers on
+   * independent intervals. Sharing one meant the SafeSpace key inherited a window
+   * derived from the VEA interval: with Vea at the hour its field allows and
+   * SafeSpace at 10s, a SafeSpace outage that ended stayed "failing" — and unsaid
+   * — for four hours of correct readings.
+   */
+  private readonly safeSpaceOutages = new OutageLog(
+    settleWindowMs(SAFESPACE_DEFAULT_POLL_SECONDS),
+  );
   /** The SafeSpace live-occupancy endpoint, and what it last said about its
    *  quota. Idle and untouched while no space id is configured. */
   private readonly safeSpace = new SafeSpaceClient();
   /** The newest usable SafeSpace reading. Held across an empty response — one
    *  sample in six is empty, and empty is unknown rather than an empty room. */
   private safeSpaceAt: { occupancy: number; at: number } | null = null;
+  /**
+   * The occupancy the last Vea poll produced, BEFORE any SafeSpace override.
+   *
+   * What the count goes back to when a SafeSpace reading stops being usable. Kept
+   * because /log announcing "the occupancy falls back to Vea" while the payload
+   * went on serving a stale SafeSpace number, still labelled `"safespace"`, until
+   * the next Vea poll is the log and the data disagreeing — and the Vea interval
+   * can be an hour.
+   */
+  private veaOccupancy: number | null = null;
+  /** True while the pending SafeSpace reading was scheduled at the idle cadence.
+   *  Its own flag: `polledIdle` is the VEA poll's and is never set at a Vea
+   *  interval of 60s or more, so it cannot speak for this timer. */
+  private safeSpacePolledIdle = false;
   /** The SafeSpace reading's own timer. Deliberately not the base class's: that
    *  one is the Vea poll's, and sharing it would tie a 10s reading to whatever
    *  interval Vea is set to. */
@@ -617,14 +643,22 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
    * `Math.max` exists to prevent.
    */
   pollNowIfIdle(): void {
-    if (!this.running || !this.polledIdle || !this.inDemand) return;
+    if (!this.running || !this.inDemand) return;
+    // TWO timers, so two gates. The SafeSpace reading has the same problem — its
+    // next tick is up to a minute out and the number it holds is the one the
+    // arriving consumer is about to read — but it cannot be gated on
+    // `polledIdle`, which belongs to the Vea poll and is false whenever the Vea
+    // interval is 60s or more. Gated on its own flag it pre-empts an IDLE wait
+    // only, so a flapping consumer still cannot read SafeSpace faster than the
+    // configured rate, which for a rate-limited endpoint matters more than most.
+    if (this.cfg?.safeSpaceId && this.safeSpacePolledIdle) {
+      this.safeSpacePolledIdle = false;
+      this.scheduleSafeSpaceIn(0);
+    }
+    if (!this.polledIdle) return;
     this.polledIdle = false;
     console.log("[sensource] a consumer arrived — polling now rather than waiting out the idle interval");
     this.scheduleIn(0);
-    // The SafeSpace reading is on the same idle gate and has the same problem:
-    // its next tick is up to a minute out, and the number it holds is the one the
-    // arriving consumer is about to read.
-    if (this.cfg?.safeSpaceId) this.scheduleSafeSpaceIn(0);
   }
 
   constructor() {
@@ -647,11 +681,14 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     this.outages.forget();
     // The interval may have changed with everything else, and the settle window
     // has to stay longer than one poll of it.
-    this.outages.settleAfter(settleWindowMs(cfg.pollSeconds));
+    this.outages.settleAfter(settleWindowMs(Math.max(MIN_POLL_SECONDS, cfg.pollSeconds || DEFAULT_POLL_SECONDS)));
     // A different space id is a different bucket and a different building; the
     // old one's quota state and its last reading are both false of the new one.
     this.safeSpace.forget();
     this.safeSpaceAt = null;
+    this.veaOccupancy = null;
+    this.safeSpaceOutages.forget();
+    this.safeSpaceOutages.settleAfter(settleWindowMs(this.safeSpaceSeconds()));
     // New credentials — nothing learned about the old ones survives, including
     // the exchange rate-limit state.
     this.lastExchangeAt = 0;
@@ -747,24 +784,29 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     const now = Date.now();
     if (reading.kind === "ok") {
       this.safeSpaceAt = { occupancy: reading.occupancy, at: now };
-      const back = this.recovered("safespace", now);
+      const back = this.safeSpaceOutages.ok("safespace", now);
       if (back.log) console.log(`[sensource] SafeSpace live occupancy is answering again${back.note}`);
-      this.republishOccupancy(reading.occupancy);
+      this.republishOccupancy(reading.occupancy, "safespace");
     } else {
       // Not this reading's number — but the last one may still be young enough
       // to stand, which is what carries the occupancy over the one reading in six
       // that comes back empty. Silent while it does: nothing a display shows has
       // changed, and the empty response is the normal case.
       const held = this.safeSpaceOccupancy(now);
-      if (held !== null) this.republishOccupancy(held);
-      else this.noteSafeSpaceOutage(reading, now);
+      if (held !== null) this.republishOccupancy(held, "safespace");
+      else {
+        this.noteSafeSpaceOutage(reading, now);
+        // ...and the payload says the same thing the line just did. Every read,
+        // not only the one that logged: emit() drops a re-broadcast that repeats
+        // itself, so this costs nothing after the first.
+        if (this.veaOccupancy !== null) this.republishOccupancy(this.veaOccupancy, "vea");
+      }
     }
 
-    this.scheduleSafeSpaceIn(
-      this.inDemand
-        ? this.safeSpaceSeconds() * 1000
-        : Math.max(this.safeSpaceSeconds() * 1000, IDLE_POLL_MS),
-    );
+    const sec = this.safeSpaceSeconds();
+    const demand = this.inDemand;
+    this.safeSpacePolledIdle = !demand && IDLE_POLL_MS > sec * 1000;
+    this.scheduleSafeSpaceIn(demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
   }
 
   /**
@@ -787,7 +829,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   ): void {
     const kind =
       reading.kind === "failed" ? (reading.status ? `HTTP ${reading.status}` : "transport") : reading.kind;
-    const out = this.outages.fail("safespace", kind, now);
+    const out = this.safeSpaceOutages.fail("safespace", kind, now);
     if (out.log) {
       // `reading.why` arrives redacted and scrubbed: safespace-client.ts is the
       // ONE choke point for the space id, because it is the only thing that knows
@@ -801,18 +843,36 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     }
   }
 
-  /** Publish the last snapshot again with a newer occupancy. Nothing else about
-   *  it has changed, and emit() drops a re-broadcast that says the same thing. */
-  private republishOccupancy(occupancy: number): void {
+  /** Publish the last snapshot again with a newer occupancy, naming its source.
+   *  Nothing else about it has changed, and emit() drops a re-broadcast that says
+   *  the same thing. */
+  private republishOccupancy(occupancy: number, source: "vea" | "safespace"): void {
     const last = this.last;
     if (!last.connected) return;
     const next: PeopleCountDTO = {
       ...last,
       updatedAt: new Date().toISOString(),
-      total: { ...last.total, occupancy, occupancySource: "safespace" },
+      total: { ...last.total, occupancy, occupancySource: source },
     };
     this.appendHistory(next);
     this.emit(next);
+  }
+
+  /**
+   * What Test connection says about SafeSpace, or "" when no space id is set.
+   *
+   * Never fails the test. Vea IS the integration and SafeSpace layers one field
+   * onto it, so a wrong space id is worth reporting and is not worth calling the
+   * whole connection broken. Uses the live client, so a Test pressed while the
+   * poller is holding off on the quota says so rather than spending it.
+   */
+  private async testSafeSpace(cfg: SenSourceConfig): Promise<string> {
+    const id = cfg.safeSpaceId;
+    if (!id) return "";
+    const reading = await this.safeSpace.read(id);
+    if (reading.kind === "ok") return `; SafeSpace reading ${reading.occupancy}`;
+    // `why` arrives redacted from the client — see the note in noteSafeSpaceOutage.
+    return `; SafeSpace did not answer (${reading.why})`;
   }
 
   /** One-shot reachability check for the Integrations "Test connection" button. */
@@ -823,7 +883,14 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       this.resetAuth();
       try {
         const locations = await this.listLocations();
-        return { ok: true, message: `Authenticated — ${locations.length} location(s) visible` };
+        // The descriptor's help walks an operator through pasting a space id, so
+        // Test is where they will expect it checked. It used to report a green
+        // "Authenticated" for a wrong one and leave a /log line as the only hint.
+        const safeSpace = await this.testSafeSpace(cfg);
+        return {
+          ok: true,
+          message: `Authenticated — ${locations.length} location(s) visible${safeSpace}`,
+        };
       } finally {
         this.cfg = prev;
         this.resetAuth();
@@ -1581,6 +1648,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       // zone-net path, the space path and the carried path all produce an
       // occupancy, and three copies of this override is how the fourth one gets
       // written without it.
+      const veaOccupancy = dto.total.occupancy ?? null;
       const fresh = this.safeSpaceOccupancy(now);
       if (fresh !== null) {
         dto.total.occupancy = fresh;
@@ -1595,6 +1663,10 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
         console.log("[sensource] the integration was reconfigured mid-poll; dropping this poll's answer");
         return;
       }
+
+      // Kept past the epoch check, so a poll from a replaced scope cannot leave
+      // its number behind as the thing SafeSpace falls back to.
+      this.veaOccupancy = veaOccupancy;
 
       const scope = allow ? `${reduced.zones.length} of selected zone(s)` : `${reduced.zones.length} zone(s)`;
       this.report("connected", `${scope}, occ via ${occSource}`);

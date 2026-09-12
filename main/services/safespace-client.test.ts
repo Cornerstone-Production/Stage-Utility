@@ -165,6 +165,21 @@ describe("SafeSpace live occupancy", () => {
       assert.ok(!out.includes(SPACE), out);
     });
 
+    it("takes the PERCENT-ENCODED form too, which is what the URL carries", () => {
+      // The id goes into the URL through encodeURIComponent, and a fetch error
+      // quotes the URL. An id holding a space, a slash or a non-ASCII character
+      // therefore reaches the log in a form a raw-string split walks straight
+      // past — which would make the file header's "never in a URL" untrue.
+      for (const id of ["space one", "a/b", "caf\u00e9-space"]) {
+        const url = `https://app.safespace.io/api/raw-data/live-occupancy/${encodeURIComponent(id)}`;
+        const out = redact(`TypeError: fetch failed for ${url}`, id);
+        assert.ok(
+          !out.includes(encodeURIComponent(id)),
+          `the encoded space id survived redaction: ${out}`,
+        );
+      }
+    });
+
     it("still flattens a forged log line when no id is configured", () => {
       // redact() is also the scrub() choke point: /log is one record per line, so
       // a value carrying a newline forges an entry whether or not an id is set.

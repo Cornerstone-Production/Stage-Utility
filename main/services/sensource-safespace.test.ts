@@ -33,9 +33,9 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { setAppTimeZone } = await import("./app-timezone.js");
+const { setSubscriberCheck } = await import("./broadcaster.js");
 setAppTimeZone("America/Chicago");
 const { sensourceService } = await import("./sensource-service.js");
-import type { OutageLog } from "./repeat-log.js";
 import { errorMessage } from "./errors.js";
 import type { PeopleCountDTO } from "../types/live.js";
 import type { SenSourceConfig } from "./sensource-service.js";
@@ -49,25 +49,25 @@ type Poller = {
   start: () => void;
   emit: (dto: PeopleCountDTO) => void;
   last: PeopleCountDTO;
-  token: string | null;
-  tokenExpiresAt: number;
-  tokenIssuedAt: number;
   tokenGen: number;
-  authInFlight: Promise<string> | null;
-  lastExchangeAt: number;
-  exchangeBlockedUntil: number;
-  carriedDay: unknown;
-  outages: OutageLog;
-  safeSpace: { forget: () => void };
   safeSpaceAt: { occupancy: number; at: number } | null;
-  zonesCache: unknown;
-  spacesCache: unknown;
+  veaOccupancy: number | null;
+  safeSpacePolledIdle: boolean;
+  pollNowIfIdle: () => void;
   scheduleIn: (ms: number) => void;
   scheduleReconnect: () => void;
   scheduleSafeSpaceIn: (ms: number) => void;
   restart: () => void;
 };
 const svc = sensourceService as unknown as Poller;
+
+// Stubbed HERE and not only in beforeEach: resetService below calls the real
+// configure(), which restarts the poller, and the first resetService runs before
+// any beforeEach body would have replaced these.
+svc.scheduleIn = () => {};
+svc.scheduleReconnect = () => {};
+svc.scheduleSafeSpaceIn = () => {};
+svc.restart = () => {};
 
 /** A space id that is unmistakable inside a log line — the point of the
  *  redaction guard is that a substring search finds it if it leaked. */
@@ -155,25 +155,23 @@ function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200 });
 }
 
+/**
+ * Reset by driving the REAL configure(), not by listing fields.
+ *
+ * A hand-written reset is a copy of configure() that drifts. This file's first
+ * version listed the fields, a later commit gave SafeSpace its own OutageLog, the
+ * list did not gain it, and three cases went red reporting ZERO lines because one
+ * open run leaked across the file — the same shape that parked this work in the
+ * first place, one field later. Whatever configure() learns to clear, this clears.
+ *
+ * `restart` is stubbed at module scope above, so this starts no poll.
+ */
 function resetService(cfg: SenSourceConfig = CFG): void {
-  svc.cfg = { ...cfg };
+  sensourceService.configure({ ...cfg });
   svc.running = true;
-  svc.token = null;
-  svc.tokenExpiresAt = 0;
-  svc.tokenIssuedAt = 0;
+  // Not configure()'s to reset: a mint counter is not configuration, and `last`
+  // is what has been published rather than what was asked for.
   svc.tokenGen = 0;
-  svc.authInFlight = null;
-  svc.lastExchangeAt = 0;
-  svc.exchangeBlockedUntil = 0;
-  svc.carriedDay = null;
-  svc.zonesCache = null;
-  svc.spacesCache = null;
-  // A METHOD on the real OutageLog, not a replacement field: an assignment to a
-  // renamed private compiles through `as unknown as Poller` and silently resets
-  // nothing, which is how one open run once leaked across a whole test file.
-  svc.outages.forget();
-  svc.safeSpace.forget();
-  svc.safeSpaceAt = null;
   svc.last = { connected: false, updatedAt: null, total: { attendance: null, occupancy: null }, zones: [] };
   requests = [];
   emitted = [];
@@ -186,13 +184,13 @@ const published = (): PeopleCountDTO => emitted.at(-1)!;
 
 describe("SafeSpace live occupancy on the SenSource payload", () => {
   beforeEach(() => {
-    resetService();
     clock = Date.UTC(2026, 8, 6, 15, 0, 0);
     Date.now = () => clock;
     svc.scheduleIn = () => {};
     svc.scheduleReconnect = () => {};
     svc.scheduleSafeSpaceIn = () => {};
     svc.restart = () => {};
+    resetService();
     svc.emit = (dto: PeopleCountDTO) => {
       emitted.push(dto);
       svc.last = dto;
@@ -203,6 +201,8 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
   });
 
   afterEach(() => {
+    // Back to the "assume watched" default the transport-less process starts in.
+    setSubscriberCheck(() => true);
     globalThis.fetch = realFetch;
     Date.now = realNow;
     console.warn = realWarn;
@@ -428,6 +428,125 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
       `start() read SafeSpace ${safeSpaceRequests().length} time(s) with no space ID`,
     );
     assert.deepEqual(logs.filter((l) => l.includes("SafeSpace")), [], "a blank ID was announced");
+  });
+
+  it("settles the SafeSpace outage on the SafeSpace interval, not the Vea one", async () => {
+    // An OutageLog has ONE settle window and this integration has TWO pollers on
+    // independent intervals. Sharing one log meant the SafeSpace key inherited a
+    // window derived from the VEA interval: at the hour the Vea field allows,
+    // SETTLE_POLLS x 3600s is four hours, so a SafeSpace outage that ended stayed
+    // unsaid for four hours of correct ten-second readings.
+    resetService({ ...CFG, pollSeconds: 3600, safeSpacePollSeconds: 10 });
+    let ok = false;
+    stubFetch({ safeSpaceStatus: () => (ok ? 200 : 503), safeSpace: () => (ok ? "417" : "") });
+
+    await readSafeSpace();
+    assert.equal(fellBack().length, 1, "the outage was not reported");
+
+    // Four minutes of good readings — twice the settle window a 10s poll earns,
+    // and a fraction of the four hours an hourly Vea poll would have imposed.
+    ok = true;
+    for (let i = 0; i < 24; i++) {
+      clock += 10_000;
+      await readSafeSpace();
+    }
+
+    assert.equal(
+      cameBack().length,
+      1,
+      `four minutes of good readings produced ${cameBack().length} recovery lines; the window is the Vea poll's`,
+    );
+  });
+
+  it("puts the PAYLOAD back on Vea, not just the log line", async () => {
+    // /log announcing "the occupancy falls back to Vea" while the payload went on
+    // serving a stale SafeSpace number, still labelled "safespace", until the next
+    // Vea poll is the log and the data disagreeing — and the Vea interval can be
+    // an hour.
+    let body: string | null = "417";
+    stubFetch({ safeSpace: () => body, safeSpaceStatus: () => (body === "" ? 503 : 200) });
+
+    await poll(); // Vea says 1510
+    await readSafeSpace(); // SafeSpace says 417
+    assert.equal(published().total.occupancy, 417, "the reading never took effect");
+
+    // SafeSpace dies and the held value ages out. No Vea poll in between.
+    body = "";
+    clock += 61_000;
+    await readSafeSpace();
+
+    assert.equal(fellBack().length, 1, "the fallback was not reported");
+    assert.equal(
+      published().total.occupancy,
+      VEA_OCCUPANCY,
+      `the log said it fell back to Vea and the payload still published ${published().total.occupancy}`,
+    );
+    assert.equal(
+      published().total.occupancySource,
+      "vea",
+      "a Vea number was published still labelled as SafeSpace's",
+    );
+  });
+
+  it("reports the SafeSpace reading from Test connection", async () => {
+    // The descriptor's help walks an operator through pasting the ID, so Test is
+    // where they will expect it checked. A green "Authenticated" for a wrong ID,
+    // with a /log line as the only hint, is a control that renders and does
+    // nothing.
+    stubFetch({ safeSpace: () => "417" });
+    const good = await sensourceService.test({ ...CFG });
+    assert.equal(good.ok, true, good.message);
+    assert.match(good.message ?? "", /SafeSpace reading 417/, "Test said nothing about SafeSpace");
+
+    // A wrong ID is reported and does NOT fail the test — Vea is the integration.
+    // Past MIN_EXCHANGE_GAP_MS, because the 30s mint floor holds for the button
+    // too and a second press inside it fails on the token, not on SafeSpace.
+    clock += 31_000;
+    stubFetch({ safeSpaceStatus: () => 404, safeSpace: () => "" });
+    const bad = await sensourceService.test({ ...CFG });
+    assert.equal(bad.ok, true, "a wrong space ID failed the whole Vea connection test");
+    assert.match(bad.message ?? "", /SafeSpace did not answer \(HTTP 404\)/, bad.message);
+
+    // ...and with no ID configured Test says nothing about it at all.
+    clock += 31_000;
+    stubFetch();
+    // Counted from HERE: the two presses above legitimately read SafeSpace.
+    const before = safeSpaceRequests().length;
+    const none = await sensourceService.test({ ...CFG, safeSpaceId: null });
+    assert.doesNotMatch(none.message ?? "", /SafeSpace/, "a blank ID was reported as a result");
+    assert.equal(
+      safeSpaceRequests().length - before,
+      0,
+      "Test read SafeSpace with no ID configured",
+    );
+  });
+
+  it("pre-empts an IDLE SafeSpace wait, and only an idle one", async () => {
+    // `polledIdle` is the VEA poll's flag and is false at any Vea interval of 60s
+    // or more, so gating the SafeSpace pre-empt behind it left the reading an
+    // arriving consumer is about to look at up to a minute stale.
+    resetService({ ...CFG, pollSeconds: 3600 });
+    setSubscriberCheck(() => false);
+    stubFetch({ safeSpace: () => "417" });
+    let armed: number[] = [];
+    svc.scheduleSafeSpaceIn = (ms: number) => armed.push(ms);
+
+    // No consumer: the reading re-arms at the idle cadence and says so.
+    await readSafeSpace();
+    assert.equal(armed.at(-1), 60_000, `an unwatched reading re-armed at ${armed.at(-1)}ms`);
+    assert.equal(svc.safeSpacePolledIdle, true, "the idle wait was not remembered");
+
+    // A consumer arrives — which is the only thing that calls pollNowIfIdle, and
+    // the only state in which it does anything.
+    setSubscriberCheck(() => true);
+    armed = [];
+    svc.pollNowIfIdle();
+    assert.deepEqual(armed, [0], "a consumer arriving did not cut the idle SafeSpace wait short");
+
+    // ...and a second arrival cannot make it read faster than configured.
+    armed = [];
+    svc.pollNowIfIdle();
+    assert.deepEqual(armed, [], "a flapping consumer read a rate-limited endpoint off-cadence");
   });
 
   it("publishes nothing from a reading whose configuration was replaced", async () => {
