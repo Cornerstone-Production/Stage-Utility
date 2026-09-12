@@ -19,6 +19,7 @@ import { useSplState, resolveSplValue } from "./use-spl-state";
 import { useDisplayPresence } from "./use-display-presence";
 import { useObsState } from "./use-obs-state";
 import { useResiState, useYouTubeState } from "./use-stream-state";
+import { obsRecordTimecode } from "@main/services/obs-record-clock";
 import { streamers, streamIndicator, STREAMER_FOR } from "../app/recording-status";
 import { usePvpState, usePvpSkewMs } from "./use-pvp-state";
 import { useReaperState } from "./use-reaper-state";
@@ -70,7 +71,7 @@ export interface LayoutRenderCtx {
   pvpSkewMs: number;
   scores: ScoresStatusDTO | null;
   resi: StreamStatusDTO | null;
-  youtube: StreamStatusDTO | null;
+  youtube: YouTubeStatusDTO | null;
   osc: OscFeedbackDTO | null;
   /** Global RossTalk simulate mode, so a button can show it is not really sending.
    *  Defaults to TRUE when unknown — the direction that cannot cause a stray send. */
@@ -734,8 +735,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     const chosen = only ? all.filter((x) => x.name === only) : all;
     const ind = streamIndicator(chosen, ctx.now, { showElapsed: opts.showElapsed });
     const live = ind.state === "live";
-    // Tally-light mode: nothing on screen unless something is going out.
-    if (!live && (opts.hideWhenIdle ?? false)) return null;
+    // A scheduled broadcast the clock has passed with nothing going out. Off
+    // air, but the one off-air moment worth a colour — see streamIndicator.
+    const late = ind.state === "late";
+    // Tally-light mode: nothing on screen unless something is going out. LATE is
+    // the exception: a tally light that hides exactly when the stream failed to
+    // start is a light that has switched itself off for the one event it exists
+    // to report.
+    if (!live && !late && (opts.hideWhenIdle ?? false)) return null;
 
     // FILLED BY DEFAULT, the same as obs-status and reaper-status.
     //
@@ -755,8 +762,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       caption: only ?? "Streaming",
       // The elapsed clock takes the caption row's end slot while live, exactly
       // as a recorder's timecode does in statusReadout — see the note there.
-      // The quiet states are one word with nothing to add.
-      captionEnd: live ? ind.sub : null,
+      // The quiet states are one word with nothing to add; LATE has the one
+      // thing worth adding, which is how long ago it should have started.
+      captionEnd: live || late ? ind.sub : null,
       upper: true,
       // QUIET IS ONE THING. Off air and unreachable both read at the same
       // strength, because both mean "nothing is going out" and the WORD already
@@ -767,9 +775,16 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // when they cannot be reached -- it was the brightest quiet thing in the
       // row and read as the one still doing something. Reported twice as the
       // streaming widgets not matching the grey their neighbours wear.
-      dim: !live,
-      fill: live && filled ? "var(--green-9)" : null,
-      valueColor: live && !filled ? "var(--green-10)" : null,
+      //
+      // LATE is the one quiet state that is not quiet. It is off air at a
+      // moment somebody scheduled a broadcast for, which is the failure this
+      // wall exists to show. Amber rather than the recorder's red, so a room
+      // carrying both still has exactly one red — and through the SEMANTIC warn
+      // token rather than a raw scale step, because "this needs attention" is
+      // what is meant and a re-themed app should carry it.
+      dim: !live && !late,
+      fill: live && filled ? "var(--green-9)" : late && filled ? "var(--color-warn-9)" : null,
+      valueColor: live && !filled ? "var(--green-10)" : late && !filled ? "var(--color-warn-11)" : null,
     });
   };
 
@@ -1235,7 +1250,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         activeText: c.recordingText ?? activeDefault,
         idleText: c.idleText ?? idleDefault,
         offlineText: c.offlineText ?? STATUS_TEXT.obs.offline,
-        sub: mode === "recording" && c.showTimecode ? (obs?.recordTimecode ?? null) : null,
+        sub: mode === "recording" && c.showTimecode ? obsRecordTimecode(obs, ctx.now, ctx.skewMs) : null,
       });
     }
     case "stream-status":
@@ -1380,10 +1395,14 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // The count is the value; the lowest battery is what qualifies it. They
       // were two figures side by side in different colours, which reads as two
       // separate readouts sharing a box.
-      const quals = [
-        showBattery && lowest != null ? `${lowest}% lowest` : null,
-        showRuntime && soonest != null ? `${runtimeText(soonest)} left` : null,
-      ].filter(Boolean);
+      // A muted pack is ONLINE, so the count cannot show it and the lowest
+      // battery cannot either — the fleet tile would read a clean "12/12" over a
+      // dead mic. Not behind a toggle, for the same reason the channel tile's
+      // MUTED is not: this is a fault, not a metric.
+      const mutedCount = live.filter((d) => d.muted === true).length;
+      const batteryQual = showBattery && lowest != null ? `${lowest}% lowest` : null;
+      const runtimeQual = showRuntime && soonest != null ? `${runtimeText(soonest)} left` : null;
+      const mutedQual = mutedCount > 0 ? `${mutedCount} muted` : null;
       // With the count off, the tile is a single figure — battery if it is on,
       // otherwise runtime, so turning battery off does not leave a blank tile.
       //
@@ -1392,11 +1411,18 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // tile ends up showing minutes coloured by battery thresholds.
       const batteryLeads = showBattery || !showRuntime;
       const headline = batteryLeads ? `${lowest ?? "—"}%` : (runtimeText(soonest) ?? "—");
+      // Whichever figure became the headline is not repeated under it. Named
+      // rather than sliced off by index: the list is no longer two entries long,
+      // and `slice(1)` dropped the mute warning whenever both toggles were off.
+      const quals = (
+        showOnline ? [batteryQual, runtimeQual, mutedQual]
+        : [batteryLeads ? runtimeQual : batteryQual, mutedQual]
+      ).filter(Boolean);
       return (
         <Readout
           caption={(c.showLabel ?? false) && c.label ? c.label : null}
           value={showOnline ? `${online}/${ch.length}` : headline}
-          sub={showOnline ? quals.join("  ") || null : quals.slice(1).join("  ") || null}
+          sub={quals.join("  ") || null}
           valueColor={showOnline ? null : batteryLeads ? batteryColor(lowest) : runtimeColor(soonest)}
           mono
             align={o.style?.textAlign}
@@ -1423,17 +1449,35 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       const quals = [
         // The one that did not get the headline still gets said.
         battery && runtime ? runtime : null,
+        // Quality rides the RF toggle: bars and quality are the same question
+        // ("how good is the radio"), and quality is the half that accounts for
+        // interference — five bars with a quality of two is a real reading.
         show.rf && d.rfBars != null ? rfBarsGlyph(d.rfBars) : null,
+        show.rf && d.quality != null ? `Q${d.quality}` : null,
         show.frequency && d.frequencyLabel ? d.frequencyLabel : null,
         show.audio && d.audioLevel != null ? `${Math.round(d.audioLevel * 100)}%` : null,
+        // Not behind a toggle. Interference is a fault, and nobody opts in to
+        // being told their channel is being sat on.
+        d.interference ? "RF INT" : null,
       ].filter(Boolean);
+      // A muted pack reports five bars and a full battery, so the ONLY thing that
+      // can say it is muted is the widget, and it has to say it where the figure
+      // an operator reads first is. The figures are not lost — everything that
+      // would have been the headline moves down a line.
+      const muted = d.muted === true && d.online;
       return (
         <Readout
           caption={(c.showLabel ?? true) ? d.name ?? d.channelId : null}
-          value={headline ?? quals[0] ?? "—"}
-          sub={(headline ? quals : quals.slice(1)).join("  ") || null}
+          value={muted ? "MUTED" : (headline ?? quals[0] ?? "—")}
+          sub={
+            (muted ? [headline, ...quals].filter(Boolean)
+            : headline ? quals
+            : quals.slice(1)
+            ).join("  ") || null
+          }
           valueColor={
-            battery && d.battery != null ? batteryColor(d.battery)
+            muted ? "var(--red-10)"
+            : battery && d.battery != null ? batteryColor(d.battery)
             : runtime ? runtimeColor(d.batteryMinutes)
             : null
           }
@@ -2075,13 +2119,27 @@ function ChargerBattery({
     >
       {bays.map((b) => {
         const bay = all.find((x) => x.id === b.id) ?? null;
-        const label = b.label || (bay ? `${bay.connectionName ?? `Charger ${bay.chargerIndex}`} · Bay ${bay.bay}` : "Bay");
+        // The connection's name is the operator's own, so it still wins. `name` is
+        // the charger's DEVICE_ID ("MA: 5-8 · Bay 3") and only fills in where the
+        // connection was left unnamed, which used to read "Charger 1 · Bay 3".
+        const label =
+          b.label ||
+          (bay ?
+            bay.connectionName ? `${bay.connectionName} · Bay ${bay.bay}`
+            : (bay.name ?? `Charger ${bay.chargerIndex} · Bay ${bay.bay}`)
+          : "Bay");
         return (
           <div key={b.id} className="flex items-center justify-between gap-[0.5em] w-full min-w-0">
             <span className="truncate min-w-0 flex-1">{label}</span>
             <span className="flex items-center gap-[0.6em] shrink-0 tabular-nums">
               {!bay || !bay.online ? (
                 <span style={{ opacity: 0.35 }}>empty</span>
+              ) : bay.fault ? (
+                // A faulted bay is NOT an empty one — the battery is physically
+                // docked and every reading it answers is a marker, so the fault is
+                // the whole row. Unconditional: nobody opts in to being told their
+                // battery has failed.
+                <span style={{ color: "var(--red-10)", fontWeight: 700 }}>{bay.fault}</span>
               ) : (
                 <>
                   {showBattery && (
@@ -2092,9 +2150,20 @@ function ChargerBattery({
                   {show.charging && bay.charging && (
                     <ZapIcon style={{ width: "0.85em", height: "0.85em" }} className="inline-block shrink-0 text-green-10" aria-label="charging" />
                   )}
+                  {/* Time to full rides the charging toggle rather than a new one:
+                      "is it charging" and "when is it done" are the same question,
+                      and the charger only answers this while it is charging. */}
+                  {show.charging && bay.timeToFullMinutes != null && (
+                    <span style={{ opacity: 0.7 }}>{runtimeText(bay.timeToFullMinutes)}</span>
+                  )}
                   {show.cycles && <span style={{ opacity: 0.7 }}>{bay.cycles ?? "—"} cyc</span>}
                   {show.health && <span style={{ opacity: 0.7 }}>health {bay.health ?? "—"}%</span>}
                   {show.temp && <span style={{ opacity: 0.7 }}>{bay.tempC ?? "—"}°C</span>}
+                  {/* Storage mode explains a shelf of bays all stopped at ~40%.
+                      Device-level, so every row of that charger carries it. */}
+                  {bay.storageMode && (
+                    <span style={{ opacity: 0.7, color: "var(--yellow-10)" }}>storage</span>
+                  )}
                 </>
               )}
             </span>

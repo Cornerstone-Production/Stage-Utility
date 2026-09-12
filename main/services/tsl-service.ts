@@ -141,17 +141,24 @@ class TslService extends ConnectionLifecycle {
     if (this.connected) this.sendAll(people);
   }
 
-  /** One-shot reachability test for the Integrations "Test connection" button. */
+  /**
+   * One-shot reachability test for the Integrations "Test connection" button.
+   *
+   * CONNECTS AND SENDS NOTHING. This used to write `STAGE UTILITY` to display
+   * address 0, which is not a probe — it is a UMD write to whatever tile the
+   * multiviewer has on address 0, and nothing repaints that tile afterwards
+   * unless address 0 happens to be one of the configured feeds. A button an
+   * operator presses to ask "can I reach this?" must not change what is on a
+   * screen in front of the room.
+   *
+   * The same reasoning is written on rosstalkManager.testTarget, which has
+   * always connected and sent nothing. This is the second of two.
+   */
   async test(host: string, port: number): Promise<{ ok: boolean; message?: string }> {
     return new Promise((resolve) => {
       const sock = net.connect({ host, port }, () => {
-        try {
-          sock.write(buildTsl31Packet(0, "STAGE UTILITY"));
-        } catch {
-          /* ignore */
-        }
         sock.end();
-        resolve({ ok: true, message: `Connected to ${host}:${port}` });
+        resolve({ ok: true, message: `Reachable at ${host}:${port} (nothing sent)` });
       });
       sock.setTimeout(5000);
       sock.on("timeout", () => {

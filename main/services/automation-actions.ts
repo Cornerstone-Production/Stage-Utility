@@ -13,6 +13,8 @@ import { broadcast } from "./broadcaster.js";
 import { companionApi } from "./companion-api.js";
 import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
 import { oscManager } from "./osc-manager.js";
+import { propresenterManager } from "./propresenter-service.js";
+import { isReaperTransportCommand, reaperService } from "./reaper-service.js";
 import { rosstalkManager } from "./rosstalk-manager.js";
 import { stageController } from "./stage-controller.js";
 import { matchRoster } from "./automation-roster-match.js";
@@ -215,6 +217,76 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
       } catch (e) {
         return fail(errorMessage(e));
       }
+    },
+  },
+
+  "reaper.transport": {
+    id: "reaper.transport",
+    label: "REAPER transport",
+    help:
+      "Drives REAPER through the same web interface the REAPER integration polls, so nothing else has to be set up " +
+      "(Preferences → Control/OSC/web → \"Web browser interface\"). Record does NOTHING when REAPER is already " +
+      "recording: REAPER's Record is a toggle, and a cue said twice would otherwise end the recording.",
+    params: [
+      {
+        key: "command",
+        label: "Command",
+        type: "enum",
+        options: [
+          { value: "record", label: "Start recording" },
+          { value: "stop", label: "Stop" },
+          { value: "play", label: "Play" },
+        ],
+      },
+    ],
+    run: async (params, ctx) => {
+      const command = String(params.command ?? "").trim();
+      if (!isReaperTransportCommand(command)) {
+        return fail(command ? `"${command}" is not a REAPER transport command` : "no command chosen");
+      }
+      // Ahead of the service on purpose: a simulated run must not read the
+      // transport either, so a rule can be tested with REAPER off the network.
+      if (ctx.simulate) return ok(`would send ${command}`);
+      const result = await reaperService.transport(command);
+      return result.ok ? ok(`${command}: ${result.detail}`) : fail(`${command}: ${result.detail}`);
+    },
+  },
+
+  "propresenter.macro": {
+    id: "propresenter.macro",
+    label: "Trigger a ProPresenter macro",
+    help:
+      "Runs one of your own ProPresenter macros — whatever it does there, it does here. Needs ProPresenter's " +
+      "Network API switched on (Preferences \u2192 Network), the same prerequisite as the ProPresenter integration. " +
+      "The macro is stored by NAME, not by its uuid, so it survives a re-import and means the same thing on both " +
+      "booth machines; rename it in ProPresenter and the rule stops finding it, and says so.",
+    params: [
+      {
+        key: "instance",
+        label: "ProPresenter",
+        type: "enum",
+        optionsFrom: "propresenter-instances",
+        optional: true,
+        // Blank is the primary, the same as everywhere else in the app that
+        // names an instance (layout objects, the thumbnail proxy). Said out
+        // loud on the form, because "it silently picked the main auditorium"
+        // is not something to discover during a service.
+        help: "Leave blank for the main one.",
+      },
+      { key: "macro", label: "Macro", type: "enum", optionsFrom: "propresenter-macros" },
+    ],
+    run: async (params, ctx) => {
+      const macro = String(params.macro ?? "").trim();
+      // Named before anything is contacted, the same as the REAPER transport
+      // action refusing a command it does not have: a rule saved with the
+      // dropdown untouched must say so, not dial a machine and get a 404.
+      if (!macro) return fail("no macro chosen");
+      // Ahead of the manager on purpose: a simulated run must reach nothing, so
+      // a rule can be written and tested with the booth machine off — which is
+      // when a rule is usually written.
+      if (ctx.simulate) return ok(`would trigger "${macro}"`);
+      const result = await propresenterManager.triggerMacro(String(params.instance ?? ""), macro);
+      return result.ok ? ok(result.detail) : fail(result.detail);
     },
   },
 

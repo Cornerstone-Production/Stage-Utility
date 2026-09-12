@@ -7,10 +7,11 @@
 //    binding, and the only other place the state appears is inside Home
 //    Assistant. It goes on the `_on` half and nowhere else: one pair is one
 //    thing, and the `_off` row saying the same word again reads as two devices.
-//  - the FIELDS. `State variable` is offered on the `_on` half of a pair and
-//    nowhere else, because a binding on a cue with no partner reads a variable
-//    that nothing ever shows. Offered everywhere it would be a setting that
-//    saves and does nothing.
+//  - the FIELDS. `State variable` is offered for a PAIR and nowhere else,
+//    because a binding on a cue with no partner reads a variable that nothing
+//    ever shows. Offered everywhere it would be a setting that saves and does
+//    nothing. In the pair's dialog it is in "This pair", once, whichever half
+//    is selected — and it is still saved onto the `_on` rule.
 //
 // And the gate: with no pair bound, NOTHING requests /api/cues/states. That is
 // what keeps an install that does not use this from polling Companion every ten
@@ -175,12 +176,42 @@ const pairPills = (): string[] =>
 const titles = (): string[] =>
   [...document.querySelectorAll("[data-cue-state]")].map((el) => el.getAttribute("title") ?? "");
 
-/** Open one rule's editor by pressing its row. */
-async function open(name: string): Promise<void> {
+async function press(el: Element | null, what: string): Promise<void> {
+  assert.ok(el, `nothing to press: ${what}`);
   await act(async () => {
-    screen.getByText(name).click();
+    (el as HTMLElement).click();
   });
   await settle();
+}
+
+/**
+ * Open the editor for one cue, by its cue name.
+ *
+ * The editor is a DIALOG over the list, and a pair is one row and one dialog:
+ * either half opens the pair's, and the OFF half's own fields are behind the
+ * Turn off tab. A cue with no partner has a row of its own.
+ *
+ * The pair row is found by the two cue names it prints rather than by text
+ * search: a fixture whose `says` is its cue name puts the same string on
+ * several nodes, and `getByText` then throws rather than opening anything.
+ */
+async function open(name: string): Promise<void> {
+  const pairRow = [...document.querySelectorAll("[data-cue-pair-row]")].find((row) =>
+    [...row.querySelectorAll("span")].some((el) => (el.textContent ?? "").split(" / ").includes(name)),
+  );
+  if (pairRow) {
+    await press(pairRow.querySelector("button"), `the pair row holding ${name}`);
+    if (name.endsWith("_off")) {
+      const tab = [...document.querySelectorAll('[role="tab"]')].find((el) =>
+        (el.textContent ?? "").startsWith("Turn off"),
+      );
+      await press(tab ?? null, "the Turn off tab");
+    }
+    return;
+  }
+  const label = document.querySelector(`[data-rule-name="${name}"]`);
+  assert.ok(label, `no row called ${name}`);
+  await press(label.closest("button"), name);
 }
 
 /** The accessible names of every field the open editor renders. */
@@ -254,6 +285,83 @@ describe("the state pill on the rules list", () => {
     STATES = {};
     await mount();
     assert.deepEqual(pills(), []);
+  });
+
+  test("settling shows the commanded state, not the stale reading", async () => {
+    // A press was dispatched in the last 8 s; `state` may still be the
+    // pre-press value. The pill must show `commanded` and never `unknown`.
+    STATES = {
+      projectors: {
+        on: "projectors_on",
+        off: "projectors_off",
+        variable: "projectors_state",
+        value: "off",
+        state: "off",
+        settling: true,
+        commanded: "on",
+      },
+    };
+    await mount();
+    assert.deepEqual(pills(), ["on"], "settling did not show the commanded state");
+  });
+
+  test("settling shows the commanded state even when the stale reading is unknown", async () => {
+    STATES = {
+      projectors: {
+        on: "projectors_on",
+        off: "projectors_off",
+        variable: "projectors_state",
+        value: "WARMUP",
+        state: "unknown",
+        settling: true,
+        commanded: "off",
+      },
+    };
+    await mount();
+    assert.deepEqual(pills(), ["off"], "a settling row showed unknown instead of the commanded state");
+  });
+
+  test("a settling row marks itself and says why, on hover", async () => {
+    STATES = {
+      projectors: {
+        on: "projectors_on",
+        off: "projectors_off",
+        variable: "projectors_state",
+        value: "off",
+        state: "off",
+        settling: true,
+        commanded: "on",
+      },
+    };
+    await mount();
+    const pill = document.querySelector("[data-cue-state]");
+    assert.equal(pill === null, false, "no settling pill rendered");
+    assert.equal(
+      pill?.textContent?.includes("…"),
+      true,
+      "a settling pill did not carry the settling marker",
+    );
+    assert.equal(
+      pill?.getAttribute("title"),
+      "Pressed just now; the device has not reported back yet",
+    );
+  });
+
+  test("a row with no settling field renders exactly as before", async () => {
+    STATES = {
+      projectors: {
+        on: "projectors_on",
+        off: "projectors_off",
+        variable: "projectors_state",
+        value: "on",
+        state: "on",
+      },
+    };
+    await mount();
+    assert.deepEqual(pills(), ["on"]);
+    const pill = document.querySelector("[data-cue-state]");
+    assert.equal(pill?.textContent, "on");
+    assert.equal(pill?.getAttribute("title"), "projectors_state");
   });
 });
 
@@ -367,15 +475,22 @@ describe("the state fields in the rule editor", () => {
     assert.equal(names.includes("Value meaning off"), true);
   });
 
-  test("do NOT appear on the _off half", async () => {
+  test("are the PAIR's, rendered once and not per half", async () => {
+    // One pair is one thing. The field used to be on the `_on` half's editor
+    // and absent from the `_off` half's, which meant an operator who opened the
+    // off half found no binding at all; two fields would be two settings for
+    // one pair. In the dialog it is in "This pair", above both halves — so
+    // exactly one, whichever half is selected.
     RULES = [cue("projectors_on", { stateVariable: "projectors_state" }), cue("projectors_off")];
     CUSTOM_VARIABLES = ["projectors_state"];
     await mount();
+    await open("projectors_on");
+    assert.equal(document.querySelectorAll('[aria-label="State variable"]').length, 1);
     await open("projectors_off");
     assert.equal(
-      fieldNames().includes("State variable"),
-      false,
-      "the _off half inherits the binding; a second field for it is two settings for one pair",
+      document.querySelectorAll('[aria-label="State variable"]').length,
+      1,
+      "the Turn off half rendered a second State variable field",
     );
   });
 
@@ -469,6 +584,91 @@ describe("the state fields in the rule editor", () => {
     );
   });
 
+  test("a pair with candidates and no binding says it is learning", async () => {
+    // A blank State variable with nothing inferred reads as "this pair cannot
+    // report its state", which is the opposite of what is about to happen. The
+    // hint is the only thing on screen that says a press will bind it.
+    RULES = [
+      cue("amps_on", {
+        stateCandidates: "Rack:status,Rack:mute",
+        stateLearning: '{"attempts":0,"observed":{}}',
+      }),
+      cue("amps_off"),
+    ];
+    await mount();
+    await open("amps_on");
+    assert.equal(
+      document.body.textContent?.includes(
+        "Learning: watching 2 candidates; press the pair on and off once to bind",
+      ),
+      true,
+      "a learning pair said nothing about learning",
+    );
+  });
+
+  test("a pair that gave up says so, and offers Learn again", async () => {
+    RULES = [
+      cue("amps_on", { stateCandidates: "", stateLearning: '{"attempts":3,"observed":{},"stopped":"gave-up"}' }),
+      cue("amps_off"),
+    ];
+    await mount();
+    await open("amps_on");
+    assert.equal(
+      document.body.textContent?.includes("Learning gave up after 3 presses"),
+      true,
+      "learning stopped with nothing on screen saying why",
+    );
+    assert.equal(document.body.textContent?.includes("Learn again"), true);
+  });
+
+  test("a pair with nothing to learn offers no Learn again", async () => {
+    // The button is not offered on every pair in the building: nothing has been
+    // probed, so there is nothing to forget.
+    RULES = [cue("amps_on"), cue("amps_off")];
+    await mount();
+    await open("amps_on");
+    assert.equal(document.body.textContent?.includes("Learn again"), false);
+  });
+
+  test("Learn again SAVES the reset, so the next pass probes again", async () => {
+    // A control that renders is not a control that does anything. This is the
+    // patch it sends: both keys blank, which is what makes the next hourly pass
+    // probe a pair whose learning had stopped.
+    RULES = [
+      cue("amps_on", {
+        stateCandidates: "Rack:status",
+        stateLearning: '{"attempts":2,"observed":{"Rack:status":{"values":["Standby"]}},"stopped":"bound"}',
+        stateVariable: "Rack:status",
+        stateOnValue: "Active",
+        stateOffValue: "Standby",
+      }),
+      cue("amps_off"),
+    ];
+    await mount();
+    await open("amps_on");
+    await act(async () => {
+      screen.getByText("Learn again").click();
+    });
+    await act(async () => {
+      screen.getByText("Save").click();
+    });
+    await settle();
+    const patch = requests.find((r) => r.url.includes("/api/automation/rules/rule-amps_on"));
+    const params = (
+      JSON.parse(String(patch?.body)) as { trigger: { params: Record<string, string> } }
+    ).trigger.params;
+    assert.deepEqual(
+      {
+        candidates: params.stateCandidates,
+        learning: params.stateLearning,
+        variable: params.stateVariable,
+      },
+      // The BINDING is left alone: an operator asking to learn again has not
+      // asked for the switch to stop reporting in the meantime.
+      { candidates: "", learning: "", variable: "Rack:status" },
+    );
+  });
+
   test("choosing a variable saves it on the _on rule", async () => {
     // A control that renders is not a control that does anything — the named
     // scar in this repo. This is the PATCH the editor sends.
@@ -494,5 +694,84 @@ describe("the state fields in the rule editor", () => {
       JSON.parse(String(patch?.body)).trigger.params.stateVariable,
       "amps_state",
     );
+  });
+});
+
+// ── A toggle pair's warning on the State variable field ───────────────────────
+//
+// Two cues that press the SAME Companion button are a toggle: the state
+// variable is the ONLY thing that can tell the two directions apart, so leaving
+// it blank is not merely "optimistic", it is a switch that reports the opposite
+// of the truth every other press. The field says so, and the hint lives behind
+// the row's InfoHint, so this opens it the way an operator does.
+describe("the State variable hint on a toggle pair", () => {
+  /** Open the InfoHint beside a row label and return the popover's text. */
+  async function hintFor(label: string): Promise<string> {
+    const span = [...document.querySelectorAll("label > span")].find((el) =>
+      (el.textContent ?? "").startsWith(label),
+    );
+    assert.equal(span === undefined, false, `no row labelled ${label}`);
+    const button = span!.querySelector('button[aria-label="More info"]');
+    assert.equal(button === null, false, `the ${label} row has no hint`);
+    await act(async () => {
+      (button as HTMLButtonElement).click();
+    });
+    await settle();
+    return document.body.textContent ?? "";
+  }
+
+  test("both halves on one button and nothing bound says Home cannot know which way it went", async () => {
+    // `cue()` presses p1 r0 c1 for every rule in this file, so these two halves
+    // are one button — which is exactly the imported toggle.
+    RULES = [cue("house_lights_on"), cue("house_lights_off")];
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    await open("house_lights_on");
+    const text = await hintFor("State variable");
+    assert.equal(
+      text.includes(
+        "Both halves press the same button. Without a state variable, Home Assistant cannot know which way it went.",
+      ),
+      true,
+    );
+  });
+
+  test("once a variable is bound the ordinary hint is back", async () => {
+    RULES = [cue("house_lights_on", { stateVariable: "house_lights_state" }), cue("house_lights_off")];
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    await open("house_lights_on");
+    const text = await hintFor("State variable");
+    assert.equal(text.includes("Home Assistant cannot know which way it went"), false);
+    assert.equal(text.includes("A Companion custom variable your ON/OFF buttons set"), true);
+  });
+
+  test('the off value hint says what "*" means, and the on value hint does not', async () => {
+    // `*` is legal on the OFF field only — the server refuses it as the on
+    // value — so naming it on both would be an invitation to a 400. The hint
+    // lives behind the row's InfoHint, opened here the way an operator does.
+    //
+    // The FIELD ITSELF is verified in a browser rather than here: the popover's
+    // placement and whether it is legible over the field below it are not
+    // things jsdom can see. See the pull request.
+    RULES = [cue("deck_on", { stateVariable: "MA_HyperDeck_01:status", stateOnValue: "Record", stateOffValue: "*" }), cue("deck_off")];
+    CUSTOM_VARIABLES = [];
+    await mount();
+    await open("deck_on");
+    const off = await hintFor("Value meaning off");
+    assert.equal(off.includes('"*" means anything else — any value that is not the on value'), true);
+    const on = await hintFor("Value meaning on");
+    assert.equal(on.includes("anything else"), false);
+  });
+
+  test("an ordinary pair on two buttons never says it", async () => {
+    const off = cue("house_lights_off");
+    off.action.params.col = 2;
+    RULES = [cue("house_lights_on"), off];
+    CUSTOM_VARIABLES = ["house_lights_state"];
+    await mount();
+    await open("house_lights_on");
+    const text = await hintFor("State variable");
+    assert.equal(text.includes("Home Assistant cannot know which way it went"), false);
   });
 });

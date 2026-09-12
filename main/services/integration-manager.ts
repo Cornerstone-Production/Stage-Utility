@@ -23,6 +23,9 @@ import { secretsStore } from "./secrets.js";
 import {
   DEFAULT_POLL_SECONDS as SENSOURCE_DEFAULT_POLL_SECONDS,
   MIN_POLL_SECONDS as SENSOURCE_MIN_POLL_SECONDS,
+  SAFESPACE_DEFAULT_POLL_SECONDS,
+  SAFESPACE_MAX_POLL_SECONDS,
+  SAFESPACE_MIN_POLL_SECONDS,
   type SenSourceConfig,
   sensourceService,
 } from "./sensource-service.js";
@@ -530,6 +533,23 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       max: SENSOURCE_MAX_POLL_SECONDS,
       help: "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls.",
     },
+    {
+      key: "safeSpaceId",
+      label: "SafeSpace space ID (optional)",
+      type: "text",
+      placeholder: "(only if your site has SafeSpace)",
+      help: "Optional. If your site also has SenSource SafeSpace, paste the space ID from its live-occupancy embed URL (SafeSpace → the space → the address of its live value ends in the ID). It replaces only the occupancy number with SafeSpace's live reading, which is much fresher than Vea's; attendance, zones, peak and capacity keep coming from Vea. Leave blank to use Vea for everything. Treat the ID like a password: anyone who has it can read your occupancy without logging in.",
+    },
+    {
+      key: "safeSpacePollSeconds",
+      label: "SafeSpace interval (s)",
+      type: "number",
+      placeholder: String(SAFESPACE_DEFAULT_POLL_SECONDS),
+      default: SAFESPACE_DEFAULT_POLL_SECONDS,
+      min: SAFESPACE_MIN_POLL_SECONDS,
+      max: SAFESPACE_MAX_POLL_SECONDS,
+      help: "How often to read the SafeSpace value. Separate from the Vea interval above, because a live number is only worth having if it is read often. SafeSpace rate-limits and Stage reads its limit headers and backs off on its own, but there is nothing to win below 10s. The ceiling is 60s because a reading older than that is no fresher than Vea's and the occupancy goes back to Vea — to read it less often than that, clear the space ID instead. Ignored while the space ID is blank.",
+    },
   ],
 };
 
@@ -954,12 +974,65 @@ class IntegrationManager {
   /** Live count of connected Companion-module clients (pushed from remote-server
    *  as SSE streams marked with the X-Companion-Module header connect/close). */
   private companionClients = 0;
+  /**
+   * What the OUTBOUND half last said, or null for nothing to say.
+   *
+   * Companion's row is two independent facts on one message line, and each has
+   * its own writer: how many modules are dialled IN (setCompanionClients, from
+   * remote-server as SSE streams open and close) and what this app found when it
+   * last dialled OUT. Whichever wrote last used to be the whole message, so a
+   * module reconnecting erased "12 of 52 connection(s) in error", and — worse —
+   * erased the reason a Test had failed and flipped the row from error back to
+   * connected. Both now compose in applyCompanionRow.
+   *
+   * ONE slot for the outbound half, holding either the Test's answer or the
+   * hourly reconcile's connection health, because they are one fact reported at
+   * two moments. Last writer wins WITHIN the slot, and that is correct: the
+   * reconcile only reaches its health read having just read the export off the
+   * same Companion, so it is newer evidence than a Test that failed an hour ago.
+   */
+  private companionOutbound: { failed: boolean; message: string } | null = null;
+
   setCompanionClients(count: number): void {
     this.companionClients = count;
+    this.applyCompanionRow();
+  }
+
+  /**
+   * What this app found the last time it dialled Companion.
+   *
+   * `message` null clears the slot — a host that just changed, no host at all, or
+   * a Companion too old to report its connection status. `failed` is what puts
+   * the row in error, and only a Test sets it: see applyCompanionRow.
+   */
+  setCompanionOutbound(message: string | null, opts: { failed?: boolean } = {}): void {
+    this.companionOutbound = message === null ? null : { failed: opts.failed ?? false, message };
+    this.applyCompanionRow();
+  }
+
+  /**
+   * The Companion row: the inbound client count, then whatever the outbound half
+   * last said.
+   *
+   * `error` comes from a FAILED TEST and from nothing else. A Test is this app
+   * dialling Companion and being unable to, which is this integration being
+   * down; connections in error behind a Companion that answered are gear in the
+   * building, and a red row for a light in an office is a row an operator learns
+   * to ignore. Note that the row therefore CAN be in error — an earlier comment
+   * on companion-info-panel.tsx claimed it never was, which was wrong and is the
+   * ordinary case for a Companion that is switched off.
+   */
+  private applyCompanionRow(): void {
+    const count = this.companionClients;
+    const out = this.companionOutbound;
+    const parts = [
+      count > 0 ? `${count} Companion client(s) connected` : null,
+      out?.message ?? null,
+    ].filter((p): p is string => p !== null);
     this.setConnectionState(
       "companion",
-      count > 0 ? "connected" : "disconnected",
-      count > 0 ? `${count} Companion client(s) connected` : null,
+      out?.failed ? "error" : count > 0 ? "connected" : "disconnected",
+      parts.length ? parts.join(". ") : null,
     );
     this.broadcastStates();
   }
@@ -1090,6 +1163,11 @@ class IntegrationManager {
       // picker offer another Companion's buttons at coordinates this one will
       // press regardless.
       companionApi.invalidate();
+      // Everything the outbound half had to say belonged to the OLD host — the
+      // connection counts, and the last Test's answer. Left on the row, "12 of
+      // 52 connection(s) in error" would go on describing a box this app no
+      // longer talks to until the next reconcile an hour later.
+      this.setCompanionOutbound(null);
       // And the hourly reconcile follows the host: added here it starts without
       // a restart, and cleared here it stops rather than dialling an address
       // nobody has configured. Boot is the only other place it is started.
@@ -1201,8 +1279,10 @@ class IntegrationManager {
         // outbound to test and the inbound count is the whole answer, exactly as
         // before this integration gained config.
         if (!this.getCompanionTarget()) {
-          this.setConnectionState("companion", n > 0 ? "connected" : "disconnected", inbound);
-          this.broadcastStates();
+          // Through the composition, not around it. Writing the row directly
+          // here is what erased the health and the last Test's reason, and this
+          // was the third of three writers.
+          this.setCompanionOutbound(null);
           return { ok: true, message: inbound };
         }
 
@@ -1219,16 +1299,16 @@ class IntegrationManager {
           const { runCompanionReconcile } = await import("./companion-reconcile.js");
           unsaved = (await runCompanionReconcile())?.failed.length ?? 0;
         }
-        const msg =
-          `${inbound}. ${outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`}` +
+        // What the OUTBOUND half found, without the inbound count: the count is
+        // the other slot and applyCompanionRow puts the two together. Repeating
+        // it here would print it twice on the row.
+        const said =
+          (outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`) +
           (unsaved > 0 ? ` ${unsaved} cue status(es) could not be saved.` : "");
-        this.setConnectionState(
-          "companion",
-          outbound.ok ? "connected" : "error",
-          msg,
-        );
-        this.broadcastStates();
-        return { ok: outbound.ok, message: msg };
+        this.setCompanionOutbound(said, { failed: !outbound.ok });
+        // The RETURNED message keeps both halves. It is the Test button's own
+        // one-shot answer in the dialog footer, which composes nothing.
+        return { ok: outbound.ok, message: `${inbound}. ${said}` };
       }
 
       if (id === "propresenter") {
@@ -1420,9 +1500,9 @@ class IntegrationManager {
     const enabled = this.states.get("propresenter")?.enabled ?? false;
     const { host, port, pollMs } = this.getPropresenterTarget();
     if (enabled && host && port) {
-      // configure() starts polling; the listener flips this to connected/error
-      // on the first tick.
-      this.setConnectionState("propresenter", "connecting", `Polling ${host}:${port}`);
+      // configure() opens the status stream; the listener flips this to
+      // connected/error once it is up, or once the fallback poll answers.
+      this.setConnectionState("propresenter", "connecting", `Connecting to ${host}:${port}`);
       propresenterService.configure(host, port, pollMs ?? undefined);
     } else {
       propresenterService.stop();
@@ -1776,15 +1856,17 @@ class IntegrationManager {
   }
 
   private async getSensourceConfig(): Promise<SenSourceConfig> {
+    /** A saved interval field, which the form may have stored as either type. */
+    const seconds = (raw: unknown): number =>
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim()
+          ? parseInt(raw, 10)
+          : NaN;
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");
-    const rawPoll = cfg.pollSeconds;
-    const pollSeconds =
-      typeof rawPoll === "number"
-        ? rawPoll
-        : typeof rawPoll === "string" && rawPoll.trim()
-          ? parseInt(rawPoll, 10)
-          : NaN;
+    const pollSeconds = seconds(cfg.pollSeconds);
+    const safeSpacePoll = seconds(cfg.safeSpacePollSeconds);
     return {
       clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
       clientSecret: secrets.clientSecret || null,
@@ -1793,6 +1875,14 @@ class IntegrationManager {
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],
+      // Blank is the normal state, and it is not an error — it means the
+      // SafeSpace half is simply off.
+      safeSpaceId:
+        typeof cfg.safeSpaceId === "string" && cfg.safeSpaceId.trim() ? cfg.safeSpaceId.trim() : null,
+      safeSpacePollSeconds:
+        Number.isFinite(safeSpacePoll) && safeSpacePoll > 0
+          ? safeSpacePoll
+          : SAFESPACE_DEFAULT_POLL_SECONDS,
     };
   }
 

@@ -142,6 +142,17 @@ function drawChecks(c){
     html += '<span class="chip s-' + esc(it.state) + '" title="' + esc(it.detail || '') + '">'
          +  '<span class="dot"></span><b>' + esc(it.label) + '</b> ' + esc(it.state === 'ok' ? 'connected' : it.state) + '</span>';
   }
+  /* PCO quota, from the rate headers PCO puts on every response. Absent until PCO
+     has answered once — an unconfigured integration has no headroom to report and
+     a made-up number on a diagnostics page is worse than no chip. */
+  if (c.pcoRate) {
+    var r = c.pcoRate;
+    var win = r.periodSec > 0 ? r.periodSec + 's' : 'window';
+    html += '<span class="chip ' + (r.tight ? 's-warn' : 's-ok') + '" title="'
+         +  esc('Planning Center reports this limit on every response. It is dynamic and per-endpoint, so it is read rather than assumed.') + '">'
+         +  '<span class="dot"></span><b>PCO quota</b> ' + esc(r.count + '/' + r.limit) + ' per ' + esc(win)
+         +  (r.tight ? ' · holding back' : '') + '</span>';
+  }
   checksEl.innerHTML = html;
 }
 

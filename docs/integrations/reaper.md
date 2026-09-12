@@ -31,3 +31,21 @@ tick *Run web server on port* (e.g. `8080`) → leave *Username:password* blank 
 
 **On a layout:** add object → **REAPER → REAPER status**. Options: recording/idle/
 offline text overrides, fill-red-when-recording, show-position, hide-when-idle.
+
+## Driving the transport
+
+The same web interface runs an action, so an automation rule can start and stop a
+recording: the **REAPER transport** action (Record, Stop, Play) needs nothing set
+up beyond this integration's host and port. REAPER's Record is a toggle, so the
+action reads the transport first and sends nothing when REAPER is already
+recording.
+
+A `_on`/`_off` cue pair built from Record and Stop reports its real state to Home
+Assistant, read from this poll rather than from Companion. See
+[Automation](../automation.md#state-from-stage-utility).
+
+The transport is also readable: **REAPER starts recording** and **REAPER stops
+recording** are triggers, and **REAPER is recording** is a condition. An enabled
+rule using any of them holds the poll at its active cadence with no browser
+open. The stop trigger does not fire when REAPER simply becomes unreachable —
+that is unknown, not stopped.

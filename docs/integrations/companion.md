@@ -54,8 +54,10 @@ sits alongside them.
 | **Companion Host** | Companion's IP. Leave blank and nothing outbound happens |
 | **API Port** | Companion's web and HTTP API port, `8000` by default. Companion's **Settings → Protocols → HTTP** must be on |
 
-**Test** reads Companion's configuration and reports its build and how many
-buttons it found. It never presses anything.
+**Test** reads Companion's configuration and reports its build, how many buttons
+it found and how many of Companion's own connections are healthy — see
+[When Companion cannot reach the device](#when-companion-cannot-reach-the-device).
+It never presses anything.
 
 Everything outbound comes from Companion's own configuration export
 (`/int/export/full`), which is unauthenticated **unless the Companion admin has
@@ -101,7 +103,7 @@ snapshot, no schedule reaches it.
 
 | Answer | |
 |---|---|
-| `200` | dispatched. `{ok, detail}`, plus `simulated: true` while the engine is in simulate mode — the call succeeded and nothing reached a device |
+| `200` | dispatched. `{ok, detail}`, plus `simulated: true` while the engine is in simulate mode — the call succeeded and nothing reached a device. A cue on a pair with a [state variable](#real-state) also carries `state`, and answers `{detail: "already on", skipped: true}` without pressing when the device is already there |
 | `202` | this cue is set to **Ask twice**. `{confirm, expiresInSec}`; call again within 30 s with `?confirm=<token>`, or in the body. A confirmation is **single use** and lapses after 30 s — replaying one is answered with a fresh confirmation, never a second press |
 | `401` | no token, or a revoked one |
 | `404` | no cue by that name |
@@ -143,11 +145,22 @@ mitigation there is the same: an ACL on the switch port Companion is on.
 ### Importing ON/OFF pairs
 
 Settings → Automation → **Import from Companion…** finds, per page, buttons whose
-labels differ only by a trailing `ON`/`OFF` (or `Startup`/`Shutdown`) and offers
-each pair as two cues, `<name>_on` and `<name>_off`. A pair whose buttons drive a
-utility device — a projector, a television, a smart plug or bulb, a lighting console
-— is ticked by default; everything else is offered unticked, because a cue that
-presses it is a cue somebody can say by accident.
+labels differ only by a trailing direction word — `ON`/`OFF`,
+`Startup`/`Shutdown` or `START`/`STOP` — and offers each pair as two cues,
+`<name>_on` and `<name>_off`. Whichever pair of words the buttons use, the cues
+are named `_on` and `_off`: "REC START" and "REC STOP" become `rec_on` and
+`rec_off`.
+
+The word is the **trailing word** and the base is everything before it, so a
+"Deck 2 START" beside an "Encoder STOP" on one page is two single buttons and
+not a pair. `Record`/`Stop` is deliberately not a pair of words: a lone "Stop"
+has too many partners.
+
+A pair whose buttons drive a utility device — a projector, a television, a smart
+plug or bulb, a lighting console, a recorder or stream encoder — is ticked by
+default; everything else is offered unticked, because a cue that presses it is a
+cue somebody can say by accident. A camera is not on that list: it is pointed at
+things during a service, not turned on before one.
 
 Pairs are matched **within a page**: "Conf TVs ON" on two auditoriums' pages are
 different televisions, and crossing them is the kind of mistake found out during
@@ -160,7 +173,13 @@ reports that rather than what it last asked for. See
 [Real state](#real-state) — a variable named after the pair (`projectors` or
 `projectors_state`) is picked for you.
 
-Each imported pair becomes two rules with **no service is live** and a two-second
+One **search** field at the top of the dialog filters both sections at once, by
+label, page, base and cue name — `projectors_off` finds its pair. A section with
+nothing left shows *No matches* under its heading rather than disappearing, and
+each section's **Select all** and **Clear** act on the rows the search has left
+on screen. The counter beside the field says how many of the offered rows match.
+
+Each imported pair becomes two rules with **no service is live** and a three-second
 cooldown. They are ordinary rules afterwards — edit, disable or delete them like
 any other. Re-running the import skips names that already exist and tells you
 which.
@@ -174,12 +193,50 @@ is left out: a cue called nothing cannot be called.
 **Nothing in this section is ticked for you.** A pair is plainly a thing being
 turned on and off; a single button is whatever somebody put on a Companion page,
 and a pre-ticked camera shot or playback macro is a cue somebody can say by
-accident. Search by label, page or cue name and tick what you want.
+accident. Use the search at the top of the dialog and tick what you want.
+Choosing a **Toggle with state** variable for a row ticks that row, because
+picking one is saying you want that button.
 
-They carry the same **no service is live** condition and two-second cooldown as a
+They carry the same **no service is live** condition and three-second cooldown as a
 pair's halves, and the same page-naming rule applies when the same label is on two
 pages. In Home Assistant a single button becomes a `script` rather than a switch —
-there is no on and no off to give a switch a state.
+there is no on and no off to give a switch a state — unless it is a **toggle**.
+
+#### Toggle buttons
+
+A button that is really a **toggle** — one key that turns the thing on and off in
+turn, with no OFF partner — is the exception. Imported as a single cue it becomes
+a `script`, which HomeKit shows as a momentary button that snaps back: every tap
+presses the toggle again, and the light ends up whichever way the taps happened to
+land.
+
+Give the row a **Toggle with state** variable and it is imported as an ON/OFF
+**pair** instead. Both cues press the same button; the variable is what tells the
+two directions apart, so `<name>_on` presses when the variable says off — and when
+it cannot be read at all — but not when it already says on. `<name>_off` mirrors
+it. See [Real state](#real-state). A trailing direction word — `ON`, `OFF`,
+`Startup`, `Shutdown`, `START`, `STOP` or `Toggle` — comes off the name first:
+"VCR Light ON" becomes `vcr_light_on` and `vcr_light_off`, not
+`vcr_light_on_off`.
+
+In Companion, set the variable from the button's own toggle branches — a **Set
+custom variable** action to `on` in the branch that turns the thing on, and one to
+`off` in the branch that turns it off. A button with no variable is a single cue
+and a `script`.
+
+A toggle already imported is not offered again: the dialog knows its two cue
+names as well as its own. Importing one whose name is taken creates **neither**
+half — a lone `_off` cue would carry no variable and would pair itself with
+whatever `<name>_on` was already there.
+
+A toggle **needs** the variable. Two cues pointed at one button with nothing bound
+generate a switch that reports what it last asked for while the device does the
+opposite every other press; the generated YAML carries a `# WARNING` comment on it,
+the rule's **State variable** field says so, and the server logs:
+
+```
+[cues] pair vcr_light presses one button with no state variable
+```
 
 ### When a button moves
 
@@ -259,18 +316,34 @@ pair's spoken name is composed by the import and never follows.
 
 ### Home Assistant
 
-**Copy YAML** in the same panel produces the whole configuration fragment: one
-`rest_command` per cue, a template switch per pair under the `template:` key, and
-a `script` per cue that is not half of a pair. That is the current template
-format — the legacy `platform: template` under `switch:`, which Home Assistant
-now refuses with a repair notice, is not generated. A fragment pasted from an
-older version needs re-pasting. Each switch's entity id follows its name, so an
-automation of your own naming an old `switch.…` may need its id updating.
+**Copy YAML** and **Download YAML** in the same panel both produce the whole
+configuration fragment: one `rest_command` per cue, a template switch per pair
+under the `template:` key, and a `script` per cue that is not half of a pair.
+That is the current template format — the legacy `platform: template` under
+`switch:`, which Home Assistant now refuses with a repair notice, is not
+generated, and a fragment saved from an older version needs replacing. Each
+switch's entity id follows its name, so an automation of your own naming an old
+`switch.…` may need its id updating. A cue that has been renamed carries a
+comment naming the `rest_command` it used to be; former names are never emitted
+as commands of their own. Copy YAML writes it to the clipboard, which needs a
+secure browsing context and fails on the plain-HTTP LAN address most installs
+run on — use **Download YAML** there instead.
 
-A cue that has been renamed carries a comment naming the `rest_command` it used
-to be; former names are never emitted as commands of their own. Paste the
-fragment into `configuration.yaml`, put the token in `secrets.yaml` **with the
-scheme**:
+Save the download as `packages/stage_utility.yaml` in Home Assistant's config
+folder, and add this to `configuration.yaml` once:
+
+```yaml
+homeassistant:
+  packages: !include_dir_named packages
+```
+
+A package rather than a direct paste, because the fragment carries top-level
+`script:` and `template:` keys, and a default `configuration.yaml` already has
+`script: !include scripts.yaml` — pasting the fragment in as-is would be a
+duplicate key. `secrets.yaml` sits in the same config folder; the File editor
+add-on is the easiest way to reach both it and the packages folder.
+
+Put the token in `secrets.yaml` **with the scheme**:
 
 ```yaml
 stage_utility_token: "Bearer su_..."
@@ -280,12 +353,170 @@ and reload. A switch is `optimistic: true` unless its pair has a **state
 variable** — Stage Utility reports that it dispatched the press and nothing more,
 so Home Assistant shows what it asked for rather than what the device did.
 
+### Keeping a cue out of Home Assistant
+
+Each cue's editor carries a **Home Assistant** switch. Turned off, the cue is
+voice-only: it is left out of `/api/cues/manifest` and out of the generated
+YAML, so no entity is created for it and it appears under **Everything else** in
+the Automations tab. `POST /api/cues/<name>` still fires it, and so does
+anything already calling it that way.
+
+For a pair the switch belongs to the ON half and covers both halves — one
+switch, hidden or shown together. Turning it off removes the entity from Home
+Assistant within a few seconds, and automations there that refer to it stop
+working; the entity comes back under the same id when the switch is turned on
+again.
+
+### Cues that are not Companion buttons
+
+A cue is a rule, and every rule has an action — a Companion press is only the
+most common one. A cue whose action is anything else appears in Home Assistant
+the same way, through the same manifest and the same generated YAML: cues named
+`<base>_on` and `<base>_off` become one switch, and a cue on its own becomes a
+script.
+
+The **REAPER transport** action is the worked example:
+
+| Cue | Action |
+|---|---|
+| `reaper_record_on` | REAPER transport → Start recording |
+| `reaper_record_off` | REAPER transport → Stop |
+
+That pair's state is read from Stage Utility's own REAPER connection rather than
+from a Companion variable, so the switch reports whether REAPER is really
+recording and a repeated `turn_on` sends nothing. Nothing has to be built in
+Companion for it, and the pair is never probed for a state source or marked
+`button missing` — it has no button. See
+[State from Stage Utility](../automation.md#state-from-stage-utility).
+
 ### Real state
 
 Companion answers a press the moment it hands it to a control and never says what
 happened at the other end, so an optimistic switch still reads *on* for a
-projector somebody turned off at the wall. Bind the pair to a Companion **custom
-variable** and it reports the truth instead.
+projector somebody turned off at the wall. Bind the pair to a Companion variable
+and it reports the truth instead.
+
+A binding names one of two things:
+
+| Form | Reads |
+|---|---|
+| `projectors_state`, or `custom:projectors_state` | a Companion **custom variable** — one your own buttons set |
+| `VCR-Overhead-Light:power_state` | a **module variable** — one a connection publishes for itself |
+
+A bare name is a custom variable, so every binding written before module
+variables could be named goes on meaning what it meant.
+
+#### Inferred, from what the button drives
+
+A button that drives a smart plug, a television, a projector, a camera, a
+recorder or OBS already has somewhere to read its state from, with nothing to
+build in Companion at all. The import offers it as the default binding, labelled
+`(inferred)`, and the hourly reconcile fills it in for a pair that has none:
+
+| Module | What it reads | Variable | On value | Off value |
+|---|---|---|---|---|
+| `tplink-kasasmartplug` | the plug's power | `power_state` | `On` | `Off` |
+| `tplink-kasasmartbulb` | the bulb's power | `power_state` | `On` | `Off` |
+| `vizio-smartcast` | the television's power | `power` | `On` | `Off` |
+| `generic-pjlink` | the projector's power | `powerState` | `On` | `Off` |
+| `panasonic-cameras` | the camera's power | `power` | `ON` | `OFF` |
+| `panasonic-cameras` | its SD card recording | `recording` | `ON` | `OFF` |
+| `obs-studio` | the stream | `streaming` | `Live` | `*` |
+| `obs-studio` | the recording | `recording` | `Recording` | `*` |
+| `bmd-hyperdeck` | the deck's transport | `status` | `Record` | `*` |
+| `magewell-ultrastream` | the encoder's stream | `stream_status` | `Streaming` | `*` |
+| `magewell-ultrastream` | its recording | `record_status` | `Recording` | `*` |
+| `red-rcp2` | the camera's recording | `recording` | `Recording` | `*` |
+
+A power variable holds one of two values and keeps an exact off value, so a
+projector warming up reads *unknown* rather than *off* — reported off it is a
+projector somebody presses again mid warm-up. A status variable holds several,
+so its off value is [`*`](#real-state) and the on value is the only one spelled
+out.
+
+**Which connection** comes from the button's `powerState` feedback where it has
+one, then from its first action, then from any other feedback — which is what
+lets a macro key whose actions are all Companion button presses still be
+identified by the one device feedback on it.
+
+**Which fact** comes from what the button does. A module with more than one row
+— OBS, an encoder, a camera — matches on the actions the button runs, and on its
+feedbacks only if no action matched: a recording key and a streaming key on one
+OBS connection are two different facts, and a deck's format key is neither.
+Anything else infers nothing rather than guessing a name.
+
+Modules in use with **no row**, because they publish no on/off state to read:
+`bmd-atem` (its `record_active` and `stream_active` variables exist only in
+module versions after 3.18.0), `qsys-remote-control` and `yamaha-rcp` (their
+variables are named after a control or a console model, not after the module),
+`renewedvision-pvp` (registers no variables at all), `malighting-grandma3`,
+`rossvideo-rosstalk`, `generic-swp08`, `bmd-smartview`, `slack-webhooks` (send
+only), `magewell-proconvert-decoder` (only cable and source state),
+`shure-wireless`, `shure-psm1000` and `shure-chargers` (per-channel RF and
+battery).
+
+A binding you set yourself is never replaced. Pick a different variable, or
+**No state**, and the reconcile leaves it alone.
+
+#### Learning a state source
+
+A pair whose connections have **no row above** learns one instead. Companion's
+export carries no variable definitions and its API cannot list a connection's
+variables, so the names are guessed and checked: the hourly pass asks Companion
+for each of 19 candidate names on the connection — the eight the table already
+uses plus `power_status`, `state`, `record_state`, `stream_state`, `on_off`,
+`is_on`, `active`, `enabled`, `mute`, `muted` and `connected` — and records the
+ones that exist. The import dialog says **will learn** for such a pair, and the
+rule shows *Learning: watching N candidates*.
+
+**What it needs from you: press the pair on, and press it off.** The two values
+are not guessed. After a press that really reached a device, each candidate is
+read at the start of the eight-second [settle window](#the-settle-window) and
+again as it moves. A candidate that moved after an ON press *and* after an OFF
+press, to two values and never a third, becomes the binding — with the value
+seen after ON as the on value and the one after OFF as the off value. The order
+of the two presses does not matter, and they can be days apart.
+
+Where more than one candidate qualifies, a `power` name wins, then a `status`
+one; the others are named on the log line.
+
+What it never does:
+
+- **press anything.** Every observation rides a press you or a caller made. A
+  simulated press and a failed one are not observed at all.
+- **replace a binding.** A pair with a binding on either half — typed, inferred
+  or learned — is never probed and never watched.
+- **bind from one press.** A variable that moves after an ON press and then
+  holds is a `last_command` or a counter, not a state.
+
+It asks Companion **once**. The candidate set is recorded and what happens next
+is a press — Learn again is what re-asks. A connection that answers for none of
+the 19 is retried hourly three times, because a module that has not finished
+connecting publishes no variables yet — see
+[When Companion cannot reach the device](#when-companion-cannot-reach-the-device)
+for how to tell that apart from a name that does not exist — and then left alone:
+
+```
+[cues] pair projectors: none of the 19 candidate state variables exist on GrandMA3 after 3 tries; pick one on the rule
+```
+
+It **stops** after three presses that taught it nothing:
+
+```
+[cues] pair projectors: could not learn a state source after 3 presses; pick one on the rule
+```
+
+and once it has bound, it stops for good:
+
+```
+[cues] pair projectors: learned state source Rack:status (Active/Standby) from watching 2 presses
+```
+
+A learned binding is an ordinary binding — editable, clearable. Clearing it does
+**not** restart learning, because a pair you unbound on purpose would otherwise
+be re-bound within the hour. **Learn again** on the rule is what starts over.
+
+#### A custom variable your buttons set
 
 In Companion:
 
@@ -296,13 +527,22 @@ In Companion:
 
 In Stage Utility, either pick the variable in the **State** column when you import
 the pair, or open the pair's `_on` cue and set **State variable**. The `_off` half
-inherits it. If your buttons set something other than `on`/`off` — `POWER=ON`,
+inherits it. Picking an inferred source brings its two values with it. If your buttons set something other than `on`/`off` — `POWER=ON`,
 `1` — set **Value meaning on** and **Value meaning off** to match; they may not be
 the same string.
 
 The comparison is **exact and case-sensitive**, after trimming whitespace from
 both ends: a variable holding `ON` does not match the default `on`, and reads
 *unknown*. Set **Value meaning on** to `ON` or have the button write `on`.
+
+**`*` as the off value means "anything else".** A status variable with more than
+two answers — a recorder's transport, which reads `Record`, `Stopped`, `Preview`,
+`Play`, `Forward`, `Rewind`, `Jog` or `Shuttle` — needs only its on value spelled
+out: set **Value meaning off** to `*` and every other value, including an empty
+one, reads *off*. *Unknown* then means only that Companion has no variable by
+that name or could not be reached. Only the off value may be `*`; `*` as the on
+value is refused, because a switch that reads on whatever the device is doing is
+the failure this binding exists to remove.
 
 The generated YAML then also carries one `rest` sensor polling
 `GET /api/cues/states` every ten seconds, with an attribute per bound pair, and
@@ -326,8 +566,105 @@ In Home Assistant an unknown pair reads *off*, because a template switch has no
 third state — the reason is on the sensor's attribute and on the rule's row. It
 stays **pressable**: the generated switch carries no `availability_template`, on
 purpose, because an unavailable entity cannot be commanded and an unreachable
-Companion would then also stop you turning the device on. Pressing a cue never
-depends on the state variable.
+Companion would then also stop you turning the device on. A state that cannot be
+read always presses.
+
+**A bound cue is idempotent.** Calling `<pair>_on` while the variable already
+says `on` presses nothing and answers `200 {detail: "already on", state: "on",
+skipped: true}`; the Activity log records it as `skipped`. Inside the
+[settle window](#the-settle-window) the last press is what a repeat is compared
+against instead. That is what makes a
+[toggle button](#toggle-buttons) safe, and it also absorbs a Home Assistant that
+repeats `turn_on`, or an assistant that hears the same sentence twice. Only a
+call is checked — a rule the engine fires from a trigger of its own presses
+without reading anything.
+
+The read is the same one `/api/cues/states` makes, so it costs one round of
+Companion reads shared with any poller, and its answer is served for five
+seconds. An unreachable Companion makes a bound cue wait up to **three seconds**
+before it presses — the read's timeout. It still presses.
+
+#### A Companion trigger, when the device has a feedback but no variable
+
+Some modules show a device's state as a **feedback** and publish no variable for
+it — a router crosspoint (`generic-swp08`), a console fader (`yamaha-rcp`), and
+every other module in the [no row](#inferred-from-what-the-button-drives) list
+that also lights a key up. An HTTP client cannot read a feedback's result, so
+Stage Utility offers no inferred source and the learning probe finds nothing to
+watch.
+
+One Companion **trigger** turns that feedback into a custom variable, and the
+binding above then reports real state with nothing to change in Stage Utility.
+Two triggers per device, one each way:
+
+In Companion, **Triggers → Add trigger**:
+
+1. **Event** — *On condition becoming true*.
+2. **Condition** — the same feedback the button uses, configured the same way.
+   The condition list takes feedbacks; drop in the one that is true when the
+   device is on.
+3. **Action** — internal **Set custom variable**, naming your variable and the
+   value `on`.
+
+Then a second trigger, identical, with the feedback **inverted** and the value
+`off`. Companion's feedbacks carry an *Invert* toggle, so this is the same
+feedback twice rather than two different ones.
+
+In Stage Utility, bind the pair to that variable exactly as in
+[A custom variable your buttons set](#a-custom-variable-your-buttons-set). Set
+**Value meaning on** and **Value meaning off** to whatever the two triggers
+write.
+
+Why this beats setting the variable from the buttons: a trigger fires on what
+the **device** reports, so the variable also moves when somebody switches the
+thing at the wall, or from another control surface. Setting it from the ON and
+OFF buttons only records what Companion was **asked** to do, which is the
+optimism the binding exists to remove.
+
+#### The settle window
+
+Companion polls the device on its own interval — one to five seconds for a smart
+plug — so for a moment after a press the variable still holds the value from
+before it. A repeat compared against that reading is compared against the state
+the device was in before the press it is repeating.
+
+So a press is remembered for **eight seconds**, and inside that window the
+command outranks the variable:
+
+- the **same** state again is `200 {detail: "already on (just pressed)",
+  skipped: true}` and presses nothing. The variable is not read at all — nothing
+  it could say would change the answer;
+- the **opposite** state presses, whatever the variable reads, because the
+  reading is presumed to be behind. `[cues] vcr_light_off by Home Assistant:
+  pressed against a stale reading (off) inside the settle window` says so.
+
+Flipping a switch in Apple Home several times quickly is what this is for: the
+`_off` a second after the `_on` used to read the pre-press `off`, answer *already
+off*, press nothing, and leave the light on with Home showing it off.
+
+While a pair is inside its window, that one variable is re-read every second
+until it holds the commanded value — so `/api/cues/states`, the manifest and the
+[`cues`](../reference/api.md#channels) channel carry the truth about a second
+after the device moves rather than at the next five-second poll. Both the states
+route and the manifest also carry `settling: true` and `commanded` for that
+pair, so an integration can show what was asked for instead of a reading it has
+been told is stale. The log says how it ended, once:
+
+```
+[cues] state of vcr_light_state settled to on after 3 s
+[cues] state of vcr_light_state did not settle within 8 s
+```
+
+The generated Home Assistant switch reads `commanded` before `state` for the
+same reason: templated on the reading alone it flips itself back mid-window, and
+a switch that flips back is an invitation to tap it again. The rules list in
+Settings does the same: a bound pair's pill shows `commanded` while `settling`
+is true, never the stale reading underneath it. Re-paste the fragment
+to pick that up.
+
+A press that reached nothing opens no window: a simulated call, a call Companion
+refused, and a call that was itself skipped all leave the variable as the only
+thing worth comparing against.
 
 If the whole read fails rather than one pair — the server could not answer at all
 — Settings → Automation says so in one line above the rules list and shows no
@@ -335,7 +672,92 @@ pills, rather than leaving them out silently.
 
 Nothing polls Companion in the background: the variables are read when
 `/api/cues/states` is called and the answer is served for five seconds, so an
-install nobody polls costs nothing.
+install nobody polls costs nothing. The one exception is the eight seconds after
+a press — see [The settle window](#the-settle-window) — which reads one variable
+a second and stops as soon as it agrees.
+
+#### When Companion cannot reach the device
+
+A connection Companion cannot reach does not fail in one way, and neither
+failure is visible in the read:
+
+- a connection that **never came up** registers no variables, so the read is
+  **404** — the same 404 as for a variable that does not exist. The pair reads
+  *unknown*, which is honest, but the binding is usually fine and the device is
+  the problem.
+- a connection that came up and then **lost the device** goes on answering with
+  the last value it saw, or with an empty one. The pair reads *on* or *off* with
+  full confidence about a television Companion is no longer talking to.
+
+Only a connection Companion reports as **good** has a value worth trusting.
+
+The **connection status** tells the two apart. It comes from Companion's own
+`GET /api/connections`, read on **Test** and on the hourly reconcile — never on a
+timer of its own — and appears in Settings → Integrations → **Bitfocus
+Companion** under **Status**, beside the connected-client count:
+
+```
+2 Companion client(s) connected. 12 of 52 connection(s) in error, 10 not reporting
+```
+
+It is there with no Companion module attached, which is when it matters most.
+`GET /api/integrations` carries the same line as the row's `message`, for
+reading it from somewhere else.
+
+| Bucket | Companion's status | Means |
+|---|---|---|
+| ok | `good` | up; its variables hold a current value |
+| in error | `error` | Companion cannot reach the device. Its variables either 404 or hold whatever was last seen — neither is current |
+| not reporting | no status, or one this app has not verified | never came up; its variables 404 |
+
+On the install this was built against, the forty enabled connections on modules
+the state table knows read out as: eighteen `good`, every one answering a real
+value; six bulbs and ten plugs answering 404; five cameras answering an empty
+`200`; and one television, `error / Connection Failure`, answering `Off` — the
+value from before Companion lost it.
+
+Connections **disabled** in Companion are not counted. The row's own connected /
+no-clients state still follows the module clients alone — gear behind Companion
+being down is a fact about the building, not about this integration — so nothing
+turns red and the count is the warning.
+
+When anything is not ok, the hourly pass writes one line naming the modules and
+Companion's own words for what is wrong:
+
+```
+[companion] 12 of 52 connection(s) in error, 10 not reporting: 6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), SA-HL-Stage-TV (Connection Failure), 10 tplink-kasasmartplug (not reporting)
+```
+
+**Only when it changes**, and never on a clean pass. An install with a fault
+nobody has got to yet would otherwise write the same line 24 times a day and
+bury the pass where the number moved. A fault that clears and comes back is
+written again, and so is the first pass after a restart. The row always carries
+the current state; the log carries the transitions.
+
+`/api/connections` is a **Companion 5.x** endpoint; on
+anything older the row simply carries no connection status, which is not
+reported as a fault.
+
+### For Home Assistant
+
+Two things exist for an integration to build on, beside the pasted YAML above:
+
+- `GET /api/cues/manifest` — every cue as JSON, with a `version` that goes up on
+  any rule change, this server's name and LAN address, one entry per ON/OFF pair
+  with its current state, and one per single cue. A cue whose Companion button
+  has gone missing is listed with `available: false` rather than dropped.
+- the `cues` [SSE channel](../reference/api.md#channels) — a `state` event when a
+  bound pair's device changes, and a `manifest` event carrying the new version
+  when the rules change.
+
+While at least one client is subscribed to `cues`, bound variables are read every
+five seconds and only changes are pushed; with nobody subscribed there is no
+timer and nothing is read. The log says which:
+
+```
+[cues] live channel: polling every 5 s for 1 subscriber(s)
+[cues] live channel: polling stopped
+```
 
 ## What the module exposes
 

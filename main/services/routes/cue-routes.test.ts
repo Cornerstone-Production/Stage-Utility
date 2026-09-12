@@ -42,7 +42,9 @@ const { integrationManager } = await import("../integration-manager.js");
 const { AUTOMATION_TRIGGERS, CALL_TRIGGER_ID } = await import("../automation-triggers.js");
 const { readFingerprint } = await import("../companion-fingerprint.js");
 const { runCompanionReconcile } = await import("../companion-reconcile.js");
-const { cueStates } = await import("../cue-states.js");
+const { cueStates, SETTLE_MS } = await import("../cue-states.js");
+const { __resetWatches, stateProbeDeps } = await import("../companion-state-probe.js");
+const { reaperDeps, reaperService } = await import("../reaper-service.js");
 
 after(async () => {
   await fsp.rm(TMP, { recursive: true, force: true });
@@ -156,6 +158,19 @@ function installCompanionStub(): void {
         ? new Response("Not found", { status: 404 })
         : new Response(value, { status: 200 });
     }
+    // A MODULE variable, which Companion serves at its own path. Held in the
+    // same map under `<label>:<name>` — the spelling a binding uses — so a test
+    // that binds one reads it back through the real dispatch rather than
+    // through a second stub that could answer for a URL nothing builds.
+    const moduleVariable = /\/api\/variable\/([^/]+)\/([^/]+)\/value$/.exec(url);
+    if (moduleVariable) {
+      const ref = `${decodeURIComponent(moduleVariable[1]!)}:${decodeURIComponent(moduleVariable[2]!)}`;
+      variableReads.push(ref);
+      const value = variables[ref];
+      return value === undefined
+        ? new Response("Not found", { status: 404 })
+        : new Response(value, { status: 200 });
+    }
     void init;
     return Response.json(companionExportFixture());
   };
@@ -209,6 +224,10 @@ beforeEach(() => {
   variables = {};
   variableReads = [];
   cueStates.invalidate();
+  // A real press in the previous case is remembered for eight seconds, and the
+  // next case's first call would be compared against IT rather than against the
+  // variable it sets up. Cancels the settle re-read with it.
+  cueStates.__resetSettle();
   setQuiet();
   setPcoConfigured(true);
   companionApi.invalidate();
@@ -230,6 +249,28 @@ describe("the token gate on a call", () => {
     assert.equal(r.status, 401);
   });
 
+  test("the refusal line says WHICH header problem it was", async () => {
+    // Three refusals that read identically as a 401 and are fixed in three
+    // different places. The log used to say "no valid token" for all of them.
+    await withCue();
+    const warns: string[] = [];
+    const real = console.warn;
+    console.warn = (...a: unknown[]) => { warns.push(a.map(String).join(" ")); };
+    try {
+      await callRoute(cueRoutes, "/api/cues/projectors_on", { method: "POST" });
+      await call("projectors_on", { headers: { authorization: "su_bare_no_scheme" } });
+      await call("projectors_on", { headers: { authorization: "Bearer su_wrong" } });
+    } finally {
+      console.warn = real;
+    }
+    const refusals = warns.filter((w) => w.includes("[cues] refused"));
+    assert.equal(refusals.length, 3, `expected three refusal lines, got ${JSON.stringify(warns)}`);
+    assert.match(refusals[0]!, /no Authorization header/);
+    assert.match(refusals[1]!, /not "Bearer <token>"/);
+    assert.match(refusals[2]!, /not recognised/);
+    assert.equal(refusals.some((w) => w.includes("su_wrong") || w.includes("su_bare")), false, "a refusal line carried the token");
+  });
+
   test("a same-origin browser does NOT get a free pass on a call", async () => {
     // Deliberately unlike the management routes. There is no operator-at-the-
     // console case for firing a cue; the rule editor has a Test button.
@@ -246,7 +287,15 @@ describe("the token gate on a call", () => {
     // Assistant switch that flips with the projectors still off.
     await withCue();
     await automationEngine.setSettings({ simulate: true });
-    const r = await call("projectors_on");
+    const lines: string[] = [];
+    const real = console.log;
+    console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+    let r;
+    try {
+      r = await call("projectors_on");
+    } finally {
+      console.log = real;
+    }
     await automationEngine.setSettings({ simulate: false });
 
     assert.equal(r.status, 200);
@@ -254,6 +303,12 @@ describe("the token gate on a call", () => {
     assert.equal(body.simulated, true);
     assert.match(body.detail, /^would press/);
     assert.equal(presses.length, 0);
+    // The LOG says so too. It used to read a bare "dispatched", identical to a
+    // real press, so an operator reading /log with the projectors dark had
+    // nothing to go on; only the response body carried the flag.
+    const verdict = lines.find((l) => l.includes("[cues] projectors_on by"));
+    assert.ok(verdict, `no verdict line: ${JSON.stringify(lines)}`);
+    assert.match(verdict!, /dispatched \(simulated\)/);
   });
 
   test("a valid token fires it", async () => {
@@ -711,9 +766,9 @@ describe("a pair's state binding", () => {
     // Accepted, it is a switch that reads unknown forever with nothing saying
     // which rule is wrong — the state route would answer 404 for it every poll.
     await withCue();
-    const r = await post({ name: "screens_on", stateVariable: "state:projectors" });
+    const r = await post({ name: "screens_on", stateVariable: "../../projectors" });
     assert.equal(r.status, 400);
-    assert.match((r.json as { error: string }).error, /not a Companion variable name/);
+    assert.match((r.json as { error: string }).error, /not a Companion variable/);
     assert.equal(automationEngine.cueRules().length, 1, "the rule was saved anyway");
   });
 
@@ -735,6 +790,80 @@ describe("a pair's state binding", () => {
     assert.equal(r.status, 201);
     const saved = automationEngine.cueRules().find((x) => x.trigger.params.name === "screens_on");
     assert.equal(String(saved?.trigger.params.stateVariable), "screens_state");
+  });
+});
+
+describe("GET /api/cues/manifest", () => {
+  /** A bound pair and a lone cue, on the real engine through the real addRule. */
+  async function withACueOfEachKind(): Promise<void> {
+    for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+    for (const [name, says, extra, params] of [
+      ["projectors_on", "Projectors on", { stateVariable: "projectors_state" }, { page: 1, row: 0, col: 1 }],
+      ["projectors_off", "Projectors off", {}, { page: 1, row: 0, col: 2 }],
+      ["take_screens", "Take screens", {}, { page: 1, row: 2, col: 3 }],
+    ] as const) {
+      await automationEngine.addRule({
+        name,
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name, says, room: "Room A", ...extra } },
+        conditions: [],
+        action: { id: "companion.press", params: { ...params } },
+        cooldownSec: 0,
+        oncePerService: false,
+      });
+    }
+  }
+
+  const manifest = async () => {
+    const r = await callRoute(cueRoutes, "/api/cues/manifest");
+    assert.equal(r.status, 200);
+    return r.json as {
+      version: number;
+      server: { name: string; lanUrl: string | null };
+      switches: { id: string; name: string; on: string; off: string; state: string; available: boolean }[];
+      buttons: { id: string; name: string; cue: string; available: boolean }[];
+    };
+  };
+
+  test("is an OPEN read, and lists a switch per pair and a button per lone cue", async () => {
+    // Open like the states route and the YAML: cue names and on/off, never a
+    // token. The thing reading it is an integration that has not been handed
+    // one yet — this is how it finds out what to ask for.
+    await withACueOfEachKind();
+    variables.projectors_state = "on";
+    cueStates.invalidate();
+    const m = await manifest();
+    assert.deepEqual(
+      m.switches.map((x) => `${x.id}|${x.name}|${x.on}|${x.off}|${x.state}|${x.available}`),
+      ["projectors|Projectors|projectors_on|projectors_off|on|true"],
+    );
+    assert.deepEqual(
+      m.buttons.map((x) => `${x.id}|${x.name}|${x.cue}|${x.available}`),
+      ["take_screens|Take screens|take_screens|true"],
+    );
+    assert.equal(typeof m.server.name, "string");
+  });
+
+  test("the version goes up when a rule changes", async () => {
+    // The only thing telling an integration to re-read. Frozen, a cue added on
+    // a Saturday never appears anywhere.
+    await withACueOfEachKind();
+    const before = (await manifest()).version;
+    await automationEngine.addRule({
+      name: "house_lights",
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: "house_lights", says: "House lights" } },
+      conditions: [],
+      action: { id: "companion.press", params: { page: 2, row: 2, col: 1 } },
+      cooldownSec: 0,
+      oncePerService: false,
+    });
+    const after = await manifest();
+    assert.equal(String(after.version > before), "true");
+    assert.equal(
+      after.buttons.some((b) => b.id === "house_lights"),
+      true,
+    );
   });
 });
 
@@ -1018,7 +1147,7 @@ describe("the button and pair endpoints", () => {
     assert.equal(r.status, 200);
     const body = r.json as { ok: boolean; buttons: { pageName: string; label: string }[] };
     assert.equal(body.ok, true);
-    assert.equal(body.buttons.length, 14);
+    assert.equal(body.buttons.length, 30);
     assert.ok(body.buttons.some((b) => b.pageName === FIXTURE_PAGES.screens));
   });
 
@@ -1061,12 +1190,20 @@ describe("the button and pair endpoints", () => {
     for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
     const r = await callRoute(cueRoutes, "/api/companion/pairs");
     const pairs = (r.json as { pairs: { base: string; slug: string; exists: boolean }[] }).pairs;
-    assert.equal(pairs.length, 4);
+    assert.equal(pairs.length, 6);
     assert.deepEqual(
       pairs.map((p) => p.slug),
       // "Projectors" is on both fixture pages, so both are prefixed. See
       // slugsForPairs — a plain slug would have one of them refused on import.
-      ["lobby_tvs", "room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
+      // `deck_1` is a START/STOP pair, named `_on`/`_off` like every other.
+      [
+        "lobby_tvs",
+        "room_a_screens_projectors",
+        "room_a_lighting_projectors",
+        "rig",
+        "deck_1",
+        "ptz",
+      ],
     );
     assert.equal(pairs.every((p) => !p.exists), true);
   });
@@ -1089,13 +1226,16 @@ describe("the button and pair endpoints", () => {
     const body = r.json as { pairs: { slug: string; suggested: boolean }[]; defaultPages?: unknown };
     assert.deepEqual(
       body.pairs.filter((p) => p.suggested).map((p) => p.slug),
-      ["room_a_screens_projectors", "room_a_lighting_projectors", "rig"],
+      ["room_a_screens_projectors", "room_a_lighting_projectors", "rig", "deck_1"],
     );
     // "lobby_tvs" drives generic-tcp-udp — something we cannot call a projector —
-    // so it is offered unticked rather than pre-armed.
+    // so it is offered unticked rather than pre-armed. "ptz" drives a Panasonic
+    // camera, whose power the inference reads and which is still not on the
+    // utility list: a camera pre-ticked is a cue somebody can say by accident,
+    // and an unticked pair is one click away.
     assert.deepEqual(
       body.pairs.filter((p) => !p.suggested).map((p) => p.slug),
-      ["lobby_tvs"],
+      ["lobby_tvs", "ptz"],
     );
     assert.equal("defaultPages" in body, false, "a site's page names came back over the wire");
   });
@@ -1129,7 +1269,7 @@ describe("importing pairs", () => {
     assert.equal(rules.length, 4);
     for (const rule of rules) {
       assert.deepEqual(rule.conditions, [{ id: "service.is-not-live", params: {} }]);
-      assert.equal(rule.cooldownSec, 2);
+      assert.equal(rule.cooldownSec, 3);
       assert.equal(rule.enabled, true);
       assert.equal(rule.action.id, "companion.press");
     }
@@ -1173,6 +1313,9 @@ describe("the Home Assistant config", () => {
     const r = await callRoute(cueRoutes, "/api/cues/home-assistant.yaml", { headers: browser });
     assert.equal(r.status, 200);
     assert.match(r.headers["Content-Type"] ?? "", /yaml/);
+    // The download button relies on this exact filename — the docs tell the
+    // operator to save it as packages/stage_utility.yaml.
+    assert.equal(r.headers["Content-Disposition"], 'attachment; filename="stage_utility.yaml"');
     const yaml = r.body;
 
     // Four cues from the import above -> four commands, two pairs -> two switches.
@@ -1223,12 +1366,35 @@ describe("importing single buttons", () => {
     const buttons = await offered();
     // Page 1: House Lights ON (an ON with no OFF), Take Screens. The unlabelled
     // button at r3c0 is left out — a cue called nothing cannot be called.
+    // Page 2: VCR Light ON and Desk Lamp Toggle, the two smart-device toggles.
     // Page 3: Cam 1 and Record Toggle on row 0, then Cam 2 on row 1 — Cam 1 and
     // Cam 2 both run nothing, which is what the reconcile's "an empty
-    // fingerprint is never searched for" guard needs. See the fixture.
+    // fingerprint is never searched for" guard needs — then the two OBS
+    // toggles. See the fixture.
+    // Page 5: the recorder keys that have no partner. Deck 1 START and STOP are
+    // a pair and are offered as one, so neither is here; "Deck 2 START" and
+    // "Encoder STOP" share no base and are two singles.
     assert.deepEqual(
       buttons.map((b) => `${b.page as number}:${b.slug as string}`),
-      ["1:house_lights_on", "1:take_screens", "3:cam_1", "3:record_toggle", "3:cam_2"],
+      [
+        "1:house_lights_on",
+        "1:take_screens",
+        "2:vcr_light_on",
+        "2:desk_lamp_toggle",
+        "3:cam_1",
+        "3:record_toggle",
+        "3:cam_2",
+        "3:obs_rec_toggle",
+        "3:obs_stream_toggle",
+        "3:tv_wall_on",
+        "5:deck_2_start",
+        "5:encoder_stop",
+        "5:pgm_rec_toggle",
+        "5:pgm_stream_toggle",
+        "5:ptz_sd_rec",
+        "5:cam_1_rec_start",
+        "5:format_decks",
+      ],
     );
     assert.equal(
       buttons.some((b) => "suggested" in b),
@@ -1256,7 +1422,7 @@ describe("importing single buttons", () => {
     assert.equal(rules.length, 2, "one rule per button, not two");
     for (const rule of rules) {
       assert.deepEqual(rule.conditions, [{ id: "service.is-not-live", params: {} }]);
-      assert.equal(rule.cooldownSec, 2);
+      assert.equal(rule.cooldownSec, 3);
       assert.equal(rule.action.id, "companion.press");
     }
     const take = rules.find((x) => automationEngine.cueNameOf(x) === "take_screens")!;
@@ -1441,6 +1607,19 @@ describe("reconciling a cue's Companion button", () => {
         presses.push(url);
         return new Response("ok", { status: 200 });
       }
+      // A VARIABLE read, answered from the shared map. Without this clause it
+      // fell through to the export below, so every name a candidate probe asked
+      // for answered 200 with a 4 MB JSON document as its value — which is
+      // every candidate "existing", holding the same value, forever.
+      const moduleVariable = /\/api\/variable\/([^/]+)\/([^/]+)\/value$/.exec(url);
+      if (moduleVariable) {
+        const ref = `${decodeURIComponent(moduleVariable[1]!)}:${decodeURIComponent(moduleVariable[2]!)}`;
+        variableReads.push(ref);
+        const value = variables[ref];
+        return value === undefined
+          ? new Response("Not found", { status: 404 })
+          : new Response(value, { status: 200 });
+      }
       if (!exportOk) throw new Error("EHOSTUNREACH");
       return Response.json(exportDoc);
     };
@@ -1547,7 +1726,7 @@ describe("reconciling a cue's Companion button", () => {
     presses = [];
     assert.equal((await call("room_a_screens_projectors_on")).status, 200);
     // And the new name fires the other half. A different cue, because an
-    // imported cue carries a two-second cooldown.
+    // imported cue carries a three-second cooldown.
     assert.equal((await call("screens_off")).status, 200);
     assert.deepEqual(presses, [
       "http://10.0.0.5:8000/api/location/1/0/1/press",
@@ -1711,11 +1890,104 @@ describe("reconciling a cue's Companion button", () => {
     assert.match(automationEngine.cueNameOf(after), /^screens_(on|off)$/);
   });
 
+  test("a pair with no binding is bound from what its ON button drives", async () => {
+    // The whole path, through the real engine: imported unbound, the hourly
+    // pass reads the export, sees the PJLink `powerState` feedback on the ON
+    // button and writes the binding with its values.
+    await importPageOne();
+    const before = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "room_a_screens_projectors_on")!;
+    assert.equal(before.trigger.params.stateVariable, undefined);
+
+    const realLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await runCompanionReconcile();
+    } finally {
+      console.log = realLog;
+    }
+
+    const after = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "room_a_screens_projectors_on")!;
+    assert.equal(String(after.trigger.params.stateVariable), "Projectors:powerState");
+    assert.equal(String(after.trigger.params.stateOnValue), "On");
+    assert.equal(String(after.trigger.params.stateOffValue), "Off");
+    // And an operator reading /log on a Sunday can see it happened.
+    assert.deepEqual(
+      lines.filter((l) => l.includes("state source inferred")),
+      [
+        "[companion] cue room_a_screens_projectors: " +
+          "state source inferred Projectors:powerState",
+      ],
+    );
+
+    // A second pass writes nothing more — the binding is now explicit.
+    const again = await runCompanionReconcile();
+    assert.equal(again?.applied, 0, "the pass rewrote a binding it had just made");
+  });
+
+  test("a pair the table has no row for records its candidates for a later press", async () => {
+    // The page 2 "Projectors" pair drives a lighting console, which has no
+    // verified row — so the pass probes its connection and records the names
+    // that answered, and the pair waits to be pressed. What it must NOT do is
+    // bind anything from a probe: a name existing says nothing about which of
+    // its values means on.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    exportDoc = companionExportFixture();
+    exportOk = true;
+    companionApi.invalidate();
+    variables["Lighting:status"] = "Standby";
+    variables["Lighting:mute"] = "0";
+    try {
+      const offer = (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        pairs: { page: number; base: string; learnable?: boolean }[];
+      };
+      const pair = offer.pairs.filter((p) => p.page === 2 && p.base === "Projectors");
+      assert.deepEqual(
+        pair.map((p) => p.learnable),
+        [true],
+        "the offer says this one will be learned",
+      );
+      await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+        method: "POST",
+        headers: browser,
+        body: { pairs: pair },
+      });
+
+      const run = await runCompanionReconcile();
+      assert.ok((run?.applied ?? 0) > 0);
+      const on = automationEngine
+        .cueRules()
+        .find((r) => automationEngine.cueNameOf(r).endsWith("_on"))!;
+      assert.equal(
+        String(on.trigger.params.stateCandidates),
+        "Lighting:status,Lighting:mute",
+        "the names that answered, in candidate order",
+      );
+      assert.equal(String(on.trigger.params.stateVariable ?? ""), "", "a probe never binds");
+    } finally {
+      delete variables["Lighting:status"];
+      delete variables["Lighting:mute"];
+    }
+  });
+
   test("an hourly pass that changed nothing logs no summary line", async () => {
     // 24 lines a day saying "4 in place" on the same /log page an operator
     // reads on a Sunday morning, burying the lines that matter. Every actual
     // decision already logs itself; the summary exists to total those.
     await importPageOne();
+    // ONE settling pass first. The page 1 pairs are imported unbound here, the
+    // way an install from before the state-source inference has them, so the
+    // first pass legitimately writes a binding for the Projectors pair. What
+    // this test is about is the pass AFTER that, which changes nothing.
+    const settling = await runCompanionReconcile();
+    assert.equal(settling?.applied, 1, "the settling pass wrote something other than the binding");
+
     const realLog = console.log;
     const lines: string[] = [];
     console.log = (...args: unknown[]) => {
@@ -1820,6 +2092,141 @@ describe("importing a pair with a state variable", () => {
     assert.equal(states.lobby_tvs?.state, "on");
   });
 
+  test("an offer carries its inferred source's VALUES onto the _on half", async () => {
+    // The whole point of the values travelling: a kasa plug's `power_state`
+    // holds `On`, not `on`. Imported without them the pair reads unknown
+    // forever, and there is nothing on screen that looks wrong.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const offered = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+        pairs: {
+          slug: string;
+          page: number;
+          base: string;
+          stateSource: { variable: string; onValue: string; offValue: string } | null;
+        }[];
+      }
+      // "Projectors" is on two pages in the fixture, so the slug is
+      // page-qualified. Only the page 1 pair drives a PJLink projector.
+    ).pairs.find((p) => p.page === 1 && p.base === "Projectors")!;
+    // The offer itself names it, so the dialog needs no second request.
+    assert.equal(offered.stateSource?.variable, "Projectors:powerState");
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: {
+        pairs: [
+          {
+            ...offered,
+            stateVariable: offered.stateSource!.variable,
+            stateOnValue: offered.stateSource!.onValue,
+            stateOffValue: offered.stateSource!.offValue,
+          },
+        ],
+      },
+    });
+    const slug = offered.slug;
+    assert.deepEqual((r.json as { created: string[] }).created, [`${slug}_on`, `${slug}_off`]);
+
+    const byName = new Map(
+      automationEngine.cueRules().map((x) => [String(x.trigger.params.name), x]),
+    );
+    assert.equal(String(byName.get(`${slug}_on`)?.trigger.params.stateVariable), "Projectors:powerState");
+    assert.equal(String(byName.get(`${slug}_on`)?.trigger.params.stateOnValue), "On");
+    assert.equal(String(byName.get(`${slug}_on`)?.trigger.params.stateOffValue), "Off");
+    // The `_off` half inherits all three, as it always did.
+    assert.equal(byName.get(`${slug}_off`)?.trigger.params.stateVariable, undefined);
+
+    // And it reads back through the MODULE endpoint, end to end.
+    variables["Projectors:powerState"] = "On";
+    cueStates.invalidate();
+    const states = (
+      (await callRoute(cueRoutes, "/api/cues/states")).json as {
+        states: Record<string, { state: string; variable: string }>;
+      }
+    ).states;
+    assert.equal(states[slug]?.variable, "Projectors:powerState");
+    assert.equal(states[slug]?.state, "on");
+    // A binding whose values were left at the on/off defaults would have read
+    // "On" as neither.
+    delete variables["Projectors:powerState"];
+  });
+
+  test("on and off values that are the same are refused before either half exists", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs", stateOnValue: "1", stateOffValue: "1" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.match(skipped[0]!.why, /could never be read/);
+    assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
+  });
+
+  test('an off value of "*" imports, and reads on for the on value and off for anything else', async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs", stateOnValue: "Record", stateOffValue: "*" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    assert.deepEqual((r.json as { created: string[] }).created, ["lobby_tvs_on", "lobby_tvs_off"]);
+    const on = automationEngine
+      .cueRules()
+      .find((x) => String(x.trigger.params.name) === "lobby_tvs_on");
+    assert.equal(String(on?.trigger.params.stateOffValue), "*");
+
+    const stateOf = async (): Promise<string> => {
+      cueStates.invalidate();
+      const answer = (await callRoute(cueRoutes, "/api/cues/states")).json as {
+        states: Record<string, { state: string }>;
+      };
+      return String(answer.states.lobby_tvs?.state);
+    };
+    variables.lobby_tvs = "Record";
+    assert.equal(await stateOf(), "on");
+    // One of the seven other words a transport variable holds. Exact matching
+    // would have read every one of them unknown.
+    variables.lobby_tvs = "Preview";
+    assert.equal(await stateOf(), "off");
+    delete variables.lobby_tvs;
+    assert.equal(await stateOf(), "unknown");
+  });
+
+  test('an ON value of "*" is refused before either half exists', async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const pairs = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
+    ).pairs
+      .filter((p) => p.slug === "lobby_tvs")
+      .map((p) => ({ ...p, stateVariable: "lobby_tvs", stateOnValue: "*", stateOffValue: "Idle" }));
+
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { pairs },
+    });
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.match(skipped[0]!.why, /can only be the off value/);
+    assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
+  });
+
   test("a state variable Companion could not have skips the pair, creating NEITHER half", async () => {
     // Checked before either half is created: addRule would refuse the `_on` rule
     // and create the `_off` one, leaving half a pair behind for a typo in a
@@ -1829,7 +2236,7 @@ describe("importing a pair with a state variable", () => {
       (await callRoute(cueRoutes, "/api/companion/pairs")).json as { pairs: { slug: string }[] }
     ).pairs
       .filter((p) => p.slug === "lobby_tvs")
-      .map((p) => ({ ...p, stateVariable: "state:lobby" }));
+      .map((p) => ({ ...p, stateVariable: "../../lobby" }));
 
     const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
       method: "POST",
@@ -1842,7 +2249,880 @@ describe("importing a pair with a state variable", () => {
       skipped.map((x) => x.name),
       ["lobby_tvs"],
     );
-    assert.match(skipped[0]!.why, /not a Companion variable name/);
+    assert.match(skipped[0]!.why, /not a Companion variable/);
     assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
+  });
+});
+
+// ── A bound cue is idempotent ─────────────────────────────────────────────────
+
+describe("a bound cue does not press when the device is already there", () => {
+  // The reconcile describe above replaces the Companion stub in its own `before`
+  // and never restores it, so the variable read has to be put back.
+  before(() => installCompanionStub());
+
+  /**
+   * A pair on the real engine, bound to `projectors_state` unless `bind` is off.
+   *
+   * BOTH halves press the same coordinates on purpose: this is the toggle
+   * button the whole feature exists for — one Companion button, no OFF partner,
+   * and only the variable to tell the two directions apart.
+   */
+  async function withPair(bind = true): Promise<void> {
+    for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+    await automationLog.clear();
+    for (const [name, extra] of [
+      ["projectors_on", bind ? { stateVariable: "projectors_state" } : {}],
+      ["projectors_off", {}],
+    ] as const) {
+      await automationEngine.addRule({
+        name,
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name, ...extra } },
+        conditions: [],
+        action: { id: "companion.press", params: { page: 1, row: 0, col: 1 } },
+        cooldownSec: 0,
+        oncePerService: false,
+      });
+    }
+  }
+
+  /** The pair's row out of a `GET /api/cues/states` answer. */
+  function rowOf(r: { json: unknown }): Record<string, unknown> {
+    const { states } = r.json as { states: Record<string, Record<string, unknown>> };
+    return states.projectors!;
+  }
+
+  /** Put a real cooldown on both halves, as the import does. */
+  async function setCooldown(seconds: number): Promise<void> {
+    for (const rule of automationEngine.listRules()) {
+      await automationEngine.updateRule(rule.id, { cooldownSec: seconds });
+    }
+  }
+
+  test("_on while the variable says on answers already on and presses nothing", async () => {
+    await withPair();
+    variables.projectors_state = "on";
+    const r = await call("projectors_on");
+    assert.equal(r.status, 200);
+    const body = r.json as Record<string, unknown>;
+    assert.equal(String(body.detail), "already on");
+    assert.equal(String(body.state), "on");
+    assert.equal(body.skipped, true);
+    assert.equal(presses.length, 0, "a cue pressed a toggle button that was already on");
+  });
+
+  test("the skip is in the activity log as its own outcome, with the caller", async () => {
+    // Not "suppressed": nothing refused this call. An operator reading the log
+    // has to be able to tell "Home Assistant asked again and we did nothing"
+    // from "a condition stopped it".
+    await withPair();
+    variables.projectors_state = "on";
+    await call("projectors_on");
+    const entry = automationLog.list()[0]!;
+    assert.equal(entry.outcome, "skipped");
+    assert.equal(entry.caller, "Home Assistant");
+    assert.match(entry.detail, /already on, not pressed/);
+  });
+
+  test("three calls in a row while it is on are three skips and no presses", async () => {
+    // The failure this exists for: a toggle button pressed once per repeat left
+    // the light in the wrong state, and the log showed the same `_on` cue
+    // dispatched seconds apart. The cooldown is zero here so the SKIP is what
+    // is being proved, not the cooldown backstop behind it.
+    await withPair();
+    variables.projectors_state = "on";
+    const answers: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const body = (await call("projectors_on")).json as Record<string, unknown>;
+      answers.push(String(body.detail));
+    }
+    assert.deepEqual(answers, ["already on", "already on", "already on"]);
+    assert.equal(presses.length, 0);
+  });
+
+  test("_on while the variable says off presses, and says what it read", async () => {
+    await withPair();
+    variables.projectors_state = "off";
+    const body = (await call("projectors_on")).json as Record<string, unknown>;
+    assert.equal(String(body.state), "off");
+    assert.equal(body.skipped, undefined);
+    assert.equal(presses.length, 1);
+  });
+
+  test("_off while the variable says on presses; while it says off it does not", async () => {
+    await withPair();
+    variables.projectors_state = "on";
+    assert.equal(presses.length, 0);
+    const pressed = (await call("projectors_off")).json as Record<string, unknown>;
+    assert.equal(pressed.skipped, undefined);
+    assert.equal(presses.length, 1);
+
+    variables.projectors_state = "off";
+    cueStates.invalidate();
+    const skipped = (await call("projectors_off")).json as Record<string, unknown>;
+    assert.equal(skipped.skipped, true);
+    // "(just pressed)" because the first press is still inside its settle
+    // window: the skip is against the COMMAND, and the variable — which agrees
+    // here — was not read for it.
+    assert.equal(String(skipped.detail), "already off (just pressed)");
+    assert.equal(presses.length, 1, "off was pressed again with the device already off");
+  });
+
+  test("a repeat inside the COOLDOWN is answered already on, not 409", async () => {
+    // The case the whole feature exists for, at the cooldown every imported cue
+    // actually carries: Home Assistant repeats `turn_on` about two seconds
+    // apart. Below the cooldown check this answered 409 `cooldown` — an error
+    // in Home Assistant's log for a call that was correct and needed nothing
+    // done — and the skip never ran.
+    await withPair();
+    await setCooldown(3);
+    variables.projectors_state = "off";
+    assert.equal((await call("projectors_on")).status, 200);
+    assert.equal(presses.length, 1);
+
+    // The device reports itself on, and the repeat lands well inside 3 s.
+    variables.projectors_state = "on";
+    cueStates.invalidate();
+    const repeat = await call("projectors_on");
+    assert.equal(repeat.status, 200);
+    const body = repeat.json as Record<string, unknown>;
+    assert.equal(String(body.detail), "already on (just pressed)");
+    assert.equal(body.skipped, true);
+    assert.equal(presses.length, 1);
+  });
+
+  test("the cooldown is still the backstop once the settle window has lapsed", async () => {
+    // Inside the window a same-state repeat is a skip, so the cooldown is what
+    // stops the one that arrives after it — here on a cue whose cooldown is
+    // longer than the window, with the device still reporting the old value.
+    //
+    // Through callByName rather than the route: `now` is the only way to be
+    // twelve seconds later without waiting, and the window, the cooldown and
+    // this argument are all the same clock.
+    await withPair();
+    await setCooldown(30);
+    variables.projectors_state = "off";
+    assert.equal((await call("projectors_on")).status, 200);
+    assert.equal(presses.length, 1);
+
+    cueStates.invalidate();
+    const repeat = await automationEngine.callByName("projectors_on", {
+      caller: "Home Assistant",
+      now: Date.now() + SETTLE_MS + 4000,
+    });
+    assert.equal(repeat.status, 409);
+    assert.equal(String((repeat.body as Record<string, unknown>).reason), "cooldown");
+    assert.equal(presses.length, 1, "the cooldown let a second press through");
+  });
+
+  test("a state that cannot be read PRESSES, and says unknown", async () => {
+    // A read must never be able to stop a press: the variable is missing here,
+    // which is exactly what an operator sees before they have set it up.
+    await withPair();
+    const body = (await call("projectors_on")).json as Record<string, unknown>;
+    assert.equal(String(body.state), "unknown");
+    assert.equal(body.skipped, undefined);
+    assert.equal(presses.length, 1);
+  });
+
+  test("an UNBOUND pair presses without reading anything at all", async () => {
+    // Not merely "it presses" — that would pass with a read that answered
+    // unknown. An unbound pair has nothing to read, and a Companion round trip
+    // on every call to find that out is a cost with no answer at the end of it.
+    await withPair(false);
+    const body = (await call("projectors_on")).json as Record<string, unknown>;
+    assert.equal(body.state, undefined);
+    assert.equal(presses.length, 1);
+    assert.deepEqual(variableReads, [], "an unbound cue read a Companion variable");
+  });
+
+  test("a press through a bound cue drops the cached state", async () => {
+    // The states cache is five seconds and what it holds after a press is from
+    // before it. Left in place, `GET /api/cues/states` — and with it the Home
+    // Assistant sensor and the rules page — reports the pre-press value for up
+    // to five seconds after the device has moved.
+    await withPair();
+    variables.projectors_state = "off";
+    const before = await callRoute(cueRoutes, "/api/cues/states");
+    assert.equal(rowOf(before).state, "off");
+    variableReads = [];
+
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+    variables.projectors_state = "on";
+    const after = await callRoute(cueRoutes, "/api/cues/states");
+    assert.deepEqual(variableReads, ["projectors_state"], "the states route served the cache");
+    assert.equal(rowOf(after).state, "on");
+    // And it says the press is still settling, with what was asked for.
+    assert.equal(rowOf(after).settling, true);
+    assert.equal(rowOf(after).commanded, "on");
+  });
+
+  test("a SIMULATED call keeps the cached state — nothing reached the device", async () => {
+    // The cache is dropped after a press because the state it holds is from
+    // before it. A simulated call pressed nothing, so the cached state is still
+    // true, and dropping it buys every bound pair another round of Companion
+    // reads for nothing.
+    await withPair();
+    variables.projectors_state = "off";
+    await automationEngine.setSettings({ simulate: true });
+    try {
+      await call("projectors_on");
+      assert.deepEqual(variableReads, ["projectors_state"]);
+      await call("projectors_on");
+      assert.deepEqual(variableReads, ["projectors_state"], "a simulated call dropped the cache");
+      assert.equal(presses.length, 0);
+    } finally {
+      await automationEngine.setSettings({ simulate: false });
+    }
+  });
+
+  test("THE ENGINE never reads state for a rule fired from another trigger", async () => {
+    // The check belongs to the CALL route, where the caller may repeat itself.
+    // A rule the engine fires from a trigger of its own has already decided the
+    // press is what it wants, and putting a Companion round trip in front of
+    // every triggered press is a Companion outage stopping automation that
+    // never needed it. Move the check into runAction and this goes red.
+    await withPair();
+    variables.projectors_state = "on";
+    await automationEngine.addRule({
+      name: "Presses the same button on a trigger",
+      enabled: true,
+      trigger: { id: "pco.service-started", params: {} },
+      conditions: [],
+      action: { id: "companion.press", params: { page: 1, row: 0, col: 1 } },
+      cooldownSec: 0,
+      oncePerService: false,
+    });
+    const at = Date.parse("2026-07-26T10:00:00Z");
+    const live = (mode: string) => ({ mode, currentItemTitle: null, serviceTimeId: "st1" });
+    await automationEngine.__handleBroadcast("pco:live", live("preservice"), at);
+    await automationEngine.__handleBroadcast("pco:live", live("item"), at + 1000);
+    assert.equal(presses.length, 1, "the triggered rule did not press");
+    assert.deepEqual(variableReads, [], "a triggered press consulted the state variable");
+    setQuiet();
+  });
+
+  // ── The settle window ───────────────────────────────────────────────────────
+  //
+  // Companion polls the device on its own interval, so for a second or two
+  // after a press the variable STILL READS THE OLD VALUE. Flipping a switch in
+  // Apple Home twice quickly hit exactly that: the `_off` read the pre-press
+  // `off`, was told the device was already off, pressed nothing, and the light
+  // stayed on with Home showing it off.
+  //
+  // The Companion stub here never moves the variable at all, which is that lag
+  // taken to its limit and the only thing these cases need.
+
+  /** Every console line one call wrote. */
+  async function withLines(fn: () => Promise<void>): Promise<string[]> {
+    const lines: string[] = [];
+    const real = console.log;
+    console.log = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+    try {
+      await fn();
+    } finally {
+      console.log = real;
+    }
+    return lines;
+  }
+
+  test("a repeat of what was just commanded skips without reading the variable", async () => {
+    await withPair();
+    variables.projectors_state = "off";
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+
+    variableReads = [];
+    const body = (await call("projectors_on")).json as Record<string, unknown>;
+    assert.equal(String(body.detail), "already on (just pressed)");
+    assert.equal(body.skipped, true);
+    assert.equal(presses.length, 1);
+    // Nothing the variable could say would change this answer, and an
+    // unreachable Companion would make an idempotent repeat wait three seconds
+    // to be told nothing.
+    assert.deepEqual(variableReads, [], "a decision the command had already made read Companion");
+  });
+
+  test("the OPPOSITE state presses against a reading from before the press", async () => {
+    // THE DEFECT. Both calls must press: the second one is being told `off` by
+    // a variable that has not caught up with the first press yet.
+    await withPair();
+    variables.projectors_state = "off";
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+
+    let body: Record<string, unknown> = {};
+    const lines = await withLines(async () => {
+      body = (await call("projectors_off")).json as Record<string, unknown>;
+    });
+    assert.equal(presses.length, 2, "off was skipped against a reading from before the on press");
+    assert.equal(body.skipped, undefined);
+    // The stale reading is still reported as what was read. The answer does not
+    // pretend the variable said something else.
+    assert.equal(String(body.state), "off");
+    assert.ok(
+      lines.includes(
+        "[cues] projectors_off by Home Assistant: pressed against a stale reading (off) " +
+          "inside the settle window",
+      ),
+      `no stale-reading line: ${JSON.stringify(lines)}`,
+    );
+  });
+
+  test("once the window has lapsed the variable rules again", async () => {
+    await withPair();
+    variables.projectors_state = "off";
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+
+    // The device caught up, and the window is over. Through callByName because
+    // `now` is the only way to be eight seconds later without waiting, and the
+    // window and this argument are the same clock.
+    variables.projectors_state = "on";
+    cueStates.invalidate();
+    const late = await automationEngine.callByName("projectors_on", {
+      caller: "Home Assistant",
+      now: Date.now() + SETTLE_MS,
+    });
+    const body = late.body as Record<string, unknown>;
+    assert.equal(String(body.detail), "already on", "the command still outranked the variable");
+    assert.equal(body.skipped, true);
+    assert.equal(String(body.state), "on");
+    assert.equal(presses.length, 1);
+  });
+
+  test("a SIMULATED press opens no window", async () => {
+    // Nothing reached a device, so the variable is still the truth and a window
+    // would have the app overriding it with a command nothing carried out.
+    await withPair();
+    variables.projectors_state = "off";
+    await automationEngine.setSettings({ simulate: true });
+    try {
+      await call("projectors_on");
+      assert.equal(presses.length, 0);
+      const body = (await call("projectors_off")).json as Record<string, unknown>;
+      assert.equal(String(body.detail), "already off", "a simulated press opened a settle window");
+      assert.equal(body.skipped, true);
+    } finally {
+      await automationEngine.setSettings({ simulate: false });
+    }
+  });
+
+  test("a press Companion refused opens no window", async () => {
+    // Companion answers an invalid coordinate 204 and presses nothing.
+    await withPair();
+    variables.projectors_state = "off";
+    const real = companionDeps.fetch;
+    companionDeps.fetch = async (input, init) => {
+      if (String(input).includes("/press")) return new Response(null, { status: 204 });
+      return real!(input, init);
+    };
+    try {
+      const failed = (await call("projectors_on")).json as Record<string, unknown>;
+      assert.equal(failed.ok, false);
+    } finally {
+      companionDeps.fetch = real;
+    }
+    const body = (await call("projectors_off")).json as Record<string, unknown>;
+    assert.equal(String(body.detail), "already off", "a refused press opened a settle window");
+    assert.equal(body.skipped, true);
+    assert.equal(presses.length, 0);
+  });
+
+  test("a SKIPPED call opens no window", async () => {
+    // Nothing was pressed, so there is nothing for the variable to lag behind.
+    await withPair();
+    variables.projectors_state = "on";
+    const first = (await call("projectors_on")).json as Record<string, unknown>;
+    assert.equal(String(first.detail), "already on");
+    const second = (await call("projectors_on")).json as Record<string, unknown>;
+    assert.equal(String(second.detail), "already on", "a skip opened a settle window");
+    assert.equal(presses.length, 0);
+  });
+
+  test("the manifest says the pair is settling, with what was commanded", async () => {
+    // Through the real route, the real engine and the real cue-states: an
+    // integration reading the manifest inside the window has to be able to show
+    // the command rather than a reading it has been told is stale.
+    await withPair();
+    variables.projectors_state = "off";
+    await call("projectors_on");
+    assert.equal(presses.length, 1);
+
+    const r = await callRoute(cueRoutes, "/api/cues/manifest");
+    const [pair] = (r.json as { switches: Record<string, unknown>[] }).switches;
+    assert.equal(pair!.id, "projectors");
+    assert.equal(pair!.settling, true);
+    assert.equal(pair!.commanded, "on");
+    assert.equal(pair!.state, "off", "the manifest hid the reading rather than marking it stale");
+  });
+
+  test("a press on a LEARNING pair reads its candidates, and only those", async () => {
+    // The other half of the rule above: an unbound pair whose `_on` half
+    // carries probed candidates has its press WATCHED, because the two values
+    // of a variable can only be read off a device that has just been told to
+    // move. The engine is what dispatches that watch, and this drives the real
+    // call route to prove it does.
+    await withPair(false);
+    const on = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "projectors_on")!;
+    await automationEngine.updateRule(on.id, {
+      trigger: {
+        ...on.trigger,
+        params: { ...on.trigger.params, stateCandidates: "Lighting:status,Lighting:mute" },
+      },
+    });
+    variables["Lighting:status"] = "Standby";
+    variables["Lighting:mute"] = "0";
+    // The settle poll is disarmed for this test: what is being asserted is the
+    // one read the engine's dispatch causes, and a live one-second timer would
+    // go on reading into the tests below it.
+    const realTimeout = stateProbeDeps.setTimeout;
+    stateProbeDeps.setTimeout = () => ({}) as unknown as NodeJS.Timeout;
+    try {
+      variableReads.length = 0;
+      await call("projectors_on");
+      assert.equal(presses.length, 1, "a learning pair must still press");
+      // Settling promises inside the watch are not awaited by the route.
+      for (let i = 0; i < 32; i++) await Promise.resolve();
+      assert.deepEqual(variableReads, ["Lighting:status", "Lighting:mute"]);
+    } finally {
+      stateProbeDeps.setTimeout = realTimeout;
+      __resetWatches();
+      delete variables["Lighting:status"];
+      delete variables["Lighting:mute"];
+    }
+  });
+
+  test("a SIMULATED press on a learning pair watches nothing", async () => {
+    // Nothing reached a device, so there is nothing to observe — and an
+    // observation of a press that never happened is a variable ruled out, or
+    // worse ruled IN, on evidence that does not exist. Simulate is on by
+    // default on a fresh install, which is exactly when a pair is learning.
+    await withPair(false);
+    const on = automationEngine
+      .cueRules()
+      .find((r) => automationEngine.cueNameOf(r) === "projectors_on")!;
+    await automationEngine.updateRule(on.id, {
+      trigger: { ...on.trigger, params: { ...on.trigger.params, stateCandidates: "Lighting:status" } },
+    });
+    variables["Lighting:status"] = "Standby";
+    const realTimeout = stateProbeDeps.setTimeout;
+    stateProbeDeps.setTimeout = () => ({}) as unknown as NodeJS.Timeout;
+    await automationEngine.setSettings({ simulate: true });
+    try {
+      variableReads.length = 0;
+      await call("projectors_on");
+      for (let i = 0; i < 32; i++) await Promise.resolve();
+      assert.deepEqual(variableReads, []);
+    } finally {
+      await automationEngine.setSettings({ simulate: false });
+      stateProbeDeps.setTimeout = realTimeout;
+      __resetWatches();
+      delete variables["Lighting:status"];
+    }
+  });
+
+  test("an unbound pair is not settled, whatever it presses", async () => {
+    // No binding is no command: there is nothing to read, nothing to lag, and
+    // both halves must go on pressing every time they are called.
+    await withPair(false);
+    await call("projectors_on");
+    await call("projectors_on");
+    await call("projectors_off");
+    assert.equal(presses.length, 3, "an unbound pair skipped a press");
+    assert.deepEqual(variableReads, [], "an unbound pair read a Companion variable");
+  });
+});
+
+// ── A toggle button imported as a pair ────────────────────────────────────────
+
+describe("importing a single button as a TOGGLE pair", () => {
+  // The reconcile describe above replaces the Companion stub in its own `before`
+  // and never restores it.
+  before(() => installCompanionStub());
+
+  /** The `buttons` half of the import offer, from the real route. */
+  async function offered(slug: string): Promise<Record<string, unknown>> {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const buttons = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { buttons: Record<string, unknown>[] }
+    ).buttons;
+    return buttons.find((b) => b.slug === slug)!;
+  }
+
+  const importing = (buttons: unknown[]) =>
+    callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: { buttons },
+    });
+
+  test("a state variable turns one button into two cues that press the SAME key", async () => {
+    // The failure this exists for: "House Lights ON" is really a toggle with no
+    // OFF partner. Imported as one cue it became a Home Assistant script, which
+    // HomeKit shows as a momentary switch that snaps back, and every tap pressed
+    // the toggle again.
+    const button = await offered("house_lights_on");
+    const r = await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    assert.deepEqual((r.json as { created: string[] }).created, ["house_lights_on", "house_lights_off"]);
+
+    const rules = automationEngine.cueRules();
+    assert.equal(rules.length, 2);
+    const byName = new Map(rules.map((x) => [String(x.trigger.params.name), x]));
+    for (const name of ["house_lights_on", "house_lights_off"]) {
+      const rule = byName.get(name)!;
+      assert.equal(rule.action.id, "companion.press");
+      assert.equal(`${rule.action.params.page}:${rule.action.params.row}:${rule.action.params.col}`, "1:2:1");
+      assert.deepEqual(rule.conditions, [{ id: "service.is-not-live", params: {} }]);
+      assert.equal(rule.cooldownSec, 3);
+    }
+    // The binding is on the `_on` half only; the `_off` half inherits it.
+    assert.equal(String(byName.get("house_lights_on")!.trigger.params.stateVariable), "house_lights_state");
+    assert.equal(byName.get("house_lights_off")!.trigger.params.stateVariable, undefined);
+    // The direction word comes off the LABEL: "House Lights ON" off is spoken
+    // "House Lights off", never "House Lights ON off".
+    assert.equal(String(byName.get("house_lights_on")!.trigger.params.says), "House Lights on");
+    assert.equal(String(byName.get("house_lights_off")!.trigger.params.says), "House Lights off");
+    assert.equal(byName.get("house_lights_off")!.name, "House Lights OFF");
+
+    // And both halves really press that one key, through the real route.
+    presses = [];
+    variables.house_lights_state = "off";
+    assert.equal((await call("house_lights_on")).status, 200);
+    variables.house_lights_state = "on";
+    cueStates.invalidate();
+    assert.equal((await call("house_lights_off")).status, 200);
+    assert.deepEqual(presses, [
+      "http://10.0.0.5:8000/api/location/1/2/1/press",
+      "http://10.0.0.5:8000/api/location/1/2/1/press",
+    ]);
+  });
+
+  test("a trailing Toggle is stripped too, not just ON and OFF", async () => {
+    const button = await offered("record_toggle");
+    const r = await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    assert.deepEqual((r.json as { created: string[] }).created, ["record_on", "record_off"]);
+    const says = automationEngine.cueRules().map((x) => String(x.trigger.params.says));
+    assert.deepEqual(says, ["Record on", "Record off"]);
+  });
+
+  test("WITHOUT a variable the same button is one cue, exactly as before", async () => {
+    const button = await offered("house_lights_on");
+    const r = await importing([button]);
+    assert.deepEqual((r.json as { created: string[] }).created, ["house_lights_on"]);
+    const rules = automationEngine.cueRules();
+    assert.equal(rules.length, 1, "a button with no state variable became a pair");
+    assert.equal(rules[0]!.trigger.params.stateVariable, undefined);
+  });
+
+  test("the resulting pair IS a toggle pair, and the config says so", async () => {
+    // The generated YAML is what an operator pastes into Home Assistant, so the
+    // shape is proved end to end rather than over the resolver alone.
+    const button = await offered("house_lights_on");
+    await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    const r = await callRoute(cueRoutes, "/api/cues/home-assistant.yaml");
+    assert.equal(r.status, 200);
+    assert.equal(
+      String(r.body).includes(
+        "# toggle button: both directions press the same Companion button, so the state variable is what tells them apart",
+      ),
+      true,
+    );
+  });
+
+  test("an imported toggle is not offered again, under EITHER of its two names", async () => {
+    // `exists` used to be read off the button's own slug, which is not what a
+    // toggle's cues are called: `record_toggle` becomes `record_on`/`record_off`
+    // and the button was offered again forever. Taking that offer created a
+    // THIRD cue on the same key, so Home Assistant had a switch and a script
+    // fighting over one button. Re-running the import is the ordinary case.
+    const button = await offered("record_toggle");
+    await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    const again = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { buttons: Record<string, unknown>[] }
+    ).buttons.find((b) => b.slug === "record_toggle")!;
+    assert.equal(again.exists, true, "an imported toggle was offered as available");
+  });
+
+  test("a second import of the same toggle creates NOTHING, not a third cue", async () => {
+    const button = await offered("record_toggle");
+    await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    const r = await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.deepEqual(skipped.map((x) => x.name), ["record_on"]);
+    assert.deepEqual(
+      automationEngine.cueRules().map((x) => String(x.trigger.params.name)).sort(),
+      ["record_off", "record_on"],
+    );
+  });
+
+  test("a clashing name skips the WHOLE toggle, never half of one", async () => {
+    // Half a toggle is worse than none: the binding lives on the `_on` half, so
+    // a surviving `_off` alone is an unbound cue that pairs itself with whatever
+    // unrelated `<base>_on` was already there — and the generated switch turns
+    // that stranger on and this button off.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    await automationEngine.addRule({
+      name: "House lights on, the old way",
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: "house_lights_on" } },
+      conditions: [],
+      action: { id: "log.message", params: { message: "x" } },
+      cooldownSec: 0,
+      oncePerService: false,
+    });
+    const button = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { buttons: Record<string, unknown>[] }
+    ).buttons.find((b) => b.slug === "house_lights_on")!;
+    const r = await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.match(skipped[0]!.why, /a toggle is imported as a whole pair or not at all/);
+    assert.deepEqual(
+      automationEngine.cueRules().map((x) => String(x.trigger.params.name)),
+      ["house_lights_on"],
+      "half a toggle was left behind",
+    );
+  });
+
+  test("a FORMER name counts as taken too, so the pair cannot steal one", async () => {
+    // The engine holds names and former names in one namespace, so a half whose
+    // name is somebody's former name is refused by addRule — after the other
+    // half had already been created, if this only looked at current names.
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    await automationEngine.addRule({
+      name: "Something else entirely",
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: "unrelated", aliases: "house_lights_off" } },
+      conditions: [],
+      action: { id: "log.message", params: { message: "x" } },
+      cooldownSec: 0,
+      oncePerService: false,
+    });
+    const button = (
+      (await callRoute(cueRoutes, "/api/companion/pairs")).json as { buttons: Record<string, unknown>[] }
+    ).buttons.find((b) => b.slug === "house_lights_on")!;
+    const r = await importing([{ ...button, stateVariable: "house_lights_state" }]);
+    assert.deepEqual((r.json as { created: string[] }).created, []);
+    assert.equal(automationEngine.cueRules().length, 1, "half a toggle was left behind");
+  });
+
+  test("a variable Companion could not have skips the button, creating NEITHER half", async () => {
+    const button = await offered("house_lights_on");
+    const r = await importing([{ ...button, stateVariable: "../../lights" }]);
+    const { created, skipped } = r.json as { created: string[]; skipped: { name: string; why: string }[] };
+    assert.deepEqual(created, []);
+    assert.deepEqual(skipped.map((x) => x.name), ["house_lights_on"]);
+    assert.match(skipped[0]!.why, /not a Companion variable/);
+    assert.equal(automationEngine.cueRules().length, 0, "half a pair was left behind");
+  });
+
+  test("a name found on two pages is still disambiguated by page, both halves", async () => {
+    for (const rule of automationEngine.listRules()) await automationEngine.removeRule(rule.id);
+    const real = companionDeps.fetch;
+    companionDeps.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/press")) {
+        presses.push(url);
+        return new Response("ok", { status: 200 });
+      }
+      // "House Lights ON" now exists on page 2 as well, over another room.
+      const doc = companionExportFixture() as {
+        pages: Record<string, { controls: Record<string, Record<string, unknown>> }>;
+      };
+      doc.pages["2"]!.controls["2"] = { "1": doc.pages["1"]!.controls["2"]!["1"] };
+      return Response.json(doc);
+    };
+    companionApi.invalidate();
+    try {
+      const buttons = (
+        (await callRoute(cueRoutes, "/api/companion/pairs")).json as {
+          buttons: Record<string, unknown>[];
+        }
+      ).buttons
+        .filter((b) => slugOf(b).endsWith("house_lights_on"))
+        .map((b) => ({ ...b, stateVariable: "house_lights_state" }));
+      assert.deepEqual(buttons.map(slugOf), [
+        "room_a_screens_house_lights_on",
+        "room_a_lighting_house_lights_on",
+      ]);
+      const r = await importing(buttons);
+      assert.deepEqual((r.json as { created: string[] }).created, [
+        "room_a_screens_house_lights_on",
+        "room_a_screens_house_lights_off",
+        "room_a_lighting_house_lights_on",
+        "room_a_lighting_house_lights_off",
+      ]);
+      // The WORDS carry the page too, or Home Assistant gets two switches both
+      // called "House Lights".
+      assert.deepEqual(
+        automationEngine.cueRules().map((x) => String(x.trigger.params.says)),
+        [
+          "Room A: Screens House Lights on",
+          "Room A: Screens House Lights off",
+          "Room A: Lighting House Lights on",
+          "Room A: Lighting House Lights off",
+        ],
+      );
+    } finally {
+      companionDeps.fetch = real;
+      companionApi.invalidate();
+    }
+  });
+});
+
+// ── A cue that is not a Companion button ──────────────────────────────────────
+//
+// A REAPER Record/Stop pair drives REAPER through this app's own connection and
+// presses nothing, so its state is `app:reaper.recording` rather than a
+// Companion variable — bound implicitly, because it is the only answer there is
+// (cue-pairs.ts).
+//
+// Three things have to hold, and all three are the machinery a Companion pair
+// already uses, reached here through the real call route:
+//
+//  - idempotency. REAPER's Record is a TOGGLE, so "start the recording" said
+//    twice while it is recording must send nothing. Nothing in the engine is
+//    reaper-specific; the binding is what makes it work.
+//  - the manifest names the source, so Home Assistant shows a real state.
+//  - LEARNING NEVER TOUCHES IT. Learning watches a module variable move when a
+//    BUTTON is pressed, so a pair that presses no button has nothing to watch —
+//    and probing it would read Companion on a call that never went near it.
+
+describe("a cue that drives REAPER rather than a Companion button", () => {
+  before(() => installCompanionStub());
+
+  /** Every `/_/…` the transport commands sent. There is no REAPER to run. */
+  let transport: string[] = [];
+  let recording = false;
+  const realReaperFetch = reaperDeps.fetch;
+  const realGetLatest = reaperService.getLatest.bind(reaperService);
+
+  before(() => {
+    reaperService.configure("reaper.example", 8080);
+    reaperService.stop();
+    reaperService.getLatest = () => ({
+      connected: true,
+      recording,
+      recordPaused: false,
+      playing: false,
+      positionSeconds: null,
+      positionString: null,
+    });
+    reaperDeps.fetch = (async (input: unknown) => {
+      const url = String(input);
+      transport.push(url);
+      const body = url.endsWith("/TRANSPORT")
+        ? `TRANSPORT\t${recording ? 5 : 0}\t0\t0\t0:00.000\t1.1.00`
+        : "";
+      return { ok: true, status: 200, text: async () => body } as unknown as Response;
+    }) as typeof fetch;
+  });
+
+  after(() => {
+    // Unconfigured and stopped BEFORE the real fetch goes back: the other order
+    // let a poll already in flight leave this process for a hostname that does
+    // not exist, which is a test making a real DNS request at teardown.
+    reaperService.configure("", 0);
+    reaperService.stop();
+    reaperService.getLatest = realGetLatest;
+    reaperDeps.fetch = realReaperFetch;
+  });
+
+  /** A REAPER pair, `<base>_on` running `onCommand` and `<base>_off` a Stop. */
+  async function withReaperPair(
+    base: string,
+    onCommand: string,
+    onParams: Record<string, string> = {},
+  ): Promise<void> {
+    for (const r of automationEngine.listRules()) await automationEngine.removeRule(r.id);
+    await automationLog.clear();
+    for (const [suffix, command, extra] of [
+      ["on", onCommand, onParams],
+      ["off", "stop", {}],
+    ] as const) {
+      const name = `${base}_${suffix}`;
+      await automationEngine.addRule({
+        name,
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name, ...extra } },
+        conditions: [],
+        action: { id: "reaper.transport", params: { command } },
+        cooldownSec: 0,
+        oncePerService: false,
+      });
+    }
+  }
+
+  beforeEach(() => {
+    transport = [];
+    recording = false;
+  });
+
+  test("_on while REAPER is already recording answers already on and sends nothing", async () => {
+    await withReaperPair("reaper_record", "record");
+    recording = true;
+    const r = await call("reaper_record_on");
+    assert.equal(r.status, 200);
+    const body = r.json as Record<string, unknown>;
+    assert.equal(String(body.detail), "already on");
+    assert.equal(String(body.state), "on");
+    assert.equal(body.skipped, true);
+    assert.deepEqual(transport, [], "a second Record would have STOPPED the recording");
+  });
+
+  test("_on while REAPER is idle really does send Record", async () => {
+    await withReaperPair("reaper_record", "record");
+    const r = await call("reaper_record_on");
+    assert.equal(r.status, 200);
+    assert.equal((r.json as Record<string, unknown>).skipped, undefined);
+    assert.deepEqual(transport, [
+      "http://reaper.example:8080/_/TRANSPORT",
+      "http://reaper.example:8080/_/1013",
+    ]);
+  });
+
+  test("the manifest names Stage Utility as the state source", async () => {
+    await withReaperPair("reaper_record", "record");
+    recording = true;
+    const r = await callRoute(cueRoutes, "/api/cues/manifest");
+    const { switches } = r.json as { switches: Record<string, unknown>[] };
+    const entry = switches.find((s) => s.id === "reaper_record")!;
+    assert.equal(entry.stateSource, "app:reaper.recording");
+    assert.equal(entry.state, "on");
+    assert.equal(entry.available, true, "a cue with no Companion button cannot be button-missing");
+  });
+
+  test("a REAPER pair is never queued for learning", async () => {
+    // A Play/Stop pair, which has NO binding — the case the learning path is
+    // reached in. Its `_on` half carries candidates a probe could never have
+    // written for it (the probe only ever sees `companion.press` pairs); if the
+    // engine queued the press anyway, the watcher would read them from
+    // Companion, and `variableReads` is where that shows.
+    await withReaperPair("reaper_play", "play", { stateCandidates: "Lighting:status" });
+    variables["Lighting:status"] = "Standby";
+    const realTimeout = stateProbeDeps.setTimeout;
+    stateProbeDeps.setTimeout = () => ({}) as unknown as NodeJS.Timeout;
+    try {
+      variableReads.length = 0;
+      const r = await call("reaper_play_on");
+      assert.equal(r.status, 200);
+      assert.deepEqual(transport, ["http://reaper.example:8080/_/1007"], "the cue still runs");
+      for (let i = 0; i < 32; i++) await Promise.resolve();
+      assert.deepEqual(
+        variableReads,
+        [],
+        "a cue that presses no Companion button was probed for a state source",
+      );
+    } finally {
+      stateProbeDeps.setTimeout = realTimeout;
+      __resetWatches();
+      delete variables["Lighting:status"];
+    }
   });
 });

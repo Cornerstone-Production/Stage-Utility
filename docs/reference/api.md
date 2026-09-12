@@ -181,23 +181,26 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 |--------|------|---------|
 | GET | `/api/automation/registry` | Every trigger, condition and action this build offers |
 | GET | `/api/automation/plan-items` | The current plan's items, for the item pickers |
+| GET | `/api/automation/propresenter-instances` | Every ProPresenter a rule can address, as `{value, label}` |
+| GET | `/api/automation/propresenter-macros` | Macro names across every configured instance, unioned. Empty, never an error, when one is unreachable |
 | GET / POST | `/api/automation/rules` | List (`{rules, settings}`) / create a rule |
 | PATCH / DELETE | `/api/automation/rules/:id` | Update / delete |
 | POST | `/api/automation/rules/:id/test` | Fire the action now, ignoring the trigger. Honours simulate; a refusal is `400` with the reason |
 | GET / POST | `/api/automation/settings` | `simulate` and `disarmed` |
 | GET / DELETE | `/api/automation/log` | Read / clear the Activity log |
-| POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
+| POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. A button carrying `stateVariable` is a [toggle](../integrations/companion.md#toggle-buttons) and makes a PAIR instead — two cues pressing that one button, bound on the `_on` half. `stateVariable` on a pair binds its `_on` half the same way; a pair sent without one whose connections have no verified row has its source [learned](../integrations/companion.md#learning-a-state-source) instead. Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
 
 **Cues** — an automation rule called by name. See
 [Companion](../integrations/companion.md#calling-a-cue-by-name).
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/cues/:name` | Run the cue. `:name` is the cue's current name or any of its former names (see [When a button is renamed](../integrations/companion.md#when-a-button-is-renamed)); a current name always wins. `200` dispatched, `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
+| POST | `/api/cues/:name` | Run the cue. `:name` is the cue's current name or any of its former names (see [When a button is renamed](../integrations/companion.md#when-a-button-is-renamed)); a current name always wins. `200` dispatched — `{ok, detail}`, plus `state` (`on`, `off` or `unknown`) when the cue is half of a pair with a **State variable**, and `{detail: "already on", skipped: true}` when the variable already says what the call asked for and nothing was pressed. Within eight seconds of a press the last COMMAND is what a repeat is compared against rather than the variable, which lags it: the same state is `{detail: "already on (just pressed)", skipped: true}` and carries no `state`, the opposite presses whatever the variable reads (see [The settle window](../integrations/companion.md#the-settle-window)). `202` confirm required (`?confirm=…` to complete), `401` no token, `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
 | GET / POST | `/api/cues/tokens` | List callers (never a hash) / mint one (`{label}`). The secret is returned once and never again |
 | DELETE | `/api/cues/tokens/:id` | Revoke one caller |
-| GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml`, not JSON |
-| GET | `/api/cues/states` | What each bound ON/OFF pair's device is actually doing: `{ok, checkedAt, states}`, `states` keyed by the pair's base — `{on, off, variable, value, state, reason?}` with `state` one of `on`, `off`, `unknown`. `ok` is false when any pair is unknown. Open read. Reads the Companion custom variables on demand, in parallel, and serves the whole answer for 5 seconds; only pairs with a **State variable** are in it, and an install with none reads nothing at all |
+| GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml; charset=utf-8`, not JSON, with `Content-Disposition: attachment; filename="stage_utility.yaml"` so it downloads as a fixed name |
+| GET | `/api/cues/manifest` | Every cue as JSON, for an integration rather than a pasted config: `{version, server: {name, lanUrl}, switches, buttons}`. `version` goes up on any rule change and is the only thing worth comparing about it. A `switch` is an ON/OFF pair — `{id, name, room, on, off, toggle, state, reason?, settling?, commanded?, stateSource?, available}`, `state` one of `on`, `off`, `unknown`; `stateSource` is the Companion variable the state is read from, or an `app:<source>` such as `app:reaper.recording` for a pair Stage Utility answers for itself — treat it as opaque; `settling: true` with `commanded` (`on`/`off`) means a press was dispatched for that pair in the last eight seconds and `state` may still be from before it — show `commanded`, not `state`; a `button` is a lone cue — `{id, name, room, cue, available}`. A cue whose Companion button has gone missing is listed with `available: false`, never dropped; a cue whose **Home Assistant** switch is off is omitted entirely, and a hidden pair omits both halves rather than exposing them as buttons. Open read; state comes from the same five-second cached read as `/api/cues/states`. Pairs with the [`cues`](#channels) channel |
+| GET | `/api/cues/states` | What each bound ON/OFF pair's device is actually doing: `{ok, checkedAt, states}`, `states` keyed by the pair's base — `{on, off, variable, value, state, reason?, settling?, commanded?}` with `state` one of `on`, `off`, `unknown`. `settling: true` with `commanded` (`on`/`off`) means a press was dispatched for that pair in the last eight seconds and `value` may still be from before it — Companion polls the device on its own interval (see [The settle window](../integrations/companion.md#the-settle-window)); that one variable is re-read every second until it agrees. `ok` is false when any pair is unknown. Open read. Reads the bound sources on demand, in parallel, and serves the whole answer for 5 seconds — a Companion variable (custom, or a module's own), or an `app:<source>` this app answers itself, such as `app:reaper.recording` off the REAPER transport poll; only pairs with a **State variable** are in it, and an install with none reads nothing at all |
 
 **Companion** — reading the connected Companion's own configuration.
 
@@ -205,7 +208,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 |--------|------|---------|
 | GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Each carries `page`, `pageId`, `pageName`, `row`, `col`, `label`, `drives` and `actionIds` — the page's opaque id and the button's sorted action ids are its identity, and survive being renumbered or dragged to another key. Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
 | POST | `/api/companion/buttons/refresh` | Drop the five-minute cache, re-read, and re-check every cue's button against it. `{ok, buttons, cachedAt, reconcile}`, where `reconcile` is `{applied, failed}` — `failed` names each cue whose new status could not be saved (`{ruleId, label, detail}`). Answers `ok: false` when any status failed to save, or `{ok: false, reason, buttons: []}` when Companion could not be read at all |
-| GET | `/api/companion/pairs` | The import dialog's whole offer: `{ok, pairs, buttons, customVariables}` — ON/OFF pairs, the labelled buttons that are not half of one, and the names of Companion's custom variables (what a pair's state can be bound to; empty on an install with none) — each offer with its proposed cue name and whether that name (or any cue's former name) already exists. One request, because deciding which buttons are unpaired needs the pairs, and because the two lists' proposed names are disambiguated against each other. Answers `200` with `{ok: false, reason, pairs: []}` when Companion is unreachable — no `buttons` key |
+| GET | `/api/companion/pairs` | The import dialog's whole offer: `{ok, pairs, buttons, customVariables}` — ON/OFF pairs, the labelled buttons that are not half of one, and the names of Companion's custom variables (what a pair's state can be bound to; empty on an install with none) — each offer with its proposed cue name and whether that name (or any cue's former name) already exists. A pair carries `stateSource` (the verified module variable its button drives, or `null`) and `learnable: true` when nothing in the table covers it and its state source will instead be [learned](../integrations/companion.md#learning-a-state-source) from a press. One request, because deciding which buttons are unpaired needs the pairs, and because the two lists' proposed names are disambiguated against each other. Answers `200` with `{ok: false, reason, pairs: []}` when Companion is unreachable — no `buttons` key |
 
 **ProPresenter & ProdCom**
 | Method | Path | Purpose |
@@ -379,12 +382,24 @@ something to change:
 `prodcom:transcript` · `slots:devices` · `integrations:state-changed` ·
 `wireless:connections-changed` · `osc:targets-changed` ·
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
-`rosstalk:simulated` · `automation:rules` ·
+`rosstalk:simulated` · `automation:rules` · `cues` ·
 `automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` ·
 `display:refresh` · `settings:allowedServiceTypeIds-changed`
 
 Every status snapshot carries a `rev` counter so a hydrate read cannot overwrite
 a newer push — see [Integrations](../integrations/README.md#the-snapshot-version).
+
+`cues` is for a Home Assistant integration and carries two kinds of message:
+`{type: "state", id, state, reason?, settling?, commanded?}` when a bound ON/OFF
+pair's device changes — or when it enters or leaves its
+[settle window](../integrations/companion.md#the-settle-window), which is a
+change in what the reading is worth — and `{type: "manifest", version}` when the
+rules change and
+[`/api/cues/manifest`](#cues) should be re-read. `id` is the pair's base, as in
+the manifest. While at least one client is subscribed the bound Companion
+variables are read every five seconds and only changes are pushed; with nobody
+subscribed there is no timer and nothing is read. A value that lands while a
+pair is settling is read and pushed at once rather than at the next tick.
 
 ## Outside `/api`
 

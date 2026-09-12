@@ -3,9 +3,12 @@
 
 import type { PcoAttachmentDTO, PcoItemTypeColor, PcoLiveDTO, PlanDTO, PlanItemDTO, ServiceTypeDTO, TeamMemberDTO, TeamPositionDTO } from "../types/stage.js";
 import { scheduleItems } from "./automation-item-schedule.js";
+import { errorMessage } from "./errors.js";
 import type { PlanNoteDTO } from "./plan-note-checklist.js";
 import { isServiceEndHeader, isServiceStartHeader } from "./pco-plan-markers.js";
+import { PcoRateLimit, describeRate, readRateHeaders, type RateStatus } from "./pco-rate-limit.js";
 import { pickServiceTime } from "./pick-service-time.js";
+import { RepeatLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
 
 /**
@@ -27,11 +30,25 @@ import { scrub } from "./scrub.js";
 const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
 
 /**
+ * Every version Planning Center SERVICES publishes, newest first.
+ *
+ * THIS LIST IS PER PRODUCT AND IS NOT TRANSFERABLE. See the note on
+ * `resolvePcoApiVersion` for the trap; the short version is that each PCO
+ * product keeps its own, entirely independent, list of dates, and a date that is
+ * current for one product is very likely to be unpublished — and therefore
+ * silently downgraded — on another.
+ *
+ * Read from https://api.planningcenteronline.com/services/v2/documentation on
+ * 2026-09-11, which serves this list as JSON without a credential.
+ */
+export const SERVICES_API_VERSIONS = ["2018-11-01", "2018-08-01"] as const;
+export type ServicesApiVersion = (typeof SERVICES_API_VERSIONS)[number];
+
+/**
  * The Services API version this client is written against.
  *
  * PCO versions each product by DATE, selected with an `X-PCO-API-Version:
- * YYYY-MM-DD` request header and resolved by an equal-or-earlier match. Send no
- * header at all — which this client did until now — and the version is whatever
+ * YYYY-MM-DD` request header. Send no header at all and the version is whatever
  * is configured as the app's default in PCO's developer console: a setting that
  * lives outside this repository, differs between installs, and is older than
  * whatever the code was written against. Pinning here makes the contract a
@@ -41,17 +58,60 @@ const PCO_BASE = "https://api.planningcenteronline.com/services/v2";
  * request would let a PCO release change field names, defaults or pagination
  * under a running install with no change in this repository.
  *
- * Chosen 2026-08-29. Services publishes exactly two versions — 2018-08-01,
- * withdrawn 2 April 2024, and 2018-11-01 — so this is both the newest and the
- * only one still served. The one documented difference between them is that
+ * The TYPE is the guard. `ServicesApiVersion` is a union of the dates Services
+ * actually publishes, so pasting another product's date here does not compile —
+ * which is exactly how the Calendar pin went wrong for a year. pco-api-version.test.ts
+ * checks the same thing at runtime, by resolving the pin the way PCO does.
+ *
+ * Services publishes exactly two versions: 2018-08-01, deprecated and documented
+ * as "now identical to 2018-11-01", and 2018-11-01. So this is both the newest
+ * and the only one with distinct behaviour. The one documented difference is that
  * 2018-11-01 makes the `/people` endpoint respect the "Can view people not on My
  * Teams" permission; this client calls no `/people` endpoint.
  *
- * To bump: open https://api.planningcenteronline.com/docs/apps/services, take the
- * newest date from the version selector, read its changelog entry for field or
- * pagination changes, then change this string.
+ * To bump: read the version list at
+ * https://api.planningcenteronline.com/services/v2/documentation — SERVICES's own,
+ * never another product's — add the new date to SERVICES_API_VERSIONS, read its
+ * `details` for field or pagination changes, then change this string.
  */
-export const PCO_API_VERSION = "2018-11-01";
+export const PCO_API_VERSION: ServicesApiVersion = "2018-11-01";
+
+/**
+ * The version PCO will actually serve for `requested`, given what `published` has.
+ *
+ * PCO's documented algorithm: the newest published version at or BEFORE the
+ * requested date. There is no error, no warning and no header saying it happened
+ * — an unpublished date is silently downgraded, and the only way to notice is to
+ * compare a response against the shape you expected.
+ *
+ * This exists because that silence cost a year. The Calendar client was pinned to
+ * `2018-11-01`, copied across from Services with a comment explaining that one app
+ * should state one contract date. Calendar has never published 2018-11-01: its
+ * versions are 2018-08-01, 2020-04-08, 2021-07-20, 2022-07-07 and 2026-06-22. So
+ * every Calendar request resolved to 2018-08-01, the oldest version Calendar has,
+ * five revisions behind current — while Services, reading the same string, landed
+ * on its own newest. Nothing failed, nothing logged, and the comment telling the
+ * next reader how to bump it was never acted on because the shared-date reasoning
+ * looked like a reason not to.
+ *
+ * A version string is a fact about ONE product. The two lists above and in
+ * pco-calendar-service.ts are per product for that reason, and the test asserts
+ * `resolvePcoApiVersion(list, pin) === pin` for each — a pin that resolves to
+ * something else is a pin that is not in force.
+ *
+ * @param published every date the product publishes, in any order.
+ * @returns the version PCO serves, or null when `requested` predates them all
+ *   (PCO answers 400 for a date before a product's first version).
+ */
+export function resolvePcoApiVersion(published: readonly string[], requested: string): string | null {
+  // Lexicographic comparison is date order for zero-padded YYYY-MM-DD, which is
+  // the only shape PCO publishes or accepts.
+  let best: string | null = null;
+  for (const v of published) {
+    if (v <= requested && (best === null || v > best)) best = v;
+  }
+  return best;
+}
 
 /**
  * Is `candidate` an absolute URL on the same origin as `base`?
@@ -348,9 +408,46 @@ const ATTACH_OPEN_TTL_MS = 2 * 60_000;
 const MAX_PAGES = 6;
 
 const MAX_RETRIES = 3;
-/** Concurrent in-flight PCO requests. PCO allows roughly 100 per 20s per app, so
- *  the ceiling is well under that even when every slot is retrying. */
+/**
+ * Concurrent in-flight PCO requests when there is headroom.
+ *
+ * NOT a budget calculation. PCO's limit is dynamic and per-endpoint — its own
+ * documentation says applications "should never hard-code rate limit values", and
+ * its staff say on the record to rely on the response headers; one report saw a
+ * limit of 10 where the default is 100. The comment that stood here reasoned in
+ * prose about "roughly 100 per 20s", which is exactly the hard-coded value the
+ * docs warn against.
+ *
+ * So this is a fan-out ceiling — what stops a refresh across every service type
+ * becoming one burst — and the REAL limiter is `rateLimit`, which reads what PCO
+ * says on every response and drops the ceiling to TIGHT_CONCURRENT before PCO
+ * has to refuse anything.
+ */
 const MAX_CONCURRENT = 4;
+/** The ceiling while consumption is past the high-water mark. One in flight is
+ *  still forward progress; it just stops the app spending its remaining headroom
+ *  four requests at a time. */
+const TIGHT_CONCURRENT = 1;
+/**
+ * Fraction of the observed limit at which the app starts holding back, and the
+ * fraction it must fall back below to be clear again.
+ *
+ * Two thresholds, not one: a single line at 0.75 flaps on every request that
+ * crosses it, and each crossing is a log line and a cadence change. The gap is
+ * what makes "tight" and "recovered" each happen once per real episode.
+ */
+const RATE_TIGHT_AT = 0.75;
+const RATE_CLEAR_AT = 0.5;
+/**
+ * How long an observation is trusted.
+ *
+ * The headers describe a window that has moved on. Past two periods there is no
+ * reason to believe the count, and holding back on a stale one would throttle the
+ * app for an episode that ended. Falls back to a generous default when PCO sends
+ * no period.
+ */
+const RATE_STALE_PERIODS = 2;
+const RATE_DEFAULT_PERIOD_S = 20;
 // Per-request PCO logging (~2 lines per uncached /live, ~1 Hz during a service) is
 // off unless STAGE_UTILITY_DEBUG=1 — keeps an unrotated stdout log from ballooning.
 const DEBUG_PCO = process.env.STAGE_UTILITY_DEBUG === "1";
@@ -481,6 +578,26 @@ class PcoService {
   private static loggedLiveActions = false;
   private inFlight = 0;
   private pending: (() => void)[] = [];
+  /**
+   * A failing rundown read, collapsed to one line per outage.
+   *
+   * getLive() reads the rundown on every live tick — 1 Hz while an item is live —
+   * and since `include=items` was dropped the rundown is where the live item's
+   * title and length come from, so its failure is worth saying out loud. Once,
+   * not 3,600 times an hour.
+   */
+  private readonly rundownErrors = new RepeatLog("[pco] plan rundown unavailable:");
+  /**
+   * What PCO last said about our quota. Read from the three rate headers on
+   * EVERY response, including failures — see pco-rate-limit.ts for why a constant
+   * cannot stand in for them.
+   */
+  private readonly rateLimit = new PcoRateLimit(
+    RATE_STALE_PERIODS,
+    RATE_DEFAULT_PERIOD_S,
+    RATE_TIGHT_AT,
+    RATE_CLEAR_AT,
+  );
 
   private cache = new Map<string, CacheEntry<unknown>>();
 
@@ -574,14 +691,74 @@ class PcoService {
    * — that constructor re-parses its first argument and reads a leading `//` as
    * an authority, which is the exact bug fixed one commit ago.
    */
-  private pcoFetch(
+  private async pcoFetch(
     url: string,
     appId: string,
     secret: string,
     init: RequestInit = {},
     apiVersion?: string,
   ): Promise<Response> {
-    return fetch(pinnedToPco(url), { ...init, headers: this.pcoHeaders(appId, secret, apiVersion) });
+    const response = await fetch(pinnedToPco(url), {
+      ...init,
+      headers: this.pcoHeaders(appId, secret, apiVersion),
+    });
+    // EVERY response, including 401s, 429s and POSTs — PCO puts the three rate
+    // headers on all of them, and a failed request has still been counted
+    // against the window. Reading them here rather than in requestInner is what
+    // makes that true by construction: this is the only call to fetch in the file.
+    this.noteRateHeaders(response);
+    return response;
+  }
+
+  /**
+   * Record what PCO just said about the quota, and say so ONCE per episode.
+   *
+   * Two lines per episode, not two per request: `observe` returns a transition
+   * only on the response that crosses a threshold, and the thresholds have a gap
+   * between them so a request straddling one cannot flap.
+   */
+  private noteRateHeaders(response: Response): void {
+    const now = Date.now();
+    const transition = this.rateLimit.observe(readRateHeaders(response.headers, now), now);
+    if (!transition) return;
+    const status = this.rateLimit.status(now);
+    if (!status) return;
+    if (transition === "tight") {
+      console.warn(
+        `[pco] rate-limit headroom is tight — ${scrub(describeRate(status))}; ` +
+          `holding concurrency at ${scrub(TIGHT_CONCURRENT)} and slowing the live poll until it clears`,
+      );
+    } else {
+      console.log(`[pco] rate-limit headroom recovered — ${scrub(describeRate(status))}`);
+    }
+  }
+
+  /**
+   * What PCO last said about the quota, for a surface an operator reads.
+   *
+   * Null until PCO has answered once — an unconfigured or never-used integration
+   * has no headroom to report, and inventing "100%" for it would be a made-up
+   * number on a diagnostics page.
+   */
+  rateLimitStatus(): RateStatus | null {
+    return this.rateLimit.status(Date.now());
+  }
+
+  /**
+   * Is the app holding back right now?
+   *
+   * Read by the live poller, which is the single largest consumer — at 1 Hz it is
+   * about 20 requests per 20-second window on its own — so slowing it is the
+   * change that actually returns headroom. The gate above only stops a burst.
+   */
+  rateLimitTight(): boolean {
+    return this.rateLimit.tight(Date.now());
+  }
+
+  /** Forget what PCO said about the quota. For tests, and for a credential
+   *  change — one app's window says nothing about another's. */
+  resetRateLimit(): void {
+    this.rateLimit.reset();
   }
 
   private sleep(ms: number): Promise<void> {
@@ -657,6 +834,17 @@ class PcoService {
     return this.request<T>(safe, appId, secret, apiVersion);
   }
 
+  /**
+   * How many requests may be in flight right now.
+   *
+   * Read on every grant rather than captured once, so crossing the high-water
+   * mark takes effect immediately — including for requests already queued behind
+   * a full pool.
+   */
+  private maxConcurrent(): number {
+    return this.rateLimit.tight(Date.now()) ? TIGHT_CONCURRENT : MAX_CONCURRENT;
+  }
+
   /** Wait for a free request slot; resolves with the function that frees it. */
   private acquireSlot(): Promise<() => void> {
     return new Promise((resolve) => {
@@ -667,12 +855,27 @@ class PcoService {
           if (released) return; // a double release would over-grant the pool
           released = true;
           this.inFlight--;
-          this.pending.shift()?.();
+          this.drain();
         });
       };
-      if (this.inFlight < MAX_CONCURRENT) grant();
+      if (this.inFlight < this.maxConcurrent()) grant();
       else this.pending.push(grant);
     });
+  }
+
+  /**
+   * Grant queued slots up to the CURRENT ceiling.
+   *
+   * A release used to hand the slot straight to the next waiter, which kept
+   * `inFlight` at whatever it already was — so dropping the ceiling to
+   * TIGHT_CONCURRENT while four were in flight would have throttled nothing until
+   * the pool happened to drain on its own. Re-checking here is what makes the
+   * tighter ceiling take effect on the next completion.
+   */
+  private drain(): void {
+    while (this.pending.length > 0 && this.inFlight < this.maxConcurrent()) {
+      this.pending.shift()?.();
+    }
   }
 
   private async requestInner<T extends PcoNode = PcoNode>(
@@ -682,9 +885,16 @@ class PcoService {
     apiVersion?: string,
   ): Promise<PcoResponse<T>> {
     if (DEBUG_PCO) console.log(`[pco] GET ${scrub(url)}`);
-    // Retry transient failures (429 rate-limit, 5xx, network) with backoff. PCO
-    // allows ~100 req / 20s per app; a burst (many displays + a refresh) can 429,
-    // which previously threw and dropped data. 401/other-4xx fail fast.
+    // Retry transient failures (429 rate-limit, 5xx, network) with backoff. A
+    // burst (many displays + a refresh) can 429, which previously threw and
+    // dropped data. 401/other-4xx fail fast.
+    //
+    // This is the LAST resort, not the first. Reacting only to a refusal means a
+    // display has already missed a tick by the time anything slows down; the
+    // first resort is the rate headers pcoFetch reads on every response, which
+    // tighten the gate and the live cadence before PCO has to refuse anything.
+    // Deliberately no hard-coded budget here any more — PCO's limit is dynamic
+    // and per-endpoint, and its docs say never to hard-code one.
     for (let attempt = 0; ; attempt++) {
       let response: Response;
       try {
@@ -1425,6 +1635,23 @@ class PcoService {
    * → the time until the service starts ("preservice" mode, e.g. PCO's "6 days").
    * "none" when neither is available. One /live request (+ a cached plan_times
    * lookup for the service start). NOT cached for the live part — polled live.
+   *
+   * `include=items` is deliberately NOT asked for. This request runs once a
+   * second while an item is live, and the whole `items` include existed to
+   * supply two values — the current item's title and its length. The rundown
+   * from listPlanItems is already fetched on the next line, already cached, and
+   * already carries both under the same names. Dropping the include takes a
+   * whole plan's items off the wire 20 times per 20-second window.
+   *
+   * It also removes a disagreement. `label` came from the include (fresh every
+   * second) while `currentItemTitle` came from the cache (up to 45s old), so
+   * renaming an item mid-service made two fields describing the same item
+   * contradict each other until the cache turned over. Both now come from the
+   * one source.
+   *
+   * `current_item_time` stays: it carries `live_start_at` and `length_offset`,
+   * which exist nowhere else, and the `item` relationship whose id is how the
+   * live item is found in the rundown.
    */
   async getLive(
     appId: string,
@@ -1435,7 +1662,7 @@ class PcoService {
   ): Promise<PcoLiveDTO> {
     const serverNow = new Date().toISOString();
     const base = `${PCO_BASE}/service_types/${serviceTypeId}/plans/${planId}`;
-    const json = await this.request(`${base}/live?include=items,current_item_time`, appId, secret);
+    const json = await this.request(`${base}/live?include=current_item_time`, appId, secret);
     const live = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     const included = json.included ?? [];
 
@@ -1448,22 +1675,45 @@ class PcoService {
     const serviceTimeStartsAt = serviceTime?.startsAt ?? null;
 
     // ── "item" mode: a plan item is currently live. ──
-    // (current_item_time must resolve to one of THIS plan's items — its item is in
-    // the `items` include. A session whose item isn't ours, or no session at all,
-    // falls through to the preservice countdown below.)
+    // (current_item_time must resolve to one of THIS plan's items — its item id
+    // has to appear in this plan's rundown. A session whose item isn't ours, or
+    // no session at all, falls through to the preservice countdown below.)
     const currentRef = live?.relationships?.["current_item_time"]?.data;
     const currentId = currentRef && !Array.isArray(currentRef) ? currentRef.id : null;
     const it = currentId ? included.find((n) => n.id === currentId) : null;
     const liveStartAt = it?.attributes?.live_start_at;
     const itemRef = it?.relationships?.["item"]?.data;
     const itemId = itemRef && !Array.isArray(itemRef) ? itemRef.id : null;
-    const itemNode =
-      itemId ? included.find((n) => n.type === "Item" && n.id === itemId) : null;
 
     // Current/next item titles follow the PCO PLAN order (authoritative), not the
     // ProPresenter playlist — so an off-plan presentation can't leak a wrong "next".
     // listPlanItems is cached, so this is essentially free on most live ticks.
-    const planItems = await this.listPlanItems(appId, secret, serviceTypeId, planId).catch(() => []);
+    //
+    // The catch is no longer cosmetic and no longer silent. With `include=items`
+    // gone this rundown is the ONLY source of the live item's title and length,
+    // so a failed read drops the countdown out of item mode rather than merely
+    // blanking "next". Reported once per outage and once on recovery — a live
+    // tick runs at 1 Hz, so a line per attempt would evict the log in minutes.
+    // Not rethrown: a rundown blip must not blank a running countdown, and the
+    // caller (live-poller) has no better answer than "carry the last state",
+    // which is what falling through already does.
+    const planItems = await this.listPlanItems(appId, secret, serviceTypeId, planId).catch(
+      (err: unknown) => {
+        const decision = this.rundownErrors.fail(errorMessage(err), Date.now());
+        if (decision.line) console.warn(scrub(decision.line));
+        return [] as PlanItemDTO[];
+      },
+    );
+    if (planItems.length > 0) {
+      const recovered = this.rundownErrors.ok(Date.now());
+      if (recovered.line) console.log(scrub(recovered.line));
+    }
+    // The live item, from the cached rundown. Both `title` and `lengthSec` used
+    // to come off the `include=items` payload on this same request; they are the
+    // same two PCO attributes (`title`, `length`) under listPlanItems' names.
+    // Finding it here is also the "is this item ours?" check the include used to
+    // perform by its presence.
+    const planItem = itemId ? planItems.find((p) => p.id === itemId) ?? null : null;
     const { currentItemTitle, nextItemTitle } = resolvePlanCurrentNext(planItems, itemId);
     // Item clock for the automation engine (PCO puts no time on an Item). Built
     // from the already-cached rundown and plan times, so it costs no extra request.
@@ -1480,11 +1730,11 @@ class PcoService {
       .filter((t) => t.timeType === "service" || t.timeType === "rehearsal")
       .map((t) => ({ id: t.id, name: t.name, timeType: t.timeType, startsAt: t.startsAt }));
 
-    if (it && typeof liveStartAt === "string" && liveStartAt && itemNode) {
+    if (it && typeof liveStartAt === "string" && liveStartAt && planItem) {
       // "Full Item Length" = the *plan item's* length (ItemTime.length is often 0)
-      // plus any live length_offset the operator set.
-      const planLen =
-        typeof itemNode.attributes.length === "number" ? (itemNode.attributes.length as number) : 0;
+      // plus any live length_offset the operator set. `lengthSec` is PCO's
+      // `length` on the Item, which is the attribute the dropped include carried.
+      const planLen = planItem.lengthSec;
       const offset =
         typeof it.attributes.length_offset === "number" ? it.attributes.length_offset : 0;
       const adjLen = planLen + offset;
@@ -1502,14 +1752,14 @@ class PcoService {
       return {
         mode: "item",
         currentItemId: itemId,
-        label: typeof itemNode.attributes.title === "string" ? itemNode.attributes.title : null,
+        label: planItem.title,
         lengthSec: adjLen > 0 ? adjLen : null,
         liveStartAt,
         targetAt: null,
         serverNow,
         currentItemTitle,
         nextItemTitle,
-        itemType: curIdx >= 0 ? (planItems[curIdx]?.itemType ?? null) : null,
+        itemType: planItem.itemType,
         serviceTimeId,
         serviceTimeStartsAt,
         itemSchedule,

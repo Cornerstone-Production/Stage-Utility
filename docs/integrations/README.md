@@ -17,7 +17,7 @@ countdown, so the app needs it.
 | [OBS Studio](obs.md) | Recording / streaming / virtual-cam state |
 | [REAPER](reaper.md) | Recording state (Web Interface poll) |
 | [ProVideoPlayer](provideoplayer.md) | What is on each PVP layer, and control of layers from rules |
-| [OSC](osc.md) | Control buttons to LAN gear + feedback |
+| [OSC](osc.md) | Control buttons to LAN gear, and inbound feedback that can drive rules |
 | [Resi](resi.md) | Whether Resi is streaming, and for how long |
 | [YouTube](youtube.md) | Whether you are live on YouTube, and for how long |
 | [Bitfocus Companion](companion.md) | Stream-deck control of Stage (reversed — module dials in) |

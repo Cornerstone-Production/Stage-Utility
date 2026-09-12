@@ -29,8 +29,11 @@ import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, CALL_CHANNEL, CALL_TRIGGER_ID, isValidCueName, triggersForChannel } from "./automation-triggers.js";
-import { stateBindingProblem } from "./cue-pairs.js";
-import { cueStates } from "./cue-states.js";
+import { APP_STATE_SOURCES, appStateRef, type AppStateSourceId } from "./app-state-sources.js";
+import { boundCuePairs, cuePairs, stateBindingProblem } from "./cue-pairs.js";
+import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
+import { notePressForLearning } from "./companion-state-probe.js";
+import { cueLive } from "./cue-live.js";
 import { parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
@@ -51,7 +54,21 @@ export type CueBlockReason =
  * the route, so the refusal reasons live beside the guards that produce them.
  */
 export type CueCallResult =
-  | { status: 200; body: { ok: boolean; detail: string; simulated?: true } }
+  | {
+      status: 200;
+      body: {
+        ok: boolean;
+        detail: string;
+        simulated?: true;
+        /**
+         * What the pair's state variable said just before this call, for a cue
+         * that is half of a BOUND pair. Absent for every other cue.
+         */
+        state?: CueStateName;
+        /** The device was already in the state this call asked for: nothing was pressed. */
+        skipped?: true;
+      };
+    }
   | { status: 202; body: { confirm: string; expiresInSec: number } }
   | { status: 404; body: { error: string; reason: "unknown" } }
   | { status: 409; body: { error: string; reason: CueBlockReason; plan?: string } };
@@ -206,6 +223,10 @@ class AutomationEngine {
   private rulesChanged(): void {
     broadcast("automation:rules", { rules: this.listRules() });
     cueStates.invalidate();
+    // The cues manifest is a different audience — a Home Assistant integration
+    // that is not a browser and does not read `automation:rules`. It watches a
+    // VERSION, which goes up here and is announced on the `cues` channel.
+    cueLive.rulesChanged();
   }
 
   async addRule(rule: Omit<Rule, "id">): Promise<Rule> {
@@ -373,6 +394,79 @@ class AutomationEngine {
       return blocked("condition-not-met", `Not right now — ${label.toLowerCase()} is not satisfied`);
     }
 
+    // DESIRED STATE, and only here — ABOVE the cooldown on purpose.
+    //
+    // A bound pair knows what its device is actually doing, so a call asking for
+    // the state it is already in presses nothing: a Home Assistant switch that
+    // repeats `turn_on`, or an assistant that hears "lights on" twice, would
+    // otherwise press a TOGGLE button twice and leave the light off. Below the
+    // cooldown it would almost never run for the case it exists for — a repeat
+    // arrives about two seconds apart and every imported cue carries a three
+    // second cooldown, so the repeat was answered 409 `cooldown`, which is an
+    // ERROR in Home Assistant's log for a call that was correct and needed
+    // nothing done. "Already on" is the true answer and a 200.
+    //
+    // The cooldown is still the backstop, and still ahead of the press: a second
+    // call whose state DISAGREES falls straight through to it, which is the case
+    // where the device has not yet caught up with the first press.
+    //
+    // AND THE READING IS NOT ALWAYS THE TRUTH. Companion polls the device on its
+    // own interval, so for a second or two after a press the variable still
+    // holds the old value. Inside the settle window (cue-states' SETTLE_MS) the
+    // last command is what a call is compared against instead: the same state
+    // skips, the opposite presses whatever the variable says. Flipping a switch
+    // in Apple Home twice quickly hit exactly that gap — the `_off` read the
+    // pre-press `off`, answered "already off", pressed nothing, and the light
+    // stayed on.
+    //
+    // Deliberately NOT in runAction and NOT on the bus path: a rule the engine
+    // fires from a trigger of its own has already decided that the press is what
+    // it wants, and a state read there would put a Companion round trip — and a
+    // Companion that is down — in the way of every triggered press. This is the
+    // call route only, where the caller is a voice assistant or a home
+    // automation system that may repeat itself.
+    const desired = this.desiredStateOf(rule);
+    let state: CueStateName | null = null;
+    if (desired) {
+      const skip = (detail: string, extra: { state?: CueStateName } = {}): CueCallResult => {
+        this.log(rule, "skipped", `${detail}, not pressed`, opts.caller);
+        console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: ${scrub(detail)}, not pressed`);
+        // No `simulated` flag, in simulate mode or out of it: nothing was
+        // dispatched and nothing WOULD have been, so there is no simulation to
+        // report. `skipped: true` is the whole answer.
+        return { status: 200, body: { ok: true, detail, ...extra, skipped: true } };
+      };
+
+      // INSIDE THE SETTLE WINDOW the last COMMAND outranks the reading, and the
+      // variable is not consulted for the decision at all. See SETTLE_MS: the
+      // reading lags the press it is supposed to reflect, so a repeat compared
+      // against it is answered from before the press it is repeating.
+      const command = cueStates.commandedWithin(desired.base, now);
+      if (command?.want === desired.want) {
+        // No read: nothing the variable could say would change this, and a
+        // Companion that is down would make an idempotent repeat wait three
+        // seconds to be told nothing.
+        return skip(`already ${desired.want} (just pressed)`);
+      }
+
+      const read = await this.readCueState(desired.base);
+      state = read.state;
+      if (command) {
+        // The OPPOSITE of what was just commanded. It presses whatever the
+        // variable says — and when the variable contradicts it, that is the
+        // stale reading this window exists for, and the operator gets a line
+        // saying the press went ahead against it.
+        if (state === desired.want) {
+          console.log(
+            `[cues] ${scrub(said)} by ${scrub(opts.caller)}: pressed against a stale reading ` +
+              `(${scrub(read.value)}) inside the settle window`,
+          );
+        }
+      } else if (state === desired.want) {
+        return skip(`already ${desired.want}`, { state });
+      }
+    }
+
     const last = this.lastFiredAt.get(rule.id);
     if (last !== undefined && rule.cooldownSec > 0) {
       const remaining = Math.ceil((last + rule.cooldownSec * 1000 - now) / 1000);
@@ -412,15 +506,134 @@ class AutomationEngine {
       if (key) this.firedForService.set(rule.id, key);
     }
     const result = await this.runAction(rule, `call by ${opts.caller}`, opts.caller);
-    const verdict = result.ok ? "dispatched" : "blocked (action-failed)";
+    // "dispatched (simulated)" and not a bare "dispatched": in simulate mode the
+    // line read identically to a real press while nothing reached a device, so
+    // an operator reading /log with the projectors dark had nothing to go on.
+    // The response body already carried the flag; the log threw it away.
+    const verdict = !result.ok
+      ? "blocked (action-failed)"
+      : this.settings.simulate
+        ? "dispatched (simulated)"
+        : "dispatched";
     console.log(`[cues] ${scrub(said)} by ${scrub(opts.caller)}: ${scrub(verdict)}`);
+    // THE PRESS IS REMEMBERED. What the variable holds is now a value from
+    // BEFORE it, for as long as Companion takes to poll the device, so this
+    // drops the cached answer, is what the next repeat is compared against for
+    // eight seconds, and starts the one-second re-read that notices the device
+    // catching up. See SETTLE_MS.
+    //
+    // Only when something REALLY reached a device: a simulated call and a failed
+    // action both leave the cached state accurate, and a window opened by
+    // either would have the app overriding a truthful reading with a command
+    // nothing carried out.
+    if (desired && result.ok && !this.settings.simulate) cueStates.noteCommand(desired);
+    // A pair with NO binding whose connections the verified table does not
+    // cover: the press is what learning has to watch, because a variable's two
+    // values can only be read off a device that has just been told to move.
+    // Fire and forget — the window is eight seconds and the caller is a voice
+    // assistant holding the line. Same three conditions as the command above:
+    // a simulated or failed press moved nothing, so there is nothing to watch.
+    if (!desired && result.ok && !this.settings.simulate) {
+      const learning = this.learningPressOf(rule);
+      if (learning) notePressForLearning(learning);
+    }
+    // `state` is what was read BEFORE the press — including `unknown`, which is
+    // the caller's evidence that the press went ahead without knowing what the
+    // device was doing rather than because the device needed it.
+    const body = state === null ? { ...result } : { ...result, state };
     // Simulate is on by default on a fresh install, and a call that answers a
     // plain 200 while nothing reached a device is a switch in Home Assistant
     // that flips with the projectors still off. The flag is how a caller can
     // tell; `detail` already reads "would press …".
     return this.settings.simulate
-      ? { status: 200, body: { ...result, simulated: true } }
-      : { status: 200, body: result };
+      ? { status: 200, body: { ...body, simulated: true } }
+      : { status: 200, body };
+  }
+
+  /**
+   * The pair half this cue is and the state a press would be asking for, or
+   * null when this cue is not half of a BOUND pair.
+   *
+   * By rule id rather than by name, so a call that arrived through a former name
+   * resolves to the same half. An unbound pair returns null and is never read
+   * for: there is nothing to read, and a call on one must not pay a Companion
+   * round trip to find that out.
+   */
+  private desiredStateOf(rule: Rule): CueCommand | null {
+    if (rule.trigger.id !== CALL_TRIGGER_ID) return null;
+    for (const pair of cuePairs(this.rules)) {
+      const binding = pair.binding;
+      if (binding === null) continue;
+      // The whole binding, not just the base: what a press COMMANDS is the
+      // variable and the value it will hold once the device catches up, and
+      // cue-states needs both to re-read it. Read from the pair here so nothing
+      // downstream has to resolve the pair a second time.
+      const of = (want: "on" | "off"): CueCommand => ({
+        base: pair.base,
+        want,
+        variable: binding.variable,
+        wantValue: want === "on" ? binding.onValue : binding.offValue,
+      });
+      if (pair.on.id === rule.id) return of("on");
+      if (pair.off.id === rule.id) return of("off");
+    }
+    return null;
+  }
+
+  /**
+   * The pair half this cue is when its pair is LEARNING, or null.
+   *
+   * The mirror of desiredStateOf for the other case: a pair with no binding at
+   * all, whose `_on` half carries the candidate variables a probe found. The
+   * params travel with it because the watcher decides from them whether there
+   * is anything to watch, and reading them again over there would be a second
+   * walk of the rules.
+   */
+  private learningPressOf(
+    rule: Rule,
+  ): { ruleId: string; base: string; want: "on" | "off"; params: Record<string, string | number> } | null {
+    if (rule.trigger.id !== CALL_TRIGGER_ID) return null;
+    // LEARNING IS COMPANION-ONLY. It watches what a module variable does when a
+    // BUTTON is pressed, so a pair whose halves drive something else — a REAPER
+    // transport cue — has nothing to watch and no fingerprint to read. Guarded
+    // here rather than trusted to notePressForLearning's empty-candidates early
+    // return: the candidates are written by the probe, and "the probe cannot
+    // reach this pair today" is an invariant three modules away.
+    if (rule.action.id !== "companion.press") return null;
+    for (const pair of cuePairs(this.rules)) {
+      if (pair.binding !== null) continue;
+      const want = pair.on.id === rule.id ? "on" : pair.off.id === rule.id ? "off" : null;
+      if (!want) continue;
+      // The `_on` half's params, whichever half was pressed: that is where the
+      // candidates and the learning state live, exactly as the binding does.
+      return { ruleId: pair.on.id, base: pair.base, want, params: pair.on.trigger.params };
+    }
+    return null;
+  }
+
+  /**
+   * What a bound pair's device is doing, through the SAME read the states route
+   * uses — its five second cache, its parallel reads and its three second
+   * timeout. A second fetch path here would be a second thing to keep in step
+   * with Companion's API and a second cache to go stale.
+   *
+   * Never throws and never blocks: anything it cannot answer is `unknown`, and
+   * an unknown state presses.
+   */
+  private async readCueState(base: string): Promise<{ state: CueStateName; value: string | null }> {
+    try {
+      const answer = await cueStates.read();
+      const row = answer.states[base];
+      return { state: row?.state ?? "unknown", value: row?.value ?? null };
+    } catch (err) {
+      // NOT swallowed: "unknown" IS the failure, returned to the caller — it
+      // comes back in the call's answer as `state: "unknown"` and presses. The
+      // alternative is a cue that cannot be run at all because a read failed,
+      // which is the one thing this feature must never cause. The reason is
+      // logged here because nothing downstream carries it.
+      console.warn(`[cues] state of ${scrub(base)} could not be read: ${scrub(errorMessage(err))}`);
+      return { state: "unknown", value: null };
+    }
   }
 
   /** Exposed for tests — drives the engine with a synthetic broadcast. */
@@ -643,6 +856,24 @@ class AutomationEngine {
       (rule) => rule.enabled && rule.conditions.some((c) => c.id === conditionId),
     );
   }
+
+  /**
+   * Does any cue pair read its state from this app source?
+   *
+   * A pair bound to `app:reaper.recording` is answered from REAPER's transport
+   * poll, which falls to IDLE_POLL_MS when no browser is watching — so a Home
+   * Assistant switch on an unattended booth machine read a snapshot up to five
+   * seconds old, which is exactly the window a repeat call arrives in.
+   *
+   * NOT gated on `disarmed`, unlike the two above. Disarming stops rules
+   * FIRING; `GET /api/cues/states` and the manifest still answer, and a switch
+   * in Home Assistant reporting a five-second-old state because the engine is
+   * disarmed would be a second, invisible consequence of the panic switch.
+   */
+  wantsAppStateSource(id: AppStateSourceId): boolean {
+    const ref = appStateRef(id);
+    return boundCuePairs(this.rules).some((pair) => pair.binding?.variable === ref);
+  }
 }
 
 export const automationEngine = new AutomationEngine();
@@ -688,4 +919,17 @@ for (const [conditionId, def] of Object.entries(AUTOMATION_CONDITIONS)) {
   const { channel } = def;
   if (channel === null) continue;
   addChannelDemandSource(channel, () => automationEngine.wantsCondition(conditionId));
+}
+
+/**
+ * App state sources, which arrive by pull as conditions do.
+ *
+ * A pair bound to `app:reaper.recording` reads REAPER's latest snapshot rather
+ * than the bus, so neither loop above can see it — and REAPER polls at its idle
+ * cadence with no browser attached, which is the whole case a cue on a booth
+ * machine is for. Derived from the registry, so a second source is covered the
+ * moment it is added there.
+ */
+for (const [id, def] of APP_STATE_SOURCES) {
+  addChannelDemandSource(def.channel, () => automationEngine.wantsAppStateSource(id));
 }

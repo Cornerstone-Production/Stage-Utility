@@ -67,11 +67,47 @@ about the signed-in channel, and only an OAuth token can answer it.
 |---|---|
 | **Live** | a broadcast is on air — `lifeCycleStatus` is `live`, or the video has a start time and no end time |
 | **Off air** | YouTube is reachable and nothing is live |
+| **Off air, late** | nothing is live and a broadcast was scheduled to have started — see below |
 | **—** | not set up, or cannot be reached |
 
 `testing` and `liveStarting` do not count as live. Neither is going out to an
 audience, and an indicator that lights during a test broadcast would be wrong at
 exactly the moment someone trusts it.
+
+### Viewers
+
+While live, YouTube also reports how many people are watching, and the widget
+shows it beside the elapsed clock — `12:34 · 137 watching`.
+
+The count is **only available on the public path**. A `liveBroadcast` carries no
+audience figure, so reading one under *My broadcasts* would mean a second
+request on every poll, and the count is not worth that against the daily budget.
+Nothing is shown rather than a wrong number.
+
+Nothing is shown either when the channel owner has hidden the count in YouTube
+Studio, or in the first moments of a broadcast before YouTube has one. A hidden
+count reads as no count, never as nobody watching.
+
+**Elapsed time** turns the whole reading off, audience included: a widget has one
+slot for a running number, and the switch owns it.
+
+### A start that did not happen
+
+A broadcast scheduled in YouTube that is past its start time with nothing live
+turns the widget amber and says how late it is — `Off air`, `6:12 late`. It is
+the one off-air state with a colour, because off air is what a wall sits in all
+week and a colour that is always there stops being read.
+
+It waits a minute before saying anything, and stops after two hours: an upcoming
+broadcast that was cancelled rather than started keeps its scheduled time for as
+long as it sits on the channel, and a widget red since March is a widget nobody
+looks at.
+
+This too needs the **public path**. *My broadcasts* asks YouTube for broadcasts
+that are `active`, and one that has not started is not among them — seeing it
+would mean a second request on every poll of the whole week when nothing is
+live. Under *My broadcasts* a late start is visible only once the broadcast is
+actually going out.
 
 ## Quota
 
@@ -80,9 +116,13 @@ A Google project gets 10,000 API units a day. A check costs 1 unit on OAuth and
 screen and slowly otherwise, on the same service-aware schedule the other
 integrations use — a normal week lands near 2,000 units.
 
-The obvious-looking `search.list?eventType=live` is not used: it costs 100 units
-a call, so polling it through a single service would spend most of the day's
-budget.
+The viewer count and the scheduled start are free: both arrive inside a response
+the poll already makes.
+
+The obvious-looking `search.list?eventType=live` is not used, and the reason is a
+rate limit rather than a price. Search has its own daily allowance of **100
+calls** — 1 unit each, separate from the 10,000 — which works out at one every
+fifteen minutes against a poll that runs every twenty seconds.
 
 If the quota does run out, the integration says so and waits half an hour rather
 than retrying into a door that stays shut until midnight Pacific.
@@ -97,16 +137,21 @@ one of them reads as one design:
 |---|---|
 | Offline | dimmed. YouTube is not set up, or cannot be reached |
 | Off air | grey — reachable, nothing going out |
-| Live | green, with the elapsed time underneath |
+| Off air, late | amber, with how late beside it |
+| Live | green, with the elapsed time and the viewer count beside it |
 
 Green, not the red a recorder uses: red is what OBS and REAPER mean by rolling,
 and a wall carrying both should tell them apart by colour rather than by weight.
+Late is amber for the same reason — a room carrying recorders and streams wants
+exactly one red.
 
 Live fills the whole widget by default, exactly as OBS status and REAPER status
 fill red while recording — the four sit side by side and are meant to read as one
 set. Turn **Fill green when live** off to colour just the word instead. **Hide
 when idle** makes it a tally light, drawing nothing at all until something is
-going out.
+going out — except for a late start, which it still shows. A tally light that
+switches itself off exactly when the stream failed to start is a light that has
+hidden the one event it exists to report.
 
 **Streaming status** is the same widget asking about every platform at once, or
 about one you pick.

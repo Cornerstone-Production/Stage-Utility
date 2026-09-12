@@ -9,6 +9,8 @@
 //   POST /api/location/<page>/<row>/<col>/press      presses a button
 //   GET  /int/export/full?format=json                the whole configuration
 //   GET  /api/custom-variable/<name>/value           one custom variable's value
+//   GET  /api/variable/<label>/<name>/value          one module variable's value
+//   GET  /api/connections                            every connection and its status
 //
 // Companion answers the press with 200 and the body `ok` when the coordinate
 // exists. An INVALID coordinate answers 204 and presses nothing — so 2xx alone is
@@ -21,8 +23,15 @@
 // Companion, which is rarely and never mid-service. It is cached for five
 // minutes; the picker's Refresh button busts it.
 
-import { errorMessage } from "./errors.js";
+import { fetchFailureMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
+import {
+  type ConnectionHealth,
+  type ConnectionsResult,
+  connectionSentence,
+  parseConnections,
+  summariseConnections,
+} from "./companion-connections.js";
 import {
   type CompanionButton,
   type CompanionPair,
@@ -30,7 +39,9 @@ import {
   exportBuild,
   findPairs,
   isCompanionVariableName,
+  isCompanionVariableRef,
   parseButtons,
+  parseVariableRef,
 } from "./companion-export.js";
 
 /** Companion's default HTTP/web port. */
@@ -49,6 +60,35 @@ export const VARIABLE_TIMEOUT_MS = 3000;
 /** The export is 4 MB on a real install; give it longer than a press. */
 const EXPORT_TIMEOUT_MS = 20_000;
 const EXPORT_CACHE_MS = 5 * 60 * 1000;
+/**
+ * How long a connection list is reused.
+ *
+ * Short, and not the export's five minutes: this is a live status and an
+ * operator who just plugged the projector back in should see it on the next
+ * pass. Long enough for one purpose only — pressing Test runs the reconcile,
+ * and both of them want the health, so a minute is what stops one button press
+ * asking Companion for the same list twice.
+ *
+ * It does NOT save a request on the cue picker's Refresh, which calls
+ * `invalidate()` first by design. Refresh means read Companion again.
+ */
+const CONNECTIONS_CACHE_MS = 60_000;
+/**
+ * A connection-list read.
+ *
+ * The same three seconds as a variable read, and for a measured reason rather
+ * than by analogy: the live install's list is 84 entries and about 10 KB, which
+ * came back instantly, and a Companion that has not produced 10 KB in three
+ * seconds is not about to. Nothing waits on this — a timeout leaves the row's
+ * last sentence in place and writes nothing — so the cost of being wrong short
+ * is one missing hourly line, and the cost of being wrong long is an hourly
+ * sweep held open.
+ *
+ * Exported so its own guard can pin it by elapsed time. A guard that only
+ * checked a signal was PRESENT stayed green against a signal that never fires,
+ * which is the whole bug.
+ */
+export const CONNECTIONS_TIMEOUT_MS = 3000;
 
 export interface CompanionTarget {
   host: string;
@@ -119,28 +159,14 @@ export type ExportResult =
  */
 export type VariableResult = { value: string } | { error: string };
 
+export type { ConnectionsResult };
+
 class CompanionApi {
   private cache: ExportCache | null = null;
   /** In-flight fetch, so a page of pickers opening at once reads one export. */
   private inFlight: Promise<ExportResult> | null = null;
-
-  /**
-   * A caught fetch failure, said usefully.
-   *
-   * Node's own message for every network failure is the word "fetch failed",
-   * with the real reason — ECONNREFUSED, EHOSTUNREACH, the address and the port
-   * — one level down on `cause`. Driving the picker against a dead port put
-   * "Could not read Companion's configuration: fetch failed" on screen, which
-   * tells an operator nothing at all.
-   */
-  private static why(e: unknown, target: string): string {
-    const top = errorMessage(e);
-    const cause = e instanceof Error && e.cause !== undefined ? errorMessage(e.cause) : "";
-    const said = cause && cause !== top ? cause : top === "fetch failed" ? `could not reach ${target}` : top;
-    // The cause usually already names the address ("connect ECONNREFUSED
-    // 127.0.0.1:8799"); appending it again reads as two different failures.
-    return said.includes(target.replace(/^https?:\/\//, "")) ? said : `${said} (${target})`;
-  }
+  /** The last connection list read, and when. See CONNECTIONS_CACHE_MS. */
+  private connections: { at: number; health: ConnectionHealth } | null = null;
 
   private async baseUrl(): Promise<string | null> {
     const target = await companionDeps.getTarget();
@@ -197,7 +223,7 @@ class CompanionApi {
     } catch (e) {
       // `base` is "" when getTarget itself failed, and "17/2/6 at " reads as a
       // truncated sentence — the coordinate alone is what is left to say.
-      const detail = CompanionApi.why(e, base ? `${loc.page}/${loc.row}/${loc.col} at ${base}` : where);
+      const detail = fetchFailureMessage(e, base ? `${loc.page}/${loc.row}/${loc.col} at ${base}` : where);
       console.warn(`[companion] press ${where} failed: ${scrub(detail)}`);
       return { ok: false, status: null, detail };
     }
@@ -269,7 +295,7 @@ class CompanionApi {
       this.cache = { at: Date.now(), buttons, pairs, build, customVariables };
       return { ok: true, buttons, pairs, build, customVariables, cachedAt: this.cache.at };
     } catch (e) {
-      const reason = CompanionApi.why(e, base);
+      const reason = fetchFailureMessage(e, base);
       console.warn(`[companion] export unavailable: ${scrub(reason)}`);
       return { ok: false, reason };
     }
@@ -295,6 +321,57 @@ class CompanionApi {
     if (!isCompanionVariableName(variable)) {
       return { error: `"${variable}" is not a Companion variable name` };
     }
+    return this.readValueAt(
+      `/api/custom-variable/${encodeURIComponent(variable)}/value`,
+      "no such custom variable in Companion",
+    );
+  }
+
+  /**
+   * Read one variable a MODULE publishes for a connection.
+   *
+   * `/api/variable/<connection label>/<name>/value`, which is the other half of
+   * what `$(VCR-Overhead-Light:power_state)` means inside Companion. Same
+   * contract as readCustomVariable in every respect — never throws, never
+   * caches, three second timeout — because cue-states.ts batches the two
+   * together and a binding must not behave differently for having named a
+   * connection.
+   */
+  async readModuleVariable(label: string, name: string): Promise<VariableResult> {
+    const ref = `${label.trim()}:${name.trim()}`;
+    if (!isCompanionVariableRef(ref)) {
+      return { error: `"${ref}" is not a Companion variable name` };
+    }
+    return this.readValueAt(
+      `/api/variable/${encodeURIComponent(label.trim())}/${encodeURIComponent(name.trim())}/value`,
+      `no such variable ${ref} in Companion`,
+    );
+  }
+
+  /**
+   * Read whichever variable a binding names — `custom:<name>`, a bare `<name>`
+   * (custom, as every binding written before this meant), or
+   * `<connection label>:<name>`.
+   *
+   * ONE entry point, so cue-states.ts and anything else reading a binding
+   * dispatch in one place rather than each deciding what a string means.
+   */
+  async readVariable(ref: string): Promise<VariableResult> {
+    const parsed = parseVariableRef(ref);
+    if (!parsed) return { error: `"${ref.trim()}" is not a Companion variable name` };
+    return parsed.kind === "custom"
+      ? this.readCustomVariable(parsed.name)
+      : this.readModuleVariable(parsed.label, parsed.name);
+  }
+
+  /**
+   * GET one value off Companion, said as a VariableResult.
+   *
+   * The shared body of the two reads above: one timeout, one 404 sentence, one
+   * trim, one catch. Two copies of this is how the module read would come to
+   * hold the request open for eight seconds while the custom one did not.
+   */
+  private async readValueAt(path: string, missing: string): Promise<VariableResult> {
     // `baseUrl()` is INSIDE the try. It awaits getTarget, which reaches the
     // integration manager and its config store, and a rejection there escaped a
     // method documented as never throwing — which under the caller's batch read
@@ -304,11 +381,10 @@ class CompanionApi {
       const resolved = await this.baseUrl();
       if (!resolved) return { error: "Companion host is not configured" };
       base = resolved;
-      const url = `${base}/api/custom-variable/${encodeURIComponent(variable)}/value`;
-      const res = await companionDeps.fetch(url, {
+      const res = await companionDeps.fetch(`${base}${path}`, {
         signal: AbortSignal.timeout(VARIABLE_TIMEOUT_MS),
       });
-      if (res.status === 404) return { error: "no such custom variable in Companion" };
+      if (res.status === 404) return { error: missing };
       if (!res.ok) return { error: `Companion answered HTTP ${res.status}` };
       // Companion answers with the value as text. Trimmed, because a variable an
       // operator set from a button expression can carry a trailing newline and
@@ -319,13 +395,69 @@ class CompanionApi {
       // when the message does not already name it, and every message contains
       // "", so an unknown host reads as the failure alone rather than as
       // "... ()".
-      return { error: CompanionApi.why(e, base) };
+      return { error: fetchFailureMessage(e, base) };
+    }
+  }
+
+  /**
+   * Read every connection Companion has, and what each one's status is.
+   *
+   * NEVER throws, like every other read here — the reconcile calls it on a timer
+   * and the Test button calls it while an operator waits. A failure comes back
+   * as `{ ok: false, reason }`, and a 404 comes back as
+   * `{ ok: false, unsupported: true }` because a Companion older than 5.x simply
+   * does not have this endpoint.
+   *
+   * Nothing is logged here. The two callers each have something different to say
+   * about the answer, and a line written at this level would appear twice for
+   * one Test.
+   *
+   * No in-flight dedupe, unlike fetchExport, and that is a decision rather than
+   * an omission: the export is 4 MB and a page of pickers can open at once,
+   * while this is a small list with exactly two callers — a Test somebody
+   * pressed, and an hourly sweep. The only way to overlap them is to press Test
+   * on the hour, and the cost of that is one extra small GET.
+   */
+  async readConnections(opts: { force?: boolean } = {}): Promise<ConnectionsResult> {
+    const now = Date.now();
+    if (!opts.force && this.connections && now - this.connections.at < CONNECTIONS_CACHE_MS) {
+      return { ok: true, health: this.connections.health, cachedAt: this.connections.at };
+    }
+    // Inside the try, like every other read: getTarget reaches the integration
+    // manager and its config store, and a rejection there escaped a method
+    // documented as never throwing.
+    let base = "";
+    try {
+      const resolved = await this.baseUrl();
+      if (!resolved) {
+        return { ok: false, unsupported: false, reason: "Companion host is not configured" };
+      }
+      base = resolved;
+      const res = await companionDeps.fetch(`${base}/api/connections`, {
+        signal: AbortSignal.timeout(CONNECTIONS_TIMEOUT_MS),
+      });
+      if (res.status === 404) {
+        return {
+          ok: false,
+          unsupported: true,
+          reason: "this Companion does not report connection status (5.x and later do)",
+        };
+      }
+      if (!res.ok) {
+        return { ok: false, unsupported: false, reason: `Companion answered HTTP ${res.status}` };
+      }
+      const health = summariseConnections(parseConnections(await res.json()));
+      this.connections = { at: Date.now(), health };
+      return { ok: true, health, cachedAt: this.connections.at };
+    } catch (e) {
+      return { ok: false, unsupported: false, reason: fetchFailureMessage(e, base) };
     }
   }
 
   /** Drop the cache, so the next read goes to Companion. */
   invalidate(): void {
     this.cache = null;
+    this.connections = null;
   }
 
   /**
@@ -334,6 +466,12 @@ class CompanionApi {
    * Reads the export rather than pressing anything — a Test that pressed a button
    * would be a Test nobody dares use. Forced past the cache, because "Test" has
    * to mean "reach it now".
+   *
+   * The connection health goes in the same sentence. Companion answering at all
+   * is not the question an operator presses Test to settle — "why does that
+   * switch say unknown" is, and twelve connections in error is the answer.
+   * `ok` still tracks whether COMPANION could be reached: gear behind it being
+   * down is a fact about the building, not a failed test.
    */
   async testConnection(): Promise<{ ok: boolean; message: string }> {
     const target = await companionDeps.getTarget();
@@ -345,9 +483,22 @@ class CompanionApi {
       return { ok: false, message: result.reason };
     }
     const version = result.build ? `Companion ${result.build}` : "Companion";
+    // Forced for the same reason the export is: Test means "now".
+    const connections = await this.readConnections({ force: true });
+    // A build with no such endpoint says nothing — there is no fact to report and
+    // "unavailable" on every 4.x install reads as a fault. Any OTHER failure is
+    // said out loud rather than dropped: the export just succeeded, so a
+    // connection list that did not is something the operator has not been told.
+    const health = connections.ok
+      ? `, ${connectionSentence(connections.health)}`
+      : connections.unsupported
+        ? ""
+        : `, connection status unavailable: ${connections.reason}`;
     return {
       ok: true,
-      message: `${version} — ${result.buttons.length} button(s), ${result.pairs.length} on/off pair(s)`,
+      message:
+        `${version} — ${result.buttons.length} button(s), ` +
+        `${result.pairs.length} on/off pair(s)${health}`,
     };
   }
 }

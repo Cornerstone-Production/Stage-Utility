@@ -48,7 +48,19 @@ function CopyField({ label, value }: { label: string; value: string }) {
 // There is nothing to configure here: the Companion module connects TO this app's
 // HTTP/SSE API. Companion can't resolve DNS and takes host + port as separate
 // fields, so we show the raw LAN IP and port split out (from state.lanUrl, not the
-// DNS publicUrl), plus a live connected-client count.
+// DNS publicUrl), plus the row's own status line.
+//
+// The Status field is where the Companion row's message is read. ConnectionBadge,
+// which every integration card and dialog header uses, shows a message only while
+// the row is in `error`, and the Companion row is in error for exactly one
+// reason: a Test that could not reach Companion (integration-manager's
+// applyCompanionRow). Every other thing that message carries — the module-client
+// count, the connection health from the hourly reconcile — is shown here or
+// nowhere.
+//
+// An earlier version of this comment said the row was "never in error, because
+// nothing dials out to fail". That was wrong: the outbound half dials out and
+// fails whenever Companion is switched off.
 export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
   const { state: stage } = useStageState();
   const lanUrl = stage?.lanUrl ?? null;
@@ -65,8 +77,20 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
     }
   }
 
-  const connectedCount =
-    state.connection === "connected" && state.message ? state.message : null;
+  /**
+   * The row's whole message, whatever the connection state is.
+   *
+   * It used to be shown only while `connection === "connected"`, which meant
+   * only while a Companion module was attached. Everything else the message can
+   * carry is true with none attached: the connection health from the hourly
+   * reconcile ("12 of 52 connection(s) in error"), and the reason a Test failed.
+   * Both were written to the row and rendered nowhere — the panel showed "No
+   * Companion clients connected yet." over the top of them.
+   *
+   * `break-words` on the element below, and no truncation: the message is
+   * several sentences now and this is the one place it is read in full.
+   */
+  const status = state.message ?? null;
 
   return (
     <FieldGroup>
@@ -118,7 +142,7 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
         <FieldContent>
           <FieldLabel>Status</FieldLabel>
           <FieldDescription className="break-words" data-testid="companion-status">
-            {connectedCount ?? "No Companion clients connected yet."}
+            {status ?? "No Companion clients connected yet."}
           </FieldDescription>
         </FieldContent>
       </Field>

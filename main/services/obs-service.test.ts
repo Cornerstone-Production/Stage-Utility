@@ -14,8 +14,13 @@ const OFFLINE: ObsStatusDTO = {
   recordPaused: false,
   streaming: false,
   virtualCam: false,
-  recordTimecode: null,
+  recordAnchorMs: null,
+  recordSampledAt: null,
 };
+
+/** A fixed moment, so a rolled-forward anchor is an exact number. */
+const NOW = Date.parse("2026-09-11T15:20:00.000Z");
+const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
 
 const evt = (eventType: string, eventData: Record<string, unknown> = {}) => ({ eventType, eventData });
 
@@ -26,11 +31,12 @@ describe("reduceObsEvent", () => {
     assert.equal(next.recordPaused, false);
   });
 
-  test("RecordStateChanged inactive stops recording and clears the timecode", () => {
-    const recording = { ...OFFLINE, recording: true, recordTimecode: "00:12:34" };
-    const next = reduceObsEvent(recording, evt("RecordStateChanged", { outputActive: false, outputState: "OUTPUT_STOPPED" }));
+  test("RecordStateChanged inactive stops recording and clears the anchor", () => {
+    const recording = { ...OFFLINE, recording: true, recordAnchorMs: 754_000, recordSampledAt: at(0) };
+    const next = reduceObsEvent(recording, evt("RecordStateChanged", { outputActive: false, outputState: "OUTPUT_STOPPED" }), NOW);
     assert.equal(next.recording, false);
-    assert.equal(next.recordTimecode, null, "a stale timecode must not survive the stop");
+    assert.equal(next.recordAnchorMs, null, "a stale anchor must not survive the stop");
+    assert.equal(next.recordSampledAt, null, "a stale anchor must not survive the stop");
   });
 
   test("a paused recording is still a recording", () => {
@@ -41,10 +47,35 @@ describe("reduceObsEvent", () => {
     assert.equal(next.recordPaused, true);
   });
 
-  test("pausing preserves the running timecode", () => {
-    const recording = { ...OFFLINE, recording: true, recordTimecode: "00:05:00" };
-    const next = reduceObsEvent(recording, evt("RecordStateChanged", { outputActive: true, outputState: "OUTPUT_PAUSED" }));
-    assert.equal(next.recordTimecode, "00:05:00");
+  test("pausing freezes the clock at the time actually recorded, not at the last anchor", () => {
+    // The anchor was taken 20s ago and the recording has been rolling since, so
+    // a pause has to bank those 20 seconds. Leaving the old anchor in place made
+    // the frozen reading jump BACKWARDS by up to a whole keepalive.
+    const recording = { ...OFFLINE, recording: true, recordAnchorMs: 300_000, recordSampledAt: at(-20_000) };
+    const next = reduceObsEvent(recording, evt("RecordStateChanged", { outputActive: true, outputState: "OUTPUT_PAUSED" }), NOW);
+    assert.equal(next.recordPaused, true);
+    assert.equal(next.recordAnchorMs, 320_000, "the pause lost the seconds since the last anchor");
+    assert.equal(next.recordSampledAt, at(0));
+  });
+
+  test("resuming restarts the clock from this instant, so the pause is not replayed as recording", () => {
+    // A recording paused at 5:00 and left there for ten minutes. The service
+    // re-reads outputDuration on this same event, but that is a round trip away,
+    // and an untouched anchor would count the whole pause in the meantime.
+    const paused = { ...OFFLINE, recording: true, recordPaused: true, recordAnchorMs: 300_000, recordSampledAt: at(-600_000) };
+    const next = reduceObsEvent(paused, evt("RecordStateChanged", { outputActive: true, outputState: "OUTPUT_RESUMED" }), NOW);
+    assert.equal(next.recordPaused, false);
+    assert.equal(next.recordAnchorMs, 300_000, "ten minutes of pause were counted as recorded time");
+    assert.equal(next.recordSampledAt, at(0));
+  });
+
+  test("a start with no anchor yet stays null rather than claiming 00:00:00", () => {
+    // The GetRecordStatus that answers this event has not come back. Null is the
+    // honest reading; 0 would be a clock that happens to be right.
+    const next = reduceObsEvent(OFFLINE, evt("RecordStateChanged", { outputActive: true, outputState: "OUTPUT_STARTED" }), NOW);
+    assert.equal(next.recording, true);
+    assert.equal(next.recordAnchorMs, null);
+    assert.equal(next.recordSampledAt, null);
   });
 
   test("resuming clears the paused flag", () => {

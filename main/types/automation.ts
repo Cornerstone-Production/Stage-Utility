@@ -15,7 +15,15 @@ export interface ParamDef {
   max?: number;
   options?: { value: string; label: string }[];
   /** Options that can only be known at runtime (targets, service types, commands). */
-  optionsFrom?: "rosstalk-targets" | "rosstalk-commands" | "osc-targets" | "service-types" | "displays" | "plan-items";
+  optionsFrom?:
+    | "rosstalk-targets"
+    | "rosstalk-commands"
+    | "osc-targets"
+    | "service-types"
+    | "displays"
+    | "plan-items"
+    | "propresenter-instances"
+    | "propresenter-macros";
   optional?: boolean;
   help?: string;
   /** Column headings for a "key-value" param. */
@@ -129,7 +137,22 @@ export interface Rule {
   confirmRequired?: boolean;
 }
 
-export type AutomationOutcome = "fired" | "failed" | "simulated" | "suppressed" | "condition-not-met";
+/**
+ * What became of one evaluation of a rule.
+ *
+ * `skipped` is not a suppression: nothing stopped the rule, the device was
+ * already in the state the call asked for and pressing would have been the
+ * wrong thing to do. It is its own outcome so an operator reading the activity
+ * log can tell "Home Assistant asked again and we did nothing" from
+ * "a condition refused it".
+ */
+export type AutomationOutcome =
+  | "fired"
+  | "failed"
+  | "simulated"
+  | "suppressed"
+  | "skipped"
+  | "condition-not-met";
 
 export interface AutomationLogEntry {
   at: string;

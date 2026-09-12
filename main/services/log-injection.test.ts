@@ -63,7 +63,15 @@ const REQUEST_FACING = [
   "calendar-routes.ts",
   "checklist-ticks-store.ts",
   "companion-reconcile.ts",
+  // Its lines name a cue pair's base — a rule param typed into an HTTP body —
+  // and the Companion variable names and VALUES it read back off a connection
+  // whose label came out of Companion's own export.
+  "companion-state-probe.ts",
   "context.ts",
+  // Its read failure line carries whatever cue-states could not read, which
+  // reaches Companion over HTTP with a variable name typed into a rule.
+  "cue-live.ts",
+  "cue-manifest.ts",
   "cue-routes.ts",
   // Logs the Companion variable name a cue is bound to, which arrives as a rule
   // param over HTTP.
@@ -71,6 +79,9 @@ const REQUEST_FACING = [
   "cue-tokens.ts",
   "display-settings-routes.ts",
   "history-routes.ts",
+  // Its one warning names a cue pair's base, which comes from a cue name typed
+  // into an HTTP body.
+  "home-assistant-yaml.ts",
   "integration-manager.ts",
   "integration-routes.ts",
   "kiosk-device-routes.ts",
@@ -224,10 +235,25 @@ function requestFacingFiles(): string[] {
     // Its lines name the Companion custom variable a cue pair is bound to and
     // the pair's base — a rule param typed into an HTTP body — and the value
     // Companion sent back.
+    // Its read failure line carries whatever cue-states could not read, which
+    // reaches Companion over HTTP with a variable name typed into a rule.
+    // Scanned rather than excluded even though its one line carries a COUNT and
+    // nothing else: the file is reached by `GET /api/cues/manifest`, and the
+    // next line added to it will be under the scan rather than outside it.
+    path.join(HERE, "cue-manifest.ts"),
+    path.join(HERE, "cue-live.ts"),
     path.join(HERE, "cue-states.ts"),
     // Every value on its lines is either a cue name — typed into an HTTP body
     // — or a Companion page name out of the export. Both reach `/log`.
     path.join(HERE, "companion-reconcile.ts"),
+    // The learned variable name and the two values on its lines are read off
+    // Companion over HTTP, and the pair's base is a cue name typed into an HTTP
+    // body. See companion-state-probe.ts.
+    path.join(HERE, "companion-state-probe.ts"),
+    // Its one line — a pair whose two halves press the same Companion button
+    // with no state variable bound — names the pair's base, which is a cue name
+    // typed into an HTTP body.
+    path.join(HERE, "home-assistant-yaml.ts"),
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),

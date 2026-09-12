@@ -21,6 +21,8 @@
 
 import { errorMessage } from "@main/services/errors";
 import { defaultStateVariable } from "@main/services/cue-pairs";
+import { togglePairSlug } from "@main/services/companion-export";
+import type { InferredStateSource } from "@main/services/companion-state-source";
 import {
   type ButtonFingerprint,
   fingerprintParams,
@@ -30,7 +32,7 @@ import {
 } from "@main/services/companion-fingerprint";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CopyIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
+import { CopyIcon, DownloadIcon, KeyIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
 import {
@@ -65,6 +67,13 @@ export interface CompanionButton {
   drives: string[];
   /** The button's sorted action ids — its identity when somebody moves it. */
   actionIds: string[];
+  /**
+   * Where this button's own device already reports its state, or null.
+   *
+   * Inferred from what it drives (companion-state-source.ts). Optional on the
+   * wire so an older server's answer still renders.
+   */
+  stateSource?: InferredStateSource | null;
 }
 
 interface ButtonsReply {
@@ -92,6 +101,15 @@ interface Pair {
   on: CompanionButton;
   off: CompanionButton;
   suggested: boolean;
+  /** Where this pair's device already reports its state, off its `_on` button. */
+  stateSource?: InferredStateSource | null;
+  /**
+   * The verified table has no row for what this pair drives, so its state
+   * source will be LEARNED after it is pressed on and off once.
+   *
+   * Optional on the wire so an older server's answer still renders.
+   */
+  learnable?: boolean;
   exists: boolean;
 }
 
@@ -483,6 +501,22 @@ export function matchesButtonSearch(b: Single, search: string): boolean {
   return `${b.pageName} ${b.label} ${b.slug}`.toLowerCase().includes(needle);
 }
 
+/**
+ * Does this pair match what was typed? PURE.
+ *
+ * Every word the ROW shows: the base, the page, and both cue names it would
+ * create. A search that read only the base would miss `projectors_off`, which
+ * is what somebody looking for the pair is most likely to have in front of them
+ * — it is the name in their Home Assistant config.
+ */
+export function matchesPairSearch(p: Pair, search: string): boolean {
+  const needle = search.trim().toLowerCase();
+  if (!needle) return true;
+  return `${p.pageName} ${p.base} ${p.slug} ${p.slug}_on ${p.slug}_off`
+    .toLowerCase()
+    .includes(needle);
+}
+
 /** `switch` / `script` — which Home Assistant object this offer becomes. */
 function KindTag({ kind }: { kind: "switch" | "script" }) {
   return (
@@ -495,11 +529,47 @@ function KindTag({ kind }: { kind: "switch" | "script" }) {
   );
 }
 
-function SectionHeading({ title, count }: { title: string; count: number }) {
+/**
+ * A section's heading, with an optional Select all / Clear pair.
+ *
+ * Both act on the rows CURRENTLY VISIBLE in this section only — the caller
+ * decides what that means (every pair, or the single buttons a search has
+ * filtered to) and passes it in as `selectAllLabel`, which is also the
+ * accessible name: the singles section has a search field, and "Select all"
+ * alone would not say whether that means every button on Companion or just
+ * the seven the search has narrowed to.
+ */
+function SectionHeading({
+  title,
+  count,
+  onSelectAll,
+  onClear,
+  selectAllLabel,
+  clearLabel,
+}: {
+  title: string;
+  count: number;
+  onSelectAll?: () => void;
+  onClear?: () => void;
+  selectAllLabel?: string;
+  clearLabel?: string;
+}) {
   return (
-    <div className="sticky top-0 z-10 flex items-baseline gap-2 bg-bg py-1">
+    // `top-9`, not `top-0`: the dialog's search field is pinned above this and
+    // is `h-9`. See the field.
+    <div className="sticky top-9 z-10 flex items-baseline gap-2 bg-bg py-1">
       <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">{title}</span>
       <span className="text-caption2 text-fg-subtle">{count}</span>
+      {onSelectAll && onClear && (
+        <span className="ml-auto flex items-center gap-1">
+          <Button variant="transparent" size="small" aria-label={selectAllLabel} onClick={onSelectAll}>
+            Select all
+          </Button>
+          <Button variant="transparent" size="small" aria-label={clearLabel} onClick={onClear}>
+            Clear
+          </Button>
+        </span>
+      )}
     </div>
   );
 }
@@ -529,6 +599,15 @@ export function ImportPairsDialog({
    * remembered — which is why the lookup uses `??` and not `||`.
    */
   const [stateVars, setStateVars] = useState<Record<string, string>>({});
+  /**
+   * The state variable chosen for a SINGLE button, by button key.
+   *
+   * Nothing is suggested here, unlike a pair: a pair is plainly a thing being
+   * turned on and off, and a single button is only a toggle if the operator
+   * says it is. An entry appears when they pick one, and only those buttons
+   * send `stateVariable` at all.
+   */
+  const [toggleVars, setToggleVars] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -549,14 +628,72 @@ export function ImportPairsDialog({
 
   const key = (p: Pair) => `${p.page}:${p.slug}`;
   const buttonKey = (b: Single) => `${b.page}:${b.row}:${b.col}`;
-  /** The variable this pair will be bound to: what was chosen, else the guess. */
-  const stateVarFor = (p: Pair) => stateVars[key(p)] ?? defaultStateVariable(p.slug, customVariables);
+  /** The two cue names a toggle button would get, from the module the route uses. */
+  const toggleSlug = (b: Single) => togglePairSlug(b.slug, b.label);
+  /**
+   * The variable a single button will be bound to: what was chosen, else its
+   * own inferred source.
+   *
+   * A button whose device reports its own state is a TOGGLE by default — one
+   * key that goes both ways, which is what a switch in Home Assistant needs.
+   * It stays UNTICKED like every other single button: the default is about what
+   * KIND of thing it would become, never about importing it.
+   */
+  const toggleVarFor = (b: Single) => toggleVars[buttonKey(b)] ?? b.stateSource?.variable ?? "";
+  /**
+   * The variable this pair will be bound to: what was chosen, else the button's
+   * own inferred source, else a custom variable named after the pair.
+   *
+   * The INFERENCE wins over the name match because it is evidence rather than a
+   * guess — it is the connection the button drives, read out of Companion's own
+   * document, where `projectors_state` merely happens to be spelled like the
+   * pair.
+   */
+  const stateVarFor = (p: Pair) =>
+    stateVars[key(p)] ?? p.stateSource?.variable ?? defaultStateVariable(p.slug, customVariables);
+
+  /**
+   * The three binding params one offer sends.
+   *
+   * The VALUES go with the variable, and only when the chosen variable IS the
+   * inferred one: a kasa plug's `power_state` holds `On`, not `on`, and the
+   * comparison is case-sensitive, so a pair imported without them reads unknown
+   * forever. A custom variable an operator's own buttons set gets no values and
+   * falls back to the server's on/off defaults.
+   */
+  const bindingFor = (variable: string, source: InferredStateSource | null | undefined) =>
+    variable && source && variable === source.variable
+      ? { stateVariable: variable, stateOnValue: source.onValue, stateOffValue: source.offValue }
+      : { stateVariable: variable };
+
+  /**
+   * What the State select offers: Companion's custom variables, plus this
+   * button's own inferred source labelled as such.
+   *
+   * The inferred one is FIRST and says so. An operator looking at
+   * "VCR-Overhead-Light:power_state (inferred)" can tell at a glance that
+   * nothing has to be built in Companion for it to work, which is the whole
+   * point of it being offered.
+   */
+  const optionsFor = (source: InferredStateSource | null | undefined) => {
+    const inferred = source && !customVariables.includes(source.variable) ? [source] : [];
+    return [
+      ...inferred.map((s) => ({ value: s.variable, text: `${s.variable} (inferred)` })),
+      ...customVariables.map((name) => ({ value: name, text: name })),
+    ];
+  };
 
   // Single buttons are NEVER pre-ticked, and this is not an oversight. A pair is
   // plainly a thing being turned on and off; a single button is whatever
   // somebody put on a Companion page, and a ticked-by-default camera shot or
   // playback macro is a cue somebody can say by accident.
+  // ONE query over both sections. Two fields — one per section — is the
+  // operator typing the same thing twice to find out which half a button is in,
+  // which is the question the dialog exists to answer.
+  const shownPairs = pairs.filter((p) => matchesPairSearch(p, search));
   const shown = singles.filter((b) => matchesButtonSearch(b, search));
+  const matches = shownPairs.length + shown.length;
+  const offered = pairs.length + singles.length;
 
   async function run() {
     setBusy(true);
@@ -565,8 +702,15 @@ export function ImportPairsDialog({
       // rather than needing a second edit. Blank is an optimistic pair.
       const send = pairs
         .filter((p) => chosen.has(key(p)))
-        .map((p) => ({ ...p, stateVariable: stateVarFor(p) }));
-      const sendButtons = singles.filter((b) => pickedButtons.has(buttonKey(b)));
+        .map((p) => ({ ...p, ...bindingFor(stateVarFor(p), p.stateSource) }));
+      // `stateVariable` is on a button only when one was chosen. A button
+      // without it is a single cue and a Home Assistant script, as before.
+      const sendButtons = singles
+        .filter((b) => pickedButtons.has(buttonKey(b)))
+        .map((b) => {
+          const variable = toggleVarFor(b);
+          return variable ? { ...b, ...bindingFor(variable, b.stateSource) } : b;
+        });
       const r = await invoke<{ created: string[]; skipped: { name: string; why: string }[] }>(
         "automation:importPairs",
         { pairs: send, buttons: sendButtons },
@@ -596,6 +740,7 @@ export function ImportPairsDialog({
           setPicked(null);
           setPickedButtons(new Set());
           setStateVars({});
+          setToggleVars({});
           setSearch("");
         }
         onOpenChange(v);
@@ -604,24 +749,67 @@ export function ImportPairsDialog({
       <DialogContent className="max-w-2xl">
         <h2 className="text-subheadline font-semibold text-fg">Import from Companion</h2>
         <p className="mb-2 mt-1 text-caption1 text-fg-muted">
-          Every cue is created with <span className="text-fg">no service is live</span> on it and a two
-          second cooldown. Pairs that drive a projector, television, plug or lighting console are ticked
-          for you; nothing else is.
+          Every cue is created with <span className="text-fg">no service is live</span> on it and a three
+          second cooldown. Pairs that drive a projector, television, plug, lighting console or recorder
+          are ticked for you; nothing else is.
         </p>
 
         {data && !data.ok ? (
           <p className="text-caption1 text-fg-muted">Could not read Companion&rsquo;s configuration: {data.reason}</p>
         ) : (
+          // The dialog's own scroller, NOT the page's: this list scrolls inside
+          // the dialog, so the field below sticks to the top of THIS element.
           <div className="max-h-[50vh] overflow-y-auto">
+            {/* `z-20`, above the two section headings, which are sticky at
+                `z-10` and would otherwise slide over the field. */}
+            {/* `h-9` is not decoration: the section headings below stick at
+                `top-9`, so the two numbers are one number. Without it a heading
+                pinned at the same offset as this field and disappeared behind
+                it — the list scrolled with no heading visible at all. */}
+            <div className="sticky top-0 z-20 flex h-9 items-center gap-2 bg-bg">
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search buttons, pages and cue names…"
+                className="h-7 flex-1 text-footnote"
+                aria-label="Search buttons"
+              />
+              {search.trim() !== "" && (
+                <span className="shrink-0 text-caption2 text-fg-muted" data-import-search-count="">
+                  {matches} of {offered}
+                </span>
+              )}
+            </div>
             {isFetching && pairs.length === 0 && singles.length === 0 && (
               <p className="py-4 text-caption1 text-fg-muted">Reading Companion…</p>
             )}
 
-            <SectionHeading title="ON/OFF pairs" count={pairs.length} />
+            <SectionHeading
+              title="ON/OFF pairs"
+              count={shownPairs.length}
+              selectAllLabel={`Select all ${shownPairs.filter((p) => !p.exists).length} shown pairs`}
+              clearLabel="Clear pairs"
+              // The VISIBLE rows, both ways. Select all over every pair while a
+              // search is on screen is an import of things the operator cannot
+              // see, and Clear over all of them throws away a selection made
+              // before they typed.
+              onSelectAll={() => {
+                const next = new Set(chosen);
+                for (const p of shownPairs) if (!p.exists) next.add(key(p));
+                setPicked(next);
+              }}
+              onClear={() => {
+                const next = new Set(chosen);
+                for (const p of shownPairs) next.delete(key(p));
+                setPicked(next);
+              }}
+            />
             <p className="pb-1 text-caption2 text-fg-subtle">
-              Buttons whose labels differ only by ON/OFF. Each becomes two cues and one Home Assistant
-              switch.
-              {customVariables.length > 0 && (
+              Buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown or START/STOP.
+              Each becomes two cues — <span className="text-fg">_on</span> and{" "}
+              <span className="text-fg">_off</span>, whichever words the buttons use — and one Home
+              Assistant switch. Select all and Clear act on the rows a search has left on screen.
+              {(customVariables.length > 0 || pairs.some((p) => p.stateSource)) && (
                 <>
                   {" "}
                   Pick a <span className="text-fg">state</span> variable and the switch reports what the
@@ -629,10 +817,15 @@ export function ImportPairsDialog({
                 </>
               )}
             </p>
-            {pairs.length === 0 && !isFetching && (
-              <p className="py-2 text-caption1 text-fg-muted">No ON/OFF pairs on this Companion.</p>
+            {/* The section stays, with a word, rather than disappearing: a
+                heading that vanishes reads as "this Companion has no pairs",
+                which is a different answer from "none of them match". */}
+            {shownPairs.length === 0 && !isFetching && (
+              <p className="py-2 text-caption1 text-fg-muted">
+                {pairs.length === 0 ? "No ON/OFF pairs on this Companion." : "No matches."}
+              </p>
             )}
-            {pairs.map((p) => (
+            {shownPairs.map((p) => (
               // A DIV with the label around the checkbox and the words only.
               // With the whole row as one <label>, every click on the State
               // select also toggled the checkbox — choosing a variable
@@ -661,7 +854,15 @@ export function ImportPairsDialog({
                 {/* Offered only when Companion HAS custom variables, and never
                     for a pair that is already imported — its cues exist, and
                     the binding is an edit to the rule from here on. */}
-                {customVariables.length > 0 && !p.exists && (
+                {/* Nothing to offer and nothing to build: this pair's state
+                    source is learned from a press. Said here rather than left
+                    blank, because a blank State column reads as "this pair
+                    cannot report its state" — which is the opposite of what is
+                    about to happen. See companion-state-learn.ts. */}
+                {p.learnable && !p.exists && customVariables.length === 0 && (
+                  <span className="w-40 shrink-0 text-caption2 text-fg-subtle">will learn</span>
+                )}
+                {(customVariables.length > 0 || p.stateSource) && !p.exists && (
                   <Select value={stateVarFor(p)} onValueChange={(v) => setStateVars({ ...stateVars, [key(p)]: v })}>
                     {/* The PAGE is in the accessible name, exactly as the
                         checkbox's is: the fixture Companion has "Projectors" on
@@ -675,9 +876,14 @@ export function ImportPairsDialog({
                       <SelectValue placeholder="No state" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No state</SelectItem>
-                      {customVariables.map((name) => (
-                        <SelectItem key={name} value={name}>{name}</SelectItem>
+                      {/* "will learn" is the EMPTY option's own text for a
+                          learnable pair, not a placeholder beside it: Select
+                          drops a placeholder whenever the caller supplies an
+                          empty item, and an operator who leaves this alone
+                          gets learning — "No state" would say the opposite. */}
+                      <SelectItem value="">{p.learnable ? "will learn" : "No state"}</SelectItem>
+                      {optionsFor(p.stateSource).map((o) => (
+                        <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -687,49 +893,107 @@ export function ImportPairsDialog({
             ))}
 
             <div className="mt-3">
-              <SectionHeading title="Single buttons" count={singles.length} />
+              <SectionHeading
+                title="Single buttons"
+                count={shown.length}
+                selectAllLabel={`Select all ${shown.filter((b) => !b.exists).length} shown buttons`}
+                clearLabel="Clear single buttons"
+                onSelectAll={() => {
+                  const next = new Set(pickedButtons);
+                  for (const b of shown) if (!b.exists) next.add(buttonKey(b));
+                  setPickedButtons(next);
+                }}
+                onClear={() => {
+                  const next = new Set(pickedButtons);
+                  for (const b of shown) next.delete(buttonKey(b));
+                  setPickedButtons(next);
+                }}
+              />
               <p className="pb-1 text-caption2 text-fg-subtle">
                 Every other labelled button. Each becomes one cue and one Home Assistant script — nothing
-                here is ticked for you.
+                here is ticked for you. Select all and Clear act on the rows a search has left on screen.
+                {(customVariables.length > 0 || singles.some((b) => b.stateSource)) && (
+                  <>
+                    {" "}
+                    A button that is really a <span className="text-fg">toggle</span> — one key for both
+                    directions — becomes an ON/OFF pair instead when you give it a state variable, so Home
+                    Assistant gets a switch rather than a button that snaps back.
+                  </>
+                )}
               </p>
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search buttons, pages and cue names…"
-                className="mb-1 h-7 text-footnote"
-                aria-label="Search single buttons"
-              />
+              {/* The search field is at the TOP of the dialog now, over both
+                  sections — a field inside one section could only ever filter
+                  that one, and an operator who could not find a button had no
+                  way to tell whether it was imported as half of a pair. */}
               {shown.length === 0 && !isFetching && (
                 <p className="py-2 text-caption1 text-fg-muted">
-                  {singles.length === 0 ? "Every labelled button is part of a pair." : "Nothing matches."}
+                  {singles.length === 0 ? "Every labelled button is part of a pair." : "No matches."}
                 </p>
               )}
-              {shown.map((b) => (
-                <label
-                  key={buttonKey(b)}
-                  className="flex items-center gap-2 border-b border-line py-1.5"
-                >
-                  <Checkbox
-                    checked={pickedButtons.has(buttonKey(b))}
-                    disabled={b.exists}
-                    aria-label={`${b.label} · ${b.pageName}`}
-                    onCheckedChange={(v) => {
-                      const next = new Set(pickedButtons);
-                      if (v) next.add(buttonKey(b));
-                      else next.delete(buttonKey(b));
-                      setPickedButtons(next);
-                    }}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-footnote text-fg">{b.label}</span>
-                    <span className="block truncate text-caption2 text-fg-subtle">
-                      {b.pageName} · {b.slug}
-                      {b.exists ? " · already imported" : ""}
-                    </span>
-                  </span>
-                  <KindTag kind="script" />
-                </label>
-              ))}
+              {shown.map((b) => {
+                const chosenVar = toggleVarFor(b);
+                return (
+                  // A DIV with the label around the checkbox and the words only,
+                  // exactly as the pairs rows are: with the whole row as one
+                  // <label>, every click on the select also toggled the
+                  // checkbox, so choosing a variable unticked the button it was
+                  // for.
+                  <div key={buttonKey(b)} className="flex items-center gap-2 border-b border-line py-1.5">
+                    <label className="flex min-w-0 flex-1 items-center gap-2">
+                      <Checkbox
+                        checked={pickedButtons.has(buttonKey(b))}
+                        disabled={b.exists}
+                        aria-label={`${b.label} · ${b.pageName}`}
+                        onCheckedChange={(v) => {
+                          const next = new Set(pickedButtons);
+                          if (v) next.add(buttonKey(b));
+                          else next.delete(buttonKey(b));
+                          setPickedButtons(next);
+                        }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-footnote text-fg">{b.label}</span>
+                        <span className="block truncate text-caption2 text-fg-subtle">
+                          {b.pageName} · {chosenVar ? `${toggleSlug(b)}_on / ${toggleSlug(b)}_off` : b.slug}
+                          {b.exists ? " · already imported" : ""}
+                        </span>
+                      </span>
+                    </label>
+                    {/* Offered only when Companion HAS custom variables, and
+                        never for a button that is already imported. */}
+                    {(customVariables.length > 0 || b.stateSource) && !b.exists && (
+                      <Select
+                        value={chosenVar}
+                        onValueChange={(v) => {
+                          setToggleVars({ ...toggleVars, [buttonKey(b)]: v });
+                          // Choosing a variable TICKS the row. Nothing here is
+                          // ticked for you, but picking a variable for one
+                          // button is the operator saying they want that button
+                          // — and in a browser the choice otherwise sat there
+                          // with the footer still reading "Import 3 pairs" and
+                          // the button imported as nothing at all. Clearing it
+                          // does not untick: unticking is the checkbox's job.
+                          if (v) setPickedButtons(new Set(pickedButtons).add(buttonKey(b)));
+                        }}
+                      >
+                        <SelectTrigger
+                          className="w-40 shrink-0"
+                          aria-label={`Toggle with state for ${b.label} · ${b.pageName}`}
+                        >
+                          <SelectValue placeholder="Not a toggle" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Not a toggle</SelectItem>
+                          {optionsFor(b.stateSource).map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <KindTag kind={chosenVar ? "switch" : "script"} />
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -873,6 +1137,15 @@ export function CueAccessCard() {
           </p>
           <Button variant="transparent" size="small" onClick={() => void showYaml()}>
             <CopyIcon className="size-3.5" /> Copy YAML
+          </Button>
+          {/* Clipboard writes are a secure-context API and fail on the plain-HTTP
+              LAN address every real install answers on — see prod-insecure-context
+              notes. A plain anchor download works there, so it stays even though
+              Copy YAML does not always. */}
+          <Button variant="transparent" size="small" asChild>
+            <a href="/api/cues/home-assistant.yaml" download>
+              <DownloadIcon className="size-3.5" /> Download YAML
+            </a>
           </Button>
         </div>
       </div>

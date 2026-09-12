@@ -41,10 +41,32 @@ export interface ChannelState {
   charging: boolean | null;
   frequencyLabel: string | null;
   audioLevel: number | null;
+  /** The channel is muted — at the receiver, or at the pack. A muted pack still
+   *  reports five bars and a full battery, so without this it looks perfect on a
+   *  stage display while nothing comes out of it. */
+  muted: boolean | null;
+  /** Channel quality 0-5. NOT signal strength: it accounts for interference, so a
+   *  pack can sit at five bars of RF with a quality of two. It is the figure
+   *  Wireless Workbench leads with. */
+  quality: number | null;
+  /** The receiver is reporting RF interference on this channel. */
+  interference: boolean | null;
   /** Charger-bay telemetry (null for mics and IEMs). */
   cycles: number | null;
   health: number | null;
   tempC: number | null;
+  /** Minutes until the docked pack is charged, where the charger computes one.
+   *  Null on a bay that is already full, empty or faulted — the charger answers
+   *  "not applicable" there, and a zero would read as "ready now". */
+  timeToFullMinutes: number | null;
+  /** A short operator-readable fault on this bay/channel, e.g. "Error 007". The
+   *  only signal a bay or its battery is bad: a faulted bay still reports a
+   *  battery as DOCKED, so without this it renders as an ordinary occupied bay. */
+  fault: string | null;
+  /** The charger is in storage mode: it charges to about 40% and stops. Without
+   *  it an operator sees 40% and no charging indicator and has no way to know
+   *  why. Device-level, mirrored onto every bay. Null where not applicable. */
+  storageMode: boolean | null;
 }
 
 /** A blank channel: everything unknown until the device says otherwise. */
@@ -64,9 +86,15 @@ export function blankChannel(
     charging: null,
     frequencyLabel: null,
     audioLevel: null,
+    muted: null,
+    quality: null,
+    interference: null,
     cycles: null,
     health: null,
     tempC: null,
+    timeToFullMinutes: null,
+    fault: null,
+    storageMode: null,
   };
 }
 

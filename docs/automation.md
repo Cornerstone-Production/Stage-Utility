@@ -33,13 +33,15 @@ poll after.
 | Plan item is due | an item's scheduled moment passes — see [Firing an item on time](#firing-an-item-on-time) |
 | People count rises above | attendance or occupancy crosses a threshold upward |
 | People count falls below | crosses it downward |
-| Recording starts | OBS or REAPER begins recording |
-| Recording stops | stops. A recorder going offline does not count — that is unknown, not stopped |
+| OBS starts recording | OBS begins recording |
+| OBS stops recording | it stops. A recorder going offline does not count — that is unknown, not stopped |
+| REAPER starts / stops recording | REAPER's own transport, read from its web interface. Same rule about offline |
 | *X* connects / disconnects | any integration's link comes up or drops. One pair per integration, named for it — "OBS connects", "Smaart disconnects" |
 | Resi goes live / stops streaming | a watched Resi encoder starts or stops. Unreachable does not count |
 | YouTube goes live / stops streaming | a broadcast on your channel reaches `live`, or leaves it |
 | OBS starts / stops streaming | the stream output starts or stops |
 | OBS starts / stops the virtual camera | the virtual camera output starts or stops |
+| An OSC message arrives | a value at an OSC address changes to equal, or crosses, what you name — see [Inbound OSC](#inbound-osc) |
 | A phrase is said on ProdCom | a **new** transcript line contains your text, optionally on one channel only |
 | Baptism timer starts | the timer leaves idle |
 | Baptism moves to another phase | testimony to baptism, or either back to idle |
@@ -69,11 +71,54 @@ so a pack dropping off the network is not a low battery, an unreachable OBS is
 not "stopped streaming", and an integration vanishing from a payload is not a
 disconnect.
 
+Each recorder has its **own** pair of triggers, named for its machine. There is
+no "either recorder" trigger: the two publish separate state, and OBS starting
+while REAPER is already rolling is not the moment recording began. Pick the
+machine you mean, or build two rules. To ask about the other recorder while a
+rule fires on this one, add the **OBS is recording** or **REAPER is recording**
+condition.
+
 ProVideoPlayer layers, playlists and cues are matched **by name, not by id** — an
 id is opaque and changes when a workspace is rebuilt from a template. **Renaming
 the layer in ProVideoPlayer stops the rule**, silently. Nothing else will tell
 you. A name that is only digits cannot be used at all: PVP reads an all-digits
 value as a position rather than a name.
+
+### Inbound OSC
+
+**An OSC message arrives** makes the app drivable by anything on the network that
+can send a UDP packet. Point the device's OSC reply at this server on the
+feedback port (default `9000`, Settings → Integrations → OSC) and the values
+land where a rule can read them. REAPER's own OSC control surface transmits
+transport state, so it is the easy first sender.
+
+| Field | |
+|---|---|
+| **OSC address** | exactly as the device sends it, starting with a slash |
+| **From target** | blank for any sender; a configured target to accept it only from that one |
+| **Argument** | `0` is the first. Use `1` for the value in a channel-and-value reply |
+| **Match** | equals, crossed above, crossed below |
+| **Value** | the value for equals, the threshold for a crossing. `1` matches a float `1.0`; `true`/`false` match an OSC `T`/`F`; strings compare case-insensitively |
+
+Like every trigger here it fires on a **change**, not on a state. Two
+consequences worth knowing before you build a rule:
+
+- A **bang** — a message with no arguments — is stored as `true` and stays
+  `true`, so it is a change **at most** once, and **not at all** if it is the
+  first thing to arrive on the channel after a restart: the first snapshot after
+  the app starts is a baseline and is never read as an event. Nothing is
+  remembered across a restart, so for a sender that has the feedback port to
+  itself that is every time. **Use an address that carries a value.**
+- For the same reason the first message on any address after a restart is a
+  baseline, not an event. A rule on `/record` will not fire on the `1` that was
+  already there when the app came back up — it fires on the next change.
+- Feedback is broadcast at most every 200 ms. Two changes inside that window
+  arrive as one snapshot, so `/x 1` immediately followed by `/x 0` is a single
+  change to `0` and the `1` never happened as far as a rule is concerned.
+
+Scoping to a target needs the app to know which target sent the packet, which it
+decides from the source address — see [OSC](integrations/osc.md). Leave the
+field blank if in doubt.
 
 ## Conditions
 
@@ -118,6 +163,8 @@ for "idle", because before it runs we do not know that it is idle.
 | Send a RossTalk command | a Carbonite or Ultrix command at a target |
 | Send an OSC message | to an OSC target |
 | Advance PCO Live one item | steps the live plan forward once |
+| REAPER transport | Record, Stop or Play, through the same web interface the [REAPER](integrations/reaper.md) integration polls. Record does nothing when REAPER is already recording |
+| Trigger a ProPresenter macro | runs one of your own ProPresenter macros, on a chosen instance — see [Triggering a macro from a rule](integrations/propresenter.md#triggering-a-macro-from-a-rule) |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
 | Press a Companion button | presses one button at a page/row/column. Reports "dispatched", never "on" — see [Pressing a button](integrations/companion.md#pressing-a-button) |
@@ -139,6 +186,31 @@ for "idle", because before it runs we do not know that it is idle.
 > layer a cue uses is set in ProVideoPlayer, not here. See
 > [ProVideoPlayer](integrations/provideoplayer.md).
 
+> **REAPER transport** needs REAPER's web interface switched on — the same
+> prerequisite as the [REAPER](integrations/reaper.md) integration, and the same
+> host and port. REAPER's Record is a TOGGLE: pressed while it is recording it
+> stops the recording, so the action reads the transport first and sends nothing
+> when REAPER is already rolling. Stop and Play go out unconditionally.
+
+> **Trigger a ProPresenter macro** needs ProPresenter's Network API switched on
+> — the same prerequisite as the [ProPresenter](integrations/propresenter.md)
+> integration, and the same host and port. The macro runs on the instance you
+> pick, and whatever the macro does in ProPresenter it does here; Stage Utility
+> never inspects it.
+>
+> The macro is identified by its **name**, not by its internal id. Names mean
+> the same thing on every machine and survive a re-import, where an id does
+> not — so the same rule works in both auditoriums, and re-importing a
+> ProPresenter library does not quietly break every rule. The cost is that
+> renaming a macro in ProPresenter stops the rule finding it; the action then
+> fails with `no macro called "SONG INTRO" on MA` rather than a bare 404.
+>
+> The macro dropdown lists what every configured instance reports, so an
+> instance that is switched off simply contributes nothing — the rule editor
+> still opens. When more than one instance is set up, a name only some of them
+> have is marked, `DOORS (MA only)`. A macro already chosen on a rule is always
+> shown, marked, even while the machine that has it is off.
+
 ## Cues
 
 A **cue** is a rule triggered by **Called by name** rather than by anything
@@ -152,13 +224,60 @@ from Companion carries the **no service is live** condition, and refuses with a
 sentence — *"The Gospel Way is live"* — while a service is running or about to
 start, and when Planning Center cannot be read.
 
+A cue's editor has an **Allowed during a service** switch that is the same
+condition in one control: off (the imported default) refuses the cue while a
+service is live or about to start, on removes the condition and lets it fire
+whenever it is called. The rules list marks every cue that is on with a
+clearly visible **any time** badge, so the ones that can fire mid-service are
+easy to spot in a long list. A pair's row carries one badge over both halves,
+and reads **any time** if either half can fire — each half is evaluated against
+its own conditions, so one unguarded half is a pair that can fire mid-service.
+Its switch, in the pair's dialog, writes both halves at once.
+
+The rules list is in two sections. **Home Assistant** holds every cue that has
+an entity there — pairs as switches, single cues as buttons. **Everything else**
+holds the cues whose **Home Assistant** switch is off and every rule with a
+trigger other than Called by name. An ON/OFF pair is ONE row, named by the words
+it is spoken as.
+
+A row is a summary: the enable switch, the name, any former names, the
+service-guard badge, whether Home Assistant has an entity for it, and the
+one-line *when … then*. Pressing the row — anywhere but the enable switch —
+opens the editor in a dialog over the list, so the list and the search field
+stay where they are. **Test** and **Delete** are in its footer beside **Cancel**
+and **Save**; Escape, the overlay and Cancel all discard the draft, and a save
+the server refuses leaves the dialog open with the change still in it. Deleting
+asks first, naming the cues that go.
+
+A pair opens ONE dialog. **This pair** holds the settings that belong to the
+pair rather than to one direction of it — Home Assistant, Allowed during a
+service, State variable, Room — and a **Turn on** / **Turn off** control below
+it swaps the fields that differ: cue name, spoken as, former names, the button
+it presses, cooldown, once per service, enabled. Saving writes both halves, and
+the pair's own settings land on the `_on` rule. **Test** fires the half that is
+selected and says which.
+
+A cue's editor has a **Home Assistant** switch under Allowed during a service.
+Off, the cue is voice-only: no entity is created for it, it is left out of the
+generated YAML and the manifest, and it moves to Everything else.
+`POST /api/cues/<name>` still fires it. For a pair the switch covers both halves
+— one switch, hidden or shown together — and Home Assistant removes the entity
+within a few seconds, breaking automations there that refer to it. See
+[Keeping a cue out of Home Assistant](integrations/companion.md#keeping-a-cue-out-of-home-assistant).
+
+The **Search rules** field is pinned to the top of the list and filters live by
+rule name, cue name, spoken name, former names, a Companion button's label, and
+the trigger and action's own names. A pair shows whenever either half matches.
+
 | | |
 |---|---|
 | **Cue name** | `lower_snake_case`, unique across rules — and across every cue's former names. This is the URL |
 | **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
-| **State variable** | on the `_on` half of an ON/OFF pair: a Companion custom variable your own buttons set to `on`/`off`, so the generated Home Assistant switch reports what the device is doing rather than what it was asked to do. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) |
+| **Home Assistant** | on by default. Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
+| **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `VCR-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
+| **Learning** | shown in **This pair** for a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
 | **Once per service** | honoured on a call as well as on a trigger: a second call in the same service occurrence is refused `once-per-service` |
 
@@ -166,6 +285,29 @@ The rule's own conditions, cooldown and enable switch all apply to a call exactl
 as they do to a trigger — a cue is a rule, not a second path through the engine.
 Every call, allowed or refused, is in the Activity log with the calling token's
 label.
+
+**A bound cue only presses when it needs to.** When a cue is half of a pair with
+a [State variable](integrations/companion.md#real-state), the variable is read
+before the press. If it already says what the call is asking for, nothing is
+pressed and the answer is `200 {ok: true, detail: "already on", state: "on",
+skipped: true}` — mirrored for off. This is checked before the cue's cooldown,
+so a repeated call is answered "already on" rather than refused `cooldown`.
+Within eight seconds of a press the last press is what a repeat is compared
+against rather than the variable, which lags it by however long Companion takes
+to poll the device — the same state answers `already on (just pressed)`, the
+opposite presses. See [The settle
+window](integrations/companion.md#the-settle-window). The Activity log records it as its own
+outcome, `skipped`, not as a suppression: nothing refused the call.
+
+```
+09:14:02  Projectors ON    —    skipped: already on, not pressed
+```
+
+A state that cannot be read — the variable missing, Companion unreachable, a
+value matching neither — **presses**, and the answer carries `state: "unknown"`.
+A read never stops a press, though an unreachable Companion delays one by up to
+three seconds. Only a call is checked this way; a rule the engine
+fires from a trigger of its own presses without reading anything.
 
 A cue that presses a Companion button remembers which button, not just where it
 was: if somebody moves it, the coordinates follow it and the rule's row says so;
@@ -178,6 +320,27 @@ renamed to match and the old name keeps answering. See
 Set the whole thing up under [Companion](integrations/companion.md#calling-a-cue-by-name):
 the button picker, the ON/OFF and single-button import, the tokens and the Home
 Assistant paste.
+
+### State from Stage Utility
+
+A cue that does not press a Companion button has no Companion variable to read,
+and does not need one — Stage Utility is already talking to the device. Those
+bindings are written `app:<source>` and are offered in the **State variable**
+select whenever the integration behind them is set up.
+
+| Source | Reads |
+|---|---|
+| `app:reaper.recording` | `on` while REAPER is recording, `off` while it is connected and not, unknown while it is not connected |
+
+A pair whose `_on` half is a **REAPER transport** Record is bound to
+`app:reaper.recording` without anybody choosing it: it is the only answer there
+is, and the two values are fixed at `on` and `off`, so the value rows are not
+offered. Setting **State variable** to anything else on that pair overrides it.
+
+Such a pair is a switch in Home Assistant like any other, reports a real state,
+and is idempotent — "start the recording" said twice while it is recording
+answers `already on` and sends nothing, which matters because REAPER's Record is
+a toggle.
 
 ## Firing an item on time
 
@@ -242,8 +405,9 @@ outcome is recorded, including skips and the reason for them.
 **Simulate mode** (on by default) — rules evaluate fully and the resolved action is
 logged, but nothing reaches a device. Leave it on while you build.
 
-**Per-rule enable and Test fire** — Test runs the action immediately, ignoring the
-trigger, so you can prove the action before arming the rule. It respects simulate.
+**Per-rule enable and Test fire** — the enable switch is on the row; **Test** is in
+the editor's footer. Test runs the action immediately, ignoring the trigger, so you
+can prove the action before arming the rule. It respects simulate.
 
 **Disarm all** — stops every rule at once regardless of its own switch, and persists
 across a restart. Simulate is for building; disarm is for stopping.

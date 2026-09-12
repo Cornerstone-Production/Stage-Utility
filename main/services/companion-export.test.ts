@@ -21,10 +21,14 @@ import {
   customVariableNames,
   exportBuild,
   findPairs,
+  importedCueNames,
+  importedCues,
   isCompanionVariableName,
+  isCompanionVariableRef,
   isSuggestedPair,
   isUtilityModule,
   parseButtons,
+  parseVariableRef,
   singleButtons,
   slugForCue,
   UTILITY_MODULES,
@@ -43,13 +47,14 @@ const at = (page: number, row: number, col: number) =>
 
 describe("parseButtons", () => {
   test("finds every labelled or acting button, and nothing else", () => {
-    // EXACT, not a floor. Seven on page 1, four on page 2, three on page 3,
-    // none on the navigation-only page. A floor here is how the pagenum
-    // furniture creeps back in and the picker grows 150 rows of "Page 4".
-    assert.equal(BUTTONS.length, 14);
+    // EXACT, not a floor. Seven on page 1, four on page 2, eight on page 3,
+    // eleven on the recorders page, none on the navigation-only page. A floor
+    // here is how the pagenum furniture creeps back in and the picker grows 150
+    // rows of "Page 4".
+    assert.equal(BUTTONS.length, 30);
     assert.deepEqual(
       [...new Set(BUTTONS.map((b) => b.page))].sort((a, b) => a - b),
-      [1, 2, 3],
+      [1, 2, 3, 5],
     );
   });
 
@@ -145,13 +150,54 @@ describe("findPairs", () => {
   const pairs = findPairs(BUTTONS);
   const bases = pairs.map((p) => `${p.page}:${p.base}`);
 
-  test("finds exactly the ON/OFF and Startup/Shutdown sets", () => {
+  test("finds exactly the ON/OFF, Startup/Shutdown and START/STOP sets", () => {
     assert.deepEqual(bases, [
       "1:Lobby: TVs",
       "1:Projectors",
       "2:Projectors",
       "2:Rig",
+      "5:Deck 1",
+      "5:PTZ",
     ]);
+  });
+
+  test("START/STOP is a pair, and its cues are still named _on and _off", () => {
+    // How a recorder is labelled. Without it the two halves of every deck,
+    // encoder and camera recording were two unrelated one-shot cues.
+    const deck = pairs.find((p) => p.base === "Deck 1");
+    assert.equal(deck?.on.label, "Deck 1 START");
+    assert.equal(deck?.off.label, "Deck 1 STOP");
+    // The NAMES the import writes, from the one function the import and the
+    // reconcile both ask.
+    const cues = importedCues(BUTTONS);
+    assert.equal(cues.get("5:1:0")?.slug, "deck_1_on");
+    assert.equal(cues.get("5:1:1")?.slug, "deck_1_off");
+    assert.equal(cues.get("5:1:0")?.pair?.half, "on");
+    // And a relabelled half is still recognised as named after its button, so
+    // the reconcile renames it rather than leaving it alone as hand-named.
+    assert.ok(importedCueNames("Deck 1 START", FIXTURE_PAGES.recorders).includes("deck_1_on"));
+  });
+
+  test("a START and a STOP on different devices do NOT pair", () => {
+    // Same page, adjacent keys, no shared base: "Deck 2 START" and "Encoder
+    // STOP". Paired, saying "deck 2 off" would stop the encoder.
+    assert.equal(bases.includes("5:Deck 2"), false);
+    assert.equal(bases.includes("5:Encoder"), false);
+    const singles = singleButtons(BUTTONS, pairs).map((b) => b.label);
+    assert.ok(singles.includes("Deck 2 START"));
+    assert.ok(singles.includes("Encoder STOP"));
+  });
+
+  test("the START half is what the state source is inferred from", () => {
+    // A deck has no power state; `status` is its transport, and the `rec`
+    // action on the START half is what says the pair is about recording.
+    const deck = pairs.find((p) => p.base === "Deck 1");
+    assert.deepEqual(deck?.on.stateSource, {
+      variable: "MA_HyperDeck_01:status",
+      onValue: "Record",
+      offValue: "*",
+      moduleId: "bmd-hyperdeck",
+    });
   });
 
   test("an ON with no OFF is not a pair", () => {
@@ -277,16 +323,28 @@ describe("isSuggestedPair", () => {
 
   test("ticks the pairs that drive a utility device, and only those", () => {
     // EXACT. Projectors on page 1 drive generic-pjlink; Rig and Projectors on
-    // page 2 drive malighting-msc, matched by the family wildcard. "Lobby: TVs"
-    // drives generic-tcp-udp — something we cannot say is a projector — so it is
-    // offered unticked rather than pre-armed.
-    assert.deepEqual(suggested, ["1:Projectors", "2:Projectors", "2:Rig"]);
+    // page 2 drive malighting-msc, matched by the family wildcard. "Deck 1"
+    // drives a HyperDeck — a recorder is setup gear in the same sense, started
+    // before a service and stopped after. "Lobby: TVs" drives generic-tcp-udp
+    // — something we cannot say is a projector — so it is offered unticked
+    // rather than pre-armed, and so is the Panasonic camera's power pair.
+    assert.deepEqual(suggested, ["1:Projectors", "2:Projectors", "2:Rig", "5:Deck 1"]);
   });
 
   test("no page name appears anywhere in the rule", () => {
     // The whole point of the heuristic: a Companion page name is one building's
     // furniture and must not be in this repository at all.
     for (const m of UTILITY_MODULES) assert.match(m, /^[a-z0-9-]+\*?$/);
+  });
+
+  test("a recorder pair is a utility pair", () => {
+    assert.equal(isUtilityModule("bmd-hyperdeck"), true);
+    assert.equal(isUtilityModule("magewell-ultrastream"), true);
+    // Not every recording device: a camera is pointed at things during a
+    // service, and a pre-ticked camera cue is one somebody can say by accident.
+    assert.equal(isUtilityModule("red-rcp2"), false);
+    assert.equal(isUtilityModule("panasonic-cameras"), false);
+    assert.equal(isUtilityModule("obs-studio"), false);
   });
 
   test("a family wildcard matches the family and nothing beyond it", () => {
@@ -309,9 +367,10 @@ describe("customVariableNames", () => {
   });
 
   test("an export with no custom variables is an empty list, not an error", () => {
-    // The 5.0.3 export this was built against has no `custom_variables` key at
-    // all. Reading that as a failure would make the import dialog unusable on
-    // an install that simply has none.
+    // Some builds omit the `custom_variables` key entirely. Reading that as a
+    // failure would make the import dialog unusable on an install that simply
+    // has none. (This file used to claim the 5.0.3 export it was written
+    // against had no such key; 5.0.3+9703's has one, an object of ten.)
     assert.deepEqual(customVariableNames({ version: 12, type: "full", pages: {} }), []);
     assert.deepEqual(customVariableNames({ custom_variables: {} }), []);
     assert.deepEqual(customVariableNames(null), []);
@@ -336,5 +395,56 @@ describe("customVariableNames", () => {
     assert.equal(isCompanionVariableName("../../int/export/full"), false);
     assert.equal(isCompanionVariableName("a/b"), false);
     assert.equal(isCompanionVariableName("x".repeat(101)), false);
+  });
+});
+
+describe("parseVariableRef", () => {
+  test("a bare name stays a CUSTOM variable", () => {
+    // Every binding written before module variables could be named is a bare
+    // name, and each has to go on meaning exactly what it meant.
+    assert.deepEqual(parseVariableRef("projectors_state"), { kind: "custom", name: "projectors_state" });
+    assert.deepEqual(parseVariableRef("  rig.state "), { kind: "custom", name: "rig.state" });
+  });
+
+  test("`custom:` is the same thing said out loud", () => {
+    assert.deepEqual(parseVariableRef("custom:projectors_state"), {
+      kind: "custom",
+      name: "projectors_state",
+    });
+    // Companion's own prefix is case-insensitive in an expression, so this is
+    // too — and it wins over a connection somebody labelled "custom", because a
+    // binding that changed meaning when a connection was renamed is worse than
+    // one that cannot reach a connection nobody should have called that.
+    assert.deepEqual(parseVariableRef("CUSTOM:projectors_state"), {
+      kind: "custom",
+      name: "projectors_state",
+    });
+  });
+
+  test("`<label>:<name>` is a module variable", () => {
+    assert.deepEqual(parseVariableRef("VCR-Overhead-Light:power_state"), {
+      kind: "module",
+      label: "VCR-Overhead-Light",
+      name: "power_state",
+    });
+    assert.deepEqual(parseVariableRef("MA_Video_Mac_Mini_OBS:streaming"), {
+      kind: "module",
+      label: "MA_Video_Mac_Mini_OBS",
+      name: "streaming",
+    });
+  });
+
+  test("neither half may be something Companion could not have", () => {
+    // Both land in a URL path.
+    assert.equal(parseVariableRef("../../int:power_state"), null);
+    assert.equal(parseVariableRef("VCR-Light:../../int/export/full"), null);
+    // A dot is legal in a variable name and not in a connection label.
+    assert.equal(parseVariableRef("VCR.Light:power_state"), null);
+    assert.equal(parseVariableRef("a:b:c"), null);
+    assert.equal(parseVariableRef(""), null);
+    assert.equal(parseVariableRef("not a name"), null);
+    assert.equal(isCompanionVariableRef("VCR-Overhead-Light:power_state"), true);
+    assert.equal(isCompanionVariableRef("state:projectors"), true);
+    assert.equal(isCompanionVariableRef("a/b"), false);
   });
 });
