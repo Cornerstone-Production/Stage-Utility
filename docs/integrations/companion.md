@@ -678,10 +678,18 @@ a second and stops as soon as it agrees.
 
 #### When Companion cannot reach the device
 
-Companion answers **404** for a variable on a connection that has not come up —
-the same 404 it answers for a variable that does not exist. So a pair reading
-*unknown* looks identical whether the binding is wrong or the projector is
-unplugged, and the binding is usually fine.
+A connection Companion cannot reach does not fail in one way, and neither
+failure is visible in the read:
+
+- a connection that **never came up** registers no variables, so the read is
+  **404** — the same 404 as for a variable that does not exist. The pair reads
+  *unknown*, which is honest, but the binding is usually fine and the device is
+  the problem.
+- a connection that came up and then **lost the device** goes on answering with
+  the last value it saw, or with an empty one. The pair reads *on* or *off* with
+  full confidence about a television Companion is no longer talking to.
+
+Only a connection Companion reports as **good** has a value worth trusting.
 
 The **connection status** tells the two apart. It comes from Companion's own
 `GET /api/connections`, read on **Test** and on the hourly reconcile — never on a
@@ -698,9 +706,15 @@ reading it from somewhere else.
 
 | Bucket | Companion's status | Means |
 |---|---|---|
-| ok | `good` | the connection is up; its variables read |
-| in error | `error` | Companion cannot reach the device — connecting, refused, offline |
-| not reporting | no status, or one this app has not verified | the connection has published nothing yet; its variables 404 |
+| ok | `good` | up; its variables hold a current value |
+| in error | `error` | Companion cannot reach the device. Its variables either 404 or hold whatever was last seen — neither is current |
+| not reporting | no status, or one this app has not verified | never came up; its variables 404 |
+
+On the install this was built against, the forty enabled connections on modules
+the state table knows read out as: eighteen `good`, every one answering a real
+value; six bulbs and ten plugs answering 404; five cameras answering an empty
+`200`; and one television, `error / Connection Failure`, answering `Off` — the
+value from before Companion lost it.
 
 Connections **disabled** in Companion are not counted. The row's own connected /
 no-clients state still follows the module clients alone — gear behind Companion
