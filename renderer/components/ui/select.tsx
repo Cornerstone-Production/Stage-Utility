@@ -10,6 +10,12 @@ import { cn } from "../../lib/cn";
 // The sub-components render nothing — they're markers whose props `Select` reads
 // from the element tree to build <option>/<optgroup>. This lets every existing
 // call site convert to native without edits.
+//
+// A `value` no option carries gets one synthesised for it, so the control shows
+// what is stored rather than blanking or substituting a neighbour — see
+// `missingValue` in `Select`. Call sites that can name the missing thing (a
+// plan's date, a layer's state) still pass their own item for it; this is the
+// floor, not a ceiling.
 
 interface ItemProps {
   value: string;
@@ -45,18 +51,34 @@ function textOf(node: React.ReactNode): string {
   return "";
 }
 
-// Does the caller already supply an empty-valued item? If so the placeholder
-// option is skipped, or the list opens with two blank rows. Traversed the same
-// way the options themselves are, but as a pure predicate — the option builder is
-// a reusable closure, so counting from inside it would mutate render scope.
-function hasEmptyItem(node: React.ReactNode): boolean {
+// Does the caller supply an item carrying this value? Traversed the same way the
+// options themselves are — through SelectGroup and through fragments, so an item
+// inside an optgroup or a `.map(...)` counts — but as a pure predicate: the option
+// builder is a reusable closure, so counting from inside it would mutate render
+// scope.
+//
+// Asked twice, for two different reasons: with "" to decide whether the caller
+// already offers an empty choice (if so the placeholder option is skipped, or the
+// list opens with two blank rows), and with the current `value` to decide whether
+// that value still has an option to be selected in.
+function hasItemWithValue(node: React.ReactNode, value: string): boolean {
   return React.Children.toArray(node).some((child) => {
     if (!React.isValidElement(child)) return false;
-    if (child.type === SelectItem) return (child.props as ItemProps).value === "";
+    if (child.type === SelectItem) return (child.props as ItemProps).value === value;
     const kids = (child.props as { children?: React.ReactNode })?.children;
-    return kids != null ? hasEmptyItem(kids) : false;
+    return kids != null ? hasItemWithValue(kids, value) : false;
   });
 }
+
+/**
+ * Appended to a stored value the option list no longer offers.
+ *
+ * Wording follows the inspector's PVP layer picker, which reached the same
+ * problem first; the MultiSelect equivalent (`pco-options.ts`) says "(not in
+ * Planning Center)" because it knows where its list came from. This one does
+ * not, so it says only that the value is not in the list it was handed.
+ */
+export const NOT_OFFERED = "· not found";
 
 // Field styling for the closed control; the OS renders the arrow + open list
 // (native picker), matching the patch sheet's native <select>s. Call-site trigger
@@ -134,7 +156,43 @@ export function Select({
     });
 
   const options = toOptions(contentChildren);
-  const hasEmpty = hasEmptyItem(contentChildren);
+  const hasEmpty = hasItemWithValue(contentChildren, "");
+
+  // A stored value with no option to live in.
+  //
+  // A native <select> cannot show a value that matches no <option>, and it does
+  // one of two things instead — measured on this component, and both are what
+  // React's `updateOptions` and the HTML "ask for a reset" algorithm specify:
+  //
+  //   list is EMPTY     → selectedIndex -1, and the trigger is BLANK. This is the
+  //                       one the plan switcher and ScriptView comments describe,
+  //                       and every settings page passes through it on mount
+  //                       while its options are still in flight.
+  //   list is NOT empty → the FIRST non-disabled option is selected, so the
+  //                       control reads as a real, plausible, wrong value and the
+  //                       stored one is gone from the DOM entirely.
+  //
+  // The second is the worse half: nothing on screen says anything is amiss, and
+  // the next save writes the substitute back as though the operator chose it.
+  //
+  // So the value gets an option of its own, labelled, rather than being dropped:
+  // an operator can only decide what to do about a choice they can still see, and
+  // the thing it points at may well come back — an integration reconnects, a
+  // plan loads, a device is re-added. Losing it because the list is momentarily
+  // short would be the worse failure. Display only: it changes nothing the caller
+  // stores and fires no onValueChange of its own.
+  //
+  // NOT disabled. Disabling would grey it out for free, but it would also make
+  // the stored value unreachable the moment the operator browsed past it — one
+  // stray keystroke and the thing this exists to preserve is gone. The label
+  // carries the signal instead; a native <option> takes no styling worth having
+  // across browsers anyway.
+  //
+  // "" is never missing. Many call sites bind value="" deliberately as "unset",
+  // either against their own "None" item or against the placeholder option above,
+  // and a synthetic "" option would give every one of them a second blank row.
+  const missingValue =
+    value !== undefined && value !== "" && !hasItemWithValue(contentChildren, value) ? value : null;
 
   return (
     <select
@@ -161,6 +219,11 @@ export function Select({
         </option>
       )}
       {options}
+      {/* Last, not first: the list is something to pick FROM, and a value it no
+          longer offers is a footnote to it. Same ordering rule `pco-options.ts`
+          states for the MultiSelect equivalent, and it leaves the real options
+          exactly where the caller put them. */}
+      {missingValue !== null && <option value={missingValue}>{`${missingValue} ${NOT_OFFERED}`}</option>}
     </select>
   );
 }
