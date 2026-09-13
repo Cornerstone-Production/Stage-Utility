@@ -539,9 +539,9 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
     {
       key: "safeSpaceId",
       label: "SafeSpace space ID (optional)",
-      type: "text",
+      type: "password",
       placeholder: "(only if your site has SafeSpace)",
-      help: "Optional. If your site also has SenSource SafeSpace, paste the space ID from its live-occupancy embed URL (SafeSpace → the space → the address of its live value ends in the ID). It replaces only the occupancy number with SafeSpace's live reading, which is much fresher than Vea's; attendance, zones, peak and capacity keep coming from Vea. Leave blank to use Vea for everything. Treat the ID like a password: anyone who has it can read your occupancy without logging in.",
+      help: "Optional. If your site also has SenSource SafeSpace, paste the space ID from its live-occupancy embed URL (SafeSpace → the space → the address of its live value ends in the ID). It replaces only the occupancy number with SafeSpace's live reading, which is much fresher than Vea's; attendance, zones, peak and capacity keep coming from Vea. Leave blank to use Vea for everything. The ID is the whole of the endpoint's authority — anyone who has it can read your occupancy without logging in — so it is stored encrypted like a password and is NOT carried in a config snapshot. Restore a snapshot onto another box and Stage says SafeSpace needs its ID re-entered rather than quietly falling back to Vea.",
     },
     {
       key: "safeSpacePollSeconds",
@@ -839,15 +839,144 @@ const SECRET_KEYS: Partial<Record<IntegrationId, string[]>> = {
   scores: [],
   resi: ["password"],
   youtube: ["apiKey", "clientSecret", "refreshToken"],
-  sensource: ["clientSecret", "apiToken"],
+  // safeSpaceId is here for the reason safespace-client.ts states in capitals:
+  // "THE SPACE ID IS THE ENTIRE CREDENTIAL. There is no key, no token and no
+  // account check." It was ordinary config, so it sat in settings.json and rode
+  // verbatim into every config snapshot — a bundle the UI presents as safe to
+  // hand to somebody.
+  sensource: ["clientSecret", "apiToken", "safeSpaceId"],
   "ross-tsl": [],
 };
 
+/**
+ * The non-secret record that SafeSpace is switched on.
+ *
+ * The space id WAS the switch, and it now lives in secrets.bin — which a config
+ * snapshot deliberately does not carry. Without this, a restored box cannot tell
+ * "the operator never wanted SafeSpace" from "the operator wanted it and the id
+ * did not travel", and the second one falls back to Vea looking perfectly
+ * healthy. That silent fallback is the failure this key exists to prevent.
+ *
+ * Written as `true` or REMOVED, never `false`: configuredFor() reads any
+ * non-empty, non-null config value as "the operator set this up", so a literal
+ * `false` would make an otherwise untouched SenSource card claim to be
+ * configured.
+ *
+ * Not in `configSchema` deliberately — it is not a field anyone fills in, it is
+ * derived from whether the id was saved. sensource's `zoneIds` and `locationId`
+ * are non-schema config keys for the same kind of reason.
+ */
+const SAFESPACE_ENABLED_KEY = "safeSpaceEnabled";
+
 /** The secret field names for an integration id, or none. A helper rather than a
  *  bare index because SECRET_KEYS is keyed by IntegrationId — so a typo in the
- *  TABLE is a compile error — while every call site carries a plain string. */
-function secretKeysFor(id: string): readonly string[] {
+ *  TABLE is a compile error — while every call site carries a plain string.
+ *
+ *  Exported for integration-secret-parity.test.ts, which pins this table against
+ *  the `password` fields the descriptors declare. */
+export function secretKeysFor(id: string): readonly string[] {
   return SECRET_KEYS[id as IntegrationId] ?? [];
+}
+
+/** What a boot migration would move, worked out without touching disk. */
+export interface SecretMigration {
+  /** `integrationConfigs` with the credential keys gone and the SafeSpace marker
+   *  set — what the state map must be built from. */
+  configs: Record<string, Record<string, unknown>>;
+  /** integration id → the credential values found in settings.json. */
+  found: Record<string, Record<string, string>>;
+  /** `<id>.<key>` for each one, for the log. NAMES only. */
+  moved: string[];
+}
+
+/**
+ * Plan the move of any credential still sitting in settings.json.
+ *
+ * settings.json is in CONFIG_FILES, so anything left in it rides VERBATIM into
+ * every config snapshot and every automatic backup — a bundle the UI presents as
+ * safe to keep on a drive or hand to somebody. SafeSpace's space id was ordinary
+ * config until this release and is exactly that: safespace-client.ts calls it
+ * "THE ENTIRE CREDENTIAL", with no key and no account check behind it.
+ *
+ * Without this an upgrading box keeps the cleartext in that file forever — init
+ * masks the field from the API, so nothing would ever reveal it — AND SafeSpace
+ * stops working the moment the masked value replaces the real one. That second
+ * half is the silent failure: the occupancy would quietly go back to Vea.
+ * wireless-manager's boot migration exists for the same pair of reasons.
+ *
+ * Written on the whole SECRET_KEYS table rather than on safeSpaceId alone. Any
+ * slot that ever leaked into settings.json is cleaned up by the same pass, and a
+ * slot added later is covered without anybody remembering this function.
+ *
+ * Pure and exported so the guard can drive the real classifier: `init()` cannot
+ * be called from a unit test (it starts the reconnect timers and never lets the
+ * process exit).
+ */
+export function planSecretMigration(
+  configs: Record<string, Record<string, unknown>>,
+): SecretMigration | null {
+  const found: Record<string, Record<string, string>> = {};
+  const cleaned: Record<string, Record<string, unknown>> = {};
+  const moved: string[] = [];
+  for (const [id, cfg] of Object.entries(configs)) {
+    const keys = secretKeysFor(id).filter((k) => {
+      const v = cfg[k];
+      // A mask is not a value: an older build wrote "••••" into settings.json
+      // for a slot whose real value was already in secrets.bin, and storing that
+      // would replace the credential with a row of bullets.
+      return typeof v === "string" && v !== "" && !isMask(v);
+    });
+    if (keys.length === 0) continue;
+    const values: Record<string, string> = {};
+    const rest: Record<string, unknown> = { ...cfg };
+    for (const key of keys) {
+      values[key] = cfg[key] as string;
+      delete rest[key];
+      // The key NAME. The value is the thing this whole pass exists to stop
+      // appearing anywhere it can be read.
+      moved.push(`${id}.${key}`);
+    }
+    // The presence of the id was SafeSpace's switch. Moving the id out of
+    // settings.json takes the switch with it unless this is recorded, and a box
+    // that upgrades would come back with SafeSpace silently off.
+    if (id === "sensource" && keys.includes("safeSpaceId")) rest[SAFESPACE_ENABLED_KEY] = true;
+    found[id] = values;
+    cleaned[id] = rest;
+  }
+  if (moved.length === 0) return null;
+  return { configs: { ...configs, ...cleaned }, found, moved };
+}
+
+/**
+ * Carry out a {@link planSecretMigration}.
+ *
+ * secrets.bin WINS a collision. Every slot but safeSpaceId has been masked at
+ * init since the slot existed, so a value still in settings.json for one of
+ * those is a stale copy from before the split, not the value in use.
+ */
+export async function applySecretMigration(plan: SecretMigration): Promise<void> {
+  console.log(
+    `[integration-manager] migrating ${scrub(plan.moved.length)} stored credential(s) out of settings.json: ${scrub(plan.moved.join(", "))}`,
+  );
+  const toStore: Record<string, Record<string, string>> = {};
+  for (const [id, values] of Object.entries(plan.found)) {
+    const next: Record<string, string> = { ...(await secretsStore.getSecrets(id)) };
+    for (const [key, value] of Object.entries(values)) if (!next[key]) next[key] = value;
+    toStore[id] = next;
+  }
+  // One write for the whole blob — secrets.ts re-encrypts the entire file per
+  // save, and this can touch several integrations at once.
+  await secretsStore.setManySecrets(toStore);
+  for (const id of Object.keys(plan.found)) {
+    // Two calls, because a merge cannot delete: the first takes the credential
+    // keys OUT of the file (setting them to null would leave them in the
+    // snapshot as keys, and null is not what "gone" means), the second writes
+    // the SafeSpace marker.
+    await settingsStore.removeIntegrationConfigKeys(id, secretKeysFor(id));
+    if (plan.configs[id]?.[SAFESPACE_ENABLED_KEY] === true) {
+      await settingsStore.patchIntegrationConfig(id, { [SAFESPACE_ENABLED_KEY]: true });
+    }
+  }
 }
 
 class IntegrationManager {
@@ -859,13 +988,19 @@ class IntegrationManager {
     console.log("[integration-manager] init");
     propresenterManager.init();
     const settings = await settingsStore.load();
+    // Anything still holding a credential in settings.json moves to secrets.bin
+    // before the state map is built from it — see planSecretMigration.
+    const saved = settings.integrationConfigs ?? {};
+    const plan = planSecretMigration(saved);
+    if (plan) await applySecretMigration(plan);
+    const savedConfigs = plan?.configs ?? saved;
 
     for (const descriptor of DESCRIPTORS) {
       // Tolerate a settings.json missing this key entirely. DataStore does not
       // deep-merge on load (deliberately — it keeps migrations honest), so an older
       // config snapshot restored over a newer build can arrive without keys added
       // since. Crashing init over it takes every display down.
-      const savedConfig = settings.integrationConfigs?.[descriptor.id] ?? {};
+      const savedConfig = savedConfigs[descriptor.id] ?? {};
       const enabled = enabledFor(descriptor, settings.integrationEnabled);
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
@@ -1152,6 +1287,20 @@ class IntegrationManager {
       secretKeys,
       id,
     );
+
+    // Keep the SafeSpace switch beside the id it belongs to. A save that carries
+    // a new id turns it on; a save that empties the field turns it off; a save
+    // that does not mention the field at all leaves it exactly as it was, which
+    // is why this is three cases and not a boolean.
+    if (id === "sensource") {
+      if (clearedSecrets.includes("safeSpaceId")) {
+        // Removed, not set to false — see SAFESPACE_ENABLED_KEY. Before the
+        // patch below, so the `merged` it returns does not still carry the key.
+        await settingsStore.removeIntegrationConfigKeys(id, [SAFESPACE_ENABLED_KEY]);
+      } else if (newSecrets.safeSpaceId) {
+        nonSecretConfig[SAFESPACE_ENABLED_KEY] = true;
+      }
+    }
 
     // Persist non-secret config.
     //
@@ -1917,10 +2066,16 @@ class IntegrationManager {
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],
-      // Blank is the normal state, and it is not an error — it means the
-      // SafeSpace half is simply off.
-      safeSpaceId:
-        typeof cfg.safeSpaceId === "string" && cfg.safeSpaceId.trim() ? cfg.safeSpaceId.trim() : null,
+      // Out of the encrypted store, never out of `cfg` — the state map holds it
+      // MASKED ("••••"), the same rule Resi and YouTube above carry. Reading the
+      // state value would send the mask to SafeSpace as a space id.
+      safeSpaceId: secrets.safeSpaceId?.trim() || null,
+      // Switched ON but with no id is a REAL state, and a distinct one: the id
+      // does not travel in a config snapshot, so a restore lands here. Falling
+      // back to Vea is right; doing it quietly is not. `|| !!secrets.safeSpaceId`
+      // keeps the invariant "an id implies enabled" true even on a box whose
+      // marker never got written.
+      safeSpaceEnabled: cfg[SAFESPACE_ENABLED_KEY] === true || !!secrets.safeSpaceId,
       safeSpacePollSeconds:
         Number.isFinite(safeSpacePoll) && safeSpacePoll > 0
           ? safeSpacePoll

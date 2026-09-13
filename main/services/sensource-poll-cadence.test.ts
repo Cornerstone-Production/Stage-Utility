@@ -214,7 +214,11 @@ describe("the SafeSpace interval has one definition too", () => {
       .find((d) => d.id === "sensource")
       ?.configSchema.find((f) => f.key === "safeSpaceId");
     assert.ok(id, "the SenSource descriptor lost its SafeSpace space-ID field");
-    assert.equal(id.type, "text");
+    // A PASSWORD field, not text. The id is the whole of the endpoint's
+    // authority — no key, no token, no account check — so it is masked in the
+    // form and stored in secrets.bin. integration-secret-parity.test.ts is what
+    // makes that type a promise rather than a label.
+    assert.equal(id.type, "password");
     assert.equal(id.default, undefined, "a default space ID would turn the section on for everyone");
   });
 });

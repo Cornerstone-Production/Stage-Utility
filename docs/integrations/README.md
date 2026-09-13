@@ -38,6 +38,30 @@ Ross TSL **multiviewer feeds** and the ProPresenter **additional instances**,
 which each have their own Save button. Saving from the confirm writes those
 lists as well as the form.
 
+## Credentials
+
+Any field a card shows masked — a password, an API key, a token, SenSource's
+SafeSpace space ID — is stored in the encrypted secret store, never in
+`settings.json`, and is therefore **not carried in a config snapshot**. Restore a
+snapshot onto another box and those fields come back empty for you to re-enter.
+
+In the dialog a stored credential shows as bullets. Three things you can do with
+it, and they mean different things:
+
+| You do | What happens |
+| --- | --- |
+| Leave the bullets alone | The stored value is untouched, whatever else you save |
+| Type a new value | It replaces the stored one |
+| Clear the field and save | The stored value is **deleted** |
+
+Clearing is how you take a credential back off the box — there is no separate
+button for it. It is recorded on `/log` as
+`[integration-manager] cleared N stored credential(s) on <id>`, naming the fields
+and never the values.
+
+A box upgrading from a build that kept a credential in `settings.json` moves it
+into the secret store on the next start, and says how many it moved on `/log`.
+
 ## Adding a new integration
 
 REAPER is the cleanest end-to-end template for a polling integration — see
@@ -49,7 +73,10 @@ REAPER is the cleanest end-to-end template for a polling integration — see
    to throttle or de-duplicate, call `this.bumpRev()` and send
    `this.stamped(snapshot)` at your own broadcast — see the version contract below.
 2. Descriptor + `apply<Id>()` + `get<Id>Target()` + `test()` in
-   `integration-manager.ts`; secret keys in `SECRET_KEYS`.
+   `integration-manager.ts`; secret keys in `SECRET_KEYS`. Every `password` field
+   must appear there and every entry there must be a `password` field —
+   `integration-secret-parity.test.ts` fails otherwise, because the two drifting
+   apart is how a credential ends up in `settings.json` and in every backup.
 3. DTO in its own module under `main/types/` (`live.ts`, `pvp.ts`), re-exported
    from `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`), extending
    `RevisionedStatus`.
