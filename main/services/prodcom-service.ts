@@ -224,6 +224,133 @@ function normalizeColor(raw: string | null): string | null {
   return /^[a-z]+$/i.test(s) ? s : null; // CSS named color, else ignore
 }
 
+// ── Sensitive-keyword redaction ───────────────────────────────────────────────
+//
+// ProdCom has a first-class keyword system, global and per channel, and each
+// keyword carries `isSensitive`. ProdCom's own interface replaces matched text
+// with asterisks; this app rendered the same transcript verbatim on stage and
+// lobby walls, so a word the operator explicitly marked sensitive was hidden on
+// their screen and shown in full to the room.
+//
+// Two rules shape everything below:
+//
+//   The KEYWORD LIST NEVER LEAVES THE SERVER. If the flagged words are a
+//   person's name, a diagnosis or "resignation", the list is exactly as
+//   sensitive as the transcript. So no client-side matching, and no keyword in a
+//   log line, an error message or a broadcast payload — only counts.
+//
+//   The BUFFER KEEPS THE RAW LINE. Redaction happens on the way out, in
+//   getBuffer(), which is the one accessor every outward path goes through (the
+//   SSE broadcast and GET /api/prodcom/transcript). getRawBuffer() is the
+//   unredacted read, and only the token-gated diagnostic route calls it.
+
+/**
+ * Matching semantics, read from ProdCom's own OpenAPI document
+ * (`GET /api/v1/openapi.yaml`, `components.schemas.Keyword`) rather than
+ * invented here:
+ *
+ *   `text` — "Substring to match (case-insensitive)". SUBSTRING, so "cast"
+ *            matches inside "broadcast"; no word boundaries are applied. That is
+ *            deliberately wider than a word match: too narrow leaks the word.
+ *   `isSensitive` — "When true, matched text is replaced with asterisks in the
+ *            UI".
+ *
+ * The specification does NOT say how MANY asterisks, and it could not be probed:
+ * the live box has no keywords configured at all (global and all 17 channel
+ * lists came back empty) and creating one is a write against production gear.
+ * So this replaces each matched character with one asterisk — the reading of
+ * "replaced with asterisks" that keeps the sentence the same shape and the same
+ * length, which is what ProdCom's own UI does with a fixed-width feed. If a box
+ * is ever seen doing otherwise, this is the line to change.
+ *
+ * A compiled regex per keyword, built once when the list is loaded rather than
+ * per line: the alternative — lower-casing the haystack and using indexOf — is
+ * wrong for a handful of characters whose lower-case form is a different LENGTH
+ * (U+0130 "İ" lower-cases to two code units), which silently shifts every index
+ * after it and redacts the wrong span.
+ */
+function keywordPattern(text: string): RegExp | null {
+  const trimmed = text.trim();
+  // An empty keyword would match at every position and asterisk the whole line.
+  if (!trimmed) return null;
+  return new RegExp(trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+}
+
+/**
+ * Replace every match of `patterns` in `text` with asterisks.
+ *
+ * Matches are collected over the ORIGINAL text and merged before anything is
+ * replaced, so the result does not depend on the order of the keyword list: two
+ * keywords that overlap, or that sit end to end, produce one asterisk run rather
+ * than a different answer depending on which was applied first. `redactions` is
+ * the number of contiguous runs — the same thing a reader could count off the
+ * screen, so it tells an operator that something was hidden without telling them
+ * how many words or which.
+ *
+ * Exported so the semantics above can be asserted directly; the service also
+ * drives this on the real path.
+ */
+export function redactText(text: string, patterns: readonly RegExp[]): { text: string; redactions: number } {
+  if (!text || patterns.length === 0) return { text, redactions: 0 };
+
+  const spans: { start: number; end: number }[] = [];
+  for (const pattern of patterns) {
+    // matchAll does not advance the shared pattern's lastIndex — it works on an
+    // internal clone — so one compiled regex is safe to reuse across lines.
+    for (const m of text.matchAll(pattern)) {
+      if (m[0].length === 0) continue;
+      spans.push({ start: m.index, end: m.index + m[0].length });
+    }
+  }
+  if (spans.length === 0) return { text, redactions: 0 };
+
+  spans.sort((a, b) => a.start - b.start);
+  const merged: { start: number; end: number }[] = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    // `<=`, not `<`: two runs that touch render as one run of asterisks, so
+    // counting them as two would report a boundary nothing on screen shows.
+    if (last && span.start <= last.end) last.end = Math.max(last.end, span.end);
+    else merged.push({ ...span });
+  }
+
+  let out = "";
+  let cursor = 0;
+  for (const span of merged) {
+    out += text.slice(cursor, span.start) + "*".repeat(span.end - span.start);
+    cursor = span.end;
+  }
+  return { text: out + text.slice(cursor), redactions: merged.length };
+}
+
+/**
+ * Compile the patterns for the keyword rows that are marked sensitive.
+ *
+ * Rows arrive as `GET /api/v1/keywords` and `GET /api/v1/channels/{id}/keywords`
+ * return them. Only the two fields this app acts on are read; `shouldHighlight`,
+ * `highlightColor` and `replacementText` are ProdCom's own display concerns and
+ * are deliberately ignored — this masks what ProdCom masks, it does not restyle
+ * the transcript.
+ *
+ * `isSensitive` must be exactly `true`. A missing flag is not sensitive: the
+ * field is required by the schema, and treating absent as sensitive would
+ * asterisk every highlight keyword on a box that omitted it.
+ *
+ * Exported for the semantics guard, which drives this and redactText() — the
+ * same two functions the service calls.
+ */
+export function sensitivePatterns(rows: unknown[]): RegExp[] {
+  const out: RegExp[] = [];
+  for (const row of rows) {
+    const rec = asRecord(row);
+    if (!rec || bool(rec, "isSensitive") !== true) continue;
+    const text = str(rec, "text");
+    const pattern = text && keywordPattern(text);
+    if (pattern) out.push(pattern);
+  }
+  return out;
+}
+
 /** One channel's in-progress partial, plus the bookkeeping the long-lived-
  *  partial diagnostics below read. */
 type PartialEntry = {
@@ -293,6 +420,33 @@ export class ProdComService extends ConnectionLifecycle {
   private channels = new Map<string, ChannelMeta>();
   private channelsFetchedAt = 0;
   private channelRefreshInFlight = false;
+
+  /**
+   * Compiled patterns for every keyword ProdCom marks `isSensitive`, split the
+   * way ProdCom scopes them: global ones apply to every line, channel-scoped
+   * ones only to that channel.
+   *
+   * These are the only place the flagged words exist in this process, and
+   * nothing reads them except redactLine(). They are never serialised, never
+   * broadcast and never logged.
+   */
+  private globalSensitive: RegExp[] = [];
+  private channelSensitive = new Map<string, RegExp[]>();
+  /** Counts of the last load, so the log line fires on a CHANGE rather than on
+   *  every throttled refresh. Null until the first load of a connection. */
+  private lastKeywordSummary: string | null = null;
+  /** One "redaction is running" line per connection — see noteRedaction(). */
+  private redactionLogged = false;
+
+  /**
+   * Whether sensitive keywords are hidden on the way out. ON by default, because
+   * ProdCom's own interface redacts them and matching that is the unsurprising
+   * behaviour. Off restores the previous behaviour exactly.
+   *
+   * This decides what crosses the wire, not what a browser draws with: a
+   * client-side toggle would mean the raw text had already left the server.
+   */
+  private redactSensitive = true;
 
   /** Per-connection "log this once" flags, cleared in teardown(). */
   private wsEnvelopeLogged = false;
@@ -379,6 +533,12 @@ export class ProdComService extends ConnectionLifecycle {
     this.wsEnvelopeLogged = false;
     this.wsUnknownFrameLogged = false;
     this.skippedSources.clear();
+    // A new connection re-reads the keyword list and says so again. The list
+    // itself is deliberately KEPT across the teardown: if the re-read fails,
+    // still redacting with the last known words is the safe direction, and
+    // dropping them would silently un-redact every display.
+    this.lastKeywordSummary = null;
+    this.redactionLogged = false;
     // In-flight speech does not survive the stream. Whatever was mid-utterance
     // when the connection went will be re-sent or finalised on the other side; an
     // orphan kept here would sit under every real line until a restart. Finals are
@@ -544,11 +704,84 @@ export class ProdComService extends ConnectionLifecycle {
     console.log("[prodcom] transcript cleared");
   }
 
-  /** Current rolling buffer (finals + active partials), oldest → newest. */
+  /**
+   * Current rolling buffer (finals + active partials), oldest → newest, AS IT
+   * LEAVES THIS PROCESS — sensitive keywords already replaced with asterisks
+   * unless the operator turned that off.
+   *
+   * Every outward path goes through here: the three `broadcast()` calls below
+   * and `GET /api/prodcom/transcript`, which a freshly-loaded display reads for
+   * its backfill. That route was the second half of this bug and is easy to
+   * miss — redacting only the broadcast would have left a display showing the
+   * unredacted word for its first paint and hiding it from the next line on.
+   * Redaction lives in the accessor rather than at each call site precisely so a
+   * fourth outward path cannot be added unredacted.
+   */
   getBuffer(): TranscriptLineDTO[] {
+    return this.getRawBuffer().map((line) => this.redactLine(line));
+  }
+
+  /**
+   * The buffer exactly as ProdCom sent it.
+   *
+   * The only caller is the token-gated diagnostic route — an operator reviewing
+   * afterwards needs to be able to read what was hidden. Everything else calls
+   * getBuffer(). Keeping the raw line here is what makes redaction
+   * non-destructive: nothing overwrites the text, it is masked on the way past.
+   */
+  getRawBuffer(): TranscriptLineDTO[] {
     this.pruneStalePartials();
     this.pruneStaleFinals();
     return [...this.finals.map((e) => e.line), ...[...this.partials.values()].map((e) => e.line)];
+  }
+
+  /** Hide sensitive keywords, or don't, per the operator's setting. */
+  private redactLine(line: TranscriptLineDTO): TranscriptLineDTO {
+    if (!this.redactSensitive) return line;
+    const scoped = line.channel ? this.channelSensitive.get(line.channel) : undefined;
+    const patterns = scoped?.length ? [...this.globalSensitive, ...scoped] : this.globalSensitive;
+    if (patterns.length === 0) return line;
+    const { text, redactions } = redactText(line.text, patterns);
+    if (redactions === 0) return line;
+    this.noteRedaction(line.channel);
+    return { ...line, text, redactions };
+  }
+
+  /**
+   * One line per connection, the first time anything is actually hidden.
+   *
+   * An operator looking at a wall of asterisks at 9am on a Sunday needs to be
+   * able to tell "ProdCom keywords are doing this on purpose" from "the feed is
+   * broken". Not per line — a keyword that matches a common word would fill the
+   * log — and never the word, the count or the matched text.
+   */
+  private noteRedaction(channel: string | null): void {
+    if (this.redactionLogged) return;
+    this.redactionLogged = true;
+    console.log(
+      `[prodcom] hiding text that matches a keyword marked sensitive in ProdCom ` +
+        `(first seen on channel ${scrub(channel ?? "none")}) — ` +
+        `the unredacted lines are at /api/prodcom/transcript/raw`,
+    );
+  }
+
+  /**
+   * Turn keyword redaction on or off.
+   *
+   * Separate from configure() because it changes what is SENT, not what is
+   * connected — an operator flipping it must not drop the stream and re-run
+   * backfill. Re-broadcasts on a change so every open display updates at once
+   * instead of waiting for the next person to speak.
+   */
+  setRedactSensitive(on: boolean): void {
+    if (this.redactSensitive === on) return;
+    this.redactSensitive = on;
+    console.log(
+      on
+        ? "[prodcom] sensitive keywords will be hidden on displays"
+        : "[prodcom] sensitive-keyword redaction turned OFF — displays show the transcript in full",
+    );
+    broadcast("prodcom:transcript", this.getBuffer());
   }
 
   /**
@@ -1025,8 +1258,7 @@ export class ProdComService extends ConnectionLifecycle {
    * the very first broadcast rather than arriving grey and correcting later.
    */
   private async primeFromRest(host: string, port: number): Promise<void> {
-    const channels = await this.fetchChannels(host, port);
-    if (channels.error) this.logChannelFailure(channels.error);
+    await this.refreshChannelMetadata(host, port);
     const result = await this.backfill(host, port);
     if (result.error) {
       console.warn(
@@ -1039,14 +1271,50 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   /**
+   * Everything this app reads about the channels: their names and colours, and
+   * the keywords ProdCom scopes to them.
+   *
+   * One entry point because both are refreshed on the same two occasions —
+   * connect, and a throttled re-read when a line arrives on an unknown id — and
+   * two entry points is how one of them ends up refreshed and the other stale.
+   * The keyword read needs the channel list to know which channels to ask about,
+   * so it runs second and is skipped when the channel read failed.
+   *
+   * Protected so a test can drive a re-read against a box that has stopped
+   * answering, without waiting out the refresh throttle.
+   */
+  protected async refreshChannelMetadata(host: string, port: number): Promise<void> {
+    const channels = await this.fetchChannels(host, port);
+    if (channels.error) {
+      this.logChannelFailure(channels.error);
+      // Without the channel list there is nothing to ask for keywords about.
+      // Whatever was loaded before stays loaded — see logKeywordFailure().
+      this.logKeywordFailure(channels.error);
+      return;
+    }
+    const keywords = await this.fetchKeywords(host, port, channels.embedded ?? new Map());
+    if (keywords.error) this.logKeywordFailure(keywords.error);
+  }
+
+  /**
    * Fetch `/api/v1/channels` and key name + colour by channel id.
    *
    * There is no channel event on the WebSocket — the live box's welcome frame
    * lists transcript / status / automation / activity, and the spec's claim of a
    * "channel" category is wrong — so this is a REST read on connect plus a
    * throttled refresh when a line turns up on an id we have never seen.
+   *
+   * `embedded` carries any channel that answered with its own `keywords` array.
+   * The spec's Channel schema declares that field; ProdCom 2.3.2 does not send
+   * it (17 channels on the live box, none carrying the key), so the keyword read
+   * below asks each channel separately for the ones that did not. Both are real
+   * observed behaviours, not a guessed fallback: a box that does send them saves
+   * a request per channel and stays consistent with its own list.
    */
-  private async fetchChannels(host: string, port: number): Promise<{ error?: string }> {
+  private async fetchChannels(
+    host: string,
+    port: number,
+  ): Promise<{ error?: string; embedded?: Map<string, unknown[]> }> {
     let body: string;
     try {
       body = await this.getJson(host, port, "/api/v1/channels");
@@ -1059,15 +1327,17 @@ export class ProdComService extends ConnectionLifecycle {
     if (!Array.isArray(rows)) return { error: "response had no data array" };
 
     const next = new Map<string, ChannelMeta>();
+    const embedded = new Map<string, unknown[]>();
     for (const row of rows) {
       const rec = asRecord(row);
       const id = rec && str(rec, "id");
       if (!rec || !id) continue;
       next.set(id, { name: str(rec, "name"), color: normalizeColor(str(rec, "color")) });
+      if (Array.isArray(rec["keywords"])) embedded.set(id, rec["keywords"]);
     }
     this.channels = next;
     this.channelsFetchedAt = this.now();
-    return {};
+    return { embedded };
   }
 
   /** The one operator-facing line for a channel-list failure, so both callers
@@ -1079,8 +1349,102 @@ export class ProdComService extends ConnectionLifecycle {
     );
   }
 
+  /**
+   * Read the keyword lists and keep the patterns for the sensitive ones.
+   *
+   * Global (`GET /api/v1/keywords`) applies to every line; channel-scoped
+   * (`GET /api/v1/channels/{id}/keywords`) only to that channel, which is how
+   * ProdCom itself scopes them. Requests go out together rather than one after
+   * another — a box with seventeen channels would otherwise take seventeen
+   * round trips before the first caption could be redacted, and until the list
+   * is loaded nothing is hidden.
+   *
+   * A failure returns rather than logs, and — importantly — leaves the previous
+   * patterns in place. Discarding them on a transient error would silently
+   * un-redact every display mid-service, which is the exact failure this whole
+   * change exists to prevent.
+   */
+  private async fetchKeywords(
+    host: string,
+    port: number,
+    embedded: Map<string, unknown[]>,
+  ): Promise<{ error?: string }> {
+    const rowsOf = async (path: string): Promise<unknown[]> => {
+      const parsed = asRecord(safeJson(await this.getJson(host, port, path)));
+      const data = parsed?.["data"];
+      if (!Array.isArray(data)) throw new Error("response had no data array");
+      return data;
+    };
+
+    const ids = [...this.channels.keys()];
+    let global: unknown[];
+    let scoped: { id: string; rows: unknown[] }[];
+    try {
+      [global, scoped] = await Promise.all([
+        rowsOf("/api/v1/keywords"),
+        Promise.all(
+          ids.map(async (id) => ({
+            id,
+            // The channel row already carried them on a box that sends them.
+            rows: embedded.get(id) ?? (await rowsOf(`/api/v1/channels/${encodeURIComponent(id)}/keywords`)),
+          })),
+        ),
+      ]);
+    } catch (e) {
+      // errorMessage, and getJson's own rejections, carry a status code or a
+      // socket error — never a response body. No keyword text can reach a log
+      // line through here, and prodcom-redaction.test.ts fails if one ever does.
+      //
+      // The patterns already loaded are deliberately left alone: clearing them
+      // here silently un-redacts every display on a transient 500 mid-service,
+      // which is the exact failure this file exists to prevent.
+      return { error: errorMessage(e) };
+    }
+
+    this.globalSensitive = sensitivePatterns(global);
+    const next = new Map<string, RegExp[]>();
+    let scopedSensitive = 0;
+    for (const { id, rows } of scoped) {
+      const patterns = sensitivePatterns(rows);
+      if (!patterns.length) continue;
+      next.set(id, patterns);
+      scopedSensitive += patterns.length;
+    }
+    this.channelSensitive = next;
+
+    // Counts only. The words themselves are what has to stay on this machine.
+    const summary =
+      `${global.length} global (${this.globalSensitive.length} sensitive), ` +
+      `${scoped.reduce((n, s) => n + s.rows.length, 0)} channel-scoped across ${ids.length} channel(s) ` +
+      `(${scopedSensitive} sensitive)`;
+    if (summary !== this.lastKeywordSummary) {
+      this.lastKeywordSummary = summary;
+      console.log(
+        `[prodcom] keywords loaded: ${summary} — ` +
+          (this.redactSensitive
+            ? "sensitive matches are hidden on displays"
+            : "redaction is OFF, so they are shown in full"),
+      );
+    }
+    return {};
+  }
+
+  /** The one operator-facing line for a keyword-read failure. Says what the
+   *  consequence is, because "unavailable" alone does not tell an operator
+   *  whether their displays are currently safe. */
+  private logKeywordFailure(error: string): void {
+    const held = this.globalSensitive.length + [...this.channelSensitive.values()].reduce((n, p) => n + p.length, 0);
+    console.warn(
+      `[prodcom] keyword list unavailable (${error}) — ` +
+        (held > 0
+          ? `still hiding ${held} sensitive keyword(s) from the last successful read`
+          : "no sensitive keywords are loaded, so nothing is being hidden on displays"),
+    );
+  }
+
   /** A line arrived on an unknown channel id. Re-read the list, at most once per
-   *  CHANNEL_REFRESH_MIN_MS, so a channel added mid-service gets its colour. */
+   *  CHANNEL_REFRESH_MIN_MS, so a channel added mid-service gets its colour —
+   *  and its keywords, or a channel added mid-service would caption unredacted. */
   private refreshChannelsSoon(): void {
     if (this.channelRefreshInFlight) return;
     if (this.now() - this.channelsFetchedAt < CHANNEL_REFRESH_MIN_MS) return;
@@ -1091,13 +1455,9 @@ export class ProdComService extends ConnectionLifecycle {
     // Stamp before the fetch, or a box that keeps failing would be re-asked on
     // every single line.
     this.channelsFetchedAt = this.now();
-    void this.fetchChannels(host, port)
-      .then((r) => {
-        if (r.error) this.logChannelFailure(r.error);
-      })
-      .finally(() => {
-        this.channelRefreshInFlight = false;
-      });
+    void this.refreshChannelMetadata(host, port).finally(() => {
+      this.channelRefreshInFlight = false;
+    });
   }
 
   /**

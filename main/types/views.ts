@@ -92,6 +92,17 @@ export interface TranscriptLineDTO {
   isFinal: boolean;
   /** ISO timestamp the line was received. */
   at: string;
+  /**
+   * How many spans of `text` were replaced with asterisks because they matched a
+   * ProdCom keyword marked `isSensitive`. Absent when nothing was hidden.
+   *
+   * A count, never the words, and never the keyword list: the flagged words can
+   * themselves be the sensitive thing (a person's name, a diagnosis), so they do
+   * not leave the server. This is enough for a display to say something was
+   * hidden, and for an operator reviewing later to know which lines to re-read
+   * through the unredacted route.
+   */
+  redactions?: number;
 }
 
 /** A ProPresenter slide group/section (e.g. Verse, Chorus) with its color. */
