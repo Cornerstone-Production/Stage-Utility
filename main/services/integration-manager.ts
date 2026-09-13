@@ -953,8 +953,29 @@ export function planSecretMigration(
  * secrets.bin WINS a collision. Every slot but safeSpaceId has been masked at
  * init since the slot existed, so a value still in settings.json for one of
  * those is a stale copy from before the split, not the value in use.
+ *
+ * @returns whether it ran. FALSE is not a failure to hand upwards — it is a
+ *   deliberate decline, said on the log with the fix named, and there is nothing
+ *   different for the caller to do with the config map: init masks every secret
+ *   key out of the state either way, so the map it builds from is the same one.
+ *   Returned rather than void so the decline is a value somebody can assert on
+ *   instead of a log line they have to notice.
  */
-export async function applySecretMigration(plan: SecretMigration): Promise<void> {
+export async function applySecretMigration(plan: SecretMigration): Promise<boolean> {
+  // Not onto a secrets.bin that exists and will not decrypt. Writing would set
+  // the old file aside as secrets.bin.unreadable-* — which is the right thing
+  // when an OPERATOR re-enters a credential, and the wrong thing here: it spends
+  // that one-time preservation unasked, and after it "fix the key and restart"
+  // no longer recovers in place. Nothing is lost by waiting; the values are
+  // still in settings.json and the next boot migrates them.
+  if (await secretsStore.isUnreadable()) {
+    console.error(
+      `[integration-manager] ${scrub(plan.moved.length)} credential(s) are still in settings.json ` +
+        "and could not be moved: secrets.bin exists but will not decrypt. Fix the encryption key " +
+        "and restart — they will move then, and until they do they remain in every config snapshot.",
+    );
+    return false;
+  }
   console.log(
     `[integration-manager] migrating ${scrub(plan.moved.length)} stored credential(s) out of settings.json: ${scrub(plan.moved.join(", "))}`,
   );
@@ -984,6 +1005,7 @@ export async function applySecretMigration(plan: SecretMigration): Promise<void>
     // older build, which planSecretMigration deliberately refuses to STORE.
     await settingsStore.removeIntegrationConfigKeys(id, secretKeysFor(id));
   }
+  return true;
 }
 
 class IntegrationManager {
@@ -1000,6 +1022,11 @@ class IntegrationManager {
     const saved = settings.integrationConfigs ?? {};
     const plan = planSecretMigration(saved);
     if (plan) await applySecretMigration(plan);
+    // `plan.configs` whether or not the move actually happened. Every secret key
+    // is masked out of the state below either way, so the two maps differ in one
+    // thing: plan.configs carries the SafeSpace marker. A box whose secrets.bin
+    // will not decrypt therefore still says SafeSpace needs its id back, instead
+    // of reading like a site that never had it.
     const savedConfigs = plan?.configs ?? saved;
 
     for (const descriptor of DESCRIPTORS) {

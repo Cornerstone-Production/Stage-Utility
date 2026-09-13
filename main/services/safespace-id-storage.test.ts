@@ -184,4 +184,37 @@ describe("the boot migration off an upgrading box", () => {
     await applySecretMigration(planSecretMigration(settings.integrationConfigs)!);
     assert.equal((await secretsStore.getSecrets("obs")).password, "the-live-one");
   });
+
+  test("it declines onto a secrets.bin that will not decrypt, and leaves it alone", async () => {
+    // secrets.ts deliberately does NOT move an unreadable file aside on a read:
+    // "the KEY may be what is wrong, and the file perfectly good. Moving it aside
+    // here would turn 'fix the key and restart' into permanent loss." It moves it
+    // aside on the next SAVE instead — right when an operator re-enters a
+    // credential, wrong for a write nobody asked for. This migration is that
+    // write, and it runs at boot on every upgrading box.
+    const orphan = "ss-invented-orphan-0002";
+    await settingsStore.patchIntegrationConfig("sensource", { safeSpaceId: orphan });
+    await fs.writeFile(path.join(TMP, "secrets.bin"), "not a valid GCM payload");
+    const store = secretsStore as unknown as { cache: unknown; unreadable: boolean };
+    store.cache = null;
+    store.unreadable = false;
+
+    const settings = await settingsStore.load();
+    const ran = await applySecretMigration(planSecretMigration(settings.integrationConfigs)!);
+
+    assert.equal(ran, false, "it wrote onto a secrets.bin it could not read");
+    assert.equal(
+      await fs.readFile(path.join(TMP, "secrets.bin"), "utf8"),
+      "not a valid GCM payload",
+      "the unreadable file was overwritten — fixing the key no longer recovers in place",
+    );
+    assert.deepEqual(
+      (await fs.readdir(TMP)).filter((f) => f.startsWith("secrets.bin.unreadable-")),
+      [],
+      "the one-time preservation was spent on a write the operator never asked for",
+    );
+    // And the credential is still where it was, so the next boot can try again.
+    const after = JSON.parse(await fs.readFile(path.join(TMP, "settings.json"), "utf8"));
+    assert.equal(after.integrationConfigs.sensource.safeSpaceId, orphan);
+  });
 });

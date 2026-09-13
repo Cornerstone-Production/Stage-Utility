@@ -152,6 +152,26 @@ class SecretsStore {
     return blob[integrationId] ?? {};
   }
 
+  /**
+   * Is the file on disk present but unreadable — a wrong key, or damaged bytes?
+   *
+   * For a caller that would write of its OWN accord rather than because the
+   * operator asked it to. An operator-initiated save must still go through:
+   * re-entering a credential is how someone recovers from this, and persist()
+   * sets the old bytes aside as secrets.bin.unreadable-* first so nothing is
+   * lost. But a save nobody asked for spends that one-time preservation on the
+   * operator's behalf, and after it the old file is no longer IN PLACE — so
+   * fixing the key and restarting stops recovering on its own, which is the
+   * whole point of not renaming on the read.
+   *
+   * The boot-time credential migration in integration-manager is that caller.
+   * Loads first, because "unreadable" is not known until something has tried.
+   */
+  async isUnreadable(): Promise<boolean> {
+    await this.load();
+    return this.unreadable;
+  }
+
   async setSecret(integrationId: string, key: string, value: string): Promise<void> {
     const blob = await this.load();
     blob[integrationId] = { ...(blob[integrationId] ?? {}), [key]: value };
