@@ -336,6 +336,43 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     });
   });
 
+  describe("the row keeps up with where the occupancy is coming from", () => {
+    // GUARD. ConnectionBadge renders a non-error message now, and this one names
+    // the SOURCE: `occ via safespace/space×1/minute` or `occ via space×1/minute`.
+    // report() used to drop a repeat of the same STATE and ignore the message, so
+    // the first connected poll's wording was the one the grid kept — for hours
+    // after SafeSpace stopped answering and the occupancy went back to Vea. A
+    // badge asserting something no longer true is the class of defect the badge
+    // was rewritten to fix, and before it rendered this string the staleness was
+    // harmless.
+    it("says safespace while SafeSpace answers, and stops saying it when it does not", async () => {
+      resetService();
+      let alive = true;
+      stubFetch({ safeSpace: () => (alive ? "417" : null) });
+
+      await readSafeSpace();
+      await poll();
+      const first = reports.filter((r) => r.state === "connected").at(-1)?.message ?? "";
+      assert.match(first, /occ via safespace\//, `the row said "${first}" while SafeSpace was answering`);
+
+      // SafeSpace goes quiet and its last reading ages out; the occupancy
+      // reverts to Vea and the DTO says so.
+      alive = false;
+      clock += 10 * 60_000;
+      await readSafeSpace();
+      await poll();
+      assert.equal(published().total.occupancySource, "vea", "the fallback to Vea never happened");
+
+      const latest = reports.filter((r) => r.state === "connected").at(-1)?.message ?? "";
+      assert.doesNotMatch(
+        latest,
+        /safespace/,
+        `the row still says "${latest}". The occupancy is Vea's, the badge is green, and the ` +
+          "one line naming the source is the one it was told hours ago",
+      );
+    });
+  });
+
   it("reads an EMPTY response as unknown, never as an empty building", async () => {
     // GUARD. One SafeSpace sample in six comes back with no body. `Number("")`
     // is 0, and a confident 0 fires every occupancy threshold in the app.

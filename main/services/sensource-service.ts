@@ -1310,7 +1310,14 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     // lets the base class's back-off do its job.
     const wait = this.exchangeWaitMs();
     if (wait > 0) {
-      throw new Error(`Auth deferred — ${Math.ceil(wait / 1000)}s before the next token request`);
+      // NO COUNTDOWN IN THE MESSAGE. This read "Auth deferred — 30s before the
+      // next token request", and the number is recomputed per poll — so while
+      // auth stayed blocked the badge got a brand-new string every 15 seconds,
+      // and report() (which compares the message now, not just the state) would
+      // broadcast the whole integration state map each time. The number is not
+      // lost: the 429 handler below logs the wait it set, and the only other
+      // source of a wait here is MIN_EXCHANGE_GAP_MS, a constant.
+      throw new Error("Auth deferred — waiting before the next token request");
     }
 
     this.lastExchangeAt = Date.now();
@@ -1355,7 +1362,11 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
             rateLimited.note,
         );
       }
-      throw new Error(`Auth rate-limited (HTTP 429) — retrying in ${Math.round(waitMs / 1000)}s`);
+      // Same reason as "Auth deferred" above: `waitMs` follows Retry-After, so
+      // it can differ per response and the badge would change with it. The
+      // duration is on the line just logged, which is where an operator reading
+      // /log at 9am wants it anyway.
+      throw new Error("Auth rate-limited (HTTP 429)");
     }
     if (!res.ok) {
       // "Check client id/secret" is advice, and it is only true for a refusal.
@@ -1796,9 +1807,13 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
       const scope = allow ? `${reduced.zones.length} of selected zone(s)` : `${reduced.zones.length} zone(s)`;
       // The note is empty unless SafeSpace is on with no id — see safeSpaceNote.
-      // report() drops a repeat of the SAME state, so this reaches the row on
-      // the first connected poll after a configure (resetReport) and then stays
-      // put; the SenSource panel is the surface that keeps saying it.
+      // report() drops a repeat of the same state AND the same message, so an
+      // unchanged occupancy source is silent and a CHANGED one reaches the row
+      // on the next poll. That matters because `occSource` genuinely varies:
+      // the `safespace/` prefix is only there while a fresh SafeSpace reading
+      // exists, and the row used to keep whichever wording the first connected
+      // poll happened to produce. The SenSource panel is still the surface that
+      // keeps saying it, because this one goes quiet once it stops changing.
       this.report("connected", `${scope}, occ via ${occSource}${this.safeSpaceNote()}`);
       // Append a building-total sample to the rolling trend buffer, at the
       // buffer's own resolution rather than the poll's — see HISTORY_MIN_GAP_MS.
