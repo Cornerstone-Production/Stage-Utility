@@ -11,6 +11,7 @@ import * as fs from "fs/promises";
 import * as http from "http";
 
 import { type RouteCtx, json, error } from "./context.js";
+import { logAuthed } from "./log-routes.js";
 import { stageController } from "../stage-controller.js";
 import { propresenterManager } from "../propresenter-service.js";
 import { prodcomService } from "../prodcom-service.js";
@@ -183,8 +184,34 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
     }
 
     // ── ProdCom transcript backfill (recent lines for a freshly-loaded display) ──
+    // getBuffer() is the REDACTED read — keywords ProdCom marks sensitive are
+    // already asterisked. This route and the "prodcom:transcript" broadcast are
+    // the only two ways the transcript leaves the process, and they must agree:
+    // if this one served the raw buffer, a display would paint the hidden word
+    // once on load and then hide it from the next line on.
     if (method === "GET" && pathname === "/api/prodcom/transcript") {
       json(res, prodcomService.getBuffer());
+      return;
+    }
+
+    /**
+     * The same buffer, UNREDACTED — what was actually said.
+     *
+     * An operator reviewing after a service has to be able to read the words a
+     * keyword hid; a count on the line says something was hidden but not what.
+     *
+     * Gated by logAuthed, the /api/log gate, rather than anything new: one
+     * env var (STAGE_UTILITY_LOG_TOKEN), one failure mode, one thing to
+     * document. Unset means LAN-open exactly like /api/log and like every other
+     * route on this appliance; set means `?token=…` or a 401, so an operator who
+     * gets one knows they need the token rather than that the server is down.
+     */
+    if (method === "GET" && pathname === "/api/prodcom/transcript/raw") {
+      if (!logAuthed(url)) {
+        error(res, "unauthorized", 401);
+        return;
+      }
+      json(res, prodcomService.getRawBuffer());
       return;
     }
 
