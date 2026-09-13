@@ -69,6 +69,32 @@ describe("clearing a stored credential", () => {
     assert.equal(foldConfigEntries({ host: "203.0.113.7" }, SECRETS, "test").config.host, "203.0.113.7");
   });
 
+  test("a non-string is ignored, never coerced into the credential", () => {
+    // GUARD. This was `secrets[key] = String(value)`. `String(null)` is "null",
+    // so POST {"config":{"apiToken":null}} stored the four-character string
+    // "null" as the credential and the integration went and used it — the UI
+    // shows a mask either way, so nothing on screen could tell it from a real
+    // one. `String([])` is worse still: an empty-string secret occupying the
+    // slot while masking as unset.
+    //
+    // wireless-credentials.mergeSecrets, the other copy of this fold, has always
+    // guarded on `typeof value === "string"`.
+    for (const junk of [null, undefined, 42, true, {}, [], ["a"]] as unknown[]) {
+      const { secrets, clearedSecrets, config } = foldConfigEntries(
+        { password: junk },
+        SECRETS,
+        "test",
+      );
+      assert.deepEqual(
+        { ...secrets },
+        {},
+        `${String(junk)} was coerced into a stored credential — the app would authenticate with it`,
+      );
+      assert.deepEqual(clearedSecrets, [], `${String(junk)} deleted a working credential`);
+      assert.deepEqual({ ...config }, {}, `${String(junk)} leaked into the non-secret config`);
+    }
+  });
+
   test("an empty NON-secret field is an ordinary value, not a clear", () => {
     // "" is a legitimate saved value for a text field — a blank ProPresenter
     // instance name, a cleared host. Only a secret slot treats it as a delete.

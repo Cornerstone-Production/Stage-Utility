@@ -773,7 +773,31 @@ export function foldConfigEntries(
       // is an explicit clear"), and this is the other copy of it.
       if (isMask(value)) continue;
       if (value === "") clearedSecrets.push(key);
-      else secrets[key] = String(value);
+      else if (typeof value === "string") secrets[key] = value;
+      else {
+        // NOT String(value), which is what this did. `String(null)` is "null",
+        // so POST {"config":{"safeSpaceId":null}} stored the four-character
+        // string "null" AS the credential and the app went off and polled
+        // SafeSpace with it — indistinguishable from a real id anywhere in the
+        // UI, which shows a mask either way. `String({})` gives
+        // "[object Object]"; `String([])` gives "", a stored empty-string secret
+        // that masks as UNSET while occupying the slot.
+        //
+        // wireless-credentials.mergeSecrets — the other copy of this fold, and
+        // the one the commit that split these claimed parity with — has always
+        // had `typeof value === "string"`. This is the copy that drifted.
+        //
+        // Ignored rather than cleared, and said out loud. A body putting a
+        // non-string in a password field is junk or a mistake, and deleting a
+        // working credential over it is the worse of the two wrong answers; a
+        // silent skip is how an operator concludes the field is broken.
+        // The TYPE, never the value — this is a credential slot.
+        console.warn(
+          `[integration-manager] ignoring a non-string credential on ${scrub(id)}: ` +
+            `${scrub(key)} arrived as ${scrub(value === null ? "null" : typeof value)}. ` +
+            "The stored value is unchanged.",
+        );
+      }
     } else {
       config[key] = value;
     }
