@@ -163,7 +163,16 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
     if (this.req) {
       const req = this.req;
       this.req = null;
-      req.removeAllListeners();
+      // BY NAME — these two are the ones openStream() attaches to the REQUEST,
+      // 'response' being the callback passed to https.request(). 'error' is the
+      // one that matters: it calls onStreamClosed(), so destroying a request on
+      // purpose would otherwise schedule a reconnect for a stream we hung up on.
+      // A bare removeAllListeners() would take Node's own listeners with them.
+      //
+      // The data/end/close handlers live on the RESPONSE, which is a different
+      // emitter and was never reachable from here; destroy() below closes it, and
+      // onStreamClosed() is idempotent and gated on `running`.
+      for (const event of ["error", "response"] as const) req.removeAllListeners(event);
       // An 'error' still arrives AFTER the listeners come off, and it arrives
       // asynchronously, so the try/catch below cannot see it: Node's HTTP client
       // manufactures "socket hang up" when a socket closes with a response still
