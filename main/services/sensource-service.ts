@@ -733,7 +733,8 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       console.warn(
         "[sensource] SafeSpace is switched on but no space ID is stored — occupancy is coming " +
           "from Vea. A config snapshot deliberately does not carry the ID; re-enter it in " +
-          "Settings → Integrations → SenSource Vea, or clear the field to turn SafeSpace off.",
+          "Settings → Integrations → SenSource Vea, or save that card with the field left empty " +
+          "to turn SafeSpace off.",
       );
     }
     this.restart();

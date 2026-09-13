@@ -64,7 +64,7 @@ describe("the SenSource panel's SafeSpace notice", () => {
     assert.ok(text, "SafeSpace fell back to Vea and the panel said nothing at all");
     assert.match(text, /SafeSpace is on but has no space ID/);
     assert.match(text, /coming from Vea/, "it does not say what the count is running on now");
-    assert.match(text, /clear that field to turn\s+SafeSpace off/, "it offers no way out but retyping");
+    assert.match(text, /save with that field\s+left empty to turn SafeSpace off/, "it offers no way out but retyping");
   });
 
   test("with an id stored there is no notice", () => {

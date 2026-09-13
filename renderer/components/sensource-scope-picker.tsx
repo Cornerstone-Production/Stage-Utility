@@ -44,8 +44,8 @@ function SafeSpaceIdMissingNotice({ state }: { state: IntegrationState }) {
       <span className="text-caption2 text-amber-11">
         SafeSpace is on but has no space ID. The occupancy is coming from Vea, which refreshes about
         every 78 seconds instead of every few. A config snapshot never carries the ID — paste it into{" "}
-        <strong className="font-medium">SafeSpace space ID</strong> above, or clear that field to turn
-        SafeSpace off.
+        <strong className="font-medium">SafeSpace space ID</strong> above, or save with that field
+        left empty to turn SafeSpace off.
       </span>
     </div>
   );

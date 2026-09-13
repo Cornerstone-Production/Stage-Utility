@@ -116,8 +116,8 @@ than quietly reverting to Vea:
 - a notice on the SenSource card itself, above the location and zone pickers.
 
 The count keeps coming from Vea throughout — nothing goes blank — which is
-exactly why it is said out loud. Paste the ID back in, or clear the field to turn
-SafeSpace off for good.
+exactly why it is said out loud. Paste the ID back in, or save the card with the
+field left empty to turn SafeSpace off for good.
 
 **What the reading does when it goes wrong.**
 
