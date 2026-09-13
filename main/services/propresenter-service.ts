@@ -388,6 +388,75 @@ function streamEndpointOf(name: string | null): string | null {
   return trimmed.replace(/^\/?(?:v\d+\/)?/, "") || null;
 }
 
+/**
+ * The named timers currently doing something, in ProPresenter's own order.
+ *
+ * ## `time` IS PASSED THROUGH VERBATIM, AND MUST BE. NOT ANCHORED.
+ *
+ * A running timer re-sends `timers/current` once a second with a new `time`, and
+ * `emit()` compares the whole DTO — so a ten-minute timer is 600 SSE frames to
+ * every connected browser. The OBS record clock (obs-record-clock.ts), the PVP
+ * progress bar (pvp-progress.ts) and the PCO countdown all answer that shape the
+ * same way: the DTO carries an anchor and a rate, the client interpolates, and a
+ * ten-minute recording costs 25 frames instead of 604.
+ *
+ * That trade is NOT AVAILABLE HERE, and this comment exists so nobody spends the
+ * afternoon rediscovering why. Four reasons, in order of how hard they are to
+ * work around:
+ *
+ * 1. **There is no number.** `timers/current` carries `{ id, time, state }` and
+ *    nothing else — `time` is ProPresenter's own formatted text. OBS was
+ *    tractable because it ships `outputDuration` in milliseconds BESIDE its
+ *    timecode string. `GET /v1/timers` and `GET /v1/timer/<id>` return the
+ *    timer's CONFIGURATION (`countdown.duration`, `count_down_to_time`,
+ *    `elapsed.start_time`/`end_time`, `allows_overrun`) and never its position.
+ *    Interpolating therefore means parsing and re-formatting ProPresenter's
+ *    display text, and both consumers — the `pp-timer` layout object and the
+ *    stage display's header — render `time` as-is, so any difference is visible
+ *    on a wall.
+ *
+ * 2. **The format is not pinned.** In ProPresenter's own OpenAPI document the
+ *    field's schema example is `00:00:01.00` and its response examples are
+ *    `00:00:01`, `-00:00:02` and `00:21:43` — three precisions for one field.
+ *    21.3 answers whole seconds for a STOPPED timer, which is the one state
+ *    filtered out below and so the one state no browser ever sees.
+ *
+ * 3. **Two of the five states advance in a direction the payload does not
+ *    carry.** `state` is one of stopped / running / complete / overrunning /
+ *    overran. `running` counts DOWN for a `countdown` and a `count_down_to_time`
+ *    and UP for an `elapsed` timer; the type is only in `/v1/timers`, keyed by a
+ *    uuid this DTO does not carry. `overrunning` on an elapsed timer past its
+ *    `end_time` has no documented behaviour at all.
+ *
+ * 4. **The zero crossing is per-timer configuration.** `allows_overrun` decides
+ *    whether a countdown may go negative. A client interpolating forward across
+ *    zero on a timer with `allows_overrun: false` would draw `-00:00:01` on a
+ *    timer configured never to show one — for up to a second, at the most-watched
+ *    moment of its life. "A client interpolating a stopped timer forward is worse
+ *    than a stale one" applies here at full strength.
+ *
+ * The cost of leaving it is measured rather than guessed: see "what a ticking
+ * timer costs" in propresenter-stream.test.ts, which drives the real stream and
+ * counts the frames that reach the channel.
+ *
+ * ## Stopped timers are dropped
+ *
+ * `stopped` is the resting state of every configured timer, so a booth with two
+ * timers set up would otherwise put two frozen readouts on every display that
+ * shows one. Dropping them here is also what keeps reason 4 above hypothetical:
+ * nothing that is not advancing reaches a browser at all.
+ */
+export function proTimersFrom(timers: unknown): ProTimer[] {
+  if (!Array.isArray(timers)) return [];
+  return timers
+    .map((t) => ({
+      name: asString(pick(t, "id", "name")) ?? "Timer",
+      time: asString(pick(t, "time")) ?? "",
+      state: asString(pick(t, "state")) ?? "",
+    }))
+    .filter((t) => t.state && t.state !== "stopped");
+}
+
 class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   private host: string | null = null;
   private port: number | null = null;
@@ -1228,16 +1297,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       );
     }
 
-    // Running named timers (state ≠ "stopped").
-    const runningTimers: ProTimer[] = Array.isArray(timers)
-      ? timers
-          .map((t) => ({
-            name: asString(pick(t, "id", "name")) ?? "Timer",
-            time: asString(pick(t, "time")) ?? "",
-            state: asString(pick(t, "state")) ?? "",
-          }))
-          .filter((t) => t.state && t.state !== "stopped")
-      : [];
+    // Running named timers, `time` verbatim. See proTimersFrom — the reason it is
+    // not anchored the way the OBS record clock is lives on that function.
+    const runningTimers: ProTimer[] = proTimersFrom(timers);
 
     // Stash preview target + key (thumbnail index is the 0-based slide index).
     // The key includes the current arrangement so that reordering a song (same

@@ -101,11 +101,24 @@ export interface ProSection {
   colorHex: string;
 }
 
-/** A ProPresenter named timer (countdown/clock) currently running. */
+/** A ProPresenter named timer (countdown/clock) currently doing something.
+ *  Timers in the `stopped` state are dropped and never appear here. */
 export interface ProTimer {
   name: string;
-  /** Display string from the API, e.g. "00:03:00". */
+  /**
+   * ProPresenter's own display text, passed through UNCHANGED — e.g. "00:03:00",
+   * or "-00:00:02" once a timer with overrun enabled is past zero.
+   *
+   * This is the only expression of the timer's position the API has: there is no
+   * numeric counterpart anywhere, so this cannot be anchored and interpolated the
+   * way `ObsStatusDTO.recordAnchorMs` or `PvpLayerDTO.anchorElapsedSec` are, and
+   * a running timer really is one broadcast a second. The four reasons, and the
+   * measurement, are on `proTimersFrom` in propresenter-service.ts — read them
+   * before reaching for an anchor here.
+   */
   time: string;
+  /** One of ProPresenter's own: "running", "complete", "overrunning", "overran".
+   *  Never "stopped" — those are filtered out before this DTO is built. */
   state: string;
 }
 

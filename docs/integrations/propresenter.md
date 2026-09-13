@@ -39,6 +39,27 @@ in the log. The fallback lasts for the rest of the run: the subscription is
 re-probed when the integration is reconfigured or Stage restarts, not on every
 poll cycle.
 
+### Timers
+
+Named timers arrive on `timers/current`. A timer in the `stopped` state — the
+resting state of every configured timer — is dropped, so only timers actually
+doing something reach a display. The rest are passed on with ProPresenter's own
+display text exactly as it sends it, sign included: an overrunning timer reads
+`-00:00:02`, the same as it does in ProPresenter.
+
+**A running timer is one update a second, to every browser watching** — about 600
+for a ten-minute timer. That is the one place this integration is not
+change-driven, and it is deliberate. Elsewhere Stage anchors a clock and lets the
+browser interpolate (an OBS recording costs 25 updates rather than 604), but
+ProPresenter's API has no number to anchor: `time` is a formatted string and is
+the only expression of a timer's position the API offers. `GET /v1/timers`
+returns each timer's *configuration* — its duration, or the time of day it counts
+to, or its start and end — never its current position. Re-deriving the number
+from the string would also mean re-formatting it, which is visible on every stage
+display, and the direction a timer advances depends on a type the payload does
+not carry. The reasoning in full is on `proTimersFrom` in
+`propresenter-service.ts`.
+
 Fields are read defensively (each degrades to null) and assembled into a
 `ProPresenterStatusDTO` broadcast on the `propresenter:status` channel. Every
 field is verified against ProPresenter 21.3 / API v1. Slide thumbnails are
