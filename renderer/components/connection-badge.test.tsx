@@ -13,13 +13,26 @@
 // integration-manager.ts. Asserted against the rendered text, not against props.
 //
 // WHAT IS NOT TESTED HERE, and why. jsdom loads no stylesheet, so `truncate`,
-// `max-w-[9rem]` and `shrink-0` all measure as nothing and a guard over them
+// the `max-w-*` cap and `shrink-0` all measure as nothing and a guard over them
 // would pass whatever the classes said. The tooltip needs a real hover. Both
-// were checked in a browser instead: a RossTalk tile at 252px shows "Connected"
-// in full with the simulate suffix cut mid-word after it, the full string on
-// hover; the wireless row and the ProPresenter instance row keep their controls
-// on one line. What IS asserted here is the thing that was actually broken —
-// whether the text reaches the DOM at all.
+// were driven in a headless browser against a real server instead, on a RossTalk
+// target genuinely connected to a loopback sink with simulate mode on:
+//
+//   1400px — the tile reads "Connected 1 of 1 target(s) — simulate m…" and the
+//            dialog header reads the whole string with room to spare.
+//   420px  — the cap bites. At the original 9rem it cut to "1 of 1 tar…" and
+//            lost the word "simulate" altogether, which is the only word on the
+//            line that matters; the cap is 14rem for that reason and it now
+//            reads "1 of 1 target(s) — simulat…".
+//
+// The error branch was checked in the same pass and is unchanged: a dropped OBS
+// connection is still the red message alone, with no state word before it.
+//
+// NOT driven: the wireless receiver row and the ProPresenter instance row need
+// real hardware. The wireless row nulls its message on connected and on
+// disconnected (wireless-manager.patchRuntimeState), so it can only ever render
+// one in the error state — unchanged behaviour. What IS asserted below is the
+// thing that was actually broken: whether the text reaches the DOM at all.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";

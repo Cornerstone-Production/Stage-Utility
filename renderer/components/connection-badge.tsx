@@ -77,7 +77,14 @@ export function ConnectionBadge({
 
   return (
     <Tooltip label={tooltip}>
-      <span className="flex items-center gap-1 min-w-0 max-w-[9rem] sm:max-w-md" aria-label={full}>
+      {/* The cap stops one long string eating a wireless or ProPresenter row.
+          14rem below `sm`, not the 9rem it was: that number was chosen when the
+          badge rendered the error message ALONE, and a state word now takes
+          about 5rem of it — at 9rem a phone-width tile cut RossTalk's line at
+          "1 of 1 tar…", losing the word "simulate" entirely. 14rem leaves the
+          message about the room it used to have. Driven in a browser at 420px
+          and at 1400px. */}
+      <span className="flex items-center gap-1 min-w-0 max-w-[14rem] sm:max-w-md" aria-label={full}>
         {face.icon}
         {/* The state word never truncates — it is two words and it is the part
             that must always be legible. The error message is the exception,
