@@ -153,11 +153,14 @@ If the keyword read fails, whatever was loaded before stays loaded and is still
 applied; a transient failure mid-service does not un-redact the displays. On a
 connection where nothing has ever loaded, nothing is hidden, and the log says so.
 
-**Two consequences worth knowing.** A `prodcom.phrase-said` automation trigger
+**Three consequences worth knowing.** A `prodcom.phrase-said` automation trigger
 reads the same broadcast the displays do, so a phrase that is also a sensitive
-keyword stops matching while redaction is on. And `PRODCOM_DEBUG=1` prints every
-raw frame verbatim, transcript text included — it is a debugging escape hatch,
-not something to leave on.
+keyword stops matching while redaction is on. `PRODCOM_DEBUG=1` prints every raw
+frame verbatim, transcript text included — it is a debugging escape hatch, not
+something to leave on. And matching is over whole text, so while a line is still
+in progress a partly-recognised keyword can show its first few letters for a
+moment before the word completes and is hidden; ProdCom's own live view behaves
+the same way.
 
 **Turning it off.** Settings → Integrations → **ProdCom** → **Hide sensitive
 keywords**. On by default. Off sends the transcript in full to every display; it

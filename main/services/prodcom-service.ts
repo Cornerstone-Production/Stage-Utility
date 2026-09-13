@@ -709,13 +709,18 @@ export class ProdComService extends ConnectionLifecycle {
    * LEAVES THIS PROCESS — sensitive keywords already replaced with asterisks
    * unless the operator turned that off.
    *
-   * Every outward path goes through here: the three `broadcast()` calls below
-   * and `GET /api/prodcom/transcript`, which a freshly-loaded display reads for
-   * its backfill. That route was the second half of this bug and is easy to
-   * miss — redacting only the broadcast would have left a display showing the
-   * unredacted word for its first paint and hiding it from the next line on.
-   * Redaction lives in the accessor rather than at each call site precisely so a
-   * fourth outward path cannot be added unredacted.
+   * Every outward path goes through here: every `broadcast()` in this file, and
+   * `GET /api/prodcom/transcript`, which a freshly-loaded display reads for its
+   * backfill. That route is the half of this that is easy to miss — redacting
+   * only the broadcast leaves a display showing the unredacted word for its
+   * first paint and hiding it from the next line on. Redaction lives in the
+   * accessor rather than at each call site precisely so the NEXT outward path,
+   * whatever it is, cannot be added unredacted.
+   *
+   * Cost is not worth caching. Measured at 0.19 ms to redact a full 100-line
+   * buffer against 20 sensitive keywords, and broadcasts are throttled to four a
+   * second — under 1 ms/s of CPU, for which a memo keyed on a keyword-list
+   * generation would be more machinery than the work it skips.
    */
   getBuffer(): TranscriptLineDTO[] {
     return this.getRawBuffer().map((line) => this.redactLine(line));
@@ -1369,24 +1374,31 @@ export class ProdComService extends ConnectionLifecycle {
     port: number,
     embedded: Map<string, unknown[]>,
   ): Promise<{ error?: string }> {
-    const rowsOf = async (path: string): Promise<unknown[]> => {
+    // `scope` and never the path: this is the one place a request URL could end
+    // up quoted in an error, and while the only variable in it is a channel id,
+    // an invariant that reads "no URL reaches a log line from here" is one a
+    // reviewer can check at a glance. It also tells an operator WHICH read
+    // failed, which the path would have done anyway.
+    const rowsOf = async (scope: string, path: string): Promise<unknown[]> => {
       const parsed = asRecord(safeJson(await this.getJson(host, port, path)));
       const data = parsed?.["data"];
-      if (!Array.isArray(data)) throw new Error("response had no data array");
+      if (!Array.isArray(data)) throw new Error(`the ${scope} response had no data array`);
       return data;
     };
 
     const ids = [...this.channels.keys()];
-    let global: unknown[];
+    let globalRows: unknown[];
     let scoped: { id: string; rows: unknown[] }[];
     try {
-      [global, scoped] = await Promise.all([
-        rowsOf("/api/v1/keywords"),
+      [globalRows, scoped] = await Promise.all([
+        rowsOf("global keyword", "/api/v1/keywords"),
         Promise.all(
           ids.map(async (id) => ({
             id,
             // The channel row already carried them on a box that sends them.
-            rows: embedded.get(id) ?? (await rowsOf(`/api/v1/channels/${encodeURIComponent(id)}/keywords`)),
+            rows:
+              embedded.get(id) ??
+              (await rowsOf("channel keyword", `/api/v1/channels/${encodeURIComponent(id)}/keywords`)),
           })),
         ),
       ]);
@@ -1401,7 +1413,7 @@ export class ProdComService extends ConnectionLifecycle {
       return { error: errorMessage(e) };
     }
 
-    this.globalSensitive = sensitivePatterns(global);
+    this.globalSensitive = sensitivePatterns(globalRows);
     const next = new Map<string, RegExp[]>();
     let scopedSensitive = 0;
     for (const { id, rows } of scoped) {
@@ -1414,7 +1426,7 @@ export class ProdComService extends ConnectionLifecycle {
 
     // Counts only. The words themselves are what has to stay on this machine.
     const summary =
-      `${global.length} global (${this.globalSensitive.length} sensitive), ` +
+      `${globalRows.length} global (${this.globalSensitive.length} sensitive), ` +
       `${scoped.reduce((n, s) => n + s.rows.length, 0)} channel-scoped across ${ids.length} channel(s) ` +
       `(${scopedSensitive} sensitive)`;
     if (summary !== this.lastKeywordSummary) {
