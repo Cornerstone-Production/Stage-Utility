@@ -116,8 +116,13 @@ than quietly reverting to Vea:
 - a notice on the SenSource card itself, above the location and zone pickers.
 
 The count keeps coming from Vea throughout — nothing goes blank — which is
-exactly why it is said out loud. Paste the ID back in, or save the card with the
-field left empty to turn SafeSpace off for good.
+exactly why it is said out loud. Paste the ID back in, or press **Turn SafeSpace
+off** in that notice to switch it off for good; either way `/log` records which.
+
+Saving the card does not switch SafeSpace off. With no ID stored the field is
+empty on every save, so an ordinary edit — the Vea poll interval, say — would
+otherwise take the reminder with it. Clearing a field that *does* hold an ID
+still switches SafeSpace off, because that deletes the credential.
 
 **What the reading does when it goes wrong.**
 

@@ -149,3 +149,77 @@ describe("the marker is derived, so a request body cannot write it", () => {
     assert.equal((await onDisk()).pollSeconds, 30, "an ordinary config key stopped being saved");
   });
 });
+
+describe("an emptied space id only turns SafeSpace off when an id really went", () => {
+  beforeEach(async () => {
+    await reset();
+    // THE RESTORE STATE, built the way a restore really produces it: the marker
+    // rides in the snapshot, the id does not. Written through the store rather
+    // than through a save, because a save is the thing under test.
+    await settingsStore.patchIntegrationConfig("sensource", { safeSpaceEnabled: true });
+    seedState({
+      clientId: "cid-1",
+      safeSpacePollSeconds: 10,
+      safeSpaceEnabled: true,
+      safeSpaceId: "",
+      clientSecret: "",
+      apiToken: "",
+    });
+  });
+
+  test("a save that changes only the Vea poll interval leaves the marker alone", async () => {
+    // Exactly what the dialog posts. initialConfig() seeds a password field with
+    // the mask only when the state holds a non-empty string, so with no id
+    // stored the SafeSpace field seeds as "" and handleSave — which skips only
+    // MASKED password fields — sends it. Every save in this state carries it,
+    // whatever the operator came to change.
+    await save({ clientId: "cid-1", pollSeconds: 30, safeSpaceId: "", safeSpacePollSeconds: 10 });
+
+    assert.equal((await onDisk()).pollSeconds, 30, "the change the operator came to make was lost");
+    assert.equal(
+      (await onDisk()).safeSpaceEnabled,
+      true,
+      "changing the poll interval switched SafeSpace off. The warning, the row message, the " +
+        "Test notice and the panel notice all go at once, nothing is logged because no secret " +
+        "was actually removed, and the box is back to looking like a site that never had " +
+        "SafeSpace — which is the state the marker exists to rule out",
+    );
+  });
+
+  test("nor does emptying a field that never had anything behind it", async () => {
+    await save({ safeSpaceId: "" });
+    assert.equal(
+      (await onDisk()).safeSpaceEnabled,
+      true,
+      "clearing an already-empty credential is a no-op for every other integration and must be " +
+        "one here too",
+    );
+  });
+
+  test("but the operator's explicit off DOES turn it off", async () => {
+    const config = await save({ safeSpaceEnabled: false });
+    assert.equal(
+      (await onDisk()).safeSpaceEnabled,
+      undefined,
+      "the SenSource panel's 'Turn SafeSpace off' button leaves the warning up forever",
+    );
+    assert.equal(config.safeSpaceEnabled, undefined, "the returned state still says SafeSpace is on");
+  });
+
+  test("and so does clearing a field that really holds one", async () => {
+    await save({ safeSpaceId: SPACE_ID });
+    assert.equal((await onDisk()).safeSpaceEnabled, true, "the fixture never stored an id");
+
+    await save({ safeSpaceId: "" });
+    assert.equal(
+      (await onDisk()).safeSpaceEnabled,
+      undefined,
+      "the operator deleted the credential and the box still claims SafeSpace is on",
+    );
+    assert.equal(
+      (await secretsStore.getSecrets("sensource")).safeSpaceId,
+      undefined,
+      "the credential survived the clear",
+    );
+  });
+});

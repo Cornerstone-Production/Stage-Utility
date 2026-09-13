@@ -1347,21 +1347,67 @@ class IntegrationManager {
     // Dropped once, here, for every integration rather than inside the sensource
     // branch: no other id has a key by this name today, and one that grew one
     // would want the same rule. The server's own writes are below this line.
+    //
+    // ONE thing a body may say about it, and it is a COMMAND rather than a
+    // value: `false` means "the operator is turning SafeSpace off". It can only
+    // ever REMOVE the marker, so unlike a writable `true` it cannot manufacture
+    // the warning state, and it never reaches settings.json as a literal.
+    const safeSpaceOff = nonSecretConfig[SAFESPACE_ENABLED_KEY] === false;
     delete nonSecretConfig[SAFESPACE_ENABLED_KEY];
 
-    // Keep the SafeSpace switch beside the id it belongs to. A save that carries
-    // a new id turns it on; a save that empties the field turns it off; a save
-    // that does not mention the field at all leaves it exactly as it was, which
-    // is why this is three cases and not a boolean.
+    // Read here rather than after the config write: the marker decision below
+    // needs to know whether a credential was really stored. A read, so it
+    // changes nothing about the order the writes land in.
+    const existingSecrets = await secretsStore.getSecrets(id);
+    const removed = clearedSecrets.filter((k) => k in existingSecrets);
+
+    // Keep the SafeSpace switch beside the id it belongs to. A save that stores
+    // a new id turns it on; a save that TAKES ONE OUT, or that carries the
+    // explicit off command, turns it off; anything else leaves it exactly as it
+    // was, which is why this is three cases and not a boolean.
     if (id === "sensource") {
-      if (clearedSecrets.includes("safeSpaceId")) {
+      const markerWasOn = state.config[SAFESPACE_ENABLED_KEY] === true;
+      // `removed`, not `clearedSecrets`. An emptied field with nothing stored
+      // behind it is the no-op it is for every other integration, and it has to
+      // be, because the dialog posts one on every save in the restore state:
+      // initialConfig() seeds a password field with the mask only when the state
+      // holds a non-empty string, so with no id stored the field seeds as "",
+      // handleSave sees an unmasked value and sends `safeSpaceId: ""`. An
+      // operator changing only the Vea poll interval was therefore switching
+      // SafeSpace off — the warning, the row message, the Test notice and the
+      // panel notice gone at once, with nothing logged because no secret had
+      // actually been removed. That is the exact failure the marker exists to
+      // prevent, in the exact state it exists for.
+      //
+      // Which leaves "off" needing a gesture of its own: in that state there is
+      // no id left to take out. SafeSpaceIdMissingNotice's button sends the
+      // command above. With an id stored, clearing the FIELD is still the way
+      // off and still lands here.
+      if (safeSpaceOff || removed.includes("safeSpaceId")) {
         // Removed, not set to false — see SAFESPACE_ENABLED_KEY. Before the
         // patch below, so the `merged` it returns does not still carry the key.
         // That is now true of a body carrying the marker as well, because the
         // delete above took it out of `nonSecretConfig` before we got here.
         await settingsStore.removeIntegrationConfigKeys(id, [SAFESPACE_ENABLED_KEY]);
+        // The marker moving on its own has no other trace. `cleared N stored
+        // credential(s)` below covers a real deletion, but the command path
+        // deletes nothing, and an operator looking at /log for why the occupancy
+        // went back to Vea would have found the save and no reason.
+        if (markerWasOn) {
+          console.log(
+            "[integration-manager] SafeSpace switched OFF on sensource " +
+              `(${scrub(safeSpaceOff ? "the operator turned it off" : "the stored space id was cleared")}). ` +
+              "Occupancy falls back to SenSource Vea, which refreshes about every 78 seconds.",
+          );
+        }
       } else if (newSecrets.safeSpaceId) {
         nonSecretConfig[SAFESPACE_ENABLED_KEY] = true;
+        if (!markerWasOn) {
+          console.log(
+            "[integration-manager] SafeSpace switched ON on sensource: a space id is now stored. " +
+              "The id itself lives in secrets.bin and never rides into a config snapshot.",
+          );
+        }
       }
     }
 
@@ -1380,11 +1426,10 @@ class IntegrationManager {
 
     // Persist secrets: merge so unchanged ones survive, and DELETE the ones the
     // operator emptied. Written as one blob rather than key by key, because
-    // secrets.ts re-encrypts the whole file on every save.
-    const existingSecrets = await secretsStore.getSecrets(id);
+    // secrets.ts re-encrypts the whole file on every save. `existingSecrets` and
+    // `removed` are read above, where the SafeSpace marker decision needs them.
     const nextSecrets = { ...existingSecrets, ...newSecrets };
     for (const key of clearedSecrets) delete nextSecrets[key];
-    const removed = clearedSecrets.filter((k) => k in existingSecrets);
     // Only when something actually changed. A save that touches no secret used
     // to rewrite the encrypted blob anyway, and every such write is another
     // window for the concurrent-write race secrets.ts guards against.

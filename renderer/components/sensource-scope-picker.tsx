@@ -30,23 +30,73 @@ import { cn } from "../lib/cn";
  * none is. Three surfaces say this — the /log line, the integration row's
  * message and this — because the first two are transient and this one is beside
  * the field the operator has to retype.
+ *
+ * THE WAY OUT IS A BUTTON, not a save. This block used to say "save with that
+ * field left empty to turn SafeSpace off", and the server obliged — for EVERY
+ * save, because with no id stored the dialog seeds the field as "" and posts
+ * that on every save whatever the operator came to change. So an operator
+ * editing the Vea poll interval switched SafeSpace off by accident, and one who
+ * meant to switch it off could not be told apart from them. Two intents, one
+ * gesture. The server now only reads a save as "off" when a stored id really
+ * went, and the deliberate one is this.
  */
-function SafeSpaceIdMissingNotice({ state }: { state: IntegrationState }) {
+function SafeSpaceIdMissingNotice({
+  state,
+  onStateChange,
+}: {
+  state: IntegrationState;
+  onStateChange: (next: IntegrationState) => void;
+}) {
+  const [turningOff, setTurningOff] = useState(false);
   const on = state.config.safeSpaceEnabled === true;
   const stored = typeof state.config.safeSpaceId === "string" && state.config.safeSpaceId !== "";
   if (!on || stored) return null;
+
+  async function turnOff() {
+    setTurningOff(true);
+    try {
+      // `safeSpaceEnabled: false` is a COMMAND to the server, not a value it
+      // stores — see the marker block in integration-manager.setConfig. It is
+      // the only thing a body may say about this key, and it can only remove.
+      onStateChange(
+        await invoke<IntegrationState>("integrations:setConfig", {
+          id: "sensource",
+          config: { safeSpaceEnabled: false },
+        }),
+      );
+      toast.success("SafeSpace turned off. The occupancy comes from Vea.");
+    } catch (err) {
+      // Surfaced, not swallowed: the notice stays up either way, and without
+      // this the button would read as a control that does nothing.
+      toast.error(`Could not turn SafeSpace off: ${errorMessage(err)}`);
+    } finally {
+      setTurningOff(false);
+    }
+  }
+
   return (
     <div
       data-testid="safespace-id-missing"
       className="flex items-start gap-2 rounded-lg border border-amber-6 bg-amber-2/60 px-3 py-2"
     >
       <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-amber-11" />
-      <span className="text-caption2 text-amber-11">
-        SafeSpace is on but has no space ID. The occupancy is coming from Vea, which refreshes about
-        every 78 seconds instead of every few. A config snapshot never carries the ID — paste it into{" "}
-        <strong className="font-medium">SafeSpace space ID</strong> above, or save with that field
-        left empty to turn SafeSpace off.
-      </span>
+      <div className="flex min-w-0 flex-col items-start gap-2">
+        <span className="text-caption2 text-amber-11">
+          SafeSpace is on but has no space ID. The occupancy is coming from Vea, which refreshes
+          about every 78 seconds instead of every few. A config snapshot never carries the ID —
+          paste it into <strong className="font-medium">SafeSpace space ID</strong> above, or turn
+          SafeSpace off.
+        </span>
+        <Button
+          size="small"
+          variant="filled"
+          disabled={turningOff}
+          onClick={() => void turnOff()}
+          data-testid="safespace-turn-off"
+        >
+          {turningOff ? "Turning off…" : "Turn SafeSpace off"}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -165,7 +215,7 @@ export function SenSourceScopePicker({
 
   return (
     <div className="flex flex-col gap-3">
-      <SafeSpaceIdMissingNotice state={state} />
+      <SafeSpaceIdMissingNotice state={state} onStateChange={onStateChange} />
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-2">
           <span className="flex w-44 shrink-0 items-center gap-1.5 text-caption1 text-gray-11">
