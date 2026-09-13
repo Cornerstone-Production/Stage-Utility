@@ -968,14 +968,21 @@ export async function applySecretMigration(plan: SecretMigration): Promise<void>
   // save, and this can touch several integrations at once.
   await secretsStore.setManySecrets(toStore);
   for (const id of Object.keys(plan.found)) {
-    // Two calls, because a merge cannot delete: the first takes the credential
-    // keys OUT of the file (setting them to null would leave them in the
-    // snapshot as keys, and null is not what "gone" means), the second writes
-    // the SafeSpace marker.
-    await settingsStore.removeIntegrationConfigKeys(id, secretKeysFor(id));
+    // Two calls, because a merge cannot delete — and in THIS order.
+    //
+    // Every step is ordered so that a failure leaves a state the next boot can
+    // still recover from. The secrets are written first, so the value exists in
+    // both places before it exists in only one. The marker is written before the
+    // removal, so a removal that throws leaves the credential still in
+    // settings.json — which is where the next boot looks for it — rather than
+    // gone from the config with nothing recording that SafeSpace was on.
     if (plan.configs[id]?.[SAFESPACE_ENABLED_KEY] === true) {
       await settingsStore.patchIntegrationConfig(id, { [SAFESPACE_ENABLED_KEY]: true });
     }
+    // Removed, not nulled: settings.json rides into every snapshot, and a key
+    // set to null is still a key. This also sweeps a stale mask left by an
+    // older build, which planSecretMigration deliberately refuses to STORE.
+    await settingsStore.removeIntegrationConfigKeys(id, secretKeysFor(id));
   }
 }
 
