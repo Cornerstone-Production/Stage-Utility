@@ -25,7 +25,7 @@ reachable unauthenticated** unless it says otherwise. Four things do gate:
 | | |
 |---|---|
 | **Cross-origin writes** | Any `POST`/`PUT`/`PATCH`/`DELETE` carrying an `Origin` whose hostname is not the request's `Host` is refused `403`. A request with no `Origin` is allowed, and reads are never gated. Ports are ignored so the dev proxy works |
-| **The log** | `/log` and `/api/log` require `?token=…` when `STAGE_UTILITY_LOG_TOKEN` is set, and answer `401` without it. Unset means open |
+| **The log** | `/log` and `/api/log` require `?token=…` when `STAGE_UTILITY_LOG_TOKEN` is set, and answer `401` without it. Unset means open. `/api/prodcom/transcript/raw` — the unredacted transcript — uses the same token and the same failure |
 | **Device enrolment** | `/enroll` authorises a `device` id against the secret that device was issued. An unrecognised device gets a holding screen rather than somebody else's screen |
 | **Cue calls** | `POST /api/cues/:name` always requires `Authorization: Bearer su_…`, browser or not, and answers `401` without one. `POST /api/action/invoke`, the cue token **writes** (mint, revoke), `import-pairs` and `buttons/refresh` require the same token **unless the request is a same-origin browser write** — an `Origin` naming this server, which a browser sends on every `POST`/`DELETE` and a page on any other origin cannot forge. `Sec-Fetch-Site` is not required (browsers send it only to HTTPS or localhost, and this app is plain HTTP on a LAN address), but when present it must say `same-origin`. Reads are open, including the token list and the Home Assistant fragment: a same-origin `GET` sends no `Origin`, and neither carries a secret |
 
@@ -215,7 +215,8 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 |--------|------|---------|
 | GET | `/api/propresenter/thumbnail?k=…` | Live slide thumbnail (JPEG proxy; `k` cache-busts per slide) |
 | GET | `/api/propresenter/status` \| `/api/propresenter/instances` | Latest slide/timer state / every configured instance |
-| GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display) |
+| GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display). Text that matched a ProdCom keyword marked sensitive is already replaced with asterisks; such a line carries `redactions`, the number of hidden runs. Never gated — a display carries no token |
+| GET | `/api/prodcom/transcript/raw` | The same buffer with nothing hidden, for reviewing what a keyword covered up. Token-gated by `STAGE_UTILITY_LOG_TOKEN`, exactly like `/api/log`: unset means open, set means `?token=…` or a `401` |
 | POST | `/api/prodcom/transcript/clear` | Empty the buffer everywhere at once |
 
 **SPL (Smaart) & rundown**

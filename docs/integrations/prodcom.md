@@ -22,9 +22,11 @@ heartbeats (90 s of total silence) means the box is gone, not that the room is
 quiet, so the connection is dropped and reopened. This is the only liveness
 check the WebSocket path needs.
 
-On (re)connect the app primes itself from two REST reads, in this order:
+On (re)connect the app primes itself from REST, in this order:
 
 - `GET /api/v1/channels` for each channel's name and colour, keyed by channel id
+- `GET /api/v1/keywords` and `GET /api/v1/channels/{id}/keywords` for the words
+  ProdCom marks sensitive (see [Sensitive keywords](#sensitive-keywords))
 - `GET /api/v1/transcript?since=…&limit=200&offset=…` for the transcript so far
 
 That transcript endpoint is paginated, mandatorily so, and ascending from the
@@ -82,6 +84,12 @@ The `/log` page has the evidence when something looks wrong:
   `[prodcom] backfill failed after P page(s) (…)` when a page did not answer
 - `[prodcom] backfill skipped N line(s) older than 4h`
 - `[prodcom] channel list unavailable (…)` when colours could not be read
+- `[prodcom] keywords loaded: N global (M sensitive), …` on a change, and
+  `[prodcom] hiding text that matches a keyword marked sensitive …` once per
+  connection the first time anything is actually hidden
+- `[prodcom] keyword list unavailable (…)`, saying whether earlier keywords are
+  still being applied or nothing is being hidden at all
+- `[prodcom] sensitive-keyword redaction turned OFF …` when the setting moves
 - `[prodcom] not captioning "typed" entries — they are not spoken audio`
 - `[prodcom] partial on channel … in progress for Ns` at one minute and every
   five after, `[prodcom] final on channel … with no partial in flight` when a
@@ -89,9 +97,10 @@ The `/log` page has the evidence when something looks wrong:
   channel case), and `[prodcom] transcript cleared by operator` naming every live
   partial and its age when the clear button is pressed
 
-Text is never logged, only its length. `PRODCOM_DEBUG=1` logs every raw
-WebSocket and SSE frame verbatim, which is how to capture the shape of a live
-transcript event.
+Text is never logged, only its length, and neither is any keyword — only counts.
+`PRODCOM_DEBUG=1` logs every raw WebSocket and SSE frame verbatim, which is how
+to capture the shape of a live transcript event; it prints transcript text that
+would otherwise be redacted, so leave it off outside a debugging session.
 
 ## Setup
 
@@ -102,14 +111,54 @@ transcript event.
 **In Stage:** Settings → Integrations → **ProdCom** → enter the **Host** (IP),
 **API Port**, and (only if required) the **API Key**, enable it, and **Test
 connection** — which reads `GET /api/v1/status` and reports the version and
-channel count. The key is stored encrypted (secret key `apiKey`).
+channel count. The key is stored encrypted (secret key `apiKey`). **Hide
+sensitive keywords** is on by default; see
+[Sensitive keywords](#sensitive-keywords).
 
 **On a layout:** add object → **transcription strip**. Options: latest-line vs.
 multi-speaker scrolling feed, max lines, and hide specific channels by name.
 
-## Known gap: sensitive keywords are not redacted
+## Sensitive keywords
 
 ProdCom keywords carry an `isSensitive` flag, and ProdCom replaces matched text
-with asterisks in its own interface. This app renders the transcript raw, so a
-word redacted on the operator's screen still reaches a stage or lobby display in
-full. Nothing here reads the keyword list yet.
+with asterisks in its own interface. This app does the same before a line reaches
+any display, so a word hidden on the operator's screen is not shown in full on a
+stage or lobby wall.
+
+**Matching is ProdCom's, from its own specification.** A keyword's `text` is a
+case-insensitive **substring** — `cast` matches inside `broadcast` — and each
+matched character becomes one asterisk, so the line keeps its length. Global
+keywords apply on every channel; a keyword scoped to a channel applies only
+there. A keyword that is not marked sensitive is ProdCom's own highlight and is
+never hidden here.
+
+Keywords are read on connect and on the same throttled refresh as the channel
+list: `GET /api/v1/keywords` for the global ones, and
+`GET /api/v1/channels/{id}/keywords` per channel. Where a build embeds a
+`keywords` array in the channel record itself, that is used and the per-channel
+request is skipped.
+
+**The keyword list never leaves the server.** Matching happens server-side, not in
+the browser, because a list of flagged words is as sensitive as the transcript
+that contains them — the words are never broadcast, never written to a config
+export, and never logged. Only counts appear on `/log`.
+
+**The buffer keeps the original.** Redaction happens on the way out, so nothing
+is destroyed: a redacted line carries `redactions`, the number of hidden runs,
+and the full text stays readable at `GET /api/prodcom/transcript/raw`. That route
+is gated by `STAGE_UTILITY_LOG_TOKEN` in exactly the way `/log` is — unset means
+open, set means `?token=…` or a `401`.
+
+If the keyword read fails, whatever was loaded before stays loaded and is still
+applied; a transient failure mid-service does not un-redact the displays. On a
+connection where nothing has ever loaded, nothing is hidden, and the log says so.
+
+**Two consequences worth knowing.** A `prodcom.phrase-said` automation trigger
+reads the same broadcast the displays do, so a phrase that is also a sensitive
+keyword stops matching while redaction is on. And `PRODCOM_DEBUG=1` prints every
+raw frame verbatim, transcript text included — it is a debugging escape hatch,
+not something to leave on.
+
+**Turning it off.** Settings → Integrations → **ProdCom** → **Hide sensitive
+keywords**. On by default. Off sends the transcript in full to every display; it
+does not change ProdCom's own redaction, and it never edits your keywords.
