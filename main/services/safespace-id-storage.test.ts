@@ -166,11 +166,14 @@ describe("the boot migration off an upgrading box", () => {
     assert.ok(!after.includes(legacyId), "the legacy space id survived the migration in settings.json");
     assert.ok(!after.includes("safeSpaceId"), "the key itself was emptied rather than removed");
     assert.ok(!(await snapshotText()).includes(legacyId), "the legacy id still rides into a snapshot");
-    assert.equal(
-      JSON.parse(after).integrationConfigs.sensource.safeSpaceEnabled,
-      true,
-      "the switch was not recorded, so SafeSpace comes back off",
-    );
+    // NOT asserted here: that the marker reached disk. The before() hook above
+    // patched `safeSpaceEnabled: true` onto this same store, and
+    // removeIntegrationConfigKeys only takes SECRET keys back out — so the
+    // marker is already in settings.json before applySecretMigration runs, and
+    // an assertion that it is there afterwards passes on the fixture. Deleting
+    // the migration's marker write left this whole file green.
+    // safespace-marker-persist.test.ts starts from its own data dir with no
+    // marker anywhere and is the guard that goes red on it.
   });
 
   test("secrets.bin wins a collision — a stale config copy never overwrites it", async () => {
