@@ -1322,6 +1322,33 @@ class IntegrationManager {
       id,
     );
 
+    // THE MARKER IS DERIVED, SO IT NEVER COMES OFF A REQUEST BODY.
+    //
+    // SAFESPACE_ENABLED_KEY says it is "not a field anyone fills in", and
+    // nothing enforced that: CONFIG_KEY admits the name and RESERVED_KEYS does
+    // not list it, so `foldConfigEntries` put it in the non-secret half and the
+    // patch below wrote whatever a client sent. Three ways that landed, all
+    // driven against a real server:
+    //
+    //   POST {"safeSpaceEnabled":true} on its own — with no id stored anywhere —
+    //   put the box into the permanent "on with no space ID" warning on four
+    //   surfaces until somebody saved the card with the field empty.
+    //
+    //   POST {"safeSpaceEnabled":false} wrote the literal `false` this key's own
+    //   doc forbids, because configuredFor() reads any non-null config value as
+    //   "the operator set this up".
+    //
+    //   POST {"safeSpaceId":"", "safeSpaceEnabled":true} — exactly what a client
+    //   gets back from GET /api/integrations and posts again — deleted the
+    //   credential and then had the patch put the marker straight back, two
+    //   lines after the removal took it out. The comment on that removal claimed
+    //   `merged` could not still carry the key; it could, whenever the body did.
+    //
+    // Dropped once, here, for every integration rather than inside the sensource
+    // branch: no other id has a key by this name today, and one that grew one
+    // would want the same rule. The server's own writes are below this line.
+    delete nonSecretConfig[SAFESPACE_ENABLED_KEY];
+
     // Keep the SafeSpace switch beside the id it belongs to. A save that carries
     // a new id turns it on; a save that empties the field turns it off; a save
     // that does not mention the field at all leaves it exactly as it was, which
@@ -1330,6 +1357,8 @@ class IntegrationManager {
       if (clearedSecrets.includes("safeSpaceId")) {
         // Removed, not set to false — see SAFESPACE_ENABLED_KEY. Before the
         // patch below, so the `merged` it returns does not still carry the key.
+        // That is now true of a body carrying the marker as well, because the
+        // delete above took it out of `nonSecretConfig` before we got here.
         await settingsStore.removeIntegrationConfigKeys(id, [SAFESPACE_ENABLED_KEY]);
       } else if (newSecrets.safeSpaceId) {
         nonSecretConfig[SAFESPACE_ENABLED_KEY] = true;
