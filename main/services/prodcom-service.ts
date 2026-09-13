@@ -258,10 +258,12 @@ function normalizeColor(raw: string | null): string | null {
  * The specification does NOT say how MANY asterisks, and it could not be probed:
  * the live box has no keywords configured at all (global and all 17 channel
  * lists came back empty) and creating one is a write against production gear.
- * So this replaces each matched character with one asterisk — the reading of
- * "replaced with asterisks" that keeps the sentence the same shape and the same
- * length, which is what ProdCom's own UI does with a fixed-width feed. If a box
- * is ever seen doing otherwise, this is the line to change.
+ *
+ * ONE ASTERISK PER MATCHED CHARACTER. Decided by the maintainer on 13 Sep 2026;
+ * this is settled, not an open question. It keeps the sentence the same shape
+ * and the same length, which is what a fixed-width caption feed wants. Do not
+ * change it to a fixed run of asterisks to match some other product: preserving
+ * the character count is the intent.
  *
  * A compiled regex per keyword, built once when the list is loaded rather than
  * per line: the alternative — lower-casing the haystack and using indexOf — is
