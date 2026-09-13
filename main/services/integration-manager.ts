@@ -36,6 +36,9 @@ import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
 import { wirelessManager } from "./wireless-manager.js";
+// One definition of "this is the mask, not a value", shared with the wireless
+// half rather than written a second time here.
+import { isMask } from "./wireless-credentials.js";
 
 // PCO integration descriptor.
 const PCO_DESCRIPTOR: IntegrationDescriptor = {
@@ -732,9 +735,10 @@ export function foldConfigEntries(
   entries: Record<string, unknown>,
   secretKeys: readonly string[],
   id = "?",
-): { config: Record<string, unknown>; secrets: Record<string, string> } {
+): { config: Record<string, unknown>; secrets: Record<string, string>; clearedSecrets: string[] } {
   const config: Record<string, unknown> = Object.create(null);
   const secrets: Record<string, string> = Object.create(null);
+  const clearedSecrets: string[] = [];
   for (const [rawKey, value] of Object.entries(entries)) {
     if (!CONFIG_KEY.test(rawKey) || RESERVED_KEYS.has(rawKey)) {
       // `rawKey` is a key straight off an HTTP body: POST /api/integrations/:id/config
@@ -752,13 +756,29 @@ export function foldConfigEntries(
     // list, both already done, on a null-prototype object.
     const key = rawKey;
     if (secretKeys.includes(key)) {
-      // Only update the secret if the caller provided a real value (not the mask).
-      if (value !== "••••" && value !== "") secrets[key] = String(value);
+      // THREE cases, and the middle one used to be missing.
+      //
+      // A MASK means "leave it alone" — the dialog posts back what it was shown.
+      // Matched on any run of bullets rather than the exact four this file
+      // writes, for the reason wireless-credentials.isMask spells out: the panel
+      // renders its own longer "••••••••", and a client echoing that back would
+      // have stored a row of bullets AS the credential.
+      //
+      // An EMPTY STRING is the operator clearing the field, and it was silently
+      // ignored — so no integration secret could be removed from the dialog at
+      // all. A PCO token, an OBS password or a SafeSpace space id could be
+      // entered and never taken back out, with the form showing an empty field
+      // and the server still holding the value. That is exactly the bug
+      // wireless-credentials.mergeSecrets was rewritten to fix ("an empty string
+      // is an explicit clear"), and this is the other copy of it.
+      if (isMask(value)) continue;
+      if (value === "") clearedSecrets.push(key);
+      else secrets[key] = String(value);
     } else {
       config[key] = value;
     }
   }
-  return { config, secrets };
+  return { config, secrets, clearedSecrets };
 }
 
 /**
@@ -1127,7 +1147,11 @@ class IntegrationManager {
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
     const secretKeys = secretKeysFor(id);
-    const { config: nonSecretConfig, secrets: newSecrets } = foldConfigEntries(config, secretKeys, id);
+    const { config: nonSecretConfig, secrets: newSecrets, clearedSecrets } = foldConfigEntries(
+      config,
+      secretKeys,
+      id,
+    );
 
     // Persist non-secret config.
     //
@@ -1142,10 +1166,28 @@ class IntegrationManager {
     // back off a second load() is the other half of the same race.
     const merged = await settingsStore.patchIntegrationConfig(id, nonSecretConfig);
 
-    // Persist secrets (merge with existing so unchanged ones survive).
-    if (Object.keys(newSecrets).length > 0) {
-      const existing = await secretsStore.getSecrets(id);
-      await secretsStore.setSecrets(id, { ...existing, ...newSecrets });
+    // Persist secrets: merge so unchanged ones survive, and DELETE the ones the
+    // operator emptied. Written as one blob rather than key by key, because
+    // secrets.ts re-encrypts the whole file on every save.
+    const existingSecrets = await secretsStore.getSecrets(id);
+    const nextSecrets = { ...existingSecrets, ...newSecrets };
+    for (const key of clearedSecrets) delete nextSecrets[key];
+    const removed = clearedSecrets.filter((k) => k in existingSecrets);
+    // Only when something actually changed. A save that touches no secret used
+    // to rewrite the encrypted blob anyway, and every such write is another
+    // window for the concurrent-write race secrets.ts guards against.
+    const secretsChanged =
+      removed.length > 0 || Object.entries(newSecrets).some(([k, v]) => existingSecrets[k] !== v);
+    if (secretsChanged) {
+      await secretsStore.setSecrets(id, nextSecrets);
+      // Field NAMES, never values. Clearing a credential is an operator decision
+      // with no other trace — the field simply reads empty afterwards, which is
+      // also what it read while the value was still stored.
+      if (removed.length > 0) {
+        console.log(
+          `[integration-manager] cleared ${scrub(removed.length)} stored credential(s) on ${scrub(id)}: ${scrub(removed.join(", "))}`,
+        );
+      }
     }
 
     // Rebuild masked config for state.
