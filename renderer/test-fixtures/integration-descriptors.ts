@@ -171,6 +171,17 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "label": "API Key",
         "type": "password",
         "placeholder": "(only if Require Authentication is on)"
+      },
+      {
+        "key": "redactSensitive",
+        "label": "Hide sensitive keywords",
+        "type": "select",
+        "default": "on",
+        "options": [
+          { "value": "on", "label": "On" },
+          { "value": "off", "label": "Off" }
+        ],
+        "help": "ProdCom keywords marked sensitive are replaced with asterisks before a line is sent to any display. Only affects what THIS app shows — ProdCom's own redaction is unchanged, and the setting does not edit your keywords. The unredacted transcript stays readable at /api/prodcom/transcript/raw, which is gated by STAGE_UTILITY_LOG_TOKEN the same way /log is."
       }
     ]
   },
