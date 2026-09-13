@@ -22,7 +22,7 @@ import { providerRegistry } from "../providers/registry.js";
 // the whole server-side provider graph. Re-exported rather than moved out of
 // sight: this file's callers and its own test read `MASK` from here.
 export { MASK, isMask } from "./mask.js";
-import { MASK, isMask } from "./mask.js";
+import { MASK, hasSecretValue, isBlankSecret, isMask } from "./mask.js";
 
 /** Which config keys for this provider hold a credential. */
 export function credentialKeys(providerId: string): string[] {
@@ -66,7 +66,7 @@ export function splitConfig(config: Record<string, unknown>): {
     const value = safe[key];
     delete safe[key];
     // The mask is not a value — it is the UI saying "unchanged". Never store it.
-    if (typeof value === "string" && value !== "" && !isMask(value)) secret[key] = value;
+    if (hasSecretValue(value) && !isMask(value)) secret[key] = value;
   }
   return { safe, secret };
 }
@@ -88,7 +88,7 @@ export function publicConfig(
   const { safe } = splitConfig(config);
   for (const key of credentialKeys(providerId)) {
     const value = config[key];
-    safe[key] = typeof value === "string" && value !== "" ? MASK : "";
+    safe[key] = hasSecretValue(value) ? MASK : "";
   }
   return safe;
 }
@@ -118,7 +118,7 @@ export function mergeSecrets(
     if (!(key in incoming)) continue;
     const value = incoming[key];
     if (isMask(value)) continue; // unchanged
-    if (value === "") delete next[key]; // explicit clear
+    if (isBlankSecret(value)) delete next[key]; // explicit clear — whitespace is empty
     else if (typeof value === "string") next[key] = value;
   }
   return next;

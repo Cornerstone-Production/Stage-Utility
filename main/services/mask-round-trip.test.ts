@@ -22,7 +22,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { MASK, FORM_MASK, isMask, isSecretStored } from "./mask.js";
+import { MASK, FORM_MASK, isMask, isSecretStored, isBlankSecret, hasSecretValue } from "./mask.js";
+import { mergeSecrets, publicConfig, splitConfig } from "./wireless-credentials.js";
 import { foldConfigEntries } from "./integration-manager.js";
 
 const SECRETS = ["password", "apiToken"];
@@ -68,5 +69,83 @@ describe("what the form sends back", () => {
   test("a real value is still stored, so none of the above passes by refusing everything", () => {
     const { secrets } = foldConfigEntries({ password: "hunter2" }, SECRETS, "test");
     assert.equal(secrets.password, "hunter2");
+  });
+});
+
+describe("whitespace in a credential field is an empty field", () => {
+  // GUARD. `value === ""` decided this in seven places while every reader used
+  // `value?.trim() || null`, so one field had two answers. POST
+  // {"config":{"safeSpaceId":"   "}} against a real server stored three spaces,
+  // masked them as "••••" — which sensource-scope-picker reads as "an ID is
+  // stored", so the notice went quiet — while getSensourceConfig trimmed the
+  // same value to null and logged "SafeSpace is switched on but no space ID is
+  // stored". The one surface that stays put beside the field the operator has to
+  // retype was the one that said nothing.
+  for (const blank of ["   ", "\t", "\n", " \t\n "]) {
+    test(`${JSON.stringify(blank)} clears the field rather than becoming the credential`, () => {
+      const { secrets, clearedSecrets } = foldConfigEntries({ password: blank }, SECRETS, "test");
+      assert.deepEqual(
+        { ...secrets },
+        {},
+        "whitespace was stored as a credential. It masks as a stored value on every surface " +
+          "that checks truthiness and reads as absent on every surface that trims",
+      );
+      assert.deepEqual(clearedSecrets, ["password"], "the operator emptied the field and nothing said so");
+    });
+  }
+
+  test("but a value that merely HAS whitespace keeps every character", () => {
+    // The emptiness decision only. A password may legitimately begin or end with
+    // a space, and silently trimming one breaks a working login with nothing on
+    // screen to explain it.
+    const { secrets } = foldConfigEntries({ password: "  hunter2  " }, SECRETS, "test");
+    assert.equal(secrets.password, "  hunter2  ", "the stored credential was trimmed");
+  });
+
+  test("the two predicates agree on every case, in both directions", () => {
+    for (const v of ["   ", "", "\t"]) {
+      assert.equal(isBlankSecret(v), true, `${JSON.stringify(v)} is not an empty field`);
+      assert.equal(hasSecretValue(v), false, `${JSON.stringify(v)} counts as a stored credential`);
+    }
+    for (const v of ["x", " x ", MASK]) {
+      assert.equal(isBlankSecret(v), false);
+      assert.equal(hasSecretValue(v), true);
+    }
+    // A NON-STRING is neither. Folding it in as "blank" would make
+    // POST {"password":null} delete a working credential.
+    for (const v of [null, undefined, 42, {}, []] as unknown[]) {
+      assert.equal(isBlankSecret(v), false, `${String(v)} would clear a stored credential`);
+      assert.equal(hasSecretValue(v), false, `${String(v)} would mask as a stored credential`);
+    }
+  });
+
+  // Sennheiser Spectera is the one wireless provider that declares a password.
+  const SPECTERA = "sennheiser-spectera";
+
+  test("the wireless fold, the other copy of this decision, agrees", () => {
+    assert.deepEqual(
+      mergeSecrets(SPECTERA, { password: "   " }, { password: "real-password" }),
+      {},
+      "a whitespace-only password left the real one stored, masked and unreachable",
+    );
+    assert.deepEqual(
+      mergeSecrets(SPECTERA, { password: null }, { password: "real-password" }),
+      { password: "real-password" },
+      "a non-string deleted the stored password",
+    );
+  });
+
+  test("and neither the wireless split nor its mask calls a whitespace value 'stored'", () => {
+    assert.equal(
+      publicConfig(SPECTERA, { password: "   ", host: "192.0.2.10" }).password,
+      "",
+      "GET /api/wireless/connections showed a mask over three spaces",
+    );
+    assert.equal(publicConfig(SPECTERA, { password: "real", host: "192.0.2.10" }).password, MASK);
+    assert.equal(
+      splitConfig({ password: "   ", host: "192.0.2.10" }).secret.password,
+      undefined,
+      "whitespace was written into the encrypted store as a base-station password",
+    );
   });
 });

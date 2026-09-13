@@ -36,9 +36,10 @@ import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
 import { wirelessManager } from "./wireless-manager.js";
-// One definition of "this is the mask, not a value", shared with the wireless
-// half rather than written a second time here.
-import { isMask, MASK } from "./mask.js";
+// One definition of "this is the mask, not a value" and "is there anything in
+// this field", shared with the wireless half and the renderer rather than
+// written again here. A leaf module, so the panels can import it too.
+import { hasSecretValue, isBlankSecret, isMask, MASK } from "./mask.js";
 
 // PCO integration descriptor.
 const PCO_DESCRIPTOR: IntegrationDescriptor = {
@@ -772,7 +773,11 @@ export function foldConfigEntries(
       // wireless-credentials.mergeSecrets was rewritten to fix ("an empty string
       // is an explicit clear"), and this is the other copy of it.
       if (isMask(value)) continue;
-      if (value === "") clearedSecrets.push(key);
+      // A field holding only whitespace is an EMPTY field — see isBlankSecret.
+      // `value === ""` here while getSensourceConfig read the same slot through
+      // `.trim() || null` is how one save produced a stored "   " that the panel
+      // read as an ID and the log read as none.
+      if (isBlankSecret(value)) clearedSecrets.push(key);
       else if (typeof value === "string") secrets[key] = value;
       else {
         // NOT String(value), which is what this did. `String(null)` is "null",
@@ -948,7 +953,7 @@ export function planSecretMigration(
       // A mask is not a value: an older build wrote "••••" into settings.json
       // for a slot whose real value was already in secrets.bin, and storing that
       // would replace the credential with a row of bullets.
-      return typeof v === "string" && v !== "" && !isMask(v);
+      return hasSecretValue(v) && !isMask(v);
     });
     if (keys.length === 0) continue;
     const values: Record<string, string> = {};
@@ -1065,7 +1070,7 @@ class IntegrationManager {
       // Merge saved non-secret config with any secret keys (masked).
       const maskedConfig: Record<string, unknown> = { ...savedConfig };
       for (const key of secretKeysFor(descriptor.id)) {
-        maskedConfig[key] = secrets[key] ? MASK : "";
+        maskedConfig[key] = hasSecretValue(secrets[key]) ? MASK : "";
       }
 
       this.states.set(descriptor.id, {
@@ -1475,7 +1480,10 @@ class IntegrationManager {
     const allSecrets = await secretsStore.getSecrets(id);
     const maskedConfig: Record<string, unknown> = { ...merged };
     for (const key of secretKeys) {
-      maskedConfig[key] = allSecrets[key] ? MASK : "";
+      // isBlankSecret, not truthiness: a whitespace-only value already on disk
+      // from an older build would otherwise mask as a stored credential on every
+      // surface that reads this, while every reader that trims saw none.
+      maskedConfig[key] = hasSecretValue(allSecrets[key]) ? MASK : "";
     }
 
     this.states.set(id, { ...state, config: maskedConfig });

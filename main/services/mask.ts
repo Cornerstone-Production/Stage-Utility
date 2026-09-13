@@ -52,3 +52,40 @@ export function isMask(value: unknown): boolean {
 export function isSecretStored(value: unknown): boolean {
   return isMask(value);
 }
+
+/**
+ * Is there nothing in this credential field?
+ *
+ * WHITESPACE IS NOTHING. This was `value === ""` in seven places and
+ * `value?.trim() || null` in the readers, so one field had two different answers
+ * to the same question: `POST {"safeSpaceId":"   "}` stored three spaces, masked
+ * as `"••••"` — which the SenSource panel reads as "an ID is stored", so the
+ * notice went quiet — while getSensourceConfig trimmed the same value to null
+ * and logged "SafeSpace is switched on but no space ID is stored". The one
+ * surface that stays put beside the field the operator has to retype was the one
+ * that said nothing.
+ *
+ * THE EMPTINESS DECISION ONLY. Nothing trims the stored value: a password may
+ * legitimately begin or end with a space, and silently trimming one would break
+ * a working login with nothing on screen to explain it. A field holding ONLY
+ * whitespace is different — no credential this app handles is three spaces, and
+ * a blank field and a whitespace field render identically anyway, so treating
+ * them alike is the only way the UI can be honest about either.
+ *
+ * A NON-STRING IS NEITHER blank nor present. It is junk, and the fold rejects
+ * it and leaves the stored credential alone — see foldConfigEntries. Folding
+ * `null` in here as "blank" would make POST {"password":null} delete a working
+ * password, which is the same bug from the other side.
+ */
+// Type guards: both answer "yes" only for a string, so a caller that stores the
+// value keeps its narrowing instead of casting it back.
+export function isBlankSecret(value: unknown): value is string {
+  return typeof value === "string" && value.trim() === "";
+}
+
+/** Is there a real credential in this value? The question every mask asks —
+ *  see {@link isBlankSecret} for why whitespace does not count and why a
+ *  non-string is not a credential either. */
+export function hasSecretValue(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
