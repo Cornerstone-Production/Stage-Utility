@@ -1,4 +1,5 @@
 import { errorMessage } from "@main/services/errors";
+import { isSecretStored } from "@main/services/mask";
 import { invoke } from "../lib/api";
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -49,7 +50,7 @@ function SafeSpaceIdMissingNotice({
 }) {
   const [turningOff, setTurningOff] = useState(false);
   const on = state.config.safeSpaceEnabled === true;
-  const stored = typeof state.config.safeSpaceId === "string" && state.config.safeSpaceId !== "";
+  const stored = isSecretStored(state.config.safeSpaceId);
   if (!on || stored) return null;
 
   async function turnOff() {

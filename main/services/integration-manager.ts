@@ -38,7 +38,7 @@ import { type TslFeed, tslService } from "./tsl-service.js";
 import { wirelessManager } from "./wireless-manager.js";
 // One definition of "this is the mask, not a value", shared with the wireless
 // half rather than written a second time here.
-import { isMask } from "./wireless-credentials.js";
+import { isMask, MASK } from "./mask.js";
 
 // PCO integration descriptor.
 const PCO_DESCRIPTOR: IntegrationDescriptor = {
@@ -760,8 +760,8 @@ export function foldConfigEntries(
       //
       // A MASK means "leave it alone" — the dialog posts back what it was shown.
       // Matched on any run of bullets rather than the exact four this file
-      // writes, for the reason wireless-credentials.isMask spells out: the panel
-      // renders its own longer "••••••••", and a client echoing that back would
+      // writes, for the reason mask.isMask spells out: the panel seeds its
+      // fields with the longer FORM_MASK, and a client echoing that back would
       // have stored a row of bullets AS the credential.
       //
       // An EMPTY STRING is the operator clearing the field, and it was silently
@@ -1065,7 +1065,7 @@ class IntegrationManager {
       // Merge saved non-secret config with any secret keys (masked).
       const maskedConfig: Record<string, unknown> = { ...savedConfig };
       for (const key of secretKeysFor(descriptor.id)) {
-        maskedConfig[key] = secrets[key] ? "••••" : "";
+        maskedConfig[key] = secrets[key] ? MASK : "";
       }
 
       this.states.set(descriptor.id, {
@@ -1475,7 +1475,7 @@ class IntegrationManager {
     const allSecrets = await secretsStore.getSecrets(id);
     const maskedConfig: Record<string, unknown> = { ...merged };
     for (const key of secretKeys) {
-      maskedConfig[key] = allSecrets[key] ? "••••" : "";
+      maskedConfig[key] = allSecrets[key] ? MASK : "";
     }
 
     this.states.set(id, { ...state, config: maskedConfig });
