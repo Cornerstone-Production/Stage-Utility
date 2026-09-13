@@ -446,7 +446,7 @@ function streamEndpointOf(name: string | null): string | null {
  * shows one. Dropping them here is also what keeps reason 4 above hypothetical:
  * nothing that is not advancing reaches a browser at all.
  */
-export function proTimersFrom(timers: unknown): ProTimer[] {
+function proTimersFrom(timers: unknown): ProTimer[] {
   if (!Array.isArray(timers)) return [];
   return timers
     .map((t) => ({
