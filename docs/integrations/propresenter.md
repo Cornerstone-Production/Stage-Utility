@@ -135,5 +135,13 @@ and never blocks the editor from opening; when more than one is configured, a
 name only some of them have is marked `DOORS (MA only)`. A macro already chosen
 on a rule is shown whether or not the machine holding it is reachable.
 
+Changing an instance's host or port drops its cached list immediately, so a
+repointed instance never offers the previous machine's macros. A list that was
+mid-read when the change landed is discarded rather than cached, and says so:
+
+```
+[propresenter] macro list from 192.168.0.123:1025 discarded — the instance was reconfigured while it was being read
+```
+
 With **Simulate mode** on, the action reports what it would trigger and contacts
 nothing — a rule can be written and tested with the booth machine off.

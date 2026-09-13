@@ -42,13 +42,39 @@ const MACROS = [
   { id: { uuid: "u-3", name: "Kids Worship", index: 2 } },
 ];
 
+/** A SECOND booth machine, with its own macros — the one an operator repoints
+ *  the instance at. The whole point is that its list shares no name with the
+ *  first, so serving the wrong machine's is unmistakable. */
+const OTHER_MACROS = [{ id: { uuid: "u-9", name: "CHAPEL LIGHTS", index: 0 } }];
+
 let server: http.Server;
 let port = 0;
+let otherServer: http.Server;
+let otherPort = 0;
+
+/** Park `/v1/macros` instead of answering it, so a case can hold a read in
+ *  flight across a reconfigure. */
+let holdMacros = false;
+let heldMacros: http.ServerResponse[] = [];
+
+/** Answer every parked macro read, letting the listMacros behind it resume. */
+function releaseMacros(): void {
+  const parked = heldMacros;
+  heldMacros = [];
+  for (const res of parked) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(MACROS));
+  }
+}
 
 before(async () => {
   server = http.createServer((req, res) => {
     seen.push(req.url ?? "");
     if (req.url === "/v1/macros") {
+      if (holdMacros) {
+        heldMacros.push(res);
+        return;
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(MACROS));
       return;
@@ -60,10 +86,25 @@ before(async () => {
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   port = (server.address() as { port: number }).port;
+
+  otherServer = http.createServer((req, res) => {
+    if (req.url === "/v1/macros") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(OTHER_MACROS));
+      return;
+    }
+    res.writeHead(204);
+    res.end();
+  });
+  await new Promise<void>((r) => otherServer.listen(0, "127.0.0.1", r));
+  otherPort = (otherServer.address() as { port: number }).port;
 });
 
 after(() => {
+  for (const res of heldMacros) res.destroy();
+  heldMacros = [];
   server.close();
+  otherServer.close();
 });
 
 /** A configured, STOPPED primary instance: `configure` starts the poll, and a
@@ -204,6 +245,71 @@ describe("propresenterService.listMacros", () => {
     const r = await propresenterService.listMacros();
     assert.deepEqual(r.names, []);
     assert.match(r.error ?? "", /not configured/);
+  });
+
+  // ── A cache that must not outlive its machine ──────────────────────────────
+  //
+  // The cache is keyed by nothing: it is a field on the instance, and the
+  // instance is what gets repointed. Both halves of that are below — the cache
+  // surviving a reconfigure, and a read in flight ACROSS one writing the old
+  // machine's names back over it afterwards. Neither is reachable by clearing
+  // the cache in the test helper, so neither uses `configured()`.
+
+  it("a reconfigure to a different machine does not serve the old one's macros", async () => {
+    // The failure this is for: an operator repoints the integration at the other
+    // booth machine, opens a rule within thirty seconds, and picks a macro off a
+    // list that belongs to the machine they just stopped using. It then 404s on
+    // a Sunday morning.
+    propresenterService.configure("127.0.0.1", port);
+    propresenterService.stop();
+    clearMacroCache();
+    const before = await propresenterService.listMacros();
+    assert.deepEqual(before.names, ["DOORS", "SONG INTRO", "Kids Worship"]);
+
+    // Repointed, and asked again at once — well inside MACRO_CACHE_MS. Nothing
+    // clears the cache here; teardown() has to.
+    propresenterService.configure("127.0.0.1", otherPort);
+    propresenterService.stop();
+    const after = await propresenterService.listMacros();
+    assert.deepEqual(
+      after.names,
+      ["CHAPEL LIGHTS"],
+      `the previous machine's macro list survived the reconfigure: ${JSON.stringify(after.names)}`,
+    );
+  });
+
+  it("a reconfigure INSIDE the read discards the answer rather than caching it", async () => {
+    // The half teardown() alone cannot close. The read is already in flight when
+    // the reconfigure lands, so teardown() clears a cache that the resuming
+    // continuation then fills straight back in — with the old machine's names,
+    // and with a fresh thirty-second lease on them.
+    propresenterService.configure("127.0.0.1", port);
+    propresenterService.stop();
+    clearMacroCache();
+
+    holdMacros = true;
+    const inFlight = propresenterService.listMacros();
+    await new Promise((r) => setTimeout(r, 30)); // let the read reach the stub
+    assert.equal(heldMacros.length, 1, "the macro read never reached the stub");
+
+    // The repoint, landing inside the round trip.
+    propresenterService.configure("127.0.0.1", otherPort);
+    propresenterService.stop();
+    holdMacros = false;
+    releaseMacros();
+
+    const abandoned = await inFlight;
+    assert.deepEqual(abandoned.names, [], "the old machine's names were returned to the editor");
+    assert.match(abandoned.error ?? "", /reconfigured/);
+
+    // And nothing was cached: the next open reads the machine it is now pointed
+    // at, rather than answering from what the abandoned read left behind.
+    const next = await propresenterService.listMacros();
+    assert.deepEqual(
+      next.names,
+      ["CHAPEL LIGHTS"],
+      `the abandoned read poisoned the cache: ${JSON.stringify(next.names)}`,
+    );
   });
 });
 

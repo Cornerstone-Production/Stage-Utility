@@ -599,7 +599,22 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   /** Has the run that captured `epoch` been stopped or superseded? Checked after
    *  every await, because `running` alone cannot see a restart. */
   private stale(epoch: number): boolean {
-    return !this.running || epoch !== this.epoch;
+    return !this.running || this.superseded(epoch);
+  }
+
+  /**
+   * The counter half of `stale()`, WITHOUT the `running` check — "has this
+   * instance been reconfigured or torn down since I captured the epoch", asked by
+   * work that is legitimate on an instance that is not running.
+   *
+   * listMacros is the only such caller and needs exactly this: the rule editor
+   * asks every CONFIGURED instance (`hasTarget`), and an instance whose
+   * integration is switched off is still configured, so `stale()` would report
+   * every one of its reads as abandoned and the editor would never list its
+   * macros at all.
+   */
+  private superseded(epoch: number): boolean {
+    return epoch !== this.epoch;
   }
 
   /**
@@ -624,6 +639,13 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     this.playlistItems = [];
     this.playlistRetryAt = 0;
     this.playlistFailures = 0;
+    // And the macro names, for the same reason one line up and a worse
+    // consequence. teardown() runs on every configure(), so repointing this
+    // instance at a DIFFERENT booth machine would otherwise keep serving the
+    // previous machine's macro list for the rest of MACRO_CACHE_MS: an operator
+    // who changes the host and opens a rule sees macros that do not exist on the
+    // new machine, picks one, and gets a 404 at the worst possible moment.
+    this.macroCache = null;
     this.closeStream();
     this.frames = { active: null, slide: null, slideIndex: null, playlistActive: null, timers: null };
     // Re-probe the subscription on the next start(). An operator who upgrades
@@ -691,16 +713,34 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
    *
    * A failure comes back on `error` rather than as a throw — the caller has to
    * be able to answer the editor with a list either way.
+   *
+   * The cache is dropped by teardown(), so it cannot outlive the machine it was
+   * read from, and the read itself is epoch-guarded so a reconfigure landing
+   * INSIDE the round trip cannot write the old machine's names back over the
+   * cache teardown() just cleared. `superseded` rather than `stale`: this is
+   * legitimate work on an instance that is configured but not running.
    */
   async listMacros(): Promise<MacroListResult> {
     const { host, port } = this;
     if (!host || !port) return { names: [], error: "ProPresenter is not configured" };
+    const epoch = this.epoch;
     const now = Date.now();
     if (this.macroCache && now - this.macroCache.at < MACRO_CACHE_MS) {
       return { names: this.macroCache.names, error: null };
     }
     try {
       const body = await getJson(host, port, "/v1/macros");
+      // Answered — but by `host`, which this instance may no longer be pointed
+      // at. Returning these names would be the same lie the stale cache told,
+      // one round trip wide instead of thirty seconds, so it is a returned
+      // failure and nothing is cached. The next open reads the new machine.
+      if (this.superseded(epoch)) {
+        console.warn(
+          `[propresenter] macro list from ${host}:${port} discarded — ` +
+            "the instance was reconfigured while it was being read",
+        );
+        return { names: [], error: "ProPresenter was reconfigured while its macros were being read" };
+      }
       const names = Array.isArray(body)
         ? body.map((m) => asString(pick(m, "id", "name"))).filter((n): n is string => !!n)
         : [];
