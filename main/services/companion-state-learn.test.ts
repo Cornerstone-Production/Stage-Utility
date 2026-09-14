@@ -38,25 +38,23 @@ import {
   pickCandidate,
   shouldProbe,
   type LearningState,
+  type Observation,
 } from "./companion-state-learn.js";
 import { STATE_SOURCES, learnableConnections } from "./companion-state-source.js";
 import type { ExportConnection } from "./companion-state-source.js";
 
 /** A press's readings, with everything unmentioned unchanged. */
-function press(
-  want: "on" | "off",
-  moves: Record<string, [string, string]>,
-): { want: "on" | "off"; before: Record<string, string>; after: Record<string, string> } {
-  const before: Record<string, string> = {};
-  const after: Record<string, string> = {};
+function press(want: "on" | "off", moves: Record<string, [string, string]>): Observation {
+  const before = new Map<string, string>();
+  const after = new Map<string, string>();
   for (const [ref, [from, to]] of Object.entries(moves)) {
-    before[ref] = from;
-    after[ref] = to;
+    before.set(ref, from);
+    after.set(ref, to);
   }
   return { want, before, after };
 }
 
-const fresh: LearningState = { attempts: 0, observed: {} };
+const fresh: LearningState = { attempts: 0, observed: new Map() };
 
 describe("the candidate names", () => {
   test("include every name the verified table knows", () => {
@@ -261,7 +259,7 @@ describe("observing a press", () => {
       candidates,
     );
     assert.equal(second.binding, null);
-    assert.deepEqual(second.state.observed["Rack:state"], { on: "press", values: ["press"] });
+    assert.deepEqual(second.state.observed.get("Rack:state"), { on: "press", values: ["press"] });
   });
 
   test("does NOT bind a candidate that took a third value", () => {
@@ -284,7 +282,7 @@ describe("observing a press", () => {
       candidates,
     );
     assert.equal(third.binding, null, "three values is not a two-state variable");
-    assert.deepEqual(third.state.observed["Rack:state"]?.values, ["Warming", "Standby", "Active"]);
+    assert.deepEqual(third.state.observed.get("Rack:state")?.values, ["Warming", "Standby", "Active"]);
   });
 
   test("does NOT bind a candidate whose two directions read the same value", () => {
@@ -302,8 +300,8 @@ describe("observing a press", () => {
   test("treats a candidate that could not be read as no evidence", () => {
     // An unreachable Companion mid-window must not make a moving candidate look
     // static, and must not make a static one look like it moved.
-    const outcome = observePress(fresh, { want: "on", before: {}, after: {} }, candidates);
-    assert.deepEqual(outcome.state.observed, {});
+    const outcome = observePress(fresh, { want: "on", before: new Map(), after: new Map() }, candidates);
+    assert.deepEqual([...outcome.state.observed], []);
     assert.equal(outcome.state.attempts, 1, "the press is still spent");
   });
 
@@ -348,7 +346,7 @@ describe("observing a press", () => {
     const second = observePress(first.state, press("off", { "Rack:power": ["1", "0"] }), [
       "Rack:power",
     ]);
-    assert.deepEqual(Object.keys(second.state.observed), ["Rack:power"]);
+    assert.deepEqual([...second.state.observed.keys()], ["Rack:power"]);
     assert.equal(second.binding, null);
   });
 
@@ -382,7 +380,7 @@ describe("the stored form", () => {
   test("round-trips through the params", () => {
     const state: LearningState = {
       attempts: 1,
-      observed: { "R:state": { on: "Active", values: ["Active"] } },
+      observed: new Map([["R:state", { on: "Active", values: ["Active"] }]]),
       probedAt: "2026-09-10T12:00:00.000Z",
     };
     const params = learningParams(["R:state", "R:power"], state);
@@ -398,18 +396,18 @@ describe("the stored form", () => {
     // held.
     const state: LearningState = {
       attempts: 1,
-      observed: { "R:state": { on: "Rec, paused", off: "Idle", values: ["Rec, paused", "Idle"] } },
+      observed: new Map([["R:state", { on: "Rec, paused", off: "Idle", values: ["Rec, paused", "Idle"] }]]),
     };
     assert.deepEqual(parseLearning(learningParams(["R:state"], state)), state);
   });
 
   test("reads a hand-mangled value as nothing learned rather than throwing", () => {
-    assert.deepEqual(parseLearning({ stateLearning: "{not json" }), { attempts: 0, observed: {} });
-    assert.deepEqual(parseLearning({ stateLearning: "[]" }), { attempts: 0, observed: {} });
-    assert.deepEqual(parseLearning({}), { attempts: 0, observed: {} });
+    assert.deepEqual(parseLearning({ stateLearning: "{not json" }), { attempts: 0, observed: new Map() });
+    assert.deepEqual(parseLearning({ stateLearning: "[]" }), { attempts: 0, observed: new Map() });
+    assert.deepEqual(parseLearning({}), { attempts: 0, observed: new Map() });
     assert.deepEqual(parseLearning({ stateLearning: '{"attempts":"lots","stopped":"maybe"}' }), {
       attempts: 0,
-      observed: {},
+      observed: new Map(),
     });
   });
 
@@ -426,7 +424,7 @@ describe("the stored form", () => {
     // old value, so "learn again" would keep the observations it is meant to
     // forget.
     assert.deepEqual(learnAgainParams(), { stateCandidates: "", stateLearning: "" });
-    assert.deepEqual(parseLearning(learnAgainParams()).observed, {});
+    assert.deepEqual([...parseLearning(learnAgainParams()).observed], []);
     assert.equal(parseLearning(learnAgainParams()).stopped, undefined);
   });
 });
@@ -434,7 +432,7 @@ describe("the stored form", () => {
 describe("whether to probe", () => {
   const hour = 60 * 60 * 1000;
   const at = (state: Partial<LearningState>) =>
-    learningParams([], { attempts: 0, observed: {}, ...state });
+    learningParams([], { attempts: 0, observed: new Map(), ...state });
 
   test("probes a pair nothing is known about", () => {
     assert.equal(shouldProbe({}, 1_000_000, hour), true);
@@ -472,5 +470,92 @@ describe("what the editor says", () => {
       learningHint(["R:state"]),
       "Learning: watching 1 candidate; press the pair on and off once to bind",
     );
+  });
+});
+
+// ── A candidate ref that is a key on Object.prototype ────────────────────────
+//
+// COMPANION_VARIABLE_RE is `[A-Za-z0-9_.-]`, so `__proto__` and `constructor`
+// are both names Companion will accept for a custom variable and both pass
+// isCompanionVariableRef — a grammar check is NOT what keeps them out. The
+// stored candidate list and the stored observations are both read back out of
+// automation-rules.json, so a restored archive or a hand edit puts either one
+// straight into the key space these objects are indexed by.
+//
+// On a plain record the two fail differently and neither says anything:
+//
+//   observed["__proto__"] = entry   sets the PROTOTYPE. The candidate is not in
+//                                   the object at all, so nothing it ever did is
+//                                   remembered and the pair never learns.
+//   observed["constructor"]         reads back the Object FUNCTION, whose
+//                                   `.values` is a static method — so
+//                                   `entry.values.includes(after)` is
+//                                   "entry.values.includes is not a function",
+//                                   thrown out of a settle-window timer callback
+//                                   with nobody to catch it.
+describe("a candidate ref that is a key on Object.prototype", () => {
+  /**
+   * One candidate's movement, built WITHOUT a source object literal.
+   *
+   * `{ __proto__: [...] }` in a literal sets the object's prototype rather than
+   * adding a key — the same trap this whole describe is about, one level up in
+   * the test — and a literal `constructor:` key does not contextually type as a
+   * tuple. Object.fromEntries defines an own property for either name.
+   */
+  const moves = (ref: string, from: string, to: string): Record<string, [string, string]> =>
+    Object.fromEntries([[ref, [from, to] as [string, string]]]);
+
+  test("both names pass the ref grammar, which is why a grammar check is not the fix", () => {
+    assert.deepEqual(parseCandidates({ stateCandidates: "__proto__,constructor" }), [
+      "__proto__",
+      "constructor",
+    ]);
+  });
+
+  test("`constructor` is observed like any other candidate, and does not throw", () => {
+    const first = observePress(fresh, press("on", moves("constructor", "Idle", "Active")), [
+      "constructor",
+    ]);
+    assert.deepEqual(first.state.observed.get("constructor"), {
+      on: "Active",
+      values: ["Active"],
+    });
+    const second = observePress(
+      first.state,
+      press("off", moves("constructor", "Active", "Idle")),
+      ["constructor"],
+    );
+    assert.deepEqual(second.binding, {
+      variable: "constructor",
+      onValue: "Active",
+      offValue: "Idle",
+    });
+  });
+
+  test("`__proto__` is a real entry, and Object.prototype is untouched", () => {
+    const outcome = observePress(fresh, press("on", moves("__proto__", "Idle", "Active")), [
+      "__proto__",
+    ]);
+    assert.deepEqual([...outcome.state.observed.keys()], ["__proto__"]);
+    assert.deepEqual(outcome.state.observed.get("__proto__"), { on: "Active", values: ["Active"] });
+    assert.equal((({}) as Record<string, unknown>).on, undefined, "Object.prototype was polluted");
+  });
+
+  test("and both survive the round trip through the stored params", () => {
+    // learningParams is the one place the Map becomes JSON. Object.fromEntries
+    // defines own properties, so `__proto__` is a key in the document; a plain
+    // `{ __proto__: … }` spread there would set the prototype instead and the
+    // observation would be gone from the file.
+    const state: LearningState = {
+      attempts: 1,
+      observed: new Map([
+        ["__proto__", { on: "Active", values: ["Active"] }],
+        ["constructor", { off: "Idle", values: ["Idle"] }],
+      ]),
+    };
+    const back = parseLearning(learningParams(["__proto__", "constructor"], state));
+    assert.deepEqual([...back.observed.keys()].sort(), ["__proto__", "constructor"]);
+    assert.deepEqual(back.observed.get("__proto__"), { on: "Active", values: ["Active"] });
+    assert.deepEqual(back.observed.get("constructor"), { off: "Idle", values: ["Idle"] });
   });
 });
