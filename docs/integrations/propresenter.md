@@ -143,6 +143,10 @@ and never blocks the editor from opening; when more than one is configured, a
 name only some of them have is marked `DOORS (MA only)`. A macro already chosen
 on a rule is shown whether or not the machine holding it is reachable.
 
+When an instance does not answer, the field says which one, under the dropdown:
+`Chapel did not answer. A macro that only lives there is missing from this list.`
+A short list is then a machine that is off rather than macros that have gone.
+
 Changing an instance's host or port drops its cached list immediately, so a
 repointed instance never offers the previous machine's macros. A list that was
 mid-read when the change landed is discarded rather than cached, and says so:

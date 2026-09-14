@@ -36,9 +36,25 @@ export interface Option {
   label: string;
 }
 
-/** One source's answer. */
+/**
+ * One source's answer, and why it is short when it is.
+ *
+ * `notice` is PER SOURCE rather than per field and rather than special-cased for
+ * one provider, because ParamField renders every `optionsFrom` param through one
+ * generic path: a ProPresenter-only affordance would need a second mechanism the
+ * first time another source could be empty for a reason. Two already can —
+ * macros when a booth machine did not answer, service types when Planning Center
+ * is not set up — and both are the same sentence to an operator: the list you
+ * are looking at is not the whole list, and here is why.
+ *
+ * Absent means "nothing to say", which is the normal case. A source that is
+ * simply empty says nothing: "no OSC targets configured" is not news to somebody
+ * who has configured none.
+ */
 export interface OptionSource {
   options: Option[];
+  /** Shown under every field this source feeds. Absent when the list is whole. */
+  notice?: string;
 }
 
 /** Every source, answered. Exhaustive by type — see the header. */
@@ -72,10 +88,30 @@ export interface OptionSourceAnswers {
   oscTargets?: { id: string; name: string }[];
   planItems?: { items?: Option[] };
   propresenterInstances?: { items?: Option[] };
-  propresenterMacros?: { items?: Option[] };
+  /** `unreachable` names the instances that did not answer. ABSENT on a server
+   *  that predates the field, and the notice is simply not shown then — the
+   *  renderer must keep working against the older answer. */
+  propresenterMacros?: { items?: Option[]; unreachable?: string[] };
   serviceTypes?: { id: string; name: string }[];
+  /** Whether Planning Center has credentials at all. `undefined` while stage
+   *  state is still in flight, which is NOT the same as false: reading it as
+   *  false would flash "Planning Center is not set up" on every page load. */
+  pcoConfigured?: boolean;
   /** The app's own display outputs. See the "displays" source below. */
   outputs?: { id: string; name: string }[];
+}
+
+/**
+ * Why the macro list is short, or undefined when every instance answered.
+ *
+ * NAMED, not counted: "Chapel did not answer" is something an operator can go
+ * and act on and "1 unreachable" is not — the route makes the same argument for
+ * sending names in the first place.
+ */
+function macrosNotice(unreachable: string[]): string | undefined {
+  const named = unreachable.filter((n) => typeof n === "string" && n.trim() !== "");
+  if (named.length === 0) return undefined;
+  return `${named.join(", ")} did not answer. A macro that only lives there is missing from this list.`;
 }
 
 /** PURE. Every source's options from one set of answers. */
@@ -86,12 +122,21 @@ export function buildOptionSources(a: OptionSourceAnswers): OptionSources {
     "osc-targets": { options: list(a.oscTargets).map((t) => ({ value: t.id, label: t.name })) },
     "plan-items": { options: list(a.planItems?.items) },
     "propresenter-instances": { options: list(a.propresenterInstances?.items) },
-    "propresenter-macros": { options: list(a.propresenterMacros?.items) },
+    "propresenter-macros": {
+      options: list(a.propresenterMacros?.items),
+      notice: macrosNotice(list(a.propresenterMacros?.unreachable)),
+    },
     // The VALUE is Planning Center's service-type id, which is what
     // `service.type-is` compares `ctx.serviceTypeId` against. Ids are stable in
     // PCO, unlike a plan item's, so one picked today still means this service
     // type next year.
-    "service-types": { options: list(a.serviceTypes).map((t) => ({ value: t.id, label: t.name })) },
+    "service-types": {
+      options: list(a.serviceTypes).map((t) => ({ value: t.id, label: t.name })),
+      notice:
+        a.pcoConfigured === false
+          ? "Planning Center is not set up, so there are no service types to offer."
+          : undefined,
+    },
     // The VALUE is the OUTPUT ID, not the name on the card: display-presence.ts
     // keys its connected set by output id and `display.connected` matches
     // against that set. The param is labelled "Display" and stores an id, so
@@ -150,12 +195,13 @@ export function useOptionSources(): OptionSources {
   });
   const { data: propresenterMacros } = useQuery({
     queryKey: ["automation:propresenter-macros"],
-    queryFn: () => invoke<{ items: Option[] }>("automation:propresenter-macros"),
+    queryFn: () => invoke<{ items: Option[]; unreachable?: string[] }>("automation:propresenter-macros"),
   });
   const { data: stageState } = useStageStateQuery();
   const { data: serviceTypes } = useServiceTypes(stageState);
 
   const outputs = stageState?.outputs;
+  const pcoConfigured = stageState?.pcoConfigured;
   return useMemo(
     () =>
       buildOptionSources({
@@ -167,6 +213,7 @@ export function useOptionSources(): OptionSources {
         propresenterMacros,
         serviceTypes,
         outputs,
+        pcoConfigured,
       }),
     [
       rosstalkTargets,
@@ -177,6 +224,7 @@ export function useOptionSources(): OptionSources {
       propresenterMacros,
       serviceTypes,
       outputs,
+      pcoConfigured,
     ],
   );
 }

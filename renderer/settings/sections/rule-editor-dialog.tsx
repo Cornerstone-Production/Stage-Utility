@@ -259,7 +259,17 @@ function ParamField({
   // there is no `?? []` here and no way to reach one: a source with no answer is
   // a compile error in automation-option-sources.ts, not an empty select the
   // operator discovers on a Sunday.
-  const options = spec.optionsFrom ? optionSources[spec.optionsFrom].options : (spec.options ?? []);
+  const source = spec.optionsFrom ? optionSources[spec.optionsFrom] : null;
+  const options = source ? source.options : (spec.options ?? []);
+  // WHY the list is short, when the source can say. Under the field, for any
+  // source — a single-instance site whose ProPresenter is off got "Pick one…"
+  // and nothing else, with nothing anywhere on screen saying the machine had not
+  // answered. Renders nothing at all when the list is whole, which is normally.
+  const notice = source?.notice ? (
+    <span data-option-notice={spec.optionsFrom} className="block pt-0.5 text-caption2 text-amber-11">
+      {source.notice}
+    </span>
+  ) : null;
 
   if (spec.type === "key-value") {
     return <KeyValueField spec={spec} value={value} onChange={onChange} />;
@@ -287,37 +297,46 @@ function ParamField({
             written is gone from the list while the rule still names it. Select
             carries a stored value with no matching option as its own option
             rather than rendering blank — see missingValue in select.tsx. */}
-        <Select value={current} onValueChange={onChange}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>
-            {options.map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <>
+          <Select value={current} onValueChange={onChange}>
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>
+              {options.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {notice}
+        </>
       </Row>
     );
   }
   // A string param can still name a runtime source. It stays typeable on purpose:
   // the list only knows the plan that is loaded right now, and a rule is written
   // for every week — so picking is a convenience, not a constraint.
-  if (spec.optionsFrom && options.length > 0) {
+  if (spec.optionsFrom) {
     const listId = `opts-${spec.optionsFrom}`;
+    // `list` only when there is something to suggest: an input bound to an empty
+    // datalist draws a picker affordance in some browsers and opens on nothing.
+    const hasList = options.length > 0;
     return (
       <Row label={spec.label} hint={spec.help}>
         <>
           <Input
             value={String(value ?? "")}
-            list={listId}
+            list={hasList ? listId : undefined}
             onChange={(e) => onChange(e.target.value)}
             className="h-7 text-footnote"
           />
-          <datalist id={listId}>
-            {options.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </datalist>
+          {hasList && (
+            <datalist id={listId}>
+              {options.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </datalist>
+          )}
+          {notice}
         </>
       </Row>
     );
