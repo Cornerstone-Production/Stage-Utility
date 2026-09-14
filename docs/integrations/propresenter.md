@@ -39,6 +39,27 @@ in the log. The fallback lasts for the rest of the run: the subscription is
 re-probed when the integration is reconfigured or Stage restarts, not on every
 poll cycle.
 
+### Timers
+
+Named timers arrive on `timers/current`. A timer in the `stopped` state — the
+resting state of every configured timer — is dropped, so only timers actually
+doing something reach a display. The rest are passed on with ProPresenter's own
+display text exactly as it sends it, sign included: an overrunning timer reads
+`-00:00:02`, the same as it does in ProPresenter.
+
+**A running timer is one update a second, to every browser watching** — about 600
+for a ten-minute timer. That is the one place this integration is not
+change-driven, and it is deliberate. Elsewhere Stage anchors a clock and lets the
+browser interpolate (an OBS recording costs 25 updates rather than 604), but
+ProPresenter's API has no number to anchor: `time` is a formatted string and is
+the only expression of a timer's position the API offers. `GET /v1/timers`
+returns each timer's *configuration* — its duration, or the time of day it counts
+to, or its start and end — never its current position. Re-deriving the number
+from the string would also mean re-formatting it, which is visible on every stage
+display, and the direction a timer advances depends on a type the payload does
+not carry. The reasoning in full is on `proTimersFrom` in
+`propresenter-service.ts`.
+
 Fields are read defensively (each degrades to null) and assembled into a
 `ProPresenterStatusDTO` broadcast on the `propresenter:status` channel. Every
 field is verified against ProPresenter 21.3 / API v1. Slide thumbnails are
@@ -113,6 +134,14 @@ at most every 30 seconds. An instance that is switched off contributes nothing
 and never blocks the editor from opening; when more than one is configured, a
 name only some of them have is marked `DOORS (MA only)`. A macro already chosen
 on a rule is shown whether or not the machine holding it is reachable.
+
+Changing an instance's host or port drops its cached list immediately, so a
+repointed instance never offers the previous machine's macros. A list that was
+mid-read when the change landed is discarded rather than cached, and says so:
+
+```
+[propresenter] macro list from 192.168.0.123:1025 discarded — the instance was reconfigured while it was being read
+```
 
 With **Simulate mode** on, the action reports what it would trigger and contacts
 nothing — a rule can be written and tested with the booth machine off.

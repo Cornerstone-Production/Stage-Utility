@@ -161,13 +161,38 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
 
   private abortStream(): void {
     if (this.req) {
-      this.req.removeAllListeners();
+      const req = this.req;
+      this.req = null;
+      // BY NAME — these two are the ones openStream() attaches to the REQUEST,
+      // 'response' being the callback passed to https.request(). 'error' is the
+      // one that matters: it calls onStreamClosed(), so destroying a request on
+      // purpose would otherwise schedule a reconnect for a stream we hung up on.
+      // A bare removeAllListeners() would take Node's own listeners with them.
+      //
+      // The data/end/close handlers live on the RESPONSE, which is a different
+      // emitter and was never reachable from here; destroy() below closes it, and
+      // onStreamClosed() is idempotent and gated on `running`.
+      for (const event of ["error", "response"] as const) req.removeAllListeners(event);
+      // An 'error' still arrives AFTER the listeners come off, and it arrives
+      // asynchronously, so the try/catch below cannot see it: Node's HTTP client
+      // manufactures "socket hang up" when a socket closes with a response still
+      // outstanding, which is exactly what destroying a half-open SSE request
+      // does. With nothing listening that is an uncaughtException, and it takes
+      // the whole server down — an operator disabling this integration while it
+      // was mid-reconnect was one keystroke from doing it.
+      //
+      // Absorbed rather than reported: this request was hung up on deliberately,
+      // there is no caller left to hand a failure to, and `running` is already
+      // false. Kept on DEBUG so it is still visible when somebody is pinning the
+      // schema against a real base station.
+      req.on("error", (err: Error) => {
+        if (DEBUG) console.log(`[spectera] discarded stream error after abort: ${scrub(err.message)}`);
+      });
       try {
-        this.req.destroy();
+        req.destroy();
       } catch {
         /* already gone */
       }
-      this.req = null;
     }
   }
 

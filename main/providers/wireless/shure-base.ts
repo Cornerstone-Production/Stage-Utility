@@ -516,7 +516,19 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
 
   private destroySocket(): void {
     if (this.socket) {
-      this.socket.removeAllListeners();
+      // BY NAME — these five are the ones openSocket() attaches, and 'close' is
+      // the one that matters: it calls scheduleReconnect(), so a deliberate
+      // disconnect() would otherwise re-dial the device it was just told to let
+      // go of.
+      //
+      // A bare removeAllListeners() also takes Node's own. A fresh net.Socket
+      // ships with exactly one listener of its own — 'end', which is what half-
+      // closes the writable side when the peer sends FIN — and stripping it
+      // leaks the socket on any path where the peer hangs up first. It got away
+      // with it only because the destroy() below follows immediately.
+      for (const event of ["connect", "data", "timeout", "error", "close"] as const) {
+        this.socket.removeAllListeners(event);
+      }
       this.socket.destroy();
       this.socket = null;
     }

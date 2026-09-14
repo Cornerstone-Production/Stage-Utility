@@ -232,7 +232,16 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
 
   private closeSocket(): void {
     if (this.socket) {
-      this.socket.removeAllListeners();
+      // BY NAME — these three are the ones open() attaches, and 'error' is the
+      // one that matters: it reconnects, and this method is called from inside
+      // that very handler, so leaving it attached is a re-entry waiting to
+      // happen. A bare removeAllListeners() would also take Node's own; a fresh
+      // dgram.Socket happens to ship with none today, which makes the blanket
+      // form harmless here and nowhere else — the same line on the net.Socket in
+      // shure-base.ts strips the listener that closes the socket on FIN.
+      for (const event of ["message", "error", "listening"] as const) {
+        this.socket.removeAllListeners(event);
+      }
       try {
         this.socket.close();
       } catch {

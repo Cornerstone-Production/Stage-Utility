@@ -1261,3 +1261,137 @@ describe("two auditoriums, each on its own stream", () => {
     assert.equal(subscribes().length, 2);
   });
 });
+
+// ── What a ticking timer costs ───────────────────────────────────────────────
+//
+// THE MEASUREMENT BEHIND A DECISION NOT TO CHANGE ANYTHING. `ProTimer.time` is
+// ProPresenter's own display text and is passed through verbatim, so a running
+// timer is a change every second and a change is a broadcast. The OBS record
+// clock and the PVP progress bar both escaped that shape by shipping an anchor
+// and interpolating on the client; ProPresenter's API carries no number to
+// anchor — see the four reasons on `proTimersFrom` in propresenter-service.ts.
+//
+// These cases exist so the cost is a number somebody measured rather than a
+// number somebody remembered, and so that the day an anchor DOES become
+// possible the first case goes red and makes whoever did it state the new figure.
+//
+// NOT COVERED HERE, and deliberately: what `time` reads for a RUNNING timer on
+// real hardware. It could only be captured by starting a timer on a live booth
+// machine, which is a state change on production gear. The strings below come
+// from ProPresenter's published OpenAPI examples ("00:00:01", "-00:00:02",
+// "00:21:43", and the schema's own "00:00:01.00") and from a read-only capture of
+// `timers/current` on 21.3, which answers whole seconds for a stopped timer.
+
+describe("what a ticking timer costs", () => {
+  /** One `timers/current` frame for a countdown with `secondsLeft` to go. */
+  const countdown = (secondsLeft: number, state = "running"): unknown => [
+    {
+      id: { uuid: "t-1", name: "Countdown", index: 0 },
+      time:
+        `00:${String(Math.floor(secondsLeft / 60)).padStart(2, "0")}` +
+        `:${String(secondsLeft % 60).padStart(2, "0")}`,
+      state,
+    },
+  ];
+
+  /** Ticks measured. Short enough to run in about a second; the ten-minute
+   *  figure is extrapolated from the measured ratio below rather than written
+   *  down as prose, so it cannot drift away from what the code does. */
+  const TICKS = 24;
+  /** Seconds in the ten-minute timer the quoted figure is for. */
+  const TEN_MINUTES_OF_TICKS = 600;
+
+  it("is one broadcast to every browser per second — 600 for ten minutes", async () => {
+    // Nothing else moving: no snapshot burst, no heartbeat, no slide. The only
+    // thing that changes across the run is the timer's display string.
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    push(frame(WIRE.timers, countdown(600)));
+    await until("the first tick to publish", () => status().timers.length === 1);
+    await sleep(PUBLISH_SETTLE_MS);
+    published = [];
+
+    for (let i = 1; i <= TICKS; i++) {
+      push(frame(WIRE.timers, countdown(600 - i)));
+      await sleep(PUBLISH_SETTLE_MS);
+    }
+
+    assert.equal(
+      published.length,
+      TICKS,
+      `${TICKS} ticks produced ${published.length} broadcasts. If this is now ` +
+        "FEWER than one per tick the timer has been anchored — which would be " +
+        "good news, and means proTimersFrom's four reasons and the integration " +
+        "doc need rewriting with the new figure.",
+    );
+    // Every frame differed only in the timer, which is the whole complaint.
+    assert.deepEqual(
+      published.slice(0, 3).map((f) => f.timers[0]?.time),
+      ["00:09:59", "00:09:58", "00:09:57"],
+      "the broadcasts do not track the ticking string",
+    );
+    assert.equal(
+      (published.length / TICKS) * TEN_MINUTES_OF_TICKS,
+      600,
+      "the ten-minute figure quoted on proTimersFrom and in the integration doc is stale",
+    );
+  });
+
+  it("a stopped timer costs nothing, however its own string moves", async () => {
+    // The guard that keeps "a client interpolating a stopped timer forward" from
+    // ever being reachable: a timer that is not advancing does not reach a
+    // browser at all. Drop the `state !== "stopped"` filter in proTimersFrom and
+    // every configured-but-idle timer in the booth becomes a frozen readout on
+    // every display AND a broadcast every time its duration is edited.
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    push(frame(WIRE.timers, countdown(600, "stopped")));
+    await sleep(PUBLISH_SETTLE_MS);
+    // Something real, so the case is not merely measuring a stream that never
+    // published anything at all.
+    push(frame(WIRE.slide, SLIDE_FRAME));
+    await until("the slide to publish", () => status().currentSlideText === "line one");
+    await sleep(PUBLISH_SETTLE_MS);
+    assert.deepEqual(status().timers, [], "a stopped timer reached the DTO");
+    published = [];
+
+    // The stopped timer's own display string moves — an operator editing its
+    // duration in ProPresenter, which really does re-send the frame.
+    for (let i = 1; i <= 6; i++) {
+      push(frame(WIRE.timers, countdown(600 - i, "stopped")));
+      await sleep(PUBLISH_SETTLE_MS);
+    }
+    assert.deepEqual(
+      published,
+      [],
+      `a stopped timer broadcast ${published.length} times: ` +
+        JSON.stringify(published.map((f) => f.timers)),
+    );
+  });
+
+  it("carries ProPresenter's own text through unchanged, overrun sign included", async () => {
+    // Both consumers — the pp-timer layout object and the stage display header —
+    // render `time` as-is. Any re-formatting here is visible on a wall, which is
+    // reason 1 on proTimersFrom. "-00:00:02" is ProPresenter's own example for an
+    // overrunning timer, and "00:21:43.00" carries the hundredths its schema
+    // example has and its response examples do not; both must survive the trip
+    // byte for byte.
+    burstOn = false;
+    heartbeatOn = false;
+    await streaming();
+    push(
+      frame(WIRE.timers, [
+        { id: { uuid: "t-1", name: "Countdown", index: 0 }, time: "-00:00:02", state: "overrunning" },
+        { id: { uuid: "t-2", name: "Elapsed", index: 1 }, time: "00:21:43.00", state: "running" },
+        { id: { uuid: "t-3", name: "Idle", index: 2 }, time: "00:03:00", state: "stopped" },
+      ]),
+    );
+    await until("the timers to publish", () => status().timers.length === 2);
+    assert.deepEqual(status().timers, [
+      { name: "Countdown", time: "-00:00:02", state: "overrunning" },
+      { name: "Elapsed", time: "00:21:43.00", state: "running" },
+    ]);
+  });
+});
