@@ -175,6 +175,28 @@ export function summaryLine(descriptor: IntegrationDescriptor, state: Integratio
   return sentence ?? descriptor.description ?? descriptor.label;
 }
 
+/**
+ * What NumberInput is handed for one `type: "number"` field.
+ *
+ * `null` — "no value", which NumberInput renders as an empty box — only for a
+ * field whose descriptor declares `unsetHint`, i.e. one where blank IS the
+ * setting. For every other number field this is the `Number(value) || 0` the
+ * render site always did, so the ten fields that must hold a real number are
+ * untouched.
+ *
+ * EXPORTED for integration-number-fields.test.tsx, which runs it over the real
+ * descriptors beside initialConfig — the two together are what an operator
+ * actually sees, and a guard over either one alone missed the bug.
+ */
+export function numberFieldValue(field: ConfigField, value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  // `value !== ""` as well as the finite check, because Number("") is 0 — the
+  // form's own spelling of "unset" would otherwise arrive as a real zero.
+  const usable = value !== "" && value != null && Number.isFinite(n);
+  if (!usable && field.unsetHint != null) return null;
+  return usable ? n : 0;
+}
+
 // "Synced 12:52 PM" for the PCO Refresh-now row; "Never synced" when null/invalid.
 function fmtSynced(iso: string | null | undefined): string {
   if (!iso) return "Never synced";
@@ -652,12 +674,22 @@ export function IntegrationDialog({
                   />
                 ) : field.type === "number" ? (
                   <NumberInput
-                    value={typeof value === "number" ? value : Number(value) || 0}
+                    // `null` ONLY where the descriptor says blank is a setting.
+                    // Everywhere else this is the old `Number(value) || 0` to
+                    // the character, which is what keeps the ten number fields
+                    // that mean a real number rendering exactly as before.
+                    value={numberFieldValue(field, value)}
                     // The number, not String(n): initialConfig stores a number
                     // for a numeric field, so "4455" !== 4455 and one stepper
                     // click left the dialog permanently dirty — raising the
                     // unsaved-changes modal over a config identical to the saved one.
                     onChange={(n) => setField(field.key, n)}
+                    // "" rather than deleting the key: it is what initialConfig
+                    // seeds an unset number field with, so `pristine` and the
+                    // form agree and the dialog is not born dirty — and every
+                    // reader of these three treats "" exactly as absent.
+                    onUnset={field.unsetHint == null ? undefined : () => setField(field.key, "")}
+                    placeholder={field.unsetHint}
                     min={field.min}
                     max={field.max}
                     className="w-44 max-sm:w-full"

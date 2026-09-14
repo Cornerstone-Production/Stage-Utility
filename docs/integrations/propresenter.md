@@ -77,10 +77,12 @@ the **port** (default 1025). The machine must be on the same network as Stage.
 **Test connection**. Add more auditoriums via extra instances.
 
 **Poll interval** applies only to the fallback: on a ProPresenter that supports
-`status/updates`, updates are pushed and there is no interval. Left blank the
-fallback polls at **1000 ms**, dropping to a 5 s keepalive when nothing is
-reading the channel — open displays and in-process consumers such as an
-automation rule both count; anything under 200 ms is ignored.
+`status/updates`, updates are pushed and there is no interval. Leave it blank —
+the field shows `1000` in grey — and the fallback polls at **1000 ms**, dropping
+to a 5 s keepalive when nothing is reading the channel; open displays and
+in-process consumers such as an automation rule both count. **200 ms** is the
+floor the field accepts, because the poller ignores anything below it. Clearing
+the field back to blank returns it to 1000 ms.
 
 **On a layout:** add slide objects — current/next slide text, current/next slide
 notes, current/next section, slide progress, slide thumbnail. Each can target a

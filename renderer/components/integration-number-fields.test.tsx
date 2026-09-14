@@ -26,16 +26,30 @@
 // main/services/integration-descriptor-fixture.test.ts, so it cannot drift.
 
 import { strict as assert } from "node:assert";
-import { after, describe, test } from "node:test";
+import { after, beforeEach, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { installFakeServer, withQueryClient, settle, idle, integrationCard, until } = await import(
+  "../test-fixtures/integrations-harness.js"
+);
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import("../test-fixtures/integration-descriptors.js");
-const { initialConfig } = await import("./integrations-panel.js");
+const { IntegrationsPanel, initialConfig, numberFieldValue } = await import("./integrations-panel.js");
 
-after(() => {
+let server = installFakeServer();
+
+beforeEach(() => {
+  cleanup();
+  server.restore();
+});
+
+after(async () => {
+  cleanup();
+  await settle();
+  server.restore();
   teardown();
 });
 
@@ -114,4 +128,234 @@ describe("what a number field starts out holding", () => {
       "a number field seeded something that is neither a number nor blank",
     );
   });
+});
+
+/** Every number field again, this time paired with its own descriptor entry. */
+const fields = INTEGRATION_DESCRIPTOR_FIXTURE.flatMap((d) =>
+  d.configSchema.filter((f) => f.type === "number").map((f) => ({ id: d.id, field: f })),
+);
+
+describe("which number fields say blank is a setting", () => {
+  test("exactly three declare unsetHint, and these three", () => {
+    const opted = fields.filter((f) => f.field.unsetHint != null).map((f) => `${f.id}.${f.field.key}`).sort();
+    assert.deepEqual(opted, ["propresenter.pollMs", "ross-tsl.port", "sensource.attendancePollSeconds"]);
+  });
+
+  test("no unsetHint is long enough to be clipped by its own box", () => {
+    // A PROXY for the real measurement, and it says so. jsdom loads no
+    // stylesheet and reports every width as 0, so nothing here can ask whether
+    // the string fits. What CAN be pinned is the length, and the ceiling below
+    // is not a guess: measured in headless Chrome against the shipped
+    // stylesheet, the field gives 105px of room at 13px IBM Plex Sans, where
+    //
+    //   "1000"                  31.2px
+    //   "Not set"               42.1px
+    //   "Same as above"         87.5px
+    //   "Same as poll interval" 121.2px  — CLIPPED by 16.2px, and what this
+    //                                      field shipped with until it was
+    //                                      looked at in a browser
+    //
+    // 16 characters of ordinary mixed-case prose comes to about 92px, which
+    // leaves room. A hint that trips this has not necessarily overflowed —
+    // go and measure it rather than raising the number.
+    const tooLong = fields
+      .filter((f) => (f.field.unsetHint?.length ?? 0) > 16)
+      .map((f) => `${f.id}.${f.field.key} = ${JSON.stringify(f.field.unsetHint)} (${f.field.unsetHint?.length} chars)`);
+    assert.deepEqual(tooLong, [], "an unset hint is too long for the 176px field it renders in");
+  });
+
+  test("a field seeds blank if and only if it declares unsetHint", () => {
+    // THE BICONDITIONAL, and the reason this file is worth having. Either half
+    // failing is a real defect with a different fix:
+    //
+    //   seeds blank, no unsetHint — the form cannot say what blank means, so
+    //     the field renders 0 and a click in and out commits it. Either give it
+    //     an unsetHint or give it a default.
+    //   unsetHint, seeds a number — the hint is dead text nobody will ever see,
+    //     because the field is prefilled. The default and the hint disagree.
+    //
+    // A fourteenth number field added with neither lands in the first half.
+    const seedOf = new Map(seeded.map((s) => [`${s.id}.${s.key}`, s.seed]));
+    const mismatched = fields
+      .map((f) => ({ at: `${f.id}.${f.field.key}`, hint: f.field.unsetHint != null, blank: seedOf.get(`${f.id}.${f.field.key}`) === "" }))
+      .filter((f) => f.hint !== f.blank)
+      .map((f) => `${f.at} (unsetHint=${f.hint}, seeds blank=${f.blank})`);
+    assert.deepEqual(mismatched, []);
+  });
+
+  test("only those three reach NumberInput as 'no value'", () => {
+    // initialConfig is half the path; this is the other half. The bug an
+    // operator SAW lived here — the render site turned "" into 0 with
+    // `Number(value) || 0` — so a guard over the seeding alone was green on it.
+    const asShown = fields.map((f) => {
+      const seed = seeded.find((s) => s.id === f.id && s.key === f.field.key)!.seed;
+      return { at: `${f.id}.${f.field.key}`, shown: numberFieldValue(f.field, seed) };
+    });
+    const blank = asShown.filter((f) => f.shown === null).map((f) => f.at).sort();
+    assert.deepEqual(blank, ["propresenter.pollMs", "ross-tsl.port", "sensource.attendancePollSeconds"]);
+
+    const rest = asShown.filter((f) => f.shown !== null);
+    const bad = rest.filter((f) => !(typeof f.shown === "number" && Number.isFinite(f.shown) && f.shown > 0));
+    assert.deepEqual(bad.map((f) => `${f.at}=${f.shown}`), [], "a number field reached the input as 0");
+  });
+
+  test("a field with no unsetHint is still handed 0 for an empty value", () => {
+    // The opt-in, at the render site. Without the `unsetHint` test in
+    // numberFieldValue this would blank every number field in the app whose
+    // value happened to be missing.
+    const plain = fields.find((f) => f.field.unsetHint == null)!;
+    assert.equal(numberFieldValue(plain.field, ""), 0);
+    assert.equal(numberFieldValue(plain.field, null), 0);
+  });
+
+  test("a saved number still reaches the input for an unsettable field", () => {
+    // Unsettable is about the ABSENCE of a value, not about ignoring one.
+    for (const f of fields.filter((f) => f.field.unsetHint != null)) {
+      assert.equal(numberFieldValue(f.field, 900), 900, `${f.id}.${f.field.key} dropped a saved value`);
+      assert.equal(numberFieldValue(f.field, "900"), 900, `${f.id}.${f.field.key} dropped a saved string value`);
+    }
+  });
+});
+
+// ── The round trip, through the real dialog ──────────────────────────────────
+//
+// Not the helpers: the DIALOG, mounted, with `fetch` pointed at the in-memory
+// server from integrations-harness. Everything above proves what a function
+// returns. This proves what the POST body actually carries — which is the
+// failure that costs something, because an invented number is only expensive
+// once it is on disk.
+//
+// The three integrations here are all left DISABLED and no credential is
+// entered, and nothing in this file reaches a network: the harness replaces
+// `fetch` and `EventSource` outright.
+
+const UNSET: { id: string; key: string; dirtyKey: string; dirtyValue: string }[] = [
+  // `dirtyKey` is a field OTHER than the one under test — the point is a save
+  // the operator makes for some unrelated reason, with the unset field never
+  // touched. That is exactly when a prefilled number gets written to disk.
+  { id: "propresenter", key: "pollMs", dirtyKey: "host", dirtyValue: "192.168.1.100" },
+  { id: "ross-tsl", key: "port", dirtyKey: "host", dirtyValue: "192.168.1.60" },
+  { id: "sensource", key: "attendancePollSeconds", dirtyKey: "pollSeconds", dirtyValue: "30" },
+];
+
+/** The dialog as it is RIGHT NOW. Queried fresh every time rather than held in
+ *  a variable: a save re-seeds the form, React re-renders, and a node captured
+ *  before that is detached — which reads as "the dialog has no Save button"
+ *  rather than as anything to do with the field under test. */
+function dialogNow(): HTMLElement {
+  const d = document.querySelector<HTMLElement>('[role="dialog"]');
+  assert.ok(d, "no dialog is open");
+  return d;
+}
+
+async function openCard(id: string): Promise<void> {
+  server = installFakeServer();
+  const c = render(withQueryClient(<IntegrationsPanel />));
+  await idle();
+  fireEvent.click(await integrationCard(c.container, id));
+  await settle(60);
+  assert.ok(document.querySelector('[role="dialog"]'), `the ${id} dialog did not open`);
+}
+
+function box(key: string): HTMLInputElement {
+  const el = dialogNow().querySelector<HTMLInputElement>(`[data-config-field="${key}"] input`);
+  assert.ok(el, `the dialog rendered no field for ${key}`);
+  return el;
+}
+
+/** The footer's Save button, whichever of its two labels it is wearing.
+ *
+ *  `"Save"` alone misses it for the whole of a save in flight, when it reads
+ *  "Saving…" — which is precisely when the second half of a round-trip test
+ *  goes looking for it, and reads as "the dialog has no Save button". */
+function saveButton(): HTMLButtonElement | undefined {
+  return [...dialogNow().querySelectorAll("button")].find((b) => /^Sav(e|ing…)$/.test(b.textContent?.trim() ?? ""));
+}
+
+/** Click Save and return the config the dialog actually POSTed.
+ *
+ *  Asserts the button is ENABLED first: a disabled Save is the exact failure
+ *  mode that made reporting a clearing only on blur wrong, and a click on it is
+ *  a silent no-op the `until` below would then blame on the network.
+ *
+ *  Waits for the save to COMPLETE, not merely for the request to go out. The
+ *  dialog re-seeds its form from the state the server answered with, and until
+ *  that lands a caller reading the field back is reading what it typed rather
+ *  than what was stored. Save going disabled again is that signal: it means
+ *  `localConfig` and a fresh `initialConfig(state)` now agree. */
+async function save(id: string): Promise<Record<string, unknown>> {
+  const button = saveButton();
+  assert.ok(button, "the dialog has no Save button");
+  assert.equal(button.disabled, false, "Save is disabled — the form never registered the edit");
+  const before = server.posts.length;
+  fireEvent.click(button);
+  await until(
+    () => server.posts.some((p, i) => i >= before && p.path === `/api/integrations/${id}/config`),
+    () => `no config POST for ${id}; saw ${server.posts.map((p) => p.path).join(", ") || "nothing"}`,
+  );
+  // BOTH, and the label is the half that matters. `disabled` alone is true for
+  // the whole of a save in flight as well (`disabled={!schemaDirty || isSaving}`),
+  // so waiting on it returned the instant the request went out — and the next
+  // edit the test made was then overwritten by handleSave's own re-seed landing
+  // late. The label going back to "Save" says isSaving is false; `disabled`
+  // saying so too says the form and the state the server answered with agree.
+  await until(
+    () => saveButton()?.disabled === true && saveButton()?.textContent?.trim() === "Save",
+    () => `${id} never finished saving — Save reads "${saveButton()?.textContent?.trim()}"`,
+  );
+  const post = server.posts.filter((p) => p.path === `/api/integrations/${id}/config`).at(-1)!;
+  return (post.body as { config: Record<string, unknown> }).config;
+}
+
+describe("an unset number field, opened and saved", () => {
+  for (const { id, key, dirtyKey, dirtyValue } of UNSET) {
+    test(`${id}: ${key} opens EMPTY, not 0`, async () => {
+      await openCard(id);
+      assert.equal(box(key).value, "", `${id}.${key} rendered a number nobody set`);
+      cleanup();
+    });
+
+    test(`${id}: saving for another reason invents no ${key}`, async () => {
+      // The one that costs money. SenSource took 3,527 vendor-side failures in
+      // five days; a poll interval invented by a click in and a click out is a
+      // request rate nobody chose, against exactly that API.
+      await openCard(id);
+      fireEvent.change(box(dirtyKey), { target: { value: dirtyValue } });
+      const config = await save(id);
+      assert.equal(
+        typeof config[key] === "number",
+        false,
+        `${id}.${key} was saved as the number ${JSON.stringify(config[key])} without the operator ever touching it`,
+      );
+      assert.equal(config[key], "", `${id}.${key} saved as ${JSON.stringify(config[key])} rather than blank`);
+      cleanup();
+    });
+
+    test(`${id}: a click in and a click out of ${key} invents no number`, async () => {
+      await openCard(id);
+      fireEvent.focus(box(key));
+      fireEvent.blur(box(key));
+      assert.equal(box(key).value, "", `${id}.${key} filled itself in on a focus and a blur`);
+      assert.equal(saveButton()?.disabled, true, `a focus and a blur on ${id}.${key} made the form dirty`);
+      cleanup();
+    });
+
+    test(`${id}: a typed ${key} is saved, and clearing it takes it back out`, async () => {
+      await openCard(id);
+      fireEvent.change(box(key), { target: { value: "900" } });
+      const saved = await save(id);
+      assert.equal(saved[key], 900, `${id}.${key} did not store a typed value`);
+
+      // And back out again. The dialog re-seeds from what the server returned,
+      // so this is the operator reopening a field that now HAS a value and
+      // emptying it — the path that used to be impossible, because the box
+      // sprang back to a number on blur.
+      await until(() => box(key).value === "900", () => `${id}.${key} never showed the saved value`);
+      fireEvent.change(box(key), { target: { value: "" } });
+      fireEvent.blur(box(key));
+      const cleared = await save(id);
+      assert.equal(cleared[key], "", `${id}.${key} could not be cleared: saved ${JSON.stringify(cleared[key])}`);
+      cleanup();
+    });
+  }
 });
