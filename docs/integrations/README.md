@@ -123,9 +123,10 @@ biconditional.
 stored in it. A value saved before the bound existed keeps its number and goes
 on being displayed; only a value the operator enters in that edit is pulled
 inside the bounds. Clamping a stored value on a click in and a click out was a
-silent config change nobody asked for — `propresenter.pollMs` 100 became 200, a
-five-fold request rate — so bounds may be added to an existing field without
-rewriting anybody's setting.
+silent config change nobody asked for: `propresenter.pollMs` 100 became 200, and
+because the poller ignores anything under 200 that box went from falling back to
+one request a second to making five. Bounds may therefore be added to an
+existing field without rewriting anybody's setting.
 
 Keep `unsetHint` short: the field is 176px, and "Same as poll interval" is
 clipped where "Same as above" is not. The wireless connections panel renders
