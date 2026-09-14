@@ -248,8 +248,8 @@ function dialogNow(): HTMLElement {
   return d;
 }
 
-async function openCard(id: string): Promise<void> {
-  server = installFakeServer();
+async function openCard(id: string, config: Record<string, unknown> = {}): Promise<void> {
+  server = installFakeServer(Object.keys(config).length ? { [id]: { config } } : {});
   const c = render(withQueryClient(<IntegrationsPanel />));
   await idle();
   fireEvent.click(await integrationCard(c.container, id));
@@ -355,6 +355,83 @@ describe("an unset number field, opened and saved", () => {
       fireEvent.blur(box(key));
       const cleared = await save(id);
       assert.equal(cleared[key], "", `${id}.${key} could not be cleared: saved ${JSON.stringify(cleared[key])}`);
+      cleanup();
+    });
+  }
+});
+
+// ── A stored value the field's own bounds now reject ─────────────────────────
+//
+// Bounds are declared on the descriptor and enforced by NumberInput's clamp, and
+// a field can be given one AFTER an operator has already stored a value outside
+// it — which is exactly what happened on this branch: propresenter.pollMs gained
+// `min: 200` and ross-tsl.port gained `min: 1, max: 65535`, with installs
+// already holding 100 and whatever else. The blur used to clamp whatever the box
+// held whether or not anything had been typed into it, so opening the card,
+// looking at the field and closing it rewrote the stored number: pollMs 100 ->
+// 200 is a five-fold request-rate increase from a gesture that changed nothing,
+// committed to disk by the next save made for any other reason.
+//
+// Driven through the real dialog rather than over NumberInput alone, because the
+// dialog is where "did this make the form dirty" is answered, and a Save button
+// that goes live is what turns a display change into a stored one.
+
+/** Every number field that declares a bound, and a stored value outside it that
+ *  the form will really SHOW.
+ *
+ *  `min - 1` only where `min > 1`, because initialConfig reads any stored number
+ *  not `> 0` as ABSENT and prefills the default in its place — so for a field
+ *  whose floor is 1 there is no below-the-floor value that ever reaches the box,
+ *  and a case seeded with 0 would be testing the prefill rather than the clamp.
+ *  Above `max` is always reachable. */
+const OUT_OF_BOUNDS: { id: string; key: string; stored: number; why: string }[] = fields.flatMap((f) => {
+  const out: { id: string; key: string; stored: number; why: string }[] = [];
+  if (typeof f.field.min === "number" && f.field.min > 1) {
+    out.push({ id: f.id, key: f.field.key, stored: f.field.min - 1, why: `below min ${f.field.min}` });
+  }
+  if (typeof f.field.max === "number") {
+    out.push({ id: f.id, key: f.field.key, stored: f.field.max + 1, why: `above max ${f.field.max}` });
+  }
+  return out;
+});
+
+describe("a stored number outside the field's bounds", () => {
+  test("nine reachable cases, across six bounded fields", () => {
+    // EXACT, like the counts above it. A new bound on a number field is a new
+    // way for an already-stored value to be outside it, and it should arrive
+    // here rather than be covered by luck. Six of the thirteen number fields
+    // declare a bound: five declare both a floor and a ceiling, one
+    // (propresenter.pollMs) declares only a floor. Nine rather than eleven
+    // because companion.port and ross-tsl.port floor at 1, and nothing below
+    // that survives initialConfig — see OUT_OF_BOUNDS.
+    const bounded = [...new Set(OUT_OF_BOUNDS.map((o) => `${o.id}.${o.key}`))].sort();
+    assert.deepEqual(bounded, [
+      "companion.port",
+      "propresenter.pollMs",
+      "ross-tsl.port",
+      "sensource.attendancePollSeconds",
+      "sensource.pollSeconds",
+      "sensource.safeSpacePollSeconds",
+    ]);
+    assert.equal(
+      OUT_OF_BOUNDS.length,
+      9,
+      `out-of-bounds cases: ${OUT_OF_BOUNDS.map((o) => `${o.id}.${o.key} ${o.why}`).join(", ")}`,
+    );
+  });
+
+  for (const { id, key, stored, why } of OUT_OF_BOUNDS) {
+    test(`${id}: ${key} stored ${stored} (${why}) survives a click in and a click out`, async () => {
+      await openCard(id, { [key]: stored });
+      assert.equal(box(key).value, String(stored), `${id}.${key} did not open showing its stored value`);
+      fireEvent.focus(box(key));
+      fireEvent.blur(box(key));
+      assert.equal(
+        box(key).value,
+        String(stored),
+        `${id}.${key} rewrote a stored ${stored} that the operator only looked at`,
+      );
+      assert.equal(saveButton()?.disabled, true, `a focus and a blur on ${id}.${key} made the form dirty`);
       cleanup();
     });
   }

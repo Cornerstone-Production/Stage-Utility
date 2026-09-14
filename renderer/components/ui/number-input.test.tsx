@@ -292,6 +292,61 @@ describe("NumberInput", () => {
     cleanup();
   });
 
+  test("a click in and a click out of a STORED value outside the bounds changes nothing", () => {
+    // THE SILENT REWRITE. The blur used to clamp whatever the box held whether
+    // or not anything had been typed into it, so an operator running a value
+    // from before the field declared its bounds had it rewritten by a gesture
+    // that changed nothing — and the next save made for any other reason put
+    // the new number on disk. Both real cases:
+    //
+    //   propresenter.pollMs  100   -> 200    a 5x request-rate increase
+    //   ross-tsl.port        70000 -> 65535  a port nobody entered
+    //
+    // The value stays out of bounds and the box goes on showing it. Typing
+    // still clamps (the test below), so the operator has a way to fix it; what
+    // they do not have is a way to change it by accident.
+    const low = setup({ value: 100, min: 200 });
+    fireEvent.focus(low.field);
+    fireEvent.blur(low.field);
+    assert.deepEqual(low.calls, [], `a focus and a blur reported ${low.calls}`);
+    assert.deepEqual(low.commits, [], `a focus and a blur committed ${low.commits}`);
+    assert.equal(low.field.value, "100", "the box rewrote a stored value nobody touched");
+    cleanup();
+
+    const high = setup({ value: 70000, min: 1, max: 65535 });
+    fireEvent.focus(high.field);
+    fireEvent.blur(high.field);
+    assert.deepEqual(high.calls, [], `a focus and a blur reported ${high.calls}`);
+    assert.deepEqual(high.commits, [], `a focus and a blur committed ${high.commits}`);
+    assert.equal(high.field.value, "70000", "the box rewrote a stored value nobody touched");
+    cleanup();
+  });
+
+  test("a value the operator TYPES is still clamped on blur", () => {
+    // The other half, and the one that must not break: clamping is for a value
+    // entered in this edit. Typing already clamps on the keystroke; blur clamps
+    // again because the keystroke path can be reached with a partial number.
+    const { field, calls, commits } = setup({ value: 500, min: 200 });
+    fireEvent.change(field, { target: { value: "100" } });
+    fireEvent.blur(field);
+    assert.equal(calls.at(-1), 200, `typing 100 into a min-200 field reported ${calls}`);
+    assert.equal(commits.at(-1), 200, `typing 100 into a min-200 field committed ${commits}`);
+    cleanup();
+  });
+
+  test("a stepper press followed by a blur commits once, not twice", () => {
+    // Why `bumpOnce` deliberately does not mark the box as edited: it has
+    // already reported the stepped value through both callbacks, and a blur
+    // that committed the text it left behind would write the same number a
+    // second time — a duplicate PATCH for every commit-on-blur caller.
+    const { field, commits } = setup({ value: 5, step: 1 });
+    fireEvent.focus(field);
+    tap(screen.getAllByRole("button")[1]);
+    fireEvent.blur(field);
+    assert.deepEqual(commits, [6], `a stepper press and a blur committed ${commits}`);
+    cleanup();
+  });
+
   test("a new value from the parent is what gets displayed", () => {
     // Settings can change from another tab over SSE, so the field has to render
     // whatever it is handed rather than whatever was typed into it last.

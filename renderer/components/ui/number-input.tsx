@@ -97,6 +97,27 @@ export function NumberInput({
   const [text, setText] = React.useState(() => display(value));
   const [editing, setEditing] = React.useState(false);
 
+  /** Did the operator CHANGE this box during the visit that is ending?
+   *
+   *  A blur used to clamp and commit whatever the box held, whether or not
+   *  anything had been typed into it — so a stored value outside the field's
+   *  bounds was silently rewritten by a click in and a click out. An operator
+   *  running `pollMs: 100` from before the field declared `min: 200` opened the
+   *  ProPresenter card, looked at the interval, closed it, and the next save
+   *  made for any other reason stored 200: a five-fold request-rate increase
+   *  nobody chose, from a gesture that changed nothing. `ross-tsl.port` did the
+   *  same with 70000 -> 65535.
+   *
+   *  A ref, not state: nothing renders differently because of it, and it has to
+   *  be readable by the blur handler in the same tick the last keystroke set it.
+   *
+   *  Cleared on FOCUS, which is every visit's first event — a blur cannot happen
+   *  without one — and set by `commitText`, which is the only path a keystroke
+   *  takes. A stepper press deliberately does NOT set it: `bumpOnce` has already
+   *  called `onChange` and `onCommit` with the stepped value, and a blur that
+   *  committed it again would be writing the same number twice. */
+  const edited = React.useRef(false);
+
   useResyncOn([value, editing], () => {
     if (!editing) setText(display(value));
   });
@@ -108,6 +129,7 @@ export function NumberInput({
   };
 
   function commitText(raw: string) {
+    edited.current = true;
     setText(raw);
     if (raw.trim() === "") {
       // An empty box is a REAL answer where the caller can take one, and it is
@@ -246,10 +268,27 @@ export function NumberInput({
         aria-label={rest["aria-label"]}
         onFocus={(e) => {
           setEditing(true);
+          edited.current = false;
           e.currentTarget.select();
         }}
         onBlur={() => {
           setEditing(false);
+          // NOTHING WAS TYPED, so there is nothing to commit and nothing to
+          // clamp. Only a value the operator entered IN THIS EDIT gets pulled
+          // inside the field's bounds; a value that was already stored is left
+          // exactly as it is, out of bounds or not, for the same reason the
+          // blank-field path below exists — a click in and a click out is not
+          // an edit, and it must not change what is on disk. The operator can
+          // still fix it by typing, and a field they never touch stays theirs.
+          //
+          // `setText` rather than a bare return: a blur can arrive without a
+          // preceding focus (React's own `fireEvent.blur`, and a programmatic
+          // one), and then `setEditing(false)` changes nothing, so the resync
+          // above does not run and the box would keep a stepper's text.
+          if (!edited.current) {
+            setText(display(value));
+            return;
+          }
           const typed = text.trim();
           const n = Number.parseFloat(typed);
           if (typed !== "" && Number.isFinite(n)) {
