@@ -299,6 +299,87 @@ describe("the attendance interval, split onto its own cadence", () => {
     });
   });
 
+  describe("the interval the service itself resolves", () => {
+    // getSensourceConfig above resolves a blank field to the operator's own poll
+    // interval before the service ever sees it. attendanceSeconds() carries the
+    // SAME fallback, and it is not redundant: it is what decides the answer for a
+    // config built anywhere else, and SenSourceConfig's own doc comment states
+    // "0 or unset means the same as pollSeconds, not a constant of its own".
+    // Nothing pinned it — `|| this.veaSeconds()` could be `|| 30` with the whole
+    // suite green — and sensource-poll-cadence.test.ts pointed at this file for
+    // a guard that was not here.
+    it("treats a blank attendance interval as the poll interval, not a constant", () => {
+      // GUARD. The exact production shape: an operator set 120s to stay inside
+      // Vea's quota and has never opened this field. With any fixed fallback
+      // below 120 a SECOND timer starts for them, and at a 30s constant that is
+      // four times the Vea request volume they chose — on every install that
+      // never touched the field.
+      resetService({ ...CFG, pollSeconds: 120, attendancePollSeconds: 0 });
+      const armed: number[] = [];
+      svc.attendanceTicker.arm = (ms) => armed.push(ms);
+      svc.pollOnce = async () => "skip";
+      svc.running = false;
+      svc.start();
+
+      assert.deepEqual(armed, [], "a blank attendance interval started a second timer of its own");
+      assert.deepEqual(
+        logs.filter((l) => l.includes("reading attendance every")),
+        [],
+        "a blank attendance interval announced a fast read",
+      );
+    });
+
+    it("floors the attendance interval at the same minimum the poll enforces", () => {
+      // GUARD. Same Vea endpoint, so the same floor — and the form's own min is
+      // asserted against MIN_POLL_SECONDS in sensource-poll-cadence.test.ts,
+      // which is only a promise if the poller enforces it too. A config that
+      // reaches the service below the floor (an older settings.json, a restored
+      // snapshot, the API) must not be honoured.
+      resetService({ ...CFG, pollSeconds: 3600, attendancePollSeconds: 2 });
+      const armed: number[] = [];
+      svc.attendanceTicker.arm = (ms) => armed.push(ms);
+      svc.pollOnce = async () => "skip";
+      svc.running = false;
+      svc.start();
+
+      assert.deepEqual(armed, [10_000], "the attendance interval was armed below the floor");
+      assert.ok(
+        logs.some((l) => l.includes("reading attendance every 10s")),
+        `the announced interval was not the floored one:\n${logs.join("\n")}`,
+      );
+    });
+  });
+
+  describe("the one question both pollers ask of /data/traffic", () => {
+    // trafficPath() exists "so they can never drift into asking two different
+    // questions of the same endpoint", and nothing pinned what that one question
+    // is: `excludeClosedHours` could be flipped to "false" with the whole suite
+    // green, and the string appeared in zero test files. On any site with
+    // after-hours sensor noise that silently inflates attendance — no error, and
+    // nothing on screen.
+    const EXPECTED =
+      "https://vea.sensourceinc.com/api/data/traffic" +
+      "?relativeDate=today&dateGroupings=day&entityType=zone&metrics=ins%2Couts&excludeClosedHours=true";
+
+    it("the main poll asks exactly this", async () => {
+      await poll();
+      assert.deepEqual(trafficRequests(), [EXPECTED]);
+    });
+
+    it("the fast read asks exactly the same thing", async () => {
+      // GUARD on the drift the shared helper exists to prevent. Compared to the
+      // main poll's OWN string rather than to the constant alone, so a change
+      // that moved both together still has to be a deliberate one.
+      await poll();
+      const fromPoll = trafficRequests();
+      await readAttendance();
+      const fromFastRead = trafficRequests().slice(fromPoll.length);
+
+      assert.deepEqual(fromFastRead, [EXPECTED]);
+      assert.deepEqual(fromFastRead, fromPoll, "the two pollers asked /data/traffic different questions");
+    });
+  });
+
   describe("whether the fast timer runs at all", () => {
     // pollOnce() is stubbed to a no-op in both cases below — the poll ticker's
     // body, so stubbing it is what stops start()'s first tick from running:
