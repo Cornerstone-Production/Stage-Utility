@@ -24,11 +24,17 @@
 //     fires both callbacks in the same timer-phase sweep before either one's
 //     first await, which is too late for a "cancel the other one" to help.
 //
-// NOT unit-tested here, deliberately: the settings card. The field is declared
-// on the descriptor and rendered by the generic ConfigField form, pinned by
-// integration-descriptor-fixture.test.ts and sensource-poll-cadence.test.ts;
-// whether the form actually draws it, and a saved value survives a reload, was
-// checked in a browser against a real server — jsdom renders no stylesheet.
+// NOT unit-tested here, and NOT browser-checked either — unlike
+// safeSpacePollSeconds, whose own test file records that it was. The field is
+// declared on the descriptor and rendered by the generic ConfigField form,
+// pinned by integration-descriptor-fixture.test.ts and
+// sensource-poll-cadence.test.ts, and its shape (no default, no numeric
+// placeholder) matches ross-tsl's already-shipped `port` field exactly. But
+// whether the form actually draws it, what the NumberInput shows for a blank
+// field with no default, and whether a saved value survives a reload were
+// judged from that precedent and from reading number-input.tsx, not observed
+// in a running server — jsdom renders no stylesheet and cannot show what a
+// stepper control paints. If this ships, drive it once before relying on it.
 
 import assert from "node:assert/strict";
 import { describe, it, beforeEach, afterEach } from "node:test";
