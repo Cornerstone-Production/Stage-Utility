@@ -2052,7 +2052,17 @@ class IntegrationManager {
     if (enabled && host && port) {
       // start() opens the status stream; the listener flips this to
       // connected/error once it is up, or once the fallback poll answers.
-      this.setConnectionState("propresenter", "connecting", `Connecting to ${host}:${port}`);
+      //
+      // ONLY when something is actually being started. Every other applier in
+      // this file hands off to a configure() that restarts unconditionally, so
+      // the service always reports again and this optimistic write is always
+      // taken back. ProPresenter deliberately does not re-dial an unchanged
+      // target, so on an ordinary settings save nothing takes it back and the
+      // row reads "Connecting to h:p" over a live stream until it next drops.
+      // The same two lines are in ProPresenterManager.apply for the extras.
+      if (!propresenterService.isRunning) {
+        this.setConnectionState("propresenter", "connecting", `Connecting to ${host}:${port}`);
+      }
       propresenterService.start();
     } else {
       propresenterService.stop();

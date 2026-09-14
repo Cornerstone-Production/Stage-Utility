@@ -653,8 +653,8 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     // the macro names, the playlist, the frames, the fallback verdict. stop()
     // bumps the epoch and teardown() drops all of it. Starting again is the
     // caller's call, because only the caller knows whether it is switched on.
+    // stop() resets the report, so a repoint gets fresh feedback too.
     this.stop();
-    this.resetReport();
   }
 
   override start(): void {
@@ -663,11 +663,35 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   }
 
   /**
+   * Is this instance switched on?
+   *
+   * Public because both appliers have to tell "I am starting this" from "this
+   * was already running": start() is a no-op on a running instance, and a row
+   * told "Connecting to h:p" that nothing then re-dials sits on that message for
+   * the rest of the service. See applyPropresenter and ProPresenterManager.apply.
+   */
+  get isRunning(): boolean {
+    return this.running;
+  }
+
+  /**
    * End this run before tearing anything down, so every continuation parked on
    * an await abandons its work when it resumes. See `epoch`.
+   *
+   * And forget what the row was last told. Every other integration resets the
+   * report in configure(), which runs on every apply pass; this one deliberately
+   * does not re-dial an unchanged target, so stop() is the only moment left that
+   * means "the operator changed something". Without it, switching the
+   * integration OFF and back ON left the row on the applier's "Connecting to
+   * h:p" for ever: the stream came straight back up, reported the identical
+   * "Streaming from h:p" it had reported before the disable, and report() —
+   * which compares the state AND the message — dropped it. A live, healthy
+   * stream under a row that says it is still connecting, and toggling an
+   * integration off and on is the first thing anybody tries.
    */
   override stop(): void {
     this.epoch++;
+    this.resetReport();
     super.stop();
   }
 
@@ -1695,7 +1719,16 @@ class ProPresenterManager {
       if (e.enabled !== false && e.host && e.port > 0) {
         // "Connecting to", not "Polling": this instance holds a stream, and only
         // the fallback polls at all. The message survives until the first tick.
-        this.conn.set(e.id, { state: "connecting", message: `Connecting to ${e.host}:${e.port}` });
+        //
+        // ONLY when something is actually being started. start() is a no-op on
+        // an instance that is already running, and setTarget does not re-dial an
+        // unchanged target — so on an ordinary settings save this wrote
+        // "Connecting to h:p" over a live stream and nothing ever took it back.
+        // The same two lines are in integration-manager.applyPropresenter for
+        // the primary.
+        if (!svc.isRunning) {
+          this.conn.set(e.id, { state: "connecting", message: `Connecting to ${e.host}:${e.port}` });
+        }
         svc.start();
       } else {
         svc.stop();

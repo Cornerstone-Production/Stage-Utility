@@ -442,6 +442,8 @@ async function withoutRetryClamp(fn: () => Promise<void>): Promise<void> {
 }
 
 const status = (): ProPresenterStatusDTO => propresenterService.getStatus();
+/** What the extras half of the Integrations card reads for one instance. */
+const instConn = (id: string) => propresenterManager.getInstancesDto().conn[id];
 const subscribes = (): string[] => seen.filter((s) => s.startsWith("POST /v1/status/updates"));
 const polls = (): string[] =>
   seen.filter((s) => s.startsWith("GET /v1/") && !s.startsWith("GET /v1/playlist/3"));
@@ -916,6 +918,29 @@ describe("a stream that has died without saying so", () => {
     assert.equal(subscribes().length, before, "an interval-only save re-dialled the booth machine");
     assert.equal(streams.length, 1, "the live stream was dropped for a setting the stream does not read");
     assert.equal(inner(propresenterService).pollMs, 900, "the new interval was not applied");
+  });
+
+  it("switching the integration off and on reports the stream again", async () => {
+    // GUARD. Same defect as the two extras cases below, on the primary, which is
+    // the instance with a row on the Integrations card. stop() is exactly what
+    // applyPropresenter does when the operator unticks Enabled, and the target
+    // does not move across it — so without a reset in stop() the service's
+    // second "Streaming from h:p" is dropped as a repeat of the first and the
+    // applier's "Connecting to h:p" is the last thing the row was ever told.
+    await streaming();
+    await until("the row to go green", () => reports.length === 1);
+    const before = reports.length;
+
+    propresenterService.stop();
+    await until("the stub to see the subscription close", () => streams.length === 0);
+
+    point("127.0.0.1", port); // the tick going back on: same host, same port
+    await until("the stream to come back", () => streams.length === 1);
+    await sleep(PUBLISH_SETTLE_MS);
+
+    assert.deepEqual(reports.slice(before), [
+      { state: "connected", message: `Streaming from 127.0.0.1:${port}` },
+    ]);
   });
 
   it("a ProPresenter that accepts the subscription and says nothing stops reading green", async () => {
@@ -1577,6 +1602,59 @@ describe("two auditoriums, each on its own stream", () => {
         propresenterManager.getInstancesDto().conn.chapel?.message ===
         `Streaming from 127.0.0.1:${port}`,
     );
+  });
+
+  it("an extra instance switched off and on again ends on Streaming from, not Connecting", async () => {
+    // GUARD. The apply pass writes "Connecting to h:p" and calls start(); the
+    // service is what takes that back by reporting "Streaming from h:p" when the
+    // stream comes up. Across a disable the target never moves, so setTarget
+    // returns early and nothing resets the report — the service reported the
+    // IDENTICAL "Streaming from h:p" before the disable, report() dropped it as
+    // a repeat, and the row sat on "Connecting to h:p" with a live, healthy
+    // stream under it for the rest of the service. Off and on again is the first
+    // thing anybody tries when a row looks wrong.
+    const chapel = { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true };
+    propresenterManager.apply("MA", [chapel]);
+    await until(
+      "the extra instance to come up",
+      () => instConn("chapel")?.message === `Streaming from 127.0.0.1:${port}`,
+    );
+
+    propresenterManager.apply("MA", [{ ...chapel, enabled: false }]);
+    assert.deepEqual(instConn("chapel"), { state: "disconnected", message: null });
+
+    propresenterManager.apply("MA", [chapel]);
+    await until("the re-enabled row to leave Connecting", () => instConn("chapel")?.state === "connected");
+    assert.deepEqual(instConn("chapel"), {
+      state: "connected",
+      message: `Streaming from 127.0.0.1:${port}`,
+    });
+  });
+
+  it("an interval-only save does not put a live extra instance back to Connecting", async () => {
+    // GUARD, the other half. The applier announced "Connecting to h:p" on EVERY
+    // pass, and the pass runs on every settings write. Every other integration
+    // gets away with that because its configure() restarts unconditionally and
+    // the service reports again; this one deliberately does not re-dial an
+    // unchanged target, so the optimistic message was never taken back.
+    const chapel = { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true };
+    propresenterManager.apply("MA", [chapel]);
+    await until(
+      "the extra instance to come up",
+      () => instConn("chapel")?.message === `Streaming from 127.0.0.1:${port}`,
+    );
+
+    // A save that changes the FALLBACK poll interval, which the stream path does
+    // not read and which must not disturb anything.
+    propresenterManager.apply("MA", [{ ...chapel, pollMs: 900 }]);
+    await sleep(150);
+
+    assert.deepEqual(
+      instConn("chapel"),
+      { state: "connected", message: `Streaming from 127.0.0.1:${port}` },
+      "a settings save left a live extra instance reading as still connecting",
+    );
+    assert.equal(streams.length, 1, "the interval save dropped the extra instance's stream");
   });
 
   it("each instance holds its own stream", async () => {
