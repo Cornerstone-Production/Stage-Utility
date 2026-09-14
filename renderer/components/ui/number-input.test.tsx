@@ -334,6 +334,21 @@ describe("NumberInput", () => {
     cleanup();
   });
 
+  test("a second blur without a second visit commits nothing more", () => {
+    // The edit flag is cleared at BOTH ends of a visit — on focus, and on the
+    // way out of blur. Clearing on focus alone is enough in a browser, where a
+    // blur always follows a focus; clearing on the way out too means the
+    // handler assumes nothing about the order it is called in, and a blur that
+    // arrives twice cannot commit the same edit a second time.
+    const { field, commits } = setup({ value: 100, min: 200 });
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: "50" } });
+    fireEvent.blur(field);
+    fireEvent.blur(field);
+    assert.deepEqual(commits, [200], `two blurs over one edit committed ${commits}`);
+    cleanup();
+  });
+
   test("a stepper press followed by a blur commits once, not twice", () => {
     // Why `bumpOnce` deliberately does not mark the box as edited: it has
     // already reported the stepped value through both callbacks, and a blur

@@ -111,11 +111,16 @@ export function NumberInput({
    *  A ref, not state: nothing renders differently because of it, and it has to
    *  be readable by the blur handler in the same tick the last keystroke set it.
    *
-   *  Cleared on FOCUS, which is every visit's first event — a blur cannot happen
-   *  without one — and set by `commitText`, which is the only path a keystroke
-   *  takes. A stepper press deliberately does NOT set it: `bumpOnce` has already
-   *  called `onChange` and `onCommit` with the stepped value, and a blur that
-   *  committed it again would be writing the same number twice. */
+   *  Set by `commitText`, the only path a keystroke takes, and cleared at BOTH
+   *  ends of a visit — on focus, and again on the way out of blur. Either alone
+   *  would do in a browser, where a blur always follows a focus; clearing on the
+   *  way out as well means two blurs in a row cannot commit the same edit twice,
+   *  without the handler having to assume anything about the order it is called
+   *  in.
+   *
+   *  A stepper press deliberately does NOT set it: `bumpOnce` has already called
+   *  `onChange` and `onCommit` with the stepped value, and a blur that committed
+   *  it again would be writing the same number twice. */
   const edited = React.useRef(false);
 
   useResyncOn([value, editing], () => {
@@ -273,6 +278,9 @@ export function NumberInput({
         }}
         onBlur={() => {
           setEditing(false);
+          // The visit is over whichever branch below runs.
+          const wasEdited = edited.current;
+          edited.current = false;
           // NOTHING WAS TYPED, so there is nothing to commit and nothing to
           // clamp. Only a value the operator entered IN THIS EDIT gets pulled
           // inside the field's bounds; a value that was already stored is left
@@ -285,7 +293,7 @@ export function NumberInput({
           // preceding focus (React's own `fireEvent.blur`, and a programmatic
           // one), and then `setEditing(false)` changes nothing, so the resync
           // above does not run and the box would keep a stepper's text.
-          if (!edited.current) {
+          if (!wasEdited) {
             setText(display(value));
             return;
           }
