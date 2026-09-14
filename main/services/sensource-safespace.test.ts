@@ -42,11 +42,17 @@ import type { PeopleCountDTO } from "../types/live.js";
 import type { SenSourceConfig } from "./sensource-service.js";
 
 /** The private surface these cases drive — the point is to run the real thing. */
+type TickerSeam = {
+  arm: (ms: number) => void;
+  cancel: () => void;
+  run: () => Promise<void>;
+  readonly armed: boolean;
+};
 type Poller = {
   cfg: SenSourceConfig | null;
   running: boolean;
   connect: () => Promise<void>;
-  readSafeSpace: () => Promise<void>;
+  readSafeSpace: () => Promise<unknown>;
   start: () => void;
   emit: (dto: PeopleCountDTO) => void;
   last: PeopleCountDTO;
@@ -55,10 +61,12 @@ type Poller = {
   veaOccupancy: number | null;
   safeSpacePolledIdle: boolean;
   pollNowIfIdle: () => void;
-  scheduleIn: (ms: number) => void;
-  scheduleReconnect: () => void;
-  scheduleSafeSpaceIn: (ms: number) => void;
-  scheduleAttendanceIn: (ms: number) => void;
+  /** The three clocks. Each owns its timer and re-arms itself after every tick
+   *  — see ticker.ts — so `arm` is the seam, and a case about the RE-ARM drives
+   *  `run()` rather than the read body directly. */
+  pollTicker: TickerSeam;
+  safeSpaceTicker: TickerSeam;
+  attendanceTicker: TickerSeam;
   restart: () => void;
 };
 const svc = sensourceService as unknown as Poller;
@@ -66,10 +74,9 @@ const svc = sensourceService as unknown as Poller;
 // Stubbed HERE and not only in beforeEach: resetService below calls the real
 // configure(), which restarts the poller, and the first resetService runs before
 // any beforeEach body would have replaced these.
-svc.scheduleIn = () => {};
-svc.scheduleReconnect = () => {};
-svc.scheduleSafeSpaceIn = () => {};
-svc.scheduleAttendanceIn = () => {};
+svc.pollTicker.arm = () => {};
+svc.safeSpaceTicker.arm = () => {};
+svc.attendanceTicker.arm = () => {};
 svc.restart = () => {};
 
 /** A space id that is unmistakable inside a log line — the point of the
@@ -198,17 +205,16 @@ function resetService(cfg: SenSourceConfig = CFG): void {
 }
 
 const poll = (): Promise<void> => svc.connect();
-const readSafeSpace = (): Promise<void> => svc.readSafeSpace();
+const readSafeSpace = async (): Promise<void> => void (await svc.readSafeSpace());
 const published = (): PeopleCountDTO => emitted.at(-1)!;
 
 describe("SafeSpace live occupancy on the SenSource payload", () => {
   beforeEach(() => {
     clock = Date.UTC(2026, 8, 6, 15, 0, 0);
     Date.now = () => clock;
-    svc.scheduleIn = () => {};
-    svc.scheduleReconnect = () => {};
-    svc.scheduleSafeSpaceIn = () => {};
-    svc.scheduleAttendanceIn = () => {};
+    svc.pollTicker.arm = () => {};
+    svc.safeSpaceTicker.arm = () => {};
+    svc.attendanceTicker.arm = () => {};
     svc.restart = () => {};
     sensourceService.setConnectionListener((state, message) => reports.push({ state, message }));
     resetService();
@@ -673,6 +679,78 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     );
   });
 
+  it("defers a reading that lands inside Test connection, rather than killing it", async () => {
+    // GUARD, and the production failure the Ticker was built for.
+    //
+    // readSafeSpace's guard clauses used to sit ABOVE the try whose `finally`
+    // held the only re-arm in the entire call graph — safeSpaceTimer was written
+    // in exactly two places and nothing else armed it — so a tick that landed
+    // while Test connection was held simply never scheduled another one. After
+    // SAFESPACE_HOLD_MS the published occupancy reverted to Vea's slower number
+    // with nothing on screen or in the log saying why, and the only cures were
+    // re-saving the card or restarting the box.
+    //
+    // The window is not narrow: test() holds `testing` across TWO sequential
+    // round-trips while the reading ticks every 10s, and an operator debugging a
+    // space id presses Test repeatedly.
+    stubFetch({ safeSpace: () => "417" });
+    await poll(); // a connected snapshot, so a republish has something to republish
+    const armed: number[] = [];
+    svc.safeSpaceTicker.arm = (ms: number) => armed.push(ms);
+
+    // Driven through the REAL test(), which sets `testing` synchronously and
+    // then holds it across its awaits — exactly the production interleaving.
+    const testing = sensourceService.test({ ...CFG });
+    await svc.safeSpaceTicker.run();
+    assert.deepEqual(
+      armed,
+      [10_000],
+      "a reading skipped for Test connection never re-armed — it is dead until the card is saved again",
+    );
+    await testing;
+
+    // ...and "deferred" means the next tick reads normally. One interval late is
+    // the whole cost.
+    armed.length = 0;
+    await svc.safeSpaceTicker.run();
+    assert.deepEqual(armed, [10_000], "the deferred reading did not resume");
+    assert.equal(published().total.occupancy, 417, "the deferred reading never published again");
+    assert.equal(published().total.occupancySource, "safespace");
+  });
+
+  it("defers the VEA POLL that lands inside Test connection too", async () => {
+    // GUARD. The other half of the same window, and the one the two readings
+    // beside it were already guarded against: test() swaps `this.cfg` for the
+    // operator's UNSAVED form values and holds it across two round-trips, so a
+    // poll firing in there authenticates with unsaved credentials, publishes
+    // counts for a location scope nobody saved, and carries that scope's day
+    // aggregates for the next ten minutes.
+    //
+    // The poll could not have this guard before the ticker: with the re-arm in
+    // its own `finally`, "not this tick" was spelled either as a bare return
+    // (which left the poll unarmed for good) or as a failure (which stepped the
+    // exponential back-off while Vea was answering perfectly).
+    stubFetch({ safeSpace: () => "417" });
+    const armed: number[] = [];
+    svc.pollTicker.arm = (ms: number) => armed.push(ms);
+
+    const testing = sensourceService.test({ ...CFG, locationId: "a-location-nobody-saved" });
+    await svc.pollTicker.run();
+
+    assert.equal(
+      emitted.length,
+      0,
+      "a poll inside Test connection published counts for a scope nobody saved",
+    );
+    assert.deepEqual(reports, [], "a poll inside Test connection reported on the unsaved config");
+    assert.deepEqual(
+      armed,
+      [15_000],
+      "a deferred poll re-armed at something other than the configured cadence — a deferral is not a failure",
+    );
+    await testing;
+  });
+
   it("pre-empts an IDLE SafeSpace wait, and only an idle one", async () => {
     // `polledIdle` is the VEA poll's flag and is false at any Vea interval of 60s
     // or more, so gating the SafeSpace pre-empt behind it left the reading an
@@ -681,10 +759,12 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     setSubscriberCheck(() => false);
     stubFetch({ safeSpace: () => "417" });
     let armed: number[] = [];
-    svc.scheduleSafeSpaceIn = (ms: number) => armed.push(ms);
+    svc.safeSpaceTicker.arm = (ms: number) => armed.push(ms);
 
-    // No consumer: the reading re-arms at the idle cadence and says so.
-    await readSafeSpace();
+    // No consumer: the reading re-arms at the idle cadence and says so. Driven
+    // through the TICKER, because the re-arm is the ticker's — readSafeSpace()
+    // deliberately never touches the timer (see ticker.ts).
+    await svc.safeSpaceTicker.run();
     assert.equal(armed.at(-1), 60_000, `an unwatched reading re-armed at ${armed.at(-1)}ms`);
     assert.equal(svc.safeSpacePolledIdle, true, "the idle wait was not remembered");
 
@@ -752,17 +832,19 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
       }),
     });
     const armed: number[] = [];
-    svc.scheduleSafeSpaceIn = (ms: number) => armed.push(ms);
+    svc.safeSpaceTicker.arm = (ms: number) => armed.push(ms);
 
-    // Three reads: the third leaves the bucket unable to pay for a fourth.
+    // Three reads: the third leaves the bucket unable to pay for a fourth. Each
+    // driven through the ticker, which is what chooses the next delay from what
+    // the read came back with.
     for (let n = 0; n < 3; n++) {
-      await readSafeSpace();
+      await svc.safeSpaceTicker.run();
       clock += 10_000;
     }
     assert.deepEqual(armed, [10_000, 10_000, 10_000], "a normal read did not re-arm at the cadence");
 
     // The fourth is refused locally, and re-arms for the reset the SERVER named.
-    await readSafeSpace();
+    await svc.safeSpaceTicker.run();
     assert.ok(
       armed.at(-1)! > 60_000,
       `a held reading re-armed in ${armed.at(-1)}ms, so it will wake through the whole hold`,

@@ -118,10 +118,15 @@ describe("SenSource poll demand", () => {
 type Poller = {
   running: boolean;
   polledIdle: boolean;
-  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  /** The poll's own clock since it moved off the base class's timer — see
+   *  ticker.ts. Its `arm` is spied on rather than left to fire: a real 0ms
+   *  timer here would run a real poll against the real Vea host. */
+  pollTicker: { arm: (ms: number) => void };
   pollNowIfIdle: () => void;
 };
 const poller = sensourceService as unknown as Poller;
+/** Every delay pollNowIfIdle asked the poll ticker for, this test onwards. */
+let armed: number[] = [];
 
 describe("waking SenSource when a consumer arrives", () => {
   beforeEach(() => {
@@ -130,8 +135,8 @@ describe("waking SenSource when a consumer arrives", () => {
     recorder.postMs = 60 * 60_000;
     tsl.connected = false;
     tsl.feeds = [];
-    if (poller.reconnectTimer) clearTimeout(poller.reconnectTimer);
-    poller.reconnectTimer = null;
+    armed = [];
+    poller.pollTicker.arm = (ms: number) => armed.push(ms);
     poller.running = true;
     poller.polledIdle = true; // a slow poll is pending
   });
@@ -144,13 +149,13 @@ describe("waking SenSource when a consumer arrives", () => {
     recorder.current = { endedAt: null };
     (attendanceRecorder as unknown as { onRecordEstablished: () => void }).onRecordEstablished();
     assert.equal(poller.polledIdle, false, "the idle wait was not pre-empted");
-    assert.notEqual(poller.reconnectTimer, null, "no poll was scheduled");
+    assert.deepEqual(armed, [0], "no poll was scheduled");
   });
 
   it("does nothing when nothing is consuming", () => {
     poller.pollNowIfIdle();
     assert.equal(poller.polledIdle, true, "woke up with no consumer");
-    assert.equal(poller.reconnectTimer, null);
+    assert.deepEqual(armed, []);
   });
 
   it("does not pre-empt a poll already at the service cadence", () => {
@@ -159,13 +164,13 @@ describe("waking SenSource when a consumer arrives", () => {
     poller.polledIdle = false;
     recorder.current = { endedAt: null };
     poller.pollNowIfIdle();
-    assert.equal(poller.reconnectTimer, null, "a service-cadence poll was cancelled");
+    assert.deepEqual(armed, [], "a service-cadence poll was cancelled");
   });
 
   it("does nothing while the integration is stopped", () => {
     poller.running = false;
     recorder.current = { endedAt: null };
     poller.pollNowIfIdle();
-    assert.equal(poller.reconnectTimer, null, "a stopped integration scheduled a poll");
+    assert.deepEqual(armed, [], "a stopped integration scheduled a poll");
   });
 });

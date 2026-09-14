@@ -252,6 +252,14 @@ A failing endpoint backs off instead of retrying at full rate. Outside the servi
 window it goes dormant with the other integrations. See
 [Logging an outage](#logging-an-outage) for what a failure writes to `/log`.
 
+**Test connection pauses the live readings for one interval.** The button checks
+the values currently in the form, which are not the saved ones, so while it is
+running the poll, the SafeSpace reading and the fast attendance read each skip
+their next tick rather than publish counts for a location or space nobody has
+saved. Every one of them resumes on its own next interval — a skipped tick is a
+deferral, never a cancellation, so nothing needs re-saving afterwards and no
+back-off is stepped.
+
 ## Logging an outage
 
 Each part of the poll that can fail on its own — the day aggregates, the live
