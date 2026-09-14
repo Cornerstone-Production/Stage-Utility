@@ -99,8 +99,11 @@ Everything else on the panel keeps up; the stream is not dropped over it.
 **A ProPresenter that accepts the subscription and then sends nothing turns the
 card red.** Its HTTP server is alive, so `/version` answers and the subscription
 is accepted — but the update publisher is wedged and no frame ever arrives. After
-two silent streams the row reports it, the payload goes offline, and the displays
-stop showing a slide from before the wedge as though it were current. Restarting
+two silent streams the row goes red and the payload goes offline, and both stay
+that way while the machine keeps accepting subscriptions it never writes to: a
+2xx on its own no longer reads as connected once the count is past two. The log
+line is written once, at the threshold. The row goes green again on the first
+byte of any stream — the one thing a wedged publisher cannot produce. Restarting
 ProPresenter is the fix.
 
 ## Setup

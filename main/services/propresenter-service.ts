@@ -1026,7 +1026,14 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
           this.streamHadData = false;
           this.armSustainTimer();
           console.log(`[propresenter] streaming ${STREAM_ENDPOINTS.length} endpoints from ${host}:${port}`);
-          this.report("connected", `Streaming from ${host}:${port}`);
+          // A 2xx is NOT proof while the publisher is wedged — a 2xx is exactly
+          // what a wedged one gives, every fifteen seconds, for ever. Reporting
+          // it here unconditionally is what put the row back to green after the
+          // threshold had turned it red and left it there: the listener saw
+          // connected, error, connected, and nothing red it again because the
+          // count had already passed the threshold. Past the threshold the row
+          // waits for a BYTE (below), which a wedged publisher never sends.
+          if (this.silentStreams < SILENT_STREAMS_BEFORE_ERROR) this.reportStreaming(host, port);
 
           const reader = createSseReader({
             maxBuffer: STREAM_MAX_BUFFER,
@@ -1042,7 +1049,15 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
             // on every cycle, and resetting on it pinned the delay at the base
             // for ever. Lasting longer than sustainMs() is what forgives the
             // back-off now; this only records that the stream was not silent.
-            this.streamHadData = true;
+            if (!this.streamHadData) {
+              this.streamHadData = true;
+              // The first byte, and the ONLY thing a wedged publisher cannot
+              // fake. For an ordinary stream this is a no-op — report() drops
+              // the identical pair already sent on the 2xx above — and past the
+              // threshold it is what clears the red row, because the 2xx no
+              // longer does.
+              this.reportStreaming(host, port);
+            }
             this.armIdleWatchdog();
             for (const event of reader.push(chunk)) this.handleStreamEvent(event.event, event.data);
           });
@@ -1118,16 +1133,35 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     // HTTP server is alive and whose update publisher is wedged answers
     // /version, accepts the subscribe and then says nothing — so nothing ever
     // fails "THERE", the card stays green, and every stage display holds the
-    // slide from before the wedge. Said once, at the threshold, and not again
-    // until a stream delivers something.
-    if (this.silentStreams === SILENT_STREAMS_BEFORE_ERROR) {
+    // slide from before the wedge.
+    //
+    // AT OR PAST the threshold, not exactly at it. Strict equality reported the
+    // wedge once, at two, and never again — so the next stream's 2xx put the row
+    // back to green and the third, fourth and fifth silent streams could not
+    // take it back. The row on a permanently wedged publisher read green, which
+    // is the whole thing this counter exists to stop.
+    if (this.silentStreams >= SILENT_STREAMS_BEFORE_ERROR) {
       const detail =
         `${this.host}:${this.port} accepts the status subscription and then sends nothing — ` +
         "the displays are holding the last slide it sent. Is ProPresenter's Network view wedged?";
-      console.warn(`[propresenter] ${detail}`);
+      // ONCE in the log, at the threshold: an operator wants the line, not one
+      // every fifteen seconds for the rest of the service. The counter resets on
+      // the first byte of any stream, so a machine that recovers and wedges
+      // again says so again.
+      if (this.silentStreams === SILENT_STREAMS_BEFORE_ERROR) console.warn(`[propresenter] ${detail}`);
+      // EVERY time. report() drops the identical pair, so while the row is
+      // already red this costs nothing — and if anything on the stream path ever
+      // reports connected in between, the next silent stream takes it back.
       this.report("error", detail);
       this.goOffline();
     }
+  }
+
+  /** "Streaming from h:p", from whichever proof of a live publisher came first —
+   *  the 2xx, or the first byte. One template, because the two have to dedupe
+   *  against each other in report(). */
+  private reportStreaming(host: string, port: number): void {
+    this.report("connected", `Streaming from ${host}:${port}`);
   }
 
   /**

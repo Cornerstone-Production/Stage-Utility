@@ -40,6 +40,7 @@ import {
   propresenterManager,
 } from "./propresenter-service.js";
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
+import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { SSE_MAX_BUFFER } from "./sse-reader.js";
 import type { ProPresenterStatusDTO } from "../types/stage.js";
 
@@ -185,6 +186,9 @@ let resetSubscribe = false;
 let stalled: http.ServerResponse[] = [];
 /** The body of the last subscription request, so a case can read the endpoints. */
 let lastSubscribeBody = "";
+/** Refuse the next N `/version` probes with a 500 — a booth Mac that blips, not
+ *  one that is gone. Counts down, so the machine comes back by itself. */
+let versionFailures = 0;
 /** Hold every /version response until releaseVersion(), parking a connect on it. */
 let holdVersion = false;
 /** The /version responses currently parked. */
@@ -232,6 +236,12 @@ before(async () => {
       // reconfigure restarts the instance underneath it.
       if (holdVersion) {
         heldVersion.push(res);
+        return;
+      }
+      if (versionFailures > 0) {
+        versionFailures--;
+        res.writeHead(500);
+        res.end();
         return;
       }
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -357,6 +367,25 @@ addBroadcastListener((channel, payload) => {
   if (channel === "propresenter:status") published.push(payload as ProPresenterStatusDTO);
 });
 
+// ── Connection-report capture ────────────────────────────────────────────────
+//
+// What the INTEGRATIONS CARD is told, which is a different thing from the DTO
+// and is the half that shipped broken. `integration-manager.applyPropresenter`
+// attaches exactly this listener and writes every report straight into the row,
+// so the array below is the row's history.
+//
+// The wedged-publisher guard was written against `status().connected` alone and
+// passed while the row it exists to turn red read green: the payload goes
+// offline (that half worked) and the row went connected → error → connected and
+// stayed there. Nothing that asserts on the DTO can see it.
+
+interface ConnReport {
+  state: string;
+  message: string | null;
+}
+let reports: ConnReport[] = [];
+propresenterService.setConnectionListener((state, message) => reports.push({ state, message }));
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Comfortably past PUBLISH_COALESCE_MS plus a round trip to the stub. */
@@ -390,6 +419,28 @@ async function until(what: string, fn: () => boolean, ms = 4000): Promise<void> 
   assert.fail(`timed out after ${ms}ms waiting for: ${what}`);
 }
 
+/**
+ * Run `fn` with the window-aware retry clamp switched off.
+ *
+ * `serviceWindow.capDelayMs` FLOORS every retry at one second while a schedule
+ * is enabled, and one is by default with no windows known. A case that shortens
+ * `reconnectBaseMs` to 30ms to watch the ramp therefore watches 1s, 1s, 1s …
+ * and cannot tell a forgiven back-off from a ramped one until attempt 5. Off,
+ * the delay is the raw `base * 2 ** attempt` the service computed, which is the
+ * number these cases are about.
+ *
+ * Restored on the way out: the schedule is a process-wide singleton and the
+ * cases either side of this one read it.
+ */
+async function withoutRetryClamp(fn: () => Promise<void>): Promise<void> {
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE, enabled: false });
+  try {
+    await fn();
+  } finally {
+    serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+  }
+}
+
 const status = (): ProPresenterStatusDTO => propresenterService.getStatus();
 const subscribes = (): string[] => seen.filter((s) => s.startsWith("POST /v1/status/updates"));
 const polls = (): string[] =>
@@ -415,6 +466,7 @@ afterEach(() => {
   seen = [];
   logged = [];
   published = [];
+  reports = [];
   playlistReadAt = [];
   subscribeStatus = 200;
   playlistStatus = 200;
@@ -423,6 +475,7 @@ afterEach(() => {
   burstOn = true;
   stallSubscribe = false;
   resetSubscribe = false;
+  versionFailures = 0;
   holdVersion = false;
   for (const r of heldVersion) r.destroy();
   heldVersion = [];
@@ -873,23 +926,119 @@ describe("a stream that has died without saying so", () => {
     // badge alone ("the next connect() probes /version, and a machine that is
     // genuinely gone fails THERE"), the card stayed green while every stage
     // display held the slide from before the wedge.
+    //
+    // FOUR silent streams, and the assertion is on the CONNECTION REPORT.
+    // Stopping at the threshold and asserting on the DTO is how the first
+    // version of this guard passed while the row it exists to turn red read
+    // green: the payload half worked, and the row went
+    // connected -> error -> connected and stayed connected for ever, because the
+    // error was reported at exactly two and every later stream's 2xx re-reported
+    // "connected" over the top of it.
     burstOn = false;
     heartbeatOn = false;
     inner(propresenterService).streamIdleMs = 120;
     Object.defineProperty(propresenterService, "reconnectBaseMs", { get: () => 30, configurable: true });
     try {
-      await streaming();
-      // Two silent streams is the threshold — see SILENT_STREAMS_BEFORE_ERROR.
-      await until("the second silent stream to end", () => subscribes().length >= 3, 6000);
-      await sleep(100);
+      await withoutRetryClamp(async () => {
+        await streaming();
+        // Two silent streams is the threshold — see SILENT_STREAMS_BEFORE_ERROR —
+        // so five subscribes is two past it, with the fourth stream ended.
+        await until("a fourth silent stream to end", () => subscribes().length >= 5, 8000);
+        await sleep(100);
 
-      const said = loggedMatching(/accepts the status subscription and then sends nothing/);
-      assert.equal(said.length, 1, `expected one line, got ${said.length}:\n${logged.join("\n")}`);
-      assert.equal(
-        status().connected,
-        false,
-        "the payload still says connected, so every display is holding a slide from before the wedge",
-      );
+        const said = loggedMatching(/accepts the status subscription and then sends nothing/);
+        assert.equal(said.length, 1, `expected one line, got ${said.length}:\n${logged.join("\n")}`);
+        assert.deepEqual(
+          reports,
+          [
+            { state: "connected", message: `Streaming from 127.0.0.1:${port}` },
+            {
+              state: "error",
+              message:
+                `127.0.0.1:${port} accepts the status subscription and then sends nothing — ` +
+                "the displays are holding the last slide it sent. Is ProPresenter's Network view wedged?",
+            },
+          ],
+          "the Integrations row does not end red on a publisher that is still wedged",
+        );
+        assert.equal(
+          status().connected,
+          false,
+          "the payload still says connected, so every display is holding a slide from before the wedge",
+        );
+      });
+    } finally {
+      inner(propresenterService).streamIdleMs = 15_000;
+      delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
+    }
+  });
+
+  it("a wedge the row has drifted off is re-asserted by the next silent stream", async () => {
+    // GUARD, and the reason endStream compares `>=` rather than `===`. Strict
+    // equality reports the wedge at the instant the count crosses two and never
+    // again, so ANYTHING that reports something else afterwards owns the row for
+    // the rest of the service. One blip of the booth Mac's HTTP server does it:
+    // /version refuses once, the catch in connect() reports "Can't reach", the
+    // machine answers again, and the row goes on saying the machine is
+    // unreachable while it is answering every request and still wedged.
+    burstOn = false;
+    heartbeatOn = false;
+    inner(propresenterService).streamIdleMs = 120;
+    Object.defineProperty(propresenterService, "reconnectBaseMs", { get: () => 30, configurable: true });
+    try {
+      await withoutRetryClamp(async () => {
+        await streaming();
+        await until("the row to go red on the wedge", () => reports.length === 2, 8000);
+        // The blip: one refused probe, then the machine is back — and still wedged.
+        versionFailures = 1;
+        await until("the row to be taken over by the unreachable report", () => reports.length === 3, 8000);
+        await until("the next silent stream to end", () => reports.length === 4, 8000);
+
+        assert.equal(reports.length, 4, `reports: ${JSON.stringify(reports, null, 2)}`);
+        assert.deepEqual(
+          reports.map((r) => r.state),
+          ["connected", "error", "error", "error"],
+        );
+        assert.match(reports[1].message ?? "", /accepts the status subscription and then sends nothing/);
+        assert.match(reports[2].message ?? "", /Can't reach 127\.0\.0\.1:\d+ — HTTP 500/);
+        assert.match(
+          reports[3].message ?? "",
+          /accepts the status subscription and then sends nothing/,
+          "the row still calls a wedged machine unreachable long after it started answering",
+        );
+      });
+    } finally {
+      inner(propresenterService).streamIdleMs = 15_000;
+      delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
+    }
+  });
+
+  it("a wedged publisher that starts sending again turns the row green on the first byte", async () => {
+    // The other half of the case above, and the reason the 2xx no longer reports
+    // "connected" once the count is past the threshold: something has to, or a
+    // machine that recovers leaves the row red for the rest of the service.
+    // A BYTE is the proof, because a 2xx is what the wedged machine gives too.
+    burstOn = false;
+    heartbeatOn = false;
+    inner(propresenterService).streamIdleMs = 120;
+    Object.defineProperty(propresenterService, "reconnectBaseMs", { get: () => 30, configurable: true });
+    try {
+      await withoutRetryClamp(async () => {
+        await streaming();
+        await until("the row to go red", () => reports.some((r) => r.state === "error"), 8000);
+        // The publisher comes back: the next stream carries the heartbeat again.
+        heartbeatOn = true;
+        await until("a stream that is delivering", () => streams.length > 0, 8000);
+        await until(
+          "the row to go back to green",
+          () => reports.at(-1)?.state === "connected",
+          8000,
+        );
+        assert.deepEqual(reports.at(-1), {
+          state: "connected",
+          message: `Streaming from 127.0.0.1:${port}`,
+        });
+      });
     } finally {
       inner(propresenterService).streamIdleMs = 15_000;
       delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
