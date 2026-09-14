@@ -1147,8 +1147,13 @@ export function secretMigrationNotes(
   result: SecretMigrationResult,
 ): Map<string, string> {
   if (result.moved) return new Map();
+  // Scrubbed HERE, at the boundary, rather than trusted from the producer: this
+  // string reaches an integration row and, through it, a broadcast — and a
+  // newline in an errno message is a forged line on every surface that renders
+  // one. log-injection.test.ts reads the interpolation, not the provenance, and
+  // it is right to.
   const note =
-    `stored credentials could not be moved out of settings.json (${result.why}), ` +
+    `stored credentials could not be moved out of settings.json (${scrub(result.why, 120)}), ` +
     "so they are still in every config snapshot — see /log";
   return new Map(Object.keys(plan.found).map((id) => [id, note]));
 }
@@ -1206,10 +1211,10 @@ export async function applySecretMigration(plan: SecretMigration): Promise<Secre
     // NOT swallowed and NOT rethrown: rethrowing here is the boot loop (see the
     // note on this function). The failure is returned as a value, and init()
     // puts it on the affected integrations' rows as well as here.
-    const why = scrub(errorMessage(err), 120);
+    const why = errorMessage(err);
     console.error(
       `[integration-manager] ${scrub(plan.moved.length)} credential(s) could not be moved out of ` +
-        `settings.json (${why}): ${scrub(plan.moved.join(", "))}. They remain in every config ` +
+        `settings.json (${scrub(why, 120)}): ${scrub(plan.moved.join(", "))}. They remain in every config ` +
         "snapshot until this is fixed, and any of them that had not already reached secrets.bin " +
         "is not available to its integration. The next start tries again — nothing has been lost.",
     );
