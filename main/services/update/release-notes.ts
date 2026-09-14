@@ -124,7 +124,7 @@ function takeInOrder(bySection: Map<SectionName, Collected>, cap: number): Relea
  * mid-sentence, which is the failure that matters: a cap that cuts the last
  * thing the writer chose to say is worse than no cap.
  */
-const INTRO_CAP = 900;
+export const INTRO_CAP = 900;
 
 /**
  * The prose a release opens with, above its first heading.
@@ -143,14 +143,26 @@ const INTRO_CAP = 900;
  * Returns null when the body has no headings at all. That is a git checkout's
  * changelog, which is bare commit subjects; treating those as prose would put
  * the whole changelog in the dialog twice.
+ *
+ * `cap` exists so a caller can ask how long a notice REALLY is. Sniffing the
+ * returned string for a trailing "…" is not the same question — a notice that
+ * legitimately ends in an ellipsis answers yes to it — and the guard over
+ * docs/release-notes needs the number, not the guess, to say by how much.
  */
-export function parseReleaseIntro(body: string | null | undefined): string | null {
+export function parseReleaseIntro(body: string | null | undefined, cap = INTRO_CAP): string | null {
   if (!body) return null;
   if (!/^#{1,6}\s/m.test(body)) return null;
 
   const out: string[] = [];
   for (const raw of body.split("\n")) {
-    const line = raw.trim();
+    // The blockquote marker comes off FIRST, because every test below is about
+    // what the line says and none of them care that it is quoted. It used to
+    // come off last, and the whole 1.10.0 notice is a blockquote — so its
+    // fences read as `> ```bash`, the fence check missed them, and the dialog
+    // shown to anyone updating from 1.9.x rendered the install commands as
+    // paragraphs and then cut the last one off mid-URL. The existing guard
+    // could not see it: its fixture's fence is not inside a quote.
+    const line = raw.trim().replace(/^>\s?/, "").trim();
     if (/^#{1,6}\s/.test(line)) break;
     // A fenced block before the first heading is a command, not a sentence.
     if (line.startsWith("```")) break;
@@ -160,14 +172,13 @@ export function parseReleaseIntro(body: string | null | undefined): string | nul
       continue;
     }
     if (line.startsWith("- ") || line.startsWith("* ")) continue;
-    // Blockquote and emphasis markers are markdown furniture; the dialog styles
-    // its own text and would otherwise render the leading ">" literally.
-    out.push(line.replace(/^>\s?/, "").replace(/\*\*/g, "").replace(/`/g, ""));
+    // Emphasis markers are markdown furniture; the dialog styles its own text.
+    out.push(line.replace(/\*\*/g, "").replace(/`/g, ""));
   }
 
   const text = out.join("\n").trim().replace(/\n{3,}/g, "\n\n");
   if (!text) return null;
-  return text.length > INTRO_CAP ? `${text.slice(0, INTRO_CAP).trimEnd()}…` : text;
+  return text.length > cap ? `${text.slice(0, cap).trimEnd()}…` : text;
 }
 
 /**

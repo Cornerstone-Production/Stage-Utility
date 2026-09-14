@@ -241,6 +241,12 @@ actually installed.
 grouped as Breaking, New, Changed, Improved and Fixed. Breaking is listed first
 and is never truncated away.
 
+Above the lists sits **the release's own opening words** — the sentence somebody
+wrote because no commit range could produce it, saying whether there is a manual
+step or where something has moved. It is the prose the release notes open with,
+up to their first heading; headings, bullet lists and fenced commands are left
+out, quoted or not, so a dialog never shows an operator a command to type.
+
 It appears after **any** successful update, including one applied automatically,
 and stays until you press Dismiss. Closing the tab or reloading does not count —
 the notice is held by the server, so it is waiting next time. That is also why a

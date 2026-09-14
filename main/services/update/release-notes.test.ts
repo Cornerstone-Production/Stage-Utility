@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { mergeReleaseSections, parseReleaseIntro, parseReleaseSections, SECTION_ORDER } from "./release-notes.js";
+import { INTRO_CAP, mergeReleaseSections, parseReleaseIntro, parseReleaseSections, SECTION_ORDER } from "./release-notes.js";
 
 // What an operator reads once, after an update they may not have watched happen.
 // The section a line came from is the part the old parser threw away, and it is
@@ -305,35 +305,91 @@ curl -fsSL https://example.invalid/install.sh | sudo bash
   });
 });
 
-describe("the cap is big enough for the notices actually written", () => {
-  test("a two-paragraph overview survives whole", () => {
-    // The regression this exists for: the first cap was 600 and cut the real
-    // 1.11.0 notice off mid-sentence, losing the last thing it had to say.
-    const real = readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "release-notes", "1.11.0.md"),
-      "utf8",
-    );
-    const intro = parseReleaseIntro(`${real}\n## Install\n\ncurl …\n`) ?? "";
-    assert.ok(intro, "the shipped notice produces no intro at all");
-    assert.doesNotMatch(intro, /…$/, "the shipped notice is being truncated");
-    assert.match(intro, /Resi and\s+YouTube now sit alongside/, "the closing sentence was cut");
+// A notice too long for the dialog is cut mid-sentence, losing the last thing
+// its writer chose to say — which is the failure INTRO_CAP's own doc comment
+// says the cap exists to avoid. The first cap was 600 and did exactly that to
+// the real 1.11.0 notice.
+//
+// The release in progress is the only one that can ever fail this: a shipped
+// notice is frozen. So the guard reads the DIRECTORY rather than a filename,
+// which is what stops it degrading into a frozen check the moment the next
+// release opens — the previous version of this file named "1.18.0.md" and a
+// literal closing sentence, and its own comment admitted the 1.11.0 test above
+// it could no longer fail.
+describe("every release notice fits the dialog", () => {
+  const NOTES_DIR = path.join(
+    path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "release-notes",
+  );
+
+  /**
+   * Notices that reach the dialog as NOTHING, exactly.
+   *
+   * parseReleaseIntro stops at the first heading, and each of these opens with
+   * one — 1.10.0's inside its own blockquote, 1.13.0's as `## Highlights`. Both
+   * are shipped and frozen, and neither is ever shown now: the dialog renders
+   * the NEWEST release's prose only. Listed rather than skipped, because a new
+   * notice written the same way would otherwise go quiet instead of red.
+   */
+  const NO_INTRO = ["1.10.0.md", "1.13.0.md"];
+
+  /** parseReleaseIntro returns null for a body with no headings, and a notice
+   *  file is pure prose — so it is read the way the generator assembles it. */
+  const introOf = (text: string, cap?: number) =>
+    parseReleaseIntro(`${text}\n## Install\n\ncurl …\n`, cap) ?? "";
+
+  const collapse = (v: string) => v.replace(/\s+/g, " ").trim();
+  const read = (file: string) => fs.readFileSync(path.join(NOTES_DIR, file), "utf8");
+
+  const files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith(".md")).sort();
+
+  test("the walk finds the notices, so everything below is a real check", () => {
+    // Without this every assertion below passes on an empty list. 1.10.0 is the
+    // anchor: it is the release that cannot self-update, and its notice can
+    // never legitimately go away.
+    assert.ok(files.includes("1.10.0.md"), `no notices found in docs/release-notes: ${files.join(", ")}`);
   });
 
-  test("the overview being written right now survives whole too", () => {
-    // The cap is only ever hit by the release in progress, and the file for a
-    // release nobody has cut yet is the one that grows a sentence per feature.
-    // 1.11.0 above is frozen and can no longer fail; this one can.
-    const real = readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "release-notes", "1.18.0.md"),
-      "utf8",
-    );
-    const intro = parseReleaseIntro(`${real}\n## Install\n\ncurl …\n`) ?? "";
-    assert.ok(intro, "the shipped notice produces no intro at all");
-    assert.doesNotMatch(intro, /…$/, `the 1.18.0 overview is ${intro.length} characters and is being cut`);
-    // `\s+` between every word, like the 1.11.0 guard above: the overview is a
-    // hard-wrapped file, so a sentence that gains a word re-wraps and a literal
-    // space in this pattern fails on a line break rather than on a truncation —
-    // which is the one thing this is here to catch.
-    assert.match(intro, /REC\s+START\s+and\s+REC\s+STOP\s+import\s+as\s+one\s+pair/, "the closing sentence was cut");
+  test("exactly these notices reach the dialog as nothing", () => {
+    // Exact, not a floor: a new notice that opens with a heading says nothing
+    // to the operator, and this is where that shows up.
+    assert.deepEqual(files.filter((f) => !introOf(read(f))), NO_INTRO);
+  });
+
+  for (const file of files.filter((f) => !NO_INTRO.includes(f))) {
+    test(`${file} survives the cap whole`, () => {
+      const text = read(file);
+
+      // The real length, not a sniff for a trailing ellipsis — a notice that
+      // ends in one would satisfy that test while being cut.
+      const full = introOf(text, Number.POSITIVE_INFINITY);
+      assert.ok(
+        full.length <= INTRO_CAP,
+        `${file}: the overview is ${full.length} characters against an INTRO_CAP of ${INTRO_CAP}. `
+          + `Shorten the notice, or raise the cap and check the dialog still reads as an overview.`,
+      );
+
+      // And the last thing the writer chose to say is still there. Derived from
+      // the file, so it follows a rewrite; collapsed, because the notices are
+      // hard-wrapped and a sentence that gains a word re-wraps.
+      const tail = collapse(full).slice(-60);
+      assert.ok(
+        collapse(introOf(text)).endsWith(tail),
+        `${file}: the closing sentence is being cut — "…${tail}"`,
+      );
+    });
+  }
+
+  test("no notice puts a shell command in the dialog, quoted or not", () => {
+    // 1.10.0's whole notice is a blockquote, so its fences read `> ```bash` and
+    // the fence check — which ran on the line with its quote marker still on —
+    // missed them. The dialog an operator saw rendered the install commands as
+    // paragraphs and then cut the last one off mid-URL.
+    for (const file of files) {
+      assert.doesNotMatch(
+        introOf(read(file), Number.POSITIVE_INFINITY),
+        /curl -fsSL|irm https|brew upgrade|sudo bash/,
+        `${file}: an install command reached the dialog as a sentence`,
+      );
+    }
   });
 });
