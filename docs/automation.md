@@ -46,7 +46,7 @@ poll after.
 | Baptism timer starts | the timer leaves idle |
 | Baptism moves to another phase | testimony to baptism, or either back to idle |
 | Baptism timer finishes | it returns to idle |
-| A display connects / disconnects | a named display arrives or goes, or any when left blank |
+| A display connects / disconnects | a display arrives or goes, or any when left blank. Pick it from the list of screens — the field stores the display's id, not the name on its card |
 | Every display has disconnected | the last display drops off — fires once, not repeatedly while none are connected |
 | SPL rises above / falls below | a Smaart meter crosses a level. Name the meter `device::channel`; leave the metric blank for the usual one |
 | A pack's battery falls below | a wireless pack crosses a percentage, for one mic or any |
@@ -131,6 +131,9 @@ selected conditions must hold.
 
 They keep triggers simple: "when occupancy rises above 50" would also fire for a
 Tuesday meeting, so you add "and a service is live".
+
+**Service type is** picks from the service types on your Planning Center account,
+so a rule can be built for Sunday morning and left alone on a Wednesday.
 
 Conditions cannot be negated — the list is a plain AND — which is why **a service
 is live** and **no service is live** are two separate entries rather than one with

@@ -41,6 +41,7 @@ import type { InferredStateSource } from "@main/services/companion-state-source"
 // these modules reach at runtime is pulled into the settings bundle.
 import type { CueStateRow } from "@main/services/cue-states";
 import type { ParamDef, Rule } from "@main/types/automation";
+import type { OptionSources } from "./automation-option-sources";
 import {
   LEARN_MAX_ATTEMPTS,
   learnAgainParams,
@@ -247,14 +248,18 @@ function ParamField({
   spec,
   value,
   onChange,
-  dynamicOptions,
+  optionSources,
 }: {
   spec: ParamDef;
   value: string | number | undefined;
   onChange: (v: string | number) => void;
-  dynamicOptions: Record<string, { value: string; label: string }[]>;
+  optionSources: OptionSources;
 }) {
-  const options = spec.optionsFrom ? (dynamicOptions[spec.optionsFrom] ?? []) : (spec.options ?? []);
+  // `optionSources` is exhaustive over the closed set `optionsFrom` can name, so
+  // there is no `?? []` here and no way to reach one: a source with no answer is
+  // a compile error in automation-option-sources.ts, not an empty select the
+  // operator discovers on a Sunday.
+  const options = spec.optionsFrom ? optionSources[spec.optionsFrom].options : (spec.options ?? []);
 
   if (spec.type === "key-value") {
     return <KeyValueField spec={spec} value={value} onChange={onChange} />;
@@ -750,7 +755,7 @@ export function RuleEditorBody({
   draft,
   setDraft,
   registry,
-  dynamicOptions,
+  optionSources,
   customVariables,
   appSources,
   inferredSource,
@@ -761,7 +766,7 @@ export function RuleEditorBody({
   draft: Rule;
   setDraft: (next: Rule) => void;
   registry: Registry;
-  dynamicOptions: Record<string, { value: string; label: string }[]>;
+  optionSources: OptionSources;
   customVariables: string[];
   /** App state sources whose integration is set up. See useConfiguredIntegrations. */
   appSources: string[];
@@ -828,7 +833,7 @@ export function RuleEditorBody({
             key={p.key}
             spec={p}
             value={draft.trigger.params[p.key]}
-            dynamicOptions={dynamicOptions}
+            optionSources={optionSources}
             onChange={(v) => setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, [p.key]: v } } })}
           />
         ))}
@@ -904,7 +909,7 @@ export function RuleEditorBody({
                 key={p.key}
                 spec={p}
                 value={c.params[p.key]}
-                dynamicOptions={dynamicOptions}
+                optionSources={optionSources}
                 onChange={(v) => {
                   const next = [...draft.conditions];
                   next[i] = { ...c, params: { ...c.params, [p.key]: v } };
@@ -969,7 +974,7 @@ export function RuleEditorBody({
             key={p.key}
             spec={p}
             value={draft.action.params[p.key]}
-            dynamicOptions={dynamicOptions}
+            optionSources={optionSources}
             onChange={(v) => setDraft({ ...draft, action: { ...draft.action, params: { ...draft.action.params, [p.key]: v } } })}
           />
         ))
@@ -1055,7 +1060,7 @@ export function RuleEditorDialog({
   target,
   onClose,
   registry,
-  dynamicOptions,
+  optionSources,
   customVariables,
   appSources,
   inferredFor,
@@ -1064,7 +1069,7 @@ export function RuleEditorDialog({
   target: RuleEditorTarget;
   onClose: () => void;
   registry: Registry;
-  dynamicOptions: Record<string, { value: string; label: string }[]>;
+  optionSources: OptionSources;
   customVariables: string[];
   appSources: string[];
   inferredFor: (rule: Rule) => InferredStateSource | null;
@@ -1331,7 +1336,7 @@ export function RuleEditorDialog({
             draft={selected}
             setDraft={(next) => setSelected(next)}
             registry={registry}
-            dynamicOptions={dynamicOptions}
+            optionSources={optionSources}
             customVariables={customVariables}
             appSources={appSources}
             inferredSource={inferredFor(selected)}

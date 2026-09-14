@@ -17,6 +17,7 @@ import { hasServiceGuard } from "@main/services/service-guard";
 import type { AutomationOutcome, Rule } from "@main/types/automation";
 import type { CueStateRow } from "@main/services/cue-states";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
+import { useOptionSources } from "./automation-option-sources";
 // The editor itself, and the field shapes it and this list share. The list
 // renders the collapsed rows; the dialog is the only thing that mounts an
 // editor.
@@ -360,20 +361,6 @@ function PairRow({
  * The sentence is not decoration: "Everything else" holding both a hidden cue
  * and a PCO-triggered rule is not something a title can say.
  */
-/**
- * An option source's answer as an ARRAY, whatever came back.
- *
- * `?? []` guards null and undefined and nothing else, so a source that answered
- * with an object — an error body, a route that changed shape, a mocked fetch
- * with no case for this URL — reached `.map` and threw inside the useMemo. That
- * is not a missing dropdown: it unmounts the whole Automation section and the
- * operator gets a blank page where their rules were. Six sources go through
- * here rather than six copies of the same ternary.
- */
-function list<T>(v: T[] | undefined): T[] {
-  return Array.isArray(v) ? v : [];
-}
-
 function ListSection({
   title,
   blurb,
@@ -418,51 +405,10 @@ export function AutomationSection() {
   useEffect(() => onNotification("automation:rules", refresh), [refresh]);
   useEffect(() => onNotification("automation:settings", refresh), [refresh]);
 
-  // Runtime option sources, so a param declaring optionsFrom resolves to real things.
-  const { data: rt } = useQuery({
-    queryKey: ["rosstalk:targets"],
-    queryFn: () => invoke<{ targets: { id: string; name: string }[] }>("rosstalk:targets"),
-  });
-  const { data: rtCmds } = useQuery({
-    queryKey: ["rosstalk:commands"],
-    queryFn: () => invoke<{ id: string; label: string }[]>("rosstalk:commands"),
-  });
-  const { data: planItems } = useQuery({
-    queryKey: ["automation:plan-items"],
-    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:plan-items"),
-  });
-  // Both ProPresenter sources answer with a list whatever the booth machines are
-  // doing — an unreachable one yields an empty list, never an error — so neither
-  // query can stop the editor opening. The macro read is cached server-side for
-  // 30s, which is what keeps re-opening the editor off the LAN.
-  const { data: propInstances } = useQuery({
-    queryKey: ["automation:propresenter-instances"],
-    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:propresenter-instances"),
-  });
-  const { data: propMacros } = useQuery({
-    queryKey: ["automation:propresenter-macros"],
-    queryFn: () => invoke<{ items: { value: string; label: string }[] }>("automation:propresenter-macros"),
-  });
-  // `osc.send` has declared optionsFrom: "osc-targets" since it was written and
-  // nothing ever answered it, so its Target select offered "Pick one…" and
-  // nothing else — the action could not be configured at all. Local config, so
-  // this costs no network: the same shape as rosstalk-targets beside it, which
-  // was wired and this was not.
-  const { data: oscTargets } = useQuery({
-    queryKey: ["osc:listTargets"],
-    queryFn: () => invoke<{ id: string; name: string }[]>("osc:listTargets"),
-  });
-  const dynamicOptions = useMemo(
-    () => ({
-      "rosstalk-targets": list(rt?.targets).map((t) => ({ value: t.id, label: t.name })),
-      "rosstalk-commands": list(rtCmds).map((c) => ({ value: c.id, label: c.label })),
-      "osc-targets": list(oscTargets).map((t) => ({ value: t.id, label: t.name })),
-      "plan-items": list(planItems?.items),
-      "propresenter-instances": list(propInstances?.items),
-      "propresenter-macros": list(propMacros?.items),
-    }),
-    [rt, rtCmds, oscTargets, planItems, propInstances, propMacros],
-  );
+  // Runtime option sources, so a param declaring optionsFrom resolves to real
+  // things. One record over the closed set main/types/automation.ts declares —
+  // see automation-option-sources.ts for why it is a whole module.
+  const optionSources = useOptionSources();
 
   // Which app state sources there is anything to read. An integration that is
   // not set up has no state, so offering it would be offering a binding that
@@ -902,7 +848,7 @@ export function AutomationSection() {
           target={editorTarget}
           onClose={() => setEditing(null)}
           registry={registry}
-          dynamicOptions={dynamicOptions}
+          optionSources={optionSources}
           customVariables={companionPairs?.customVariables ?? []}
           appSources={appSources}
           inferredFor={inferredFor}
