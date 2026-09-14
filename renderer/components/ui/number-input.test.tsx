@@ -487,6 +487,25 @@ describe("NumberInput, when blank is a real setting", () => {
     cleanup();
   });
 
+  test("without onUnset, a stepper on a non-number still steps from 0", () => {
+    // The landing-on-`min` rule is opt-in too, not just the empty rendering.
+    // "Not a number" is reachable for a caller that never asked for any of this:
+    // rule-editor-dialog spells its value `Number(value ?? spec.min ?? 0)`,
+    // which is NaN for a param holding a non-numeric string. That caller keeps
+    // `0 + step` — clamped to 10 here — rather than silently changing which
+    // number it recovers to.
+    const { commits } = setup({ value: NaN, min: 10, max: 3600 });
+    tap(screen.getAllByRole("button")[1]);
+    assert.equal(commits.at(-1), 10, "clamp(0 + 1) is 10, the same as before");
+    cleanup();
+
+    // And with no floor at all it is `0 + step`, not 0.
+    const free = setup({ value: NaN });
+    tap(screen.getAllByRole("button")[1]);
+    assert.equal(free.commits.at(-1), 1, "a caller that did not opt in kept 0 + step");
+    cleanup();
+  });
+
   test("typing a number into an unset field reports the number", () => {
     const { field, calls, unsets } = setup({ value: null, onUnset: OPT_IN, min: 10, max: 3600 });
     fireEvent.change(field, { target: { value: "45" } });

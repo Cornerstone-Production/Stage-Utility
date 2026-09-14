@@ -180,9 +180,13 @@ export function summaryLine(descriptor: IntegrationDescriptor, state: Integratio
  *
  * `null` — "no value", which NumberInput renders as an empty box — only for a
  * field whose descriptor declares `unsetHint`, i.e. one where blank IS the
- * setting. For every other number field this is the `Number(value) || 0` the
- * render site always did, so the ten fields that must hold a real number are
- * untouched.
+ * setting. For every other number field this answers what the render site's own
+ * `typeof value === "number" ? value : Number(value) || 0` answered, so the ten
+ * fields that must hold a real number are untouched. One input differs and
+ * cannot occur: a NaN, which that expression returned as NaN and this returns as
+ * 0. NumberInput drew both as "0", and since the `??`-versus-NaN fix in
+ * initialConfig nothing seeds one — integration-number-fields.test.tsx asserts
+ * that over every field.
  *
  * EXPORTED for integration-number-fields.test.tsx, which runs it over the real
  * descriptors beside initialConfig — the two together are what an operator

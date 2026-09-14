@@ -145,13 +145,17 @@ export function NumberInput({
     // either direction lands on the lowest value the field permits — `min`
     // where one is declared, else zero. Not `0 ± step`: on a field with a floor
     // of 10, that read as "11" for a press that was asking for the smallest one,
-    // and it is the floor an operator pressing `+` on a blank interval means.
-    // Unreachable for every caller that does not pass `onUnset`, since nothing
-    // else can hand this a value that is not a number.
+    // and the floor is what an operator pressing `+` on a blank interval means.
+    //
+    // Only for a caller that opted in. Everyone else keeps `0 ± step` exactly,
+    // because "not a number" is reachable for them too, if barely: one call site
+    // spells its value `Number(value ?? spec.min ?? 0)`, which is NaN for a
+    // param holding a non-numeric string. That is recovery from a value that was
+    // never valid either way, and this is not the change to alter it in.
     const next =
       typeof base === "number" && Number.isFinite(base)
         ? clamp(Number((base + dir * step).toFixed(6)))
-        : clamp(min ?? 0);
+        : clamp(onUnset ? (min ?? 0) : Number((dir * step).toFixed(6)));
     heldValue.current = next;
     onChange(next);
     onCommit?.(next);
@@ -250,7 +254,15 @@ export function NumberInput({
           onCommit?.(asNumber(value));
         }}
         onChange={(e) => commitText(e.target.value)}
-        className={cn("min-w-0 flex-1 bg-transparent px-2.5 py-1 text-footnote text-fg tabular-nums outline-none", NO_SPINNER)}
+        // `placeholder:text-gray-a8` is the themed Input's own placeholder
+        // token. Without it the hint renders in the browser's default — 50% of
+        // the text colour — which is close enough to read as a real value at a
+        // glance on a dark surface, and only a browser shows the difference.
+        className={cn(
+          "min-w-0 flex-1 bg-transparent px-2.5 py-1 text-footnote text-fg tabular-nums outline-none",
+          "placeholder:text-gray-a8",
+          NO_SPINNER,
+        )}
       />
       {suffix && (
         <span className="pointer-events-none flex select-none items-center pr-1 text-caption2 text-gray-8">{suffix}</span>
