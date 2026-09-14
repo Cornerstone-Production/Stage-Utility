@@ -32,6 +32,9 @@ const { callRoute } = await import("./route-harness.js");
 const { automationEngine } = await import("../automation-engine.js");
 const { automationLog } = await import("../automation-log.js");
 const { cueTokens } = await import("../cue-tokens.js");
+const { secretsStore } = await import("../secrets.js");
+const { handlerErrorStatus } = await import("../remote-server.js");
+const { errorMessage } = await import("../errors.js");
 const { companionApi, companionDeps } = await import("../companion-api.js");
 const { companionExportFixture, FIXTURE_PAGES, FIXTURE_PAGE_IDS, fixtureActionId } = await import(
   "../fixtures/companion-export.js"
@@ -316,6 +319,142 @@ describe("the token gate on a call", () => {
     const r = await call("projectors_on");
     assert.equal(r.status, 200);
     assert.deepEqual((r.json as { ok: boolean }).ok, true);
+    assert.deepEqual(presses, ["http://10.0.0.5:8000/api/location/17/2/6/press"]);
+  });
+});
+
+// ── What the token path does when the secrets file will not cooperate ────────
+//
+// Three documented invariants in cue-tokens.ts with nothing asserting them.
+// Each was reintroduced against the whole suite and each stayed green, which is
+// how they got here.
+//
+//  - `touch` RETURNS its failure rather than logging it away, and the caller
+//    carries it into the answer. Mutated to `{ ok: true, detail: "" }`, every
+//    Home Assistant call succeeds while `lastUsedAt` never advances — the token
+//    page shows a token as unused while it is being used hourly, and an
+//    operator revokes a working one.
+//  - an unreadable token LIST rethrows, so the route answers 500 rather than
+//    "your token is wrong". Replaced with `return []`, a corrupt secrets.bin
+//    answers 401 "token not recognised — minted on another server, revoked, or
+//    mistyped" to every caller: a sentence that sends somebody re-minting
+//    tokens on a Sunday morning over a file that will not parse.
+//  - `bearerOf` is case-insensitive per RFC 7235. `Authorization: bearer su_x`
+//    is legal and is what a hand-written Home Assistant `rest_command` header
+//    emits, which is the documented integration path.
+
+describe("the secrets file will not take the write", () => {
+  const realSetSecret = secretsStore.setSecret.bind(secretsStore);
+
+  test("the cue still fires, and BOTH fields of touch's answer are the failure", async () => {
+    // The unit half: two fields, and the detail is the operator's whole
+    // evidence. `{ ok: false }` with an empty detail is a line in the log that
+    // says nothing.
+    const minted = await cueTokens.mint("Read-only disk");
+    secretsStore.setSecret = async () => {
+      throw new Error("EROFS: read-only file system, open 'secrets.bin'");
+    };
+    try {
+      const touched = await cueTokens.touch(minted.token.id);
+      assert.equal(touched.ok, false);
+      assert.match(touched.detail, /could not record token use: EROFS: read-only file system/);
+    } finally {
+      secretsStore.setSecret = realSetSecret;
+    }
+  });
+
+  test("the route answers 200 with the failure in `detail`, and says so on the log", async () => {
+    await withCue();
+    const minted = await cueTokens.mint("Read-only disk 2");
+    const warns: string[] = [];
+    const realWarn = console.warn;
+    let r;
+    try {
+      secretsStore.setSecret = async () => {
+        throw new Error("ENOSPC: no space left on device");
+      };
+      console.warn = (...a: unknown[]) => void warns.push(a.map(String).join(" "));
+      r = await call("projectors_on", { headers: { authorization: `Bearer ${minted.secret}` } });
+    } finally {
+      console.warn = realWarn;
+      secretsStore.setSecret = realSetSecret;
+    }
+
+    // The cue FIRED. A write that failed must never stop a projector turning on.
+    assert.equal(r.status, 200);
+    assert.deepEqual(presses, ["http://10.0.0.5:8000/api/location/17/2/6/press"]);
+    // And the caller was told, in the body and on the log.
+    assert.match(
+      String((r.json as { detail: string }).detail),
+      /could not record token use: ENOSPC: no space left on device/,
+    );
+    assert.ok(
+      warns.some((w) => w.includes("could not record token use") && w.includes("ENOSPC")),
+      `the failure never reached the log: ${JSON.stringify(warns)}`,
+    );
+
+    // The operator-visible consequence, which is the reason any of this
+    // matters: the timestamp did NOT advance, so nothing may read as current.
+    const listed = (await cueTokens.list()).find((t) => t.id === minted.token.id);
+    assert.equal(listed?.lastUsedAt, null, "a stale lastUsedAt was reported as current");
+  });
+});
+
+describe("the token list will not parse", () => {
+  test("a call is 500 naming the parse failure, NOT 401 'your token is wrong'", async () => {
+    await withCue();
+    await secretsStore.setSecret("companion", "cueTokens", "{not json at all");
+    try {
+      // callRoute stops at the route — the mapping from an unlabelled throw to a
+      // status lives in remote-server's dispatcher — so the status is asserted
+      // through that dispatcher's own exported rule rather than a second copy of
+      // it here. `assert.rejects` is the half that was broken: `return []` makes
+      // this answer 401 and never throw at all.
+      let thrown: unknown = null;
+      await assert.rejects(
+        () => call("projectors_on"),
+        (err: unknown) => {
+          thrown = err;
+          return /cue tokens are unreadable/.test(errorMessage(err));
+        },
+      );
+      assert.equal(handlerErrorStatus(thrown), 500);
+      assert.match(errorMessage(thrown), /Unexpected token|JSON|not valid JSON/i);
+      assert.equal(presses.length, 0, "nothing may be pressed when the caller cannot be identified");
+    } finally {
+      await secretsStore.setSecret("companion", "cueTokens", "[]");
+      TOKEN = (await cueTokens.mint("Home Assistant")).secret;
+    }
+  });
+
+  test("and the token LIST route surfaces it too, rather than showing no tokens", async () => {
+    // GET /api/cues/tokens is the page an operator opens to work out what is
+    // wrong. An empty list there reads as "somebody revoked them all".
+    await secretsStore.setSecret("companion", "cueTokens", "]]]");
+    try {
+      await assert.rejects(
+        () => callRoute(cueRoutes, "/api/cues/tokens", { method: "GET" }),
+        /cue tokens are unreadable/,
+      );
+    } finally {
+      await secretsStore.setSecret("companion", "cueTokens", "[]");
+      TOKEN = (await cueTokens.mint("Home Assistant")).secret;
+    }
+  });
+});
+
+describe("the Authorization scheme is case-insensitive, per RFC 7235", () => {
+  // `bearer` in lower case is what a hand-written Home Assistant rest_command
+  // header emits, and that is the documented integration path. The regex has
+  // always carried /i and nothing has ever exercised it: /^Bearer (.*)$/ passes
+  // every other test in the suite.
+  // The header parse itself is asserted in cue-refusal-reason.test.ts, beside
+  // the other pure facts about cue-tokens. This is the end of the path: the
+  // real route, the real engine, a real press.
+  test("a lower-case scheme fires the cue end to end", async () => {
+    await withCue();
+    const r = await call("projectors_on", { headers: { authorization: `bearer ${TOKEN}` } });
+    assert.equal(r.status, 200);
     assert.deepEqual(presses, ["http://10.0.0.5:8000/api/location/17/2/6/press"]);
   });
 });
