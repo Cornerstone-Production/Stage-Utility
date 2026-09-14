@@ -8,11 +8,41 @@ const NO_SPINNER =
   "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0";
 
 export interface NumberInputProps {
-  value: number;
+  /** `null` is "no value". It renders as an empty box only for a caller that
+   *  passed {@link NumberInputProps.onUnset}; without one it renders 0, which is
+   *  what every caller passing a plain number has always seen. */
+  value: number | null;
   onChange: (value: number) => void;
   /** Fired on a "settled" value — blur or a stepper click — for commit-on-blur
    *  callers (onChange still fires live for dirty-tracking). */
   onCommit?: (value: number) => void;
+  /**
+   * Let this field be EMPTY, and hear about it when it is.
+   *
+   * THE CALLBACK IS THE OPT-IN, deliberately: without it the component has no
+   * way to tell a caller "there is no value now", so it must not be able to
+   * reach that state — and every one of the twenty-odd existing call sites,
+   * none of which passes one, keeps today's behaviour unchanged down to the
+   * blur path. A boolean flag beside the callback could be set without it, and
+   * a field that silently went blank while its owner still held the old number
+   * is a worse bug than the one this prop fixes.
+   *
+   * For a field where blank is a real answer rather than a missing one: a poll
+   * interval that falls back to the service's own, a port that simply is not
+   * configured yet. Those fields used to render `0`, and a focus-and-blur on
+   * that 0 committed it through the clamp below as a number the operator never
+   * chose.
+   *
+   * Fires wherever `onChange` would fire for a number (on the keystroke that
+   * empties the box) and again wherever `onCommit` would (on blur), so both a
+   * dirty-tracking caller and a commit-on-blur caller hear it. It therefore
+   * fires more than once for a single clearing and must be idempotent —
+   * "set this to nothing" always is.
+   */
+  onUnset?: () => void;
+  /** Shown in the box while it is empty. Only ever visible with `onUnset`,
+   *  since nothing else can leave the box empty once focus has left it. */
+  placeholder?: string;
   step?: number;
   min?: number;
   max?: number;
@@ -33,11 +63,17 @@ export const STEPPER_REPEAT_INTERVAL_MS = 80;
  * each stepper click (so dirty-tracking fires), selects-all on focus, can be
  * cleared while typing, and replaces the browser's native up/down spinners with
  * styled chevron steppers that match the app.
+ *
+ * Pass {@link NumberInputProps.onUnset} for a field where BLANK is a real
+ * setting rather than a missing one; without it the field behaves exactly as it
+ * always has, 0 included.
  */
 export function NumberInput({
   value,
   onChange,
   onCommit,
+  onUnset,
+  placeholder,
   step = 1,
   min,
   max,
@@ -46,11 +82,23 @@ export function NumberInput({
   disabled,
   ...rest
 }: NumberInputProps) {
-  const [text, setText] = React.useState(() => String(value));
+  /** What the box shows for a value nobody is currently typing into.
+   *
+   *  Without `onUnset` this is the old `String(Number.isFinite(v) ? v : 0)` to
+   *  the character. With one, anything that is not a real number — `null`, and
+   *  NaN, which is how the absent value used to arrive here — shows as empty
+   *  rather than as a 0 the operator would read as a setting. */
+  const display = (v: number | null): string =>
+    Number.isFinite(v) ? String(v) : onUnset ? "" : "0";
+
+  /** The value as a number, for the callbacks that are typed to take one. */
+  const asNumber = (v: number | null): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+  const [text, setText] = React.useState(() => display(value));
   const [editing, setEditing] = React.useState(false);
 
   useResyncOn([value, editing], () => {
-    if (!editing) setText(String(Number.isFinite(value) ? value : 0));
+    if (!editing) setText(display(value));
   });
 
   const clamp = (n: number) => {
@@ -61,7 +109,20 @@ export function NumberInput({
 
   function commitText(raw: string) {
     setText(raw);
-    if (raw.trim() === "") return; // allow an empty field mid-edit; don't commit
+    if (raw.trim() === "") {
+      // An empty box is a REAL answer where the caller can take one, and it is
+      // reported on the keystroke rather than saved up for blur. A form's Save
+      // button is disabled until something reports a change, and a disabled
+      // button does not take the mousedown that would have blurred this field —
+      // so deferring meant clearing a field, reaching for Save, and finding it
+      // still greyed out with no way to commit the clearing at all.
+      //
+      // Everywhere else this stays what it was: an empty field mid-edit commits
+      // NOTHING, because for a field that must hold a number, momentarily
+      // persisting 0 is a busy loop or an unbindable port written to disk.
+      onUnset?.();
+      return;
+    }
     const n = Number.parseFloat(raw);
     if (!Number.isFinite(n)) return;
     onChange(clamp(n));
@@ -76,11 +137,21 @@ export function NumberInput({
   // reset to the prop at the START of every press (see `startRepeat`) so a
   // press always steps from wherever the field actually is, including a value
   // that changed out from under it between presses.
-  const heldValue = React.useRef(value);
+  const heldValue = React.useRef<number | null>(value);
 
   function bumpOnce(dir: 1 | -1) {
-    const base = Number.isFinite(heldValue.current) ? heldValue.current : 0;
-    const next = clamp(Number((base + dir * step).toFixed(6)));
+    const base = heldValue.current;
+    // From an EMPTY box there is no number to step FROM, so the first press in
+    // either direction lands on the lowest value the field permits — `min`
+    // where one is declared, else zero. Not `0 ± step`: on a field with a floor
+    // of 10, that read as "11" for a press that was asking for the smallest one,
+    // and it is the floor an operator pressing `+` on a blank interval means.
+    // Unreachable for every caller that does not pass `onUnset`, since nothing
+    // else can hand this a value that is not a number.
+    const next =
+      typeof base === "number" && Number.isFinite(base)
+        ? clamp(Number((base + dir * step).toFixed(6)))
+        : clamp(min ?? 0);
     heldValue.current = next;
     onChange(next);
     onCommit?.(next);
@@ -142,6 +213,7 @@ export function NumberInput({
         type="text"
         inputMode="decimal"
         value={text}
+        placeholder={placeholder}
         disabled={disabled}
         aria-label={rest["aria-label"]}
         onFocus={(e) => {
@@ -150,15 +222,32 @@ export function NumberInput({
         }}
         onBlur={() => {
           setEditing(false);
-          if (text.trim() === "" || !Number.isFinite(Number.parseFloat(text))) {
-            setText(String(Number.isFinite(value) ? value : 0));
-            onCommit?.(Number.isFinite(value) ? value : 0);
-          } else {
-            const clamped = clamp(Number.parseFloat(text));
+          const typed = text.trim();
+          const n = Number.parseFloat(typed);
+          if (typed !== "" && Number.isFinite(n)) {
+            const clamped = clamp(n);
             setText(String(clamped));
             if (clamped !== value) onChange(clamped);
             onCommit?.(clamped);
+            return;
           }
+          // Nothing usable in the box. EMPTY is an answer where the caller can
+          // take one, so it settles as empty rather than springing back to a
+          // number — that spring-back is the whole bug: a field showing a 0 it
+          // was never set to committed that 0, clamped up to `min`, for nothing
+          // more than a click in and a click out.
+          //
+          // JUNK ("abc") is not an answer, so it reverts to whatever the value
+          // is — and where that value is itself absent, reverting IS going back
+          // to empty. Only the second clause makes that true; without it a typo
+          // on a blank field would have committed 0 by the branch below.
+          if (onUnset && (typed === "" || value == null)) {
+            onUnset();
+            setText("");
+            return;
+          }
+          setText(display(value));
+          onCommit?.(asNumber(value));
         }}
         onChange={(e) => commitText(e.target.value)}
         className={cn("min-w-0 flex-1 bg-transparent px-2.5 py-1 text-footnote text-fg tabular-nums outline-none", NO_SPINNER)}
