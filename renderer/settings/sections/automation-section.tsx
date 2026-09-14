@@ -9,12 +9,13 @@ import {
 } from "@main/services/cue-pairs";
 import type { InferredStateSource } from "@main/services/companion-state-source";
 import { hasServiceGuard } from "@main/services/service-guard";
-// The one main type imported rather than restated below. The wire shapes in
-// this file are deliberately local — the renderer models what the API sends —
-// but an OUTCOME is a closed set the server owns, and a second copy of it is a
-// list that silently stops covering the log: `skipped` had to be added here by
-// hand, and nothing would have said so if it had not been.
-import type { AutomationOutcome } from "@main/types/automation";
+// The server's own shapes, imported rather than restated. An OUTCOME and a RULE
+// are both closed sets the server owns, and a second copy of either is a list
+// that silently stops covering the thing it models: `skipped` had to be added
+// to the outcome copy by hand, and nothing would have said so if it had not
+// been. Type-only, so nothing these modules reach at runtime is bundled.
+import type { AutomationOutcome, Rule } from "@main/types/automation";
+import type { CueStateRow } from "@main/services/cue-states";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
 // The editor itself, and the field shapes it and this list share. The list
 // renders the collapsed rows; the dialog is the only thing that mounts an
@@ -22,10 +23,8 @@ import { labelFor, ruleMatchesSearch } from "./rule-search";
 import {
   CuePairState,
   RuleEditorDialog,
-  type CueStateRow,
   type PairRowData,
   type Registry,
-  type Rule,
   type RuleEditorTarget,
 } from "./rule-editor-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";

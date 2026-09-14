@@ -37,6 +37,10 @@ import {
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
 import type { InferredStateSource } from "@main/services/companion-state-source";
+// The server's own shapes, imported rather than restated. Type-only, so nothing
+// these modules reach at runtime is pulled into the settings bundle.
+import type { CueStateRow } from "@main/services/cue-states";
+import type { ParamDef, Rule } from "@main/types/automation";
 import {
   LEARN_MAX_ATTEMPTS,
   learnAgainParams,
@@ -74,41 +78,29 @@ import { CompanionPressFields } from "./companion-cues";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
-export interface ParamSpec {
-  key: string;
-  label: string;
-  type: "number" | "string" | "enum" | "multi-enum" | "key-value";
-  min?: number;
-  max?: number;
-  options?: { value: string; label: string }[];
-  optionsFrom?: string;
-  optional?: boolean;
-  help?: string;
-  keyLabel?: string;
-  valueLabel?: string;
-}
+/**
+ * One definition as `GET /api/automation/registry` sends it — every data field
+ * of a TriggerDef, ConditionDef or ActionDef, with `didFire`/`holds`/`run`
+ * dropped on the way out.
+ *
+ * `params` is the SERVER's own {@link ParamDef}, not a copy of it. A local copy
+ * here widened one field — `optionsFrom`, a closed union of eight literals on
+ * the server — to bare `string`, and that widening is the whole reason a
+ * condition could declare `optionsFrom: "service-types"` with nothing in the
+ * renderer answering it: the select offered "Pick one…" and nothing else, and
+ * no compiler and no test could say so. Keyed off the real union,
+ * automation-option-sources.ts cannot compile until every source is answered.
+ */
 export interface Spec {
   id: string;
   label: string;
-  params: ParamSpec[];
+  params: ParamDef[];
   help?: string;
 }
 export interface Registry {
   triggers: (Spec & { channel: string })[];
   conditions: Spec[];
   actions: Spec[];
-}
-
-export interface Rule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: { id: string; params: Record<string, string | number> }[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-  confirmRequired?: boolean;
 }
 
 /**
@@ -125,21 +117,6 @@ export interface PairRowData {
   hidden: boolean;
   on: Rule;
   off: Rule;
-}
-
-/** One bound pair's state, as `GET /api/cues/states` sends it. */
-export interface CueStateRow {
-  on: string;
-  off: string;
-  variable: string;
-  value: string | null;
-  state: "on" | "off" | "unknown";
-  reason?: string;
-  /** True for up to eight seconds after a press, while `state` may still be
-   *  the pre-press reading — see `main/services/cue-states.ts`. */
-  settling?: true;
-  /** What that press asked for. Present exactly when `settling` is. */
-  commanded?: "on" | "off";
 }
 
 // ── Shared row helpers, matching the layout inspector's shape ─────────────────
@@ -192,7 +169,7 @@ function KeyValueField({
   value,
   onChange,
 }: {
-  spec: ParamSpec;
+  spec: ParamDef;
   value: string | number | undefined;
   onChange: (v: string) => void;
 }) {
@@ -272,7 +249,7 @@ function ParamField({
   onChange,
   dynamicOptions,
 }: {
-  spec: ParamSpec;
+  spec: ParamDef;
   value: string | number | undefined;
   onChange: (v: string | number) => void;
   dynamicOptions: Record<string, { value: string; label: string }[]>;
