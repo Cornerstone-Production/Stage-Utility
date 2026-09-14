@@ -30,6 +30,17 @@ function runNotes(version: string, from: string, cwd?: string) {
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
+/** Put an override file in place for one run, then take it away again. */
+function withOverride<T>(at: string, body: unknown, run: () => T): T {
+  fs.mkdirSync(OVERRIDE_DIR, { recursive: true });
+  fs.writeFileSync(at, typeof body === "string" ? body : JSON.stringify(body, null, 2));
+  try {
+    return run();
+  } finally {
+    fs.rmSync(at, { force: true });
+  }
+}
+
 /** Just one section's text, so a line under another heading cannot satisfy a match. */
 function sectionText(out: string, title: string): string {
   const from = out.indexOf(`## ${title}`);
@@ -244,17 +255,6 @@ describe("an override for a Beta-only decision that can no longer be made in the
   const VERSION = "9.9.7";
   const file = path.join(OVERRIDE_DIR, `${VERSION}.json`);
   const preFile = path.join(OVERRIDE_DIR, `${VERSION}-beta.1.json`);
-
-  /** Put an override file in place for one run, then take it away again. */
-  function withOverride<T>(at: string, body: unknown, run: () => T): T {
-    fs.mkdirSync(OVERRIDE_DIR, { recursive: true });
-    fs.writeFileSync(at, typeof body === "string" ? body : JSON.stringify(body, null, 2));
-    try {
-      return run();
-    } finally {
-      fs.rmSync(at, { force: true });
-    }
-  }
 
   it("shows a fix whose Beta-only trailer is wrong", () => {
     // The 1.18.0 case: a fix to behaviour the last stable release really had,
@@ -588,20 +588,10 @@ describe("an override names a commit, not a name for one", () => {
   after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
   const file = path.join(OVERRIDE_DIR, "9.9.7.json");
 
-  function withOverride<T>(body: unknown, run: () => T): T {
-    fs.mkdirSync(OVERRIDE_DIR, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(body, null, 2));
-    try {
-      return run();
-    } finally {
-      fs.rmSync(file, { force: true });
-    }
-  }
-
   it("a branch name stops the release, even one sitting on a fix in range", () => {
     // `movable` points at a fix this release carries, so without the check the
     // override APPLIES — quietly, to whatever that branch points at next time.
-    const r = withOverride([{ commit: "movable", betaOnly: true, reason: "whatever is on that branch today" }], () =>
+    const r = withOverride(file, [{ commit: "movable", betaOnly: true, reason: "whatever is on that branch today" }], () =>
       runNotes("9.9.7", "v1.0.0", repo.dir));
     assert.notEqual(r.status, 0, "an override pinned to a branch generated notes");
     assert.match(r.stderr, /is not a commit SHA/);
@@ -609,7 +599,7 @@ describe("an override names a commit, not a name for one", () => {
   });
 
   it("a tag stops the release too", () => {
-    const r = withOverride([{ commit: "v1.1.0", betaOnly: true, reason: "a tag can be moved" }], () =>
+    const r = withOverride(file, [{ commit: "v1.1.0", betaOnly: true, reason: "a tag can be moved" }], () =>
       runNotes("9.9.7", "v1.0.0", repo.dir));
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /is not a commit SHA/);
@@ -617,6 +607,7 @@ describe("an override names a commit, not a name for one", () => {
 
   it("a short SHA is still fine — that is what a person pastes", () => {
     const out = withOverride(
+      file,
       [{ commit: repo.sha.rackColour.slice(0, 9), betaOnly: true, reason: "Built and broken inside this release." }],
       () => notesFor("9.9.7", "v1.0.0", repo.dir),
     );
