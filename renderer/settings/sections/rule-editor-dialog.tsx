@@ -1066,6 +1066,75 @@ function pairStateParams(
 
 const roomOf = (params: Record<string, string | number>): string => String(params.room ?? "").trim();
 
+/** One trigger or action, as a rule stores it. */
+type RuleStep = Rule["trigger"];
+
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * One trigger or action as it should be SAVED, or null when this dialog changed
+ * nothing about it.
+ *
+ * `live` is what the server holds now, as of this page's last read; `seed` is
+ * what the drafts were built from when the dialog opened. Merging this dialog's
+ * own changes onto `live` is what keeps a concurrent server write: the hourly
+ * Companion reconcile rewrites a moved button's page/row/col and fingerprint,
+ * and the learn pass writes what it found into the trigger's params — both into
+ * fields nobody has on screen, and both lost if Save sent the whole step.
+ */
+function mergedStep(seed: RuleStep, draft: RuleStep, live: RuleStep): RuleStep | null {
+  if (same(draft, seed)) return null;
+  // A DIFFERENT trigger or action. Its params are a fresh set — the Select that
+  // swaps one clears them — so merging the old ones in would carry settings over
+  // from a step that is gone.
+  if (draft.id !== seed.id) return draft;
+  const changed: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(draft.params)) {
+    if (value !== seed.params[key]) changed[key] = value;
+  }
+  // The server's step is no longer the one this dialog seeded from: somebody
+  // swapped the trigger or action out from under it, and there is nothing safe
+  // to merge onto. This dialog's own view is then what gets written.
+  const base = live.id === seed.id ? live.params : draft.params;
+  return { id: draft.id, params: { ...base, ...changed } };
+}
+
+/**
+ * What this dialog CHANGED, as a patch onto whatever the server holds now.
+ *
+ * automation-engine's updateRule is `Object.assign(r, patch)`, so a key this
+ * patch omits keeps the server's own value. Sending the whole rule instead — as
+ * this dialog did, and as the editor it replaced did with a `useResyncOn` in
+ * front of it — means every field is written back as it was when the dialog
+ * opened, however long ago that was.
+ *
+ * The case it costs: the hourly Companion reconcile finds a button that has
+ * moved and writes new coordinates. The dialog has been open since before that
+ * pass. The operator renames the rule, presses Save, and the old coordinates go
+ * back — the cue presses the wrong button until the next hourly pass, with
+ * nothing on screen having said so. companion-state-probe.ts requires the SERVER
+ * to re-read immediately before a write "never from a snapshot … an operator may
+ * have saved the rule in between"; this is the same requirement pointing the
+ * other way.
+ *
+ * Every draft is a spread of its seed, so no key is ever dropped and iterating
+ * the draft's own keys sees all of them.
+ */
+function changesOnly(seed: Rule, draft: Rule, live: Rule): Partial<Omit<Rule, "id">> {
+  const patch: Partial<Omit<Rule, "id">> = {};
+  if (draft.name !== seed.name) patch.name = draft.name;
+  if (draft.enabled !== seed.enabled) patch.enabled = draft.enabled;
+  if (draft.cooldownSec !== seed.cooldownSec) patch.cooldownSec = draft.cooldownSec;
+  if (draft.oncePerService !== seed.oncePerService) patch.oncePerService = draft.oncePerService;
+  if (draft.confirmRequired !== seed.confirmRequired) patch.confirmRequired = draft.confirmRequired;
+  if (!same(draft.conditions, seed.conditions)) patch.conditions = draft.conditions;
+  const trigger = mergedStep(seed.trigger, draft.trigger, live.trigger);
+  if (trigger) patch.trigger = trigger;
+  const action = mergedStep(seed.action, draft.action, live.action);
+  if (action) patch.action = action;
+  return patch;
+}
+
 /**
  * The rule editor, over the list.
  *
@@ -1097,6 +1166,24 @@ export function RuleEditorDialog({
   const isPair = target.kind === "pair";
   const [onDraft, setOnDraft] = useState<Rule>(isPair ? target.pair.on : target.rule);
   const [offDraft, setOffDraft] = useState<Rule | null>(isPair ? target.pair.off : null);
+  /**
+   * The rules the drafts were SEEDED from, frozen at open.
+   *
+   * `target` is re-resolved from the live query on every render, so it moves
+   * when the server writes; this does not. The difference between the two is
+   * what somebody else changed while this dialog was open, and the difference
+   * between a draft and this is what the operator changed — see `changesOnly`.
+   *
+   * A ref, and initialised once: the dialog is keyed `${kind}:${id}` upstream,
+   * which does NOT change when the rule's contents change, so a `useState`
+   * seeded from `target` would be reseeded by nothing and a dependency on
+   * `target` would reseed it on every server write, throwing away the edit in
+   * progress. That is what the editor this replaced did.
+   */
+  const seed = useRef<{ on: Rule; off: Rule | null }>({
+    on: isPair ? target.pair.on : target.rule,
+    off: isPair ? target.pair.off : null,
+  });
   const [half, setHalf] = useState<"on" | "off">("on");
   const [busy, setBusy] = useState(false);
 
@@ -1212,10 +1299,22 @@ export function RuleEditorDialog({
       // ON FIRST. It is where the pair's settings live, so a failure on the off
       // half leaves the pair's own settings saved rather than a rules file
       // where the off half claims settings the on half no longer has.
-      await invoke("automation:updateRule", { id: onDraft.id, patch: onHalfPatch() });
-      if (offDraft) {
+      // ONLY WHAT CHANGED, and merged onto what the server holds NOW. Both
+      // halves are still written, and in this order, even when one of them has
+      // nothing in it: the ordering is the guarantee, and an empty patch is a
+      // no-op the server already handles.
+      const liveOn = isPair ? target.pair.on : target.rule;
+      await invoke("automation:updateRule", {
+        id: onDraft.id,
+        patch: changesOnly(seed.current.on, onHalfPatch(), liveOn),
+      });
+      if (offDraft && seed.current.off) {
         writing = "Turn off";
-        await invoke("automation:updateRule", { id: offDraft.id, patch: offHalfPatch(offDraft) });
+        const liveOff = isPair ? target.pair.off : seed.current.off;
+        await invoke("automation:updateRule", {
+          id: offDraft.id,
+          patch: changesOnly(seed.current.off, offHalfPatch(offDraft), liveOff),
+        });
       }
       onClose();
     } catch (e) {

@@ -294,6 +294,62 @@ describe("one rule", () => {
     assert.equal((JSON.parse(String(saved[0]?.body)) as { name: string }).name, "Screens");
   });
 
+  test("Save keeps a change the server made while the dialog was open", async () => {
+    // The hourly Companion reconcile finds a button that has moved and writes
+    // new page/row/col. The dialog has been open since before that pass. Sending
+    // the whole rule put the old coordinates back, and the cue pressed the wrong
+    // button until the next hourly pass with nothing on screen having said so.
+    await mount();
+    await openRow("Rule take_screens");
+    RULES = RULES.map((r) => ({
+      ...r,
+      action: { ...r.action, params: { page: 4, row: 2, col: 3 } },
+    }));
+    await act(async () => {
+      await client!.invalidateQueries({ queryKey: ["automation:rules"] });
+    });
+    await settle();
+
+    await typeIn(field("Name"), "Screens", "Name");
+    await press(button("Save"), "Save");
+
+    const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
+    assert.equal(body.name, "Screens");
+    assert.equal(body.action, undefined, "Save sent the action it opened with");
+    assert.deepEqual(
+      RULES[0]?.action.params,
+      { page: 4, row: 2, col: 3 },
+      "the moved button's coordinates were overwritten with the ones the dialog opened on",
+    );
+  });
+
+  test("Save carries a param the server added, alongside the one it changed", async () => {
+    // The learn pass writes what it found into the TRIGGER's params, which are
+    // the same params the cue name lives in — so a key-level diff is not enough
+    // on its own. The patch merges this dialog's changes onto what the server
+    // holds now.
+    await mount();
+    await openRow("Rule take_screens");
+    RULES = RULES.map((r) => ({
+      ...r,
+      trigger: { ...r.trigger, params: { ...r.trigger.params, stateCandidates: "kasa:power_state" } },
+    }));
+    await act(async () => {
+      await client!.invalidateQueries({ queryKey: ["automation:rules"] });
+    });
+    await settle();
+
+    await typeIn(field("Cue name"), "the_screens", "Cue name");
+    await press(button("Save"), "Save");
+
+    const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
+    assert.deepEqual(body.trigger?.params, {
+      name: "the_screens",
+      says: "the screens",
+      stateCandidates: "kasa:power_state",
+    });
+  });
+
   test("a rule that is not a cue gets no pair section and no halves", async () => {
     RULES = [
       {
@@ -384,9 +440,12 @@ describe("a pair", () => {
 
     const saved = writes();
     const on = JSON.parse(String(saved[0]?.body)) as { trigger: { params: Record<string, string> } };
-    const off = JSON.parse(String(saved[1]?.body)) as { trigger: { params: Record<string, string> } };
+    const off = JSON.parse(String(saved[1]?.body)) as { trigger?: { params: Record<string, string> } };
     assert.equal(on.trigger.params.homeAssistant, "hidden");
-    assert.notEqual(off.trigger.params.homeAssistant, "hidden");
+    // The OFF half's patch does not mention its trigger AT ALL, which is
+    // stronger than "not hidden": a patch is merged server-side, so an omitted
+    // key is the server keeping its own.
+    assert.equal(off.trigger, undefined, "the off half's trigger was rewritten for a pair setting");
   });
 
   test("a setting the OFF half carries alone is shown, and moves to the ON half", async () => {
