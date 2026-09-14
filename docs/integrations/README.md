@@ -112,10 +112,20 @@ own, a port that is not configured yet — declares neither, and carries
 being blankable at all. Three do (`propresenter.pollMs`, `ross-tsl.port`,
 `sensource.attendancePollSeconds`). Their box opens empty, clearing one back to
 blank is a save the operator can make, and a stepper pressed on a blank one
-lands on the field's `min`. A number field with none of the three renders 0 when
-it has no value, and a click in and out of that 0 commits it — so a prefill is
-not optional for a setting that must hold a number.
-`integration-number-fields.test.tsx` pins the count and the biconditional.
+lands on the lowest value the field permits — its `min`, or zero where it
+declares none. A number field with none of the three shows a bare 0 for a value
+it does not have: a number the operator reads as a setting, and one a stepper
+press turns into a real one. So a prefill is not optional for a setting that
+must hold a number. `integration-number-fields.test.tsx` pins the count and the
+biconditional.
+
+`min` and `max` bound what can be TYPED into a field, not what may already be
+stored in it. A value saved before the bound existed keeps its number and goes
+on being displayed; only a value the operator enters in that edit is pulled
+inside the bounds. Clamping a stored value on a click in and a click out was a
+silent config change nobody asked for — `propresenter.pollMs` 100 became 200, a
+five-fold request rate — so bounds may be added to an existing field without
+rewriting anybody's setting.
 
 Keep `unsetHint` short: the field is 176px, and "Same as poll interval" is
 clipped where "Same as above" is not. The wireless connections panel renders

@@ -84,6 +84,12 @@ in-process consumers such as an automation rule both count. **200 ms** is the
 floor the field accepts, because the poller ignores anything below it. Clearing
 the field back to blank returns it to 1000 ms.
 
+A poll interval saved before that floor existed keeps its number — opening the
+card and closing it again changes nothing — but the poller still ignores
+anything below 200 ms and falls back to 1000 ms. If the field reads under 200
+and updates look slow, that is why: type a value of 200 or more, or clear the
+field.
+
 **On a layout:** add slide objects — current/next slide text, current/next slide
 notes, current/next section, slide progress, slide thumbnail. Each can target a
 specific ProPresenter instance.
