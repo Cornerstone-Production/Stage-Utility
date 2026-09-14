@@ -28,6 +28,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { automationEngine } = await import("./automation-engine.js");
+const { automationLog } = await import("./automation-log.js");
 const { cueManifest, manifestVersion } = await import("./cue-manifest.js");
 const { homeAssistantYaml } = await import("./home-assistant-yaml.js");
 const { CALL_TRIGGER_ID } = await import("./cue-aliases.js");
@@ -35,6 +36,7 @@ const { cuePairs, homeVisibilityParams, isHiddenFromHome } = await import("./cue
 type Rule = import("../types/automation.js").Rule;
 
 after(async () => {
+  await automationLog.whenIdle();
   await fs.rm(TMP, { recursive: true, force: true });
 });
 
@@ -197,5 +199,48 @@ describe("voice", () => {
     await automationEngine.addRule(cue("take_screens", homeVisibilityParams(true)));
     const result = await automationEngine.callByName("take_screens", { caller: "test" });
     assert.equal(result.status, 200);
+  });
+});
+
+describe("a save that fails does not fail silently", () => {
+  // Root ignores directory mode bits, so this would pass vacuously there —
+  // same guard secrets.test.ts uses for its own permission-failure test.
+  const asRoot = process.getuid?.() === 0;
+
+  test("logs on /log and whenIdle() still resolves, instead of losing the write with nothing said", async (t) => {
+    if (asRoot) return t.skip("mode bits do not apply to root");
+    await automationEngine.addRule(cue("log_write_failure_probe"));
+
+    const errors: unknown[][] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => void errors.push(args);
+    // Removes write access from the directory automation-log.json lives in, so
+    // the atomic write's temp file cannot even be created — the same EACCES
+    // shape as a card gone read-only or an operator's home directory owned by
+    // someone else.
+    await fs.chmod(TMP, 0o500);
+    try {
+      const result = await automationEngine.callByName("log_write_failure_probe", { caller: "test" });
+      // Fire-and-forget means a save that cannot land must still not block the
+      // rule that triggered it.
+      assert.equal(result.status, 200, "the rule must still fire even though its log entry cannot be saved");
+
+      // Must resolve — not hang, not reject — even though the save it is
+      // standing in for failed.
+      await automationLog.whenIdle();
+
+      assert.ok(
+        errors.some(
+          (args) =>
+            typeof args[0] === "string" &&
+            args[0].includes("[automation-log]") &&
+            args[0].includes("could not persist"),
+        ),
+        `expected a "[automation-log] could not persist" line reaching /log; saw: ${JSON.stringify(errors)}`,
+      );
+    } finally {
+      console.error = realError;
+      await fs.chmod(TMP, 0o700);
+    }
   });
 });
