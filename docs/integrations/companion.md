@@ -364,10 +364,16 @@ so Home Assistant shows what it asked for rather than what the device did.
 ### Keeping a cue out of Home Assistant
 
 Each cue's editor carries a **Home Assistant** switch. Turned off, the cue is
-voice-only: it is left out of `/api/cues/manifest` and out of the generated
-YAML, so no entity is created for it and it appears under **Everything else** in
-the Automations tab. `POST /api/cues/<name>` still fires it, and so does
-anything already calling it that way.
+voice-only: it is left out of `/api/cues/manifest`, out of the generated YAML
+and off the `cues` channel, so no entity is created for it and it appears under
+**Everything else** in the Automations tab. `POST /api/cues/<name>` still fires
+it, and so does anything already calling it that way.
+
+A hidden pair's state is still read, and still shown on its row in the
+Automations tab — hiding a cue changes which entities Home Assistant is told
+to create and nothing else. `GET /api/cues/states` therefore still carries the
+pair, marked `hiddenFromHome: true`; the generated sensor only lifts the pairs
+the YAML listed, which are the shown ones.
 
 For a pair the switch belongs to the ON half and covers both halves — one
 switch, hidden or shown together. Turning it off removes the entity from Home

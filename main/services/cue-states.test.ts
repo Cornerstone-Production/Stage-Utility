@@ -222,6 +222,48 @@ describe("cueStates.read", () => {
     });
   });
 
+  describe("a pair hidden from Home Assistant", () => {
+    // Hidden is about which entities Home Assistant is told to create "and
+    // nothing else" — see isHiddenFromHome. The row stays in THIS answer,
+    // because the app's own rules page reads this route for the state pill on
+    // every pair row, and a hidden pair going blank there would be a
+    // presentation setting quietly removing the only feedback an operator has
+    // that the binding works. Home Assistant never sees it: the generated
+    // sensor lifts only the bases the YAML wrote into `json_attributes`, and
+    // those come from the SHOWN pairs.
+    //
+    // The `cues` channel is the surface that must drop it, and this is the flag
+    // it reads. See cue-live.test.ts.
+    test("is still read, and carries hiddenFromHome; a shown pair carries nothing", async () => {
+      rules = [...pair("voice_only", { homeAssistant: "hidden" }), ...pair("projectors")];
+      values.voice_only_state = { value: "on" };
+      values.projectors_state = { value: "off" };
+      const answer = await cueStates.read();
+      assert.deepEqual([...answer.states.keys()].sort(), ["projectors", "voice_only"]);
+      assert.equal(answer.states.get("voice_only")!.state, "on");
+      assert.equal(answer.states.get("voice_only")!.hiddenFromHome, true);
+      // Absent, never false — the same shape as `settling`.
+      assert.equal(answer.states.get("projectors")!.hiddenFromHome, undefined);
+      assert.equal(
+        Object.hasOwn(cueStatesBody(answer).states.projectors!, "hiddenFromHome"),
+        false,
+      );
+      // And the variable WAS read: hiding a pair does not stop reading it.
+      assert.deepEqual(reads.sort(), ["projectors_state", "voice_only_state"]);
+    });
+
+    test("the flag rides on the OFF half too, exactly as the binding does", async () => {
+      // cuePairs reads either half, so a hand-edited rules file carrying it on
+      // the other side is not a setting that saves and does nothing.
+      rules = [
+        cue("hand_on", { stateVariable: "hand_state" }),
+        cue("hand_off", { homeAssistant: "hidden" }),
+      ];
+      values.hand_state = { value: "on" };
+      assert.equal((await cueStates.read()).states.get("hand")!.hiddenFromHome, true);
+    });
+  });
+
   test("a variable Companion does not have is unknown, with that reason", async () => {
     rules = pair("missing");
     const answer = await cueStates.read();

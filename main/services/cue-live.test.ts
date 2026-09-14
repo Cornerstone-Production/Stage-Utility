@@ -49,6 +49,7 @@ type Row = {
   reason?: string;
   settling?: true;
   commanded?: "on" | "off";
+  hiddenFromHome?: true;
 };
 
 let STATES: Record<string, Row> = {};
@@ -241,6 +242,61 @@ describe("the rules change", () => {
     cueLive.rulesChanged();
     await poll();
     assert.deepEqual(events.at(-1), { type: "state", id: "projectors", state: "on" });
+    await stopEverything();
+  });
+});
+
+// ── A pair hidden from Home Assistant ────────────────────────────────────────
+//
+// The manifest omits a hidden pair entirely — `/api/cues/manifest` says it does
+// not exist — and this channel has no audience but the integration reading that
+// manifest. Pushing a `state` event for it is the server telling an integration
+// about an entity it has just been told not to create.
+//
+// `/api/cues/states` keeps the row on purpose: the app's own rules page reads
+// that route for the state pill on every pair, hidden or not, and the generated
+// Home Assistant sensor lifts only the bases the YAML put in its
+// `json_attributes` list. The split is what CueStateRow.hiddenFromHome is for.
+describe("a pair hidden from Home Assistant", () => {
+  test("is not pushed, while the pair beside it is", async () => {
+    STATES = {
+      projectors: { state: "on" },
+      voice_only: { state: "off", hiddenFromHome: true },
+    };
+    subscribed = true;
+    cueLive.subscriptionsChanged();
+    await settle();
+    assert.deepEqual(events, [{ type: "state", id: "projectors", state: "on" }]);
+    await stopEverything();
+  });
+
+  test("hidden and shown again re-states it, rather than comparing against what nobody was sent", async () => {
+    // Shown, then hidden, then shown again, with the state never changing. The
+    // prune has to read the PUSHED set: compared against the whole answer the
+    // key is still there while the pair is hidden, so it stays in `last` — and
+    // unhiding pushes nothing until the device itself moves. The entity Home
+    // Assistant has just created then reads unknown until somebody walks over
+    // and turns it off at the wall.
+    //
+    // `rulesChanged` also clears `last`, and in production a hide IS a rule
+    // change — so this drives the poll alone, which is the path that must not
+    // depend on that.
+    STATES = { voice_only: { state: "on" } };
+    subscribed = true;
+    cueLive.subscriptionsChanged();
+    await settle();
+    assert.deepEqual(events, [{ type: "state", id: "voice_only", state: "on" }]);
+
+    STATES = { voice_only: { state: "on", hiddenFromHome: true } };
+    await poll();
+    assert.equal(String(events.length), "1", "a hidden pair was pushed");
+
+    STATES = { voice_only: { state: "on" } };
+    await poll();
+    assert.deepEqual(events, [
+      { type: "state", id: "voice_only", state: "on" },
+      { type: "state", id: "voice_only", state: "on" },
+    ]);
     await stopEverything();
   });
 });

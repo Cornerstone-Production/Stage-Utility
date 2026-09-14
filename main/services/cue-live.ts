@@ -52,6 +52,8 @@ interface LiveRow {
   reason?: string;
   settling?: true;
   commanded?: "on" | "off";
+  /** The operator hid this pair from Home Assistant. See the tick. */
+  hiddenFromHome?: true;
 }
 
 /** What goes out on the channel. */
@@ -159,7 +161,17 @@ class CueLive {
     this.reading = true;
     try {
       const answer = await cueLiveDeps.read();
-      for (const [id, row] of answer.states) {
+      // HIDDEN PAIRS ARE NOT ON THIS CHANNEL. The manifest omits a hidden pair
+      // entirely — `/api/cues/manifest` says it does not exist — so pushing
+      // state for it is this server telling an integration about an entity it
+      // has just been told not to create. `/api/cues/states` keeps the row,
+      // deliberately: the app's own rules page reads that route for the state
+      // pill on every pair, hidden or not. See CueStateRow.hiddenFromHome.
+      //
+      // Filtered ONCE, here, so the prune below compares against what was
+      // actually pushed rather than against the whole answer.
+      const rows = [...answer.states].filter(([, row]) => !row.hiddenFromHome);
+      for (const [id, row] of rows) {
         // The REASON is part of the comparison: a pair that goes from
         // unreachable to "value matches neither" is still unknown, and an
         // integration showing why has been told the wrong why until something
@@ -185,18 +197,20 @@ class CueLive {
         }
         cueLiveDeps.emit(event);
       }
-      // A pair that has gone away stops being compared against, or re-adding it
-      // later would push nothing until its state changed.
+      // A pair that has gone away — deleted, unbound, or hidden — stops being
+      // compared against, or re-adding it later would push nothing until its
+      // state changed.
       //
-      // `answer.states` is a Map for this line as much as for the reads above.
-      // It was a plain object and this was `id in answer.states`, which walks
-      // the PROTOTYPE CHAIN: of every key on Object.prototype exactly one is a
-      // legal cue name, and `constructor_on`/`constructor_off` is a pair the
-      // engine accepts today. `"constructor" in {}` is true, so that base was
-      // never pruned — delete the pair, re-create it, and `last` still held the
-      // stale key, so no `state` event went out and the entity read unknown
-      // until the device physically changed.
-      for (const id of this.last.keys()) if (!answer.states.has(id)) this.last.delete(id);
+      // A SET of what was pushed, and `has` rather than `in`. This was
+      // `id in answer.states` over a plain object, which walks the PROTOTYPE
+      // CHAIN: of every key on Object.prototype exactly one is a legal cue name,
+      // and `constructor_on`/`constructor_off` is a pair the engine accepts
+      // today. `"constructor" in {}` is true, so that base was never pruned —
+      // delete the pair, re-create it, and `last` still held the stale key, so
+      // no `state` event went out and the entity read unknown until the device
+      // physically changed.
+      const pushed = new Set(rows.map(([id]) => id));
+      for (const id of this.last.keys()) if (!pushed.has(id)) this.last.delete(id);
     } catch (err) {
       // NOT swallowed: cueStates.read is documented as never throwing, so this
       // is the case where that contract broke. Logged and the poll carries on,

@@ -126,6 +126,24 @@ export interface CueStateRow {
   settling?: true;
   /** What that press asked for. Present exactly when `settling` is. */
   commanded?: "on" | "off";
+  /**
+   * The operator turned this pair's **Home Assistant** switch off. Absent
+   * otherwise, never false.
+   *
+   * The row is STILL HERE, on purpose. `isHiddenFromHome` is about which
+   * entities Home Assistant is told to create "and nothing else": the app's own
+   * rules page reads this route for the state pill on every pair row, and a
+   * hidden pair that went blank there would be a presentation setting silently
+   * turning off the only feedback the operator has that the binding works.
+   * Home Assistant never sees it either way — the generated sensor lifts only
+   * the bases in its `json_attributes` list, which the YAML builds from the
+   * SHOWN pairs.
+   *
+   * The `cues` channel, which has no audience but an integration, drops these
+   * rows rather than pushing state for a pair the manifest says does not exist.
+   * That is what this flag is for; see cue-live.ts.
+   */
+  hiddenFromHome?: true;
 }
 
 export interface CueStatesAnswer {
@@ -477,6 +495,7 @@ class CueStates {
             `"${binding.onValue}" nor "${binding.offValue}"`;
         }
       }
+      if (pair.hiddenFromHome) row.hiddenFromHome = true;
       this.note(pair.base, binding.variable, row.reason ?? null);
       states.set(pair.base, row);
     }
