@@ -208,9 +208,18 @@ function scopesBefore(ref) {
 
 const features = [];
 const fixes = [];
+/**
+ * `perf`. A section of its own rather than a share of Fixed, which is where
+ * these used to land: "anchor the record clock instead of polling a timecode"
+ * reached an operator as a bug report about their install. The dialog has
+ * rendered an Improved heading since it learned about sections; nothing was
+ * ever routed to it.
+ */
+const improvements = [];
 const breaking = [];
-/** Fixes held back as build-out churn, counted so the omission is stated. */
+/** Held back as build-out churn, counted so each omission is stated. */
 let buildOutFixes = 0;
+let buildOutPerf = 0;
 const seen = new Set();
 
 const parsed = [];
@@ -307,7 +316,10 @@ for (const entry of parsed) {
 
   if (bang) breaking.push(line);
   else if (type === "feat") features.push(line);
-  else if (type === "fix" || type === "perf") {
+  else if (type === "perf") {
+    if (isBuildOutFix(entry, oldScopes)) buildOutPerf++;
+    else improvements.push(line);
+  } else if (type === "fix") {
     if (isBuildOutFix(entry, oldScopes)) buildOutFixes++;
     else fixes.push(line);
   }
@@ -358,28 +370,33 @@ running it? Update from **Settings → Advanced → Updates**.
 `;
 
 /**
- * What was held back, said out loud.
+ * A section, and what was held back from it said out loud.
  *
  * A silent filter reads as "nothing else changed", which is the failure this
- * whole file exists to avoid. One line, under the fixes it belongs with.
+ * whole file exists to avoid. The note needs the heading above it, so with
+ * everything held back one is still written — a floating sentence with no
+ * heading reads as a stray line of prose in the middle of a release.
+ *
+ * Fixes and improvements are counted apart so each section's arithmetic is its
+ * own; calling a held-back `perf` a "fix" is the same mislabelling that put
+ * them under Fixed to begin with.
  */
-const buildOutNote = buildOutFixes
-  ? `${buildOutFixes} further fix${buildOutFixes === 1 ? "" : "es"} made while building the features above ${buildOutFixes === 1 ? "is" : "are"} not listed — ${buildOutFixes === 1 ? "it was" : "they were"} never in a released version.\n`
-  : "";
+function sectionWithHeldBack(title, items, held, one, many) {
+  const note = held
+    ? `${held} further ${held === 1 ? one : many} made while building the features above ${held === 1 ? "is" : "are"} not listed — ${held === 1 ? "it was" : "they were"} never in a released version.\n`
+    : "";
+  if (items.length) return note ? `${section(title, items)}\n${note}` : section(title, items);
+  return note ? `## ${title}\n\n${note}` : "";
+}
 
-// The note needs the heading above it. With every fix held back there is no
-// section to hang it under, so one is written — a floating sentence with no
-// heading reads as a stray line of prose in the middle of a release.
-const fixed =
-  fixes.length ? `${section("Fixed", fixes)}\n${buildOutNote}`
-  : buildOutNote ? `## Fixed\n\n${buildOutNote}`
-  : "";
-
+// In SECTION_ORDER, which is the order the update dialog renders them in —
+// see main/services/update/release-notes.ts.
 const parts = [
   upgradeNotice(version),
   breaking.length ? section("Breaking", breaking) : "",
   section("New", features),
-  fixed,
+  sectionWithHeldBack("Improved", improvements, buildOutPerf, "improvement", "improvements"),
+  sectionWithHeldBack("Fixed", fixes, buildOutFixes, "fix", "fixes"),
   install,
 ];
 

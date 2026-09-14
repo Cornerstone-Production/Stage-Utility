@@ -6,6 +6,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parseReleaseSections } from "../main/services/update/release-notes.js";
+
 // A release that needs a manual step needs a sentence no commit range can
 // produce. Written into docs/release-notes/<version>.md next to the change that
 // made it necessary — because a note remembered at release time is a note
@@ -25,6 +27,15 @@ function notesFor(version: string, from: string, cwd?: string): string {
 function runNotes(version: string, from: string, cwd?: string) {
   const r = spawnSync("node", [SCRIPT, version, from], { encoding: "utf8", cwd });
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/** Just one section's text, so a line under another heading cannot satisfy a match. */
+function sectionText(out: string, title: string): string {
+  const from = out.indexOf(`## ${title}`);
+  if (from === -1) return "";
+  const rest = out.slice(from + 1);
+  const next = rest.indexOf("\n## ");
+  return next === -1 ? rest : rest.slice(0, next);
 }
 
 /**
@@ -77,6 +88,12 @@ function buildRepo(): { dir: string; sha: Record<string, string> } {
   // knows that, so the author says so.
   commit("diagramFeat", "feat(patch): a printable diagram");
   commit("legendTwice", "fix(patch): the diagram printed its legend twice", "Beta-only: true");
+  // `perf` is its own section. Two, so both halves are covered: one an operator
+  // reads, and one held back for never having been in a released version.
+  commit("streamPerf", "perf(patch): one stream instead of a six-request poll");
+  commit("askOncePerf", "perf(signage): ask once per pair, not every hour", "Beta-only: true");
+  // And a breaking change, so every heading the generator can emit is emitted.
+  commit("slugBang", "feat(patch)!: a display without a slug now redirects");
   git("tag", "v1.1.0");
   git("tag", "v1.1.0-beta.1");
   // Second names for the same two releases. The override tests write a file
@@ -141,17 +158,8 @@ describe("fixes made while building a brand-new feature", () => {
   const repo = buildRepo();
   after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
 
-  /** Just the Fixed section, so a scope named under New cannot satisfy a match. */
-  function fixedSection(out: string): string {
-    const from = out.indexOf("## Fixed");
-    if (from === -1) return "";
-    const rest = out.slice(from + 1);
-    const next = rest.indexOf("\n## ");
-    return next === -1 ? rest : rest.slice(0, next);
-  }
-
   it("a stable release drops them", () => {
-    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo.dir));
+    const fixed = sectionText(notesFor("1.1.0", "v1.0.0", repo.dir), "Fixed");
     assert.doesNotMatch(
       fixed,
       /a lost edit and a clipped number/,
@@ -161,7 +169,7 @@ describe("fixes made while building a brand-new feature", () => {
   });
 
   it("but keeps fixes to something the reader already had", () => {
-    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo.dir));
+    const fixed = sectionText(notesFor("1.1.0", "v1.0.0", repo.dir), "Fixed");
     assert.match(
       fixed,
       /rack colour bled/,
@@ -180,7 +188,7 @@ describe("fixes made while building a brand-new feature", () => {
     // anchor, so every rule above reads a fix under it as a fix to long-standing
     // behaviour — and this one repairs a feature added in the same range. Only
     // the author knows; the trailer is how they say so.
-    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo.dir));
+    const fixed = sectionText(notesFor("1.1.0", "v1.0.0", repo.dir), "Fixed");
     assert.doesNotMatch(
       fixed,
       /legend twice/,
@@ -204,7 +212,7 @@ describe("fixes made while building a brand-new feature", () => {
   it("a PRERELEASE keeps everything", () => {
     // Someone on the beta track has been running the broken version. For them
     // the fix is the news, and hiding it would hide the reason to update.
-    const fixed = fixedSection(notesFor("1.1.0-beta.1", "v1.0.0", repo.dir));
+    const fixed = sectionText(notesFor("1.1.0-beta.1", "v1.0.0", repo.dir), "Fixed");
     assert.match(fixed, /a lost edit and a clipped number/);
     assert.match(fixed, /first graphic/);
     // Including one marked Beta-only: the beta reader IS the person who had it.
@@ -244,14 +252,6 @@ describe("an override for a Beta-only decision that can no longer be made in the
     }
   }
 
-  function fixedSection(out: string): string {
-    const from = out.indexOf("## Fixed");
-    if (from === -1) return "";
-    const rest = out.slice(from + 1);
-    const next = rest.indexOf("\n## ");
-    return next === -1 ? rest : rest.slice(0, next);
-  }
-
   it("shows a fix whose Beta-only trailer is wrong", () => {
     // The 1.18.0 case: a fix to behaviour the last stable release really had,
     // marked Beta-only by mistake. The trailer deletes it from the notes and the
@@ -260,7 +260,7 @@ describe("an override for a Beta-only decision that can no longer be made in the
       { commit: repo.sha.legendTwice, betaOnly: false, reason: "v1.0.0 shipped the same double legend." },
     ], () => notesFor(VERSION, "v1.0.0", repo.dir));
     assert.match(
-      fixedSection(out),
+      sectionText(out, "Fixed"),
       /legend twice/,
       "a real fix is still being suppressed by a trailer the override says is wrong",
     );
@@ -273,7 +273,7 @@ describe("an override for a Beta-only decision that can no longer be made in the
       { commit: repo.sha.rackColour, betaOnly: true, reason: "Built and broken inside this release." },
     ], () => notesFor(VERSION, "v1.0.0", repo.dir));
     assert.doesNotMatch(
-      fixedSection(out),
+      sectionText(out, "Fixed"),
       /rack colour bled/,
       "a fix nobody could have hit is still being advertised to upgraders",
     );
@@ -287,7 +287,7 @@ describe("an override for a Beta-only decision that can no longer be made in the
     const out = withOverride(file, [
       { commit: repo.sha.lostEdit, betaOnly: false, reason: "The clipped number predates signage." },
     ], () => notesFor(VERSION, "v1.0.0", repo.dir));
-    assert.match(fixedSection(out), /a lost edit and a clipped number/);
+    assert.match(sectionText(out, "Fixed"), /a lost edit and a clipped number/);
   });
 
   it("says on the release log what it changed and why", () => {
@@ -378,14 +378,14 @@ describe("an override for a Beta-only decision that can no longer be made in the
     const out = withOverride(preFile, [
       { commit: repo.sha.rackColour, betaOnly: true, reason: "Built and broken inside this release." },
     ], () => notesFor(`${VERSION}-beta.1`, "v1.0.0", repo.dir));
-    assert.match(fixedSection(out), /rack colour bled/);
+    assert.match(sectionText(out, "Fixed"), /rack colour bled/);
   });
 
   it("no file at all is the ordinary case and generates notes as before", () => {
     assert.equal(fs.existsSync(file), false, "the fixture leaked an override file");
     const r = runNotes(VERSION, "v1.0.0", repo.dir);
     assert.equal(r.status, 0);
-    assert.match(fixedSection(r.stdout), /rack colour bled/);
+    assert.match(sectionText(r.stdout, "Fixed"), /rack colour bled/);
   });
 });
 
@@ -442,5 +442,49 @@ describe("the overrides in docs/release-notes/overrides", () => {
     const simulated = bySubject.get("fix(cues): the verdict line says when a dispatch was simulated");
     assert.ok(simulated, "the simulated-dispatch commit is no longer overridden — its wrong trailer wins again");
     assert.equal(simulated.betaOnly, false, "v1.17.1 logged a bare 'dispatched' in simulate mode, which is the default");
+  });
+});
+
+// `perf` reached the operator as a bug fix. "anchor the record clock instead of
+// polling a timecode" and "drop include=items from the once-per-second PCO live
+// read" are both work that made the app quicker, and both went out under Fixed —
+// read as a report of something that had been broken on their install.
+//
+// The dialog has rendered an Improved heading since it learned about sections
+// (SECTION_ORDER, and a tone for it in update-notices.tsx). Nothing was ever
+// routed there.
+describe("perf is an improvement, not a bug fix", () => {
+  const repo = buildRepo();
+  after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
+
+  it("a perf commit lands under Improved", () => {
+    const out = notesFor("1.1.0", "v1.0.0", repo.dir);
+    assert.match(sectionText(out, "Improved"), /one stream instead of a six-request poll/);
+    assert.doesNotMatch(
+      sectionText(out, "Fixed"),
+      /six-request poll/,
+      "a perf commit still reaches the operator as a bug they had",
+    );
+  });
+
+  it("a held-back perf is counted as an improvement, not as a fix", () => {
+    // Each section's arithmetic is its own, or the Fixed note claims a count
+    // that includes work no reasonable person would call a fix.
+    const out = notesFor("1.1.0", "v1.0.0", repo.dir);
+    assert.match(sectionText(out, "Improved"), /1 further improvement made while building/);
+    assert.match(sectionText(out, "Fixed"), /3 further fixes made while building/);
+  });
+
+  it("every heading the generator emits is one the update dialog renders", () => {
+    // The whole class of bug, checked by running both real pieces against each
+    // other rather than by reading either. A section the generator invents, or
+    // renames, disappears from the dialog without a word — which is exactly how
+    // four perf commits went out mislabelled and nobody could see it.
+    const out = notesFor("1.1.0", "v1.0.0", repo.dir);
+    const emitted = [...out.matchAll(/^## (.+)$/gm)].map((m) => m[1]).filter((h) => h !== "Install");
+    assert.deepEqual(emitted, ["Breaking", "New", "Improved", "Fixed"]);
+
+    const rendered = parseReleaseSections(out, 100).map((s) => s.section);
+    assert.deepEqual(rendered, emitted, "the dialog drops a heading the notes generator emits");
   });
 });
