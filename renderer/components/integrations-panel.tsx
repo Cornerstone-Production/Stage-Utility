@@ -246,11 +246,15 @@ async function toggleIntegration(
 /**
  * A panel that REPLACES the schema form, or null when the schema form is shown.
  *
- * These five have no ConfigField-shaped settings at all — a searchable team
- * picker, a list of receivers, a list of UDP targets, an address to dial us on —
- * and each saves its own list as it is edited. They therefore get no Save /
- * Discard and no Test in the dialog footer, exactly as they had neither in the
- * row.
+ * These FOUR have no ConfigField-shaped settings at all — a list of wireless
+ * receivers, a list of UDP targets, a list of RossTalk targets, a searchable
+ * team picker — and each saves its own list as it is edited. They therefore get
+ * no Save / Discard and no Test in the dialog footer, exactly as they had
+ * neither in the row.
+ *
+ * It said five, and listed Companion's address among them. Companion moved to
+ * panelAbove when its two descriptor fields turned out to be unreachable behind
+ * a bespoke panel that replaced the form — see the comment there.
  */
 function bespokePanelFor(descriptor: IntegrationDescriptor): ReactNode | null {
   if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
