@@ -37,6 +37,7 @@ import { cn } from "../lib/cn";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
+import { numberFieldValue } from "./integration-number-fields";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -280,15 +281,14 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                   />
                 ) : field.type === "number" ? (
                   <NumberInput
-                    // THE SECOND OF TWO copies of this render shape — the other
-                    // is integrations-panel.tsx, which now spells it
-                    // `numberFieldValue(field, value)` so that a field declaring
-                    // `unsetHint` can render blank instead of a 0 the operator
-                    // reads as a setting. This copy is deliberately left alone:
-                    // not one of the 14 number fields across main/providers/
-                    // means "unset", they are ports and channel counts, and a
-                    // wireless connection with no port is not configured rather
-                    // than configured-to-a-default.
+                    // The SAME function the integrations panel's form uses.
+                    // This was a second copy of the expression it replaced, left
+                    // alone on the argument that no wireless field means "unset"
+                    // — true today, and not a reason to keep a copy:
+                    // `numberFieldValue` returns that expression to the
+                    // character for a field with no `unsetHint`, so importing it
+                    // is behaviour-identical now and correct by itself the day a
+                    // provider field declares one.
                     //
                     // What is still true here: an ABSENT value renders 0, and
                     // that 0 looks like a setting. What used to make it worse
@@ -309,7 +309,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                     // press triggers carries the PREVIOUS value, not the stepped
                     // one. Give the field an `unsetHint` path instead if blank
                     // ever needs to be a real answer here.
-                    value={typeof value === "number" ? value : Number(value) || 0}
+                    value={numberFieldValue(field, value)}
                     // The number, not String(n): the next blur writes this
                     // straight into the connection's config, and a stringified
                     // port is not what the provider is typed to read.

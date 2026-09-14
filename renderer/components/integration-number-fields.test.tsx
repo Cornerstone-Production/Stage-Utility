@@ -37,7 +37,8 @@ const { installFakeServer, withQueryClient, settle, idle, integrationCard, until
   "../test-fixtures/integrations-harness.js"
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import("../test-fixtures/integration-descriptors.js");
-const { IntegrationsPanel, initialConfig, numberFieldValue } = await import("./integrations-panel.js");
+const { IntegrationsPanel } = await import("./integrations-panel.js");
+const { initialConfig, numberFieldValue } = await import("./integration-number-fields.js");
 
 let server = installFakeServer();
 
