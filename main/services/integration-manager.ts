@@ -2043,11 +2043,17 @@ class IntegrationManager {
 
     const enabled = this.states.get("propresenter")?.enabled ?? false;
     const { host, port, pollMs } = this.getPropresenterTarget();
+    // WHERE, on every pass, from whatever the settings now say — before the
+    // enablement branch and outside it. Both disable paths below skip straight
+    // to stop(), and while stop() also set the target the old address survived a
+    // save that changed it: the rule editor then read macros off the machine the
+    // operator had just stopped using. See ProPresenterService.setTarget.
+    propresenterService.setTarget(host, port, pollMs ?? undefined);
     if (enabled && host && port) {
-      // configure() opens the status stream; the listener flips this to
+      // start() opens the status stream; the listener flips this to
       // connected/error once it is up, or once the fallback poll answers.
       this.setConnectionState("propresenter", "connecting", `Connecting to ${host}:${port}`);
-      propresenterService.configure(host, port, pollMs ?? undefined);
+      propresenterService.start();
     } else {
       propresenterService.stop();
       this.setConnectionState("propresenter", "disconnected", null);

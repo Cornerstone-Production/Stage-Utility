@@ -62,7 +62,7 @@ after(async () => {
 
 afterEach(() => {
   propresenterManager.apply(null, []);
-  propresenterService.configure("", 0);
+  propresenterService.setTarget(null, null);
   propresenterService.stop();
   clearMacroCache();
 });
@@ -74,7 +74,7 @@ function clearMacroCache(): void {
 }
 
 function primaryAt(p: number): void {
-  propresenterService.configure("127.0.0.1", p);
+  propresenterService.setTarget("127.0.0.1", p);
   propresenterService.stop();
   clearMacroCache();
 }
@@ -186,7 +186,7 @@ describe("GET /api/automation/propresenter-macros", () => {
     // in the log of every site that does not use ProPresenter, every time
     // somebody opened the rule editor. The empty list alone cannot show this:
     // it is empty either way. The log line is the whole difference.
-    propresenterService.configure("", 0);
+    propresenterService.setTarget(null, null);
     propresenterService.stop();
     clearMacroCache();
     propresenterManager.apply("MA", []);

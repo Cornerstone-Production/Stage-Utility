@@ -78,15 +78,30 @@ one auditorium being switched off does not affect the other.
 [propresenter] status/updates unsupported (HTTP 404) — falling back to polling for the rest of this run
 [propresenter] playlist unreadable on 192.168.0.123:1025 (HTTP 404) — no next-item name, retrying in 30s
 [propresenter] 192.168.0.123:1025 unreachable (connect ECONNREFUSED) — backing off, will keep retrying quietly
-[propresenter] unreadable presentation/current frame from 192.168.0.123:1025 (Unexpected end of JSON input) — that field stops advancing, staying quiet about the rest
+[propresenter] unreadable presentation/current frame from 192.168.0.123:1025 (Unexpected end of JSON input) — that field goes blank, staying quiet about the rest
+[propresenter] 192.168.0.123:1025 accepts the status subscription and then sends nothing — the displays are holding the last slide it sent. Is ProPresenter's Network view wedged?
 [propresenter] status buffer exceeded 1000000 chars from 192.168.0.123:1025 — resyncing
 ```
 
-The last two are the ones to look for when a panel goes half-blank while the
-rest of it keeps up: a frame that would not parse, and a document too large for
-the reader's buffer. The unreadable-frame line names the endpoint, the reason
-and the machine, and is said once per endpoint per stream rather than once per
-slide advance; the buffer line is said once per overrun.
+The unreadable-frame and buffer lines are the ones to look for when a panel goes
+half-blank while the rest of it keeps up: a frame that would not parse, and a
+document too large for the reader's buffer. The unreadable-frame line names the
+endpoint, the reason and the machine, and is said once per endpoint per stream
+rather than once per slide advance; the buffer line is said once per overrun.
+
+**A frame that cannot be read BLANKS its field rather than holding the last
+one.** The fields are not independent: the section name, the slide count and the
+progress all come out of one `presentation/current` document while
+`presentation/slide_index` keeps arriving beside it, so a held document would
+describe slide 9 of the previous song's 6 — confidently wrong rather than stale.
+Everything else on the panel keeps up; the stream is not dropped over it.
+
+**A ProPresenter that accepts the subscription and then sends nothing turns the
+card red.** Its HTTP server is alive, so `/version` answers and the subscription
+is accepted — but the update publisher is wedged and no frame ever arrives. After
+two silent streams the row reports it, the payload goes offline, and the displays
+stop showing a slide from before the wedge as though it were current. Restarting
+ProPresenter is the fix.
 
 ## Setup
 
@@ -138,18 +153,33 @@ fails with `no macro called "SONG INTRO" on MA`, which is also what the log says
 ```
 
 The macro dropdown lists the names every configured instance reports, read fresh
-at most every 30 seconds. An instance that is switched off contributes nothing
+at most every 30 seconds. An instance that could not be read contributes nothing
 and never blocks the editor from opening; when more than one is configured, a
 name only some of them have is marked `DOORS (MA only)`. A macro already chosen
 on a rule is shown whether or not the machine holding it is reachable.
 
+**The `(… only)` suffix is dropped entirely while any instance is unreachable.**
+"Only" is a claim about the machines that answered, and a machine that is off was
+not asked — marking every macro the reachable one reported as living there
+"only" states that it does not exist on the other, which is not known. The
+response names the instances that did not answer instead.
+
 Changing an instance's host or port drops its cached list immediately, so a
-repointed instance never offers the previous machine's macros. A list that was
-mid-read when the change landed is discarded rather than cached, and says so:
+repointed instance never offers the previous machine's macros — and the address
+follows the SETTINGS, not the connection, so an instance repointed and switched
+off in the same save is not read at all rather than read at its old address. A
+list that was mid-read when the change landed is discarded rather than cached,
+and says so:
 
 ```
-[propresenter] macro list from 192.168.0.123:1025 discarded — the instance was reconfigured while it was being read
+[propresenter] macro list from 192.168.0.123:1025 discarded — the instance was pointed at another machine while it was being read
 ```
+
+Saving a change that does not move the target — the poll interval, the display
+name — does not drop the stream or the cached list.
+
+A rule whose ProPresenter is **switched off** triggers nothing: the action fails
+with `MA is switched off`, rather than dialling the last address the card held.
 
 With **Simulate mode** on, the action reports what it would trigger and contacts
 nothing — a rule can be written and tested with the booth machine off.
