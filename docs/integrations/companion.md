@@ -319,6 +319,14 @@ pair's spoken name is composed by the import and never follows.
 **Copy YAML** and **Download YAML** in the same panel both produce the whole
 configuration fragment: one `rest_command` per cue, a template switch per pair
 under the `template:` key, and a `script` per cue that is not half of a pair.
+
+A cue named `<base>_on` or `<base>_off` whose partner does not exist gets its
+`rest_command` and nothing else — no switch, because half a pair is not one, and
+no script either, because a script for half a switch is a button in the house
+that turns the projectors on with no way to turn them off. `/api/cues/manifest`
+answers the same way. `POST /api/cues/<name>` and voice still fire it; to give
+such a cue an entity in Home Assistant, rename it without the `_on`/`_off`
+suffix.
 That is the current template format — the legacy `platform: template` under
 `switch:`, which Home Assistant now refuses with a repair notice, is not
 generated, and a fragment saved from an older version needs replacing. Each
@@ -372,8 +380,8 @@ again.
 A cue is a rule, and every rule has an action — a Companion press is only the
 most common one. A cue whose action is anything else appears in Home Assistant
 the same way, through the same manifest and the same generated YAML: cues named
-`<base>_on` and `<base>_off` become one switch, and a cue on its own becomes a
-script.
+`<base>_on` and `<base>_off` become one switch, and a cue on its own — one whose
+name does not end `_on` or `_off` — becomes a script.
 
 The **REAPER transport** action is the worked example:
 

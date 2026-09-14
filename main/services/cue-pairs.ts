@@ -185,6 +185,28 @@ export function stateBindingProblem(params: Record<string, string | number>): st
 }
 
 /**
+ * Does this cue name look like half of an ON/OFF pair?
+ *
+ * An ORPHAN — `projectors_on` with its `_off` half deleted — is not a lone cue
+ * and must never be published as one. Home Assistant would get a
+ * `script.projectors_on`, pressable from the house, that turns the projectors
+ * on with no way to turn them off. It happened for the moment between two
+ * deletes, and Home Assistant created and removed an entity for it; pasting a
+ * freshly downloaded YAML makes it permanent.
+ *
+ * NAME-SHAPED, not pair-derived, on purpose: the question is asked about a cue
+ * that is NOT in any pair, so there is no pair to ask. `<base>_on`/`<base>_off`
+ * is exactly what the Companion import writes and what cuePairs matches on.
+ *
+ * Here so the manifest and the generated YAML cannot disagree. They did: the
+ * manifest filtered orphans and the YAML did not, so the fragment an operator
+ * pastes carried an entity the integration's own list said did not exist.
+ */
+export function isPairHalfName(cue: string): boolean {
+  return /_(on|off)$/.test(cue.trim().toLowerCase());
+}
+
+/**
  * What this value means for this binding: on, off, or neither.
  *
  * ONE predicate, because the question is asked in two places that must agree —
