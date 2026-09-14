@@ -424,6 +424,98 @@ describe("a pair", () => {
     );
   });
 
+  test("a setting the OFF half carries alone can be CLEARED, and stays cleared", async () => {
+    // The read path above only proves the dialog SHOWS an off-half setting. The
+    // writer was not symmetric with the reader: the write landed on the ON half,
+    // the fallback re-read the OFF half on the next render, and the control
+    // snapped straight back. Nothing here can be asserted without operating the
+    // control — which is why the read-path test passed on this bug.
+    RULES = [
+      cue("projectors_on", { says: "the projectors on" }),
+      cue("projectors_off", { room: "Auditorium" }),
+    ];
+    await mount();
+    await openPair("the projectors");
+    assert.equal(field("Room")?.value, "Auditorium", "the off half's room was not shown");
+
+    await typeIn(field("Room"), "", "Room");
+    assert.equal(field("Room")?.value, "", "Room repopulated itself — it cannot be cleared");
+
+    await press(button("Save"), "Save");
+    const saved = writes();
+    const on = JSON.parse(String(saved[0]?.body)) as { trigger: { params: Record<string, string> } };
+    const off = JSON.parse(String(saved[1]?.body)) as { trigger: { params: Record<string, string> } };
+    assert.deepEqual(
+      { on: on.trigger.params.room, off: off.trigger.params.room },
+      { on: "", off: "" },
+      "the cleared room came back on one of the halves",
+    );
+  });
+
+  test("a state binding the OFF half carries alone can be cleared", async () => {
+    // The worst of the three. "No state" snapped back AND the save then wrote
+    // the still-resolving off-half binding onto the ON half, actively undoing
+    // the clear.
+    RULES = [
+      cue("projectors_on", { says: "the projectors on" }),
+      cue("projectors_off", { stateVariable: "projectors_state", stateOnValue: "on", stateOffValue: "off" }),
+    ];
+    await mount();
+    await openPair("the projectors");
+    const variable = selectField("State variable");
+    assert.equal(variable?.value, "projectors_state", "the off half's binding was not shown");
+
+    await act(async () => {
+      fireEvent.change(variable!, { target: { value: "" } });
+    });
+    await settle();
+    // The control SWAPS when nothing is left to offer: with no custom variables
+    // in Companion and no stored variable, CueStateFields falls back to a text
+    // input under the same label. Either way the field has to be empty.
+    assert.equal(
+      (selectField("State variable") ?? field("State variable"))?.value,
+      "",
+      "the binding repopulated itself — No state cannot be chosen",
+    );
+
+    await press(button("Save"), "Save");
+    const saved = writes();
+    const on = JSON.parse(String(saved[0]?.body)) as { trigger: { params: Record<string, string> } };
+    const off = JSON.parse(String(saved[1]?.body)) as { trigger: { params: Record<string, string> } };
+    assert.deepEqual(
+      { on: on.trigger.params.stateVariable, off: off.trigger.params.stateVariable },
+      { on: "", off: "" },
+      "the save put the off half's binding back",
+    );
+  });
+
+  test("a hidden flag the OFF half carries alone can be turned back on", async () => {
+    RULES = [
+      cue("projectors_on", { says: "the projectors on" }),
+      cue("projectors_off", { homeAssistant: "hidden" }),
+    ];
+    await mount();
+    await openPair("the projectors");
+    const home = () => document.querySelector("[data-pair-settings] [data-cue-home]");
+    assert.equal(home()?.getAttribute("data-cue-home"), "hidden");
+
+    await press(document.querySelector('[aria-label="Shown in Home Assistant"]'), "the Home switch");
+    assert.equal(
+      home()?.getAttribute("data-cue-home"),
+      "shown",
+      "the hidden flag repopulated itself from the off half",
+    );
+
+    await press(button("Save"), "Save");
+    const saved = writes();
+    const on = JSON.parse(String(saved[0]?.body)) as { trigger: { params: Record<string, string> } };
+    const off = JSON.parse(String(saved[1]?.body)) as { trigger: { params: Record<string, string> } };
+    assert.deepEqual(
+      { on: on.trigger.params.homeAssistant, off: off.trigger.params.homeAssistant },
+      { on: "", off: "" },
+    );
+  });
+
   test("the allowed-during-a-service switch writes both halves", async () => {
     // No fallback exists for this one: the engine evaluates each half against
     // its OWN conditions. Written to the ON half alone, the off cue would go on

@@ -1125,8 +1125,40 @@ export function RuleEditorDialog({
 
   const title = isPair ? target.pair.name : onDraft.name;
 
+  /**
+   * A pair setting: written to the ON half, and CLEARED on the OFF one.
+   *
+   * SYMMETRIC WITH HOW IT IS READ. Each of the three settings above is the ON
+   * half's value with the OFF half's as a fallback, so a write that touched only
+   * the ON half left the old value sitting on the OFF half — the fallback read
+   * it back on the very next render and the control snapped straight back to
+   * where it was. Three settings were in that state (Home Assistant, Room, the
+   * state binding); the fourth, the service guard, was already symmetric because
+   * it has no fallback to read.
+   *
+   * A pair whose off cue carried `room: "Auditorium"` — which the 1.14 editor
+   * allowed — could not have its Room cleared AT ALL. The state binding was
+   * worse than stuck: choosing "No state" snapped back, and the save then wrote
+   * the still-resolving off-half binding onto the on half, actively undoing the
+   * clear the operator had asked for.
+   *
+   * The off half is touched only where it actually carries the key. Writing a
+   * blank into every pair's off rule would rewrite half the rules file to say
+   * nothing — the same rule `offHalfPatch` follows on save — and returning the
+   * draft unchanged keeps this off the render path for the ordinary pair that
+   * carries nothing on its off half.
+   */
   function setPairParams(patch: Record<string, string>) {
     setOnDraft((d) => ({ ...d, trigger: { ...d.trigger, params: { ...d.trigger.params, ...patch } } }));
+    setOffDraft((d) => {
+      if (d === null) return d;
+      const cleared: Record<string, string> = {};
+      for (const key of Object.keys(patch)) {
+        if (String(d.trigger.params[key] ?? "").trim() !== "") cleared[key] = "";
+      }
+      if (Object.keys(cleared).length === 0) return d;
+      return { ...d, trigger: { ...d.trigger, params: { ...d.trigger.params, ...cleared } } };
+    });
   }
 
   function setPairAllowed(allowed: boolean) {
