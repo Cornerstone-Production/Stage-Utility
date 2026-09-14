@@ -104,6 +104,24 @@ A panel holding a repeater row that cannot wrap marks its root with
 `WIDE_PANEL_ATTR` (`integration-dialog-size.ts`), which puts its dialog in the
 wide variant. A new one that forgets fails `integration-dialog-size.test.tsx`.
 
+A `type: "number"` field prefills when nothing is saved: its `default` if it
+declares one, otherwise its `placeholder` when that parses as a number. A field
+where BLANK is the setting — a poll interval that falls back to the service's
+own, a port that is not configured yet — declares neither, and carries
+`unsetHint` instead: the short string its empty box shows, and the opt-in to
+being blankable at all. Three do (`propresenter.pollMs`, `ross-tsl.port`,
+`sensource.attendancePollSeconds`). Their box opens empty, clearing one back to
+blank is a save the operator can make, and a stepper pressed on a blank one
+lands on the field's `min`. A number field with none of the three renders 0 when
+it has no value, and a click in and out of that 0 commits it — so a prefill is
+not optional for a setting that must hold a number.
+`integration-number-fields.test.tsx` pins the count and the biconditional.
+
+Keep `unsetHint` short: the field is 176px, and "Same as poll interval" is
+clipped where "Same as above" is not. The wireless connections panel renders
+`ConfigField`s too and ignores it — it has no prefill ladder at all, so its
+number fields show 0 until they are set.
+
 Build integrations efficiency-first: change-driven broadcasts, reuse the shared
 SSE stream, gate polling and broadcasting on demand, back off when unreachable.
 

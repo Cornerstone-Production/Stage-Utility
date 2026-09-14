@@ -38,6 +38,10 @@ export interface ConfigField {
    * Distinct from `placeholder`, which is the row's description under the label
    * and is free prose. This one goes INSIDE the input.
    *
+   * Honoured by the INTEGRATIONS card only. `wireless-connections-panel.tsx`
+   * renders `ConfigField`s too and ignores it — it has no prefill ladder at all,
+   * so its number fields show 0 until they are set.
+   *
    * integration-number-fields.test.tsx pins the biconditional: a number field
    * seeds blank if and only if it declares this.
    */

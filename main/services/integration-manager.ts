@@ -572,6 +572,7 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       // setting. `unsetHint` is what makes blank a state the operator can see
       // and get back to; getSensourceConfig's fallback to pollSeconds is
       // unchanged.
+      //
       // "Same as above", not "Same as poll interval": measured in a browser at
       // 121.2px against 105px of room in the 176px field, so the longer string
       // was clipped mid-word. The field directly above is "Poll interval (s)",
