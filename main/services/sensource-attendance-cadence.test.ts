@@ -24,8 +24,11 @@
 //     fires both callbacks in the same timer-phase sweep before either one's
 //     first await, which is too late for a "cancel the other one" to help.
 //
-// NOT unit-tested here, and NOT browser-checked either — unlike
-// safeSpacePollSeconds, whose own test file records that it was. The field is
+// THE FORM FIELD is not unit-tested here, and not browser-checked either —
+// unlike safeSpacePollSeconds, whose own test file records that it was. (What
+// the SERVICE resolves a blank field to, and the floor it applies, is pinned:
+// see "the interval the service itself resolves" below. This caveat is about
+// the input, not about the fallback.) The field is
 // declared on the descriptor and rendered by the generic ConfigField form,
 // pinned by integration-descriptor-fixture.test.ts and
 // sensource-poll-cadence.test.ts, and its shape (no default, no numeric
