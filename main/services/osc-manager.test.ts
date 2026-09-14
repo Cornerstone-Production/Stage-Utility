@@ -13,6 +13,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { addBroadcastListener } from "./broadcaster.js";
+
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-osc-manager-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
@@ -281,6 +283,56 @@ describe("how much of a message is stored", () => {
   });
 });
 
+describe("a feedback bind failure reaches the operator, not just the log", () => {
+  test("EADDRINUSE flips every enabled target to error, and sending is unaffected", async () => {
+    await oscManager.whenListening(); // start from a settled, known-healthy bind
+    assert.deepEqual(
+      oscManager.listTargets().map((t) => t.connection),
+      ["connected", "connected"],
+      "both canonical targets must be healthy before this test breaks anything",
+    );
+
+    // Occupy a real port so setFeedbackPort's bind hits a genuine EADDRINUSE —
+    // the same error dgram reports on the wire, not a stubbed one.
+    const squatter = dgram.createSocket("udp4");
+    const busyPort = await new Promise<number>((resolve) => {
+      squatter.bind(0, "127.0.0.1", () => resolve((squatter.address() as { port: number }).port));
+    });
+    try {
+      await oscManager.setFeedbackPort(busyPort);
+      await oscManager.whenListening();
+
+      const targets = oscManager.listTargets();
+      assert.deepEqual(
+        targets.map((t) => t.connection),
+        ["error", "error"],
+        "THE GUARD. dgram reports EADDRINUSE on the socket's error EVENT, not by " +
+          "throwing, so a try/catch around bind() alone never sees it — every " +
+          "enabled target kept reading connected while the feedback socket that " +
+          "backs it sat dead, with nothing beyond the log ever saying so.",
+      );
+      assert.ok(
+        targets.every((t) => t.message?.includes(String(busyPort))),
+        `expected every target's message to name the busy port ${busyPort}; saw: ${JSON.stringify(targets.map((t) => t.message))}`,
+      );
+
+      // Sending is a different socket. A target reported "error" over a dead
+      // FEEDBACK path must not read as a target that cannot send either.
+      const sent = await oscManager.testTarget({ id: BY_IP });
+      assert.equal(sent.ok, true, "sending must keep working — only feedback depends on the bound socket");
+    } finally {
+      await new Promise<void>((resolve) => squatter.close(resolve));
+      await oscManager.setFeedbackPort(PORT);
+      await oscManager.whenListening();
+      assert.deepEqual(
+        oscManager.listTargets().map((t) => t.connection),
+        ["connected", "connected"],
+        "restoring a free port must clear the error, not leave it stuck",
+      );
+    }
+  });
+});
+
 describe("the socket is wired to the ingest path", () => {
   test("a datagram on the feedback port reaches the feedback map", async () => {
     // Every other test here calls receive() directly, which proves what the
@@ -294,24 +346,29 @@ describe("the socket is wired to the ingest path", () => {
     // socket THIS PROCESS bound on a port the OS handed out moments ago.
     // Nothing on the LAN is addressed and no configured target is used.
     //
-    // Sent repeatedly rather than once: the bind is asynchronous with no
-    // callback to await from out here, and a datagram that arrives before the
-    // socket is listening is simply gone. UDP has no retry, so the test is the
-    // retry.
+    // whenListening() replaces what used to be a 3-second retry loop sending a
+    // fresh datagram every 50ms — the bind is asynchronous with no callback to
+    // await from out here, and a datagram sent before the socket is listening
+    // is simply gone, UDP has no retry. One send, then one event-driven wait
+    // for the broadcast receive() schedules, rather than guessing at a sleep.
+    await oscManager.whenListening();
     const sender = dgram.createSocket("udp4");
     const packet = encodeMessage("/still/listening", [{ type: "i", value: 42 }]);
     try {
-      const deadline = Date.now() + 3000;
-      for (;;) {
-        await new Promise<void>((resolve, reject) => {
-          sender.send(packet, PORT, "127.0.0.1", (err) => (err ? reject(err) : resolve()));
+      const fed = new Promise<void>((resolve) => {
+        addBroadcastListener((channel) => {
+          if (channel === "osc:feedback") resolve();
         });
-        // Past the 200 ms feedback throttle, which the stored value does not
-        // wait for but a subsequent read may as well not race.
-        await new Promise((r) => setTimeout(r, 50));
-        if (values()["*::/still/listening"] !== undefined) break;
-        if (Date.now() > deadline) break;
-      }
+      });
+      await new Promise<void>((resolve, reject) => {
+        sender.send(packet, PORT, "127.0.0.1", (err) => (err ? reject(err) : resolve()));
+      });
+      await Promise.race([
+        fed,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`no osc:feedback broadcast within 2000ms of sending to udp/${PORT}`)), 2000),
+        ),
+      ]);
       assert.equal(
         values()["*::/still/listening"],
         42,

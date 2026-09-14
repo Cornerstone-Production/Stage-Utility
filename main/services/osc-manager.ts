@@ -57,6 +57,15 @@ class OscManager {
   private resolveTimer: ReturnType<typeof setInterval> | null = null;
   /** The resolve pass in flight. See whenResolved(). */
   private resolving: Promise<void> = Promise.resolve();
+  /** The feedback bind attempt in flight. See whenListening(). Never rejects —
+   *  nothing internally awaits it, so a rejection nobody catches would be an
+   *  unhandled rejection, same reasoning as `resolving` above. */
+  private listening: Promise<void> = Promise.resolve();
+  /** Null once bound; otherwise the reason the feedback socket is not
+   *  listening, folded into every enabled target's connection state by
+   *  reapply() so a later addTarget/updateTarget cannot silently paint back
+   *  over it with a plain "connected". */
+  private feedbackBindError: string | null = null;
   /** The last set of resolve failures reported, so a standing one is said once
    *  rather than every five minutes. */
   private lastResolveFailure = "";
@@ -117,7 +126,17 @@ class OscManager {
     return { port: next };
   }
 
-  /** Re-derive runtime state + restart subscribe keepalives (after enable/config). */
+  /**
+   * Re-derive runtime state + restart subscribe keepalives (after enable/config).
+   *
+   * The ONE place `t.connection`/`t.message` are decided, on purpose: a bind
+   * failure on the shared feedback socket used to be visible only in the log,
+   * because nothing that runs afterward — addTarget, updateTarget, a target
+   * reload — consulted it, so any of them would paint every card back to a
+   * plain green "connected" the next time they ran. Folding
+   * `feedbackBindError` in here means there is nowhere left for that to happen
+   * by accident.
+   */
   reapply(): void {
     this.clearSubTimers();
     for (const t of this.targets) {
@@ -129,9 +148,16 @@ class OscManager {
         t.connection = "error";
         t.message = "Host and port required";
       } else {
-        t.connection = "connected";
-        t.message = null;
+        // Sending is a different socket and does not depend on the feedback
+        // bind below, so the keepalive runs regardless of whether it succeeded.
         this.startSubscribe(t, host, port);
+        if (this.feedbackBindError) {
+          t.connection = "error";
+          t.message = `feedback port ${this.feedbackPort} unavailable (${this.feedbackBindError}) — sending still works`;
+        } else {
+          t.connection = "connected";
+          t.message = null;
+        }
       }
     }
     this.startResolving();
@@ -429,14 +455,67 @@ class OscManager {
   private bindFeedback(): void {
     this.closeRecv();
     const s = dgram.createSocket("udp4");
-    s.on("error", (e) => console.error(`[osc] feedback socket error (port ${this.feedbackPort}):`, e));
+    let settle = (): void => {};
+    this.listening = new Promise((resolve) => {
+      settle = resolve;
+    });
+    // dgram reports almost every bind failure — EADDRINUSE chief among them —
+    // on this EVENT, asynchronously, never by throwing. The try/catch below
+    // catches only the rare synchronous throw (a malformed call), so this is
+    // the one that actually fires for a port already taken, and the one that
+    // used to only log: `this.recvSocket = s` below still ran, leaving every
+    // enabled target's card reporting "connected" with feedback silently gone
+    // for good.
+    s.on("error", (e) => {
+      console.error(`[osc] feedback socket error (port ${this.feedbackPort}):`, e);
+      this.reportFeedbackBind(errorMessage(e));
+      settle();
+    });
     s.on("message", (msg, rinfo) => this.receive(msg, rinfo.address));
     try {
-      s.bind(this.feedbackPort, () => console.log(`[osc] feedback listening on udp/${this.feedbackPort}`));
+      s.bind(this.feedbackPort, () => {
+        console.log(`[osc] feedback listening on udp/${this.feedbackPort}`);
+        this.reportFeedbackBind(null);
+        settle();
+      });
       this.recvSocket = s;
     } catch (err) {
       console.error("[osc] could not bind feedback port:", err);
+      this.reportFeedbackBind(errorMessage(err));
+      settle();
     }
+  }
+
+  /**
+   * Resolves once the feedback bind from the most recent bindFeedback() call
+   * has settled — listening, or given up — never rejects.
+   *
+   * The same seam whenResolved() provides for DNS: the bind is asynchronous
+   * with no callback the constructor can await, so a caller that needs to know
+   * whether a datagram sent right now has anywhere to land has nothing else to
+   * wait on. A test that sent one before this existed had to retry for up to 3
+   * seconds instead, because there was nothing else to wait on.
+   */
+  whenListening(): Promise<void> {
+    return this.listening;
+  }
+
+  /**
+   * Record the outcome of a bind attempt and re-derive every target's
+   * connection state from it via reapply() — the one place that decides
+   * `t.connection`, so this cannot be silently overwritten by the next
+   * addTarget/updateTarget the way a direct assignment here could be.
+   *
+   * Said — and reapplied — only when the outcome CHANGES, not on every rebind
+   * with the same one: a port that stays taken is a standing condition, and
+   * reapply() rebuilds every target and restarts every keepalive timer, which
+   * is not free to do on every unrelated config change once this is already
+   * known.
+   */
+  private reportFeedbackBind(error: string | null): void {
+    if (error === this.feedbackBindError) return;
+    this.feedbackBindError = error;
+    this.reapply();
   }
 
   private closeRecv(): void {
