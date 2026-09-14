@@ -378,7 +378,7 @@ here is required — every one has a working default.
 | `STAGE_UTILITY_DATA` | Where configuration, history and the encryption key live. Default `~/.stage-utility`; the installers set their own, above |
 | `STAGE_UTILITY_PORT` | The main port. Default `8788` |
 | `STAGE_UTILITY_FRIENDLY_PORT` | The extra port-free listener. Default `80`; `0` disables it |
-| `STAGE_UTILITY_LOG_TOKEN` | Require `?token=…` on `/log` and `/api/log`. Unset leaves them open on the LAN |
+| `STAGE_UTILITY_LOG_TOKEN` | Require `?token=…` on `/log`, `/api/log` and `/api/prodcom/transcript/raw` (the [unredacted transcript](../integrations/prodcom.md#sensitive-keywords)). Unset leaves them open on the LAN |
 | `STAGE_UTILITY_KEY_FILE` | Read the encryption key from a path of your own instead of beside the secrets — see [Reliability](reliability.md#backups) |
 | `STAGE_UTILITY_KEY` | The key itself, as raw base64 or hex. No key file is read or written |
 | `STAGE_UTILITY_ROOT` | The install directory, when it cannot be worked out. Ignored unless it holds a `package.json` or a `VERSION` |

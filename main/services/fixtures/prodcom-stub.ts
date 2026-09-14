@@ -62,6 +62,19 @@ export type StubChannel = {
   unreadCount?: number;
 };
 
+/** A keyword as `GET /api/v1/keywords` and `GET /api/v1/channels/{id}/keywords`
+ *  return it. Field names and meanings are the spec's: `text` is a
+ *  case-insensitive SUBSTRING, and `isSensitive` is what ProdCom's own UI masks
+ *  with asterisks. */
+export type StubKeyword = {
+  id: string;
+  text: string;
+  shouldHighlight?: boolean;
+  highlightColor?: string | null;
+  replacementText?: string | null;
+  isSensitive: boolean;
+};
+
 export type StubOptions = {
   /** History for `GET /api/v1/transcript`, ascending oldest → newest. */
   entries?: StubEntry[];
@@ -72,6 +85,21 @@ export type StubOptions = {
   requireBearer?: string;
   /** Reply 500 to `GET /api/v1/channels`. */
   failChannels?: boolean;
+  /** Global keywords for `GET /api/v1/keywords`. */
+  keywords?: StubKeyword[];
+  /** Channel-scoped keywords, by channel id, for
+   *  `GET /api/v1/channels/{id}/keywords`. */
+  channelKeywords?: Record<string, StubKeyword[]>;
+  /**
+   * Also put each channel's keywords on its row in `GET /api/v1/channels`.
+   *
+   * The spec's Channel schema declares a `keywords` array; ProdCom 2.3.2 does
+   * not send one (17 live channels, none carrying the key). Off by default so
+   * the stub matches the box, on to exercise a spec-compliant build.
+   */
+  embedKeywordsInChannels?: boolean;
+  /** Reply 500 to both keyword endpoints. */
+  failKeywords?: boolean;
   /** Reply 500 to `GET /api/v1/transcript`. */
   failTranscript?: boolean;
   /** Open the SSE stream and immediately end it, so the client keeps
@@ -91,6 +119,10 @@ export type ProdComStub = {
   wsUpgrades: number;
   /** How many SSE streams have been opened. */
   sseOpens: number;
+  /** Start or stop failing the keyword endpoints AFTER the stub is running, so a
+   *  test can drive "the list loaded, then a later read failed" — which is the
+   *  only path on which the previously-loaded keywords can be wrongly dropped. */
+  setFailKeywords(fail: boolean): void;
   /** Send a raw text frame on every open WebSocket. */
   wsSend(text: string): void;
   /** Send ProdCom's heartbeat on every open WebSocket. */
@@ -161,16 +193,20 @@ function decodeClientFrames(buf: Buffer): { texts: string[]; closed: boolean; re
   return { texts, closed, rest: cursor };
 }
 
+/** `/api/v1/channels/{id}/keywords`, capturing the id. */
+const CHANNEL_KEYWORDS = /^\/api\/v1\/channels\/([^/]+)\/keywords$/;
+
 export async function startProdComStub(options: StubOptions = {}): Promise<ProdComStub> {
   const entries = options.entries ?? [];
   const channels = options.channels ?? [];
+  const channelKeywords = options.channelKeywords ?? {};
   const requests: StubRequest[] = [];
   const wsReceived: string[] = [];
   const sockets = new Set<Duplex>();
   const sseStreams = new Set<http.ServerResponse>();
   const open = new Set<import("node:net").Socket>();
 
-  const state = { wsUpgrades: 0, sseOpens: 0 };
+  const state = { wsUpgrades: 0, sseOpens: 0, failKeywords: options.failKeywords === true };
   const waiters: (() => void)[] = [];
   const notify = () => {
     for (const w of waiters.splice(0)) w();
@@ -207,8 +243,24 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
         res.end(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "nope" } }));
         return;
       }
+      const rows = options.embedKeywordsInChannels
+        ? channels.map((c) => ({ ...c, keywords: channelKeywords[c.id] ?? [] }))
+        : channels;
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ data: channels, meta: { timestamp: new Date().toISOString() } }));
+      res.end(JSON.stringify({ data: rows, meta: { timestamp: new Date().toISOString() } }));
+      return;
+    }
+
+    if (url.pathname === "/api/v1/keywords" || CHANNEL_KEYWORDS.test(url.pathname)) {
+      if (state.failKeywords) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "nope" } }));
+        return;
+      }
+      const scoped = CHANNEL_KEYWORDS.exec(url.pathname);
+      const data = scoped ? (channelKeywords[decodeURIComponent(scoped[1]!)] ?? []) : (options.keywords ?? []);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data, meta: { timestamp: new Date().toISOString() } }));
       return;
     }
 
@@ -363,6 +415,9 @@ export async function startProdComStub(options: StubOptions = {}): Promise<ProdC
       return state.sseOpens;
     },
     wsSend,
+    setFailKeywords: (fail: boolean) => {
+      state.failKeywords = fail;
+    },
     wsPing: () => wsSend(JSON.stringify({ type: "ping" })),
     wsTranscript: (entry, wrap = "data") =>
       wsSend(JSON.stringify(wrap === "top" ? { type: "transcript", ...entry } : { type: "transcript", data: entry })),

@@ -204,6 +204,30 @@ function parsePropInstances(raw: unknown): PropInstanceConfig[] {
   return out;
 }
 
+/**
+ * The ProdCom config key and the one value that means "show it in full".
+ *
+ * Constants, not two spellings, because the descriptor below declares the field
+ * and applyProdcom reads it, and a settings control that renders but changes
+ * nothing is exactly what a typo in one of those two places produces. Here the
+ * compiler will not let them drift apart.
+ */
+export const PRODCOM_REDACT_KEY = "redactSensitive";
+export const PRODCOM_REDACT_OFF = "off";
+export const PRODCOM_REDACT_ON = "on";
+
+/**
+ * Whether a saved ProdCom config means "hide keywords ProdCom marks sensitive".
+ *
+ * ON unless the stored value is literally "off": an install that predates this
+ * field, a value that failed to save, or anything unexpected all redact. The
+ * safe direction for an unknown value is hiding a word that did not need hiding,
+ * never showing one that did.
+ */
+export function prodcomRedactionOn(config: Record<string, unknown> | undefined): boolean {
+  return config?.[PRODCOM_REDACT_KEY] !== PRODCOM_REDACT_OFF;
+}
+
 // ProdCom integration — subscribes to the live transcription feed from ProdCom's
 // HTTP Application API (default port 24480). Powers the transcription display.
 const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
@@ -231,6 +255,18 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
       label: "API Key",
       type: "password",
       placeholder: "(only if Require Authentication is on)",
+    },
+    {
+      key: PRODCOM_REDACT_KEY,
+      label: "Hide sensitive keywords",
+      type: "select",
+      default: PRODCOM_REDACT_ON,
+      options: [
+        { value: PRODCOM_REDACT_ON, label: "On" },
+        { value: PRODCOM_REDACT_OFF, label: "Off" },
+      ],
+      help:
+        "ProdCom keywords marked sensitive are replaced with asterisks before a line is sent to any display. Only affects what THIS app shows — ProdCom's own redaction is unchanged, and the setting does not edit your keywords. The unredacted transcript stays readable at /api/prodcom/transcript/raw, which is gated by STAGE_UTILITY_LOG_TOKEN the same way /log is.",
     },
   ],
 };
@@ -1553,6 +1589,11 @@ class IntegrationManager {
       this.setConnectionState("prodcom", state, message);
       this.broadcastStates();
     });
+
+    // Before the enable check and outside configure(): this decides what leaves
+    // the server, not what it connects to, so it applies to a stopped service
+    // too and must not drag the stream through a reconnect.
+    prodcomService.setRedactSensitive(prodcomRedactionOn(this.states.get("prodcom")?.config));
 
     const enabled = this.states.get("prodcom")?.enabled ?? false;
     const { host, port } = this.getProdcomTarget();
