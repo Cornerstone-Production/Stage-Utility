@@ -37,6 +37,7 @@ const { scoresStore } = await import("@main/services/scores-store.js");
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ScoresTeamsPanel } = await import("./scores-teams-panel.js");
+const { until } = await import("../../test-fixtures/integrations-harness.js");
 
 after(async () => {
   cleanup();
@@ -82,6 +83,16 @@ const TEAMS: ScoreFavourite[] = [
  * nothing but the wall clock.
  */
 let posts = 0;
+/**
+ * How many of those POSTs have actually LANDED in the store, as opposed to
+ * merely been sent. The wait after a burst polls this rather than the store's
+ * current content: the whole point of the test is that an EARLIER write can
+ * still be in flight and overtake a later one, so a poll that stopped as soon
+ * as the store happened to read correctly could pass on a state that was about
+ * to be clobbered by the slow first write landing last — same trap as the
+ * fixed sleep it replaces, only self-inflicted instead of a guessed duration.
+ */
+let completed = 0;
 const reply = (body: unknown) => ({
   ok: true,
   status: 200,
@@ -99,7 +110,9 @@ const reply = (body: unknown) => ({
     const body = JSON.parse(String(init.body)) as { favourites: ScoreFavourite[] };
     const slow = ++posts === 1;
     await new Promise((r) => setTimeout(r, slow ? 40 : 0));
-    return reply(await scoresStore.setFavourites(body.favourites));
+    const result = await scoresStore.setFavourites(body.favourites);
+    completed++;
+    return reply(result);
   }
   throw new Error(`unexpected request ${url}`);
 };
@@ -127,6 +140,7 @@ describe("following several teams in one burst", () => {
     await scoresStore.init();
     await scoresStore.setFavourites([]);
     posts = 0;
+    completed = 0;
 
     const ui = render(
       <QueryClientProvider client={queryClient}>
@@ -144,7 +158,19 @@ describe("following several teams in one burst", () => {
     for (const t of TEAMS) {
       fireEvent.click(ui.getByRole("option", { name: new RegExp(t.displayName) }));
     }
-    await settle();
+    // createFavouritesWriter collapses a burst into exactly two sends: the
+    // first tick's click finds nothing in flight and sends immediately
+    // (carrying team 1 alone, since the loop above has no await for a later
+    // tick's optimistic update to land before that read()); every tick after
+    // it lands while that send is outstanding and only sets `superseded`, so
+    // the second and third ticks merge into ONE follow-up send carrying the
+    // final list. Waiting for the LANDED count rather than a guessed duration:
+    // a fixed sleep either wastes time in the common case or, under load,
+    // expires before the slow first write has actually resolved.
+    const EXPECTED_SAVES = 2;
+    await act(() =>
+      until(() => completed >= EXPECTED_SAVES, () => `${completed} of ${EXPECTED_SAVES} expected saves completed`),
+    );
 
     const stored = scoresStore.get().favourites;
     assert.deepEqual(
@@ -152,6 +178,18 @@ describe("following several teams in one burst", () => {
       ["901", "902", "903"],
       `three teams were ticked and scores-favourites.json holds ${stored.length}: ` +
         `[${stored.map((f) => f.displayName).join(", ")}]`,
+    );
+
+    // The panel reacts to the store over its own query/render cycle, one step
+    // behind the write itself, so it gets its own wait rather than reusing the
+    // one above.
+    await act(() =>
+      until(
+        () => ui.queryAllByRole("button", { name: /^Stop following / }).length === stored.length,
+        () =>
+          `the panel has not caught up to ${stored.length} row(s); shows ` +
+          `${JSON.stringify(ui.queryAllByRole("button", { name: /^Stop following / }).map((b) => b.getAttribute("aria-label")))}`,
+      ),
     );
 
     // The list the panel draws, read off the rendered rows. An EXACT count: a
@@ -174,6 +212,7 @@ describe("following several teams in one burst", () => {
     await scoresStore.setFavourites([]);
     queryClient.setQueryData(["scores:getFavourites"], { favourites: [] });
     posts = 0;
+    completed = 0;
 
     const ui = render(
       <QueryClientProvider client={queryClient}>
@@ -193,7 +232,18 @@ describe("following several teams in one burst", () => {
       fireEvent.click(ui.getByRole("option", { name: new RegExp(t.displayName) }));
     }
     fireEvent.click(ui.getByRole("option", { name: new RegExp(TEAMS[1].displayName) }));
-    await settle();
+    // Still two sends, exactly as above: the first click's send goes out
+    // immediately (team 1 alone) and the remaining three clicks — two adds and
+    // an undo of one of them — all land while it is outstanding, so they merge
+    // into ONE follow-up send carrying the settled list (team 1 and team 3).
+    // Waiting for the CURRENT store content to read correctly instead would
+    // risk exactly the bug this guards — the slow first write can still be in
+    // flight, about to land last and overwrite a store that happens to read
+    // right at this instant.
+    const EXPECTED_SAVES = 2;
+    await act(() =>
+      until(() => completed >= EXPECTED_SAVES, () => `${completed} of ${EXPECTED_SAVES} expected saves completed`),
+    );
 
     const stored = scoresStore.get().favourites;
     assert.deepEqual(
