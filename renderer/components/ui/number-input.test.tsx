@@ -353,22 +353,15 @@ describe("NumberInput, when blank is a real setting", () => {
     cleanup();
   });
 
-  test("clearing the box reports unset, and reports no number", () => {
-    const { field, calls, unsets } = setup({ value: 30, onUnset: OPT_IN });
-    fireEvent.change(field, { target: { value: "" } });
-    assert.equal(unsets.length, 1, "clearing the field told the caller nothing");
-    assert.deepEqual(calls, [], "clearing the field reported a number");
-    cleanup();
-  });
-
   test("clearing reports unset on the keystroke, not saved up for blur", () => {
     // Not a nicety. A form's Save button is disabled until something reports a
     // change, and a DISABLED button does not take the mousedown that would have
     // blurred this field — so a clearing held back until blur left the operator
     // with an empty box, a greyed-out Save, and no gesture that would commit it.
-    const { field, unsets } = setup({ value: 30, onUnset: OPT_IN });
+    const { field, calls, unsets } = setup({ value: 30, onUnset: OPT_IN });
     fireEvent.change(field, { target: { value: "" } });
     assert.equal(unsets.length, 1, "the clearing waited for a blur that a disabled Save button never causes");
+    assert.deepEqual(calls, [], "clearing the field reported a number");
     cleanup();
   });
 
