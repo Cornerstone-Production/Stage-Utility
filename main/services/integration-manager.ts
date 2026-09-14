@@ -538,6 +538,22 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       help: "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls.",
     },
     {
+      key: "attendancePollSeconds",
+      label: "Attendance interval (s)",
+      type: "number",
+      // Deliberately no default and no numeric placeholder — see
+      // "the attendance interval has no default of its own" in
+      // sensource-poll-cadence.test.ts. Attendance is not opt-in the way
+      // SafeSpace is, so a concrete number here — shown as this field's value
+      // the moment the card is opened, and saved back if the operator saves it
+      // for any other reason — would raise request volume for anyone whose own
+      // poll interval above is not that number, which is most installs that
+      // have ever touched it.
+      min: SENSOURCE_MIN_POLL_SECONDS,
+      max: SENSOURCE_MAX_POLL_SECONDS,
+      help: "How often to re-read just today's attendance count, separate from the poll interval above. Blank reproduces today's behaviour exactly: attendance updates only as often as the rest of the card. Set it lower than the poll interval to catch attendance up to a faster occupancy reading — SafeSpace below, or a shorter interval than this card is normally left at — at the cost of one extra request to Vea per tick at whatever rate you choose. Same 10s floor and the same Vea flakiness as the poll interval, because it is the same API. Left at or above the poll interval, it changes nothing.",
+    },
+    {
       key: "safeSpaceId",
       label: "SafeSpace space ID (optional)",
       type: "password",
@@ -2197,12 +2213,22 @@ class IntegrationManager {
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");
     const pollSeconds = seconds(cfg.pollSeconds);
+    const resolvedPollSeconds =
+      Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS;
     const safeSpacePoll = seconds(cfg.safeSpacePollSeconds);
+    const attendancePoll = seconds(cfg.attendancePollSeconds);
     return {
       clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
       clientSecret: secrets.clientSecret || null,
       apiToken: secrets.apiToken || null,
-      pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS,
+      pollSeconds: resolvedPollSeconds,
+      // Unset falls back to the Vea interval ABOVE, not a constant of its own —
+      // see the field's doc comment on SenSourceConfig. Every existing Vea
+      // integration already has an attendance figure, so a fixed fallback faster
+      // than an operator's own pollSeconds would have raised their request
+      // volume the moment this shipped, for anyone who never opened this card.
+      attendancePollSeconds:
+        Number.isFinite(attendancePoll) && attendancePoll > 0 ? attendancePoll : resolvedPollSeconds,
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],

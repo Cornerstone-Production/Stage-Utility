@@ -60,6 +60,39 @@
 // safespace-client.ts, and note that the space id is a bearer capability that
 // must never reach a log line.
 //
+// ATTENDANCE INTERVAL. SafeSpace made occupancy fresh and left attendance on the
+// Vea poll beside it — on one lobby display, two numbers that visibly disagree
+// for no reason a viewer can see. `attendancePollSeconds` lets attendance re-read
+// on its own faster clock too, the same idea as SafeSpace's interval, but
+// attendance is not opt-in the way SafeSpace is: every existing Vea integration
+// already publishes one. So "unset" cannot mean a constant of its own the way
+// SAFESPACE_DEFAULT_POLL_SECONDS does — a fixed default faster than someone's
+// own poll interval would have started polling harder for every operator who
+// never opened this card, the instant this shipped. Unset means "the same as
+// pollSeconds", per operator, which is also why the fast timer never runs at all
+// when it isn't actually faster: there is nothing for a second timer to do that
+// the main cycle isn't already doing.
+//
+// The fast read touches /data/traffic alone — asking for the day aggregates too
+// would put the main cycle's three-request shape on the fast clock, exactly what
+// this feature exists to avoid — so it does not ask Vea for the authoritative
+// attendance again. It ADVANCES the main cycle's last published figure by how
+// far the zone sum has moved since (see noteAttendanceSample), the same
+// carry-forward arithmetic connect() already uses when a day-aggregate request
+// fails, just run on every fast tick rather than only a degraded one.
+//
+// That leaves one thing this file's own timer machinery cannot do by itself:
+// stop the two pollers from asking Vea for the same thing twice. Whenever the
+// fast interval divides evenly into the poll interval, both timers eventually
+// share a target instant, and Node fires both callbacks in the same
+// timer-phase sweep — before either one reaches its first await, which is
+// where cancelling the other one happens. So `mainPollInFlight`, set
+// synchronously before connect()'s own first await, is what actually stops
+// the redundant fetch in that tick; separately, every successful traffic
+// fetch — the main cycle's or the fast read's own — pushes the fast timer out
+// from that moment (see noteAttendanceSample), which is what stops the NEXT
+// tick from coinciding again.
+//
 // ONE API CLIENT PER INSTANCE. Vea appears to keep a single live token per API
 // client: minting a new one invalidates the last. Two Stage instances sharing a
 // client therefore knock each other offline, and the old "rejected → mint again"
@@ -242,6 +275,20 @@ export interface SenSourceConfig {
   /** Optional static token — used directly if present, skipping the exchange. */
   apiToken: string | null;
   pollSeconds: number;
+  /**
+   * How often to re-read attendance on its own, seconds — 0 or unset means
+   * "the same as pollSeconds", not a constant of its own.
+   *
+   * Every other interval in this file has a fixed fallback because it guards an
+   * OPT-IN sub-feature (SafeSpace) or the poll itself. This one cannot: every
+   * existing Vea integration already has an attendance figure, so a fixed
+   * default faster than an operator's own `pollSeconds` would raise their
+   * request volume the moment this shipped, for anyone who never touched the
+   * field. Falling back to whatever `pollSeconds` resolves to, per operator,
+   * is the only fallback that changes nothing for someone who leaves it blank.
+   * See attendanceSeconds() and attendanceIsFaster().
+   */
+  attendancePollSeconds: number;
   /** Restrict to a single location (null = all the client can see). */
   locationId: string | null;
   /** Restrict to specific zones (empty = all zones for the location). */
@@ -467,11 +514,19 @@ function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/** Zone-derived attendance for one /data/traffic result: Σ ins, clamped ≥0.
+ *  Shared by buildDto and the fast attendance read (readAttendance) so the two
+ *  can never compute "what the doors saw today" two different ways. Exported
+ *  for tests, like the reducers above it. */
+export function zoneAttendanceOf(reduced: ReducedTraffic): number {
+  return Math.max(0, Math.round(reduced.totalIns));
+}
+
 function buildDto(reduced: ReducedTraffic, updatedAt: string): PeopleCountDTO {
   // Building totals from RAW sums: occupancy nets entries against exits across all
   // zones (so a multi-door room reads ~0 when everyone who entered has left),
   // clamped ≥0 once at the building level. Attendance = total entries today.
-  const attendance = Math.max(0, Math.round(reduced.totalIns));
+  const attendance = zoneAttendanceOf(reduced);
   const occupancy = Math.max(0, Math.round(reduced.totalIns - reduced.totalOuts));
   // peak/min/avg are only available from the space endpoint (the poll overrides
   // total when a space exists); the zone-traffic fallback leaves them null.
@@ -584,6 +639,49 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
    *  one is the Vea poll's, and sharing it would tie a 10s reading to whatever
    *  interval Vea is set to. */
   private safeSpaceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** True while a fast attendance read is in flight — see readAttendance. */
+  private attendanceInFlight = false;
+  /**
+   * True for the whole of one main-cycle poll, set synchronously before its
+   * first await — see the note in connect() itself. The one thing that
+   * actually stops a fast attendance read issued in the SAME timer-phase sweep
+   * as the main poll, which cancelling a timer from noteAttendanceSample is too
+   * late for. One-directional on purpose: the main cycle never defers to this
+   * one, since it needs its own traffic fetch every tick regardless.
+   */
+  private mainPollInFlight = false;
+  /** True while the pending attendance reading was scheduled at the idle
+   *  cadence. Its own flag, for the reason safeSpacePolledIdle is: `polledIdle`
+   *  belongs to the Vea poll and says nothing about this timer. */
+  private attendancePolledIdle = false;
+  /** The attendance reading's own timer. Not the base class's, and not
+   *  safeSpaceTimer: three independent clocks now share this integration, and
+   *  sharing any one of them ties its cadence to another field's interval. */
+  private attendanceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The attendance reading's own outage log — see safeSpaceOutages for why an
+   *  OutageLog with one settle window cannot be shared across pollers on
+   *  different intervals. */
+  private readonly attendanceOutages = new OutageLog(settleWindowMs(DEFAULT_POLL_SECONDS));
+  /**
+   * The zone-derived attendance and the published attendance the main cycle
+   * last agreed on, together — what a fast attendance read ADVANCES rather
+   * than a number it re-derives from scratch.
+   *
+   * Vea publishes two different attendance figures depending on whether a site
+   * has spaces: the day-net from /data/occupancy when it does, the raw zone sum
+   * from /data/traffic when it doesn't (see buildDto and the space-occupancy
+   * override in connect()). The fast read only ever has the zone sum — asking
+   * for the day aggregates too would be the second and third request per fast
+   * tick this feature exists to avoid — so publishing it directly would fight
+   * the main cycle's own number on a site with spaces, stepping between two
+   * different bases every few seconds. Anchored to what the main cycle last
+   * published and advanced by how far the zone sum has moved since, the fast
+   * read agrees with the slow one at every one of its ticks and only fills the
+   * gap the rest of the time. Null until the main cycle's first successful poll;
+   * a fast read with no anchor yet publishes the raw zone sum, which is what a
+   * site with no spaces already does anyway.
+   */
+  private attendanceAnchor: { published: number; zoneAttendance: number } | null = null;
   /** When the current token was minted — a token rejected seconds after issue is
    *  a different fault from one that expired. See noteSharedClientSuspicion. */
   private tokenIssuedAt = 0;
@@ -671,16 +769,20 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
    */
   pollNowIfIdle(): void {
     if (!this.running || !this.inDemand) return;
-    // TWO timers, so two gates. The SafeSpace reading has the same problem — its
-    // next tick is up to a minute out and the number it holds is the one the
-    // arriving consumer is about to read — but it cannot be gated on
-    // `polledIdle`, which belongs to the Vea poll and is false whenever the Vea
-    // interval is 60s or more. Gated on its own flag it pre-empts an IDLE wait
-    // only, so a flapping consumer still cannot read SafeSpace faster than the
-    // configured rate, which for a rate-limited endpoint matters more than most.
+    // THREE timers now, so three gates. The SafeSpace and attendance readings
+    // have the same problem — each one's next tick is up to a minute out and
+    // the number it holds is what the arriving consumer is about to read — but
+    // neither can be gated on `polledIdle`, which belongs to the Vea poll and is
+    // false whenever the Vea interval alone is 60s or more. Gated on its own
+    // flag each pre-empts an IDLE wait only, so a flapping consumer still cannot
+    // read either faster than its configured rate.
     if (this.cfg?.safeSpaceId && this.safeSpacePolledIdle) {
       this.safeSpacePolledIdle = false;
       this.scheduleSafeSpaceIn(0);
+    }
+    if (this.attendancePolledIdle) {
+      this.attendancePolledIdle = false;
+      this.scheduleAttendanceIn(0);
     }
     if (!this.polledIdle) return;
     this.polledIdle = false;
@@ -708,7 +810,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     this.outages.forget();
     // The interval may have changed with everything else, and the settle window
     // has to stay longer than one poll of it.
-    this.outages.settleAfter(settleWindowMs(Math.max(MIN_POLL_SECONDS, cfg.pollSeconds || DEFAULT_POLL_SECONDS)));
+    this.outages.settleAfter(settleWindowMs(this.veaSeconds()));
     // A different space id is a different bucket and a different building; the
     // old one's quota state and its last reading are both false of the new one.
     this.safeSpace.forget();
@@ -716,6 +818,12 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     this.veaOccupancy = null;
     this.safeSpaceOutages.forget();
     this.safeSpaceOutages.settleAfter(settleWindowMs(this.safeSpaceSeconds()));
+    // A different scope (location or zones) makes the OLD zone-derived anchor
+    // meaningless against the new scope's traffic — see attendanceAnchor's own
+    // note. The main cycle's next successful poll establishes a fresh one.
+    this.attendanceOutages.forget();
+    this.attendanceOutages.settleAfter(settleWindowMs(this.attendanceSeconds()));
+    this.attendanceAnchor = null;
     // New credentials — nothing learned about the old ones survives, including
     // the exchange rate-limit state.
     this.lastExchangeAt = 0;
@@ -742,7 +850,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
   override start(): void {
     if (this.running || !this.configured) return;
-    const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
+    const sec = this.veaSeconds();
     console.log(`[sensource] polling every ${sec}s`);
     // The cadence rides the base class's single timer — connect() re-arms it. A
     // second setInterval here was exactly what integration-base warns against
@@ -756,15 +864,31 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       console.log(`[sensource] reading SafeSpace live occupancy every ${this.safeSpaceSeconds()}s`);
       void this.readSafeSpace();
     }
+    // The attendance reading runs on its own clock too, but only when that
+    // clock is actually faster than the poll above — see attendanceIsFaster.
+    // SCHEDULED rather than fired immediately the way readSafeSpace() is: the
+    // connect() the line above already ran fetches /data/traffic itself, so
+    // reading it again right now would be the doubled request this feature
+    // exists to avoid, on every start() — which is to say, on every save of
+    // this card.
+    if (this.attendanceIsFaster()) {
+      console.log(`[sensource] reading attendance every ${this.attendanceSeconds()}s`);
+      this.scheduleAttendanceIn(this.attendanceSeconds() * 1000);
+    }
   }
 
   protected override teardown(): void {
-    // The base class owns the POLL timer; this one is the SafeSpace reading's,
-    // and a stop() that left it running would keep hitting an external endpoint
-    // for an integration the operator has switched off.
+    // The base class owns the POLL timer; these are the SafeSpace and
+    // attendance readings' own, and a stop() that left either running would
+    // keep hitting an external endpoint for an integration the operator has
+    // switched off.
     if (this.safeSpaceTimer) {
       clearTimeout(this.safeSpaceTimer);
       this.safeSpaceTimer = null;
+    }
+    if (this.attendanceTimer) {
+      clearTimeout(this.attendanceTimer);
+      this.attendanceTimer = null;
     }
   }
 
@@ -963,6 +1087,171 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       updatedAt: new Date().toISOString(),
       total: { ...last.total, occupancy, occupancySource: source },
     };
+    this.appendHistory(next);
+    this.emit(next);
+  }
+
+  // ── Attendance interval ──────────────────────────────────────────────────
+
+  /** The effective Vea poll interval, floored — what start() and the
+   *  poll-rearm code below each computed inline before this factored out a
+   *  third caller: attendanceSeconds() anchors its own fallback to it. */
+  private veaSeconds(): number {
+    return Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
+  }
+
+  /** The attendance interval in seconds, floored. Falls back to the Vea
+   *  interval itself, not a constant of its own — see the field's doc comment
+   *  on SenSourceConfig for why. */
+  private attendanceSeconds(): number {
+    return Math.max(MIN_POLL_SECONDS, this.cfg?.attendancePollSeconds || this.veaSeconds());
+  }
+
+  /** Is the attendance interval actually faster than the Vea poll it would
+   *  otherwise just repeat? Equal or slower is "unset" in effect: the main
+   *  cycle's own traffic fetch already IS that tick's attendance reading, and a
+   *  second timer alongside it would only ever ask Vea the same question twice,
+   *  never sooner than the poll already does. */
+  private attendanceIsFaster(): boolean {
+    return this.attendanceSeconds() < this.veaSeconds();
+  }
+
+  /**
+   * The one /data/traffic query the main poll and the fast attendance read
+   * both use, kept in one place so they can never drift into asking two
+   * different questions of the same endpoint.
+   *
+   * The Vea /data/traffic endpoint has NO working location/zone filter param
+   * (locationIds/entityIds are silently ignored — confirmed against the public
+   * API + every reference client), so both callers always request all zones
+   * for today and narrow to the selected zones CLIENT-SIDE. excludeClosedHours
+   * matches the reference clients (drops after-hours sensor noise).
+   */
+  private trafficPath(): string {
+    const params = new URLSearchParams({
+      relativeDate: "today",
+      dateGroupings: "day",
+      entityType: "zone",
+      metrics: "ins,outs",
+      excludeClosedHours: "true",
+    });
+    return `/data/traffic?${params.toString()}`;
+  }
+
+  /**
+   * Queue the next attendance read. Guarded the way scheduleSafeSpaceIn is —
+   * the invariant belongs with the timer, not spread over the four places that
+   * arm it (start(), rearmAttendance(), noteAttendanceSample(),
+   * pollNowIfIdle()) — and also gated on attendanceIsFaster(): a configuration
+   * where the interval is not actually faster than the poll above has nothing
+   * for this timer to do.
+   */
+  private scheduleAttendanceIn(delayMs: number): void {
+    if (!this.running || !this.attendanceIsFaster()) return;
+    if (this.attendanceTimer) clearTimeout(this.attendanceTimer);
+    this.attendanceTimer = setTimeout(() => void this.readAttendance(), delayMs);
+  }
+
+  /**
+   * Record a fresh zone-derived attendance sample from whichever poller just
+   * fetched /data/traffic, and push the fast attendance timer out from now.
+   *
+   * Called from the MAIN cycle's own success path too, not only the fast
+   * read's — the main cycle already IS an attendance sample, and re-arming the
+   * fast timer from here is what stops the two from ever landing on the same
+   * tick. Without this, a fast interval that divides evenly into the poll
+   * interval coincides with it at their LCM forever, not just once at start();
+   * pushing the fast timer out from every successful fetch — the main cycle's
+   * or its own — keeps it always at least a full attendance interval away from
+   * the last one, from either source.
+   */
+  private noteAttendanceSample(published: number, zoneAttendance: number): void {
+    this.attendanceAnchor = { published, zoneAttendance };
+    this.scheduleAttendanceIn(this.attendanceSeconds() * 1000);
+  }
+
+  /**
+   * One fast attendance read: fetch /data/traffic alone, advance the anchor by
+   * how far it has moved, publish, re-arm.
+   *
+   * Deliberately the ONE endpoint this feature touches: re-fetching
+   * /data/occupancy here for the authoritative space-derived figure would be
+   * the second and third request per fast tick the whole feature exists to
+   * avoid, and the main cycle already supplies that number on its own
+   * schedule — see attendanceAnchor's own note on why this advances it
+   * instead of asking Vea for it again.
+   */
+  private async readAttendance(): Promise<void> {
+    // `testing` is the Test-connection button, for the same reason
+    // readSafeSpace checks it: test() swaps this.cfg for the operator's
+    // UNSAVED form config across an await, and a read landing in that window
+    // would advance the anchor with a scope nobody has saved.
+    //
+    // `mainPollInFlight` is checked FIRST and before any await in this
+    // function, for the same reason it is set before connect()'s own first
+    // await: when the fast interval divides evenly into the poll interval,
+    // both timers share a target instant and both callbacks run in the same
+    // timer-phase sweep, main's first. By the time this line runs, a
+    // same-tick main poll has already set the flag — checking it here is what
+    // actually stops the redundant fetch; noteAttendanceSample's re-arm only
+    // stops the NEXT tick from coinciding again.
+    if (!this.running || this.attendanceInFlight || this.testing || this.mainPollInFlight) return;
+    this.attendanceInFlight = true;
+    const epoch = this.pollEpoch;
+    try {
+      const allow = await this.resolveAllowedZones();
+      const traffic = await this.apiGet<{ results?: unknown[] }>(this.trafficPath());
+      // Reconfigured mid-read: this answer describes a scope the operator has
+      // replaced, the same guard connect() and applySafeSpace() both open with.
+      if (!this.running || epoch !== this.pollEpoch) return;
+      const zoneAttendance = zoneAttendanceOf(reduceTraffic(traffic.results ?? [], allow));
+      const anchor = this.attendanceAnchor;
+      const attendance = anchor
+        ? Math.max(0, anchor.published + (zoneAttendance - anchor.zoneAttendance))
+        : zoneAttendance;
+      this.attendanceAnchor = { published: attendance, zoneAttendance };
+      this.republishAttendance(attendance);
+      const back = this.attendanceOutages.ok("attendance", Date.now());
+      if (back.log) console.log(`[sensource] the fast attendance read is answering again${back.note}`);
+    } catch (err) {
+      // Not swallowed: reported through the same outage log every other part of
+      // this poller uses, once per outage rather than once per failing tick —
+      // and NOT rethrown, because this runs off its own timer with no caller to
+      // hand a rejection to, the same shape connect() and readSafeSpace are in.
+      const kind =
+        err instanceof SenSourceHttpError ? `HTTP ${err.status}` : scrub(errorMessage(err), 60) || "unknown";
+      const out = this.attendanceOutages.fail("attendance", kind, Date.now());
+      if (out.log) {
+        console.warn(
+          `[sensource] the fast attendance read failed (${scrub(errorMessage(err), 120)}); attendance holds ` +
+            `at its last value until the poll interval's own reading catches up${out.note}`,
+        );
+      }
+    } finally {
+      this.attendanceInFlight = false;
+      // A poll from a replaced configuration must not re-arm the timer: the new
+      // configuration's own start() has already scheduled one.
+      if (this.running && epoch === this.pollEpoch) this.rearmAttendance();
+    }
+  }
+
+  /** Queue the next fast attendance read at whichever cadence the moment calls
+   *  for — the same idle handling rearmSafeSpace uses, on the attendance
+   *  interval instead of SafeSpace's. */
+  private rearmAttendance(): void {
+    const sec = this.attendanceSeconds();
+    const demand = this.inDemand;
+    this.attendancePolledIdle = !demand && IDLE_POLL_MS > sec * 1000;
+    this.scheduleAttendanceIn(demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
+  }
+
+  /** Publish the last snapshot again with a newer attendance — republishOccupancy's
+   *  shape, for the other half of the DTO. Nothing else about it has changed,
+   *  and emit() drops a re-broadcast that says the same thing. */
+  private republishAttendance(attendance: number): void {
+    const last = this.last;
+    if (!last.connected) return;
+    const next: PeopleCountDTO = { ...last, updatedAt: new Date().toISOString(), total: { ...last.total, attendance } };
     this.appendHistory(next);
     this.emit(next);
   }
@@ -1590,20 +1879,19 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     if (!this.running || !this.cfg) return;
     const epoch = this.pollEpoch;
     let ok = false;
+    // Set SYNCHRONOUSLY, before the first await below — see readAttendance's
+    // own check of this flag for why. Two independent timers with the same
+    // target instant (the main poll's own schedule and the fast attendance
+    // timer's, exactly when the fast interval divides evenly into the poll
+    // interval) both have their callbacks invoked in the SAME timer-phase
+    // sweep, back to back, before either one reaches an await — so cancelling
+    // the other timer from inside noteAttendanceSample happens far too late to
+    // stop a read that already started. A flag checked at the top of
+    // readAttendance, before its own first await, is what actually closes that
+    // window; the pollEpoch-guarded re-arm in noteAttendanceSample is what
+    // keeps it from recurring on the NEXT tick.
+    this.mainPollInFlight = true;
     try {
-      // The Vea /data/traffic endpoint has NO working location/zone filter param
-      // (locationIds/entityIds are silently ignored — confirmed against the public
-      // API + every reference client), so we always request all zones for today
-      // and narrow to the selected zones CLIENT-SIDE. excludeClosedHours matches
-      // the reference clients (drops after-hours sensor noise).
-      const params = new URLSearchParams({
-        relativeDate: "today",
-        dateGroupings: "day",
-        entityType: "zone",
-        metrics: "ins,outs",
-        excludeClosedHours: "true",
-      });
-
       // Day stats: attendance (Σ entries), peak/min/avg occupancy for the day.
       const oParams = new URLSearchParams({
         relativeDate: "today",
@@ -1624,7 +1912,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       // read from — see below — which is only possible if both answers survive.
       const now = Date.now();
       this.dropCarriedAtMidnight(now);
-      const trafficPath = `/data/traffic?${params.toString()}`;
+      const trafficPath = this.trafficPath();
       const dayPath = `/data/occupancy?${oParams.toString()}`;
       let [allow, allowSpaces, [trafficRes, dayRes]] = await Promise.all([
         this.resolveAllowedZones(),
@@ -1804,6 +2092,11 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       // Kept past the epoch check, so a poll from a replaced scope cannot leave
       // its number behind as the thing SafeSpace falls back to.
       this.veaOccupancy = veaOccupancy;
+      // This poll's traffic fetch is itself an attendance sample — see
+      // noteAttendanceSample for why the fast read anchors to it instead of
+      // asking Vea again, and why doing this here is what keeps the two
+      // pollers from ever landing on the same tick.
+      this.noteAttendanceSample(dto.total.attendance ?? 0, zoneAttendance);
 
       const scope = allow ? `${reduced.zones.length} of selected zone(s)` : `${reduced.zones.length} zone(s)`;
       // The note is empty unless SafeSpace is on with no id — see safeSpaceNote.
@@ -1837,6 +2130,10 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       this.report("error", msg);
       this.goOffline();
     } finally {
+      // Cleared unconditionally, including on the reconfigured-mid-poll return
+      // above: a stale `true` here would block every fast attendance read for
+      // good, on an epoch nothing is ever going to complete.
+      this.mainPollInFlight = false;
       // In a finally, not at the end of each branch. connect() now IS the poller,
       // so a throw inside the catch — report(), or goOffline() reaching the
       // overridden emit() and a broadcast — would strand the integration with no
@@ -1852,7 +2149,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
           // than configured: pollSeconds has no upper bound, so an operator who
           // set 300s to stay inside Vea's quota would have been polled every 60s
           // all week by the idle path.
-          const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
+          const sec = this.veaSeconds();
           const demand = this.inDemand;
           // Remembered, so a consumer arriving during the wait can pre-empt it
           // rather than sitting out the full idle interval. See pollNowIfIdle.

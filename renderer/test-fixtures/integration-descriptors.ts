@@ -455,6 +455,14 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "help": "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls."
       },
       {
+        "key": "attendancePollSeconds",
+        "label": "Attendance interval (s)",
+        "type": "number",
+        "min": 10,
+        "max": 3600,
+        "help": "How often to re-read just today's attendance count, separate from the poll interval above. Blank reproduces today's behaviour exactly: attendance updates only as often as the rest of the card. Set it lower than the poll interval to catch attendance up to a faster occupancy reading — SafeSpace below, or a shorter interval than this card is normally left at — at the cost of one extra request to Vea per tick at whatever rate you choose. Same 10s floor and the same Vea flakiness as the poll interval, because it is the same API. Left at or above the poll interval, it changes nothing."
+      },
+      {
         "key": "safeSpaceId",
         "label": "SafeSpace space ID (optional)",
         "type": "password",
