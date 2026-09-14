@@ -185,8 +185,11 @@ function fmtSynced(iso: string | null | undefined): string {
 
 /** The form's starting values for an integration — the saved config, with password
  *  fields masked and unset numbers prefilled from their default/placeholder.
- *  Hoisted out of the component so Discard can rebuild exactly the same thing. */
-function initialConfig(
+ *  Hoisted out of the component so Discard can rebuild exactly the same thing.
+ *  EXPORTED for integration-number-fields.test.tsx, which runs it over the real
+ *  descriptors — a guard that reimplemented this loop would go green on a bug
+ *  living in it. */
+export function initialConfig(
   descriptor: IntegrationDescriptor,
   state: IntegrationState,
 ): Record<string, unknown> {
@@ -199,9 +202,18 @@ function initialConfig(
       // Unset numeric fields (e.g. an API port) prefill the integration's
       // default — field.default if declared, else the numeric placeholder
       // (the shown default) — so the field displays and saves the real port
-      // instead of a bare 0.
-      const fallback =
-        field.default ?? (field.placeholder != null && field.placeholder !== "" ? Number(field.placeholder) : undefined);
+      // instead of a bare 0. A field with neither seeds "", the form's own
+      // spelling of "no value", and NumberInput renders that blank when the
+      // descriptor says blank is a real state (see `unsetHint`).
+      //
+      // Number.isFinite, not `?? undefined`: a placeholder is free-form prose
+      // ("500 (lower = snappier, more requests)"), Number() of it is NaN, and
+      // `NaN ?? ""` is NaN — `??` only catches null and undefined. That NaN
+      // reached the field, where String(NaN) and `Number(value) || 0` both
+      // render 0, so two fields whose stored value was genuinely absent showed
+      // a bare 0 that a focus-and-blur then committed as a real number.
+      const shownDefault = field.placeholder == null || field.placeholder === "" ? NaN : Number(field.placeholder);
+      const fallback = field.default ?? (Number.isFinite(shownDefault) ? shownDefault : undefined);
       const rawNum = raw == null || raw === "" ? NaN : Number(raw);
       out[field.key] = Number.isFinite(rawNum) && rawNum > 0 ? rawNum : (fallback ?? "");
     } else {
