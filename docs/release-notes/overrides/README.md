@@ -22,7 +22,8 @@ commit that is already on `beta` and can therefore no longer be edited:
 ]
 ```
 
-`betaOnly` is the decision the commit should have carried — `true` holds the fix
+`commit` is a SHA of seven characters or more — never a branch or a tag, which
+can move. `betaOnly` is the decision the commit should have carried — `true` holds the fix
 out of the stable release's **Fixed** list and into the held-back count, `false`
 puts it in. `reason` is required, and is printed to the release log when the
 override is applied.

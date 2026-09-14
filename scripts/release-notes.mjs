@@ -219,6 +219,13 @@ function betaOnlyOverrides(v) {
     const at = `${shown} entry ${i}`;
     if (!e || typeof e !== "object" || Array.isArray(e)) throw new Error(`${at} is not an object`);
     if (typeof e.commit !== "string" || !e.commit.trim()) throw new Error(`${at} has no "commit"`);
+    // A SHA, not a name. `git rev-parse` resolves "beta" perfectly happily, and
+    // an override pinned to a branch would apply to whatever that branch points
+    // at on the day the release is cut — the one thing a correction to a frozen
+    // commit must not be.
+    if (!/^[0-9a-f]{7,40}$/i.test(e.commit.trim())) {
+      throw new Error(`${at}: "${e.commit}" is not a commit SHA — an override must name one immutable commit`);
+    }
     if (typeof e.betaOnly !== "boolean") throw new Error(`${at} (${e.commit}) needs "betaOnly": true or false`);
     if (typeof e.reason !== "string" || !e.reason.trim()) {
       throw new Error(`${at} (${e.commit}) has no "reason" — say why the commit's own trailer cannot be trusted`);

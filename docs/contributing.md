@@ -135,7 +135,7 @@ only when generating the notes for that exact version:
 
 | Field | |
 |---|---|
-| `commit` | anything `git rev-parse` resolves to one commit — a short SHA is fine |
+| `commit` | a commit SHA, seven characters or more. Not a branch or a tag: a name that can move would apply the correction to whatever it points at on the day the release is cut |
 | `betaOnly` | the decision the commit **should** have carried. `true` holds the fix back; `false` shows it, overriding both a wrong trailer and the new-scope heuristic |
 | `reason` | required. An override with no reason is the same silent decision moved to a different file |
 

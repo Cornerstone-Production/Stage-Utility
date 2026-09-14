@@ -102,6 +102,9 @@ function buildRepo(): { dir: string; sha: Record<string, string> } {
   // this repository will never publish — 1.1.0.json could one day be somebody's.
   git("tag", "v9.9.7");
   git("tag", "v9.9.7-beta.1");
+  // A branch sitting on a fix that IS in range. Without a SHA check an override
+  // could name this and apply to whatever the branch points at later.
+  git("branch", "movable", sha.rackColour);
 
   return { dir, sha };
 }
@@ -573,5 +576,50 @@ describe("a release too big for one page", () => {
     assert.match(body, /compare\/v1\.0\.0\.\.\.v1\.1\.0/);
     // And it is not a change section: a markdown link is not a change line.
     assert.equal(parseReleaseSections(body, NOTES_CAP).some((s) => /compare/.test(s.note ?? "")), false);
+  });
+});
+
+// An override corrects a commit that can no longer be edited. Naming anything
+// that can MOVE — a branch, a tag — makes the correction apply to whatever that
+// name points at on the day the release is cut, which is the one property it
+// must not have. `git rev-parse` resolves a branch name without complaint.
+describe("an override names a commit, not a name for one", () => {
+  const repo = buildRepo();
+  after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
+  const file = path.join(OVERRIDE_DIR, "9.9.7.json");
+
+  function withOverride<T>(body: unknown, run: () => T): T {
+    fs.mkdirSync(OVERRIDE_DIR, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(body, null, 2));
+    try {
+      return run();
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  }
+
+  it("a branch name stops the release, even one sitting on a fix in range", () => {
+    // `movable` points at a fix this release carries, so without the check the
+    // override APPLIES — quietly, to whatever that branch points at next time.
+    const r = withOverride([{ commit: "movable", betaOnly: true, reason: "whatever is on that branch today" }], () =>
+      runNotes("9.9.7", "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0, "an override pinned to a branch generated notes");
+    assert.match(r.stderr, /is not a commit SHA/);
+    assert.match(sectionText(r.stdout, "Fixed"), /^$|rack colour bled/, "and it must not have been applied");
+  });
+
+  it("a tag stops the release too", () => {
+    const r = withOverride([{ commit: "v1.1.0", betaOnly: true, reason: "a tag can be moved" }], () =>
+      runNotes("9.9.7", "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /is not a commit SHA/);
+  });
+
+  it("a short SHA is still fine — that is what a person pastes", () => {
+    const out = withOverride(
+      [{ commit: repo.sha.rackColour.slice(0, 9), betaOnly: true, reason: "Built and broken inside this release." }],
+      () => notesFor("9.9.7", "v1.0.0", repo.dir),
+    );
+    assert.doesNotMatch(sectionText(out, "Fixed"), /rack colour bled/);
   });
 });
