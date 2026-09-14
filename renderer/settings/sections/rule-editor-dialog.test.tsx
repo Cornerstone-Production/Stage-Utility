@@ -350,6 +350,28 @@ describe("one rule", () => {
     });
   });
 
+  test("swapping the action away and back saves the CLEARED params, not the old ones", async () => {
+    // The Action select clears the params when it swaps, so the three
+    // coordinates read 0 on screen. A patch merged onto the live action would
+    // put 1/0/1 back — a box reading 0 and a save writing 1.
+    await mount();
+    await openRow("Rule take_screens");
+    const actionSelect = () =>
+      [...document.querySelectorAll("select")].find((s) =>
+        [...s.options].some((o) => o.value === "companion.press"),
+      ) ?? null;
+    for (const id of ["log.message", "companion.press"]) {
+      await act(async () => {
+        fireEvent.change(actionSelect()!, { target: { value: id } });
+      });
+      await settle();
+    }
+    await press(button("Save"), "Save");
+
+    const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
+    assert.deepEqual(body.action, { id: "companion.press", params: {} });
+  });
+
   test("a rule that is not a cue gets no pair section and no halves", async () => {
     RULES = [
       {

@@ -256,10 +256,16 @@ function ParamField({
   optionSources: OptionSources;
 }) {
   // `optionSources` is exhaustive over the closed set `optionsFrom` can name, so
-  // there is no `?? []` here and no way to reach one: a source with no answer is
-  // a compile error in automation-option-sources.ts, not an empty select the
-  // operator discovers on a Sunday.
-  const source = spec.optionsFrom ? optionSources[spec.optionsFrom] : null;
+  // a source with no answer is a compile error in automation-option-sources.ts
+  // rather than an empty select the operator discovers on a Sunday.
+  //
+  // The `??` is still here, and not for that: the registry comes off the WIRE,
+  // and a kiosk tab left open across an update is an old bundle talking to a new
+  // server. A ninth source that server knows about is `undefined` here, and
+  // reading `.options` off it would throw inside the render and take the whole
+  // Automation section down — a blank page where the operator's rules were,
+  // rather than one dropdown that is short.
+  const source = spec.optionsFrom ? (optionSources[spec.optionsFrom] ?? null) : null;
   const options = source ? source.options : (spec.options ?? []);
   // WHY the list is short, when the source can say. Under the field, for any
   // source — a single-instance site whose ProPresenter is off got "Pick one…"
@@ -1088,6 +1094,10 @@ function mergedStep(seed: RuleStep, draft: RuleStep, live: RuleStep): RuleStep |
   // swaps one clears them — so merging the old ones in would carry settings over
   // from a step that is gone.
   if (draft.id !== seed.id) return draft;
+  // A key the seed had and the draft does not is a RESET, not an edit — swapping
+  // the action away and back clears its params. Merging onto the live step would
+  // put the old values back, so the box would read 0 and the save would write 1.
+  for (const key of Object.keys(seed.params)) if (!(key in draft.params)) return draft;
   const changed: Record<string, string | number> = {};
   for (const [key, value] of Object.entries(draft.params)) {
     if (value !== seed.params[key]) changed[key] = value;
