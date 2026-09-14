@@ -393,10 +393,25 @@ describe("the secrets file will not take the write", () => {
       `the failure never reached the log: ${JSON.stringify(warns)}`,
     );
 
-    // The operator-visible consequence, which is the reason any of this
-    // matters: the timestamp did NOT advance, so nothing may read as current.
-    const listed = (await cueTokens.list()).find((t) => t.id === minted.token.id);
-    assert.equal(listed?.lastUsedAt, null, "a stale lastUsedAt was reported as current");
+    // WHAT IS NOT ASSERTED HERE, and why. The obvious next line is that
+    // `lastUsedAt` has not advanced — and it is only true of the stub. Driven
+    // against a real server with the data directory chmod 555, the token list
+    // reads the NEW timestamp until the process restarts, and null after it:
+    //
+    //   POST /api/cues/projectors_off  ->  200, detail carries EACCES
+    //   GET  /api/cues/tokens          ->  lastUsedAt 2026-09-14T15:51:00.491Z
+    //   restart, GET /api/cues/tokens  ->  lastUsedAt null
+    //
+    // secretsStore.setSecret mutates the in-memory blob and THEN persists, and
+    // nothing rolls the cache back when the persist throws — so a failed save
+    // reads as saved until the next restart, for every secret in the app and
+    // not only this one. That is a defect in secrets.ts with a blast radius
+    // across every integration credential, not something to pin here: a stub
+    // that throws before the mutation would let this file assert a property the
+    // real server does not have.
+    //
+    // What the operator actually has either way is the two things above: the
+    // `detail` in the answer and the [cues] line in the log.
   });
 });
 
