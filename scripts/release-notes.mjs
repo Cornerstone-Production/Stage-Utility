@@ -75,20 +75,20 @@ function log(range) {
 }
 
 /**
- * Subject AND body, so a commit can say something about itself that its subject
- * cannot — see BETA_ONLY.
+ * SHA, subject AND body, so a commit can say something about itself that its
+ * subject cannot — see BETA_ONLY — and so an override can name one.
  *
- * Records are separated by RS and the subject from the body by NUL, because a
- * commit body contains blank lines, bullet lists and code fences, and every
- * cheaper separator has appeared inside one.
+ * Records are separated by RS and the fields by NUL, because a commit body
+ * contains blank lines, bullet lists and code fences, and every cheaper
+ * separator has appeared inside one.
  */
 function commits(range) {
   try {
-    return execFileSync("git", ["log", "--no-merges", "--format=%s%x00%b%x1e", range], { encoding: "utf8" })
+    return execFileSync("git", ["log", "--no-merges", "--format=%H%x00%s%x00%b%x1e", range], { encoding: "utf8" })
       .split("\x1e")
       .map((rec) => {
-        const [subject = "", body = ""] = rec.split("\x00");
-        return { subject: subject.trim(), body };
+        const [sha = "", subject = "", body = ""] = rec.split("\x00");
+        return { sha: sha.trim(), subject: subject.trim(), body };
       })
       .filter((c) => c.subject);
   } catch {
@@ -111,6 +111,79 @@ function commits(range) {
  * either way: someone on the beta track HAS been running the broken version.
  */
 const BETA_ONLY = /^Beta-only:\s*(true|yes)\s*$/im;
+
+/**
+ * Corrections to a `Beta-only:` decision that can no longer be made in the commit.
+ *
+ * The trailer is the author's, and the author gets it wrong. Four cycles have
+ * now shipped a fix whose trailer was missed or misapplied, and by the time a
+ * review finds it the commit is on `beta`, which is never force-pushed — so
+ * there is nowhere left to put the correction except beside the notes.
+ *
+ * docs/release-notes/overrides/1.18.0.json → applied to the v1.18.0 notes, and
+ * nowhere else. A JSON array, each entry naming one commit:
+ *
+ *   [{ "commit": "c9d5c29", "betaOnly": true, "reason": "…" }]
+ *
+ * `betaOnly` is the decision the commit SHOULD have carried, so it works in
+ * both directions: true holds a fix back that has no trailer, false shows one
+ * whose trailer is wrong. `reason` is required — an override with no reason is
+ * the same silent lie moved to a different file — and is printed to stderr when
+ * it is applied, so the release log says what was changed and why.
+ *
+ * Every problem here throws. Generating the notes anyway is exactly the failure
+ * this mechanism exists to prevent, and a stale or mistyped override is a
+ * correction that would silently never be applied.
+ *
+ * @returns {Map<string, {betaOnly: boolean, reason: string, given: string}>} by full SHA
+ */
+function betaOnlyOverrides(v) {
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const file = path.join(here, "..", "docs", "release-notes", "overrides", `${v}.json`);
+  const shown = path.posix.join("docs/release-notes/overrides", `${v}.json`);
+
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (err) {
+    // The ordinary case: no release needs one. Anything else is a file that
+    // exists and could not be read, which is not the same answer at all.
+    if (err.code === "ENOENT") return new Map();
+    throw new Error(`cannot read ${shown}: ${err.message}`, { cause: err });
+  }
+
+  let list;
+  try {
+    list = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`${shown} is not valid JSON: ${err.message}`, { cause: err });
+  }
+  if (!Array.isArray(list)) throw new Error(`${shown} must be a JSON array of overrides`);
+
+  const out = new Map();
+  list.forEach((e, i) => {
+    const at = `${shown} entry ${i}`;
+    if (!e || typeof e !== "object" || Array.isArray(e)) throw new Error(`${at} is not an object`);
+    if (typeof e.commit !== "string" || !e.commit.trim()) throw new Error(`${at} has no "commit"`);
+    if (typeof e.betaOnly !== "boolean") throw new Error(`${at} (${e.commit}) needs "betaOnly": true or false`);
+    if (typeof e.reason !== "string" || !e.reason.trim()) {
+      throw new Error(`${at} (${e.commit}) has no "reason" — say why the commit's own trailer cannot be trusted`);
+    }
+
+    let sha;
+    try {
+      sha = execFileSync("git", ["rev-parse", "--verify", "--quiet", `${e.commit.trim()}^{commit}`], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+    } catch (err) {
+      throw new Error(`${at}: ${e.commit} does not name one commit in this repository`, { cause: err });
+    }
+    if (out.has(sha)) throw new Error(`${at}: ${sha.slice(0, 9)} is overridden twice`);
+    out.set(sha, { betaOnly: e.betaOnly, reason: e.reason.trim(), given: e.commit.trim() });
+  });
+  return out;
+}
 
 const range = fromRef ? `${fromRef}..v${version}` : `v${version}`;
 const entries = commits(range);
@@ -143,7 +216,13 @@ const seen = new Set();
 const parsed = [];
 const featScopes = new Set();
 
-for (const { subject, body } of entries) {
+// A prerelease keeps every fix either way, so its notes are not a place a
+// trailer decision can go wrong and the file for the stable version it is
+// building towards is deliberately not read here.
+const overrides = isPrerelease ? new Map() : betaOnlyOverrides(version);
+const overridesApplied = new Set();
+
+for (const { sha, subject, body } of entries) {
   const m = CONVENTIONAL.exec(subject);
   if (!m) continue;
   const [, rawType, scope, bang, text] = m;
@@ -151,7 +230,37 @@ for (const { subject, body } of entries) {
   if (INVISIBLE.has(type) && !bang) continue;
   const key = scope?.toLowerCase() ?? null;
   if (!bang && type === "feat" && key) featScopes.add(key);
-  parsed.push({ type, scope, key, bang, text, betaOnly: BETA_ONLY.test(body) });
+
+  const trailer = BETA_ONLY.test(body);
+  const override = overrides.get(sha);
+  // Only a fix or a perf is ever held back, so an override on anything else
+  // would read as applied and change nothing. Left unapplied, and caught below.
+  const correctable = !bang && (type === "fix" || type === "perf");
+  if (override && correctable) {
+    overridesApplied.add(sha);
+    console.error(`[release-notes] ${sha.slice(0, 9)} ${say(override.betaOnly, trailer)} — ${override.reason}`);
+  }
+
+  parsed.push({
+    type, scope, key, bang, text,
+    betaOnly: trailer,
+    override: override && correctable ? override.betaOnly : null,
+  });
+}
+
+/** What an applied override did, for the release log. */
+function say(betaOnly, trailer) {
+  if (betaOnly === trailer) return `override changes nothing: the commit already reads ${trailer ? "beta-only" : "not beta-only"}`;
+  if (betaOnly) return "held back as beta-only, overriding a missing trailer";
+  return "kept in the notes, overriding a wrong Beta-only trailer";
+}
+
+for (const [sha, o] of overrides) {
+  if (overridesApplied.has(sha)) continue;
+  throw new Error(
+    `docs/release-notes/overrides/${version}.json names ${o.given}, which is not a non-breaking fix: or perf: ` +
+      `commit in ${range}. An override that matches nothing is a correction that would never be applied.`,
+  );
 }
 
 /**
@@ -174,6 +283,11 @@ for (const { subject, body } of entries) {
  */
 function isBuildOutFix(entry, oldScopes) {
   if (isPrerelease) return false;
+  // An override is the author correcting a decision the commit can no longer
+  // carry, and it decides outright — in BOTH directions. Letting it set only
+  // the trailer would leave the scope heuristic below still suppressing a fix
+  // an override exists to put back.
+  if (entry.override !== null) return entry.override;
   // The author said so outright. No scope reasoning required, and it is the only
   // thing that catches a new feature built under an old scope.
   if (entry.betaOnly) return true;

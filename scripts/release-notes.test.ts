@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -15,9 +15,16 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "release-notes.mjs");
 const NOTES_DIR = path.join(HERE, "..", "docs", "release-notes");
+const OVERRIDE_DIR = path.join(NOTES_DIR, "overrides");
 
 function notesFor(version: string, from: string, cwd?: string): string {
   return execFileSync("node", [SCRIPT, version, from], { encoding: "utf8", cwd });
+}
+
+/** The same, but survivable: an override problem is meant to exit non-zero. */
+function runNotes(version: string, from: string, cwd?: string) {
+  const r = spawnSync("node", [SCRIPT, version, from], { encoding: "utf8", cwd });
+  return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
 /**
@@ -28,7 +35,7 @@ function notesFor(version: string, from: string, cwd?: string): string {
  * say nothing precise about the rule. Here the history IS the fixture: two
  * scopes, one that existed before the anchor and one introduced after it.
  */
-function buildRepo(): string {
+function buildRepo(): { dir: string; sha: Record<string, string> } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-notes-"));
   const git = (...args: string[]) =>
     execFileSync("git", args, {
@@ -42,36 +49,43 @@ function buildRepo(): string {
         GIT_COMMITTER_EMAIL: "t@t",
       },
     });
-  const commit = (subject: string, body?: string) => {
+  const sha: Record<string, string> = {};
+  const commit = (key: string, subject: string, body?: string) => {
     fs.appendFileSync(path.join(dir, "f"), `${subject}\n`);
     git("add", "-A");
     if (body) git("commit", "-m", subject, "-m", body);
     else git("commit", "-m", subject);
+    sha[key] = git("rev-parse", "HEAD").trim();
   };
 
   git("init", "-q", "-b", "main");
 
   // BEFORE the anchor: `patch` is an established surface with a released fix.
-  commit("feat(patch): the patch sheet");
-  commit("fix(patch): a column that would not save");
+  commit("patchFeat", "feat(patch): the patch sheet");
+  commit("oldFix", "fix(patch): a column that would not save");
   git("tag", "v1.0.0");
 
   // AFTER: a brand-new `signage` feature and the fixes that built it, plus one
   // more fix to the OLD surface, which a reader has had all along.
-  commit("feat(signage): playlists and a scheduler");
-  commit("fix(signage): a lost edit and a clipped number");
-  commit("fix(signage): stop sending every wall back to its first graphic");
-  commit("fix(patch): the rack colour bled onto the row stripes");
+  commit("signageFeat", "feat(signage): playlists and a scheduler");
+  commit("lostEdit", "fix(signage): a lost edit and a clipped number");
+  commit("firstGraphic", "fix(signage): stop sending every wall back to its first graphic");
+  commit("rackColour", "fix(patch): the rack colour bled onto the row stripes");
   // The case the scope heuristic is blind to: `patch` is an OLD scope, so a fix
   // under it reads as a fix to something the reader has had all along. This one
   // is not — it repairs a feature added in this very range, and only the author
   // knows that, so the author says so.
-  commit("feat(patch): a printable diagram");
-  commit("fix(patch): the diagram printed its legend twice", "Beta-only: true");
+  commit("diagramFeat", "feat(patch): a printable diagram");
+  commit("legendTwice", "fix(patch): the diagram printed its legend twice", "Beta-only: true");
   git("tag", "v1.1.0");
   git("tag", "v1.1.0-beta.1");
+  // Second names for the same two releases. The override tests write a file
+  // into the REAL docs/release-notes/overrides, so the fixture needs a version
+  // this repository will never publish — 1.1.0.json could one day be somebody's.
+  git("tag", "v9.9.7");
+  git("tag", "v9.9.7-beta.1");
 
-  return dir;
+  return { dir, sha };
 }
 
 describe("release notes", () => {
@@ -125,7 +139,7 @@ describe("release notes", () => {
 // the second condition is what keeps it in the list.
 describe("fixes made while building a brand-new feature", () => {
   const repo = buildRepo();
-  after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
 
   /** Just the Fixed section, so a scope named under New cannot satisfy a match. */
   function fixedSection(out: string): string {
@@ -137,7 +151,7 @@ describe("fixes made while building a brand-new feature", () => {
   }
 
   it("a stable release drops them", () => {
-    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo));
+    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo.dir));
     assert.doesNotMatch(
       fixed,
       /a lost edit and a clipped number/,
@@ -147,7 +161,7 @@ describe("fixes made while building a brand-new feature", () => {
   });
 
   it("but keeps fixes to something the reader already had", () => {
-    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo));
+    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo.dir));
     assert.match(
       fixed,
       /rack colour bled/,
@@ -158,7 +172,7 @@ describe("fixes made while building a brand-new feature", () => {
   it("and says how many it held back, rather than filtering silently", () => {
     // A silent filter reads as "nothing else changed", which is the failure the
     // whole generator exists to avoid.
-    assert.match(notesFor("1.1.0", "v1.0.0", repo), /3 further fixes made while building/);
+    assert.match(notesFor("1.1.0", "v1.0.0", repo.dir), /3 further fixes made while building/);
   });
 
   it("holds back a fix the author marked Beta-only, whatever its scope", () => {
@@ -166,7 +180,7 @@ describe("fixes made while building a brand-new feature", () => {
     // anchor, so every rule above reads a fix under it as a fix to long-standing
     // behaviour — and this one repairs a feature added in the same range. Only
     // the author knows; the trailer is how they say so.
-    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo));
+    const fixed = fixedSection(notesFor("1.1.0", "v1.0.0", repo.dir));
     assert.doesNotMatch(
       fixed,
       /legend twice/,
@@ -184,13 +198,13 @@ describe("fixes made while building a brand-new feature", () => {
     // Suppressed is not the same as unmentioned. A silent filter is the failure
     // the whole generator exists to avoid, and that is as true of a fix the
     // author held back as of one the scope rule held back.
-    assert.match(notesFor("1.1.0", "v1.0.0", repo), /3 further fixes made while building/);
+    assert.match(notesFor("1.1.0", "v1.0.0", repo.dir), /3 further fixes made while building/);
   });
 
   it("a PRERELEASE keeps everything", () => {
     // Someone on the beta track has been running the broken version. For them
     // the fix is the news, and hiding it would hide the reason to update.
-    const fixed = fixedSection(notesFor("1.1.0-beta.1", "v1.0.0", repo));
+    const fixed = fixedSection(notesFor("1.1.0-beta.1", "v1.0.0", repo.dir));
     assert.match(fixed, /a lost edit and a clipped number/);
     assert.match(fixed, /first graphic/);
     // Including one marked Beta-only: the beta reader IS the person who had it.
@@ -200,6 +214,233 @@ describe("fixes made while building a brand-new feature", () => {
 
   it("the new feature itself is still announced", () => {
     // Holding back the fixes must not hold back the thing they were fixing.
-    assert.match(notesFor("1.1.0", "v1.0.0", repo), /playlists and a scheduler/);
+    assert.match(notesFor("1.1.0", "v1.0.0", repo.dir), /playlists and a scheduler/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `Beta-only: true` is the author's call, and the author gets it wrong. By the
+// time a review catches it the commit is on `beta`, which is never force-pushed,
+// so the body cannot be corrected — the notes machinery is the only place left.
+//
+// Both directions matter. A missing trailer advertises a bug an upgrader never
+// had; a wrong one deletes a real fix from the list.
+describe("an override for a Beta-only decision that can no longer be made in the commit", () => {
+  const repo = buildRepo();
+  after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
+
+  const VERSION = "9.9.7";
+  const file = path.join(OVERRIDE_DIR, `${VERSION}.json`);
+  const preFile = path.join(OVERRIDE_DIR, `${VERSION}-beta.1.json`);
+
+  /** Put an override file in place for one run, then take it away again. */
+  function withOverride<T>(at: string, body: unknown, run: () => T): T {
+    fs.mkdirSync(OVERRIDE_DIR, { recursive: true });
+    fs.writeFileSync(at, typeof body === "string" ? body : JSON.stringify(body, null, 2));
+    try {
+      return run();
+    } finally {
+      fs.rmSync(at, { force: true });
+    }
+  }
+
+  function fixedSection(out: string): string {
+    const from = out.indexOf("## Fixed");
+    if (from === -1) return "";
+    const rest = out.slice(from + 1);
+    const next = rest.indexOf("\n## ");
+    return next === -1 ? rest : rest.slice(0, next);
+  }
+
+  it("shows a fix whose Beta-only trailer is wrong", () => {
+    // The 1.18.0 case: a fix to behaviour the last stable release really had,
+    // marked Beta-only by mistake. The trailer deletes it from the notes and the
+    // commit can no longer be edited, so the reader never learns it was fixed.
+    const out = withOverride(file, [
+      { commit: repo.sha.legendTwice, betaOnly: false, reason: "v1.0.0 shipped the same double legend." },
+    ], () => notesFor(VERSION, "v1.0.0", repo.dir));
+    assert.match(
+      fixedSection(out),
+      /legend twice/,
+      "a real fix is still being suppressed by a trailer the override says is wrong",
+    );
+  });
+
+  it("holds back a fix whose trailer is missing", () => {
+    // The other 1.18.0 case: the body says outright that the bug never reached a
+    // stable tag, and the trailer was never added.
+    const out = withOverride(file, [
+      { commit: repo.sha.rackColour, betaOnly: true, reason: "Built and broken inside this release." },
+    ], () => notesFor(VERSION, "v1.0.0", repo.dir));
+    assert.doesNotMatch(
+      fixedSection(out),
+      /rack colour bled/,
+      "a fix nobody could have hit is still being advertised to upgraders",
+    );
+    // Suppressed is not unmentioned: three from the scope rule plus this one.
+    assert.match(out, /4 further fixes made while building/, "the held-back count did not take it in");
+  });
+
+  it("beats the scope heuristic, not just the trailer", () => {
+    // `signage` is new this range, so the heuristic holds every fix under it
+    // back. An override saying otherwise is the author correcting the machine.
+    const out = withOverride(file, [
+      { commit: repo.sha.lostEdit, betaOnly: false, reason: "The clipped number predates signage." },
+    ], () => notesFor(VERSION, "v1.0.0", repo.dir));
+    assert.match(fixedSection(out), /a lost edit and a clipped number/);
+  });
+
+  it("says on the release log what it changed and why", () => {
+    // The reason is the whole point. Left in a file nobody reads it is the same
+    // silent decision moved somewhere else, so it goes to the release log.
+    const r = withOverride(file, [
+      { commit: repo.sha.rackColour, betaOnly: true, reason: "Built and broken inside this release." },
+    ], () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.equal(r.status, 0);
+    assert.match(r.stderr, /held back as beta-only, overriding a missing trailer/);
+    assert.match(r.stderr, /Built and broken inside this release\./, "the reason never reached the log");
+    assert.doesNotMatch(r.stdout, /rack colour bled/, "and the notes must still be corrected");
+  });
+
+  it("an override with no reason stops the release", () => {
+    const r = withOverride(file, [{ commit: repo.sha.rackColour, betaOnly: true }], () =>
+      runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0, "notes were generated from an override that says nothing");
+    assert.match(r.stderr, /has no "reason"/);
+  });
+
+  it("an empty reason is no reason", () => {
+    const r = withOverride(file, [{ commit: repo.sha.rackColour, betaOnly: true, reason: "   " }], () =>
+      runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /has no "reason"/);
+  });
+
+  it("an override with no direction stops the release", () => {
+    const r = withOverride(file, [{ commit: repo.sha.rackColour, reason: "because" }], () =>
+      runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /needs "betaOnly": true or false/);
+  });
+
+  it("an override naming a commit this repository does not have stops the release", () => {
+    const r = withOverride(file, [
+      { commit: "0000000000000000000000000000000000000000", betaOnly: true, reason: "because" },
+    ], () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /does not name one commit in this repository/);
+  });
+
+  it("an override naming a commit outside the release stops the release", () => {
+    // A correction that can never apply is worse than none: it reads as handled.
+    const r = withOverride(file, [
+      { commit: repo.sha.oldFix, betaOnly: true, reason: "a commit from before the anchor" },
+    ], () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /which is not a non-breaking fix: or perf: commit in/);
+  });
+
+  it("an override naming something that is not a fix stops the release", () => {
+    // `betaOnly` only ever holds back a fix or a perf. On a feat it would read
+    // as applied and change nothing.
+    const r = withOverride(file, [
+      { commit: repo.sha.signageFeat, betaOnly: true, reason: "wrong commit pasted" },
+    ], () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /which is not a non-breaking fix: or perf: commit in/);
+  });
+
+  it("a file that will not parse stops the release rather than quietly generating notes", () => {
+    const r = withOverride(file, "{ not json", () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0, "a broken override file generated notes as though it were absent");
+    assert.match(r.stderr, /is not valid JSON/);
+  });
+
+  it("a file that is not a list stops the release", () => {
+    const r = withOverride(file, { commit: repo.sha.rackColour }, () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /must be a JSON array of overrides/);
+  });
+
+  it("the same commit overridden twice stops the release", () => {
+    const r = withOverride(file, [
+      { commit: repo.sha.rackColour, betaOnly: true, reason: "one" },
+      { commit: repo.sha.rackColour, betaOnly: false, reason: "and the opposite" },
+    ], () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /is overridden twice/);
+  });
+
+  it("a PRERELEASE keeps everything, overrides included", () => {
+    // Someone on the beta track HAS been running the broken version, so nothing
+    // is held back from them — and an override that held one back would hide the
+    // very fix they are being asked to test.
+    const out = withOverride(preFile, [
+      { commit: repo.sha.rackColour, betaOnly: true, reason: "Built and broken inside this release." },
+    ], () => notesFor(`${VERSION}-beta.1`, "v1.0.0", repo.dir));
+    assert.match(fixedSection(out), /rack colour bled/);
+  });
+
+  it("no file at all is the ordinary case and generates notes as before", () => {
+    assert.equal(fs.existsSync(file), false, "the fixture leaked an override file");
+    const r = runNotes(VERSION, "v1.0.0", repo.dir);
+    assert.equal(r.status, 0);
+    assert.match(fixedSection(r.stdout), /rack colour bled/);
+  });
+});
+
+// The corrections this repository actually ships. Each is a claim about a commit
+// on `beta`, so each is checked against that commit rather than taken on trust.
+describe("the overrides in docs/release-notes/overrides", () => {
+  const REPO_ROOT = path.join(HERE, "..");
+
+  /** Every release with an override, EXACTLY. Adding one is a deliberate act and
+   *  should have to be declared here; a file quietly disappearing is the bug. */
+  const VERSIONS_WITH_OVERRIDES = ["1.18.0"];
+
+  interface Override { commit: string; betaOnly: boolean; reason: string }
+
+  function subjectOf(sha: string): string {
+    return execFileSync("git", ["log", "-1", "--format=%s", sha], {
+      encoding: "utf8",
+      cwd: REPO_ROOT,
+    }).trim();
+  }
+
+  it("are exactly the releases that declare one", () => {
+    const found = fs.readdirSync(OVERRIDE_DIR).filter((f) => f.endsWith(".json")).sort();
+    assert.deepEqual(found, VERSIONS_WITH_OVERRIDES.map((v) => `${v}.json`));
+  });
+
+  it("each name a commit this repository carries, and say why", () => {
+    for (const v of VERSIONS_WITH_OVERRIDES) {
+      const list = JSON.parse(fs.readFileSync(path.join(OVERRIDE_DIR, `${v}.json`), "utf8")) as Override[];
+      assert.ok(list.length, `${v}.json is empty`);
+      for (const e of list) {
+        assert.equal(typeof e.betaOnly, "boolean", `${v}.json: ${e.commit} has no direction`);
+        assert.ok(e.reason?.trim(), `${v}.json: ${e.commit} has no reason`);
+        // Reachable from HEAD, not merely a valid-looking hex string.
+        assert.doesNotThrow(
+          () => execFileSync("git", ["merge-base", "--is-ancestor", e.commit, "HEAD"], { cwd: REPO_ROOT }),
+          `${v}.json: ${e.commit} is not an ancestor of HEAD`,
+        );
+      }
+    }
+  });
+
+  it("1.18.0 corrects both trailers the release review found", () => {
+    // Frozen on purpose: a shipped release's overrides stop changing. Matched by
+    // the SUBJECT git reports for the SHA, so a wrong SHA cannot satisfy it.
+    const list = JSON.parse(fs.readFileSync(path.join(OVERRIDE_DIR, "1.18.0.json"), "utf8")) as Override[];
+    assert.equal(list.length, 2);
+    const bySubject = new Map(list.map((e) => [subjectOf(e.commit), e]));
+
+    const safespace = bySubject.get("fix: SafeSpace edges a pre-PR review found by driving them");
+    assert.ok(safespace, "the SafeSpace commit is no longer overridden — it returns to the Fixed list");
+    assert.equal(safespace.betaOnly, true, "it must be held back: its own body says it never reached a stable tag");
+
+    const simulated = bySubject.get("fix(cues): the verdict line says when a dispatch was simulated");
+    assert.ok(simulated, "the simulated-dispatch commit is no longer overridden — its wrong trailer wins again");
+    assert.equal(simulated.betaOnly, false, "v1.17.1 logged a bare 'dispatched' in simulate mode, which is the default");
   });
 });
