@@ -178,7 +178,23 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
       key: "pollMs",
       label: "Poll interval (ms)",
       type: "number",
-      placeholder: "500 (lower = snappier, more requests)",
+      // 1000, not the 500 this said for as long as it has existed. The fallback
+      // is propresenter-service's POLL_INTERVAL_MS and that is 1000 — as
+      // docs/integrations/propresenter.md has always said — so the form was
+      // advertising a rate the service does not run, which is exactly what
+      // `default` above forbids and a placeholder does just as loudly, since
+      // initialConfig reads a numeric placeholder AS the shown default. It is
+      // not numeric here on purpose: 500 IS the right number one panel over, for
+      // an EXTRA ProPresenter instance, because that panel writes 500 to disk
+      // when it adds one. This field's blank is a fallback, not a stored value.
+      placeholder: "1000 when blank; 200 is the floor",
+      // The floor the service really enforces (`pollMs >= 200`), below which it
+      // silently substitutes 1000 — a form that accepted 50 showed one rate and
+      // ran another. No ceiling: the extra-instances panel caps itself at 10s,
+      // but nothing in the service does, and an operator who wants a 30s
+      // fallback poll is not wrong.
+      min: 200,
+      unsetHint: "1000",
     },
   ],
 };
@@ -574,6 +590,35 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       help: "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls.",
     },
     {
+      key: "attendancePollSeconds",
+      label: "Attendance interval (s)",
+      type: "number",
+      // Deliberately no default and no numeric placeholder — see
+      // "the attendance interval has no default of its own" in
+      // sensource-poll-cadence.test.ts. Attendance is not opt-in the way
+      // SafeSpace is, so a concrete number here — shown as this field's value
+      // the moment the card is opened, and saved back if the operator saves it
+      // for any other reason — would raise request volume for anyone whose own
+      // poll interval above is not that number, which is most installs that
+      // have ever touched it.
+      //
+      // Which only works if the form can actually SHOW unset. It could not: the
+      // field seeded "", the render site turned that into 0, and a click in and
+      // a click out of that 0 clamped it to the floor below and made it a real
+      // setting. `unsetHint` is what makes blank a state the operator can see
+      // and get back to; getSensourceConfig's fallback to pollSeconds is
+      // unchanged.
+      //
+      // "Same as above", not "Same as poll interval": measured in a browser at
+      // 121.2px against 105px of room in the 176px field, so the longer string
+      // was clipped mid-word. The field directly above is "Poll interval (s)",
+      // and the help below says "the poll interval above" in the same words.
+      unsetHint: "Same as above",
+      min: SENSOURCE_MIN_POLL_SECONDS,
+      max: SENSOURCE_MAX_POLL_SECONDS,
+      help: "How often to re-read just today's attendance count, separate from the poll interval above. Blank reproduces today's behaviour exactly: attendance updates only as often as the rest of the card. Set it lower than the poll interval to catch attendance up to a faster occupancy reading — SafeSpace below, or a shorter interval than this card is normally left at — at the cost of one extra request to Vea per tick at whatever rate you choose. Same 10s floor and the same Vea flakiness as the poll interval, because it is the same API. Left at or above the poll interval, it changes nothing.",
+    },
+    {
       key: "safeSpaceId",
       label: "SafeSpace space ID (optional)",
       type: "password",
@@ -616,6 +661,23 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
       label: "TSL Port",
       type: "number",
       placeholder: "(TSL UMD input port on the Ross)",
+      // No number to suggest — it is whatever the switcher is set to, which is
+      // why the placeholder above names the setting instead of a value. Blank
+      // therefore means UNCONFIGURED rather than "fall back to something", and
+      // getRossTslConfig already reads it that way (anything not > 0 is null).
+      unsetHint: "Not set",
+      // Same bounds as Companion's own port field. getRossTslConfig discards
+      // anything not > 0 silently, while configuredFor() calls any config value
+      // that is neither "" nor null "the operator set this up" — so without a
+      // floor the field could hold a number that reads as configured on the card
+      // and connects to nothing.
+      //
+      // The gesture that reached it is the MINUS press, not the plus: from the
+      // 0 this field used to render, `-` stepped to -1, and typing 0 or a
+      // negative did the same. `+` gave 1 both before and after this bound, so
+      // the commit that added it named the wrong click.
+      min: 1,
+      max: 65535,
     },
   ],
 };
@@ -2238,12 +2300,22 @@ class IntegrationManager {
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");
     const pollSeconds = seconds(cfg.pollSeconds);
+    const resolvedPollSeconds =
+      Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS;
     const safeSpacePoll = seconds(cfg.safeSpacePollSeconds);
+    const attendancePoll = seconds(cfg.attendancePollSeconds);
     return {
       clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
       clientSecret: secrets.clientSecret || null,
       apiToken: secrets.apiToken || null,
-      pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS,
+      pollSeconds: resolvedPollSeconds,
+      // Unset falls back to the Vea interval ABOVE, not a constant of its own —
+      // see the field's doc comment on SenSourceConfig. Every existing Vea
+      // integration already has an attendance figure, so a fixed fallback faster
+      // than an operator's own pollSeconds would have raised their request
+      // volume the moment this shipped, for anyone who never opened this card.
+      attendancePollSeconds:
+        Number.isFinite(attendancePoll) && attendancePoll > 0 ? attendancePoll : resolvedPollSeconds,
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],

@@ -40,3 +40,9 @@ cannot overwrite a tile). Then, in
 the feeds panel, add one or more **feeds** mapping a count → tile TSL address. The
 host/port and feed mappings are all saved as non-secret config (no secret is
 stored).
+
+**TSL Port** has no default — it is whatever the Ross is set to — so it starts
+**blank**, showing `Not set` in grey. Blank means the integration is not
+configured: nothing connects, and the card stays under "Not set up". Anything
+outside **1–65535** is rejected as you type; a value already stored outside that
+range is left alone until you type in the field.

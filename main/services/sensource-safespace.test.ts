@@ -58,6 +58,7 @@ type Poller = {
   scheduleIn: (ms: number) => void;
   scheduleReconnect: () => void;
   scheduleSafeSpaceIn: (ms: number) => void;
+  scheduleAttendanceIn: (ms: number) => void;
   restart: () => void;
 };
 const svc = sensourceService as unknown as Poller;
@@ -68,6 +69,7 @@ const svc = sensourceService as unknown as Poller;
 svc.scheduleIn = () => {};
 svc.scheduleReconnect = () => {};
 svc.scheduleSafeSpaceIn = () => {};
+svc.scheduleAttendanceIn = () => {};
 svc.restart = () => {};
 
 /** A space id that is unmistakable inside a log line — the point of the
@@ -79,6 +81,9 @@ const CFG: SenSourceConfig = {
   clientSecret: "test-secret",
   apiToken: null,
   pollSeconds: 15,
+  // Equal to pollSeconds, i.e. unset in effect (see attendanceIsFaster) — this
+  // file is about SafeSpace, and the fast attendance read has its own file.
+  attendancePollSeconds: 15,
   locationId: null,
   zoneIds: [],
   safeSpaceId: SPACE_ID,
@@ -203,6 +208,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     svc.scheduleIn = () => {};
     svc.scheduleReconnect = () => {};
     svc.scheduleSafeSpaceIn = () => {};
+    svc.scheduleAttendanceIn = () => {};
     svc.restart = () => {};
     sensourceService.setConnectionListener((state, message) => reports.push({ state, message }));
     resetService();

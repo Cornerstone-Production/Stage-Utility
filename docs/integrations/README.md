@@ -104,6 +104,35 @@ A panel holding a repeater row that cannot wrap marks its root with
 `WIDE_PANEL_ATTR` (`integration-dialog-size.ts`), which puts its dialog in the
 wide variant. A new one that forgets fails `integration-dialog-size.test.tsx`.
 
+A `type: "number"` field prefills when nothing is saved: its `default` if it
+declares one, otherwise its `placeholder` when that parses as a number. A field
+where BLANK is the setting — a poll interval that falls back to the service's
+own, a port that is not configured yet — declares neither, and carries
+`unsetHint` instead: the short string its empty box shows, and the opt-in to
+being blankable at all. Three do (`propresenter.pollMs`, `ross-tsl.port`,
+`sensource.attendancePollSeconds`). Their box opens empty, clearing one back to
+blank is a save the operator can make, and a stepper pressed on a blank one
+lands on the lowest value the field permits — its `min`, or zero where it
+declares none. A number field with none of the three shows a bare 0 for a value
+it does not have: a number the operator reads as a setting, and one a stepper
+press turns into a real one. So a prefill is not optional for a setting that
+must hold a number. `integration-number-fields.test.tsx` pins the count and the
+biconditional.
+
+`min` and `max` bound what can be TYPED into a field, not what may already be
+stored in it. A value saved before the bound existed keeps its number and goes
+on being displayed; only a value the operator enters in that edit is pulled
+inside the bounds. Clamping a stored value on a click in and a click out was a
+silent config change nobody asked for: `propresenter.pollMs` 100 became 200, and
+because the poller ignores anything under 200 that box went from falling back to
+one request a second to making five. Bounds may therefore be added to an
+existing field without rewriting anybody's setting.
+
+Keep `unsetHint` short: the field is 176px, and "Same as poll interval" is
+clipped where "Same as above" is not. The wireless connections panel renders
+`ConfigField`s too and ignores it — it has no prefill ladder at all, so its
+number fields show 0 until they are set.
+
 Build integrations efficiency-first: change-driven broadcasts, reuse the shared
 SSE stream, gate polling and broadcasting on demand, back off when unreachable.
 

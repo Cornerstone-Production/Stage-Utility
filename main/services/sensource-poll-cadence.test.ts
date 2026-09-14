@@ -222,3 +222,44 @@ describe("the SafeSpace interval has one definition too", () => {
     assert.equal(id.default, undefined, "a default space ID would turn the section on for everyone");
   });
 });
+
+describe("the attendance interval has no default of its own", () => {
+  // The SAME shape the space-ID field above is, and for the same reason, not
+  // pollSeconds/safeSpacePollSeconds's: those two guard an opt-in sub-feature
+  // (a poll that already exists, or one gated behind a credential nobody has
+  // by default), so a fixed default there changes nothing for someone who
+  // never touches it. Attendance is not opt-in — every existing Vea
+  // integration already publishes one — so ANY fixed number here, shown as
+  // this field's value the moment the card opens and saved back if the
+  // operator saves it for any other reason, would raise request volume for
+  // every install whose own poll interval is not that exact number. See the
+  // field's own doc comment on SenSourceConfig, and
+  // sensource-attendance-cadence.test.ts for the runtime fallback this pins.
+  const field = integrationManager
+    .getDescriptors()
+    .find((d) => d.id === "sensource")
+    ?.configSchema.find((f) => f.key === "attendancePollSeconds");
+
+  it("is offered by the settings form, as a number", () => {
+    assert.ok(field, "the SenSource descriptor lost its attendance-interval field");
+    assert.equal(field.type, "number");
+  });
+
+  it("has no default and no numeric placeholder", () => {
+    assert.equal(field!.default, undefined, "a default attendance interval would raise volume for everyone");
+    assert.ok(
+      field!.placeholder == null || !Number.isFinite(Number(field!.placeholder)),
+      `a numeric placeholder ("${field!.placeholder}") pre-fills the form exactly like a default would`,
+    );
+  });
+
+  it("never lets the form offer a rate below the floor the fast read enforces", () => {
+    // Same floor as pollSeconds's own — it is the same Vea endpoint, not a
+    // different constraint — and the same >= rather than == pollSeconds's own
+    // test uses: a stricter form bound is fine, a looser one lies.
+    assert.ok(
+      typeof field!.min === "number" && field!.min >= MIN_POLL_SECONDS,
+      `form floor ${field!.min} is below the ${MIN_POLL_SECONDS}s the poller enforces`,
+    );
+  });
+});

@@ -88,6 +88,10 @@ type Poller = {
   configure: (cfg: SenSourceConfig) => void;
   scheduleIn: (ms: number) => void;
   scheduleReconnect: () => void;
+  /** The attendance reading's own timer. Stubbed for the same reason scheduleIn
+   *  is: every successful poll() here now also calls noteAttendanceSample(),
+   *  which would otherwise arm a REAL setTimeout this file never reads. */
+  scheduleAttendanceIn: (ms: number) => void;
   /** Stubbed alongside the scheduler: configure() restarts the poller, and a
    *  case about what configure() DERIVES must not also start a poll. */
   restart: () => void;
@@ -99,6 +103,9 @@ const CFG: SenSourceConfig = {
   clientSecret: "test-secret",
   apiToken: null,
   pollSeconds: 15,
+  // Equal to pollSeconds, i.e. unset in effect (see attendanceIsFaster) — this
+  // file is about the main cycle, and the fast read has its own file.
+  attendancePollSeconds: 15,
   locationId: null,
   zoneIds: [],
   // The Vea half of the integration. SafeSpace has its own file.
@@ -294,6 +301,7 @@ describe("SenSource day aggregates", () => {
     // The poll re-arms itself through these; a test must not leave a timer live.
     svc.scheduleIn = () => {};
     svc.scheduleReconnect = () => {};
+    svc.scheduleAttendanceIn = () => {};
     svc.restart = () => {};
     svc.emit = (dto: PeopleCountDTO) => {
       emitted.push(dto);
@@ -757,6 +765,7 @@ describe("SenSource token rejection", () => {
     Date.now = () => clock;
     svc.scheduleIn = () => {};
     svc.scheduleReconnect = () => {};
+    svc.scheduleAttendanceIn = () => {};
     svc.restart = () => {};
     svc.emit = (dto: PeopleCountDTO) => {
       emitted.push(dto);
