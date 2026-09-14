@@ -11,16 +11,17 @@ import { Button, DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogDes
 import { cn } from "../lib/cn";
 import type { JustUpdated } from "@main/services/update-notices-store";
 import type { UpdateNoticePayload } from "@main/services/update/announce";
+import { externKeyed } from "@main/types/extern-keyed";
 
 /** Breaking earns a colour. The rest are quiet by design — if every heading
  *  shouts, the one that matters does not. */
-const SECTION_TONE: Record<string, string> = {
+const SECTION_TONE: Record<string, string> = externKeyed({
   Breaking: "bg-danger-9",
   New: "bg-accent",
   Changed: "bg-accent",
   Improved: "bg-accent",
   Fixed: "bg-warn-9",
-};
+});
 
 export function UpdateNotices() {
   const [justUpdated, setJustUpdated] = useState<JustUpdated | null>(null);

@@ -120,8 +120,11 @@ describe("the source vocabularies", () => {
   // One table per family, because the same lowercase config value has to resolve
   // to the same operator-facing name on Home, on a wall and in the inspector.
   test("every value names the source an operator reads", () => {
-    assert.deepEqual(STREAMER_FOR, { any: null, resi: "Resi", youtube: "YouTube" });
-    assert.deepEqual(RECORDER_FOR, { any: null, obs: "OBS", reaper: "REAPER" });
+    // Spread, not the table itself: both are externKeyed(), so they have no
+    // prototype and deepStrictEqual compares prototypes. extern-keyed.test.ts
+    // is what asserts the missing prototype; this asserts the contents.
+    assert.deepEqual({ ...STREAMER_FOR }, { any: null, resi: "Resi", youtube: "YouTube" });
+    assert.deepEqual({ ...RECORDER_FOR }, { any: null, obs: "OBS", reaper: "REAPER" });
   });
 
   test("an unknown value resolves to nothing, not to another source", () => {

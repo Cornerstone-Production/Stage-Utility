@@ -35,11 +35,14 @@ const MERGE = /^Merge (pull request|branch|remote-tracking)\b/i;
 const CI_DIRECTIVE = /\s*\[(skip ci|ci skip|no ci)\]\s*$/i;
 
 import SCOPE_LABEL_FILE from "./scope-labels.json" with { type: "json" };
+import { externKeyed } from "../types/extern-keyed.js";
 
 /** Jargon scopes and what to call them. Shared with scripts/release-notes.mjs. */
-const SCOPE_LABELS: Record<string, string> = Object.fromEntries(
-  Object.entries(SCOPE_LABEL_FILE).filter(([k]) => !k.startsWith("_")),
-) as Record<string, string>;
+const SCOPE_LABELS: Record<string, string> = externKeyed(
+  Object.fromEntries(
+    Object.entries(SCOPE_LABEL_FILE).filter(([k]) => !k.startsWith("_")),
+  ) as Record<string, string>,
+);
 
 /**
  * The user-facing subset of `subjects`, in the order given, deduplicated and

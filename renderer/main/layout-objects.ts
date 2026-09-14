@@ -16,6 +16,7 @@
 
 import type { HomeCardSize, HomeVisibility } from "@main/types/views";
 import { IDIOM_TYPES } from "@main/types/readout-types";
+import { externKeyed } from "@main/types/extern-keyed";
 
 /** Palette sections, in the order the add-object dropdown shows them. */
 export const PALETTE_GROUP_ORDER = [
@@ -273,7 +274,7 @@ export const EMBED_FONT_FRACTION = 0.016;
 
 // ── The registry ──────────────────────────────────────────────────────────────
 
-export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
+export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = externKeyed({
   // Layout
   container: {
     label: "Container",
@@ -939,7 +940,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = {
     homeSize: "l",
     stylingOnly: true,
   },
-};
+});
 
 /**
  * Which View kinds a `view-embed` object may render.

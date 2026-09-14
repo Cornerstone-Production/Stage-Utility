@@ -6,6 +6,7 @@
 // connected-but-stopped judgement is a second place for the same bug.
 
 import { obsRecordTimecode, type RecordAnchor } from "@main/services/obs-record-clock";
+import { externKeyed } from "@main/types/extern-keyed";
 
 /**
  * One thing that can be recording.
@@ -168,19 +169,19 @@ export function lateBySec(s: Pick<Streamer, "live" | "scheduledStartAt">, now: n
  * rendered as YouTube — a card labelled YouTube reporting something else.
  * A lookup that returns undefined for an unknown value cannot do that.
  */
-export const STREAMER_FOR: Readonly<Record<string, string | null>> = {
+export const STREAMER_FOR: Readonly<Record<string, string | null>> = externKeyed({
   any: null,
   resi: "Resi",
   youtube: "YouTube",
-};
+});
 
 /** The recorder a `recorder` value names, or null for "every recorder at once".
  *  Same shape and same reasoning as STREAMER_FOR. */
-export const RECORDER_FOR: Readonly<Record<string, string | null>> = {
+export const RECORDER_FOR: Readonly<Record<string, string | null>> = externKeyed({
   any: null,
   obs: "OBS",
   reaper: "REAPER",
-};
+});
 
 /** The options a "which one" submenu offers, built from a mapping above. `anyLabel`
  *  is what the every-source choice is called on that card. */

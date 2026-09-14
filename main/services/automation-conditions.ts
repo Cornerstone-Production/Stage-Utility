@@ -13,6 +13,7 @@ import type { ConditionCtx, ConditionDef } from "../types/automation.js";
 import { hasContent, type PvpLayerDTO } from "../types/pvp.js";
 import { zonedMinuteOfDay, zonedParts } from "./app-timezone.js";
 import { INTEGRATIONS } from "./automation-triggers.js";
+import { externKeyed } from "../types/extern-keyed.js";
 
 /**
  * How long before a service starts the building counts as "in a service" for a
@@ -134,7 +135,7 @@ function pvpLayerCondition(
   };
 }
 
-export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
+export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
   ...Object.fromEntries(
     INTEGRATIONS.map((i) => [`${i.id}.is-connected`, isConnectedCondition(i.id, i.label)]),
   ),
@@ -309,7 +310,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = {
       return from <= to ? cur >= from && cur <= to : cur >= from || cur <= to;
     },
   },
-};
+});
 
 /**
  * The FIRST condition that does not hold, or null when they all do.

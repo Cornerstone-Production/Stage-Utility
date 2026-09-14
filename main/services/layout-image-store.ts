@@ -13,7 +13,13 @@ import { getUserDataPath } from "./app-paths.js";
 import { viewsStore } from "./views-store.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
+import { externKeyed } from "../types/extern-keyed.js";
 
+// NOT externKeyed(), unlike MIME_BY_EXT below: the only lookup into this table
+// is `EXT_BY_MIME[m[1].toLowerCase()]`, and `m[1]` is a capture of
+// `image/[a-zA-Z0-9.+-]+` — every possible key starts "image/", so none of them
+// can be an inherited member name. If that regex ever loosens, wrap this too.
+// See main/types/extern-keyed.ts.
 const EXT_BY_MIME: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -21,14 +27,14 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/webp": "webp",
   "image/svg+xml": "svg",
 };
-const MIME_BY_EXT: Record<string, string> = {
+const MIME_BY_EXT: Record<string, string> = externKeyed({
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   gif: "image/gif",
   webp: "image/webp",
   svg: "image/svg+xml",
-};
+});
 /** See image-files.ts — exported for the same reason. */
 export const MAX_LAYOUT_IMAGE_BYTES = 12 * 1024 * 1024;
 

@@ -23,6 +23,7 @@ import { signalStore } from "./signal-store.js";
 // byUuid, nameSegment and flagAction, and the verify-then-report reasoning is a
 // page of comment that belongs beside the thing it governs.
 import { PVP_ACTIONS } from "./pvp-actions.js";
+import { externKeyed } from "../types/extern-keyed.js";
 
 const ok = (detail: string): ActionResult => ({ ok: true, detail });
 const fail = (detail: string): ActionResult => ({ ok: false, detail });
@@ -59,7 +60,7 @@ export const liveDeps: {
   advance: () => stageController.controlLive("next"),
 };
 
-export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
+export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
   "log.message": {
     id: "log.message",
     label: "Write a log message",
@@ -337,4 +338,4 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = {
   },
 
   ...PVP_ACTIONS,
-};
+});

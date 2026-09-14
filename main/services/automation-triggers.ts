@@ -15,6 +15,7 @@ import { findItemByTitle } from "./automation-pco-items.js";
 import { PREFERRED_METRICS } from "./spl-recorder.js";
 import { planTimeDueIn } from "./automation-plan-times.js";
 import type { PlanTimeDTO } from "../types/stage.js";
+import { externKeyed } from "../types/extern-keyed.js";
 
 type Live = {
   mode?: string;
@@ -639,7 +640,7 @@ export function isValidCueName(name: string): boolean {
   return CUE_NAME_RE.test(name);
 }
 
-export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
+export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   ...Object.assign({}, ...INTEGRATIONS.map((i) => connectionTriggers(i.id, i.label))),
 
   "call.by-name": def({
@@ -1244,7 +1245,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = {
       return crossed(metricOf(prev, metric), metricOf(next, metric), Number(params.threshold), "below");
     },
   }),
-};
+});
 
 export function triggersForChannel(channel: string): TriggerDef[] {
   return Object.values(AUTOMATION_TRIGGERS).filter((t) => t.channel === channel);

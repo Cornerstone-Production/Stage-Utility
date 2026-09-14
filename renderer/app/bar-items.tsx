@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 
 import type { BarSet } from "./set-bar-items";
+import { externKeyed } from "@main/types/extern-keyed";
 
 export type BarItemId =
   | "clock"
@@ -129,7 +130,7 @@ export interface BarItem {
  * default, deliberately data-only so the chooser can read it without importing
  * the bar.
  */
-export const BAR_ITEMS: Record<BarItemId, BarItem> = {
+export const BAR_ITEMS: Record<BarItemId, BarItem> = externKeyed({
   clock: {
     id: "clock",
     label: "Clock",
@@ -195,7 +196,7 @@ export const BAR_ITEMS: Record<BarItemId, BarItem> = {
     // amendment to the no-reflow rule rather than an escape from it.
     canBeEmpty: true,
   },
-};
+});
 
 /**
  * How the spacer presents itself in the configurator.
