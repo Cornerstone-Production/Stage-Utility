@@ -199,13 +199,28 @@ describe("which number fields say blank is a setting", () => {
     assert.deepEqual(bad.map((f) => `${f.at}=${f.shown}`), [], "a number field reached the input as 0");
   });
 
-  test("a field with no unsetHint is still handed 0 for an empty value", () => {
+  test("all ten fields with no unsetHint are still handed 0 for an empty value", () => {
     // The opt-in, at the render site. Without the `unsetHint` test in
     // numberFieldValue this would blank every number field in the app whose
     // value happened to be missing.
-    const plain = fields.find((f) => f.field.unsetHint == null)!;
-    assert.equal(numberFieldValue(plain.field, ""), 0);
-    assert.equal(numberFieldValue(plain.field, null), 0);
+    //
+    // ALL of them, and an exact count. This used to check `fields.find(...)` —
+    // one field, whichever came first, which is companion.port — so nine of the
+    // ten were covered by nothing, and a descriptor that gave one of them an
+    // unsetHint by accident would not have shown up here.
+    const plain = fields.filter((f) => f.field.unsetHint == null);
+    assert.equal(
+      plain.length,
+      10,
+      `${plain.length} number fields declare no unsetHint, not 10: ${plain.map((f) => `${f.id}.${f.field.key}`).join(", ")}`,
+    );
+    for (const f of plain) {
+      const at = `${f.id}.${f.field.key}`;
+      assert.equal(numberFieldValue(f.field, ""), 0, `${at} rendered blank for ""`);
+      assert.equal(numberFieldValue(f.field, null), 0, `${at} rendered blank for null`);
+      assert.equal(numberFieldValue(f.field, undefined), 0, `${at} rendered blank for undefined`);
+      assert.equal(numberFieldValue(f.field, NaN), 0, `${at} rendered blank for NaN`);
+    }
   });
 
   test("a saved number still reaches the input for an unsettable field", () => {
