@@ -228,11 +228,11 @@ describe("the ProPresenter macro field", () => {
   });
 
   test("names every instance that did not answer, plural", async () => {
-    MACRO_UNREACHABLE = ["Chapel", "Waterfall"];
+    MACRO_UNREACHABLE = ["MA", "Chapel"];
     await open();
     assert.equal(
       optionNotice("propresenter-macros"),
-      "Chapel, Waterfall did not answer. A macro that only lives there is missing from this list.",
+      "MA, Chapel did not answer. A macro that only lives there is missing from this list.",
     );
   });
 
