@@ -1,4 +1,5 @@
 import { FORM_MASK, isMask } from "@main/services/mask";
+import type { IntegrationId } from "@main/services/integration-ids";
 import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
@@ -95,23 +96,44 @@ export function integrationFlashId(id: string): string {
  * Center and ProdCom still sit next to each other and the Ross pair is still
  * adjacent — which is all the pair card and the headings were really doing.
  */
-const CATEGORY_ORDER: string[][] = [
+const CATEGORY_ORDER = [
   ["planning-center", "prodcom"], // Service & plan
   ["propresenter"], // Presentation
   ["smaart"], // Audio
   ["sensource"], // People
   ["wireless"], // Wireless
   ["resi", "youtube"], // Streaming
-  ["obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"], // Control & output
+  ["companion", "obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"], // Control & output
   ["scores"], // Information
-];
+] as const satisfies readonly (readonly IntegrationId[])[];
 
-const ORDER = CATEGORY_ORDER.flat();
+/**
+ * EVERY integration is placed above, and nothing that is not one is.
+ *
+ * `companion` was missing, so its card sorted to the end of its half instead of
+ * into a category slot — silently, because `rank` answers ORDER.length for
+ * anything it does not know. That is the right answer for an id a newer server
+ * has and this build does not; it is the wrong one for an integration this build
+ * ships, and nothing could tell the two apart.
+ *
+ * The constraint NAMES the id: with `companion` missing this reads
+ * `Type '"companion"' does not satisfy the constraint 'never'`.
+ * integrations-category-order.test.ts says the same thing in English, and runs
+ * under `npm test`, which does not typecheck.
+ */
+type Placed = (typeof CATEGORY_ORDER)[number][number];
+type MustBeNever<T extends never> = T;
+export type EveryIntegrationIsPlaced = MustBeNever<Exclude<IntegrationId, Placed>>;
 
-/** Anything not named above sorts to the end of its half, in server order. */
+/** Widened for the lookup below, which is asked about ids off the wire. */
+export const CATEGORY_ORDER_IDS: readonly string[] = CATEGORY_ORDER.flat();
+
+/** An id this build does not ship — a newer server's — sorts to the end of its
+ *  half, in server order. Every integration this build DOES ship is placed, and
+ *  the declaration above is what keeps that true. */
 function rank(id: string): number {
-  const i = ORDER.indexOf(id);
-  return i === -1 ? ORDER.length : i;
+  const i = CATEGORY_ORDER_IDS.indexOf(id);
+  return i === -1 ? CATEGORY_ORDER_IDS.length : i;
 }
 
 /**
