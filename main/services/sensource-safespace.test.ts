@@ -70,6 +70,13 @@ type Poller = {
   restart: () => void;
 };
 const svc = sensourceService as unknown as Poller;
+/** The SafeSpace ticker's REAL arm, captured before the stubbing below shadows
+ *  it. One case needs the ticker's own `wanted()` gate under test rather than
+ *  intercepted, and a spy on `arm` replaces the very check it is about. Bound,
+ *  because it is read off the prototype. */
+const realSafeSpaceArm = (
+  Object.getPrototypeOf(svc.safeSpaceTicker) as TickerSeam
+).arm.bind(svc.safeSpaceTicker);
 
 // Stubbed HERE and not only in beforeEach: resetService below calls the real
 // configure(), which restarts the poller, and the first resetService runs before
@@ -716,6 +723,38 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     assert.deepEqual(armed, [10_000], "the deferred reading did not resume");
     assert.equal(published().total.occupancy, 417, "the deferred reading never published again");
     assert.equal(published().total.occupancySource, "safespace");
+  });
+
+  it("survives a Test pressed with the space-ID field BLANKED", async () => {
+    // GUARD, and the second door into the same failure. The reading's "is
+    // SafeSpace even on" gate reads `this.cfg`, and test() swaps that for the
+    // operator's UNSAVED form values across two round-trips — so a Test pressed
+    // with the field cleared answered "switched off" for a poller whose saved
+    // config has an id, and the re-arm was refused. Same dead reading as the
+    // guard clause that lived above the try, reached through the gate instead of
+    // through the body.
+    stubFetch({ safeSpace: () => "417" });
+    await poll();
+    // The REAL arm, because the gate under test lives inside it — a spy would
+    // replace the very check this case exists to prove.
+    svc.safeSpaceTicker.arm = realSafeSpaceArm;
+
+    // The operator clears the field and presses Test without saving.
+    const testing = sensourceService.test({ ...CFG, safeSpaceId: null, safeSpaceEnabled: false });
+    await svc.safeSpaceTicker.run();
+    assert.equal(
+      svc.safeSpaceTicker.armed,
+      true,
+      "a Test with the field blanked left the SafeSpace reading unarmed — it is dead until the card is saved again",
+    );
+    await testing;
+
+    // The saved id is back, and the reading carries on reading it.
+    svc.safeSpaceTicker.cancel();
+    await svc.safeSpaceTicker.run();
+    assert.equal(svc.safeSpaceTicker.armed, true, "the deferred reading did not resume");
+    assert.equal(published().total.occupancy, 417);
+    svc.safeSpaceTicker.cancel(); // no real 10s timer survives the case
   });
 
   it("defers the VEA POLL that lands inside Test connection too", async () => {

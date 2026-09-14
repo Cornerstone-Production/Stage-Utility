@@ -662,7 +662,15 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     nextDelayMs: (r) => this.safeSpaceDelayMs(r),
     // Switched off (no space id) is not a state this reading defers in — there
     // is nothing to read — so it lives with the timer rather than in the body.
-    wanted: () => this.running && !!this.cfg?.safeSpaceId,
+    //
+    // `this.testing ||` because test() holds the operator's UNSAVED form config
+    // in `this.cfg`, and this gate reads through to it. A Test pressed with the
+    // space-id field blanked would answer "switched off" for a poller whose
+    // SAVED config has it on — refusing the re-arm and killing the reading
+    // exactly as the pre-ticker guard clause did, one door along. A gate that
+    // cannot be trusted is treated as open: the tick it lets through skips on
+    // `testing` anyway, and by the next one the saved config is back.
+    wanted: () => this.running && (this.testing || !!this.cfg?.safeSpaceId),
     generation: () => this.pollEpoch,
   });
   /** True while a fast attendance read is in flight — see readAttendance. */
@@ -691,7 +699,10 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     nextDelayMs: () => this.attendanceDelayMs(),
     // An interval no faster than the Vea poll has nothing for this timer to do —
     // the poll's own traffic fetch already IS that tick's attendance reading.
-    wanted: () => this.running && this.attendanceIsFaster(),
+    // `this.testing ||` for the reason safeSpaceTicker's gate carries it: the
+    // answer is read out of `this.cfg`, which test() swaps for the operator's
+    // unsaved form values.
+    wanted: () => this.running && (this.testing || this.attendanceIsFaster()),
     generation: () => this.pollEpoch,
   });
   /** The attendance reading's own outage log — see safeSpaceOutages for why an

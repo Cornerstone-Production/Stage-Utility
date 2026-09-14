@@ -734,6 +734,12 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     // restarting Stage; short of that the fallback is for the life of the run,
     // which the log line says out loud.
     this.streamFallback = false;
+    // And the silent-stream run, for the same reason the macro cache above goes:
+    // it is a fact about the machine this instance is leaving. Carried across a
+    // repoint it would put the new machine's card red on its first missed
+    // stream, or — the other way round — swallow the threshold line because the
+    // count had already passed it.
+    this.silentStreams = 0;
   }
 
   /** Hang up on the held stream and disarm everything it armed. */
