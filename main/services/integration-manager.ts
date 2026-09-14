@@ -778,23 +778,25 @@ export interface OutOfBandSetup {
  * panel that would let them finish. `empty-schema-configured.test.ts` fails if a
  * schema-less integration is added without an entry.
  */
-// Keyed by IntegrationId, not by string. A typo'd key on a `Record<string, …>`
-// is a valid entry that nothing ever looks up, so the integration it was meant
-// for stays permanently "Not set up" — the exact failure this table was added to
-// fix, arriving back through the table itself. Partial because most
-// integrations answer from their config and belong nowhere near here.
-const OUT_OF_BAND_CONFIGURED: Partial<Record<
-  IntegrationId,
-  (setup: OutOfBandSetup) => boolean
->> = {
-  wireless: (s) => s.wirelessConnections > 0,
-  osc: (s) => s.oscTargets > 0,
-  rosstalk: (s) => s.rossTalkTargets > 0,
-  scores: (s) => s.followedTeams > 0,
-};
+// A MAP keyed by IntegrationId, not a record keyed by string, for the two
+// reasons SECRET_KEYS below is one:
+//
+// A typo'd key on a `Record<string, …>` is a valid entry that nothing ever looks
+// up, so the integration it was meant for stays permanently "Not set up" — the
+// exact failure this table was added to fix, arriving back through the table
+// itself. And the read below takes an id that came off an HTTP body, where a
+// record answers `Object.prototype` for "__proto__" and a truthy non-function
+// reaches the call. Most integrations answer from their config and belong
+// nowhere near here, so most ids are legitimately absent.
+const OUT_OF_BAND_CONFIGURED = new Map<IntegrationId, (setup: OutOfBandSetup) => boolean>([
+  ["wireless", (s) => s.wirelessConnections > 0],
+  ["osc", (s) => s.oscTargets > 0],
+  ["rosstalk", (s) => s.rossTalkTargets > 0],
+  ["scores", (s) => s.followedTeams > 0],
+]);
 
 /** Ids that answer "configured" from their own list rather than from config. */
-export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = Object.keys(OUT_OF_BAND_CONFIGURED);
+export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = [...OUT_OF_BAND_CONFIGURED.keys()];
 
 /**
  * Fold a request body into the config to persist and the secrets to store.
@@ -933,7 +935,7 @@ export function configuredFor(
   // and descriptors as plain strings, while the table is keyed by IntegrationId
   // so a typo in the table itself is a compile error. An unknown id here is a
   // miss, which is the same answer a string-keyed table would have given.
-  const outOfBand = OUT_OF_BAND_CONFIGURED[state.id as IntegrationId];
+  const outOfBand = OUT_OF_BAND_CONFIGURED.get(state.id as IntegrationId);
   if (outOfBand) return outOfBand(setup);
   // YouTube asks for one of two sets of fields depending on how it is set to
   // check, so "any value present" would call it configured the moment the mode
@@ -956,32 +958,42 @@ export function configuredFor(
 
 // Keys that are secrets for each integration id.
 //
-// Keyed by IntegrationId for the same reason as OUT_OF_BAND_CONFIGURED above,
-// and the cost of a typo here is worse: an id that does not match falls back to
-// `[]`, so every field of that integration — passwords and tokens included — is
-// written to settings.json as ordinary config instead of to secrets.bin.
-const SECRET_KEYS: Partial<Record<IntegrationId, string[]>> = {
-  "planning-center": ["secret"],
-  wireless: [],
-  companion: [],
-  propresenter: [],
-  prodcom: ["apiKey"],
-  smaart: ["password"],
-  obs: ["password"],
-  pvp: ["token"],
-  reaper: [],
+// A MAP, not a record — the house rule for anything looked up by a key that came
+// from outside. secretKeysFor() is called on every key of settings.json's
+// `integrationConfigs`, and `JSON.parse('{"__proto__":{}}')` keeps "__proto__"
+// as an own enumerable key that Object.entries yields. On a record that read
+// answers `Object.prototype`, which is truthy, so the `?? []` never fires and
+// `.filter` on it is a TypeError inside init() — no boot, from a hand-edited or
+// damaged settings.json. "constructor" and "toString" do it too. A Map answers
+// `undefined` for all of them because it has no prototype chain to walk.
+//
+// Still typed by IntegrationId for the same reason as OUT_OF_BAND_CONFIGURED
+// above, and the cost of a typo here is worse: an id that does not match falls
+// back to `[]`, so every field of that integration — passwords and tokens
+// included — is written to settings.json as ordinary config instead of to
+// secrets.bin.
+const SECRET_KEYS = new Map<IntegrationId, readonly string[]>([
+  ["planning-center", ["secret"]],
+  ["wireless", []],
+  ["companion", []],
+  ["propresenter", []],
+  ["prodcom", ["apiKey"]],
+  ["smaart", ["password"]],
+  ["obs", ["password"]],
+  ["pvp", ["token"]],
+  ["reaper", []],
   // No account, no key. ESPN's scoreboard endpoints are public and unauthenticated.
-  scores: [],
-  resi: ["password"],
-  youtube: ["apiKey", "clientSecret", "refreshToken"],
+  ["scores", []],
+  ["resi", ["password"]],
+  ["youtube", ["apiKey", "clientSecret", "refreshToken"]],
   // safeSpaceId is here for the reason safespace-client.ts states in capitals:
   // "THE SPACE ID IS THE ENTIRE CREDENTIAL. There is no key, no token and no
   // account check." It was ordinary config, so it sat in settings.json and rode
   // verbatim into every config snapshot — a bundle the UI presents as safe to
   // hand to somebody.
-  sensource: ["clientSecret", "apiToken", "safeSpaceId"],
-  "ross-tsl": [],
-};
+  ["sensource", ["clientSecret", "apiToken", "safeSpaceId"]],
+  ["ross-tsl", []],
+]);
 
 /**
  * The non-secret record that SafeSpace is switched on.
@@ -1004,13 +1016,14 @@ const SECRET_KEYS: Partial<Record<IntegrationId, string[]>> = {
 const SAFESPACE_ENABLED_KEY = "safeSpaceEnabled";
 
 /** The secret field names for an integration id, or none. A helper rather than a
- *  bare index because SECRET_KEYS is keyed by IntegrationId — so a typo in the
- *  TABLE is a compile error — while every call site carries a plain string.
+ *  bare lookup because SECRET_KEYS is keyed by IntegrationId — so a typo in the
+ *  TABLE is a compile error — while every call site carries a plain string, some
+ *  of them straight off a JSON-parsed settings.json.
  *
  *  Exported for integration-secret-parity.test.ts, which pins this table against
  *  the `password` fields the descriptors declare. */
 export function secretKeysFor(id: string): readonly string[] {
-  return SECRET_KEYS[id as IntegrationId] ?? [];
+  return SECRET_KEYS.get(id as IntegrationId) ?? [];
 }
 
 /** What a boot migration would move, worked out without touching disk. */

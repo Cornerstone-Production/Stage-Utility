@@ -23,7 +23,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-const { INTEGRATION_DESCRIPTORS, secretKeysFor } = await import("./integration-manager.js");
+const { INTEGRATION_DESCRIPTORS, secretKeysFor, configuredFor, planSecretMigration } = await import(
+  "./integration-manager.js"
+);
 
 /** Every `password` field each descriptor declares, by integration id. */
 function passwordFields(): Map<string, string[]> {
@@ -90,5 +92,56 @@ describe("the form's password fields and the encrypted store agree", () => {
       "youtube.clientSecret",
       "youtube.refreshToken",
     ].sort());
+  });
+});
+
+// ── ids that came from outside ───────────────────────────────────────────────
+//
+// Both tables are read with a key the app did not choose. settings.json's
+// `integrationConfigs` is walked key by key at boot, and an integration id
+// reaches configuredFor() off an HTTP path segment. As RECORDS they answered
+// `Object.prototype` — or a function — for the names every JavaScript object
+// carries, and `JSON.parse('{"__proto__":{}}')` keeps "__proto__" as an own
+// enumerable key that Object.entries yields, so this is reachable from a
+// hand-edited or partly-damaged settings.json. The `?? []` never fired, because
+// Object.prototype is truthy, and `.filter` on it threw inside init(): no boot,
+// no HTTP server, nothing at /log to read.
+//
+// Maps have no prototype chain to walk, so every one of these is a plain miss.
+
+/** The names a plain object answers to without anyone putting them there. */
+const INHERITED = ["__proto__", "constructor", "toString", "hasOwnProperty", "valueOf"];
+
+describe("a table keyed by an id from outside the app", () => {
+  test("secretKeysFor answers no keys for an inherited name", () => {
+    for (const name of INHERITED) {
+      assert.deepEqual([...secretKeysFor(name)], [], `secretKeysFor("${name}") did not answer empty`);
+    }
+  });
+
+  test("configuredFor answers for an inherited name instead of throwing", () => {
+    const setup = { wirelessConnections: 0, oscTargets: 0, rossTalkTargets: 0, followedTeams: 0 };
+    for (const name of INHERITED) {
+      assert.equal(
+        configuredFor({ id: name, config: {} }, setup, false),
+        false,
+        `configuredFor({ id: "${name}" }) did not answer false`,
+      );
+    }
+  });
+
+  test("the boot migration survives a settings.json carrying one", () => {
+    // THE REACHABLE ONE, driven exactly as init() drives it: the real planner
+    // over a real JSON.parse of a settings.json with a __proto__ key. As a
+    // record this is `TypeError: keys.filter is not a function` out of init(),
+    // which server.ts turns into exit 100 on every restart.
+    const configs = JSON.parse(
+      '{"__proto__":{"password":"x"},"constructor":{},"toString":{},"obs":{"password":"secret-0004"}}',
+    ) as Record<string, Record<string, unknown>>;
+
+    const plan = planSecretMigration(configs);
+
+    assert.ok(plan, "the migration found nothing to move, so this proves nothing about the inherited keys");
+    assert.deepEqual(plan.moved, ["obs.password"], "an inherited key was treated as an integration");
   });
 });
