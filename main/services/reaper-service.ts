@@ -102,6 +102,16 @@ export function parseTransport(body: string): TransportRead {
   };
 }
 
+/** The web interface answered and REAPER did not — a 200 carrying something that
+ *  is not a TRANSPORT line. Its own type so the poll can word it correctly while
+ *  still taking the single failure path connect() already has. */
+class UnreadableTransport extends Error {
+  constructor() {
+    super("answered, but the reply was not REAPER's transport — is the web interface enabled?");
+    this.name = "UnreadableTransport";
+  }
+}
+
 class ReaperService extends StatusIntegration<ReaperStatusDTO> {
   private host: string | null = null;
   private port: number | null = null;
@@ -232,15 +242,14 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
       // transport cannot be read is the same lie `transport` now refuses to act
       // on, and `test()` has always called this out — so the poll says it too,
       // rather than publishing a confident "not recording" and reporting
-      // "Connected". Backs off through the same path an unreachable host does.
-      if (!read) {
-        const msg = `answered, but the reply was not REAPER's transport — is the web interface enabled?`;
-        if (this.attempt === 0) console.warn(`[reaper] ${this.host}:${this.port} ${msg} — backing off quietly`);
-        this.report("error", `${this.host}:${this.port} ${msg}`);
-        this.goOffline();
-        this.scheduleReconnect();
-        return;
-      }
+      // "Connected".
+      //
+      // THROWN rather than handled here, so it takes the one failure path this
+      // function already has: reporting, going offline, backing off and the
+      // first-failure gate are written once. A second copy of that block would
+      // be a second `attempt === 0` gate in a release whose whole point was that
+      // there are already twelve too many.
+      if (!read) throw new UnreadableTransport();
       if (!this.last.connected) {
         this.resetBackoff();
         this.report("connected", `Connected to REAPER at ${this.host}:${this.port}`);
@@ -253,9 +262,15 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
       // unattended box that is the whole point of automation.
       this.scheduleIn(this.inDemand ? POLL_MS : IDLE_POLL_MS);
     } catch (err) {
-      const msg = fetchFailureMessage(err, `${this.host}:${this.port}`);
-      if (this.attempt === 0) console.warn(`[reaper] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
-      this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
+      // "Unreachable" is the wrong word for a box that answered, so the two
+      // causes word themselves and share everything else.
+      const where = `${this.host}:${this.port}`;
+      const detail =
+        err instanceof UnreadableTransport
+          ? `${where} ${err.message}`
+          : `Can't reach ${where} — ${fetchFailureMessage(err, where)}`;
+      if (this.attempt === 0) console.warn(`[reaper] ${detail} — backing off quietly`);
+      this.report("error", detail);
       this.goOffline();
       this.scheduleReconnect();
     }

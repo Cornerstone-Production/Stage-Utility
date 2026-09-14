@@ -18,6 +18,7 @@
 // poll is gone and the frame rate collapses to twice a minute.
 
 import { errorMessage } from "./errors.js";
+import { OutageLog } from "./repeat-log.js";
 import type { ObsStatusDTO } from "../types/stage.js";
 import { StatusIntegration } from "./integration-base.js";
 import { recordElapsedMs } from "./obs-record-clock.js";
@@ -133,8 +134,26 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
 
   private adapter: ObsWebSocketAdapter | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  /** Consecutive failed anchor reads, so a flapping OBS says so once. */
-  private anchorFailures = 0;
+  /**
+   * The anchor read's outage log.
+   *
+   * A consecutive-failure counter was what this was, and it is the shape
+   * repeat-log.ts was written to replace: `if (this.anchorFailures++ === 0)`
+   * with a reset on every success. OBS does not fail in a solid block — a
+   * GetRecordStatus timing out one call in three resets the counter on every
+   * success, so every failure is a fresh first failure. At the 30s keepalive
+   * that is about 180 lines over a 90-minute service, which is the 3,527-lines-
+   * in-five-days shape OutageLog's own header documents. And on a STEADY failure
+   * it is the opposite fault: one line and then ninety minutes of silence while
+   * the timecode drifts away from OBS.
+   *
+   * The default settle window is four keepalives, so a genuine recovery is
+   * announced within two minutes while an OBS failing every other read stays one
+   * outage. `why` is deliberately NOT the kind — it is the CALLER ("keepalive",
+   * an event name), which varies per call and would mint a fresh kind each time;
+   * the error message is.
+   */
+  private readonly anchorOutages = new OutageLog();
 
   constructor() {
     super("obs", "obs:status", OFFLINE);
@@ -346,16 +365,20 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
       const rec = await adapter.request("GetRecordStatus");
       if (this.adapter !== adapter) return null;
       this.emitIfChanged({ ...this.last, ...recordAnchorFrom(rec, this.last.recording) });
-      if (this.anchorFailures) {
-        console.log(`[obs] record anchor recovered after ${this.anchorFailures} miss(es)`);
-        this.anchorFailures = 0;
-      }
+      const back = this.anchorOutages.ok("anchor", Date.now());
+      if (back.log) console.log(`[obs] the record anchor is being read again${back.note}`);
       return null;
     } catch (err) {
       const msg = errorMessage(err);
-      if (this.anchorFailures++ === 0) {
+      // Not swallowed — returned to the caller AND reported once per outage. The
+      // callers are a timer tick and an event handler, so there is nobody to
+      // hand a throw to who could act, and a display that quietly stops agreeing
+      // with OBS about how long it has been recording must not have a widget
+      // that looks fine as its only evidence.
+      const out = this.anchorOutages.fail("anchor", msg, Date.now());
+      if (out.log) {
         console.warn(
-          `[obs] record anchor (${why}) failed: ${msg} — the timecode keeps running from the last anchor and may drift from OBS`,
+          `[obs] record anchor (${why}) failed: ${msg} — the timecode keeps running from the last anchor and may drift from OBS${out.note}`,
         );
       }
       return msg;
@@ -363,7 +386,9 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
   }
 
   private clearPoll(): void {
-    this.anchorFailures = 0;
+    // A run is about one connection to one OBS. Carried across a disconnect it
+    // would suppress the first line of the next one.
+    this.anchorOutages.forget();
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
