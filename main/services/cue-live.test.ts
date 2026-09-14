@@ -30,7 +30,19 @@ import * as fsp from "node:fs/promises";
 process.env.STAGE_UTILITY_DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "cue-live-"));
 
 const { cueLive, cueLiveDeps, CUES_POLL_MS } = await import("./cue-live.js");
+const { cueStates } = await import("./cue-states.js");
 type CuesEvent = import("./cue-live.js").CuesEvent;
+
+/**
+ * The PRODUCTION `read` dep, captured before beforeEach replaces it.
+ *
+ * Every case below stubs `cueLiveDeps.read` wholesale, which means the real
+ * body — the two lines that make the poll the cache refresh — was never
+ * executed anywhere in this suite. Deleting `cueStates.invalidate()` from it
+ * left the whole project green. One case puts it back; see "the poll IS the
+ * cache refresh".
+ */
+const realRead = cueLiveDeps.read;
 
 type Row = {
   state: "on" | "off" | "unknown";
@@ -278,6 +290,85 @@ describe("a pair that goes away and comes back", () => {
       ],
       "the re-created pair was never re-stated: its key survived the prune",
     );
+    await stopEverything();
+  });
+});
+
+// ── The two properties of the producer nothing reached ──────────────────────
+
+describe("the poll IS the cache refresh", () => {
+  // `GET /api/cues/states` and the rules page share cue-states' five-second
+  // cache. If this channel read AROUND it, a subscribed install would do two
+  // rounds of Companion reads every five seconds instead of one — and the
+  // route's answer would still be up to five seconds behind what the channel
+  // had just pushed.
+  //
+  // Invisible until now because every case in this file replaces
+  // `cueLiveDeps.read` in beforeEach, so the dep's real body never ran. This
+  // one uses it, with cue-states itself stubbed.
+  test("it drops the cached answer BEFORE it reads, not after and not never", async () => {
+    const order: string[] = [];
+    const realInvalidate = cueStates.invalidate.bind(cueStates);
+    const realCueRead = cueStates.read.bind(cueStates);
+    cueStates.invalidate = () => void order.push("invalidate");
+    cueStates.read = async () => {
+      order.push("read");
+      return { ok: true, checkedAt: "2026-09-09T14:00:00.000Z", states: new Map() };
+    };
+    cueLiveDeps.read = realRead;
+    try {
+      subscribed = true;
+      cueLive.subscriptionsChanged();
+      await settle();
+      assert.deepEqual(order, ["invalidate", "read"]);
+
+      // And on EVERY tick, not only the first.
+      await poll();
+      assert.deepEqual(order, ["invalidate", "read", "invalidate", "read"]);
+    } finally {
+      cueStates.invalidate = realInvalidate;
+      cueStates.read = realCueRead;
+      await stopEverything();
+    }
+  });
+});
+
+describe("one read at a time", () => {
+  // A Companion that takes longer than five seconds to answer must not have a
+  // second round of reads stacked on top of the first, and a third on top of
+  // that. The reads are per bound variable, so the stack grows by the whole set
+  // each tick against the box that is already struggling.
+  test("a tick that lands mid-read is dropped, and the next one reads again", async () => {
+    // One resolver per read in flight. A `let` holding the latest one narrows
+    // to `never` in the type checker, which is a compile error rather than a
+    // test — an array says the same thing and reads as what it is.
+    const inFlight: (() => void)[] = [];
+    cueLiveDeps.read = async () => {
+      reads++;
+      await new Promise<void>((resolve) => inFlight.push(resolve));
+      return { states: new Map() };
+    };
+
+    subscribed = true;
+    cueLive.subscriptionsChanged();
+    await settle();
+    assert.equal(String(reads), "1", "the immediate first read");
+
+    // Two five-second ticks while the first read is still in flight.
+    tick?.();
+    tick?.();
+    await settle();
+    assert.equal(String(reads), "1", "a slow Companion had its ticks stacked");
+
+    assert.equal(String(inFlight.length), "1", "a second read was started under the first");
+
+    // It finally answers, and the next tick reads for real.
+    inFlight.shift()?.();
+    await settle();
+    await poll();
+    assert.equal(String(reads), "2");
+    inFlight.shift()?.();
+    await settle();
     await stopEverything();
   });
 });
