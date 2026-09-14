@@ -1167,7 +1167,8 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   /**
    * How long a stream must hold before its back-off is forgiven.
    *
-   * TWO heartbeat windows, plus the delay that got us here.
+   * TWO heartbeat windows, plus the delay that got us here — and that third term
+   * CAPPED at one more window, which is the whole point of the Math.min.
    *
    * Two rather than one because surviving exactly one window is a dead heat with
    * the idle watchdog — both are armed at the same instant on the same
@@ -1176,9 +1177,25 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
    * and dies cannot reset a ramp it is supposed to be climbing however far out
    * the ramp has got. `streamIdleMs` rather than the constant, so a test that
    * shortens the watchdog shortens this with it.
+   *
+   * UNCAPPED, that third term made the bar move with the ramp and the ramp could
+   * never be forgiven. At the shipped 5s base and 15s watchdog the windows ran
+   * 35s, 40s, 50s, 70s, 110s, 150s: a booth machine whose SSE dies every ~25s
+   * reaches attempt 3 in a couple of minutes, and from then on a 60-second
+   * stream delivering a heartbeat a second cannot clear a bar that has moved
+   * past it. It re-dials on the 2-minute service-window clamp instead of the 5s
+   * base it used to, and says nothing in the log, because `const first =
+   * this.attempt === 0` is false for ever.
+   *
+   * Capped at one window the worst case is 3 x streamIdleMs — 45s — which is
+   * under the 2-minute reconnect ceiling, so a stream that survives a single
+   * reconnect cycle always forgives. The gradient the term was for survives; the
+   * unboundedness that made it a regression does not. The case it was written
+   * for — a peer that accepts the subscription and hangs up — is covered by the
+   * silent-stream counter, which the back-off is not the right tool for.
    */
   private sustainMs(): number {
-    return this.nextDelayMs + this.streamIdleMs * 2;
+    return Math.min(this.nextDelayMs, this.streamIdleMs) + this.streamIdleMs * 2;
   }
 
   private armSustainTimer(): void {

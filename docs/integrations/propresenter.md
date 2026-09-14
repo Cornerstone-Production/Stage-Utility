@@ -89,6 +89,14 @@ document too large for the reader's buffer. The unreadable-frame line names the
 endpoint, the reason and the machine, and is said once per endpoint per stream
 rather than once per slide advance; the buffer line is said once per overrun.
 
+**A stream that keeps dropping re-dials more slowly each time; one that holds
+puts it back to 5 s.** The reconnect back-off doubles from 5 s and is capped at
+2 minutes while a service window is open or a display is watching. What clears
+it is a stream that LASTS — 30 to 45 seconds, two to three heartbeat windows —
+not one that merely opens, because a machine that accepts the subscription and
+hangs up delivers its snapshot every single time. The "stream ended" line is
+written once per outage, not once per retry.
+
 **A frame that cannot be read BLANKS its field rather than holding the last
 one.** The fields are not independent: the section name, the slide count and the
 progress all come out of one `presentation/current` document while

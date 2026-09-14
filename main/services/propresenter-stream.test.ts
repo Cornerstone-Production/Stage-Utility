@@ -1078,6 +1078,55 @@ describe("a stream that has died without saying so", () => {
     }
   });
 
+  it("a stream that starts holding forgives a ramp it is nowhere near the top of", async () => {
+    // GUARD. sustainMs() was `nextDelayMs + streamIdleMs * 2`, so the bar a
+    // stream had to clear MOVED WITH THE RAMP and a machine that got better
+    // could not catch up with it. At the shipped 5s base and 15s watchdog the
+    // windows are 35s, 40s, 50s, 70s, 110s, 150s — a booth machine whose SSE
+    // dies every ~25s is past attempt 3 inside two minutes, and from then on a
+    // 60-second stream full of heartbeats never resets anything. It re-dials on
+    // the 2-minute clamp instead of the 5s base, silently.
+    //
+    // The arithmetic here: base 40ms, watchdog 60ms. Five quick deaths leave
+    // attempt at 5 and nextDelayMs at 640, so stream six needs
+    //   capped   min(640, 60) + 120 = 180ms
+    //   uncapped        640   + 120 = 760ms
+    // It is held for 400ms, which is between the two. Forgiven, the next re-dial
+    // is at the 40ms base; unforgiven it is 40 * 2**5 = 1280ms. The assertion is
+    // the OBSERVED gap at the stub, not a private counter.
+    inner(propresenterService).streamIdleMs = 60;
+    Object.defineProperty(propresenterService, "reconnectBaseMs", { get: () => 40, configurable: true });
+    try {
+      await withoutRetryClamp(async () => {
+        await streaming();
+        // Phase one: five streams that die the instant they are held. The burst
+        // is on, so each one DELIVERS — this is a flaky link, not a wedge, and
+        // the silent-stream counter must stay out of it.
+        for (let i = 1; i <= 5; i++) {
+          await until(`stream ${i} to be held`, () => streams.length > 0, 4000);
+          for (const s of streams) s.destroy();
+          await until(`stream ${i} to be seen closed`, () => streams.length === 0, 4000);
+        }
+
+        // Phase two: the link comes good. Stream six holds, heartbeats and all.
+        await until("the sixth stream to be held", () => streams.length > 0, 4000);
+        const before = subscribes().length;
+        await sleep(400);
+        assert.equal(streams.length, 1, "the held stream was dropped before it could prove anything");
+
+        for (const s of streams) s.destroy();
+        await until(
+          "the re-dial after a stream that held to come at the BASE delay",
+          () => subscribes().length > before,
+          600,
+        );
+      });
+    } finally {
+      inner(propresenterService).streamIdleMs = 15_000;
+      delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
+    }
+  });
+
   it("stopping a connecting instance does not log an outage", async () => {
     // stop() destroys the in-flight request, which reaches the same catch a dead
     // machine does. A deliberate shutdown writing "unreachable — backing off" is
