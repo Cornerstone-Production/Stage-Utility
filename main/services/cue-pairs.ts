@@ -184,6 +184,34 @@ export function stateBindingProblem(params: Record<string, string | number>): st
   return null;
 }
 
+/**
+ * What this value means for this binding: on, off, or neither.
+ *
+ * ONE predicate, because the question is asked in two places that must agree —
+ * the read that answers `GET /api/cues/states`, and the settle re-read that
+ * decides whether a press has landed. They disagreed: the settle path compared
+ * `value === wantValue` literally, and `wantValue` for an OFF press is fed
+ * straight from `binding.offValue`, which is `*` on six of the twelve rows in
+ * companion-state-source.ts. `"Stopped" === "*"` is false forever, so a pair
+ * bound on `Recording` / off `*` never early-exited its window: eight re-reads
+ * a second apart against the Companion running the service, and then
+ * `[cues] state of … did not settle within 8 s` on EVERY successful stop. The
+ * switch stayed correct; only the log lied, in the exact place an operator
+ * looks first when a pair really does stick.
+ *
+ * `*` is "anything that is not the on value" — see STATE_ANY_OTHER — so the on
+ * value is checked FIRST and a value matching it is never off, whatever the
+ * off value says. A value matching neither is `null`: the caller says why.
+ *
+ * Here rather than in cue-states.ts because this is the module that owns what a
+ * binding IS, and because a second copy of the `*` rule is what this replaces.
+ */
+export function stateFor(binding: StateBinding, value: string): "on" | "off" | null {
+  if (value === binding.onValue) return "on";
+  if (binding.offValue === STATE_ANY_OTHER || value === binding.offValue) return "off";
+  return null;
+}
+
 /** One ON/OFF pair among a set of rules. */
 export interface CuePair {
   /**

@@ -111,8 +111,7 @@ describe("a pair bound to app:reaper.recording", () => {
     cueStates.noteCommand({
       base: "reaper_record",
       want: "on",
-      variable: RECORDING_REF,
-      wantValue: "on",
+      binding: { variable: RECORDING_REF, onValue: "on", offValue: "off" },
     });
 
     const during = (await cueStates.read()).states.get("reaper_record")!;

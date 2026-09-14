@@ -497,8 +497,7 @@ describe("a pair whose base is a prototype key", () => {
     cueStates.noteCommand({
       base: "__proto__",
       want: "on",
-      variable: "__proto___state",
-      wantValue: "on",
+      binding: { variable: "__proto___state", onValue: "on", offValue: "off" },
     });
     const answer = await cueStates.read();
     assert.deepEqual([...answer.states.keys()], ["__proto__"]);
@@ -541,8 +540,12 @@ describe("a pair whose base is a prototype key", () => {
 // straight off the recorded call.
 describe("the settle window", () => {
   /** A press of `<base>_on`, as the engine reports one. */
-  const commandOn = (base: string) =>
-    cueStates.noteCommand({ base, want: "on", variable: `${base}_state`, wantValue: "on" });
+  const commandOn = (base: string, binding?: { onValue: string; offValue: string }) =>
+    cueStates.noteCommand({
+      base,
+      want: "on",
+      binding: { variable: `${base}_state`, onValue: "on", offValue: "off", ...binding },
+    });
 
   test("a row inside the window says what was commanded, and drops it after", async () => {
     rules = pair("plug");
@@ -576,8 +579,7 @@ describe("the settle window", () => {
     cueStates.noteCommand({
       base: "cachedsettle",
       want: "off",
-      variable: "cachedsettle_state",
-      wantValue: "off",
+      binding: { variable: "cachedsettle_state", onValue: "on", offValue: "off" },
     });
 
     // One second before the window closes: a real read, cached from here.
@@ -619,6 +621,83 @@ describe("the settle window", () => {
     assert.deepEqual(reads, ["lag_state", "lag_state"]);
     assert.deepEqual(logged, ["[cues] state of lag_state settled to on after 2 s"]);
     assert.equal(timers.length, 0, "a timer outlived the value it was waiting for");
+  });
+
+  // ── An OFF press on a pair whose off value is `*` ───────────────────────────
+  //
+  // Six of the twelve rows in companion-state-source.ts carry `off: "*"` — every
+  // recorder, every stream. The settle re-read compared `value === wantValue`
+  // literally, and `wantValue` for an OFF press is `binding.offValue`, so it
+  // compared the deck's `Stopped` against the string `"*"`. That is false
+  // forever: the loop ran the full eight re-reads, a second apart, against the
+  // Companion running the service, and then warned "did not settle within 8 s"
+  // on EVERY successful stop. The switch stayed correct; only the log lied, in
+  // the exact place an operator looks first when a pair really does stick.
+  //
+  // The `*` describe further up drives readOnce only, and every other case in
+  // this section commands a pair with concrete values — so the two were never
+  // crossed.
+  describe('an OFF press on a pair whose off value is "*"', () => {
+    const star = { onValue: "Record", offValue: "*" };
+    const commandOff = (base: string) =>
+      cueStates.noteCommand({
+        base,
+        want: "off",
+        binding: { variable: `${base}_state`, ...star },
+      });
+
+    test("settles on the first value that is not the ON value", async () => {
+      rules = pair("deck", { stateOnValue: star.onValue, stateOffValue: star.offValue });
+      values.deck_state = { value: "Record" };
+      await cueStates.read();
+      reads = [];
+
+      commandOff("deck");
+      await withLog(async () => {
+        values.deck_state = { value: "Stopped" };
+        await tickSettle();
+      });
+      assert.deepEqual(reads, ["deck_state"], "it kept re-reading after the deck had stopped");
+      assert.deepEqual(logged, ["[cues] state of deck_state settled to Stopped after 1 s"]);
+      assert.equal(timers.length, 0, "the window ran on past a value that had settled");
+    });
+
+    test("a deck still recording is NOT settled — `*` is not a wildcard on the on value", async () => {
+      // The other half. `*` means "anything that is not the on value", so the
+      // ON value itself must keep the loop going, or an OFF press would report
+      // settled against a deck that never stopped.
+      rules = pair("deck", { stateOnValue: star.onValue, stateOffValue: star.offValue });
+      values.deck_state = { value: "Record" };
+      await cueStates.read();
+      reads = [];
+
+      commandOff("deck");
+      await withLog(async () => {
+        for (let i = 0; i < SETTLE_MS / SETTLE_POLL_MS; i++) await tickSettle();
+      });
+      assert.equal(reads.length, SETTLE_MS / SETTLE_POLL_MS);
+      assert.deepEqual(logged, ["[cues] state of deck_state did not settle within 8 s"]);
+    });
+
+    test("and an ON press still waits for the exact on value", async () => {
+      // `*` is off-only. An ON press on the same pair is an exact comparison,
+      // and a deck reading `Preview` has not started recording.
+      rules = pair("deck", { stateOnValue: star.onValue, stateOffValue: star.offValue });
+      values.deck_state = { value: "Stopped" };
+      await cueStates.read();
+      reads = [];
+
+      commandOn("deck", star);
+      await withLog(async () => {
+        values.deck_state = { value: "Preview" };
+        await tickSettle();
+        assert.equal(timers.length, 1, "a press that has not landed stopped being watched");
+        values.deck_state = { value: "Record" };
+        await tickSettle();
+      });
+      assert.deepEqual(logged, ["[cues] state of deck_state settled to Record after 2 s"]);
+      assert.equal(timers.length, 0);
+    });
   });
 
   test("a value that never catches up stops at the window, and says so", async () => {
@@ -725,8 +804,7 @@ describe("the settle window", () => {
     cueStates.noteCommand({
       base: "twice",
       want: "off",
-      variable: "twice_state",
-      wantValue: "off",
+      binding: { variable: "twice_state", onValue: "on", offValue: "off" },
     });
     assert.equal(timers.length, 1, "the first re-read is still scheduled beside the second");
 

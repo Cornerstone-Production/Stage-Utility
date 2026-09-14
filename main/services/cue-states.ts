@@ -40,7 +40,7 @@
 
 import { readAppState } from "./app-state-reads.js";
 import { isAppStateRef } from "./app-state-sources.js";
-import { boundCuePairs, STATE_ANY_OTHER } from "./cue-pairs.js";
+import { boundCuePairs, stateFor, type StateBinding } from "./cue-pairs.js";
 import { errorMessage } from "./errors.js";
 import { companionApi, type VariableResult } from "./companion-api.js";
 import { scrub } from "./scrub.js";
@@ -92,10 +92,15 @@ export interface CueCommand {
   /** The pair's base — the key everything else in here is keyed by. */
   base: string;
   want: "on" | "off";
-  /** The pair's bound variable, which is what gets re-read while it settles. */
-  variable: string;
-  /** The value that variable will hold once the device has caught up. */
-  wantValue: string;
+  /**
+   * The WHOLE binding, not the one value the press is waiting for.
+   *
+   * It used to be a flattened `wantValue`, fed straight from `binding.offValue`
+   * — which is `*` on six of the twelve rows in companion-state-source.ts, and
+   * `*` is a predicate, not a value. See stateFor in cue-pairs.ts. The variable
+   * to re-read is `binding.variable`.
+   */
+  binding: StateBinding;
 }
 
 /** One pair's state, keyed in the answer by the pair's base. */
@@ -243,7 +248,15 @@ class CueStates {
    */
   private settling = new Map<
     string,
-    { timer: NodeJS.Timeout | null; startedAt: number; wantValue: string; last: string | null }
+    {
+      timer: NodeJS.Timeout | null;
+      startedAt: number;
+      /** Which way the press went, which is what the re-read is waiting for. */
+      want: "on" | "off";
+      /** The whole binding, so `*` is read as the predicate it is. See stateFor. */
+      binding: StateBinding;
+      last: string | null;
+    }
   >();
 
   /**
@@ -343,17 +356,19 @@ class CueStates {
    * capped by the window either way — no timer outlives it.
    */
   private startSettling(command: CueCommand, last: string | null): void {
-    const running = this.settling.get(command.variable);
+    const variable = command.binding.variable;
+    const running = this.settling.get(variable);
     if (running?.timer) cueStatesDeps.clearTimeout(running.timer);
-    this.settling.set(command.variable, {
+    this.settling.set(variable, {
       timer: null,
       startedAt: cueStatesDeps.now(),
-      wantValue: command.wantValue,
+      want: command.want,
+      binding: command.binding,
       // A restart keeps what the previous loop last saw, so a value that
       // changed under the old command is not announced twice.
       last: running?.last ?? last,
     });
-    this.scheduleSettleRead(command.variable);
+    this.scheduleSettleRead(variable);
   }
 
   private scheduleSettleRead(variable: string): void {
@@ -394,7 +409,10 @@ class CueStates {
         this.invalidate();
         for (const listener of settleListeners) listener(variable);
       }
-      if (result.value === entry.wantValue) {
+      // stateFor, NOT `value === wantValue`: an off value of `*` means
+      // "anything that is not the on value", and compared literally a pair
+      // bound on `Recording` / off `*` never settles. See cue-pairs.ts.
+      if (stateFor(entry.binding, result.value) === entry.want) {
         this.settling.delete(variable);
         console.log(
           `[cues] state of ${scrub(variable)} settled to ${scrub(result.value)} ` +
@@ -445,18 +463,19 @@ class CueStates {
       };
       if ("error" in result) {
         row.reason = result.error;
-      } else if (result.value === binding.onValue) {
-        row.state = "on";
-      } else if (binding.offValue === STATE_ANY_OTHER || result.value === binding.offValue) {
-        // `*` is "anything that is not the on value", so a status variable with
-        // seven off values needs one row rather than six unknowns. The variable
-        // was READ — an empty string included — so this is off and not unknown;
-        // a variable that could not be read at all is the `error` branch above.
-        row.state = "off";
       } else {
-        row.reason =
-          `value "${result.value}" matches neither ` +
-          `"${binding.onValue}" nor "${binding.offValue}"`;
+        // The SAME predicate the settle re-read uses. `*` is "anything that is
+        // not the on value", so a status variable with seven off values needs
+        // one row rather than six unknowns — and the variable was READ, an
+        // empty string included, so that is off and not unknown. A variable
+        // that could not be read at all is the `error` branch above.
+        const state = stateFor(binding, result.value);
+        if (state) row.state = state;
+        else {
+          row.reason =
+            `value "${result.value}" matches neither ` +
+            `"${binding.onValue}" nor "${binding.offValue}"`;
+        }
       }
       this.note(pair.base, binding.variable, row.reason ?? null);
       states.set(pair.base, row);

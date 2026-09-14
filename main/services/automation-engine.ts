@@ -605,12 +605,7 @@ class AutomationEngine {
       // variable and the value it will hold once the device catches up, and
       // cue-states needs both to re-read it. Read from the pair here so nothing
       // downstream has to resolve the pair a second time.
-      const of = (want: "on" | "off"): CueCommand => ({
-        base: pair.base,
-        want,
-        variable: binding.variable,
-        wantValue: want === "on" ? binding.onValue : binding.offValue,
-      });
+      const of = (want: "on" | "off"): CueCommand => ({ base: pair.base, want, binding });
       if (pair.on.id === rule.id) return of("on");
       if (pair.off.id === rule.id) return of("off");
     }
