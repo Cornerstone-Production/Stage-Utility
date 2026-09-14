@@ -294,7 +294,9 @@ Relabel a button in Companion and the cue named after it is renamed to match, so
 The old name **keeps answering**: `POST /api/cues/projectors_on` still fires the
 cue, so a Home Assistant config already pasted into `configuration.yaml` — and
 any HomeKit switch made from it — carries on working. Re-paste the YAML when
-convenient; the generated fragment names each renamed cue in a comment.
+convenient; the generated fragment names each renamed cue in a comment. The
+[integration](#the-integration) needs none of that: the rename reaches it on the
+`cues` channel and the entity follows.
 
 A cue keeps up to five former names, oldest dropped first, and they share one
 namespace with live names: no other cue may take a name or a former name that is
@@ -315,6 +317,73 @@ button's label exactly, so words you chose for an assistant survive a relabel; a
 pair's spoken name is composed by the import and never follows.
 
 ### Home Assistant
+
+Two ways in, and they are alternatives rather than layers. The **integration**
+is the supported one: cues arrive as real entities, follow the cue list as it
+changes, and report what the gear is actually doing. The **generated YAML** is
+the fallback for an install that cannot run a custom integration.
+
+Do not run both. Each produces its own controls for the same cues, so a cue
+would appear twice in Home Assistant under two different entity ids, and an
+Apple Home household would see two switches for one projector.
+
+#### The integration
+
+[`Cornerstone-Production/ha-stage-utility`][ha-repo] — a Home Assistant custom
+integration. It needs Home Assistant 2025.2 or newer, and Stage Utility 1.18.0
+or newer, which is the release that added `/api/cues/manifest`.
+
+[ha-repo]: https://github.com/Cornerstone-Production/ha-stage-utility
+
+**Install it through [HACS](https://hacs.xyz) as a custom repository.** HACS →
+the three-dot menu → **Custom repositories**; the repository URL above, type
+**Integration**; add it, find **Stage Utility** in HACS, download and restart
+Home Assistant. While the integration is still on a prerelease version, turn on
+**Show beta versions** in the download dialog or nothing is offered. Without
+HACS, copy `custom_components/stage_utility` into Home Assistant's
+`config/custom_components` and restart.
+
+**Then Settings → Devices & services → Add integration → Stage Utility.**
+
+| | |
+|---|---|
+| **Host** | an address on the network — `192.168.1.50`, `192.168.1.50:8788` or `http://stage-utility:8788`. Leave the scheme and port off and it assumes plain HTTP on 8788, where every install starts |
+| **Cue token** | an `su_…` secret from Settings → Automation → **Calling cues**, shown once when it is minted |
+
+Setup reads the cue manifest to prove it found a Stage Utility, then calls a cue
+name that cannot exist to prove the token is accepted — a `404` means the token
+was fine, a `401` means it was not. Nothing on stage is pressed to find out. A
+server older than 1.18.0 is told apart from an unreachable one and says so.
+
+One entry per server, keyed by the server's own LAN address, so adding the same
+appliance a second time by another name is refused rather than doubling every
+switch.
+
+**What appears.** One device per server, carrying a switch for every ON/OFF pair
+and a button for every cue that is not half of one. Each is named by the cue
+alone, and the room named here is offered as the Home Assistant area. A switch
+whose Companion button has gone missing goes **unavailable** rather than
+pretending a press would do something. A pair with a state source reports what
+the gear says and follows it when somebody turns the projector off at the wall;
+without one the switch reads **unknown** and shows separate on and off buttons,
+with a `reason` attribute saying why.
+
+**No polling.** The integration holds one subscription to the `cues` channel on
+this server's event stream and is pushed both state changes and changes to the
+cue list, so a cue added, renamed or deleted here reaches Home Assistant in
+seconds with nothing to re-paste and nothing to restart. It falls back to
+reading `/api/cues/states` every thirty seconds only while the stream is down.
+
+Two options on the entry, under **Configure**: whether the server's own web
+interface appears in the Home Assistant sidebar, and whether a HomeKit Bridge is
+reloaded when the cue list changes — a bridge only works out what to publish on
+reload, so without that a new cue is missing from the Apple Home app and a
+deleted one shows as *No Response*.
+
+#### The generated YAML
+
+The fallback, for an install not running the integration. It is a snapshot: it
+does not follow the cue list, so it is re-pasted whenever cues change.
 
 **Copy YAML** and **Download YAML** in the same panel both produce the whole
 configuration fragment: one `rest_command` per cue, a template switch per pair
@@ -740,7 +809,8 @@ reported as a fault.
 
 ### For Home Assistant
 
-Two things exist for an integration to build on, beside the pasted YAML above:
+What the [integration](#the-integration) is built on, and what anything else
+talking to this server can use:
 
 - `GET /api/cues/manifest` — every cue as JSON, with a `version` that goes up on
   any rule change, this server's name and LAN address, one entry per ON/OFF pair
