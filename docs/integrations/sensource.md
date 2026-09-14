@@ -45,6 +45,8 @@ SenSource has no push, webhook or streaming endpoint, so the poller
 - If the site also has **SafeSpace**, the occupancy — and only the occupancy —
   comes from there instead, on its own faster interval. See
   [SafeSpace live occupancy](#safespace-live-occupancy).
+- Attendance can also be read on its own faster interval, independent of the
+  poll interval above. See [Attendance interval](#attendance-interval).
 - Counts broadcast on the SSE channel **`people:count`** (skipping re-broadcasts
   when the substantive counts are unchanged); `GET /api/people/count` hydrates a
   freshly loaded display. A rolling trend buffer backs the people-graph.
@@ -60,7 +62,9 @@ set the **Poll interval**, enable it, and **Test connection** (authenticates and
 reports how many locations are visible). Optionally pick a **location** and/or
 specific **zones** to scope the count — zones are the reliable scoping mechanism.
 The location/zone selection is saved as non-secret config; the client secret, the
-static token and the SafeSpace space ID are stored encrypted.
+static token and the SafeSpace space ID are stored encrypted. Leave **Attendance
+interval** blank unless attendance needs to keep pace with a faster occupancy
+reading — see [Attendance interval](#attendance-interval).
 
 **On a layout:** add object → **SenSource → people-counter / people-graph /
 people-panel**.
@@ -148,6 +152,51 @@ from `GET /api/people/count` or the SSE channel. The Integrations panel's
 connection line names the source too, but it is written when the integration
 connects and is not rewritten on every poll, so treat it as where the count
 started rather than where it is now.
+
+## Attendance interval
+
+SafeSpace above answers one half of the "why do these two numbers on the wall
+disagree" question: occupancy can be read every few seconds. Attendance stayed
+on the poll interval beside it, which is up to an hour if that is what the
+operator set — the other half of the same disagreement.
+
+**Attendance interval**, on the SenSource card, reads `/data/traffic` on its own
+faster clock, the same idea as SafeSpace's own interval. **Blank reproduces
+today's behaviour exactly**: attendance updates only as often as the rest of the
+card. This is not the same guarantee SafeSpace's interval makes — SafeSpace is
+switched off until a space ID is entered, so its interval cannot affect a site
+that never opted in. Attendance has no such switch: every existing Vea
+integration already publishes one, so the blank default has to track whatever
+the poll interval is set to, per site, rather than a fixed number of its own —
+a fixed number faster than some other operator's own poll interval would have
+started polling harder for them the moment this shipped.
+
+It costs one extra request to Vea per tick at whatever rate is set, on the same
+10-second floor and the same Vea flakiness as the poll interval — it is the same
+API, not a separate, gentler one the way SafeSpace is. Set it at or above the
+poll interval and it changes nothing; there is no additional timer running.
+
+**What it publishes.** The fast read never asks Vea for the authoritative
+attendance figure again — that would put the poll's three-request shape on the
+fast clock, which is the reason this reads one endpoint instead of all of them.
+Instead it takes the last attendance the poll interval published and advances it
+by how far `/data/traffic`'s own sum has moved since — the same arithmetic this
+page's [carried-forward](#how-it-works) day aggregates already use when the day
+request fails, just run on every fast tick instead of only a degraded one. That
+keeps the fast number and the poll interval's own number in agreement at every
+poll, rather than stepping between two different bases (the raw zone sum counts
+doors a space total does not) every few seconds.
+
+**It cannot double up with the poll interval's own request.** Whenever the fast
+interval divides evenly into the poll interval, the two would otherwise land on
+the same instant periodically, not just once — and a successful read from
+either one pushes the fast timer's next tick out from that moment, so it is
+never due again within one attendance interval of the last successful fetch.
+
+A failing fast read holds attendance at its last value and says so once per
+outage on the terms in [Logging an outage](#logging-an-outage), the same as
+every other part of this poll — it never takes the poll interval's own request
+down with it.
 
 ## Service history
 
@@ -276,11 +325,12 @@ The first rejected response of an outage is logged with what Vea said, per
 request — so the reason is on `/log` once, on the terms in
 [Logging an outage](#logging-an-outage).
 
-The SafeSpace reading has its own interval and its own timer, and neither one
-affects the other — a live number is only worth having if it is read often, and
-tying it to a Vea interval raised to save API calls would throw that away. It is
-on the same idle gate: with nothing consuming the count it drops to once a minute,
-and a consumer arriving mid-wait pre-empts it.
+The SafeSpace and attendance readings each have their own interval and their own
+timer, independent of the poll interval and of each other — a live number is
+only worth having if it is read often, and tying either one to a Vea interval
+raised to save API calls would throw that away. Both are on the same idle gate
+the poll itself is: with nothing consuming the count they drop to once a minute,
+and a consumer arriving mid-wait pre-empts whichever wait is idle.
 
 The trend buffer behind the people-graph samples on its own 45s clock rather than
 once per poll, so its ~3h span does not shrink when the interval drops.
