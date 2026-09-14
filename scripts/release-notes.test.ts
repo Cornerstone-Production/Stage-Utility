@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { NOTES_CAP } from "../main/services/update/release-check.js";
 import { parseReleaseSections } from "../main/services/update/release-notes.js";
 
 // A release that needs a manual step needs a sentence no commit range can
@@ -480,11 +481,97 @@ describe("perf is an improvement, not a bug fix", () => {
     // other rather than by reading either. A section the generator invents, or
     // renames, disappears from the dialog without a word — which is exactly how
     // four perf commits went out mislabelled and nobody could see it.
+    // The headings that are deliberately NOT change lists. Exact, so a new one
+    // has to be declared here rather than quietly excusing itself.
+    const NOT_A_CHANGE_LIST = ["Full changelog", "Install"];
+
     const out = notesFor("1.1.0", "v1.0.0", repo.dir);
-    const emitted = [...out.matchAll(/^## (.+)$/gm)].map((m) => m[1]).filter((h) => h !== "Install");
+    const headings = [...out.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+    assert.deepEqual(headings.filter((h) => NOT_A_CHANGE_LIST.includes(h)), NOT_A_CHANGE_LIST);
+
+    const emitted = headings.filter((h) => !NOT_A_CHANGE_LIST.includes(h));
     assert.deepEqual(emitted, ["Breaking", "New", "Improved", "Fixed"]);
 
     const rendered = parseReleaseSections(out, 100).map((s) => s.section);
     assert.deepEqual(rendered, emitted, "the dialog drops a heading the notes generator emits");
+  });
+});
+
+// A release big enough that the budget bites, driven end to end: the generator
+// writes the body, the REAL dialog parser reads it back. That pairing is where
+// Finding 3 lived — the generator said `- …and 37 more` and the parser dropped
+// the line, so a 49-feature release reached the operator as twelve bullets with
+// nothing to suggest anything was missing.
+describe("a release too big for one page", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-notes-big-"));
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const FEATURES = 49;
+  const FIXES = 32;
+
+  const git = (...args: string[]) =>
+    execFileSync("git", args, {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@t",
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@t",
+      },
+    });
+  git("init", "-q", "-b", "main");
+  git("commit", "-q", "--allow-empty", "-m", "feat(old): the surface everything else fixes");
+  git("tag", "v1.0.0");
+  for (let i = 0; i < FEATURES; i++) git("commit", "-q", "--allow-empty", "-m", `feat(old): feature ${i}`);
+  for (let i = 0; i < FIXES; i++) git("commit", "-q", "--allow-empty", "-m", `fix(old): fix ${i}`);
+  git("tag", "v1.1.0");
+
+  const body = notesFor("1.1.0", "v1.0.0", dir);
+
+  it("says how much of each section it left out", () => {
+    // 49 and 32 are what 1.18.0 actually carried, and the old per-section cap
+    // of 12 cut 57 of the 81.
+    assert.match(sectionText(body, "New"), /…and \d+ more/);
+    assert.match(sectionText(body, "Fixed"), /…and \d+ more/);
+  });
+
+  it("spends the whole budget and no more", () => {
+    const bullets = [...body.matchAll(/^- /gm)].length
+      - [...body.matchAll(/^- …and \d+ more$/gm)].length;
+    assert.equal(bullets, 40, "the budget is a total across sections, spent exactly");
+  });
+
+  it("gives the smaller section more than a fixed cap would, and the bigger one much more", () => {
+    // The point of replacing the per-section cap: the split follows the shape
+    // of the release rather than being the same twelve whatever it contains.
+    const count = (title: string) => [...sectionText(body, title).matchAll(/^- /gm)].length
+      - [...sectionText(body, title).matchAll(/^- …and/gm)].length;
+    assert.equal(count("New"), 24);
+    assert.equal(count("Fixed"), 16);
+  });
+
+  it("fits inside the dialog's own cap, so one release is never cut twice", () => {
+    // If the release page could out-grow NOTES_CAP the dialog would silently
+    // re-cut it, and the number an operator reads on the page and the number
+    // they read in the dialog would be two different numbers.
+    const shown = parseReleaseSections(body, NOTES_CAP);
+    const bullets = shown.reduce((n, s) => n + s.lines.length, 0);
+    assert.equal(bullets, 40);
+    assert.ok(bullets <= NOTES_CAP, `${bullets} bullets against a NOTES_CAP of ${NOTES_CAP}`);
+  });
+
+  it("the dialog reports exactly what the generator cut", () => {
+    const shown = parseReleaseSections(body, NOTES_CAP);
+    const omitted = Object.fromEntries(shown.map((s) => [s.section, s.omitted]));
+    assert.deepEqual(omitted, { New: FEATURES - 24, Fixed: FIXES - 16 });
+  });
+
+  it("links the full changelog, so the count points somewhere", () => {
+    assert.match(body, /## Full changelog/);
+    assert.match(body, /compare\/v1\.0\.0\.\.\.v1\.1\.0/);
+    // And it is not a change section: a markdown link is not a change line.
+    assert.equal(parseReleaseSections(body, NOTES_CAP).some((s) => /compare/.test(s.note ?? "")), false);
   });
 });

@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { parseReleaseIntro, parseReleaseSections, SECTION_ORDER } from "./release-notes.js";
+import { mergeReleaseSections, parseReleaseIntro, parseReleaseSections, SECTION_ORDER } from "./release-notes.js";
 
 // What an operator reads once, after an update they may not have watched happen.
 // The section a line came from is the part the old parser threw away, and it is
@@ -21,8 +21,8 @@ describe("release notes, by section", () => {
 - Duplicating a console no longer makes a display
 `);
     assert.deepEqual(out, [
-      { section: "New", lines: ["Export a layout", "Find a server by name"] },
-      { section: "Fixed", lines: ["Duplicating a console no longer makes a display"] },
+      { section: "New", lines: ["Export a layout", "Find a server by name"], omitted: 0 },
+      { section: "Fixed", lines: ["Duplicating a console no longer makes a display"], omitted: 0 },
     ]);
   });
 
@@ -51,7 +51,7 @@ describe("release notes, by section", () => {
 
   test("a heading used twice is merged rather than rendered twice", () => {
     const out = parseReleaseSections("## New\n- one\n\n## Install\n- ignored\n\n## New\n- two\n");
-    assert.deepEqual(out, [{ section: "New", lines: ["one", "two"] }]);
+    assert.deepEqual(out, [{ section: "New", lines: ["one", "two"], omitted: 0 }]);
   });
 
   test("markdown emphasis and code ticks are stripped", () => {
@@ -59,9 +59,82 @@ describe("release notes, by section", () => {
     assert.deepEqual(out[0].lines, ["Bold and code"]);
   });
 
-  test("the notes generator's own truncation marker is dropped", () => {
+  test("the notes generator's own truncation count is kept, not thrown away", () => {
+    // It used to be dropped as markdown furniture. The generator honestly wrote
+    // how much it had cut and the dialog deleted the sentence saying so, then
+    // rendered twelve of forty-nine features as though that were the release.
     const out = parseReleaseSections("## Fixed\n- real one\n- …and 12 more\n");
-    assert.deepEqual(out[0].lines, ["real one"]);
+    assert.deepEqual(out[0].lines, ["real one"], "the marker must not become a bullet");
+    assert.equal(out[0].omitted, 12, "the count the generator published was discarded");
+  });
+
+  test("the ... spelling of the marker counts too", () => {
+    assert.equal(parseReleaseSections("## Fixed\n- real one\n- ...and 5 more\n")[0].omitted, 5);
+  });
+
+  test("the cap's OWN truncation is counted, not just the generator's", () => {
+    // Two places cut, and this was the silent one: the body says nothing about
+    // it, so a section trimmed here left no trace at all.
+    const body = "## Fixed\n" + Array.from({ length: 30 }, (_, i) => `- f${i}`).join("\n")
+      + "\n\n## Breaking\n- the one that matters\n";
+    const out = parseReleaseSections(body, 5);
+    assert.equal(out[1].section, "Fixed");
+    assert.equal(out[1].lines.length, 4);
+    assert.equal(out[1].omitted, 26);
+  });
+
+  test("both cuts add up in one count", () => {
+    const body = "## Fixed\n- a\n- b\n- c\n- …and 20 more\n";
+    const out = parseReleaseSections(body, 2);
+    assert.deepEqual(out[0].lines, ["a", "b"]);
+    assert.equal(out[0].omitted, 21, "one line cut here plus twenty cut by the generator");
+  });
+
+  test("a section the cap cannot reach at all still says what it holds", () => {
+    // Dropping it would be the same bug one level up: "thirty fixes and one
+    // breaking change" rendering as the breaking change with nothing to say
+    // thirty fixes had gone.
+    const body = "## Breaking\n- a\n- b\n\n## Fixed\n"
+      + Array.from({ length: 30 }, (_, i) => `- f${i}`).join("\n") + "\n";
+    const out = parseReleaseSections(body, 2);
+    assert.deepEqual(out.map((s) => s.section), ["Breaking", "Fixed"]);
+    assert.deepEqual(out[1].lines, []);
+    assert.equal(out[1].omitted, 30);
+  });
+
+  test("the generator's held-back sentence reaches the dialog", () => {
+    // A paragraph, not a bullet, so the old parser dropped it for the same
+    // reason it dropped the count: it read `- ` lines and nothing else.
+    const out = parseReleaseSections(
+      "## Fixed\n\n- one\n\n36 further fixes made while building the features above are not listed.\n",
+    );
+    assert.equal(out[0].note, "36 further fixes made while building the features above are not listed.");
+  });
+
+  test("a hard-wrapped note comes back as one paragraph", () => {
+    const out = parseReleaseSections("## Fixed\n\n- one\n\n36 further fixes\nare not listed.\n");
+    assert.equal(out[0].note, "36 further fixes are not listed.");
+  });
+
+  test("a section that is nothing but a held-back note still renders", () => {
+    // Every fix held back: no bullets, and a sentence that would otherwise be a
+    // stray line of prose under no heading.
+    const out = parseReleaseSections("## Fixed\n\n12 further fixes are not listed.\n");
+    assert.deepEqual(out.map((s) => s.section), ["Fixed"]);
+    assert.deepEqual(out[0].lines, []);
+    assert.equal(out[0].note, "12 further fixes are not listed.");
+  });
+
+  test("a fenced block under a change heading is not prose", () => {
+    // A shell command rendered as a paragraph in a dialog is something an
+    // operator might try to type.
+    const out = parseReleaseSections("## Fixed\n\n- one\n\n```bash\ncurl -fsSL https://example.invalid | sh\n```\n");
+    assert.equal(out[0].note, undefined, `a fenced command became prose: ${out[0].note}`);
+  });
+
+  test("prose under a heading that is not a change section stays out", () => {
+    const out = parseReleaseSections("## Fixed\n- one\n\n## Install\n\nTwo supported ways in.\n");
+    assert.deepEqual(out, [{ section: "Fixed", lines: ["one"], omitted: 0 }]);
   });
 
   test("prose outside a change section is ignored", () => {
@@ -79,7 +152,7 @@ describe("release notes, by section", () => {
 ## Fixed
 - the real one
 `);
-    assert.deepEqual(out, [{ section: "Fixed", lines: ["the real one"] }]);
+    assert.deepEqual(out, [{ section: "Fixed", lines: ["the real one"], omitted: 0 }]);
   });
 
   test("a body with no recognised sections yields nothing, not one blob", () => {
@@ -108,6 +181,37 @@ describe("release notes, by section", () => {
 
   test("a line that is only emphasis markers does not become an empty bullet", () => {
     assert.deepEqual(parseReleaseSections("## New\n- ****\n- real\n")[0].lines, ["real"]);
+  });
+});
+
+// A box three releases behind installs all three at once, so one dialog has to
+// describe all three — and each of the three cut its own list and held its own
+// fixes back. One release's numbers standing for all three is a number that is
+// wrong for two of them.
+describe("three releases in one dialog", () => {
+  test("the counts they each cut add up", () => {
+    const out = mergeReleaseSections([
+      parseReleaseSections("## Fixed\n- a\n- …and 10 more\n"),
+      parseReleaseSections("## Fixed\n- b\n- …and 7 more\n"),
+    ]);
+    assert.deepEqual(out, [{ section: "Fixed", lines: ["a", "b"], omitted: 17 }]);
+  });
+
+  test("and the cap spent on the merge adds to it", () => {
+    const out = mergeReleaseSections([
+      parseReleaseSections("## Fixed\n- a\n- b\n- …and 10 more\n"),
+      parseReleaseSections("## Fixed\n- c\n"),
+    ], 2);
+    assert.deepEqual(out[0].lines, ["a", "b"]);
+    assert.equal(out[0].omitted, 11, "ten from the release body, one cut by the merge");
+  });
+
+  test("each release's held-back sentence survives", () => {
+    const out = mergeReleaseSections([
+      parseReleaseSections("## Fixed\n\n- a\n\n3 further fixes are not listed.\n"),
+      parseReleaseSections("## Fixed\n\n- b\n\n9 further fixes are not listed.\n"),
+    ]);
+    assert.equal(out[0].note, "3 further fixes are not listed.\n\n9 further fixes are not listed.");
   });
 });
 

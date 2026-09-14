@@ -250,6 +250,13 @@ A release with no usable notes shows the version alone. An install updating from
 a git checkout lists commit subjects without headings, since commit subjects
 carry no sections.
 
+**Each section says how much it is not showing.** A release's notes carry a
+fixed number of bullets and the dialog shows a fixed number of lines, so a busy
+release is listed in part — and every section that was cut ends with the count
+it cut, above whatever the release itself said about the omission. A section cut
+to nothing still appears, as a heading and a count. The **Full changelog** link
+at the foot of the release notes is the complete list.
+
 **Fixed is bugs.** Work that made something quicker rather than repairing it —
 holding one stream open instead of polling, dropping a field from a
 once-per-second read — is listed under **Improved**, so it does not read as a

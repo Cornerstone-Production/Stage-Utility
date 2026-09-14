@@ -60,8 +60,62 @@ const INVISIBLE = new Set(["chore", "ci", "build", "docs", "test", "refactor", "
 /** `type(scope)!: subject` */
 const CONVENTIONAL = /^([a-z]+)(?:\(([^)]*)\))?(!)?:\s*(.+)$/i;
 
-/** How many bullets a section may carry before the rest are summarised. */
-const CAP = 12;
+/**
+ * How many change bullets one release's notes carry, and the least any section
+ * with something to say gets.
+ *
+ * The lever used to be a CAP of 12 PER SECTION, which is the wrong one. It
+ * cannot tell a three-commit release from a 239-commit one, and it spends the
+ * same allowance on a two-line Breaking section as on forty-nine features:
+ * 1.18.0 hit it in both directions at once and cut 57 of 81 bullets.
+ *
+ * A total budget, floors first and then the rest shared out in proportion to
+ * what each section still has to show, follows the shape of the release
+ * instead. Whatever is left over is counted and stated — see section() — and
+ * the full range is linked below the last one.
+ *
+ * 40 is under the update dialog's own NOTES_CAP of 60 (release-check.ts), so
+ * for a single release the release page and the dialog show the same bullets
+ * and the same count. The dialog's cap is then free to do the job it is for:
+ * bounding a box that installs three releases at once.
+ */
+const BULLET_BUDGET = 40;
+const SECTION_FLOOR = 6;
+
+/**
+ * How many bullets each section gets, given how many each HAS.
+ *
+ * Floors are handed out in display order, so a budget too small for every floor
+ * still favours Breaking over Fixed. The remainder goes in proportion to what
+ * each section still has left, and the rounding loss goes back out in display
+ * order — so the budget is always spent exactly.
+ */
+function allocate(sizes) {
+  const alloc = sizes.map(() => 0);
+  let left = BULLET_BUDGET;
+
+  sizes.forEach((n, i) => {
+    alloc[i] = Math.min(n, SECTION_FLOOR, left);
+    left -= alloc[i];
+  });
+
+  const want = sizes.map((n, i) => n - alloc[i]);
+  const total = want.reduce((a, b) => a + b, 0);
+  const share = left;
+  if (total > 0 && share > 0) {
+    want.forEach((w, i) => {
+      const give = Math.min(w, Math.floor((share * w) / total));
+      alloc[i] += give;
+      left -= give;
+    });
+    for (let i = 0; i < alloc.length && left > 0; i++) {
+      const give = Math.min(left, sizes[i] - alloc[i]);
+      alloc[i] += give;
+      left -= give;
+    }
+  }
+  return alloc;
+}
 
 function log(range) {
   try {
@@ -341,10 +395,10 @@ function scopeLabel(scope) {
 }
 
 /** A capped bullet list, saying plainly how much was left out. */
-function section(title, items) {
+function section(title, items, limit) {
   if (items.length === 0) return "";
-  const shown = items.slice(0, CAP).map((s) => `- ${s}`);
-  const rest = items.length - CAP;
+  const shown = items.slice(0, limit).map((s) => `- ${s}`);
+  const rest = items.length - shown.length;
   if (rest > 0) shown.push(`- …and ${rest} more`);
   return `## ${title}\n\n${shown.join("\n")}\n`;
 }
@@ -381,22 +435,43 @@ running it? Update from **Settings → Advanced → Updates**.
  * own; calling a held-back `perf` a "fix" is the same mislabelling that put
  * them under Fixed to begin with.
  */
-function sectionWithHeldBack(title, items, held, one, many) {
+function renderSection({ title, items, held = 0, one, many }, limit) {
   const note = held
     ? `${held} further ${held === 1 ? one : many} made while building the features above ${held === 1 ? "is" : "are"} not listed — ${held === 1 ? "it was" : "they were"} never in a released version.\n`
     : "";
-  if (items.length) return note ? `${section(title, items)}\n${note}` : section(title, items);
+  if (items.length) return note ? `${section(title, items, limit)}\n${note}` : section(title, items, limit);
   return note ? `## ${title}\n\n${note}` : "";
 }
 
-// In SECTION_ORDER, which is the order the update dialog renders them in —
-// see main/services/update/release-notes.ts.
+/**
+ * The sections, in SECTION_ORDER — the order the update dialog renders them in.
+ * See main/services/update/release-notes.ts, which must recognise every heading
+ * named here or the section disappears from the dialog without a word.
+ */
+const SECTIONS = [
+  { title: "Breaking", items: breaking },
+  { title: "New", items: features },
+  { title: "Improved", items: improvements, held: buildOutPerf, one: "improvement", many: "improvements" },
+  { title: "Fixed", items: fixes, held: buildOutFixes, one: "fix", many: "fixes" },
+];
+const limits = allocate(SECTIONS.map((s) => s.items.length));
+
+/**
+ * Where the rest of it is.
+ *
+ * Any cap leaves "…and 27 more" pointing nowhere unless something says where
+ * "more" lives. Its own heading, deliberately not one of SECTION_ORDER's, so
+ * the dialog's parser reads it as the end of the change lists rather than
+ * folding a markdown link into the section above it.
+ */
+const fullChangelog = fromRef
+  ? `## Full changelog\n\n[${fromRef}…v${version}](https://github.com/Cornerstone-Production/Stage-Utility/compare/${fromRef}...v${version})\n`
+  : "";
+
 const parts = [
   upgradeNotice(version),
-  breaking.length ? section("Breaking", breaking) : "",
-  section("New", features),
-  sectionWithHeldBack("Improved", improvements, buildOutPerf, "improvement", "improvements"),
-  sectionWithHeldBack("Fixed", fixes, buildOutFixes, "fix", "fixes"),
+  ...SECTIONS.map((s, i) => renderSection(s, limits[i])),
+  fullChangelog,
   install,
 ];
 
