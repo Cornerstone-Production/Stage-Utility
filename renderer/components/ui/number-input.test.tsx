@@ -431,16 +431,26 @@ describe("NumberInput, when blank is a real setting", () => {
     cleanup();
   });
 
-  test("a stepper on an unset field lands on the field's floor", () => {
-    // There is no number to step FROM, so the first press in either direction
-    // lands on the smallest value the field permits. `0 + step` would have read
-    // as 11 on a field whose floor is 10 — a number nothing chose.
-    const up = setup({ value: null, onUnset: OPT_IN, min: 10, max: 3600 });
+  test("a stepper on an unset field lands on the floor, not a step above it", () => {
+    // There is no number to step FROM, so the first press lands on `clamp(0)` —
+    // the smallest value the field permits.
+    //
+    // `step: 100` against `min: 10` ON PURPOSE, and this is the whole reason the
+    // case is spelled this way: with the app's own three fields (min 200/1/10,
+    // step 1) `clamp(0)` and `clamp(0 + step)` give the SAME answer, so a test
+    // using those numbers passes whichever expression the component holds and
+    // guards nothing. A step larger than the floor is the smallest case that
+    // tells them apart — `0 + step` is 100 here for a press that was asking for
+    // the smallest value there is.
+    const up = setup({ value: null, onUnset: OPT_IN, min: 10, max: 3600, step: 100 });
     tap(screen.getAllByRole("button")[1]);
-    assert.equal(up.commits.at(-1), 10, "stepping up from blank did not land on the floor");
+    assert.equal(up.commits.at(-1), 10, "stepping up from blank overshot the floor");
     cleanup();
 
-    const down = setup({ value: null, onUnset: OPT_IN, min: 10, max: 3600 });
+    // Down from blank stops at the floor too. Not a distinguishing case on its
+    // own — `clamp(0 - 100)` is also 10 — so the negative half is pinned by the
+    // no-floor test below, where `0 - step` really can escape.
+    const down = setup({ value: null, onUnset: OPT_IN, min: 10, max: 3600, step: 100 });
     tap(screen.getAllByRole("button")[0]);
     assert.equal(down.commits.at(-1), 10, "stepping down from blank went below the floor");
     cleanup();
@@ -467,6 +477,7 @@ describe("NumberInput, when blank is a real setting", () => {
           onUnset={() => setV(null)}
           min={10}
           max={3600}
+          step={100}
           aria-label="test field"
         />
       );
@@ -475,15 +486,46 @@ describe("NumberInput, when blank is a real setting", () => {
     const [, plus] = screen.getAllByRole("button");
     tap(plus);
     tap(plus);
-    assert.deepEqual(commits, [10, 11]);
-    assert.equal((screen.getByLabelText("test field") as HTMLInputElement).value, "11");
+    // `step: 100` for the same reason the floor test above uses it: at the
+    // default step of 1 this sequence is [10, 11] whether the landing is
+    // `clamp(0)` or `clamp(0 + step)`, so the test could not fail on the thing
+    // it is named for. At 100 the two diverge on the FIRST press — [10, 110]
+    // against [100, 200] — and a landing that wrongly applied to every press
+    // would read [10, 10].
+    assert.deepEqual(commits, [10, 110]);
+    assert.equal((screen.getByLabelText("test field") as HTMLInputElement).value, "110");
     cleanup();
   });
 
-  test("a stepper on an unset field with no floor lands on zero", () => {
-    const { commits } = setup({ value: null, onUnset: OPT_IN });
+  test("a stepper on an unset field with no floor lands on zero, either way", () => {
+    // BOTH directions, and the `-` half is the one that costs something: with no
+    // floor to clamp against, `0 - step` is -1, and a negative is exactly what
+    // ross-tsl.port could not have — getRossTslConfig discards anything not > 0
+    // in silence while the card still reads as configured. That field has a
+    // `min: 1` now, but the component must not depend on every future unsettable
+    // field remembering to declare one.
+    const up = setup({ value: null, onUnset: OPT_IN });
     tap(screen.getAllByRole("button")[1]);
-    assert.equal(commits.at(-1), 0);
+    assert.equal(up.commits.at(-1), 0, "stepping up from blank with no floor invented a number");
+    cleanup();
+
+    const down = setup({ value: null, onUnset: OPT_IN });
+    tap(screen.getAllByRole("button")[0]);
+    assert.equal(down.commits.at(-1), 0, "stepping down from blank with no floor went negative");
+    cleanup();
+  });
+
+  test("a stepper on an unset field with a NEGATIVE floor lands on zero, not the floor", () => {
+    // `clamp(0)`, not `clamp(min ?? 0)` — the two agree for every non-negative
+    // floor, which is every unsettable field the app ships, and diverge here.
+    // These are the real bounds of the automation `offsetMinutes` param
+    // (min -720, max 720, reached through rule-editor-dialog): blank means "no
+    // offset", and the press that has nothing to step from should land on no
+    // offset rather than twelve hours before the cue. That param does not opt in
+    // today, so this is the component's contract rather than a shipped path.
+    const { commits } = setup({ value: null, onUnset: OPT_IN, min: -720, max: 720 });
+    tap(screen.getAllByRole("button")[1]);
+    assert.equal(commits.at(-1), 0, "stepping up from blank landed on a negative floor");
     cleanup();
   });
 

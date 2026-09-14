@@ -142,20 +142,44 @@ export function NumberInput({
   function bumpOnce(dir: 1 | -1) {
     const base = heldValue.current;
     // From an EMPTY box there is no number to step FROM, so the first press in
-    // either direction lands on the lowest value the field permits — `min`
-    // where one is declared, else zero. Not `0 ± step`: on a field with a floor
-    // of 10, that read as "11" for a press that was asking for the smallest one,
-    // and the floor is what an operator pressing `+` on a blank interval means.
+    // either direction lands on `clamp(0)` — zero, pulled up to whatever floor
+    // the field declares — and the press after that steps from there.
+    //
+    // For the three fields that ship this today that is INDISTINGUISHABLE from
+    // the `0 ± step` below, and an earlier comment here claimed otherwise: it
+    // said `0 + step` "read as 11" on a field with a floor of 10, which it never
+    // did. All three declare a `min` larger than their step (200 / 1 / 10), so
+    // `clamp(0 ± step)` lands on that same floor in both directions. Two
+    // properties make this the right spelling anyway, and number-input.test.tsx
+    // pins both with cases that really do tell the two apart:
+    //
+    //   - `+` cannot OVERSHOOT the floor. `min: 10, step: 100` gives 100 for
+    //     `0 + step`, for a press that was asking for the smallest value the
+    //     field permits.
+    //   - `-` cannot go NEGATIVE where no floor is declared. `0 - step` is -1,
+    //     and that is the hole ross-tsl.port needed a `min: 1` to close:
+    //     getRossTslConfig discards anything not > 0 in silence while
+    //     configuredFor() still reads the card as set up.
+    //
+    // `clamp(0)`, not `clamp(min ?? 0)`: `clamp` already raises 0 to `min`, and
+    // the two differ only for a NEGATIVE floor — where landing on 0 is the
+    // better answer anyway. The app has one such field today (the automation
+    // `offsetMinutes` param, min -720, reached through rule-editor-dialog), and
+    // it does not opt in.
     //
     // Only for a caller that opted in. Everyone else keeps `0 ± step` exactly,
     // because "not a number" is reachable for them too, if barely: one call site
     // spells its value `Number(value ?? spec.min ?? 0)`, which is NaN for a
     // param holding a non-numeric string. That is recovery from a value that was
     // never valid either way, and this is not the change to alter it in.
+    //
+    // `typeof base === "number"` is not redundant beside `Number.isFinite`: the
+    // latter takes `unknown` and is not a type predicate, so it is the `typeof`
+    // that narrows `number | null` for the arithmetic below.
     const next =
       typeof base === "number" && Number.isFinite(base)
         ? clamp(Number((base + dir * step).toFixed(6)))
-        : clamp(onUnset ? (min ?? 0) : Number((dir * step).toFixed(6)));
+        : clamp(onUnset ? 0 : Number((dir * step).toFixed(6)));
     heldValue.current = next;
     onChange(next);
     onCommit?.(next);
