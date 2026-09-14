@@ -7,9 +7,25 @@ import * as path from "path";
 
 import { getEncryptionBackend } from "./encryption.js";
 import { getUserDataPath } from "./app-paths.js";
+import { externKeyed } from "../types/extern-keyed.js";
+import { errorMessage } from "./errors.js";
 import { WriteQueue, atomicWrite } from "./write-queue.js";
 
 type SecretsBlob = Record<string, Record<string, string>>;
+
+/**
+ * An empty blob with NO PROTOTYPE.
+ *
+ * The keys are integration ids, and those arrive on HTTP bodies — so this is the
+ * same hazard as any externally-keyed table (see main/types/extern-keyed.ts),
+ * plus one that is specific to a store: on an ordinary object
+ * `blob["__proto__"] = { token: "..." }` does not add a property at all, it
+ * REPLACES the object's prototype. JSON.stringify then writes `{}` and the
+ * credential is gone, while `getSecrets("__proto__")` goes on answering with it
+ * out of the prototype chain — a value the cache claims and the file does not
+ * hold, which is the whole thing this file has to stop.
+ */
+const emptyBlob = (): SecretsBlob => externKeyed({} as SecretsBlob);
 
 class SecretsStore {
   private cache: SecretsBlob | null = null;
@@ -53,7 +69,7 @@ class SecretsStore {
     } catch (err) {
       // No file yet is the ordinary first run — nothing is at risk, so no flag.
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-        this.cache = {};
+        this.cache = emptyBlob();
         return this.cache;
       }
       // Anything else — EACCES after a restore changed ownership, EIO on a dying
@@ -72,15 +88,21 @@ class SecretsStore {
           "permissions or the mount and restart to recover in place.",
         err,
       );
-      this.cache = {};
+      this.cache = emptyBlob();
       return this.cache;
     }
 
     const backend = getEncryptionBackend();
     try {
-      this.cache = JSON.parse(
-        (await backend.isAvailable()) ? await backend.decrypt(raw) : raw.toString("utf-8"),
-      ) as SecretsBlob;
+      // externKeyed, not a bare parse: the file is JSON somebody could have
+      // hand-edited or restored, and a top-level "__proto__" or "constructor"
+      // key in it would otherwise be reachable by inheritance from every other
+      // lookup into the blob.
+      this.cache = externKeyed(
+        JSON.parse(
+          (await backend.isAvailable()) ? await backend.decrypt(raw) : raw.toString("utf-8"),
+        ) as SecretsBlob,
+      );
       return this.cache;
     } catch (err) {
       // The file exists and did not yield secrets. Two very different causes look
@@ -103,53 +125,113 @@ class SecretsStore {
           "in place. Re-entering credentials will set it aside as secrets.bin.unreadable-*.",
         err,
       );
-      this.cache = {};
+      this.cache = emptyBlob();
       return this.cache;
     }
   }
 
-  /**
-   * Encrypt and write the whole blob.
-   *
-   * Serialised: integration config, wireless config and the boot migration all
-   * write this one file, several of them from unauthenticated LAN routes. Two
-   * overlapping saves used to share a fixed `.tmp` path and could splice into a
-   * blob that no longer decrypted — every credential lost.
-   */
-  private persist(): Promise<void> {
-    return this.writes.enqueue(async () => {
-      const backend = getEncryptionBackend();
-      const filePath = await this.getFilePath();
+  /** Encrypt and write one blob. Throws on any failure; writes nothing else. */
+  private async writeBlob(blob: SecretsBlob): Promise<void> {
+    const backend = getEncryptionBackend();
+    const filePath = await this.getFilePath();
 
-      // The load could not read the existing file, and we are about to write over
-      // it. THIS is the moment the old bytes are at risk, so preserve them now
-      // rather than on the read — an operator who fixes the key and restarts never
-      // reaches here, and gets their secrets back in place.
-      if (this.unreadable) {
-        const kept = `${filePath}.unreadable-${Date.now()}`;
-        try {
-          await fs.rename(filePath, kept);
-          console.error(
-            `[secrets] kept the unreadable secrets.bin as ${kept} before writing a new one.`,
-          );
-        } catch {
-          /* best-effort: if it cannot be preserved, the write below still proceeds */
-        }
+    // The load could not read the existing file, and we are about to write over
+    // it. THIS is the moment the old bytes are at risk, so preserve them now
+    // rather than on the read — an operator who fixes the key and restarts never
+    // reaches here, and gets their secrets back in place.
+    if (this.unreadable) {
+      const kept = `${filePath}.unreadable-${Date.now()}`;
+      try {
+        await fs.rename(filePath, kept);
+        console.error(
+          `[secrets] kept the unreadable secrets.bin as ${kept} before writing a new one.`,
+        );
+        // Cleared only once the old bytes are SAFELY ASIDE. It used to clear
+        // whether the rename worked or not, which spent the one-time
+        // preservation on a rename that had not happened: the file was still
+        // sitting there unreadable and the next save would overwrite it.
         this.unreadable = false;
+      } catch (err) {
+        // Genuinely best-effort — the write below still proceeds, because an
+        // operator re-entering a credential is how they recover from this and
+        // refusing the save would strand them. But it is said out loud, and the
+        // flag stays set so the next save tries again.
+        console.error(
+          `[secrets] could not set the unreadable secrets.bin aside as ${kept}: ` +
+            `${errorMessage(err)}. Writing the new file over it.`,
+        );
       }
+    }
 
-      const json = JSON.stringify(this.cache ?? {});
-      const body = (await backend.isAvailable())
-        ? await backend.encrypt(json)
-        : Buffer.from(json, "utf-8");
-      // Atomic, and with a uniquely-named scratch file — see write-queue.ts.
-      await atomicWrite(filePath, body, { mode: 0o600 });
+    const json = JSON.stringify(blob);
+    const body = (await backend.isAvailable())
+      ? await backend.encrypt(json)
+      : Buffer.from(json, "utf-8");
+    // Atomic, and with a uniquely-named scratch file — see write-queue.ts.
+    await atomicWrite(filePath, body, { mode: 0o600 });
+  }
+
+  /**
+   * Apply `mutate` and save — CACHE LAST, and inside the write queue.
+   *
+   * The order is the whole point. This used to mutate the cached blob and then
+   * persist, with nothing to undo the mutation when the persist threw: a save
+   * onto a read-only data directory answered EACCES, and every read until the
+   * next restart went on reporting the value that had never reached disk. That
+   * is the repository's own "a failed save read as saved" failure.
+   *
+   * A rollback is NOT the fix, and this is why it is written this way instead.
+   * The whole file is re-encrypted per save and the queue only serialises the
+   * WRITES, so with the mutation outside the queue two callers interleave:
+   *
+   *   A mutates its slot, B mutates its slot, A's write runs (carrying BOTH
+   *   changes) and fails. A restores its own slot — and takes B's change out of
+   *   the cache with it, though B has not failed. B's write then runs over the
+   *   rolled-back blob and B is lost from the file too, silently.
+   *
+   * Mutating INSIDE the queue removes the interleaving instead of trying to
+   * unwind it. Each caller builds its next blob from the cache as it stands when
+   * its turn comes — so it already contains every earlier committed change — and
+   * the cache only moves once the bytes are down. A failure leaves the cache
+   * byte-for-byte what a fresh load from disk would give, and is RETHROWN so the
+   * caller can tell a save that landed from one that did not.
+   */
+  private async commit(mutate: (blob: SecretsBlob) => void): Promise<void> {
+    // Outside the queue: the decrypt has nothing to serialise against, and
+    // loadOnce already shares one in-flight read between concurrent callers.
+    await this.load();
+    return this.writes.enqueue(async () => {
+      // A copy, one level deep. Every mutator below REPLACES a slot rather than
+      // editing one in place, but copying the slots too means that stays a
+      // property of this function rather than a rule the next mutator has to
+      // know about.
+      // Re-read rather than `?? {}` if the cache is somehow gone by the time our
+      // turn comes: starting from empty here would write a blob with every other
+      // credential missing, which is the one outcome worse than not saving.
+      const base = this.cache ?? (await this.load());
+      const next = emptyBlob();
+      for (const [id, slot] of Object.entries(base)) next[id] = { ...slot };
+      mutate(next);
+      try {
+        await this.writeBlob(next);
+      } catch (err) {
+        console.error(
+          `[secrets] save FAILED (${errorMessage(err)}). Nothing was changed in memory ` +
+            "either, so the value being read now is the one the file still holds. Fix " +
+            "the permissions or the mount and save again.",
+        );
+        throw err;
+      }
+      this.cache = next;
     });
   }
 
+  /** One integration's slot. A COPY: the cache only ever changes through
+   *  commit(), so handing out the live object would let a caller edit it into
+   *  disagreeing with the file without ever writing. */
   async getSecrets(integrationId: string): Promise<Record<string, string>> {
     const blob = await this.load();
-    return blob[integrationId] ?? {};
+    return { ...(blob[integrationId] ?? {}) };
   }
 
   /**
@@ -172,16 +254,19 @@ class SecretsStore {
     return this.unreadable;
   }
 
+  /** Set one field. Throws if the save did not reach disk, having changed
+   *  nothing in memory — see commit(). */
   async setSecret(integrationId: string, key: string, value: string): Promise<void> {
-    const blob = await this.load();
-    blob[integrationId] = { ...(blob[integrationId] ?? {}), [key]: value };
-    await this.persist();
+    await this.commit((blob) => {
+      blob[integrationId] = { ...(blob[integrationId] ?? {}), [key]: value };
+    });
   }
 
+  /** Replace a whole slot. Same contract as setSecret. */
   async setSecrets(integrationId: string, secrets: Record<string, string>): Promise<void> {
-    const blob = await this.load();
-    blob[integrationId] = secrets;
-    await this.persist();
+    await this.commit((blob) => {
+      blob[integrationId] = { ...secrets };
+    });
   }
 
   /**
@@ -194,18 +279,20 @@ class SecretsStore {
    * concurrent write.
    */
   async setManySecrets(entries: Record<string, Record<string, string>>): Promise<void> {
-    const blob = await this.load();
-    for (const [id, secrets] of Object.entries(entries)) {
-      if (Object.keys(secrets).length === 0) delete blob[id];
-      else blob[id] = secrets;
-    }
-    await this.persist();
+    await this.commit((blob) => {
+      for (const [id, secrets] of Object.entries(entries)) {
+        if (Object.keys(secrets).length === 0) delete blob[id];
+        else blob[id] = { ...secrets };
+      }
+    });
   }
 
+  /** Same contract as setSecret: a slot is gone from memory only once it is gone
+   *  from the file. */
   async clearSecrets(integrationId: string): Promise<void> {
-    const blob = await this.load();
-    delete blob[integrationId];
-    await this.persist();
+    await this.commit((blob) => {
+      delete blob[integrationId];
+    });
   }
 }
 

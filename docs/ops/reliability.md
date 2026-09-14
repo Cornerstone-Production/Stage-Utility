@@ -115,6 +115,25 @@ writes a new file and sets the old one aside as `secrets.bin.unreadable-*` — s
 recoverable with the right key, but only from that copy. Check `/log` first: the
 reason is logged at startup.
 
+### When a credential will not save
+
+A credential is held in memory only once it is on disk. If the write fails — a
+read-only data directory, a full disk, a mount that went away — the save reports
+the failure, nothing changes in memory, and the field goes on showing the value
+the file still holds. There is no state where the app agrees a credential was
+saved and a restart disagrees.
+
+The reason is on `/log` under `[secrets]`, naming the errno:
+
+```
+[secrets] save FAILED (EACCES: permission denied, open '…/secrets.bin'). Nothing
+was changed in memory either, so the value being read now is the one the file
+still holds. Fix the permissions or the mount and save again.
+```
+
+Fix the cause and save again — the retry is an ordinary save, with nothing left
+over from the attempt that failed.
+
 ## Backups
 
 **Back up this directory.** Lose `encryption.key` and the encrypted credentials
