@@ -65,7 +65,7 @@ describe("the candidate names", () => {
     // without anybody remembering to. Asserted against the table rather than
     // against a literal list, which is what makes that automatic.
     const fromTable = new Set(
-      Object.values(STATE_SOURCES).flatMap((rows) => rows.map((r) => r.name)),
+      [...STATE_SOURCES.values()].flatMap((rows) => rows.map((r) => r.name)),
     );
     for (const name of fromTable) assert.ok(CANDIDATE_VARIABLES.includes(name), name);
   });

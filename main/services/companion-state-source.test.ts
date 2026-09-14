@@ -22,6 +22,7 @@ import { describe, test } from "node:test";
 
 import {
   inferStateSource,
+  learnableConnections,
   STATE_ANY_OTHER,
   STATE_SOURCES,
   type ExportConnection,
@@ -138,7 +139,7 @@ describe("inferStateSource, one row per module", () => {
 });
 
 describe("the table itself", () => {
-  const rows = Object.entries(STATE_SOURCES).flatMap(([moduleId, list]) =>
+  const rows = [...STATE_SOURCES].flatMap(([moduleId, list]) =>
     list.map((row) => ({ moduleId, ...row })),
   );
 
@@ -524,5 +525,101 @@ describe("through the real parser, on the fixture export", () => {
     // page's one non-inferring button is that and only that.
     assert.equal(at(5, 5, 0)?.stateSource, null);
     assert.deepEqual(at(5, 5, 0)?.drives, ["bmd-hyperdeck"]);
+  });
+});
+
+// ── A module id that is a key on Object.prototype ─────────────────────────────
+//
+// `moduleId` is whatever the Companion export document says it is, and the two
+// lookups here used to index a plain object with it. Of the keys that survive
+// `.trim().toLowerCase()`, two are real properties of `Object.prototype`:
+//
+//   STATE_SOURCES["constructor"] -> the Object function   (truthy, not iterable)
+//   STATE_SOURCES["__proto__"]   -> Object.prototype      (truthy, not iterable)
+//
+// `if (!rows) return null` passes both, and `for (const row of rows)` then
+// throws `rows is not iterable`. That throw unwinds out of inferStateSource,
+// through parseButtons, through fetchExport — which turns it into
+// `{ ok: false }`. The cue picker goes empty and runCompanionReconcile returns
+// null every hour after it, so no cue's button is ever checked again, for one
+// connection somebody named badly.
+//
+// Driven through the REAL parser on a REAL document rather than through
+// inferStateSource alone, because the blast radius is the whole export parse
+// and that is where it has to be shown not to happen.
+describe("a module id that is a key on Object.prototype", () => {
+  /** The keys that survive `.trim().toLowerCase()` and exist on Object.prototype. */
+  const PROTOTYPE_KEYS = Object.getOwnPropertyNames(Object.prototype).filter(
+    (k) => k === k.trim().toLowerCase(),
+  );
+
+  test("the lookup is a Map, so every prototype key answers 'no such module'", () => {
+    // EXACT, not a floor: if a future Node grows another own property on
+    // Object.prototype whose name survives the normalisation, this says so
+    // rather than quietly testing fewer keys. `toString`, `valueOf`,
+    // `hasOwnProperty` and the rest all carry a capital, so `.toLowerCase()`
+    // spells them into names Object.prototype does not have.
+    assert.deepEqual(PROTOTYPE_KEYS, ["constructor", "__proto__"]);
+    for (const key of PROTOTYPE_KEYS) {
+      assert.equal(STATE_SOURCES.get(key), undefined, key);
+      assert.equal(STATE_SOURCES.has(key), false, key);
+    }
+  });
+
+  test("a connection on such a module infers nothing and does not throw", () => {
+    const proto: Record<string, ExportConnection> = {
+      a: { label: "Ctor-Box", moduleId: "constructor" },
+      b: { label: "Proto-Box", moduleId: "__proto__" },
+    };
+    for (const id of Object.keys(proto)) {
+      assert.equal(
+        inferStateSource(button([{ definitionId: "powerState", connectionId: id }], []), proto),
+        null,
+        proto[id]!.moduleId,
+      );
+      // And it is LEARNABLE — the module is unknown, so probing it is right.
+      assert.deepEqual(
+        learnableConnections(button([], [{ definitionId: "power", connectionId: id }]), proto),
+        [proto[id]!.label],
+        proto[id]!.moduleId,
+      );
+    }
+  });
+
+  test("the whole export still parses, and the other buttons keep their sources", () => {
+    // One control on a `constructor` connection beside a real kasa plug. The
+    // failure this guards is not "that button infers nothing" — it is that
+    // parseButtons throws and every button in the document is lost.
+    const control = (connectionId: string, definitionId: string) => ({
+      type: "button",
+      style: { text: "A key" },
+      steps: { "0": { action_sets: { down: [{ id: definitionId, definitionId, connectionId }] } } },
+      feedbacks: [{ definitionId: "powerState", connectionId }],
+    });
+    const doc = {
+      instances: {
+        bad: { label: "Ctor-Box", moduleId: "constructor" },
+        worse: { label: "Proto-Box", moduleId: "__proto__" },
+        plug: { label: "VCR-Overhead-Light", moduleId: "tplink-kasasmartplug" },
+      },
+      pages: {
+        "1": {
+          name: "Stage",
+          id: "page-1",
+          controls: {
+            "0": {
+              "0": control("bad", "powerOn"),
+              "1": control("worse", "powerOn"),
+              "2": control("plug", "powerOn"),
+            },
+          },
+        },
+      },
+    };
+    const parsed = parseButtons(doc);
+    assert.deepEqual(
+      parsed.map((b) => `${b.row}:${b.col} ${b.stateSource?.variable ?? "-"}`),
+      ["0:0 -", "0:1 -", "0:2 VCR-Overhead-Light:power_state"],
+    );
   });
 });

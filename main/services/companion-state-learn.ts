@@ -74,7 +74,7 @@ export const CANDIDATE_VARIABLES: readonly string[] = [
   //    list without anybody remembering to. Today that is `power_state`,
   //    `power`, `powerState`, `status`, `recording`, `streaming`,
   //    `stream_status` and `record_status`.
-  ...new Set(Object.values(STATE_SOURCES).flatMap((rows) => rows.map((r) => r.name))),
+  ...new Set([...STATE_SOURCES.values()].flatMap((rows) => rows.map((r) => r.name))),
   // 2. The common shapes the table does NOT already supply. Nothing here may
   //    repeat a name from the group above — the two lists are concatenated, not
   //    de-duplicated, so a name in both would be two GETs for one answer and
