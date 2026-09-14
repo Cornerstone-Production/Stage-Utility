@@ -22,6 +22,7 @@ import { beforeEach, describe, test } from "node:test";
 import {
   addSettleListener,
   cueStates,
+  cueStatesBody,
   cueStatesDeps,
   CUE_STATES_TTL_MS,
   SETTLE_MS,
@@ -141,7 +142,7 @@ describe("cueStates.read", () => {
     const first = await cueStates.read();
     assert.equal(first.ok, true);
     assert.equal(first.checkedAt, "2026-09-09T14:00:00.000Z");
-    assert.deepEqual(first.states.projectors, {
+    assert.deepEqual(first.states.get("projectors"), {
       on: "projectors_on",
       off: "projectors_off",
       variable: "projectors_state",
@@ -152,14 +153,14 @@ describe("cueStates.read", () => {
     values.projectors_state = { value: "off" };
     clock += CUE_STATES_TTL_MS;
     const second = await cueStates.read();
-    assert.equal(second.states.projectors!.state, "off");
+    assert.equal(second.states.get("projectors")!.state, "off");
     assert.equal(second.ok, true);
   });
 
   test("the pair's own on and off values are what is compared", async () => {
     rules = pair("pj", { stateOnValue: "POWER=ON", stateOffValue: "STANDBY" });
     values.pj_state = { value: "POWER=ON" };
-    assert.equal((await cueStates.read()).states.pj!.state, "on");
+    assert.equal((await cueStates.read()).states.get("pj")!.state, "on");
   });
 
   test("any other value is unknown, and says what it read", async () => {
@@ -169,10 +170,10 @@ describe("cueStates.read", () => {
     values.warming_state = { value: "WARMUP" };
     const answer = await cueStates.read();
     assert.equal(answer.ok, false);
-    assert.equal(answer.states.warming!.state, "unknown");
-    assert.equal(answer.states.warming!.value, "WARMUP");
+    assert.equal(answer.states.get("warming")!.state, "unknown");
+    assert.equal(answer.states.get("warming")!.value, "WARMUP");
     assert.equal(
-      answer.states.warming!.reason,
+      answer.states.get("warming")!.reason,
       'value "WARMUP" matches neither "on" nor "off"',
     );
   });
@@ -186,7 +187,7 @@ describe("cueStates.read", () => {
       rules = pair("deck", { stateOnValue: "Record", stateOffValue: "*" });
       values.deck_state = { value: "Record" };
       const answer = await cueStates.read();
-      assert.equal(answer.states.deck!.state, "on");
+      assert.equal(answer.states.get("deck")!.state, "on");
       assert.equal(answer.ok, true);
     });
 
@@ -194,9 +195,9 @@ describe("cueStates.read", () => {
       rules = pair("deck", { stateOnValue: "Record", stateOffValue: "*" });
       values.deck_state = { value: "Preview" };
       const answer = await cueStates.read();
-      assert.equal(answer.states.deck!.state, "off");
-      assert.equal(answer.states.deck!.value, "Preview");
-      assert.equal(answer.states.deck!.reason, undefined);
+      assert.equal(answer.states.get("deck")!.state, "off");
+      assert.equal(answer.states.get("deck")!.value, "Preview");
+      assert.equal(answer.states.get("deck")!.reason, undefined);
       assert.equal(answer.ok, true);
     });
 
@@ -206,17 +207,17 @@ describe("cueStates.read", () => {
       rules = pair("deck", { stateOnValue: "Record", stateOffValue: "*" });
       values.deck_state = { value: "" };
       const answer = await cueStates.read();
-      assert.equal(answer.states.deck!.state, "off");
-      assert.equal(answer.states.deck!.value, "");
+      assert.equal(answer.states.get("deck")!.state, "off");
+      assert.equal(answer.states.get("deck")!.value, "");
       assert.equal(answer.ok, true);
     });
 
     test("a MISSING variable is still unknown — `*` matches a value, not a failure", async () => {
       rules = pair("deck", { stateOnValue: "Record", stateOffValue: "*" });
       const answer = await cueStates.read();
-      assert.equal(answer.states.deck!.state, "unknown");
-      assert.equal(answer.states.deck!.value, null);
-      assert.equal(answer.states.deck!.reason, "no such custom variable in Companion");
+      assert.equal(answer.states.get("deck")!.state, "unknown");
+      assert.equal(answer.states.get("deck")!.value, null);
+      assert.equal(answer.states.get("deck")!.reason, "no such custom variable in Companion");
       assert.equal(answer.ok, false);
     });
   });
@@ -224,17 +225,17 @@ describe("cueStates.read", () => {
   test("a variable Companion does not have is unknown, with that reason", async () => {
     rules = pair("missing");
     const answer = await cueStates.read();
-    assert.equal(answer.states.missing!.state, "unknown");
-    assert.equal(answer.states.missing!.value, null);
-    assert.equal(answer.states.missing!.reason, "no such custom variable in Companion");
+    assert.equal(answer.states.get("missing")!.state, "unknown");
+    assert.equal(answer.states.get("missing")!.value, null);
+    assert.equal(answer.states.get("missing")!.reason, "no such custom variable in Companion");
   });
 
   test("an unreachable Companion is unknown, carrying its own error", async () => {
     rules = pair("gone");
     values.gone_state = { error: "connect ECONNREFUSED 10.0.0.5:8000" };
     const answer = await cueStates.read();
-    assert.equal(answer.states.gone!.state, "unknown");
-    assert.equal(answer.states.gone!.reason, "connect ECONNREFUSED 10.0.0.5:8000");
+    assert.equal(answer.states.get("gone")!.state, "unknown");
+    assert.equal(answer.states.get("gone")!.reason, "connect ECONNREFUSED 10.0.0.5:8000");
     assert.equal(answer.ok, false);
   });
 
@@ -247,14 +248,14 @@ describe("cueStates.read", () => {
     ];
     values.bound_state = { value: "on" };
     const answer = await cueStates.read();
-    assert.deepEqual(Object.keys(answer.states), ["bound"]);
+    assert.deepEqual([...answer.states.keys()], ["bound"]);
     assert.deepEqual(reads, ["bound_state"]);
   });
 
   test("no bound pairs is an empty, ok answer and no reads at all", async () => {
     rules = [cue("take_screens")];
     const answer = await cueStates.read();
-    assert.deepEqual(answer.states, {});
+    assert.deepEqual([...answer.states], []);
     assert.equal(answer.ok, true);
     assert.deepEqual(reads, []);
   });
@@ -273,10 +274,10 @@ describe("cueStates.read", () => {
       return answered(variable);
     };
     const answer = await cueStates.read();
-    assert.equal(answer.states.ok_one!.state, "on");
-    assert.equal(answer.states.ok_two!.state, "off");
-    assert.equal(answer.states.thrower!.state, "unknown");
-    assert.equal(answer.states.thrower!.reason, "secrets.bin is unreadable");
+    assert.equal(answer.states.get("ok_one")!.state, "on");
+    assert.equal(answer.states.get("ok_two")!.state, "off");
+    assert.equal(answer.states.get("thrower")!.state, "unknown");
+    assert.equal(answer.states.get("thrower")!.reason, "secrets.bin is unreadable");
     assert.equal(answer.ok, false);
   });
 
@@ -285,8 +286,8 @@ describe("cueStates.read", () => {
     values.good_state = { value: "on" };
     values.bad_state = { error: "ETIMEDOUT" };
     const answer = await cueStates.read();
-    assert.equal(answer.states.good!.state, "on");
-    assert.equal(answer.states.bad!.state, "unknown");
+    assert.equal(answer.states.get("good")!.state, "on");
+    assert.equal(answer.states.get("bad")!.state, "unknown");
     assert.equal(answer.ok, false, "ok is every pair, not any pair");
   });
 });
@@ -325,8 +326,8 @@ describe("the reads themselves", () => {
     values.shared_state = { value: "on" };
     const answer = await cueStates.read();
     assert.deepEqual(reads, ["shared_state"]);
-    assert.equal(answer.states.main!.state, "on");
-    assert.equal(answer.states.south!.state, "on");
+    assert.equal(answer.states.get("main")!.state, "on");
+    assert.equal(answer.states.get("south")!.state, "on");
   });
 });
 
@@ -353,7 +354,7 @@ describe("the five second cache", () => {
     values.expiring_state = { value: "off" };
     const answer = await cueStates.read();
     assert.deepEqual(reads, ["expiring_state", "expiring_state"]);
-    assert.equal(answer.states.expiring!.state, "off");
+    assert.equal(answer.states.get("expiring")!.state, "off");
     assert.equal(answer.checkedAt, "2026-09-09T14:00:05.000Z");
   });
 
@@ -451,24 +452,23 @@ describe("the log", () => {
 // away. Cheap to hold, and it is the difference between the pair working and the
 // pair silently not existing.
 describe("a pair whose base is a prototype key", () => {
-  test("__proto__ is an OWN property of the answer, and a real row", async () => {
+  test("__proto__ is a real row, in the Map and in the JSON", async () => {
     rules = pair("__proto__");
     values.__proto___state = { value: "on" };
     const answer = await cueStates.read();
 
-    assert.equal(Object.hasOwn(answer.states, "__proto__"), true, "the pair is not in the answer");
-    assert.deepEqual(Object.keys(answer.states), ["__proto__"]);
-    // Read through a Map: `answer.states.__proto__` and `.constructor` resolve
-    // to Object's own members in the type checker, whatever the value is.
-    assert.equal(new Map(Object.entries(answer.states)).get("__proto__")?.state, "on");
+    assert.deepEqual([...answer.states.keys()], ["__proto__"]);
+    assert.equal(answer.states.get("__proto__")?.state, "on");
     assert.equal(answer.ok, true);
-    // The record itself is an ordinary object, not one wearing the row as its
-    // prototype.
-    assert.equal(Object.getPrototypeOf(answer.states), Object.prototype);
-    assert.equal((({}) as Record<string, unknown>).variable, undefined, "Object.prototype was polluted");
 
-    // And it survives the wire, which is the only thing Home Assistant sees.
-    const wire = JSON.parse(JSON.stringify(answer)) as { states: Record<string, unknown> };
+    // The JSON shape, which is the only thing Home Assistant sees. Built by
+    // cueStatesBody with Object.fromEntries, so the key is an OWN property and
+    // not a prototype swap.
+    const body = cueStatesBody(answer);
+    assert.equal(Object.hasOwn(body.states, "__proto__"), true, "the pair is not in the body");
+    assert.equal(Object.getPrototypeOf(body.states), Object.prototype);
+    assert.equal((({}) as Record<string, unknown>).variable, undefined, "Object.prototype was polluted");
+    const wire = JSON.parse(JSON.stringify(body)) as { states: Record<string, unknown> };
     assert.equal(Object.hasOwn(wire.states, "__proto__"), true, "the pair is not in the JSON");
   });
 
@@ -477,11 +477,49 @@ describe("a pair whose base is a prototype key", () => {
     values.constructor_state = { value: "on" };
     values.prototype_state = { value: "off" };
     const answer = await cueStates.read();
-    assert.deepEqual(Object.keys(answer.states).sort(), ["constructor", "prototype"]);
-    const rows = new Map(Object.entries(answer.states));
-    assert.equal(rows.get("constructor")?.state, "on");
-    assert.equal(rows.get("prototype")?.state, "off");
+    assert.deepEqual([...answer.states.keys()].sort(), ["constructor", "prototype"]);
+    assert.equal(answer.states.get("constructor")?.state, "on");
+    assert.equal(answer.states.get("prototype")?.state, "off");
     assert.equal(answer.ok, true);
+  });
+
+  test("a __proto__ pair survives the settle pass, which rebuilt the dictionary", async () => {
+    // withSettling copies every row into a FRESH dictionary on the way out. It
+    // was a plain `{}` and `states["__proto__"] = row` sets the prototype
+    // rather than adding a property — so the pair vanished from the answer the
+    // moment somebody pressed it, and every object in the process gained the
+    // row's fields. The name cannot arrive through the API (CUE_NAME_RE wants a
+    // leading alphanumeric) but it can arrive through a restored config
+    // archive: init() loads automation-rules.json straight in.
+    rules = pair("__proto__");
+    values.__proto___state = { value: "off" };
+    await cueStates.read();
+    cueStates.noteCommand({
+      base: "__proto__",
+      want: "on",
+      variable: "__proto___state",
+      wantValue: "on",
+    });
+    const answer = await cueStates.read();
+    assert.deepEqual([...answer.states.keys()], ["__proto__"]);
+    assert.equal(answer.states.get("__proto__")?.settling, true);
+    assert.equal(answer.states.get("__proto__")?.commanded, "on");
+    assert.equal((({}) as Record<string, unknown>).variable, undefined, "Object.prototype was polluted");
+  });
+
+  test("a base NOT in the answer is absent, not Object.prototype's own member", async () => {
+    // The read half, and the one a Map makes unrepresentable: on a plain
+    // record `states["constructor"]` is the Object function — truthy, with no
+    // `state` field — for a pair the route never answered for. cue-manifest,
+    // automation-engine's readCueState and the renderer's row pill all look a
+    // base up this way.
+    rules = pair("projectors");
+    values.projectors_state = { value: "on" };
+    const answer = await cueStates.read();
+    for (const key of ["constructor", "__proto__", "toString", "valueOf", "hasOwnProperty"]) {
+      assert.equal(answer.states.get(key), undefined, key);
+      assert.equal(answer.states.has(key), false, key);
+    }
   });
 });
 
@@ -509,12 +547,12 @@ describe("the settle window", () => {
   test("a row inside the window says what was commanded, and drops it after", async () => {
     rules = pair("plug");
     values.plug_state = { value: "off" };
-    const before = (await cueStates.read()).states.plug!;
+    const before = (await cueStates.read()).states.get("plug")!;
     assert.equal(before.settling, undefined);
     assert.equal(before.commanded, undefined);
 
     commandOn("plug");
-    const during = (await cueStates.read()).states.plug!;
+    const during = (await cueStates.read()).states.get("plug")!;
     assert.equal(during.settling, true);
     assert.equal(during.commanded, "on");
     // The READING is still reported as it is. The row does not lie about the
@@ -523,7 +561,7 @@ describe("the settle window", () => {
     assert.equal(during.state, "off");
 
     clock += SETTLE_MS;
-    const after = (await cueStates.read()).states.plug!;
+    const after = (await cueStates.read()).states.get("plug")!;
     assert.equal(after.settling, undefined, "the row still claims to be settling after the window");
     assert.equal(after.commanded, undefined);
   });
@@ -544,11 +582,11 @@ describe("the settle window", () => {
 
     // One second before the window closes: a real read, cached from here.
     clock += SETTLE_MS - 1000;
-    assert.equal((await cueStates.read()).states.cachedsettle!.settling, true);
+    assert.equal((await cueStates.read()).states.get("cachedsettle")!.settling, true);
 
     // The window has closed; the cached ANSWER has not.
     clock += 1000;
-    const row = (await cueStates.read()).states.cachedsettle!;
+    const row = (await cueStates.read()).states.get("cachedsettle")!;
     assert.equal(row.settling, undefined, "a cached row still claims to be settling");
     assert.equal(row.commanded, undefined);
   });
@@ -666,13 +704,13 @@ describe("the settle window", () => {
     commandOn("fresh");
     // A poller reads while the device is still catching up. This is the answer
     // that must not be served once the real value lands.
-    assert.equal((await cueStates.read()).states.fresh!.state, "off");
+    assert.equal((await cueStates.read()).states.get("fresh")!.state, "off");
 
     values.fresh_state = { value: "on" };
     await tickSettle();
     // Still well inside the five second cache.
     assert.equal(
-      (await cueStates.read()).states.fresh!.state,
+      (await cueStates.read()).states.get("fresh")!.state,
       "on",
       "the settled value was hidden behind the cached answer",
     );
@@ -707,6 +745,6 @@ describe("the settle window", () => {
     cueStates.__resetSettle();
     assert.equal(timers.length, 0, "a cancelled settle re-read is still scheduled");
     assert.equal(cueStates.commandedWithin("cancelled", clock), null);
-    assert.equal((await cueStates.read()).states.cancelled!.settling, undefined);
+    assert.equal((await cueStates.read()).states.get("cancelled")!.settling, undefined);
   });
 });

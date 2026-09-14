@@ -80,7 +80,7 @@ beforeEach(() => {
 
 describe("a pair bound to app:reaper.recording", () => {
   test("reads off while REAPER is connected and idle", async () => {
-    const row = (await cueStates.read()).states.reaper_record!;
+    const row = (await cueStates.read()).states.get("reaper_record")!;
     assert.equal(row.variable, RECORDING_REF);
     assert.equal(row.state, "off");
     assert.equal(row.value, "off");
@@ -89,7 +89,7 @@ describe("a pair bound to app:reaper.recording", () => {
 
   test("reads on while REAPER is recording", async () => {
     status = { ...status, recording: true };
-    const row = (await cueStates.read()).states.reaper_record!;
+    const row = (await cueStates.read()).states.get("reaper_record")!;
     assert.equal(row.state, "on");
     assert.equal(row.value, "on");
   });
@@ -98,7 +98,7 @@ describe("a pair bound to app:reaper.recording", () => {
     // NOT "off". An unreachable recorder reported as "not recording" is a switch
     // saying the service is not being recorded when the truth is nobody knows.
     status = { ...status, connected: false, recording: false };
-    const row = (await cueStates.read()).states.reaper_record!;
+    const row = (await cueStates.read()).states.get("reaper_record")!;
     assert.equal(row.state, "unknown");
     assert.equal(row.value, null);
     assert.equal(row.reason, "REAPER is not connected");
@@ -115,7 +115,7 @@ describe("a pair bound to app:reaper.recording", () => {
       wantValue: "on",
     });
 
-    const during = (await cueStates.read()).states.reaper_record!;
+    const during = (await cueStates.read()).states.get("reaper_record")!;
     assert.equal(during.settling, true);
     assert.equal(during.commanded, "on");
     assert.equal(during.state, "off", "REAPER has not been polled since the command");
@@ -126,10 +126,10 @@ describe("a pair bound to app:reaper.recording", () => {
     status = { ...status, recording: true };
     await tickSettle();
     assert.equal(timers.length, 0, "a re-read outlived the value it was waiting for");
-    assert.equal((await cueStates.read()).states.reaper_record!.state, "on");
+    assert.equal((await cueStates.read()).states.get("reaper_record")!.state, "on");
 
     clock += SETTLE_MS;
-    const after = (await cueStates.read()).states.reaper_record!;
+    const after = (await cueStates.read()).states.get("reaper_record")!;
     assert.equal(after.settling, undefined, "the row still claims to be settling after the window");
     assert.equal(after.state, "on");
   });
@@ -138,7 +138,7 @@ describe("a pair bound to app:reaper.recording", () => {
     const [on, off] = recordPair();
     on!.trigger.params.stateVariable = "reaper_state";
     rules = [on!, off!];
-    const row = (await cueStates.read()).states.reaper_record!;
+    const row = (await cueStates.read()).states.get("reaper_record")!;
     assert.equal(row.variable, "reaper_state");
     // Read through the Companion half of the seam, which has no such variable.
     assert.equal(row.state, "unknown");

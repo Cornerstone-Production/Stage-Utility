@@ -27,6 +27,7 @@ const { cueManifest, cueManifestDeps, manifestVersion, bumpManifestVersion } = a
 const { CALL_TRIGGER_ID } = await import("./cue-aliases.js");
 const { fingerprintParams } = await import("./companion-fingerprint.js");
 type Rule = import("../types/automation.js").Rule;
+type CueStateRow = import("./cue-states.js").CueStateRow;
 
 const NOW = "2026-09-09T14:00:00.000Z";
 
@@ -83,7 +84,21 @@ beforeEach(() => {
   cueManifestDeps.rules = async () => RULES;
   cueManifestDeps.states = async () => {
     stateReads++;
-    return { ok: true, checkedAt: NOW, states: STATES } as never;
+    // A MAP of whole CueStateRows, which is what cueStates.read answers with —
+    // see CueStatesAnswer.states. The record above is this file's shorthand for
+    // the four fields the manifest reads; the rest are filled in here so the
+    // stub returns the real type rather than a cast. (It used to be `as never`,
+    // which is why the record survived the type change silently.)
+    return {
+      ok: true,
+      checkedAt: NOW,
+      states: new Map<string, CueStateRow>(
+        Object.entries(STATES).map(([base, row]) => [
+          base,
+          { on: `${base}_on`, off: `${base}_off`, variable: `${base}_state`, value: null, ...row },
+        ]),
+      ),
+    };
   };
 });
 

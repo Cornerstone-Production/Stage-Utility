@@ -64,7 +64,12 @@ beforeEach(() => {
   cueLiveDeps.subscribers = () => (subscribed ? 2 : 0);
   cueLiveDeps.read = async () => {
     reads++;
-    return { states: STATES };
+    // The producer's contract is a MAP — the key is a pair's base out of the
+    // rules file, and every reader of it looks a key up dynamically. The record
+    // above is only this file's shorthand for writing one; `Object.entries`
+    // yields own enumerable keys only, so a base of `constructor` arrives as a
+    // real entry and not as something off Object.prototype.
+    return { states: new Map(Object.entries(STATES)) };
   };
   cueLiveDeps.setInterval = (fn, ms) => {
     tick = fn;
@@ -224,6 +229,55 @@ describe("the rules change", () => {
     cueLive.rulesChanged();
     await poll();
     assert.deepEqual(events.at(-1), { type: "state", id: "projectors", state: "on" });
+    await stopEverything();
+  });
+});
+
+// ── A pair that goes away and comes back ─────────────────────────────────────
+//
+// Only CHANGES go out, so the producer keeps the last state it pushed per pair.
+// A pair that has gone away has to be forgotten, or re-adding it later pushes
+// nothing until its state changes — and an integration sits on `unknown` until
+// somebody walks over and turns the device off at the wall.
+//
+// The prune was `if (!(id in answer.states))`, and `in` walks the PROTOTYPE
+// CHAIN. Of every key on Object.prototype exactly one is a legal cue name under
+// CUE_NAME_RE — `constructor` — so `constructor_on`/`constructor_off` is a pair
+// the engine accepts today, and `"constructor" in {}` is true while
+// `Object.hasOwn` is false. That one base was never pruned.
+describe("a pair that goes away and comes back", () => {
+  const cycle = async (base: string) => {
+    STATES = { [base]: { state: "on" } };
+    subscribed = true;
+    cueLive.subscriptionsChanged();
+    await settle();
+    // Gone.
+    STATES = {};
+    await poll();
+    // Back, in the same state it left in.
+    STATES = { [base]: { state: "on" } };
+    await poll();
+  };
+
+  test("an ordinary base is re-stated", async () => {
+    await cycle("projectors");
+    assert.deepEqual(events, [
+      { type: "state", id: "projectors", state: "on" },
+      { type: "state", id: "projectors", state: "on" },
+    ]);
+    await stopEverything();
+  });
+
+  test("and so is `constructor`, which the prototype chain used to keep alive", async () => {
+    await cycle("constructor");
+    assert.deepEqual(
+      events,
+      [
+        { type: "state", id: "constructor", state: "on" },
+        { type: "state", id: "constructor", state: "on" },
+      ],
+      "the re-created pair was never re-stated: its key survived the prune",
+    );
     await stopEverything();
   });
 });

@@ -155,7 +155,7 @@ export async function cueManifest(): Promise<CueManifest> {
       hidden += 1;
       continue;
     }
-    const row = states?.states[pair.base];
+    const row = states?.states.get(pair.base);
     const entry: ManifestSwitch = {
       id: pair.base,
       name: spokenName(pair.on, pair.base),

@@ -128,8 +128,47 @@ export interface CueStatesAnswer {
   ok: boolean;
   /** When these values were read, ISO. Home Assistant reads it as the sensor's state. */
   checkedAt: string;
-  /** Keyed by the pair's base — the Home Assistant switch id. */
+  /**
+   * Keyed by the pair's base — the Home Assistant switch id.
+   *
+   * A MAP, and it stays one all the way to the route, because the key is a cue
+   * name out of the rules file and every reader of this object looks a key up
+   * dynamically. On a plain record `states["constructor"]` is
+   * `Object.prototype.constructor` — a truthy function, from the prototype
+   * chain, for a pair that is not in the answer at all — and `constructor_on`
+   * / `constructor_off` is a name the engine accepts today. `__proto__` is
+   * worse on the way in: `record["__proto__"] = row` sets the prototype rather
+   * than adding a property, so the pair vanishes and every object in the
+   * process gains its fields.
+   *
+   * The Map is what makes that unrepresentable rather than something four
+   * call sites each have to remember. `cueStatesBody` is the one place it
+   * becomes a plain object, on its way out as JSON.
+   */
+  states: ReadonlyMap<string, CueStateRow>;
+}
+
+/** `CueStatesAnswer` as `GET /api/cues/states` serves it. */
+export interface CueStatesBody {
+  ok: boolean;
+  checkedAt: string;
   states: Record<string, CueStateRow>;
+}
+
+/**
+ * The answer as JSON — the ONE place the Map becomes a plain object.
+ *
+ * `Object.fromEntries` defines own properties, so a base of `__proto__` is a
+ * key in the document rather than a prototype swap, and a base of
+ * `constructor` shadows the inherited one. The renderer reads it back with
+ * `Object.hasOwn` for the same reason; see automation-section.tsx.
+ */
+export function cueStatesBody(answer: CueStatesAnswer): CueStatesBody {
+  return {
+    ok: answer.ok,
+    checkedAt: answer.checkedAt,
+    states: Object.fromEntries(answer.states),
+  };
 }
 
 /**
@@ -244,7 +283,7 @@ class CueStates {
   noteCommand(command: CueCommand): void {
     // Before the invalidate: what the variable last read is what the settle
     // re-read compares against to notice the device moving.
-    const last = this.cached?.answer.states[command.base]?.value ?? null;
+    const last = this.cached?.answer.states.get(command.base)?.value ?? null;
     this.commands.set(command.base, { want: command.want, at: cueStatesDeps.now() });
     this.invalidate();
     this.startSettling(command, last);
@@ -287,10 +326,10 @@ class CueStates {
   private withSettling(answer: CueStatesAnswer): CueStatesAnswer {
     const now = cueStatesDeps.now();
     if (![...this.commands.keys()].some((base) => this.commandedWithin(base, now))) return answer;
-    const states: Record<string, CueStateRow> = {};
-    for (const [base, row] of Object.entries(answer.states)) {
+    const states = new Map<string, CueStateRow>();
+    for (const [base, row] of answer.states) {
       const command = this.commandedWithin(base, now);
-      states[base] = command ? { ...row, settling: true, commanded: command.want } : row;
+      states.set(base, command ? { ...row, settling: true, commanded: command.want } : row);
     }
     return { ...answer, states };
   }
@@ -392,11 +431,7 @@ class CueStates {
       }),
     );
 
-    // A MAP, not a plain record. The key is the pair's base, which comes from a
-    // cue name in the rules file — and `record["__proto__"] = row` does not add
-    // a property, it replaces the object's prototype, so the pair vanishes from
-    // the answer and every object in the process gains its fields. A Map holds
-    // any string, and Object.fromEntries below defines an own property for it.
+    // A MAP, and the one this answer carries — see CueStatesAnswer.states.
     const states = new Map<string, CueStateRow>();
     for (const pair of pairs) {
       const binding = pair.binding!;
@@ -430,7 +465,7 @@ class CueStates {
     const answer: CueStatesAnswer = {
       ok: [...states.values()].every((s) => s.state !== "unknown"),
       checkedAt: new Date(cueStatesDeps.now()).toISOString(),
-      states: Object.fromEntries(states),
+      states,
     };
     this.cached = { at: cueStatesDeps.now(), answer };
     return answer;

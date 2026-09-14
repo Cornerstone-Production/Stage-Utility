@@ -68,7 +68,7 @@ export const cueLiveDeps: {
   subscribers: () => number;
   watched: () => boolean;
   /** Drop the cached answer and read Companion. The poll IS the refresh. */
-  read: () => Promise<{ states: Record<string, LiveRow> }>;
+  read: () => Promise<{ states: ReadonlyMap<string, LiveRow> }>;
   setInterval: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearInterval: (t: NodeJS.Timeout) => void;
   emit: (event: CuesEvent) => void;
@@ -159,7 +159,7 @@ class CueLive {
     this.reading = true;
     try {
       const answer = await cueLiveDeps.read();
-      for (const [id, row] of Object.entries(answer.states)) {
+      for (const [id, row] of answer.states) {
         // The REASON is part of the comparison: a pair that goes from
         // unreachable to "value matches neither" is still unknown, and an
         // integration showing why has been told the wrong why until something
@@ -187,7 +187,16 @@ class CueLive {
       }
       // A pair that has gone away stops being compared against, or re-adding it
       // later would push nothing until its state changed.
-      for (const id of this.last.keys()) if (!(id in answer.states)) this.last.delete(id);
+      //
+      // `answer.states` is a Map for this line as much as for the reads above.
+      // It was a plain object and this was `id in answer.states`, which walks
+      // the PROTOTYPE CHAIN: of every key on Object.prototype exactly one is a
+      // legal cue name, and `constructor_on`/`constructor_off` is a pair the
+      // engine accepts today. `"constructor" in {}` is true, so that base was
+      // never pruned — delete the pair, re-create it, and `last` still held the
+      // stale key, so no `state` event went out and the entity read unknown
+      // until the device physically changed.
+      for (const id of this.last.keys()) if (!answer.states.has(id)) this.last.delete(id);
     } catch (err) {
       // NOT swallowed: cueStates.read is documented as never throwing, so this
       // is the case where that contract broke. Logged and the poll carries on,
