@@ -188,9 +188,12 @@ export function summaryLine(descriptor: IntegrationDescriptor, state: Integratio
  * initialConfig nothing seeds one — integration-number-fields.test.tsx asserts
  * that over every field.
  *
- * EXPORTED for integration-number-fields.test.tsx, which runs it over the real
- * descriptors beside initialConfig — the two together are what an operator
- * actually sees, and a guard over either one alone missed the bug.
+ * EXPORTED for integration-number-fields.test.tsx, which runs it beside
+ * initialConfig over INTEGRATION_DESCRIPTOR_FIXTURE — the renderer's copy of the
+ * shipped descriptors, pinned field-for-field by
+ * main/services/integration-descriptor-fixture.test.ts. The two together are
+ * what an operator actually sees, and a guard over either one alone missed the
+ * bug.
  */
 export function numberFieldValue(field: ConfigField, value: unknown): number | null {
   const n = typeof value === "number" ? value : Number(value);
@@ -212,9 +215,10 @@ function fmtSynced(iso: string | null | undefined): string {
 /** The form's starting values for an integration — the saved config, with password
  *  fields masked and unset numbers prefilled from their default/placeholder.
  *  Hoisted out of the component so Discard can rebuild exactly the same thing.
- *  EXPORTED for integration-number-fields.test.tsx, which runs it over the real
- *  descriptors — a guard that reimplemented this loop would go green on a bug
- *  living in it. */
+ *  EXPORTED for integration-number-fields.test.tsx, which runs it over
+ *  INTEGRATION_DESCRIPTOR_FIXTURE (the renderer's copy, pinned to the shipped
+ *  descriptors by main/services/integration-descriptor-fixture.test.ts) — a
+ *  guard that reimplemented this loop would go green on a bug living in it. */
 export function initialConfig(
   descriptor: IntegrationDescriptor,
   state: IntegrationState,

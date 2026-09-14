@@ -631,9 +631,15 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
       // getRossTslConfig already reads it that way (anything not > 0 is null).
       unsetHint: "Not set",
       // Same bounds as Companion's own port field. getRossTslConfig discards
-      // anything <= 0 silently, so without a floor the field could hold a number
-      // that reads as configured on the card and connects to nothing — which a
-      // stepper press on a blank field can now reach in one click.
+      // anything not > 0 silently, while configuredFor() calls any config value
+      // that is neither "" nor null "the operator set this up" — so without a
+      // floor the field could hold a number that reads as configured on the card
+      // and connects to nothing.
+      //
+      // The gesture that reached it is the MINUS press, not the plus: from the
+      // 0 this field used to render, `-` stepped to -1, and typing 0 or a
+      // negative did the same. `+` gave 1 both before and after this bound, so
+      // the commit that added it named the wrong click.
       min: 1,
       max: 65535,
     },

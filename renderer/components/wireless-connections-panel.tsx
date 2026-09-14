@@ -280,6 +280,35 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                   />
                 ) : field.type === "number" ? (
                   <NumberInput
+                    // THE SECOND OF TWO copies of this render shape — the other
+                    // is integrations-panel.tsx, which now spells it
+                    // `numberFieldValue(field, value)` so that a field declaring
+                    // `unsetHint` can render blank instead of a 0 the operator
+                    // reads as a setting. This copy is deliberately left alone:
+                    // not one of the 14 number fields across main/providers/
+                    // means "unset", they are ports and channel counts, and a
+                    // wireless connection with no port is not configured rather
+                    // than configured-to-a-default.
+                    //
+                    // What is still true here: an ABSENT value renders 0, and
+                    // that 0 looks like a setting. What used to make it worse
+                    // was the blur — NumberInput clamped and committed whatever
+                    // the box held on the way out, and `onCommit` below writes
+                    // straight to the server with no Save button in front of it.
+                    // That is fixed in NumberInput itself (see the `edited` ref:
+                    // only a value typed in this edit is clamped), not here, so
+                    // adding a `min` to a provider field no longer turns a click
+                    // in and a click out into a stored number.
+                    //
+                    // Two things to know before adding one anyway. A stepper
+                    // press from the displayed 0 DOES commit `min` in one click,
+                    // because a stepper is a real gesture and 0 is a real value
+                    // to step from. And `onCommit` below ignores the number it
+                    // is handed and re-reads `localConfig[key]`, which React has
+                    // not updated yet inside the same event — so the write that
+                    // press triggers carries the PREVIOUS value, not the stepped
+                    // one. Give the field an `unsetHint` path instead if blank
+                    // ever needs to be a real answer here.
                     value={typeof value === "number" ? value : Number(value) || 0}
                     // The number, not String(n): the next blur writes this
                     // straight into the connection's config, and a stringified
