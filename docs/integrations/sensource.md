@@ -59,8 +59,8 @@ ID** and **API Client Secret** (leave the static token blank in the normal case)
 set the **Poll interval**, enable it, and **Test connection** (authenticates and
 reports how many locations are visible). Optionally pick a **location** and/or
 specific **zones** to scope the count — zones are the reliable scoping mechanism.
-The location/zone selection is saved as non-secret config; the client secret and
-static token are stored encrypted.
+The location/zone selection is saved as non-secret config; the client secret, the
+static token and the SafeSpace space ID are stored encrypted.
 
 **On a layout:** add object → **SenSource → people-counter / people-graph /
 people-panel**.
@@ -89,19 +89,40 @@ at 60 seconds: a reading older than that is no fresher than Vea's, so a longer
 interval would leave the count on Vea for most of every cycle. To read SafeSpace
 less often than that, clear the space ID and let Vea answer everything.
 
-**Treat the space ID as a credential.** The endpoint has no key, no token and no
-account check — the ID is the whole of its authority, so anyone who has it can
-read your occupancy from anywhere.
+**The space ID is a credential and is stored as one.** The endpoint has no key,
+no token and no account check — the ID is the whole of its authority, so anyone
+who has it can read your occupancy from anywhere.
 
-Stage keeps it out of every log line: the one place that builds a message
+So it is held in the encrypted secret store beside the Vea client secret, not in
+`settings.json`. The field on the card is masked like a password, and the ID is
+**not carried in a config snapshot** (Settings → Advanced → Data → Config
+snapshots, or the automatic backups) — the same rule every API key and password
+follows. A box upgrading from a build that stored it as ordinary config moves it
+into the secret store on the next start and says so on `/log`.
+
+Stage also keeps it out of every log line: the one place that builds a message
 containing the URL redacts it first, so a failure on `/log` reads `<space id>`
 rather than the value.
 
-It is not stored with the Vea client secret. It is ordinary non-encrypted
-integration config, which means it rides along in a **config snapshot** (Settings → Advanced → Data → Config snapshots, and in the automatic
-backups) — a bundle otherwise presented as safe to keep on a drive or hand to
-somebody. Handle a snapshot taken from a site with SafeSpace configured the way
-you would handle the ID itself.
+**After restoring a snapshot, SafeSpace asks for its ID back.** The snapshot
+carries the fact that SafeSpace was switched on, and deliberately not the ID. A
+restored box therefore knows the difference between a site that never had
+SafeSpace and one whose ID did not travel, and it says so in three places rather
+than quietly reverting to Vea:
+
+- a `[sensource]` line on `/log`, naming where to fix it;
+- the SenSource row in Settings → Integrations, whose connection line reads
+  `… — SafeSpace is on but has no space ID`;
+- a notice on the SenSource card itself, above the location and zone pickers.
+
+The count keeps coming from Vea throughout — nothing goes blank — which is
+exactly why it is said out loud. Paste the ID back in, or press **Turn SafeSpace
+off** in that notice to switch it off for good; either way `/log` records which.
+
+Saving the card does not switch SafeSpace off. With no ID stored the field is
+empty on every save, so an ordinary edit — the Vea poll interval, say — would
+otherwise take the reminder with it. Clearing a field that *does* hold an ID
+still switches SafeSpace off, because that deletes the credential.
 
 **What the reading does when it goes wrong.**
 

@@ -73,12 +73,29 @@ const IMAGE_DIRS = [BRANDING_IMAGE_DIR, "layout-images"] as const;
  * empty token as unpinned and pins the first secret the screen presents. So a
  * restored binding still works -- the display re-pins on its next enrolment --
  * while the bundle carries nothing worth stealing.
+ *
+ * ONLY FOR AN ARRAY-SHAPED STORE, and only for fields one row deep. This is not
+ * the mechanism for a credential nested inside settings.json -- an entry for an
+ * object-shaped file used to be accepted and do NOTHING, which is a redaction
+ * rule that reads like a fix and is not one. It is also the wrong shape for a
+ * credential outright: it empties the value at EXPORT time, so a restore puts
+ * back "", which for a kiosk token means "unpinned" and for anything else means
+ * the feature silently switched off. A credential belongs in secrets.bin, which
+ * a snapshot does not carry at all -- see SECRET_KEYS in integration-manager.ts.
  */
 const REDACTED_FIELDS: Record<string, readonly string[]> = {
   "kiosk-devices.json": ["token"],
 };
 
-/** A store's contents with its secret fields emptied, ready to leave the machine. */
+/**
+ * A store's contents with its secret fields emptied, ready to leave the machine.
+ *
+ * A shape it cannot walk passes through UNCHANGED and is not an error -- see
+ * "does not choke on an unexpected shape" in snapshot-redaction.test.ts, which
+ * is the deliberate decision that redaction must never be the thing that breaks
+ * an export. That is also why this is not a mechanism a credential may rely on:
+ * see the note on REDACTED_FIELDS above.
+ */
 export function redactForExport(filename: string, value: unknown): unknown {
   const fields = REDACTED_FIELDS[filename];
   if (!fields || !Array.isArray(value)) return value;

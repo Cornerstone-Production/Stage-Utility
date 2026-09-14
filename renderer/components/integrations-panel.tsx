@@ -1,3 +1,4 @@
+import { FORM_MASK, isMask } from "@main/services/mask";
 import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
@@ -59,11 +60,6 @@ function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
 }
 
-const MASKED_PASSWORD = "••••••••";
-
-function isPasswordMasked(value: string): boolean {
-  return /^•+$/.test(value);
-}
 
 /**
  * Cards that Getting Started can point at, by integration id.
@@ -198,7 +194,7 @@ function initialConfig(
   for (const field of descriptor.configSchema) {
     const raw = state.config[field.key];
     if (field.type === "password" && typeof raw === "string" && raw !== "") {
-      out[field.key] = MASKED_PASSWORD;
+      out[field.key] = FORM_MASK;
     } else if (field.type === "number") {
       // Unset numeric fields (e.g. an API port) prefill the integration's
       // default — field.default if declared, else the numeric placeholder
@@ -475,7 +471,7 @@ export function IntegrationDialog({
       const config: Record<string, unknown> = {};
       for (const field of descriptor.configSchema) {
         const v = localConfig[field.key];
-        if (field.type === "password" && typeof v === "string" && isPasswordMasked(v)) {
+        if (field.type === "password" && typeof v === "string" && isMask(v)) {
           // User hasn't changed this password — omit so the backend keeps the original
           continue;
         }

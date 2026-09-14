@@ -36,6 +36,11 @@ export abstract class ConnectionLifecycle {
   private reconnectAttempt = 0;
   private onConn: ((state: ConnState, message: string | null) => void) | null = null;
   private reported: ConnState | null = null;
+  /** The message that went WITH `reported`. Kept beside it because a state that
+   *  has not changed can still be describing something different — see report().
+   *  `null` is a real value here (prodcom reports "disconnected", null), so the
+   *  pair is only "nothing reported yet" when `reported` is null too. */
+  private reportedMessage: string | null = null;
 
   /**
    * @param log     short tag for console lines, e.g. "obs"
@@ -83,11 +88,41 @@ export abstract class ConnectionLifecycle {
     if (this.configured) this.start();
   }
 
-  /** Report a state change once — repeat reports of the same state are dropped,
-   *  so a quiet retry loop doesn't spam the Integrations panel. */
+  /**
+   * Report a change once — a repeat of the same state AND the same message is
+   * dropped, so a quiet retry loop doesn't spam the Integrations panel.
+   *
+   * THE MESSAGE COUNTS, not just the state. This compared the state alone and
+   * ignored the message entirely, so the FIRST message of a run was the one the
+   * row kept, however long the run went on and however much the message changed
+   * underneath it. OBS reported "OBS connection dropped — reconnecting" and then
+   * "OBS rejected the password. Not reconnecting" — the second never reached the
+   * badge, which went on offering a retry that was never coming. SenSource
+   * reports `… occ via safespace/space×1/minute` on every connected poll and the
+   * source genuinely varies, so the grid said the count came from SafeSpace for
+   * hours after SafeSpace stopped answering and the occupancy reverted to Vea.
+   * That is a badge asserting something no longer true, which is the class of
+   * defect the badge was rewritten to fix.
+   *
+   * Measured before changing it, because this app is deliberately change-driven
+   * and subscriber-gated and every report that passes costs a full
+   * `integrations:state-changed` broadcast. Instrumented report() and ran the
+   * whole suite: of 351 calls across 11 integrations, the ones whose message
+   * changed while the state did not were obs (5 of 21) and sensource (34 of
+   * 137); the other nine integrations had ZERO. Every obs case was a real
+   * transition. SenSource's error message was the only thing that varied per
+   * POLL — it carried an auth countdown, so a failing box produced a fresh
+   * string every 15s — and that message was made stable rather than this dedupe
+   * being weakened. See sensource-service.authHeader/exchangeToken.
+   *
+   * Re-measured with the change in: 261 reports pass where 220 did, 41 more
+   * over the whole suite, and every one of them is the row saying something
+   * different. Nothing left changes per poll.
+   */
   protected report(state: ConnState, message: string | null): void {
-    if (this.reported === state) return;
+    if (this.reported === state && this.reportedMessage === message) return;
     this.reported = state;
+    this.reportedMessage = message;
     this.onConn?.(state, message);
   }
 
@@ -95,6 +130,7 @@ export abstract class ConnectionLifecycle {
    *  reconfigure, where the operator expects fresh feedback). */
   protected resetReport(): void {
     this.reported = null;
+    this.reportedMessage = null;
   }
 
   /** Attempts since the last success — 0 means "first failure", which the

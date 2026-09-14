@@ -247,13 +247,26 @@ export interface SenSourceConfig {
   /** Restrict to specific zones (empty = all zones for the location). */
   zoneIds: string[];
   /**
-   * SafeSpace space id, or null when the operator has not filled one in.
+   * SafeSpace space id, or null when there is not one stored.
    *
-   * Null is the normal state and NOT an error: the SafeSpace section simply does
-   * nothing until an id is entered. A BEARER CAPABILITY — anyone holding it can
-   * read the occupancy — so it never reaches a log line. See safespace-client.ts.
+   * A BEARER CAPABILITY — anyone holding it can read the occupancy — so it lives
+   * in secrets.bin, never reaches a log line, and is NOT carried in a config
+   * snapshot. See safespace-client.ts.
+   *
+   * Null on its own does not say why. Pair it with `safeSpaceEnabled`.
    */
   safeSpaceId: string | null;
+  /**
+   * Has the operator switched the SafeSpace half on?
+   *
+   * The two ways to have no id are completely different situations and the
+   * difference has to survive: OFF (`false`) is the ordinary case and says
+   * nothing, while ON with no id means the id did not travel — the usual cause
+   * being a config snapshot restored onto another box, since the snapshot
+   * deliberately leaves the credential behind. Falling back to Vea is the right
+   * behaviour in both. Doing it SILENTLY in the second is the bug.
+   */
+  safeSpaceEnabled: boolean;
   /** How often to read the SafeSpace value, seconds. Independent of the Vea
    *  interval: the whole point of the reading is that it is fresher. */
   safeSpacePollSeconds: number;
@@ -711,6 +724,19 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     // Anything already in flight belongs to the configuration it was issued
     // under, and stops here.
     this.pollEpoch++;
+    // Said at CONFIGURE, not at start(): start() returns early unless the Vea
+    // credentials are present, and this is the one state where SafeSpace is
+    // broken while the integration as a whole is fine. An operator who restores
+    // a snapshot gets a line naming the fix rather than an occupancy that is
+    // quietly a minute and a half stale.
+    if (this.safeSpaceState() === "no-id") {
+      console.warn(
+        "[sensource] SafeSpace is switched on but no space ID is stored — occupancy is coming " +
+          "from Vea. A config snapshot deliberately does not carry the ID; re-enter it in " +
+          "Settings → Integrations → SenSource Vea, or save that card with the field left empty " +
+          "to turn SafeSpace off.",
+      );
+    }
     this.restart();
   }
 
@@ -743,6 +769,38 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   }
 
   // ── SafeSpace ─────────────────────────────────────────────────────────────
+
+  /**
+   * What the SafeSpace half of this integration is doing.
+   *
+   *   "off"   — the operator has not switched it on. Vea answers everything, and
+   *             that is the ordinary state, not a fault. Nothing is said.
+   *   "on"    — switched on with an id; the reading runs.
+   *   "no-id" — switched on and the id is GONE. The usual cause is a config
+   *             snapshot restored onto another box: the snapshot carries the
+   *             marker and deliberately leaves the credential behind.
+   *
+   * "no-id" exists because the alternative is the failure this is guarding —
+   * falling back to Vea, which is CORRECT, while looking exactly like a site
+   * that never had SafeSpace. The count still comes through, so nothing else in
+   * the app has any reason to complain.
+   */
+  private safeSpaceState(): "off" | "on" | "no-id" {
+    if (this.cfg?.safeSpaceId) return "on";
+    return this.cfg?.safeSpaceEnabled ? "no-id" : "off";
+  }
+
+  /**
+   * What the integration row says about SafeSpace, appended to its message.
+   *
+   * Empty in every state but "no-id" — a row that is working has nothing to add,
+   * and a row saying "SafeSpace off" on sixteen sites that never had it is noise.
+   */
+  private safeSpaceNote(): string {
+    return this.safeSpaceState() === "no-id"
+      ? " — SafeSpace is on but has no space ID; re-enter it in Settings → Integrations → SenSource Vea"
+      : "";
+  }
 
   /** The SafeSpace interval in seconds, floored. */
   private safeSpaceSeconds(): number {
@@ -910,15 +968,20 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   }
 
   /**
-   * What Test connection says about SafeSpace, or "" when no space id is set.
+   * What Test connection says about SafeSpace, or "" when it is switched off.
    *
    * Never fails the test. Vea IS the integration and SafeSpace layers one field
-   * onto it, so a wrong space id is worth reporting and is not worth calling the
-   * whole connection broken. Uses the live client, so a Test pressed while the
-   * poller is holding off on the quota says so rather than spending it.
+   * onto it, so a wrong space id — or a missing one — is worth reporting and is
+   * not worth calling the whole connection broken. Uses the live client, so a
+   * Test pressed while the poller is holding off on the quota says so rather
+   * than spending it.
    */
   private async testSafeSpace(cfg: SenSourceConfig): Promise<string> {
     const id = cfg.safeSpaceId;
+    // Switched on with no id. Test is where an operator looks first after a
+    // restore, and "Authenticated — 3 location(s) visible" on its own would tell
+    // them everything is fine while the occupancy quietly came from Vea.
+    if (!id && cfg.safeSpaceEnabled) return "; SafeSpace is on but has no space ID — re-enter it";
     if (!id) return "";
     const reading = await this.safeSpace.read(id);
     if (reading.kind === "ok") return `; SafeSpace reading ${reading.occupancy}`;
@@ -1247,7 +1310,14 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     // lets the base class's back-off do its job.
     const wait = this.exchangeWaitMs();
     if (wait > 0) {
-      throw new Error(`Auth deferred — ${Math.ceil(wait / 1000)}s before the next token request`);
+      // NO COUNTDOWN IN THE MESSAGE. This read "Auth deferred — 30s before the
+      // next token request", and the number is recomputed per poll — so while
+      // auth stayed blocked the badge got a brand-new string every 15 seconds,
+      // and report() (which compares the message now, not just the state) would
+      // broadcast the whole integration state map each time. The number is not
+      // lost: the 429 handler below logs the wait it set, and the only other
+      // source of a wait here is MIN_EXCHANGE_GAP_MS, a constant.
+      throw new Error("Auth deferred — waiting before the next token request");
     }
 
     this.lastExchangeAt = Date.now();
@@ -1292,7 +1362,11 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
             rateLimited.note,
         );
       }
-      throw new Error(`Auth rate-limited (HTTP 429) — retrying in ${Math.round(waitMs / 1000)}s`);
+      // Same reason as "Auth deferred" above: `waitMs` follows Retry-After, so
+      // it can differ per response and the badge would change with it. The
+      // duration is on the line just logged, which is where an operator reading
+      // /log at 9am wants it anyway.
+      throw new Error("Auth rate-limited (HTTP 429)");
     }
     if (!res.ok) {
       // "Check client id/secret" is advice, and it is only true for a refusal.
@@ -1732,7 +1806,15 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       this.veaOccupancy = veaOccupancy;
 
       const scope = allow ? `${reduced.zones.length} of selected zone(s)` : `${reduced.zones.length} zone(s)`;
-      this.report("connected", `${scope}, occ via ${occSource}`);
+      // The note is empty unless SafeSpace is on with no id — see safeSpaceNote.
+      // report() drops a repeat of the same state AND the same message, so an
+      // unchanged occupancy source is silent and a CHANGED one reaches the row
+      // on the next poll. That matters because `occSource` genuinely varies:
+      // the `safespace/` prefix is only there while a fresh SafeSpace reading
+      // exists, and the row used to keep whichever wording the first connected
+      // poll happened to produce. The SenSource panel is still the surface that
+      // keeps saying it, because this one goes quiet once it stops changing.
+      this.report("connected", `${scope}, occ via ${occSource}${this.safeSpaceNote()}`);
       // Append a building-total sample to the rolling trend buffer, at the
       // buffer's own resolution rather than the poll's — see HISTORY_MIN_GAP_MS.
       this.appendHistory(dto);

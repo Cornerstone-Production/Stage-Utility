@@ -82,6 +82,7 @@ const CFG: SenSourceConfig = {
   locationId: null,
   zoneIds: [],
   safeSpaceId: SPACE_ID,
+  safeSpaceEnabled: true,
   safeSpacePollSeconds: 10,
 };
 
@@ -100,6 +101,9 @@ const VEA_OCCUPANCY = 1510;
 let requests: string[] = [];
 let emitted: PeopleCountDTO[] = [];
 let logs: string[] = [];
+/** What the integration row was told — the text the Integrations grid renders
+ *  through ConnectionBadge, which is where an operator meets this. */
+let reports: { state: string; message: string | null }[] = [];
 
 const realFetch = globalThis.fetch;
 const realNow = Date.now;
@@ -173,15 +177,19 @@ function json(body: unknown): Response {
  * `restart` is stubbed at module scope above, so this starts no poll.
  */
 function resetService(cfg: SenSourceConfig = CFG): void {
+  // Cleared BEFORE configure(), not after. configure() itself writes a line when
+  // SafeSpace is switched on with no id, and clearing afterwards erased the one
+  // thing the guard for that state has to read.
+  requests = [];
+  emitted = [];
+  logs = [];
+  reports = [];
   sensourceService.configure({ ...cfg });
   svc.running = true;
   // Not configure()'s to reset: a mint counter is not configuration, and `last`
   // is what has been published rather than what was asked for.
   svc.tokenGen = 0;
   svc.last = { connected: false, updatedAt: null, total: { attendance: null, occupancy: null }, zones: [] };
-  requests = [];
-  emitted = [];
-  logs = [];
 }
 
 const poll = (): Promise<void> => svc.connect();
@@ -196,6 +204,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     svc.scheduleReconnect = () => {};
     svc.scheduleSafeSpaceIn = () => {};
     svc.restart = () => {};
+    sensourceService.setConnectionListener((state, message) => reports.push({ state, message }));
     resetService();
     svc.emit = (dto: PeopleCountDTO) => {
       emitted.push(dto);
@@ -235,7 +244,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
   });
 
   it("does nothing at all until a space id is filled in, and that is not an error", async () => {
-    resetService({ ...CFG, safeSpaceId: null });
+    resetService({ ...CFG, safeSpaceId: null, safeSpaceEnabled: false });
     stubFetch();
 
     await readSafeSpace();
@@ -253,6 +262,115 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
       [],
       "a blank space id was reported as a problem",
     );
+  });
+
+  describe("switched on with no space id", () => {
+    // THE STATE A RESTORE LANDS IN. The id is a bearer capability and lives in
+    // secrets.bin, which a config snapshot deliberately does not carry — so a
+    // bundle restored onto another box brings the SafeSpace marker and not the
+    // id. Falling back to Vea is CORRECT: the count still comes through and
+    // nothing else in the app has any reason to complain. Doing it silently is
+    // the bug, because the site then runs on a number a minute and a half older
+    // than the one it was set up for, with a green badge over it.
+    const ORPHANED: SenSourceConfig = { ...CFG, safeSpaceId: null, safeSpaceEnabled: true };
+
+    it("says so on the log, naming where to fix it", async () => {
+      resetService(ORPHANED);
+      const said = logs.filter((l) => l.includes("SafeSpace is switched on but no space ID"));
+      assert.equal(said.length, 1, `expected one line about the missing id, got ${said.length}`);
+      assert.match(said[0]!, /Settings → Integrations → SenSource Vea/, "the line does not say how to fix it");
+    });
+
+    it("says so on the integration row, which is what the grid renders", async () => {
+      resetService(ORPHANED);
+      stubFetch();
+      await poll();
+      const connected = reports.filter((r) => r.state === "connected");
+      assert.equal(connected.length, 1, "the row was never told the poll succeeded");
+      assert.match(
+        connected[0]!.message ?? "",
+        /SafeSpace is on but has no space ID/,
+        `the row said "${connected[0]!.message}" — an operator reading the grid sees nothing wrong`,
+      );
+    });
+
+    it("says so on Test connection, without failing it", async () => {
+      resetService(ORPHANED);
+      stubFetch();
+      const result = await sensourceService.test({ ...ORPHANED });
+      assert.equal(result.ok, true, "a missing SafeSpace id failed the whole Vea connection test");
+      assert.match(result.message ?? "", /SafeSpace is on but has no space ID/, result.message);
+    });
+
+    it("still publishes Vea's occupancy, and asks SafeSpace for nothing", async () => {
+      resetService(ORPHANED);
+      stubFetch();
+      await readSafeSpace();
+      await poll();
+      assert.equal(safeSpaceRequests().length, 0, "a box with no id still called SafeSpace");
+      assert.equal(published().total.occupancy, VEA_OCCUPANCY, "the fallback to Vea did not happen");
+      assert.equal(published().total.occupancySource, "vea");
+    });
+
+    it("switched OFF is silent — the ordinary case must not grow a warning", async () => {
+      // Sixteen sites that never had SafeSpace must not read a line about it.
+      resetService({ ...CFG, safeSpaceId: null, safeSpaceEnabled: false });
+      stubFetch();
+      await poll();
+      assert.deepEqual(logs.filter((l) => l.includes("SafeSpace")), []);
+      const connected = reports.filter((r) => r.state === "connected");
+      assert.doesNotMatch(connected.at(-1)?.message ?? "", /SafeSpace/);
+    });
+
+    it("with an id present, nothing extra is said either", async () => {
+      resetService();
+      stubFetch({ safeSpace: () => "417" });
+      await readSafeSpace();
+      await poll();
+      const connected = reports.filter((r) => r.state === "connected");
+      assert.doesNotMatch(
+        connected.at(-1)?.message ?? "",
+        /has no space ID/,
+        "a working SafeSpace was reported as broken",
+      );
+    });
+  });
+
+  describe("the row keeps up with where the occupancy is coming from", () => {
+    // GUARD. ConnectionBadge renders a non-error message now, and this one names
+    // the SOURCE: `occ via safespace/space×1/minute` or `occ via space×1/minute`.
+    // report() used to drop a repeat of the same STATE and ignore the message, so
+    // the first connected poll's wording was the one the grid kept — for hours
+    // after SafeSpace stopped answering and the occupancy went back to Vea. A
+    // badge asserting something no longer true is the class of defect the badge
+    // was rewritten to fix, and before it rendered this string the staleness was
+    // harmless.
+    it("says safespace while SafeSpace answers, and stops saying it when it does not", async () => {
+      resetService();
+      let alive = true;
+      stubFetch({ safeSpace: () => (alive ? "417" : null) });
+
+      await readSafeSpace();
+      await poll();
+      const first = reports.filter((r) => r.state === "connected").at(-1)?.message ?? "";
+      assert.match(first, /occ via safespace\//, `the row said "${first}" while SafeSpace was answering`);
+
+      // SafeSpace goes quiet and its last reading ages out; the occupancy
+      // reverts to Vea and the DTO says so.
+      alive = false;
+      clock += 10 * 60_000;
+      await readSafeSpace();
+      await poll();
+      assert.equal(published().total.occupancySource, "vea", "the fallback to Vea never happened");
+
+      const latest = reports.filter((r) => r.state === "connected").at(-1)?.message ?? "";
+      assert.doesNotMatch(
+        latest,
+        /safespace/,
+        `the row still says "${latest}". The occupancy is Vea's, the badge is green, and the ` +
+          "one line naming the source is the one it was told hours ago",
+      );
+    });
   });
 
   it("reads an EMPTY response as unknown, never as an empty building", async () => {
@@ -441,8 +559,10 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
       `start() did not say it was reading SafeSpace:\n${logs.join("\n")}`,
     );
 
-    // ...and with no ID it is silent and sends nothing.
-    resetService({ ...CFG, safeSpaceId: null });
+    // ...and switched OFF it is silent and sends nothing. (Switched ON with no
+    // id is a different state and is deliberately NOT silent — see its own
+    // describe block above.)
+    resetService({ ...CFG, safeSpaceId: null, safeSpaceEnabled: false });
     stubFetch();
     svc.running = false;
     svc.start();
@@ -533,12 +653,12 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     assert.equal(bad.ok, true, "a wrong space ID failed the whole Vea connection test");
     assert.match(bad.message ?? "", /SafeSpace did not answer \(HTTP 404\)/, bad.message);
 
-    // ...and with no ID configured Test says nothing about it at all.
+    // ...and with SafeSpace switched OFF Test says nothing about it at all.
     clock += 31_000;
     stubFetch();
     // Counted from HERE: the two presses above legitimately read SafeSpace.
     const before = safeSpaceRequests().length;
-    const none = await sensourceService.test({ ...CFG, safeSpaceId: null });
+    const none = await sensourceService.test({ ...CFG, safeSpaceId: null, safeSpaceEnabled: false });
     assert.doesNotMatch(none.message ?? "", /SafeSpace/, "a blank ID was reported as a result");
     assert.equal(
       safeSpaceRequests().length - before,

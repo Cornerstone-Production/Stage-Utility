@@ -17,20 +17,12 @@
 
 import { providerRegistry } from "../providers/registry.js";
 
-export const MASK = "••••";
-
-/**
- * Is this value a mask rather than a password?
- *
- * Any run of bullets, not just our own MASK: the panel renders its own
- * `"••••••••"` into the field it shows, and matches with the same `/^•+$/`. If
- * only the exact constant counted, a form that echoed the longer one back would
- * store a row of bullets AS the base station's password — and the real one would
- * be gone with no way to tell from the UI, which shows bullets either way.
- */
-export function isMask(value: unknown): boolean {
-  return typeof value === "string" && /^•+$/.test(value);
-}
+// The mask and the test for it live in mask.ts, which the RENDERER can import —
+// this module cannot be imported there, because providerRegistry above pulls in
+// the whole server-side provider graph. Re-exported rather than moved out of
+// sight: this file's callers and its own test read `MASK` from here.
+export { MASK, isMask } from "./mask.js";
+import { MASK, hasSecretValue, isBlankSecret, isMask } from "./mask.js";
 
 /** Which config keys for this provider hold a credential. */
 export function credentialKeys(providerId: string): string[] {
@@ -74,7 +66,7 @@ export function splitConfig(config: Record<string, unknown>): {
     const value = safe[key];
     delete safe[key];
     // The mask is not a value — it is the UI saying "unchanged". Never store it.
-    if (typeof value === "string" && value !== "" && !isMask(value)) secret[key] = value;
+    if (hasSecretValue(value) && !isMask(value)) secret[key] = value;
   }
   return { safe, secret };
 }
@@ -96,7 +88,7 @@ export function publicConfig(
   const { safe } = splitConfig(config);
   for (const key of credentialKeys(providerId)) {
     const value = config[key];
-    safe[key] = typeof value === "string" && value !== "" ? MASK : "";
+    safe[key] = hasSecretValue(value) ? MASK : "";
   }
   return safe;
 }
@@ -126,7 +118,7 @@ export function mergeSecrets(
     if (!(key in incoming)) continue;
     const value = incoming[key];
     if (isMask(value)) continue; // unchanged
-    if (value === "") delete next[key]; // explicit clear
+    if (isBlankSecret(value)) delete next[key]; // explicit clear — whitespace is empty
     else if (typeof value === "string") next[key] = value;
   }
   return next;

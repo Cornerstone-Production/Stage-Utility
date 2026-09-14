@@ -468,9 +468,9 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
       {
         "key": "safeSpaceId",
         "label": "SafeSpace space ID (optional)",
-        "type": "text",
+        "type": "password",
         "placeholder": "(only if your site has SafeSpace)",
-        "help": "Optional. If your site also has SenSource SafeSpace, paste the space ID from its live-occupancy embed URL (SafeSpace → the space → the address of its live value ends in the ID). It replaces only the occupancy number with SafeSpace's live reading, which is much fresher than Vea's; attendance, zones, peak and capacity keep coming from Vea. Leave blank to use Vea for everything. Treat the ID like a password: anyone who has it can read your occupancy without logging in."
+        "help": "Optional. If your site also has SenSource SafeSpace, paste the space ID from its live-occupancy embed URL (SafeSpace → the space → the address of its live value ends in the ID). It replaces only the occupancy number with SafeSpace's live reading, which is much fresher than Vea's; attendance, zones, peak and capacity keep coming from Vea. Leave blank to use Vea for everything. The ID is the whole of the endpoint's authority — anyone who has it can read your occupancy without logging in — so it is stored encrypted like a password and is NOT carried in a config snapshot. Restore a snapshot onto another box and Stage says SafeSpace needs its ID re-entered rather than quietly falling back to Vea."
       },
       {
         "key": "safeSpacePollSeconds",

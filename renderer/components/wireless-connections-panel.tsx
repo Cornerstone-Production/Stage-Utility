@@ -1,3 +1,4 @@
+import { FORM_MASK, isMask } from "@main/services/mask";
 import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -43,11 +44,6 @@ function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
 }
 
-const MASKED_PASSWORD = "••••••••";
-
-function isPasswordMasked(value: string): boolean {
-  return /^•+$/.test(value);
-}
 
 // ---- single connection card -------------------------------------------------
 
@@ -68,7 +64,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     for (const field of provider.configSchema) {
       const raw = conn.config[field.key];
       if (field.type === "password" && typeof raw === "string" && raw !== "") {
-        out[field.key] = MASKED_PASSWORD;
+        out[field.key] = FORM_MASK;
       } else {
         out[field.key] = raw ?? "";
       }
@@ -108,7 +104,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     for (const field of provider.configSchema) {
       const raw = conn.config[field.key];
       if (field.type === "password" && typeof raw === "string" && raw !== "") {
-        out[field.key] = MASKED_PASSWORD;
+        out[field.key] = FORM_MASK;
       } else {
         out[field.key] = raw ?? "";
       }
@@ -152,7 +148,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
 
     const v = localConfig[key];
     // Skip if password is still masked
-    if (field.type === "password" && typeof v === "string" && isPasswordMasked(v)) return;
+    if (field.type === "password" && typeof v === "string" && isMask(v)) return;
 
     try {
       const next = await ipc<WirelessConnection[]>("wireless:updateConnection", {
