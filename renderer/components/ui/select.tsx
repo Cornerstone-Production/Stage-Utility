@@ -136,9 +136,14 @@ export function Select({
         const p = child.props as ItemProps;
         // `className` reaches the <option>. Windows and Linux browsers paint an
         // option's own background in the open list, which is the only way a dark
-        // kiosk header keeps its list readable — the prop was declared on
-        // ItemProps and silently dropped, so a caller that set it got a white
-        // list and no error.
+        // kiosk header keeps its list readable.
+        //
+        // NO CALL SITE SETS IT TODAY — all 27 of them go without. It is kept
+        // because `ItemProps` DECLARES it, and a declared prop that is silently
+        // dropped is the worse of the two failures: the next caller to set one
+        // gets a white list and no error, which is what happened before f4de938b
+        // added this line. Held to that by select.test.tsx rather than by this
+        // comment, which is what the line had before.
         return (
           <option value={p.value} disabled={p.disabled} className={p.className}>
             {textOf(p.children)}

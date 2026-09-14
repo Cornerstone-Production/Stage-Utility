@@ -326,3 +326,54 @@ describe("Select keeps a value it was given", () => {
     cleanup();
   });
 });
+
+// `ItemProps` declares `className`, and the sub-components render nothing — they
+// are markers whose props `Select` reads back out of the element tree. A prop
+// declared there and not read is dropped in silence: it type-checks, it renders,
+// and the caller gets a white list in a dark kiosk header with no error anywhere.
+// That is what happened before f4de938b, and the line it added had nothing but a
+// comment holding it in place. No call site sets one today, which is exactly why
+// this is here: the prop's contract cannot be checked by using it.
+describe("SelectItem className", () => {
+  test("reaches the option it was set on, and only that one", () => {
+    const { container } = render(
+      <Select value="dark" onValueChange={() => {}}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="dark" className="bg-black text-white">Dark</SelectItem>
+          <SelectItem value="plain">Plain</SelectItem>
+        </SelectContent>
+      </Select>,
+    );
+    const options = [...container.querySelectorAll("option")];
+    assert.equal(
+      options.find((o) => o.value === "dark")?.className,
+      "bg-black text-white",
+      "the className declared on ItemProps was dropped on the way to the <option>",
+    );
+    assert.equal(options.find((o) => o.value === "plain")?.className, "");
+    cleanup();
+  });
+
+  test("reaches an option inside a group too", () => {
+    // Items inside a SelectGroup are rebuilt through a second pass, so the
+    // pass-through has to survive it as well.
+    const { container } = render(
+      <Select value="dark" onValueChange={() => {}}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectLabel>Themes</SelectLabel>
+            <SelectItem value="dark" className="bg-black">Dark</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>,
+    );
+    assert.equal(
+      [...container.querySelectorAll("option")].find((o) => o.value === "dark")?.className,
+      "bg-black",
+      "a className on an item inside a group was dropped",
+    );
+    cleanup();
+  });
+});
