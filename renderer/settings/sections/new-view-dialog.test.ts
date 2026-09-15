@@ -21,7 +21,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = readFileSync(path.join(HERE, "new-view-dialog.tsx"), "utf8");
 
 function labelledKinds(src: string): string[] {
-  const block = /const KIND_LABELS: Record<ViewKind, string> = \{([\s\S]*?)\n\};/.exec(src);
+  // externKeyed(...) wraps the literal — see extern-keyed.ts. Matched exactly
+  // rather than loosely, so this stays a scan of the real table; the assert
+  // below is what stops a shape change passing as "no kinds labelled".
+  const block = /const KIND_LABELS: Record<ViewKind, string> = externKeyed\(\{([\s\S]*?)\n\}\);/.exec(src);
   assert.ok(block, "could not find KIND_LABELS — this scan is broken, not passing");
   return [...block[1].matchAll(/^\s*"?([\w-]+)"?\s*:/gm)].map((m) => m[1]);
 }

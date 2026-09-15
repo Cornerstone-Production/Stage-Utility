@@ -13,6 +13,7 @@
 //   https://help.rossvideo.com/carbonite-device/Topics/Protocol/RossTalk/UT/RT-UT-Comm.html
 
 import type { RossTalkCommand, RossTalkFamily, RossTalkParam } from "../types/rosstalk.js";
+import { externKeyed } from "../types/extern-keyed.js";
 
 /** ME source values Carbonite accepts. Ultra names its MEs differently (ME 2, ME 1, P/P). */
 const ME_SOURCES = ["ME", "MEM", "PP"];
@@ -60,7 +61,7 @@ function def(c: RossTalkCommand): RossTalkCommand {
   return c;
 }
 
-export const ROSSTALK_COMMANDS: Record<string, RossTalkCommand> = {
+export const ROSSTALK_COMMANDS: Record<string, RossTalkCommand> = externKeyed({
   // ── Carbonite ──────────────────────────────────────────────────────────────
   cc: def({
     id: "cc",
@@ -222,7 +223,7 @@ export const ROSSTALK_COMMANDS: Record<string, RossTalkCommand> = {
       return `TIMER ${p.clock}:${p.action}`;
     },
   }),
-};
+});
 
 export function commandsForFamily(family: RossTalkFamily): RossTalkCommand[] {
   return Object.values(ROSSTALK_COMMANDS).filter((c) => c.family === family);

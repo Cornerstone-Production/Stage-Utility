@@ -532,9 +532,18 @@ describe("the API version pin", () => {
     //
     // Against the IMPORTED constant, not against the literal. This block used to
     // claim it pinned the two products INDEPENDENTLY while comparing both to the
-    // same hardcoded "2018-11-01" — which is what both constants happen to say
-    // today, so the claim was untrue and moving either constant left this
-    // assertion passing on a date the app no longer sends.
+    // same hardcoded "2018-11-01" — which is what both constants happened to say,
+    // so the claim was untrue and moving either constant left this assertion
+    // passing on a date the app no longer sends. The two constants now differ,
+    // because the shared date was the bug: Calendar publishes no 2018-11-01, so
+    // that pin was silently downgraded to Calendar's oldest version on every
+    // request. Which list each pin must come from is guarded in
+    // pco-api-version.test.ts.
+    assert.notEqual(
+      CALENDAR_API_VERSION,
+      PCO_API_VERSION,
+      "the two products publish independent version lists; a shared date is how the Calendar pin went stale",
+    );
     const seen = await captureHeaders(() => pcoService.listServiceTypes("app", "secret"));
     assert.equal(seen.length, 1);
     assert.equal(seen[0].get("X-PCO-API-Version"), PCO_API_VERSION, "a /services/v2 request lost the pin");

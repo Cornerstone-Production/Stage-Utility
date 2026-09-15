@@ -15,7 +15,12 @@ import { fileURLToPath } from "url";
 
 
 
-import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
+import {
+  addBroadcastListener,
+  setSubscriberCheck,
+  setSubscriberCount,
+  subscriptionsChanged,
+} from "./broadcaster.js";
 
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
@@ -175,6 +180,25 @@ export { hostnameOf, isCrossOrigin } from "./http-origin.js";
 /** Methods that change server state, and so must be same-origin. */
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * What an unhandled throw out of a route module answers.
+ *
+ * Some failures are the caller's situation, not a broken server, and the
+ * difference matters to the UI: an oversized body is 413, and editing a service
+ * that is recording right now is 409. Anything a route did not deliberately
+ * label stays a 500 — a status is opt-in so a stray `status` field on some
+ * unrelated error cannot turn a real fault into a 2xx-ish answer the caller
+ * shrugs off.
+ *
+ * EXPORTED so a route test can assert the status a throw becomes without
+ * writing a second copy of this rule. callRoute stops at the route, so the only
+ * alternative is a test that restates the mapping and then agrees with itself.
+ */
+export function handlerErrorStatus(err: unknown): number {
+  const declared = (err as { status?: number } | null)?.status;
+  return declared === 413 || declared === 409 ? declared : 500;
+}
+
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
 // Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
@@ -218,6 +242,18 @@ function sseWriteFrame(res: http.ServerResponse, frame: string): boolean {
     return false;
   }
 }
+/** How many connected clients want this channel — a client with no reported
+ *  filter wants all of them. */
+function countSubscribers(channel: string): number {
+  let n = 0;
+  for (const client of sseClients) {
+    const cid = resCid.get(client);
+    const chans = cid ? clientChannels.get(cid) : undefined;
+    if (!chans || chans.has(channel)) n++;
+  }
+  return n;
+}
+
 function sseWrite(res: http.ServerResponse, event: string, data: unknown): boolean {
   return sseWriteFrame(res, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
@@ -480,14 +516,10 @@ export class RemoteServer {
     // EventSource instead of polling.
     // Let producers idle when nothing is watching their channel: true if any client
     // is subscribed to it, or any client hasn't reported a filter yet (wants all).
-    setSubscriberCheck((channel) => {
-      for (const client of sseClients) {
-        const cid = resCid.get(client);
-        const chans = cid ? clientChannels.get(cid) : undefined;
-        if (!chans || chans.has(channel)) return true;
-      }
-      return false;
-    });
+    setSubscriberCheck((channel) => countSubscribers(channel) > 0);
+    // The same walk, counted. A producer that names its subscriber count in the
+    // log needs the number; everything else asks the boolean above.
+    setSubscriberCount(countSubscribers);
 
     addBroadcastListener((channel, payload, serialized) => {
       let frame: string | null = null; // serialize at most once, only if a client wants it
@@ -559,14 +591,7 @@ export class RemoteServer {
         await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
       } catch (err) {
         const msg = errorMessage(err);
-        // Some failures are the caller's situation, not a broken server, and the
-        // difference matters to the UI: an oversized body is 413, and editing a
-        // service that is recording right now is 409. Anything a route did not
-        // deliberately label stays a 500 — a status is opt-in so a stray `status`
-        // field on some unrelated error cannot turn a real fault into a 2xx-ish
-        // answer the caller shrugs off.
-        const declared = (err as { status?: number })?.status;
-        const status = declared === 413 || declared === 409 ? declared : 500;
+        const status = handlerErrorStatus(err);
         console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
         // The reader paused an over-limit body rather than destroying the socket,
         // so the response reaches the client; closing after it releases the rest.
@@ -864,7 +889,13 @@ export class RemoteServer {
           companionClients.delete(res);
           integrationManager.setCompanionClients(companionClients.size);
         }
+        // A producer that runs no timer with nobody listening stops here.
+        subscriptionsChanged();
       });
+      // Announced AFTER the client is in the set, so a producer starting from
+      // this can see it. A stream with no `cid` wants every channel until it
+      // says otherwise, so this alone can start one.
+      subscriptionsChanged();
       return;
     }
     if (method === "POST" && pathname === "/api/events/subscribe") {
@@ -873,7 +904,10 @@ export class RemoteServer {
       const channels = Array.isArray(body.channels)
         ? body.channels.filter((c): c is string => typeof c === "string")
         : null;
-      if (cid && channels) clientChannels.set(cid, new Set(channels));
+      if (cid && channels) {
+        clientChannels.set(cid, new Set(channels));
+        subscriptionsChanged();
+      }
       json(res, { ok: cid != null && channels != null });
       return;
     }

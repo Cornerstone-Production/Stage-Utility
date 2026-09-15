@@ -20,6 +20,7 @@ import { errorMessage } from "./errors.js";
 import type { ActionDef, ActionResult } from "../types/automation.js";
 import { hasContent, type PvpLayerDTO } from "../types/pvp.js";
 import { pvpService } from "./pvp-service.js";
+import { externKeyed } from "../types/extern-keyed.js";
 
 const ok = (detail: string): ActionResult => ({ ok: true, detail });
 const fail = (detail: string): ActionResult => ({ ok: false, detail });
@@ -195,7 +196,7 @@ function flagAction(
   };
 }
 
-export const PVP_ACTIONS: Record<string, ActionDef> = {
+export const PVP_ACTIONS: Record<string, ActionDef> = externKeyed({
   "pvp.clear-layer": {
     id: "pvp.clear-layer",
     label: "Clear a ProVideoPlayer layer",
@@ -312,4 +313,4 @@ export const PVP_ACTIONS: Record<string, ActionDef> = {
       });
     },
   },
-};
+});

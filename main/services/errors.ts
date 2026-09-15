@@ -23,3 +23,25 @@ export function errorMessage(err: unknown): string {
   // eslint-disable-next-line no-restricted-syntax -- this IS the one copy.
   return err instanceof Error ? err.message : String(err);
 }
+
+/**
+ * A caught FETCH failure, said usefully.
+ *
+ * Node's own message for every network failure is the word "fetch failed", with
+ * the real reason — ECONNREFUSED, EHOSTUNREACH, the address and the port — one
+ * level down on `cause`. Driving Companion's button picker against a dead port
+ * put "Could not read Companion's configuration: fetch failed" on screen, which
+ * tells an operator nothing at all; the REAPER transport action would have said
+ * the same for a booth machine that is off.
+ *
+ * `target` is what was being dialled, for the case where there is no cause to
+ * read — it goes in only when the message does not already name the address,
+ * because the cause usually does and two copies read as two failures.
+ */
+export function fetchFailureMessage(err: unknown, target: string): string {
+  const top = errorMessage(err);
+  const cause = err instanceof Error && err.cause !== undefined ? errorMessage(err.cause) : "";
+  const said = cause && cause !== top ? cause : top === "fetch failed" ? `could not reach ${target}` : top;
+  const address = target.replace(/^https?:\/\//, "");
+  return said.includes(address) ? said : `${said} (${target})`;
+}

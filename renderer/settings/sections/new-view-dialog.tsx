@@ -14,6 +14,7 @@ import { cn } from "../../lib/cn";
 import { dashboardTemplate, confidenceMonitorTemplate } from "../../editor/layout-editor";
 import type { SectionHandlers } from "../types";
 import { everyViewKind, type ViewSurface } from "@main/types/views";
+import { externKeyed } from "@main/types/extern-keyed";
 
 /** What a custom view is FOR, in the operator's words rather than the schema's.
  *  Data rather than two hand-written blocks: they had drifted to differing
@@ -34,7 +35,7 @@ const SURFACE_CHOICES: { value: ViewSurface; title: string; hint: string }[] = [
 // Copied verbatim from the list this replaces. Retyping it from memory dropped
 // "stage" and "spl-rundown" - two view kinds that would then have been
 // uncreatable, with nothing failing to say so.
-const KIND_LABELS: Record<ViewKind, string> = {
+const KIND_LABELS: Record<ViewKind, string> = externKeyed({
   slots: "Mic Slots",
   dashboard: "Dashboard",
   stage: "Stage",
@@ -43,7 +44,7 @@ const KIND_LABELS: Record<ViewKind, string> = {
   script: "Script",
   "spl-rundown": "SPL Rundown",
   calendar: "Calendar",
-};
+});
 // KIND_ORDER is the list the dialog actually renders, and it used to be a plain
 // ViewKind[] - a list a kind can drop out of with nothing failing, which is
 // precisely what happened to "stage" and "spl-rundown". everyViewKind refuses to

@@ -40,6 +40,7 @@ const { render, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { Toaster } = await import("./ui/toast.js");
 const { saveIcon } = await import("./editable-icon.js");
+const { until } = await import("../test-fixtures/integrations-harness.js");
 
 const settle = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 
@@ -62,7 +63,10 @@ describe("storing a chosen glyph", () => {
     failWith = new Error("the icon store is read-only");
 
     saveIcon("display-invented-1", "Star");
-    await settle(30);
+    await until(
+      () => /Could not change the icon/.test(document.body.textContent ?? ""),
+      () => "a refused save never reached the operator as a toast",
+    );
 
     assert.match(
       document.body.textContent ?? "",
@@ -81,7 +85,11 @@ describe("storing a chosen glyph", () => {
     const ui = render(React.createElement(Toaster));
 
     saveIcon("display-invented-1", "Star");
-    await settle(30);
+    // Proving an ABSENCE cannot poll for it directly — "not yet" and "never"
+    // look the same. Waiting for the write instead is enough: nothing on the
+    // success path can call toast.error(), so once the (fake) server has seen
+    // the write, no later toast is coming.
+    await until(() => writes.length >= 1, () => "the icon save never reached the (fake) server");
 
     assert.equal(
       /Could not change the icon/.test(document.body.textContent ?? ""),
@@ -102,7 +110,10 @@ describe("a key that moved", () => {
 
   test("the save lands under the new key FIRST, then clears the old one", async () => {
     saveIcon("view-invented-9", "Star", "display-invented-1");
-    await settle(30);
+    await until(
+      () => glyphWrites().length >= 2,
+      () => `the migration did not write both keys — saw ${JSON.stringify(glyphWrites())}`,
+    );
 
     // Exact, and in order. A floor would pass on a clear that never fired, and
     // the order is the whole safety property: clearing first and then failing to
@@ -122,7 +133,10 @@ describe("a key that moved", () => {
     failWith = new Error("the icon store is read-only");
 
     saveIcon("view-invented-9", "Star", "display-invented-1");
-    await settle(30);
+    // A negative claim (the clear must NEVER fire) again — waiting for the
+    // first write is enough: it fails, so the .then() that would clear the
+    // legacy key is skipped for good, not merely not-yet-run.
+    await until(() => writes.length >= 1, () => "the icon save never reached the (fake) server");
 
     assert.deepEqual(
       glyphWrites(),
@@ -136,7 +150,9 @@ describe("a key that moved", () => {
     // The non-console card, where the key never moved. Clearing here would erase
     // the entry the same call just wrote.
     saveIcon("display-invented-1", "Star", "display-invented-1");
-    await settle(30);
+    // Same shape: legacyKey === key means saveIcon's own check returns before a
+    // second write is even attempted, so the first write settling is enough.
+    await until(() => writes.length >= 1, () => "the icon save never reached the (fake) server");
 
     assert.deepEqual(glyphWrites(), [{ key: "display-invented-1", glyph: "Star" }]);
   });

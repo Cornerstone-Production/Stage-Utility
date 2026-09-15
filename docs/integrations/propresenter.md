@@ -7,15 +7,58 @@ objects (current/next slide text, notes, section, progress, thumbnail).
 ## How it works
 
 ProPresenter 7.9+ exposes an official local HTTP API on the LAN (no auth).
-`propresenter-service.ts` polls a handful of REST endpoints once per second while
-a display is watching, dropping to a ~5 s keepalive when nobody is and backing
-off (5 s, doubling) while the machine is unreachable:
+`propresenter-service.ts` holds **one server-sent-event stream per configured
+instance** and makes no periodic requests at all while it is up. Connecting is
+two requests — `GET /version` as the reachability probe, then:
 
-- `GET /v1/presentation/active`
-- `GET /v1/status/slide`
-- `GET /v1/presentation/slide_index`
-- `GET /v1/playlist/active` (+ `/v1/playlist/<uuid>`)
-- `GET /v1/timers/current`
+```
+POST /v1/status/updates?sse
+["status/slide","presentation/slide_index","presentation/active",
+ "playlist/active","timers/current","timer/system_time"]
+```
+
+A snapshot frame arrives per endpoint immediately, then a frame whenever one of
+them changes, so a slide advance reaches a display as fast as the network
+carries it. `timer/system_time` ticks once a second and is the heartbeat: a
+15-second silence watchdog is what notices a stream that has died without
+closing, which a half-open socket does. TCP keepalive is set on the socket as
+well, but only as a backstop — the operating system's own probe schedule puts a
+dead peer ten minutes or more away, so nothing inside a service waits for it.
+The stream stays open for as long as the instance is configured, watched or
+not — an idle stream is cheaper than any keepalive poll.
+
+`/v1/playlist/<uuid>` is the one request made after connecting, and only when
+the active playlist changes. It supplies the "next service item" name. A
+playlist the API refuses — it answers 404 for a Planning Center linked playlist
+— is retried on a back-off (30 s, doubling to 10 minutes) rather than on every
+frame, and everything else on the panel is unaffected.
+
+If a ProPresenter refuses `status/updates`, the service falls back to polling
+the same endpoints as REST reads, at the configured poll interval, and says so
+in the log. The fallback lasts for the rest of the run: the subscription is
+re-probed when the integration is reconfigured or Stage restarts, not on every
+poll cycle.
+
+### Timers
+
+Named timers arrive on `timers/current`. A timer in the `stopped` state — the
+resting state of every configured timer — is dropped, so only timers actually
+doing something reach a display. The rest are passed on with ProPresenter's own
+display text exactly as it sends it, sign included: an overrunning timer reads
+`-00:00:02`, the same as it does in ProPresenter.
+
+**A running timer is one update a second, to every browser watching** — about 600
+for a ten-minute timer. That is the one place this integration is not
+change-driven, and it is deliberate. Elsewhere Stage anchors a clock and lets the
+browser interpolate (an OBS recording costs 25 updates rather than 604), but
+ProPresenter's API has no number to anchor: `time` is a formatted string and is
+the only expression of a timer's position the API offers. `GET /v1/timers`
+returns each timer's *configuration* — its duration, or the time of day it counts
+to, or its start and end — never its current position. Re-deriving the number
+from the string would also mean re-formatting it, which is visible on every stage
+display, and the direction a timer advances depends on a type the payload does
+not carry. The reasoning in full is on `proTimersFrom` in
+`propresenter-service.ts`.
 
 Fields are read defensively (each degrades to null) and assembled into a
 `ProPresenterStatusDTO` broadcast on the `propresenter:status` channel. Every
@@ -24,7 +67,52 @@ proxied through Stage at a fixed width. Multiple auditoriums are supported: the
 primary instance keeps `propresenter:status`, extra instances get
 `propresenter:status:<id>`, and a combined snapshot of all instances is
 broadcast on `propresenter:instances` so a layout object can pick which one it
-reads.
+reads. Each instance holds its own stream with its own reconnect back-off, so
+one auditorium being switched off does not affect the other.
+
+### What the log says
+
+```
+[propresenter] streaming 6 endpoints from 192.168.0.123:1025
+[propresenter] stream ended (closed by ProPresenter) — reconnecting in 5s
+[propresenter] status/updates unsupported (HTTP 404) — falling back to polling for the rest of this run
+[propresenter] playlist unreadable on 192.168.0.123:1025 (HTTP 404) — no next-item name, retrying in 30s
+[propresenter] 192.168.0.123:1025 unreachable (connect ECONNREFUSED) — backing off, will keep retrying quietly
+[propresenter] unreadable presentation/current frame from 192.168.0.123:1025 (Unexpected end of JSON input) — that field goes blank, staying quiet about the rest
+[propresenter] 192.168.0.123:1025 accepts the status subscription and then sends nothing — the displays are holding the last slide it sent. Is ProPresenter's Network view wedged?
+[propresenter] status buffer exceeded 1000000 chars from 192.168.0.123:1025 — resyncing
+```
+
+The unreadable-frame and buffer lines are the ones to look for when a panel goes
+half-blank while the rest of it keeps up: a frame that would not parse, and a
+document too large for the reader's buffer. The unreadable-frame line names the
+endpoint, the reason and the machine, and is said once per endpoint per stream
+rather than once per slide advance; the buffer line is said once per overrun.
+
+**A stream that keeps dropping re-dials more slowly each time; one that holds
+puts it back to 5 s.** The reconnect back-off doubles from 5 s and is capped at
+2 minutes while a service window is open or a display is watching. What clears
+it is a stream that LASTS — 30 to 45 seconds, two to three heartbeat windows —
+not one that merely opens, because a machine that accepts the subscription and
+hangs up delivers its snapshot every single time. The "stream ended" line is
+written once per outage, not once per retry.
+
+**A frame that cannot be read BLANKS its field rather than holding the last
+one.** The fields are not independent: the section name, the slide count and the
+progress all come out of one `presentation/current` document while
+`presentation/slide_index` keeps arriving beside it, so a held document would
+describe slide 9 of the previous song's 6 — confidently wrong rather than stale.
+Everything else on the panel keeps up; the stream is not dropped over it.
+
+**A ProPresenter that accepts the subscription and then sends nothing turns the
+card red.** Its HTTP server is alive, so `/version` answers and the subscription
+is accepted — but the update publisher is wedged and no frame ever arrives. After
+two silent streams the row goes red and the payload goes offline, and both stay
+that way while the machine keeps accepting subscriptions it never writes to: a
+2xx on its own no longer reads as connected once the count is past two. The log
+line is written once, at the threshold. The row goes green again on the first
+byte of any stream — the one thing a wedged publisher cannot produce. Restarting
+ProPresenter is the fix.
 
 ## Setup
 
@@ -35,10 +123,78 @@ the **port** (default 1025). The machine must be on the same network as Stage.
 **Host** (IP), **API Port**, and optionally a **Poll interval**, enable it, and
 **Test connection**. Add more auditoriums via extra instances.
 
-Left blank, the poll runs at **1000 ms** while a display is watching. Set it
-lower — 500 ms feels instant — at the cost of twice the requests; anything under
-200 ms is ignored.
+**Poll interval** applies only to the fallback: on a ProPresenter that supports
+`status/updates`, updates are pushed and there is no interval. Leave it blank —
+the field shows `1000` in grey — and the fallback polls at **1000 ms**, dropping
+to a 5 s keepalive when nothing is reading the channel; open displays and
+in-process consumers such as an automation rule both count. **200 ms** is the
+floor the field accepts, because the poller ignores anything below it. Clearing
+the field back to blank returns it to 1000 ms.
+
+A poll interval saved before that floor existed keeps its number — opening the
+card and closing it again changes nothing — but the poller still ignores
+anything below 200 ms and falls back to 1000 ms. If the field reads under 200
+and updates look slow, that is why: type a value of 200 or more, or clear the
+field.
 
 **On a layout:** add slide objects — current/next slide text, current/next slide
 notes, current/next section, slide progress, slide thumbnail. Each can target a
 specific ProPresenter instance.
+
+## Triggering a macro from a rule
+
+The **Trigger a ProPresenter macro** [automation](../automation.md) action runs
+one of your own macros — whatever that macro does in ProPresenter, it does here.
+Pick the instance and the macro; nothing else is configured. Leaving the
+instance blank means the primary one.
+
+It uses the same Network API the status stream reads, so an instance that is set
+up needs nothing extra. The request is `GET /v1/macro/<name>/trigger`, which is
+ProPresenter's own design for a command.
+
+The macro is identified by its **name**, not by its uuid. A name means the same
+thing on every machine and survives re-importing a library, where a uuid is
+per-machine and does not — so one rule works in both auditoriums. The trade is
+that renaming a macro in ProPresenter stops the rule finding it; the action then
+fails with `no macro called "SONG INTRO" on MA`, which is also what the log says:
+
+```
+[propresenter] macro "SONG INTRO" triggered on MA
+[propresenter] macro "SONG INTRO" failed: no such macro on MA (404)
+```
+
+The macro dropdown lists the names every configured instance reports, read fresh
+at most every 30 seconds. An instance that could not be read contributes nothing
+and never blocks the editor from opening; when more than one is configured, a
+name only some of them have is marked `DOORS (MA only)`. A macro already chosen
+on a rule is shown whether or not the machine holding it is reachable.
+
+**The `(… only)` suffix is dropped entirely while any instance is unreachable.**
+"Only" is a claim about the machines that answered, and a machine that is off was
+not asked — marking every macro the reachable one reported as living there
+"only" states that it does not exist on the other, which is not known. The
+response names the instances that did not answer instead.
+
+When an instance does not answer, the field says which one, under the dropdown:
+`Chapel did not answer. A macro that only lives there is missing from this list.`
+A short list is then a machine that is off rather than macros that have gone.
+
+Changing an instance's host or port drops its cached list immediately, so a
+repointed instance never offers the previous machine's macros — and the address
+follows the SETTINGS, not the connection, so an instance repointed and switched
+off in the same save is not read at all rather than read at its old address. A
+list that was mid-read when the change landed is discarded rather than cached,
+and says so:
+
+```
+[propresenter] macro list from 192.168.0.123:1025 discarded — the instance was pointed at another machine while it was being read
+```
+
+Saving a change that does not move the target — the poll interval, the display
+name — does not drop the stream or the cached list.
+
+A rule whose ProPresenter is **switched off** triggers nothing: the action fails
+with `MA is switched off`, rather than dialling the last address the card held.
+
+With **Simulate mode** on, the action reports what it would trigger and contacts
+nothing — a rule can be written and tested with the booth machine off.

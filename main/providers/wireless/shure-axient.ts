@@ -15,6 +15,7 @@ import {
   normalisedDb,
   rfBarsFromDbm,
   safeInt,
+  shureNumber,
   stripBraces,
 } from "./shure-base.js";
 
@@ -91,24 +92,17 @@ export class ShureAxient extends ShureBaseProvider {
       }
 
       case "BATT_BARS": {
-        const bars = safeInt(value);
-        if (!Number.isNaN(bars)) {
-          if (bars === 255) {
-            state.battery = null;
-            state.online = false;
-          } else {
-            // Only use bars as battery fallback if no BATT_CHARGE has arrived yet.
-            if (state.battery === null) state.battery = bars * 20;
-            state.online = true;
-          }
+        // 0–5 bars in a byte field; the top of the byte is "no transmitter".
+        const bars = shureNumber(value, { width: 8, min: 0, max: 5 });
+        if (bars === null) {
+          state.battery = null;
+          state.online = false;
+        } else {
+          // Only use bars as battery fallback if no BATT_CHARGE has arrived yet.
+          if (state.battery === null) state.battery = bars * 20;
+          state.online = true;
         }
         console.debug(`[shure:${this.id}] ch${channel} BATT_BARS: ${value}`);
-        break;
-      }
-
-      case "MUTE_MODE_STATUS": {
-        // "ON" = unmuted, "MUTE" = muted — does not affect online status.
-        console.debug(`[shure:${this.id}] ch${channel} MUTE_MODE_STATUS: ${value}`);
         break;
       }
 
@@ -138,41 +132,31 @@ export class ShureAxient extends ShureBaseProvider {
       }
 
       case "TX_BATT_CHARGE_PERCENT": {
-        const charge = safeInt(value);
-        if (!Number.isNaN(charge)) {
-          if (charge === 255 || charge < 0 || charge > 100) {
-            state.battery = null; // unknown / no TX
-          } else {
-            state.battery = clamp(charge, 0, 100);
-            state.online = true;
-          }
-        }
+        const charge = shureNumber(value, { width: 8, min: 0, max: 100 });
+        state.battery = charge; // null = unknown / no TX
+        if (charge !== null) state.online = true;
         console.debug(`[shure:${this.id}] ch${channel} TX_BATT_CHARGE_PERCENT: ${value}`);
         break;
       }
 
       case "TX_BATT_BARS": {
-        const bars = safeInt(value);
-        if (!Number.isNaN(bars)) {
-          if (bars === 255) {
-            state.battery = null;
-            state.online = false; // 255 = no transmitter linked
-          } else {
-            // Only a fallback if a precise percent hasn't arrived.
-            if (state.battery === null) state.battery = clamp(bars, 0, 5) * 20;
-            state.online = true;
-          }
+        // 0–5 bars in a byte field; the top of the byte is "no transmitter linked".
+        const bars = shureNumber(value, { width: 8, min: 0, max: 5 });
+        if (bars === null) {
+          state.battery = null;
+          state.online = false;
+        } else {
+          // Only a fallback if a precise percent hasn't arrived.
+          if (state.battery === null) state.battery = bars * 20;
+          state.online = true;
         }
         console.debug(`[shure:${this.id}] ch${channel} TX_BATT_BARS: ${value}`);
         break;
       }
 
-      case "INTERFERENCE_STATUS":
-      case "RF_INT_DET": {
-        // Log RF interference events — not mapped to DeviceStatus shape yet.
-        console.log(`[shure:${this.id}] ch${channel} RF interference: ${token}=${value}`);
-        break;
-      }
+      // Mute, interference and channel quality are on the base: an AD4 and a
+      // ULX-D spell all three differently, and each driver had its own spelling
+      // that its own gear does not send. See handleCommonReport.
 
       default:
         // The tokens every family answers the same way live on the base. Only
@@ -187,10 +171,11 @@ export class ShureAxient extends ShureBaseProvider {
   }
 
   // ── SAMPLE messages ───────────────────────────────────────────────────────
-  // AD SAMPLE format (from Bitfocus shure-axient module):
-  // SAMPLE {ch} ALL {quality} {audioLED} {audioPeak} {audioLevel} {antennaStr} {bmA} {rfA} {bmB} {rfB} ...
-  // Indices:      0      1    2      3         4           5           6           7        8    9   10   11
+  // AD SAMPLE format, per Shure's AD4 command-string reference:
+  // < SAMPLE {ch} ALL qual audBitmap audPeak audRms rfAntStats rfBitmapA rfRssiA rfBitmapB rfRssiB >
+  // Indices:      0      1    2   3      4        5       6        7          8        9        10      11
   //
+  // quality  = tokens[3]  (CHAN_QUALITY, 0-5; metered, so it only arrives here)
   // rfLevelA = tokens[9]  - 120
   // rfLevelB = tokens[11] - 120
   // rfBars   = max(tokens[8], tokens[10]) clamped 0..5 (these are bar values direct from device)
@@ -203,6 +188,13 @@ export class ShureAxient extends ShureBaseProvider {
     // SLOT-level metering: `SAMPLE {ch} SLOT {n} ALL ...` — everything from "ALL"
     // onward shifts right by two tokens vs. the channel-level `SAMPLE {ch} ALL ...`.
     const off = (tokens[2] ?? "").toUpperCase() === "SLOT" ? 2 : 0;
+
+    // Channel quality: named in this file's own comment for the whole of its life
+    // and read by nothing. It is NOT signal strength — it accounts for
+    // interference, so a pack can sit at five bars with a quality of two, and it
+    // is the figure Wireless Workbench leads with. CHAN_QUALITY is a metered
+    // property: the device sends no REP when it changes, only this.
+    state.quality = shureNumber(tokens[3 + off], { width: 8, min: 0, max: 5 });
 
     const bmA = safeInt(tokens[8 + off]);
     const rfARaw = safeInt(tokens[9 + off]);
@@ -233,7 +225,7 @@ export class ShureAxient extends ShureBaseProvider {
     }
 
     console.debug(
-      `[shure:${this.id}] ch${channel} SAMPLE rfDbm=${state.rfLevelDbm} rfBars=${state.rfBars} audio=${state.audioLevel?.toFixed(2)}`,
+      `[shure:${this.id}] ch${channel} SAMPLE rfDbm=${state.rfLevelDbm} rfBars=${state.rfBars} qual=${state.quality ?? "?"} audio=${state.audioLevel?.toFixed(2)}`,
     );
 
     this.emitChannel(channel);

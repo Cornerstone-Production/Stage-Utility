@@ -49,6 +49,50 @@
 // the documented client-credentials call and refresh it before expiry. A
 // directly-pasted long-lived token is also accepted (skips the exchange).
 //
+// SAFESPACE. The site also has SenSource's SafeSpace product, which publishes a
+// single live occupancy number per space on an unauthenticated endpoint that is
+// much fresher than the Vea poll. When a space id is configured, THAT number is
+// the published occupancy and everything else — attendance, zones, day
+// aggregates, capacity, history — still comes from Vea. It is one integration
+// because it is one vendor and one payload, not two cards for the same building.
+// The reading has its own interval and its own timer, because a value worth
+// having at 10s is not worth having at whatever Vea is set to. See
+// safespace-client.ts, and note that the space id is a bearer capability that
+// must never reach a log line.
+//
+// ATTENDANCE INTERVAL. SafeSpace made occupancy fresh and left attendance on the
+// Vea poll beside it — on one lobby display, two numbers that visibly disagree
+// for no reason a viewer can see. `attendancePollSeconds` lets attendance re-read
+// on its own faster clock too, the same idea as SafeSpace's interval, but
+// attendance is not opt-in the way SafeSpace is: every existing Vea integration
+// already publishes one. So "unset" cannot mean a constant of its own the way
+// SAFESPACE_DEFAULT_POLL_SECONDS does — a fixed default faster than someone's
+// own poll interval would have started polling harder for every operator who
+// never opened this card, the instant this shipped. Unset means "the same as
+// pollSeconds", per operator, which is also why the fast timer never runs at all
+// when it isn't actually faster: there is nothing for a second timer to do that
+// the main cycle isn't already doing.
+//
+// The fast read touches /data/traffic alone — asking for the day aggregates too
+// would put the main cycle's three-request shape on the fast clock, exactly what
+// this feature exists to avoid — so it does not ask Vea for the authoritative
+// attendance again. It ADVANCES the main cycle's last published figure by how
+// far the zone sum has moved since (see noteAttendanceSample), the same
+// carry-forward arithmetic connect() already uses when a day-aggregate request
+// fails, just run on every fast tick rather than only a degraded one.
+//
+// That leaves one thing this file's own timer machinery cannot do by itself:
+// stop the two pollers from asking Vea for the same thing twice. Whenever the
+// fast interval divides evenly into the poll interval, both timers eventually
+// share a target instant, and Node fires both callbacks in the same
+// timer-phase sweep — before either one reaches its first await, which is
+// where cancelling the other one happens. So `mainPollInFlight`, set
+// synchronously before connect()'s own first await, is what actually stops
+// the redundant fetch in that tick; separately, every successful traffic
+// fetch — the main cycle's or the fast read's own — pushes the fast timer out
+// from that moment (see noteAttendanceSample), which is what stops the NEXT
+// tick from coinciding again.
+//
 // ONE API CLIENT PER INSTANCE. Vea appears to keep a single live token per API
 // client: minting a new one invalidates the last. Two Stage instances sharing a
 // client therefore knock each other offline, and the old "rejected → mint again"
@@ -61,7 +105,10 @@
 
 import { clockOf, zonedDateKey } from "./app-timezone.js";
 import { errorMessage } from "./errors.js";
+import { DEFAULT_SETTLE_MS, OutageLog } from "./repeat-log.js";
+import { redact, SafeSpaceClient, type SafeSpaceReading } from "./safespace-client.js";
 import { scrub } from "./scrub.js";
+import { Ticker, type TickOutcome } from "./ticker.js";
 import type { PeopleCountDTO, PeopleHistoryPoint, PeopleZoneCount } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
@@ -116,6 +163,62 @@ const RETRY_AFTER_MAX_MS = 15 * 60_000;
 /** The shared-API-client warning describes a condition that lasts until an
  *  operator changes something, so it is written at most this often. */
 const SHARED_CLIENT_LOG_GAP_MS = 60 * 60_000;
+/**
+ * How many clean polls a recovery must survive before an outage is called over.
+ *
+ * Vea fails by ALTERNATING, so the longest clean stretch INSIDE an outage is
+ * about one poll. Four is margin over that at whatever cadence the operator set,
+ * and it is the whole reason the window is expressed in polls: OutageLog's own
+ * default is two minutes, which at the 300s an operator sets to stay inside quota
+ * is shorter than a single poll — every success would end the run, every failure
+ * would be a fresh first failure, and the shape that wrote 2,837 lines in one day
+ * would be back at a slower rate. Floored at the class default because at the 15s
+ * default four polls is a minute, shorter than Vea's own ~78s refresh, so a run
+ * could settle without the upstream having moved at all.
+ */
+const SETTLE_POLLS = 4;
+
+/**
+ * SafeSpace's own poll cadence, and the floor the poller enforces.
+ *
+ * Exported for the same reason DEFAULT_POLL_SECONDS is: the settings descriptor
+ * and the config reader must offer the numbers the poller actually uses.
+ *
+ * Ten seconds is comfortable against the quota SafeSpace reports (a limit of 40
+ * with a request spending 2, refilling in about twenty seconds), and the client
+ * reads the rate headers rather than trusting that — so the floor is here to stop
+ * a form entry from making the reading pointlessly expensive, not to enforce a
+ * quota this app does not know.
+ */
+export const SAFESPACE_DEFAULT_POLL_SECONDS = 10;
+export const SAFESPACE_MIN_POLL_SECONDS = 10;
+/**
+ * How long a SafeSpace reading stays the published occupancy.
+ *
+ * About one SafeSpace sample in six comes back empty, which is unknown and not
+ * zero, so a reading has to survive a gap or the occupancy would flap back to Vea
+ * every minute. The horizon is Vea's own refresh: the file header measured it at
+ * ~78 seconds, so a SafeSpace value younger than that is still the fresher of the
+ * two and one older than it is not worth preferring. Sixty seconds sits inside
+ * that with margin, and covers five consecutive empties at the default interval.
+ */
+const SAFESPACE_HOLD_MS = 60_000;
+/**
+ * Upper bound on the SafeSpace interval FORM FIELD.
+ *
+ * Derived, not chosen: a reading stops being preferred after SAFESPACE_HOLD_MS,
+ * so an interval longer than that leaves the count on Vea for most of every
+ * cycle and flip-flopping its source — a setting the form offered and the
+ * feature could not use. An operator who wants SafeSpace read less often than
+ * this wants it switched off, which the blank space id already does.
+ */
+export const SAFESPACE_MAX_POLL_SECONDS = SAFESPACE_HOLD_MS / 1000;
+
+/** The settle window for a poller ticking every `sec` seconds, which the caller
+ *  has already floored — the two pollers in this file have different floors. */
+function settleWindowMs(sec: number): number {
+  return Math.max(DEFAULT_SETTLE_MS, SETTLE_POLLS * sec * 1000);
+}
 
 /** HTTP 401 and friends, carrying the status and body so a caller can tell an
  *  auth rejection from a network fault without parsing the message. */
@@ -167,16 +270,64 @@ const OFFLINE: PeopleCountDTO = {
   zones: [],
 };
 
+/**
+ * What one Vea poll did, which is what its next delay is chosen from.
+ *
+ * Three values, not two: a tick that DEFERRED is not a tick that failed, and
+ * only the failed one may step the back-off. Conflating them is how a Test
+ * connection pressed twice would have pushed the poll interval out
+ * exponentially while Vea was answering perfectly.
+ */
+type PollOutcome = "ok" | "failed" | "skip";
+
 export interface SenSourceConfig {
   clientId: string | null;
   clientSecret: string | null;
   /** Optional static token — used directly if present, skipping the exchange. */
   apiToken: string | null;
   pollSeconds: number;
+  /**
+   * How often to re-read attendance on its own, seconds — 0 or unset means
+   * "the same as pollSeconds", not a constant of its own.
+   *
+   * Every other interval in this file has a fixed fallback because it guards an
+   * OPT-IN sub-feature (SafeSpace) or the poll itself. This one cannot: every
+   * existing Vea integration already has an attendance figure, so a fixed
+   * default faster than an operator's own `pollSeconds` would raise their
+   * request volume the moment this shipped, for anyone who never touched the
+   * field. Falling back to whatever `pollSeconds` resolves to, per operator,
+   * is the only fallback that changes nothing for someone who leaves it blank.
+   * See attendanceSeconds() and attendanceIsFaster().
+   */
+  attendancePollSeconds: number;
   /** Restrict to a single location (null = all the client can see). */
   locationId: string | null;
   /** Restrict to specific zones (empty = all zones for the location). */
   zoneIds: string[];
+  /**
+   * SafeSpace space id, or null when there is not one stored.
+   *
+   * A BEARER CAPABILITY — anyone holding it can read the occupancy — so it lives
+   * in secrets.bin, never reaches a log line, and is NOT carried in a config
+   * snapshot. See safespace-client.ts.
+   *
+   * Null on its own does not say why. Pair it with `safeSpaceEnabled`.
+   */
+  safeSpaceId: string | null;
+  /**
+   * Has the operator switched the SafeSpace half on?
+   *
+   * The two ways to have no id are completely different situations and the
+   * difference has to survive: OFF (`false`) is the ordinary case and says
+   * nothing, while ON with no id means the id did not travel — the usual cause
+   * being a config snapshot restored onto another box, since the snapshot
+   * deliberately leaves the credential behind. Falling back to Vea is the right
+   * behaviour in both. Doing it SILENTLY in the second is the bug.
+   */
+  safeSpaceEnabled: boolean;
+  /** How often to read the SafeSpace value, seconds. Independent of the Vea
+   *  interval: the whole point of the reading is that it is fresher. */
+  safeSpacePollSeconds: number;
 }
 
 interface VeaLocation {
@@ -374,11 +525,19 @@ function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/** Zone-derived attendance for one /data/traffic result: Σ ins, clamped ≥0.
+ *  Shared by buildDto and the fast attendance read (readAttendance) so the two
+ *  can never compute "what the doors saw today" two different ways. Exported
+ *  for tests, like the reducers above it. */
+export function zoneAttendanceOf(reduced: ReducedTraffic): number {
+  return Math.max(0, Math.round(reduced.totalIns));
+}
+
 function buildDto(reduced: ReducedTraffic, updatedAt: string): PeopleCountDTO {
   // Building totals from RAW sums: occupancy nets entries against exits across all
   // zones (so a multi-door room reads ~0 when everyone who entered has left),
   // clamped ≥0 once at the building level. Attendance = total entries today.
-  const attendance = Math.max(0, Math.round(reduced.totalIns));
+  const attendance = zoneAttendanceOf(reduced);
   const occupancy = Math.max(0, Math.round(reduced.totalIns - reduced.totalOuts));
   // peak/min/avg are only available from the space endpoint (the poll overrides
   // total when a space exists); the zone-traffic fallback leaves them null.
@@ -431,15 +590,145 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     dateKey: string;
   } | null = null;
   /**
-   * Which parts of the poll are currently degraded, keyed by name.
+   * Which parts of the poll are failing, keyed by name, and when each last spoke.
    *
-   * Both of this file's partial failures — the day aggregates and the live
-   * minute series — used to write a console line on EVERY poll they failed on,
-   * which at 15s is 240 identical records an hour on a LAN-visible /log. A map
-   * rather than a flag each, so the third one cannot be written without the
-   * once-per-transition rule already attached to it.
+   * This was a `Map<string, boolean>` with a once-per-TRANSITION rule, and it was
+   * not enough. Measured in production over five days: 3,527 warning and error
+   * lines from this integration alone, 2,837 of them in one day, against under
+   * 200 for everything else in the app combined.
+   *
+   * A transition guard assumes an outage is a solid block. Vea does not fail that
+   * way — the file's own note above says so, "the two instances' 401s alternating
+   * minute by minute" — and every intervening success silently cleared the flag,
+   * so every failure was a fresh "first failure" and wrote its line. The backoff
+   * in the production log never grew past ~90s, which is the same fact from the
+   * other side: resetBackoff() was running, so the poll really was succeeding
+   * between the failures.
+   *
+   * OutageLog ends a run only on a success that HOLDS — for SETTLE_POLLS polls of
+   * whatever interval is configured, set by configure() — and floors repeats at
+   * one line per kind per 15 minutes whatever the state does. See repeat-log.ts.
    */
-  private degraded = new Map<string, boolean>();
+  private readonly outages = new OutageLog(settleWindowMs(DEFAULT_POLL_SECONDS));
+  /**
+   * The SafeSpace reading's outage log. Its own, not a key in `outages`.
+   *
+   * An OutageLog has ONE settle window and this file now has TWO pollers on
+   * independent intervals. Sharing one meant the SafeSpace key inherited a window
+   * derived from the VEA interval: with Vea at the hour its field allows and
+   * SafeSpace at 10s, a SafeSpace outage that ended stayed "failing" — and unsaid
+   * — for four hours of correct readings.
+   */
+  private readonly safeSpaceOutages = new OutageLog(
+    settleWindowMs(SAFESPACE_DEFAULT_POLL_SECONDS),
+  );
+  /** The SafeSpace live-occupancy endpoint, and what it last said about its
+   *  quota. Idle and untouched while no space id is configured. */
+  private readonly safeSpace = new SafeSpaceClient();
+  /** The newest usable SafeSpace reading. Held across an empty response — one
+   *  sample in six is empty, and empty is unknown rather than an empty room. */
+  private safeSpaceAt: { occupancy: number; at: number } | null = null;
+  /**
+   * The occupancy the last Vea poll produced, BEFORE any SafeSpace override.
+   *
+   * What the count goes back to when a SafeSpace reading stops being usable. Kept
+   * because /log announcing "the occupancy falls back to Vea" while the payload
+   * went on serving a stale SafeSpace number, still labelled `"safespace"`, until
+   * the next Vea poll is the log and the data disagreeing — and the Vea interval
+   * can be an hour.
+   */
+  private veaOccupancy: number | null = null;
+  /** True while a SafeSpace reading is in flight — see readSafeSpace. */
+  private safeSpaceInFlight = false;
+  /** True while test() is holding the operator's unsaved config in `this.cfg`. */
+  private testing = false;
+  /** True while the pending SafeSpace reading was scheduled at the idle cadence.
+   *  Its own flag: `polledIdle` is the VEA poll's and is never set at a Vea
+   *  interval of 60s or more, so it cannot speak for this timer. */
+  private safeSpacePolledIdle = false;
+  /**
+   * The SafeSpace reading's own clock. Deliberately not the base class's: that
+   * one is the Vea poll's, and sharing it would tie a 10s reading to whatever
+   * interval Vea is set to.
+   *
+   * A Ticker rather than a bare timer for the reason ticker.ts opens with: this
+   * reading's own guard clauses ("already in flight", "Test connection is
+   * holding an unsaved config") sat above the try that re-armed it, so pressing
+   * Test killed the reading until the next save. The body now returns what it
+   * read — or "skip" — and never touches the timer.
+   */
+  private readonly safeSpaceTicker = new Ticker<SafeSpaceReading | "skip">({
+    tick: () => this.readSafeSpace(),
+    nextDelayMs: (r) => this.safeSpaceDelayMs(r),
+    // Switched off (no space id) is not a state this reading defers in — there
+    // is nothing to read — so it lives with the timer rather than in the body.
+    //
+    // `this.testing ||` because test() holds the operator's UNSAVED form config
+    // in `this.cfg`, and this gate reads through to it. A Test pressed with the
+    // space-id field blanked would answer "switched off" for a poller whose
+    // SAVED config has it on — refusing the re-arm and killing the reading
+    // exactly as the pre-ticker guard clause did, one door along. A gate that
+    // cannot be trusted is treated as open: the tick it lets through skips on
+    // `testing` anyway, and by the next one the saved config is back.
+    wanted: () => this.running && (this.testing || !!this.cfg?.safeSpaceId),
+    generation: () => this.pollEpoch,
+  });
+  /** True while a fast attendance read is in flight — see readAttendance. */
+  private attendanceInFlight = false;
+  /**
+   * True for the whole of one main-cycle poll, set synchronously before its
+   * first await — see the note in connect() itself. The one thing that
+   * actually stops a fast attendance read issued in the SAME timer-phase sweep
+   * as the main poll, which cancelling a timer from noteAttendanceSample is too
+   * late for. One-directional on purpose: the main cycle never defers to this
+   * one, since it needs its own traffic fetch every tick regardless.
+   */
+  private mainPollInFlight = false;
+  /** True while the pending attendance reading was scheduled at the idle
+   *  cadence. Its own flag, for the reason safeSpacePolledIdle is: `polledIdle`
+   *  belongs to the Vea poll and says nothing about this timer. */
+  private attendancePolledIdle = false;
+  /** The attendance reading's own clock. Not the base class's, and not
+   *  safeSpaceTicker: three independent clocks now share this integration, and
+   *  sharing any one of them ties its cadence to another field's interval. */
+  private readonly attendanceTicker = new Ticker({
+    tick: () => this.readAttendance(),
+    // The same cadence whether the tick read or deferred: rearmAttendance's
+    // answer never depended on the outcome, and a deferral is one interval late
+    // rather than a different kind of wait.
+    nextDelayMs: () => this.attendanceDelayMs(),
+    // An interval no faster than the Vea poll has nothing for this timer to do —
+    // the poll's own traffic fetch already IS that tick's attendance reading.
+    // `this.testing ||` for the reason safeSpaceTicker's gate carries it: the
+    // answer is read out of `this.cfg`, which test() swaps for the operator's
+    // unsaved form values.
+    wanted: () => this.running && (this.testing || this.attendanceIsFaster()),
+    generation: () => this.pollEpoch,
+  });
+  /** The attendance reading's own outage log — see safeSpaceOutages for why an
+   *  OutageLog with one settle window cannot be shared across pollers on
+   *  different intervals. */
+  private readonly attendanceOutages = new OutageLog(settleWindowMs(DEFAULT_POLL_SECONDS));
+  /**
+   * The zone-derived attendance and the published attendance the main cycle
+   * last agreed on, together — what a fast attendance read ADVANCES rather
+   * than a number it re-derives from scratch.
+   *
+   * Vea publishes two different attendance figures depending on whether a site
+   * has spaces: the day-net from /data/occupancy when it does, the raw zone sum
+   * from /data/traffic when it doesn't (see buildDto and the space-occupancy
+   * override in connect()). The fast read only ever has the zone sum — asking
+   * for the day aggregates too would be the second and third request per fast
+   * tick this feature exists to avoid — so publishing it directly would fight
+   * the main cycle's own number on a site with spaces, stepping between two
+   * different bases every few seconds. Anchored to what the main cycle last
+   * published and advanced by how far the zone sum has moved since, the fast
+   * read agrees with the slow one at every one of its ticks and only fills the
+   * gap the rest of the time. Null until the main cycle's first successful poll;
+   * a fast read with no anchor yet publishes the raw zone sum, which is what a
+   * site with no spaces already does anyway.
+   */
+  private attendanceAnchor: { published: number; zoneAttendance: number } | null = null;
   /** When the current token was minted — a token rejected seconds after issue is
    *  a different fault from one that expired. See noteSharedClientSuspicion. */
   private tokenIssuedAt = 0;
@@ -481,6 +770,32 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
 
   /** True while the pending poll was scheduled at the slow idle cadence. */
   private polledIdle = false;
+
+  /**
+   * The Vea poll's clock — the third of the three, and the only one that used to
+   * ride the base class's single reconnect timer.
+   *
+   * Moved onto a Ticker with the other two so the "after every tick, armed again
+   * unless stopped" rule is written once for this file instead of three times.
+   * The base's timer is unused by this integration now: scheduleIn and
+   * scheduleReconnect arm it, and neither is called from here any more. The
+   * back-off still comes from the base — a failed tick asks it for the next
+   * delay — so an unreachable Vea backs off exactly as before.
+   *
+   * It is also what makes the `testing` gate below safe to have at all. The poll
+   * had no such gate, so a poll landing inside Test connection published counts
+   * for the operator's UNSAVED location scope and carried its day aggregates for
+   * ten minutes, which is the failure readSafeSpace and readAttendance already
+   * guarded against. Adding that guard with the old re-arm-in-a-finally would
+   * have made a deferral look like a failure and stepped the back-off; as an
+   * outcome it is neither.
+   */
+  private readonly pollTicker = new Ticker<PollOutcome>({
+    tick: () => this.pollOnce(),
+    nextDelayMs: (outcome) => this.pollDelayMs(outcome),
+    wanted: () => this.running,
+    generation: () => this.pollEpoch,
+  });
 
   /** When the trend buffer last took a sample. Its own clock, not the poll's. */
   private lastHistoryAt = 0;
@@ -526,10 +841,29 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
    * `Math.max` exists to prevent.
    */
   pollNowIfIdle(): void {
-    if (!this.running || !this.polledIdle || !this.inDemand) return;
+    if (!this.running || !this.inDemand) return;
+    // THREE tickers now, so three gates. The SafeSpace and attendance readings
+    // have the same problem — each one's next tick is up to a minute out and
+    // the number it holds is what the arriving consumer is about to read — but
+    // neither can be gated on `polledIdle`, which belongs to the Vea poll and is
+    // false whenever the Vea interval alone is 60s or more. Gated on its own
+    // flag each pre-empts an IDLE wait only, so a flapping consumer still cannot
+    // read either faster than its configured rate.
+    //
+    // No "is SafeSpace even on" check here any more: each ticker's own
+    // `wanted()` answers that, in one place, for every caller that arms it.
+    if (this.safeSpacePolledIdle) {
+      this.safeSpacePolledIdle = false;
+      this.safeSpaceTicker.arm(0);
+    }
+    if (this.attendancePolledIdle) {
+      this.attendancePolledIdle = false;
+      this.attendanceTicker.arm(0);
+    }
+    if (!this.polledIdle) return;
     this.polledIdle = false;
     console.log("[sensource] a consumer arrived — polling now rather than waiting out the idle interval");
-    this.scheduleIn(0);
+    this.pollTicker.arm(0);
   }
 
   constructor() {
@@ -549,7 +883,23 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     this.zonesCache = null;
     this.spacesCache = null;
     this.carriedDay = null;
-    this.degraded.clear();
+    this.outages.forget();
+    // The interval may have changed with everything else, and the settle window
+    // has to stay longer than one poll of it.
+    this.outages.settleAfter(settleWindowMs(this.veaSeconds()));
+    // A different space id is a different bucket and a different building; the
+    // old one's quota state and its last reading are both false of the new one.
+    this.safeSpace.forget();
+    this.safeSpaceAt = null;
+    this.veaOccupancy = null;
+    this.safeSpaceOutages.forget();
+    this.safeSpaceOutages.settleAfter(settleWindowMs(this.safeSpaceSeconds()));
+    // A different scope (location or zones) makes the OLD zone-derived anchor
+    // meaningless against the new scope's traffic — see attendanceAnchor's own
+    // note. The main cycle's next successful poll establishes a fresh one.
+    this.attendanceOutages.forget();
+    this.attendanceOutages.settleAfter(settleWindowMs(this.attendanceSeconds()));
+    this.attendanceAnchor = null;
     // New credentials — nothing learned about the old ones survives, including
     // the exchange rate-limit state.
     this.lastExchangeAt = 0;
@@ -558,24 +908,441 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     // Anything already in flight belongs to the configuration it was issued
     // under, and stops here.
     this.pollEpoch++;
+    // Said at CONFIGURE, not at start(): start() returns early unless the Vea
+    // credentials are present, and this is the one state where SafeSpace is
+    // broken while the integration as a whole is fine. An operator who restores
+    // a snapshot gets a line naming the fix rather than an occupancy that is
+    // quietly a minute and a half stale.
+    if (this.safeSpaceState() === "no-id") {
+      console.warn(
+        "[sensource] SafeSpace is switched on but no space ID is stored — occupancy is coming " +
+          "from Vea. A config snapshot deliberately does not carry the ID; re-enter it in " +
+          "Settings → Integrations → SenSource Vea, or save that card with the field left empty " +
+          "to turn SafeSpace off.",
+      );
+    }
     this.restart();
   }
 
   override start(): void {
     if (this.running || !this.configured) return;
-    const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
+    const sec = this.veaSeconds();
     console.log(`[sensource] polling every ${sec}s`);
-    // The cadence rides the base class's single timer — connect() re-arms it. A
-    // second setInterval here was exactly what integration-base warns against
-    // ("two timers would double the poll rate after a reconnect"), and it also
-    // meant this integration had NO back-off at all: a dead Vea API was re-hit at
-    // full rate forever, it polled at service rate all week instead of going
-    // dormant, and it logged every single failure.
-    super.start(); // runs the first poll, which schedules the next
+    // The cadence rides pollTicker, which begin() below takes the first tick of.
+    // A setInterval here was exactly what integration-base warns against ("two
+    // timers would double the poll rate after a reconnect"), and it also meant
+    // this integration had NO back-off at all: a dead Vea API was re-hit at full
+    // rate forever, it polled at service rate all week instead of going dormant,
+    // and it logged every single failure. The back-off still comes from the base
+    // class; only the arming moved.
+    super.start(); // sets `running`, then begin() runs the first poll
+    // The SafeSpace reading runs on its own clock beside it, when configured.
+    if (this.cfg?.safeSpaceId) {
+      console.log(`[sensource] reading SafeSpace live occupancy every ${this.safeSpaceSeconds()}s`);
+      void this.safeSpaceTicker.run();
+    }
+    // The attendance reading runs on its own clock too, but only when that
+    // clock is actually faster than the poll above — see attendanceIsFaster.
+    // SCHEDULED rather than run immediately the way SafeSpace is: the poll
+    // begin() already started fetches /data/traffic itself, so reading it again
+    // right now would be the doubled request this feature exists to avoid, on
+    // every start() — which is to say, on every save of this card.
+    if (this.attendanceIsFaster()) {
+      console.log(`[sensource] reading attendance every ${this.attendanceSeconds()}s`);
+      this.attendanceTicker.arm(this.attendanceSeconds() * 1000);
+    }
+  }
+
+  /** The base class's first attempt, taken through the poll's own ticker so the
+   *  first tick re-arms exactly like every later one. */
+  protected override begin(): void {
+    void this.pollTicker.run();
   }
 
   protected override teardown(): void {
-    /* nothing to tear down: the base class owns the only timer */
+    // All three clocks are this file's own now. A stop() that left any of them
+    // running would keep hitting an external endpoint for an integration the
+    // operator has switched off. Cancelled AFTER `running` goes false — stop()
+    // clears the flag before calling this — so a tick already in flight sees
+    // `wanted()` false and does not re-arm behind the cancel.
+    this.pollTicker.cancel();
+    this.safeSpaceTicker.cancel();
+    this.attendanceTicker.cancel();
+  }
+
+  // ── SafeSpace ─────────────────────────────────────────────────────────────
+
+  /**
+   * What the SafeSpace half of this integration is doing.
+   *
+   *   "off"   — the operator has not switched it on. Vea answers everything, and
+   *             that is the ordinary state, not a fault. Nothing is said.
+   *   "on"    — switched on with an id; the reading runs.
+   *   "no-id" — switched on and the id is GONE. The usual cause is a config
+   *             snapshot restored onto another box: the snapshot carries the
+   *             marker and deliberately leaves the credential behind.
+   *
+   * "no-id" exists because the alternative is the failure this is guarding —
+   * falling back to Vea, which is CORRECT, while looking exactly like a site
+   * that never had SafeSpace. The count still comes through, so nothing else in
+   * the app has any reason to complain.
+   */
+  private safeSpaceState(): "off" | "on" | "no-id" {
+    if (this.cfg?.safeSpaceId) return "on";
+    return this.cfg?.safeSpaceEnabled ? "no-id" : "off";
+  }
+
+  /**
+   * What the integration row says about SafeSpace, appended to its message.
+   *
+   * Empty in every state but "no-id" — a row that is working has nothing to add,
+   * and a row saying "SafeSpace off" on sixteen sites that never had it is noise.
+   */
+  private safeSpaceNote(): string {
+    return this.safeSpaceState() === "no-id"
+      ? " — SafeSpace is on but has no space ID; re-enter it in Settings → Integrations → SenSource Vea"
+      : "";
+  }
+
+  /** The SafeSpace interval in seconds, floored. */
+  private safeSpaceSeconds(): number {
+    return Math.max(
+      SAFESPACE_MIN_POLL_SECONDS,
+      this.cfg?.safeSpacePollSeconds || SAFESPACE_DEFAULT_POLL_SECONDS,
+    );
+  }
+
+  /** The held SafeSpace occupancy, if it is fresh enough to still be the better
+   *  of the two numbers. Null means the published occupancy comes from Vea. */
+  private safeSpaceOccupancy(now: number): number | null {
+    const held = this.safeSpaceAt;
+    if (!held) return null;
+    return now - held.at <= SAFESPACE_HOLD_MS ? held.occupancy : null;
+  }
+
+  /**
+   * One SafeSpace reading: hold it, and say so if the source changed.
+   *
+   * Re-publishes the last snapshot with the new number rather than waiting for
+   * the next Vea poll — the reading is only worth having because it is fresher,
+   * and holding it until Vea's interval elapses would throw that away.
+   *
+   * NOTHING HERE TOUCHES THE TIMER. It returns what it read, or "skip" when it
+   * could not read this tick; safeSpaceTicker arms the next one either way. That
+   * is not tidiness: the guard below used to sit above a try whose finally held
+   * the ONLY re-arm in the call graph, so a skipped tick was a cancelled
+   * reading — pressing Test connection killed the occupancy until the card was
+   * saved again or the box restarted. See ticker.ts.
+   */
+  private async readSafeSpace(): Promise<SafeSpaceReading | "skip"> {
+    const id = this.cfg?.safeSpaceId;
+    // A DEFERRAL, every one of them, which is why they are a return value now.
+    //
+    // `testing` is the Test-connection button: test() swaps this.cfg for the
+    // operator's UNSAVED form config across an await, and a reading that landed
+    // in that window would store the unsaved space id's answer as the live
+    // occupancy with nothing to say it had.
+    //
+    // Two readings at once interleave their X-RateLimit-Remaining values, and the
+    // cost is MEASURED from consecutive ones — the one thing the client is careful
+    // not to assume. start() runs a tick directly while pollNowIfIdle can arm a
+    // 0ms one, so the overlap is reachable.
+    //
+    // (`!id` is not here: "SafeSpace is switched off" is the ticker's `wanted()`,
+    // because it means there is nothing to defer TO.)
+    if (!id || this.safeSpaceInFlight || this.testing) return "skip";
+    this.safeSpaceInFlight = true;
+    const epoch = this.pollEpoch;
+    let reading: SafeSpaceReading;
+    try {
+      reading = await this.safeSpace.read(id);
+    } catch (err) {
+      // read() is documented never to throw; if that ever stops being true the
+      // reading must still not take the timer down with it.
+      reading = { kind: "failed", why: redact(errorMessage(err), id), status: null };
+    }
+    try {
+      this.applySafeSpace(reading, epoch);
+    } finally {
+      this.safeSpaceInFlight = false;
+    }
+    return reading;
+  }
+
+  /** Fold one reading into the published count. Separate from readSafeSpace so
+   *  the re-arm can sit in a finally around it. */
+  private applySafeSpace(reading: SafeSpaceReading, epoch: number): void {
+    // Reconfigured mid-read: this answer describes a space the operator has
+    // replaced, and the new configuration's start() has already armed a timer.
+    if (!this.running || epoch !== this.pollEpoch) return;
+
+    const now = Date.now();
+    if (reading.kind === "ok") {
+      this.safeSpaceAt = { occupancy: reading.occupancy, at: now };
+      const back = this.safeSpaceOutages.ok("safespace", now);
+      if (back.log) console.log(`[sensource] SafeSpace live occupancy is answering again${back.note}`);
+      this.republishOccupancy(reading.occupancy, "safespace");
+    } else {
+      // Not this reading's number — but the last one may still be young enough
+      // to stand, which is what carries the occupancy over the one reading in six
+      // that comes back empty. Silent while it does: nothing a display shows has
+      // changed, and the empty response is the normal case.
+      const held = this.safeSpaceOccupancy(now);
+      if (held !== null) this.republishOccupancy(held, "safespace");
+      else {
+        this.noteSafeSpaceOutage(reading, now);
+        // ...and the payload says the same thing the line just did. Every read,
+        // not only the one that logged: emit() drops a re-broadcast that repeats
+        // itself, so this costs nothing after the first.
+        if (this.veaOccupancy !== null) this.republishOccupancy(this.veaOccupancy, "vea");
+      }
+    }
+  }
+
+  /**
+   * How long until the next reading, at whichever cadence the moment calls for.
+   *
+   * `"skip"` and `null` (the tick threw) both take the ordinary cadence: a tick
+   * that never reached the endpoint has learned nothing about the quota, and
+   * deferring it by one interval is the whole cost of a deferral.
+   */
+  private safeSpaceDelayMs(reading: SafeSpaceReading | "skip" | null): number {
+    const sec = this.safeSpaceSeconds();
+    const demand = this.inDemand;
+    this.safeSpacePolledIdle = !demand && IDLE_POLL_MS > sec * 1000;
+    const normal = demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS);
+    // A held reading already knows when the bucket refills, and waking every ten
+    // seconds through a five-minute hold to be told "still held" thirty times is
+    // work for nothing. Never SHORTER than the normal cadence.
+    return reading && reading !== "skip" && reading.kind === "held"
+      ? Math.max(normal, reading.untilMs - Date.now())
+      : normal;
+  }
+
+  /**
+   * Say — once per outage — that the occupancy has gone back to Vea.
+   *
+   * Called only when there is no usable SafeSpace number at all, which is the
+   * event an operator can actually see. An empty response with a young value
+   * behind it is NOT reported: about one sample in six is empty by design, and a
+   * line for each would be six an hour saying nothing changed.
+   *
+   * The KIND is taken from the reading's shape and never from its prose. A
+   * "waiting 20s" countdown inside the message would be a different kind on every
+   * report, which makes each one a fresh first failure and defeats the reminder
+   * floor: the same mistake, one level down, that this integration's per-poll
+   * logging was.
+   */
+  private noteSafeSpaceOutage(
+    reading: Exclude<SafeSpaceReading, { kind: "ok" }>,
+    now: number,
+  ): void {
+    const kind =
+      reading.kind === "failed" ? (reading.status ? `HTTP ${reading.status}` : "transport") : reading.kind;
+    const out = this.safeSpaceOutages.fail("safespace", kind, now);
+    if (out.log) {
+      // `reading.why` arrives redacted and scrubbed: safespace-client.ts is the
+      // ONE choke point for the space id, because it is the only thing that knows
+      // the URL. A second redact() here was tried and removed — it could not be
+      // shown to do anything, and defence that cannot be proved is how a guard
+      // goes green on the bug it was written for.
+      console.warn(
+        `[sensource] SafeSpace live occupancy unavailable (${reading.why}); ` +
+          `the occupancy falls back to Vea${out.note}`,
+      );
+    }
+  }
+
+  /** Publish the last snapshot again with a newer occupancy, naming its source.
+   *  Nothing else about it has changed, and emit() drops a re-broadcast that says
+   *  the same thing. */
+  private republishOccupancy(occupancy: number, source: "vea" | "safespace"): void {
+    const last = this.last;
+    if (!last.connected) return;
+    const next: PeopleCountDTO = {
+      ...last,
+      updatedAt: new Date().toISOString(),
+      total: { ...last.total, occupancy, occupancySource: source },
+    };
+    this.appendHistory(next);
+    this.emit(next);
+  }
+
+  // ── Attendance interval ──────────────────────────────────────────────────
+
+  /** The effective Vea poll interval, floored — what start() and the
+   *  poll-rearm code below each computed inline before this factored out a
+   *  third caller: attendanceSeconds() anchors its own fallback to it. */
+  private veaSeconds(): number {
+    return Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
+  }
+
+  /** The attendance interval in seconds, floored. Falls back to the Vea
+   *  interval itself, not a constant of its own — see the field's doc comment
+   *  on SenSourceConfig for why. */
+  private attendanceSeconds(): number {
+    return Math.max(MIN_POLL_SECONDS, this.cfg?.attendancePollSeconds || this.veaSeconds());
+  }
+
+  /** Is the attendance interval actually faster than the Vea poll it would
+   *  otherwise just repeat? Equal or slower is "unset" in effect: the main
+   *  cycle's own traffic fetch already IS that tick's attendance reading, and a
+   *  second timer alongside it would only ever ask Vea the same question twice,
+   *  never sooner than the poll already does. */
+  private attendanceIsFaster(): boolean {
+    return this.attendanceSeconds() < this.veaSeconds();
+  }
+
+  /**
+   * The one /data/traffic query the main poll and the fast attendance read
+   * both use, kept in one place so they can never drift into asking two
+   * different questions of the same endpoint.
+   *
+   * The Vea /data/traffic endpoint has NO working location/zone filter param
+   * (locationIds/entityIds are silently ignored — confirmed against the public
+   * API + every reference client), so both callers always request all zones
+   * for today and narrow to the selected zones CLIENT-SIDE. excludeClosedHours
+   * matches the reference clients (drops after-hours sensor noise).
+   */
+  private trafficPath(): string {
+    const params = new URLSearchParams({
+      relativeDate: "today",
+      dateGroupings: "day",
+      entityType: "zone",
+      metrics: "ins,outs",
+      excludeClosedHours: "true",
+    });
+    return `/data/traffic?${params.toString()}`;
+  }
+
+  /**
+   * Record a fresh zone-derived attendance sample from whichever poller just
+   * fetched /data/traffic, and push the fast attendance timer out from now.
+   *
+   * Called from the MAIN cycle's own success path too, not only the fast
+   * read's — the main cycle already IS an attendance sample, and re-arming the
+   * fast timer from here is what stops the two from ever landing on the same
+   * tick. Without this, a fast interval that divides evenly into the poll
+   * interval coincides with it at their LCM forever, not just once at start();
+   * pushing the fast timer out from every successful fetch — the main cycle's
+   * or its own — keeps it always at least a full attendance interval away from
+   * the last one, from either source.
+   */
+  private noteAttendanceSample(published: number, zoneAttendance: number): void {
+    this.attendanceAnchor = { published, zoneAttendance };
+    this.attendanceTicker.arm(this.attendanceSeconds() * 1000);
+  }
+
+  /**
+   * One fast attendance read: fetch /data/traffic alone, advance the anchor by
+   * how far it has moved, publish, re-arm.
+   *
+   * Deliberately the ONE endpoint this feature touches: re-fetching
+   * /data/occupancy here for the authoritative space-derived figure would be
+   * the second and third request per fast tick the whole feature exists to
+   * avoid, and the main cycle already supplies that number on its own
+   * schedule — see attendanceAnchor's own note on why this advances it
+   * instead of asking Vea for it again.
+   */
+  private async readAttendance(): Promise<TickOutcome> {
+    // THREE DEFERRALS, and a return value rather than a bare `return` for the
+    // reason readSafeSpace's are — attendanceTicker arms the next tick whichever
+    // way this goes, so none of them can cancel the reading.
+    //
+    // `testing` is the Test-connection button, for the same reason
+    // readSafeSpace checks it: test() swaps this.cfg for the operator's
+    // UNSAVED form config across an await, and a read landing in that window
+    // would advance the anchor with a scope nobody has saved.
+    //
+    // `mainPollInFlight` is checked FIRST and before any await in this
+    // function, for the same reason it is set before the poll's own first
+    // await: when the fast interval divides evenly into the poll interval,
+    // both tickers share a target instant and both callbacks run in the same
+    // timer-phase sweep, main's first. By the time this line runs, a
+    // same-tick main poll has already set the flag — checking it here is what
+    // actually stops the redundant fetch; noteAttendanceSample's re-arm only
+    // stops the NEXT tick from coinciding again.
+    if (this.attendanceInFlight || this.testing || this.mainPollInFlight) return "skip";
+    this.attendanceInFlight = true;
+    const epoch = this.pollEpoch;
+    try {
+      const allow = await this.resolveAllowedZones();
+      const traffic = await this.apiGet<{ results?: unknown[] }>(this.trafficPath());
+      // Reconfigured mid-read: this answer describes a scope the operator has
+      // replaced, the same guard the poll and applySafeSpace() both open with.
+      // The ticker sees the moved generation and leaves the timer to whoever
+      // moved it, so this is a plain return rather than an outcome.
+      if (!this.running || epoch !== this.pollEpoch) return "done";
+      const zoneAttendance = zoneAttendanceOf(reduceTraffic(traffic.results ?? [], allow));
+      const anchor = this.attendanceAnchor;
+      const attendance = anchor
+        ? Math.max(0, anchor.published + (zoneAttendance - anchor.zoneAttendance))
+        : zoneAttendance;
+      this.attendanceAnchor = { published: attendance, zoneAttendance };
+      this.republishAttendance(attendance);
+      const back = this.attendanceOutages.ok("attendance", Date.now());
+      if (back.log) console.log(`[sensource] the fast attendance read is answering again${back.note}`);
+    } catch (err) {
+      // Not swallowed: reported through the same outage log every other part of
+      // this poller uses, once per outage rather than once per failing tick —
+      // and NOT rethrown, because this runs off its own ticker with no caller to
+      // hand a rejection to, the same shape the poll and readSafeSpace are in.
+      const kind =
+        err instanceof SenSourceHttpError ? `HTTP ${err.status}` : scrub(errorMessage(err), 60) || "unknown";
+      const out = this.attendanceOutages.fail("attendance", kind, Date.now());
+      if (out.log) {
+        console.warn(
+          `[sensource] the fast attendance read failed (${scrub(errorMessage(err), 120)}); attendance holds ` +
+            `at its last value until the poll interval's own reading catches up${out.note}`,
+        );
+      }
+    } finally {
+      this.attendanceInFlight = false;
+    }
+    return "done";
+  }
+
+  /** How long until the next fast attendance read, at whichever cadence the
+   *  moment calls for — the same idle handling safeSpaceDelayMs uses, on the
+   *  attendance interval instead of SafeSpace's. */
+  private attendanceDelayMs(): number {
+    const sec = this.attendanceSeconds();
+    const demand = this.inDemand;
+    this.attendancePolledIdle = !demand && IDLE_POLL_MS > sec * 1000;
+    return demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS);
+  }
+
+  /** Publish the last snapshot again with a newer attendance — republishOccupancy's
+   *  shape, for the other half of the DTO. Nothing else about it has changed,
+   *  and emit() drops a re-broadcast that says the same thing. */
+  private republishAttendance(attendance: number): void {
+    const last = this.last;
+    if (!last.connected) return;
+    const next: PeopleCountDTO = { ...last, updatedAt: new Date().toISOString(), total: { ...last.total, attendance } };
+    this.appendHistory(next);
+    this.emit(next);
+  }
+
+  /**
+   * What Test connection says about SafeSpace, or "" when it is switched off.
+   *
+   * Never fails the test. Vea IS the integration and SafeSpace layers one field
+   * onto it, so a wrong space id — or a missing one — is worth reporting and is
+   * not worth calling the whole connection broken. Uses the live client, so a
+   * Test pressed while the poller is holding off on the quota says so rather
+   * than spending it.
+   */
+  private async testSafeSpace(cfg: SenSourceConfig): Promise<string> {
+    const id = cfg.safeSpaceId;
+    // Switched on with no id. Test is where an operator looks first after a
+    // restore, and "Authenticated — 3 location(s) visible" on its own would tell
+    // them everything is fine while the occupancy quietly came from Vea.
+    if (!id && cfg.safeSpaceEnabled) return "; SafeSpace is on but has no space ID — re-enter it";
+    if (!id) return "";
+    const reading = await this.safeSpace.read(id);
+    if (reading.kind === "ok") return `; SafeSpace reading ${reading.occupancy}`;
+    // `why` arrives redacted from the client — see the note in noteSafeSpaceOutage.
+    return `; SafeSpace did not answer (${reading.why})`;
   }
 
   /** One-shot reachability check for the Integrations "Test connection" button. */
@@ -583,12 +1350,21 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     try {
       const prev = this.cfg;
       this.cfg = cfg;
+      this.testing = true;
       this.resetAuth();
       try {
         const locations = await this.listLocations();
-        return { ok: true, message: `Authenticated — ${locations.length} location(s) visible` };
+        // The descriptor's help walks an operator through pasting a space id, so
+        // Test is where they will expect it checked. It used to report a green
+        // "Authenticated" for a wrong one and leave a /log line as the only hint.
+        const safeSpace = await this.testSafeSpace(cfg);
+        return {
+          ok: true,
+          message: `Authenticated — ${locations.length} location(s) visible${safeSpace}`,
+        };
       } finally {
         this.cfg = prev;
+        this.testing = false;
         this.resetAuth();
       }
     } catch (err) {
@@ -651,13 +1427,15 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       for (const s of asRows(await this.apiGet<unknown>("/sensor"))) {
         if (typeof s.sensorId === "string" && typeof s.siteId === "string") m.set(s.sensorId, s.siteId);
       }
-      this.degradationChanged("sensor-join", false);
+      const joinBack = this.recovered("sensor-join");
+      if (joinBack.log) console.log(`[sensource] the /sensor join is readable again${joinBack.note}`);
     } catch (err) {
-      // Once per transition. This ran on every poll of an outage, like the four
-      // others in this file.
-      if (this.degradationChanged("sensor-join", true)) {
+      // Once per outage, not once per poll and not once per flap — see the note
+      // on `outages`, and repeat-log.ts for why a transition flag was not enough.
+      const d = this.failed("sensor-join", err);
+      if (d.log) {
         console.warn(
-          `[sensource] /sensor join failed (zones won't map to locations): ${scrub(errorMessage(err), 120)}`,
+          `[sensource] /sensor join failed (zones won't map to locations): ${scrub(errorMessage(err), 120)}${d.note}`,
         );
       }
     }
@@ -670,11 +1448,13 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       for (const s of asRows(await this.apiGet<unknown>("/site"))) {
         if (typeof s.siteId === "string" && typeof s.locationId === "string") m.set(s.siteId, s.locationId);
       }
-      this.degradationChanged("site-join", false);
+      const siteBack = this.recovered("site-join");
+      if (siteBack.log) console.log(`[sensource] the /site join is readable again${siteBack.note}`);
     } catch (err) {
-      if (this.degradationChanged("site-join", true)) {
+      const d = this.failed("site-join", err);
+      if (d.log) {
         console.warn(
-          `[sensource] /site join failed (zones won't map to locations): ${scrub(errorMessage(err), 120)}`,
+          `[sensource] /site join failed (zones won't map to locations): ${scrub(errorMessage(err), 120)}${d.note}`,
         );
       }
     }
@@ -731,21 +1511,30 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
           .filter((z) => z.locationId === cfg.locationId)
           .map((z) => z.zoneId);
         if (ids.length) {
-          this.degradationChanged("zone-location-map", false);
-          this.degradationChanged("zone-resolution", false);
+          const mapBack = this.recovered("zone-location-map");
+          if (mapBack.log) {
+            console.log(`[sensource] the selected location maps to zones again${mapBack.note}`);
+          }
+          const zoneBack = this.recovered("zone-resolution");
+          if (zoneBack.log) console.log(`[sensource] zone resolution is working again${zoneBack.note}`);
           return new Set(ids);
         }
-        // Once per transition, like the other two degradations in this file.
-        // This ran on every poll of a misconfiguration — the third copy of the
-        // same mistake, and the one an operator sees for weeks at a time.
-        if (this.degradationChanged("zone-location-map", true)) {
+        // A misconfiguration rather than an outage — it lasts until an operator
+        // changes something, which is exactly the shape that must not write a
+        // line per poll for weeks.
+        const d = this.failed("zone-location-map", new Error("no zones map to the selected location"));
+        if (d.log) {
           console.warn(
-            "[sensource] a location is selected but no zones map to it (the API may not expose zone→location); counting all visible zones. Pick specific zones to scope reliably.",
+            "[sensource] a location is selected but no zones map to it (the API may not expose zone→location); counting all visible zones. Pick specific zones to scope reliably." +
+              d.note,
           );
         }
       } catch (err) {
-        if (this.degradationChanged("zone-resolution", true)) {
-          console.warn(`[sensource] zone resolution failed; counting all zones: ${scrub(errorMessage(err), 120)}`);
+        const d = this.failed("zone-resolution", err);
+        if (d.log) {
+          console.warn(
+            `[sensource] zone resolution failed; counting all zones: ${scrub(errorMessage(err), 120)}${d.note}`,
+          );
         }
       }
     }
@@ -767,15 +1556,16 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     try {
       const spaces = await this.listSpaces();
       this.spacesCache = { at: now, spaces };
-      if (this.degradationChanged("space-listing", false)) {
-        console.log("[sensource] the space listing is readable again");
-      }
+      const r = this.recovered("space-listing");
+      if (r.log) console.log(`[sensource] the space listing is readable again${r.note}`);
       return spaces;
     } catch (err) {
-      if (this.degradationChanged("space-listing", true)) {
+      const d = this.failed("space-listing", err);
+      if (d.log) {
         console.warn(
           `[sensource] the space listing could not be read (${scrub(errorMessage(err), 120)}); ` +
-            "the building total falls back to the zone-derived net and capacity is unknown",
+            "the building total falls back to the zone-derived net and capacity is unknown" +
+            d.note,
         );
       }
       throw err;
@@ -876,7 +1666,14 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     // lets the base class's back-off do its job.
     const wait = this.exchangeWaitMs();
     if (wait > 0) {
-      throw new Error(`Auth deferred — ${Math.ceil(wait / 1000)}s before the next token request`);
+      // NO COUNTDOWN IN THE MESSAGE. This read "Auth deferred — 30s before the
+      // next token request", and the number is recomputed per poll — so while
+      // auth stayed blocked the badge got a brand-new string every 15 seconds,
+      // and report() (which compares the message now, not just the state) would
+      // broadcast the whole integration state map each time. The number is not
+      // lost: the 429 handler below logs the wait it set, and the only other
+      // source of a wait here is MIN_EXCHANGE_GAP_MS, a constant.
+      throw new Error("Auth deferred — waiting before the next token request");
     }
 
     this.lastExchangeAt = Date.now();
@@ -913,13 +1710,19 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       const after = retryAfterMs(res.headers.get("retry-after"));
       const waitMs = Math.max(after ?? 0, EXCHANGE_RATE_LIMIT_MS);
       this.exchangeBlockedUntil = Date.now() + waitMs;
-      if (this.degradationChanged("token-exchange", true)) {
+      const rateLimited = this.failed("token-exchange", new Error("HTTP 429"));
+      if (rateLimited.log) {
         console.warn(
           `[sensource] the token exchange is rate-limited (HTTP 429); waiting ${Math.round(waitMs / 1000)}s. ` +
-            "Two instances sharing one Vea API client will do this to each other — give each its own.",
+            "Two instances sharing one Vea API client will do this to each other — give each its own." +
+            rateLimited.note,
         );
       }
-      throw new Error(`Auth rate-limited (HTTP 429) — retrying in ${Math.round(waitMs / 1000)}s`);
+      // Same reason as "Auth deferred" above: `waitMs` follows Retry-After, so
+      // it can differ per response and the badge would change with it. The
+      // duration is on the line just logged, which is where an operator reading
+      // /log at 9am wants it anyway.
+      throw new Error("Auth rate-limited (HTTP 429)");
     }
     if (!res.ok) {
       // "Check client id/secret" is advice, and it is only true for a refusal.
@@ -934,8 +1737,9 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     }
     const json = (await res.json()) as { access_token?: string; expires_in?: number };
     if (!json.access_token) throw new Error("Auth response had no access_token");
-    if (this.degradationChanged("token-exchange", false)) {
-      console.log("[sensource] the token exchange is answering again");
+    const exchangeBack = this.recovered("token-exchange");
+    if (exchangeBack.log) {
+      console.log(`[sensource] the token exchange is answering again${exchangeBack.note}`);
     }
     this.token = json.access_token;
     this.tokenIssuedAt = Date.now();
@@ -1007,25 +1811,46 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       // writes one line rather than one per distinct body. A body carrying a
       // timestamp made every poll "distinct", which was two lines a poll for as
       // long as it lasted.
-      if (this.degradationChanged(`auth:${path}`, true)) {
+      const refused = this.failed(`auth:${path}`, new SenSourceHttpError(401, path, "", tokenId));
+      if (refused.log) {
         const snippet = scrub(body.replace(/\s+/g, " ").trim(), 120) || "(empty response body)";
-        console.warn(`[sensource] HTTP 401 from ${path}: ${snippet}`);
+        console.warn(`[sensource] HTTP 401 from ${path}: ${snippet}${refused.note}`);
       }
       throw new SenSourceHttpError(401, path, body, tokenId);
     }
     if (!res.ok) throw new SenSourceHttpError(res.status, path, "", tokenId);
-    this.degradationChanged(`auth:${path}`, false);
+    // The operationally important one: a 401 storm opened with a line naming what
+    // Vea said and used to close in total silence, so an operator watching /log
+    // never learned it had cleared.
+    const authBack = this.recovered(`auth:${path}`);
+    if (authBack.log) console.log(`[sensource] ${path} is answering again${authBack.note}`);
     return (await res.json()) as T;
   }
 
   // ── Poll ──────────────────────────────────────────────────────────────────
 
-  /** True only on the poll where `key` actually entered or left its degraded
-   *  state, so the caller logs the transition and not the outage. */
-  private degradationChanged(key: string, nowDegraded: boolean): boolean {
-    if ((this.degraded.get(key) ?? false) === nowDegraded) return false;
-    this.degraded.set(key, nowDegraded);
-    return true;
+  /**
+   * Report that `key` failed. True only when the operator should read a line.
+   *
+   * `note` is the tail to append on a reminder — empty on the first failure of a
+   * run — so a long outage still says how long it has been going and how many
+   * attempts it has cost without saying it every poll.
+   */
+  private failed(key: string, err: unknown, now = Date.now()): { log: boolean; note: string } {
+    // The KIND is what distinguishes one outage from another on the same key: a
+    // 401 storm and a 503 storm are different problems and must not collapse into
+    // one run. Status when Vea gave us one, the message otherwise.
+    const kind =
+      err instanceof SenSourceHttpError
+        ? `HTTP ${err.status}`
+        : scrub(errorMessage(err), 60) || "unknown";
+    return this.outages.fail(key, kind, now);
+  }
+
+  /** Report that `key` worked. True only once the run has genuinely settled —
+   *  a success between two failures of a flapping upstream is not a recovery. */
+  private recovered(key: string, now = Date.now()): { log: boolean; note: string } {
+    return this.outages.ok(key, now);
   }
 
   /** Vea's live tracked occupancy — the newest per-minute bucket per space.
@@ -1041,14 +1866,16 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     try {
       const body = await this.apiGet<{ results?: unknown[] }>(`/data/occupancy?${mParams.toString()}`);
       const live = latestSpaceOccupancy(body.results ?? [], allow);
-      if (this.degradationChanged("minute-occupancy", false)) {
-        console.log("[sensource] the live minute occupancy is available again");
+      const minuteBack = this.recovered("minute-occupancy");
+      if (minuteBack.log) {
+        console.log(`[sensource] the live minute occupancy is available again${minuteBack.note}`);
       }
       return live;
     } catch (err) {
-      if (this.degradationChanged("minute-occupancy", true)) {
+      const minuteOut = this.failed("minute-occupancy", err);
+      if (minuteOut.log) {
         console.warn(
-          `[sensource] live minute occupancy unavailable; using the day total: ${scrub(errorMessage(err), 120)}`,
+          `[sensource] live minute occupancy unavailable; using the day total: ${scrub(errorMessage(err), 120)}${minuteOut.note}`,
         );
       }
       return null;
@@ -1115,24 +1942,54 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
     this.carriedDay = null;
   }
 
+  /**
+   * The base class's connect(), which for this integration is one poll.
+   *
+   * Kept as a thin pass-through because `connect` is what ConnectionLifecycle
+   * declares and what scheduleIn would call; the cadence itself rides
+   * {@link pollTicker}, whose body is pollOnce() directly so it can read the
+   * outcome. Nothing in this file calls scheduleIn or scheduleReconnect any
+   * more, so this is only ever reached through the ticker.
+   */
   protected async connect(): Promise<void> {
-    if (!this.running || !this.cfg) return;
+    await this.pollOnce();
+  }
+
+  /**
+   * One Vea poll, and what it did.
+   *
+   * NOTHING HERE TOUCHES THE TIMER — pollTicker arms the next tick from the
+   * outcome, including after a throw. Before, the re-arm lived in this
+   * function's own `finally`, which was correct but was the third copy of that
+   * rule in this file and the copy the other two were written from; one of those
+   * two had it wrong.
+   */
+  private async pollOnce(): Promise<PollOutcome> {
+    if (!this.running || !this.cfg) return "skip";
+    // The Test-connection button holds the operator's UNSAVED config in
+    // `this.cfg` across two network round-trips (see test()). A poll landing in
+    // that window authenticates with unsaved credentials and publishes counts —
+    // and carries day aggregates for ten minutes — for a location scope nobody
+    // has saved. readSafeSpace and readAttendance have guarded this since they
+    // were written; the poll beside them did not, because until the ticker there
+    // was no way to say "not this tick" that did not also mean either "stop" or
+    // "back off".
+    if (this.testing) return "skip";
     const epoch = this.pollEpoch;
     let ok = false;
+    // Set SYNCHRONOUSLY, before the first await below — see readAttendance's
+    // own check of this flag for why. Two independent tickers with the same
+    // target instant (the main poll's own schedule and the fast attendance
+    // one's, exactly when the fast interval divides evenly into the poll
+    // interval) both have their callbacks invoked in the SAME timer-phase
+    // sweep, back to back, before either one reaches an await — so cancelling
+    // the other timer from inside noteAttendanceSample happens far too late to
+    // stop a read that already started. A flag checked at the top of
+    // readAttendance, before its own first await, is what actually closes that
+    // window; the generation-guarded re-arm in noteAttendanceSample is what
+    // keeps it from recurring on the NEXT tick.
+    this.mainPollInFlight = true;
     try {
-      // The Vea /data/traffic endpoint has NO working location/zone filter param
-      // (locationIds/entityIds are silently ignored — confirmed against the public
-      // API + every reference client), so we always request all zones for today
-      // and narrow to the selected zones CLIENT-SIDE. excludeClosedHours matches
-      // the reference clients (drops after-hours sensor noise).
-      const params = new URLSearchParams({
-        relativeDate: "today",
-        dateGroupings: "day",
-        entityType: "zone",
-        metrics: "ins,outs",
-        excludeClosedHours: "true",
-      });
-
       // Day stats: attendance (Σ entries), peak/min/avg occupancy for the day.
       const oParams = new URLSearchParams({
         relativeDate: "today",
@@ -1153,7 +2010,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       // read from — see below — which is only possible if both answers survive.
       const now = Date.now();
       this.dropCarriedAtMidnight(now);
-      const trafficPath = `/data/traffic?${params.toString()}`;
+      const trafficPath = this.trafficPath();
       const dayPath = `/data/occupancy?${oParams.toString()}`;
       let [allow, allowSpaces, [trafficRes, dayRes]] = await Promise.all([
         this.resolveAllowedZones(),
@@ -1218,15 +2075,18 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
           ? `HTTP ${dayOccErr.status}`
           : scrub(errorMessage(dayOccErr), 120);
       if (dayReason) {
-        if (this.degradationChanged("day-aggregates", true)) {
+        const dayOut = this.failed("day-aggregates", dayOccErr ?? new Error(dayReason));
+        if (dayOut.log) {
           console.warn(
-            carried
+            (carried
               ? `[sensource] day aggregates unavailable (${dayReason}); carrying the last good values from ${clockOf(carried.at)}`
-              : `[sensource] day aggregates unavailable (${dayReason}); nothing recent enough to carry, so peak, min, avg and capacity are unavailable`,
+              : `[sensource] day aggregates unavailable (${dayReason}); nothing recent enough to carry, so peak, min, avg and capacity are unavailable`) +
+              dayOut.note,
           );
         }
-      } else if (this.degradationChanged("day-aggregates", false)) {
-        console.log("[sensource] day aggregates are available again");
+      } else {
+        const dayBack = this.recovered("day-aggregates");
+        if (dayBack.log) console.log(`[sensource] day aggregates are available again${dayBack.note}`);
       }
 
       // Override the building total with the authoritative space-occupancy endpoint
@@ -1306,55 +2166,102 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
         }
       }
 
+      // SAFESPACE WINS THE OCCUPANCY, and only the occupancy. Applied here, in
+      // one place past every branch above, rather than inside each of them: the
+      // zone-net path, the space path and the carried path all produce an
+      // occupancy, and three copies of this override is how the fourth one gets
+      // written without it.
+      const veaOccupancy = dto.total.occupancy ?? null;
+      const fresh = this.safeSpaceOccupancy(now);
+      if (fresh !== null) {
+        dto.total.occupancy = fresh;
+        occSource = `safespace/${occSource}`;
+      }
+      dto.total.occupancySource = fresh !== null ? "safespace" : "vea";
+
       // Reconfigured while this poll was in flight: its answers describe a scope
       // the operator has replaced. Nothing is published and nothing is carried —
       // the poll the new configuration started is the one that speaks.
       if (epoch !== this.pollEpoch) {
         console.log("[sensource] the integration was reconfigured mid-poll; dropping this poll's answer");
-        return;
+        // The ticker reads the generation again after the tick and leaves the
+        // timer to whoever moved it, so the outcome here is never consulted.
+        return "skip";
       }
 
+      // Kept past the epoch check, so a poll from a replaced scope cannot leave
+      // its number behind as the thing SafeSpace falls back to.
+      this.veaOccupancy = veaOccupancy;
+      // This poll's traffic fetch is itself an attendance sample — see
+      // noteAttendanceSample for why the fast read anchors to it instead of
+      // asking Vea again, and why doing this here is what keeps the two
+      // pollers from ever landing on the same tick.
+      this.noteAttendanceSample(dto.total.attendance ?? 0, zoneAttendance);
+
       const scope = allow ? `${reduced.zones.length} of selected zone(s)` : `${reduced.zones.length} zone(s)`;
-      this.report("connected", `${scope}, occ via ${occSource}`);
+      // The note is empty unless SafeSpace is on with no id — see safeSpaceNote.
+      // report() drops a repeat of the same state AND the same message, so an
+      // unchanged occupancy source is silent and a CHANGED one reaches the row
+      // on the next poll. That matters because `occSource` genuinely varies:
+      // the `safespace/` prefix is only there while a fresh SafeSpace reading
+      // exists, and the row used to keep whichever wording the first connected
+      // poll happened to produce. The SenSource panel is still the surface that
+      // keeps saying it, because this one goes quiet once it stops changing.
+      this.report("connected", `${scope}, occ via ${occSource}${this.safeSpaceNote()}`);
       // Append a building-total sample to the rolling trend buffer, at the
       // buffer's own resolution rather than the poll's — see HISTORY_MIN_GAP_MS.
       this.appendHistory(dto);
       this.emit(dto);
       this.resetBackoff();
+      const pollBack = this.recovered("poll");
+      if (pollBack.log) console.log(`[sensource] the poll is answering again${pollBack.note}`);
       ok = true;
     } catch (err) {
       const msg = errorMessage(err);
-      // First failure only: an outage used to write one line per poll, forever.
-      if (this.attempt === 0) console.error("[sensource] poll error:", msg);
+      // Once per OUTAGE. This was `if (this.attempt === 0)`, which is the same
+      // transition rule the rest of this file has just moved off, defeated the
+      // same way: resetBackoff() above runs on every successful poll, so an
+      // upstream that alternates resets the counter and every failure is a fresh
+      // "first failure". The production backoff never grew past ~90s, which is
+      // that fact from the other side — the poll really was succeeding between
+      // the failures. The last `attempt === 0` gate in this integration.
+      const pollOut = this.failed("poll", err);
+      if (pollOut.log) console.error(`[sensource] poll error: ${scrub(msg, 200)}${pollOut.note}`);
       this.report("error", msg);
       this.goOffline();
     } finally {
-      // In a finally, not at the end of each branch. connect() now IS the poller,
-      // so a throw inside the catch — report(), or goOffline() reaching the
-      // overridden emit() and a broadcast — would strand the integration with no
-      // timer pending, no log, and no way back short of a restart. The old
-      // setInterval was immune to that by construction; this restores it.
-      // A poll from a replaced configuration must not re-arm the timer: the new
-      // configuration's start() has already scheduled one, and two timers is the
-      // doubled poll rate integration-base exists to prevent.
-      if (this.running && epoch === this.pollEpoch) {
-        if (ok) {
-          // Poll at the configured rate while something is watching, and slowly
-          // otherwise — the same shape REAPER and ProPresenter use. Never FASTER
-          // than configured: pollSeconds has no upper bound, so an operator who
-          // set 300s to stay inside Vea's quota would have been polled every 60s
-          // all week by the idle path.
-          const sec = Math.max(MIN_POLL_SECONDS, this.cfg?.pollSeconds || DEFAULT_POLL_SECONDS);
-          const demand = this.inDemand;
-          // Remembered, so a consumer arriving during the wait can pre-empt it
-          // rather than sitting out the full idle interval. See pollNowIfIdle.
-          this.polledIdle = !demand && IDLE_POLL_MS > sec * 1000;
-          this.scheduleIn(demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS));
-        } else {
-          this.scheduleReconnect();
-        }
-      }
+      // Cleared unconditionally, including on the reconfigured-mid-poll return
+      // above: a stale `true` here would block every fast attendance read for
+      // good, on an epoch nothing is ever going to complete.
+      this.mainPollInFlight = false;
     }
+    return ok ? "ok" : "failed";
+  }
+
+  /**
+   * How long until the next poll, from what the last tick did.
+   *
+   * A DEFERRED tick (`"skip"`, or `null` for a tick that threw before this
+   * function could learn anything) waits the ordinary cadence — never the
+   * back-off. Stepping the back-off for a poll that never left the building is
+   * how "press Test connection twice" would have quietly pushed the interval
+   * out to minutes while Vea was answering perfectly.
+   */
+  private pollDelayMs(outcome: PollOutcome | null): number {
+    // Only a real failure backs off, and asking for the delay is what advances
+    // the attempt counter — so this is asked once per failed tick.
+    if (outcome === "failed") return this.nextReconnectDelayMs();
+    // Poll at the configured rate while something is watching, and slowly
+    // otherwise — the same shape REAPER and ProPresenter use. Never FASTER
+    // than configured: pollSeconds has no upper bound, so an operator who
+    // set 300s to stay inside Vea's quota would have been polled every 60s
+    // all week by the idle path.
+    const sec = this.veaSeconds();
+    const demand = this.inDemand;
+    // Remembered, so a consumer arriving during the wait can pre-empt it
+    // rather than sitting out the full idle interval. See pollNowIfIdle.
+    this.polledIdle = !demand && IDLE_POLL_MS > sec * 1000;
+    return demand ? sec * 1000 : Math.max(sec * 1000, IDLE_POLL_MS);
   }
 
   protected override emit(snapshot: PeopleCountDTO): void {

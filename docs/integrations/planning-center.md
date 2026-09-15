@@ -20,6 +20,14 @@ volatility:
 - **Uncached:** the live on-air timer (`getLive()`), so the countdown stays
   real-time.
 
+The live read is `GET …/live?include=current_item_time` and nothing more. The
+include carries `live_start_at` and `length_offset`, which exist nowhere else,
+plus the id of the item that is live. The live item's **title and length come
+from the cached rundown**, not from the live request — they are the same two PCO
+attributes, and asking for a whole plan's items once a second to read two fields
+both cost a request's worth of payload every second and let `label` (fresh) and
+`currentItemTitle` (cached) disagree after a rename.
+
 A **service window** is the same one the integration reconnect schedule uses:
 PCO's rehearsal and service times widened by the lead and tail configured under
 Settings → Advanced (`service-window.ts`). It compares instants against plan
@@ -53,29 +61,80 @@ is stored encrypted (secret key `secret`).
 ## API version
 
 PCO versions each product by date. A request selects one with an
-`X-PCO-API-Version: YYYY-MM-DD` header, and PCO resolves it by an equal-or-earlier
-match. A request that sends no header is served whatever version is set as the
+`X-PCO-API-Version: YYYY-MM-DD` header, and PCO resolves it to the newest
+published version **at or before** that date — silently, with no error and no
+warning. A request that sends no header is served whatever version is set as the
 app's default in PCO's developer console — a setting outside this repository that
 differs between installs.
 
-Stage pins the version explicitly, in `PCO_API_VERSION` in `pco-service.ts`:
+**A version string is per product.** Each PCO product keeps its own independent
+list of dates, so a date that is current for one is very likely unpublished on
+another and is quietly downgraded to whatever that product shipped before it.
+Take a pin from the product's own version list — for example
+<https://api.planningcenteronline.com/calendar/v2/documentation>, which serves the
+list as JSON without a credential — never from a sibling client.
 
-```
-X-PCO-API-Version: 2018-11-01
-```
+Stage pins each product separately, and each list of published versions lives
+beside its pin:
+
+| Product | Constant | Pinned | File |
+|---|---|---|---|
+| Services | `PCO_API_VERSION` | `2018-11-01` | `pco-service.ts` |
+| Calendar | `CALENDAR_API_VERSION` | `2026-06-22` | `pco-calendar-service.ts` |
 
 Always an exact date, never a "give me the newest" sentinel — a floating request
 would let a PCO release change field names, defaults or pagination under a running
 install with no code change here. Services publishes exactly two versions,
-`2018-08-01` (withdrawn 2 April 2024) and `2018-11-01`, so the pin is both the
-newest and the only one still served. The single documented difference between
-them is that `2018-11-01` makes the `/people` endpoint respect the "Can view
-people not on My Teams" permission; Stage calls no `/people` endpoint.
+`2018-08-01` (deprecated, documented as identical) and `2018-11-01`, so its pin is
+the newest. The single documented difference between them is that `2018-11-01`
+makes the `/people` endpoint respect the "Can view people not on My Teams"
+permission; Stage calls no `/people` endpoint. Calendar publishes five —
+`2018-08-01`, `2020-04-08`, `2021-07-20`, `2022-07-07` and `2026-06-22` — and its
+pin is the newest of those.
 
-To bump it: take the newest date from the version selector at
-<https://api.planningcenteronline.com/docs/apps/services>, read that version's
-changelog entry for field or pagination changes, change the constant, and confirm
-against a real organisation that the plan, roster and photos still render.
+Both pins are typed as a union of their own product's published versions, so
+another product's date does not compile, and `pco-api-version.test.ts` runs PCO's
+resolution rule over each list and fails when a pin does not resolve to itself.
+
+To bump either: take the newest date from **that product's** version list, read
+its changelog entry for field or pagination changes, add it to the published-list
+constant, change the pin, and confirm against a real organisation that the plan,
+roster, photos and calendar still render.
+
+## Rate limits
+
+Planning Center puts three headers on **every** response, success or failure:
+
+```
+X-PCO-API-Request-Rate-Limit     requests allowed in the window
+X-PCO-API-Request-Rate-Period    the window, in seconds
+X-PCO-API-Request-Rate-Count     requests used in it so far
+```
+
+Stage reads all three on every response and holds back **before** being refused.
+The limit is deliberately not hard-coded anywhere: PCO documents it as dynamic and
+per-endpoint, and endpoints have been reported answering with a limit of 10 where
+the default is 100.
+
+Past **75%** of whatever PCO reports, two things happen until consumption falls
+back under **50%**:
+
+- the concurrency gate drops from 4 in-flight requests to 1
+- the live poller's cadence stretches by 4× (1 s → 4 s while an item is live)
+
+The countdown itself ticks client-side from `liveStartAt`, so the slower poll
+costs the freshness of an item **change**, not the smoothness of the clock. The
+two thresholds are separate on purpose — a single line would flap on every request
+that straddles it.
+
+The current headroom is a chip on the **`/log` health strip** (`PCO quota 48/100
+per 20s`, amber and "holding back" while the app is throttling). It is absent
+until PCO has answered once. A 429 is still honoured with its `Retry-After`; that
+is the last resort, not the first.
+
+Conditional requests (`ETag` / `If-Modified-Since`) are deliberately **not** used.
+A 304 counts against the same quota, so they would spend the scarce thing to save
+the plentiful one.
 
 ## Item times
 
@@ -129,9 +188,12 @@ narrowed to Production but not to a single position within it.
 A second PCO product, read by a second client (`pco-calendar-service.ts`) against
 `https://api.planningcenteronline.com/calendar/v2`, sharing the Services client's
 credentials, concurrency gate and retry budget. It pins
-`X-PCO-API-Version: 2018-11-01`; Calendar is versioned by date and an app sending
-no header gets whatever default is configured in PCO's developer console, which
-is not part of this repository.
+`X-PCO-API-Version: 2026-06-22`, Calendar's newest published version — taken from
+Calendar's own list, not from the Services client beside it (see
+[API version](#api-version)). That version's only behaviour change redacts event
+data on the **booking and conflict** endpoints; the three collections read here —
+`event_instances`, `calendars` and `tags` — are not among them and do not
+traverse from them.
 
 One request draws a month. `event_instances` is asked for the events
 **overlapping** the visible six-week grid — `starts_at <= gridEnd` **and**

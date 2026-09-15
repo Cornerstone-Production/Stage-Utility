@@ -66,8 +66,13 @@ export function resolveSplValue(
 
   const keys = Object.keys(meter.metrics);
   if (keys.length === 0) return null;
+  // hasOwn for the configured key: it comes off a saved layout object, and
+  // `"constructor" in metrics` is true of any parsed object — which took the
+  // first arm and then found no number, so the readout went blank instead of
+  // falling back to a preferred metric. See extern-keyed.ts. PREFERRED_METRICS
+  // is ours, so plain `in` is fine there.
   const key =
-    metricKey && metricKey in meter.metrics
+    metricKey && Object.hasOwn(meter.metrics, metricKey)
       ? metricKey
       : (PREFERRED_METRICS.find((k) => k in meter.metrics) ?? keys[0]);
   const value = meter.metrics[key];

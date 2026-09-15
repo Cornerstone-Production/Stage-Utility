@@ -23,6 +23,9 @@ import { secretsStore } from "./secrets.js";
 import {
   DEFAULT_POLL_SECONDS as SENSOURCE_DEFAULT_POLL_SECONDS,
   MIN_POLL_SECONDS as SENSOURCE_MIN_POLL_SECONDS,
+  SAFESPACE_DEFAULT_POLL_SECONDS,
+  SAFESPACE_MAX_POLL_SECONDS,
+  SAFESPACE_MIN_POLL_SECONDS,
   type SenSourceConfig,
   sensourceService,
 } from "./sensource-service.js";
@@ -33,6 +36,10 @@ import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
 import { wirelessManager } from "./wireless-manager.js";
+// One definition of "this is the mask, not a value" and "is there anything in
+// this field", shared with the wireless half and the renderer rather than
+// written again here. A leaf module, so the panels can import it too.
+import { hasSecretValue, isBlankSecret, isMask, MASK } from "./mask.js";
 
 // PCO integration descriptor.
 const PCO_DESCRIPTOR: IntegrationDescriptor = {
@@ -171,7 +178,23 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
       key: "pollMs",
       label: "Poll interval (ms)",
       type: "number",
-      placeholder: "500 (lower = snappier, more requests)",
+      // 1000, not the 500 this said for as long as it has existed. The fallback
+      // is propresenter-service's POLL_INTERVAL_MS and that is 1000 — as
+      // docs/integrations/propresenter.md has always said — so the form was
+      // advertising a rate the service does not run, which is exactly what
+      // `default` above forbids and a placeholder does just as loudly, since
+      // initialConfig reads a numeric placeholder AS the shown default. It is
+      // not numeric here on purpose: 500 IS the right number one panel over, for
+      // an EXTRA ProPresenter instance, because that panel writes 500 to disk
+      // when it adds one. This field's blank is a fallback, not a stored value.
+      placeholder: "1000 when blank; 200 is the floor",
+      // The floor the service really enforces (`pollMs >= 200`), below which it
+      // silently substitutes 1000 — a form that accepted 50 showed one rate and
+      // ran another. No ceiling: the extra-instances panel caps itself at 10s,
+      // but nothing in the service does, and an operator who wants a 30s
+      // fallback poll is not wrong.
+      min: 200,
+      unsetHint: "1000",
     },
   ],
 };
@@ -201,6 +224,30 @@ function parsePropInstances(raw: unknown): PropInstanceConfig[] {
   return out;
 }
 
+/**
+ * The ProdCom config key and the one value that means "show it in full".
+ *
+ * Constants, not two spellings, because the descriptor below declares the field
+ * and applyProdcom reads it, and a settings control that renders but changes
+ * nothing is exactly what a typo in one of those two places produces. Here the
+ * compiler will not let them drift apart.
+ */
+export const PRODCOM_REDACT_KEY = "redactSensitive";
+export const PRODCOM_REDACT_OFF = "off";
+export const PRODCOM_REDACT_ON = "on";
+
+/**
+ * Whether a saved ProdCom config means "hide keywords ProdCom marks sensitive".
+ *
+ * ON unless the stored value is literally "off": an install that predates this
+ * field, a value that failed to save, or anything unexpected all redact. The
+ * safe direction for an unknown value is hiding a word that did not need hiding,
+ * never showing one that did.
+ */
+export function prodcomRedactionOn(config: Record<string, unknown> | undefined): boolean {
+  return config?.[PRODCOM_REDACT_KEY] !== PRODCOM_REDACT_OFF;
+}
+
 // ProdCom integration — subscribes to the live transcription feed from ProdCom's
 // HTTP Application API (default port 24480). Powers the transcription display.
 const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
@@ -228,6 +275,18 @@ const PRODCOM_DESCRIPTOR: IntegrationDescriptor = {
       label: "API Key",
       type: "password",
       placeholder: "(only if Require Authentication is on)",
+    },
+    {
+      key: PRODCOM_REDACT_KEY,
+      label: "Hide sensitive keywords",
+      type: "select",
+      default: PRODCOM_REDACT_ON,
+      options: [
+        { value: PRODCOM_REDACT_ON, label: "On" },
+        { value: PRODCOM_REDACT_OFF, label: "Off" },
+      ],
+      help:
+        "ProdCom keywords marked sensitive are replaced with asterisks before a line is sent to any display. Only affects what THIS app shows — ProdCom's own redaction is unchanged, and the setting does not edit your keywords. The unredacted transcript stays readable at /api/prodcom/transcript/raw, which is gated by STAGE_UTILITY_LOG_TOKEN the same way /log is.",
     },
   ],
 };
@@ -530,6 +589,52 @@ const SENSOURCE_DESCRIPTOR: IntegrationDescriptor = {
       max: SENSOURCE_MAX_POLL_SECONDS,
       help: "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls.",
     },
+    {
+      key: "attendancePollSeconds",
+      label: "Attendance interval (s)",
+      type: "number",
+      // Deliberately no default and no numeric placeholder — see
+      // "the attendance interval has no default of its own" in
+      // sensource-poll-cadence.test.ts. Attendance is not opt-in the way
+      // SafeSpace is, so a concrete number here — shown as this field's value
+      // the moment the card is opened, and saved back if the operator saves it
+      // for any other reason — would raise request volume for anyone whose own
+      // poll interval above is not that number, which is most installs that
+      // have ever touched it.
+      //
+      // Which only works if the form can actually SHOW unset. It could not: the
+      // field seeded "", the render site turned that into 0, and a click in and
+      // a click out of that 0 clamped it to the floor below and made it a real
+      // setting. `unsetHint` is what makes blank a state the operator can see
+      // and get back to; getSensourceConfig's fallback to pollSeconds is
+      // unchanged.
+      //
+      // "Same as above", not "Same as poll interval": measured in a browser at
+      // 121.2px against 105px of room in the 176px field, so the longer string
+      // was clipped mid-word. The field directly above is "Poll interval (s)",
+      // and the help below says "the poll interval above" in the same words.
+      unsetHint: "Same as above",
+      min: SENSOURCE_MIN_POLL_SECONDS,
+      max: SENSOURCE_MAX_POLL_SECONDS,
+      help: "How often to re-read just today's attendance count, separate from the poll interval above. Blank reproduces today's behaviour exactly: attendance updates only as often as the rest of the card. Set it lower than the poll interval to catch attendance up to a faster occupancy reading — SafeSpace below, or a shorter interval than this card is normally left at — at the cost of one extra request to Vea per tick at whatever rate you choose. Same 10s floor and the same Vea flakiness as the poll interval, because it is the same API. Left at or above the poll interval, it changes nothing.",
+    },
+    {
+      key: "safeSpaceId",
+      label: "SafeSpace space ID (optional)",
+      type: "password",
+      placeholder: "(only if your site has SafeSpace)",
+      help: "Optional. If your site also has SenSource SafeSpace, paste the space ID from its live-occupancy embed URL (SafeSpace → the space → the address of its live value ends in the ID). It replaces only the occupancy number with SafeSpace's live reading, which is much fresher than Vea's; attendance, zones, peak and capacity keep coming from Vea. Leave blank to use Vea for everything. The ID is the whole of the endpoint's authority — anyone who has it can read your occupancy without logging in — so it is stored encrypted like a password and is NOT carried in a config snapshot. Restore a snapshot onto another box and Stage says SafeSpace needs its ID re-entered rather than quietly falling back to Vea.",
+    },
+    {
+      key: "safeSpacePollSeconds",
+      label: "SafeSpace interval (s)",
+      type: "number",
+      placeholder: String(SAFESPACE_DEFAULT_POLL_SECONDS),
+      default: SAFESPACE_DEFAULT_POLL_SECONDS,
+      min: SAFESPACE_MIN_POLL_SECONDS,
+      max: SAFESPACE_MAX_POLL_SECONDS,
+      help: "How often to read the SafeSpace value. Separate from the Vea interval above, because a live number is only worth having if it is read often. SafeSpace rate-limits and Stage reads its limit headers and backs off on its own, but there is nothing to win below 10s. The ceiling is 60s because a reading older than that is no fresher than Vea's and the occupancy goes back to Vea — to read it less often than that, clear the space ID instead. Ignored while the space ID is blank.",
+    },
   ],
 };
 
@@ -556,6 +661,23 @@ const ROSS_TSL_DESCRIPTOR: IntegrationDescriptor = {
       label: "TSL Port",
       type: "number",
       placeholder: "(TSL UMD input port on the Ross)",
+      // No number to suggest — it is whatever the switcher is set to, which is
+      // why the placeholder above names the setting instead of a value. Blank
+      // therefore means UNCONFIGURED rather than "fall back to something", and
+      // getRossTslConfig already reads it that way (anything not > 0 is null).
+      unsetHint: "Not set",
+      // Same bounds as Companion's own port field. getRossTslConfig discards
+      // anything not > 0 silently, while configuredFor() calls any config value
+      // that is neither "" nor null "the operator set this up" — so without a
+      // floor the field could hold a number that reads as configured on the card
+      // and connects to nothing.
+      //
+      // The gesture that reached it is the MINUS press, not the plus: from the
+      // 0 this field used to render, `-` stepped to -1, and typing 0 or a
+      // negative did the same. `+` gave 1 both before and after this bound, so
+      // the commit that added it named the wrong click.
+      min: 1,
+      max: 65535,
     },
   ],
 };
@@ -598,6 +720,14 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
 /** Derived from the descriptors rather than listed again, so an integration
  *  cannot be inbound in one place and dialable in another. */
 const inboundIds = new Set(DESCRIPTORS.filter((d) => d.inbound).map((d) => d.id));
+
+/** A row's connection message with a standing note appended, or either one
+ *  alone. The note outlives every connection report, so it is composed at read
+ *  time rather than written into the state — see secretMigrationNotes. */
+function withNote(message: string | null, note: string | undefined): string | null {
+  if (!note) return message;
+  return message ? `${message} — ${note}` : note;
+}
 
 /**
  * Is this integration on, at load?
@@ -648,23 +778,25 @@ export interface OutOfBandSetup {
  * panel that would let them finish. `empty-schema-configured.test.ts` fails if a
  * schema-less integration is added without an entry.
  */
-// Keyed by IntegrationId, not by string. A typo'd key on a `Record<string, …>`
-// is a valid entry that nothing ever looks up, so the integration it was meant
-// for stays permanently "Not set up" — the exact failure this table was added to
-// fix, arriving back through the table itself. Partial because most
-// integrations answer from their config and belong nowhere near here.
-const OUT_OF_BAND_CONFIGURED: Partial<Record<
-  IntegrationId,
-  (setup: OutOfBandSetup) => boolean
->> = {
-  wireless: (s) => s.wirelessConnections > 0,
-  osc: (s) => s.oscTargets > 0,
-  rosstalk: (s) => s.rossTalkTargets > 0,
-  scores: (s) => s.followedTeams > 0,
-};
+// A MAP keyed by IntegrationId, not a record keyed by string, for the two
+// reasons SECRET_KEYS below is one:
+//
+// A typo'd key on a `Record<string, …>` is a valid entry that nothing ever looks
+// up, so the integration it was meant for stays permanently "Not set up" — the
+// exact failure this table was added to fix, arriving back through the table
+// itself. And the read below takes an id that came off an HTTP body, where a
+// record answers `Object.prototype` for "__proto__" and a truthy non-function
+// reaches the call. Most integrations answer from their config and belong
+// nowhere near here, so most ids are legitimately absent.
+const OUT_OF_BAND_CONFIGURED = new Map<IntegrationId, (setup: OutOfBandSetup) => boolean>([
+  ["wireless", (s) => s.wirelessConnections > 0],
+  ["osc", (s) => s.oscTargets > 0],
+  ["rosstalk", (s) => s.rossTalkTargets > 0],
+  ["scores", (s) => s.followedTeams > 0],
+]);
 
 /** Ids that answer "configured" from their own list rather than from config. */
-export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = Object.keys(OUT_OF_BAND_CONFIGURED);
+export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = [...OUT_OF_BAND_CONFIGURED.keys()];
 
 /**
  * Fold a request body into the config to persist and the secrets to store.
@@ -712,9 +844,10 @@ export function foldConfigEntries(
   entries: Record<string, unknown>,
   secretKeys: readonly string[],
   id = "?",
-): { config: Record<string, unknown>; secrets: Record<string, string> } {
+): { config: Record<string, unknown>; secrets: Record<string, string>; clearedSecrets: string[] } {
   const config: Record<string, unknown> = Object.create(null);
   const secrets: Record<string, string> = Object.create(null);
+  const clearedSecrets: string[] = [];
   for (const [rawKey, value] of Object.entries(entries)) {
     if (!CONFIG_KEY.test(rawKey) || RESERVED_KEYS.has(rawKey)) {
       // `rawKey` is a key straight off an HTTP body: POST /api/integrations/:id/config
@@ -732,13 +865,57 @@ export function foldConfigEntries(
     // list, both already done, on a null-prototype object.
     const key = rawKey;
     if (secretKeys.includes(key)) {
-      // Only update the secret if the caller provided a real value (not the mask).
-      if (value !== "••••" && value !== "") secrets[key] = String(value);
+      // THREE cases, and the middle one used to be missing.
+      //
+      // A MASK means "leave it alone" — the dialog posts back what it was shown.
+      // Matched on any run of bullets rather than the exact four this file
+      // writes, for the reason mask.isMask spells out: the panel seeds its
+      // fields with the longer FORM_MASK, and a client echoing that back would
+      // have stored a row of bullets AS the credential.
+      //
+      // An EMPTY STRING is the operator clearing the field, and it was silently
+      // ignored — so no integration secret could be removed from the dialog at
+      // all. A PCO token, an OBS password or a SafeSpace space id could be
+      // entered and never taken back out, with the form showing an empty field
+      // and the server still holding the value. That is exactly the bug
+      // wireless-credentials.mergeSecrets was rewritten to fix ("an empty string
+      // is an explicit clear"), and this is the other copy of it.
+      if (isMask(value)) continue;
+      // A field holding only whitespace is an EMPTY field — see isBlankSecret.
+      // `value === ""` here while getSensourceConfig read the same slot through
+      // `.trim() || null` is how one save produced a stored "   " that the panel
+      // read as an ID and the log read as none.
+      if (isBlankSecret(value)) clearedSecrets.push(key);
+      else if (typeof value === "string") secrets[key] = value;
+      else {
+        // NOT String(value), which is what this did. `String(null)` is "null",
+        // so POST {"config":{"safeSpaceId":null}} stored the four-character
+        // string "null" AS the credential and the app went off and polled
+        // SafeSpace with it — indistinguishable from a real id anywhere in the
+        // UI, which shows a mask either way. `String({})` gives
+        // "[object Object]"; `String([])` gives "", a stored empty-string secret
+        // that masks as UNSET while occupying the slot.
+        //
+        // wireless-credentials.mergeSecrets — the other copy of this fold, and
+        // the one the commit that split these claimed parity with — has always
+        // had `typeof value === "string"`. This is the copy that drifted.
+        //
+        // Ignored rather than cleared, and said out loud. A body putting a
+        // non-string in a password field is junk or a mistake, and deleting a
+        // working credential over it is the worse of the two wrong answers; a
+        // silent skip is how an operator concludes the field is broken.
+        // The TYPE, never the value — this is a credential slot.
+        console.warn(
+          `[integration-manager] ignoring a non-string credential on ${scrub(id)}: ` +
+            `${scrub(key)} arrived as ${scrub(value === null ? "null" : typeof value)}. ` +
+            "The stored value is unchanged.",
+        );
+      }
     } else {
       config[key] = value;
     }
   }
-  return { config, secrets };
+  return { config, secrets, clearedSecrets };
 }
 
 /**
@@ -758,7 +935,7 @@ export function configuredFor(
   // and descriptors as plain strings, while the table is keyed by IntegrationId
   // so a typo in the table itself is a compile error. An unknown id here is a
   // miss, which is the same answer a string-keyed table would have given.
-  const outOfBand = OUT_OF_BAND_CONFIGURED[state.id as IntegrationId];
+  const outOfBand = OUT_OF_BAND_CONFIGURED.get(state.id as IntegrationId);
   if (outOfBand) return outOfBand(setup);
   // YouTube asks for one of two sets of fields depending on how it is set to
   // check, so "any value present" would call it configured the moment the mode
@@ -781,37 +958,291 @@ export function configuredFor(
 
 // Keys that are secrets for each integration id.
 //
-// Keyed by IntegrationId for the same reason as OUT_OF_BAND_CONFIGURED above,
-// and the cost of a typo here is worse: an id that does not match falls back to
-// `[]`, so every field of that integration — passwords and tokens included — is
-// written to settings.json as ordinary config instead of to secrets.bin.
-const SECRET_KEYS: Partial<Record<IntegrationId, string[]>> = {
-  "planning-center": ["secret"],
-  wireless: [],
-  companion: [],
-  propresenter: [],
-  prodcom: ["apiKey"],
-  smaart: ["password"],
-  obs: ["password"],
-  pvp: ["token"],
-  reaper: [],
+// A MAP, not a record — the house rule for anything looked up by a key that came
+// from outside. secretKeysFor() is called on every key of settings.json's
+// `integrationConfigs`, and `JSON.parse('{"__proto__":{}}')` keeps "__proto__"
+// as an own enumerable key that Object.entries yields. On a record that read
+// answers `Object.prototype`, which is truthy, so the `?? []` never fires and
+// `.filter` on it is a TypeError inside init() — no boot, from a hand-edited or
+// damaged settings.json. "constructor" and "toString" do it too. A Map answers
+// `undefined` for all of them because it has no prototype chain to walk.
+//
+// Still typed by IntegrationId for the same reason as OUT_OF_BAND_CONFIGURED
+// above, and the cost of a typo here is worse: an id that does not match falls
+// back to `[]`, so every field of that integration — passwords and tokens
+// included — is written to settings.json as ordinary config instead of to
+// secrets.bin.
+const SECRET_KEYS = new Map<IntegrationId, readonly string[]>([
+  ["planning-center", ["secret"]],
+  ["wireless", []],
+  ["companion", []],
+  ["propresenter", []],
+  ["prodcom", ["apiKey"]],
+  ["smaart", ["password"]],
+  ["obs", ["password"]],
+  ["pvp", ["token"]],
+  ["reaper", []],
   // No account, no key. ESPN's scoreboard endpoints are public and unauthenticated.
-  scores: [],
-  resi: ["password"],
-  youtube: ["apiKey", "clientSecret", "refreshToken"],
-  sensource: ["clientSecret", "apiToken"],
-  "ross-tsl": [],
-};
+  ["scores", []],
+  ["resi", ["password"]],
+  ["youtube", ["apiKey", "clientSecret", "refreshToken"]],
+  // safeSpaceId is here for the reason safespace-client.ts states in capitals:
+  // "THE SPACE ID IS THE ENTIRE CREDENTIAL. There is no key, no token and no
+  // account check." It was ordinary config, so it sat in settings.json and rode
+  // verbatim into every config snapshot — a bundle the UI presents as safe to
+  // hand to somebody.
+  ["sensource", ["clientSecret", "apiToken", "safeSpaceId"]],
+  ["ross-tsl", []],
+]);
+
+/**
+ * The non-secret record that SafeSpace is switched on.
+ *
+ * The space id WAS the switch, and it now lives in secrets.bin — which a config
+ * snapshot deliberately does not carry. Without this, a restored box cannot tell
+ * "the operator never wanted SafeSpace" from "the operator wanted it and the id
+ * did not travel", and the second one falls back to Vea looking perfectly
+ * healthy. That silent fallback is the failure this key exists to prevent.
+ *
+ * Written as `true` or REMOVED, never `false`: configuredFor() reads any
+ * non-empty, non-null config value as "the operator set this up", so a literal
+ * `false` would make an otherwise untouched SenSource card claim to be
+ * configured.
+ *
+ * Not in `configSchema` deliberately — it is not a field anyone fills in, it is
+ * derived from whether the id was saved. sensource's `zoneIds` and `locationId`
+ * are non-schema config keys for the same kind of reason.
+ */
+const SAFESPACE_ENABLED_KEY = "safeSpaceEnabled";
 
 /** The secret field names for an integration id, or none. A helper rather than a
- *  bare index because SECRET_KEYS is keyed by IntegrationId — so a typo in the
- *  TABLE is a compile error — while every call site carries a plain string. */
-function secretKeysFor(id: string): readonly string[] {
-  return SECRET_KEYS[id as IntegrationId] ?? [];
+ *  bare lookup because SECRET_KEYS is keyed by IntegrationId — so a typo in the
+ *  TABLE is a compile error — while every call site carries a plain string, some
+ *  of them straight off a JSON-parsed settings.json.
+ *
+ *  Exported for integration-secret-parity.test.ts, which pins this table against
+ *  the `password` fields the descriptors declare. */
+export function secretKeysFor(id: string): readonly string[] {
+  return SECRET_KEYS.get(id as IntegrationId) ?? [];
+}
+
+/** What a boot migration would move, worked out without touching disk. */
+export interface SecretMigration {
+  /** `integrationConfigs` with the credential keys gone and the SafeSpace marker
+   *  set — what the state map must be built from. */
+  configs: Record<string, Record<string, unknown>>;
+  /** integration id → the credential values found in settings.json. */
+  found: Record<string, Record<string, string>>;
+  /** `<id>.<key>` for each one, for the log. NAMES only. */
+  moved: string[];
+}
+
+/**
+ * Plan the move of any credential still sitting in settings.json.
+ *
+ * settings.json is in CONFIG_FILES, so anything left in it rides VERBATIM into
+ * every config snapshot and every automatic backup — a bundle the UI presents as
+ * safe to keep on a drive or hand to somebody. SafeSpace's space id was ordinary
+ * config until this release and is exactly that: safespace-client.ts calls it
+ * "THE ENTIRE CREDENTIAL", with no key and no account check behind it.
+ *
+ * Without this an upgrading box keeps the cleartext in that file forever — init
+ * masks the field from the API, so nothing would ever reveal it — AND SafeSpace
+ * stops working the moment the masked value replaces the real one. That second
+ * half is the silent failure: the occupancy would quietly go back to Vea.
+ * wireless-manager's boot migration exists for the same pair of reasons.
+ *
+ * Written on the whole SECRET_KEYS table rather than on safeSpaceId alone. Any
+ * slot that ever leaked into settings.json is cleaned up by the same pass, and a
+ * slot added later is covered without anybody remembering this function.
+ *
+ * Pure and exported so the guard can drive the real classifier: `init()` cannot
+ * be called from a unit test (it starts the reconnect timers and never lets the
+ * process exit).
+ */
+export function planSecretMigration(
+  configs: Record<string, Record<string, unknown>>,
+): SecretMigration | null {
+  const found: Record<string, Record<string, string>> = {};
+  const cleaned: Record<string, Record<string, unknown>> = {};
+  const moved: string[] = [];
+  for (const [id, cfg] of Object.entries(configs)) {
+    const keys = secretKeysFor(id).filter((k) => {
+      const v = cfg[k];
+      // A mask is not a value: an older build wrote "••••" into settings.json
+      // for a slot whose real value was already in secrets.bin, and storing that
+      // would replace the credential with a row of bullets.
+      return hasSecretValue(v) && !isMask(v);
+    });
+    if (keys.length === 0) continue;
+    const values: Record<string, string> = {};
+    const rest: Record<string, unknown> = { ...cfg };
+    for (const key of keys) {
+      values[key] = cfg[key] as string;
+      delete rest[key];
+      // The key NAME. The value is the thing this whole pass exists to stop
+      // appearing anywhere it can be read.
+      moved.push(`${id}.${key}`);
+    }
+    // The presence of the id was SafeSpace's switch. Moving the id out of
+    // settings.json takes the switch with it unless this is recorded, and a box
+    // that upgrades would come back with SafeSpace silently off.
+    if (id === "sensource" && keys.includes("safeSpaceId")) rest[SAFESPACE_ENABLED_KEY] = true;
+    found[id] = values;
+    cleaned[id] = rest;
+  }
+  if (moved.length === 0) return null;
+  return { configs: { ...configs, ...cleaned }, found, moved };
+}
+
+/**
+ * What a {@link applySecretMigration} did. Not a boolean: the decline and the
+ * failure have different causes and the operator needs the reason, on the row
+ * as well as on the log.
+ */
+export type SecretMigrationResult =
+  | { moved: true }
+  /** Nothing was moved. `why` is a short phrase for an integration row. */
+  | { moved: false; why: string };
+
+/**
+ * Carry out a {@link planSecretMigration}.
+ *
+ * secrets.bin WINS a collision. Every slot but safeSpaceId has been masked at
+ * init since the slot existed, so a value still in settings.json for one of
+ * those is a stale copy from before the split, not the value in use.
+ *
+ * NEVER THROWS, and that is the whole reason for the try below. init() is
+ * awaited at server.ts's module top level, where a rejection surfaces as an
+ * uncaughtException (not an unhandledRejection — the handlers differ, and this
+ * was measured against this repo's own pair), which exits 100 for the supervisor
+ * to restart. A read-only data directory, a full disk or an EACCES after a chown
+ * during an install then fails the same write on the next boot, forever, with
+ * the HTTP server never binding — so /log and /api/version are gone too, which
+ * is the stretch server.ts's own crash-handler comment calls least diagnosable.
+ *
+ * Continuing is safe because every step is already ordered so the NEXT boot can
+ * recover: the secrets are written before the settings are cleaned, and the
+ * SafeSpace marker before the removal. So a failure anywhere leaves the
+ * credentials where the next boot looks for them.
+ *
+ * @returns what happened. `moved: false` is not a failure to hand upwards — the
+ *   caller cannot retry it and must not die of it — but it is not nothing
+ *   either: init() puts `why` on the affected integrations' rows, because a
+ *   credential still in settings.json is in every config snapshot, and a
+ *   credential that never reached secrets.bin is one that integration no longer
+ *   has. A log line alone is a thing somebody has to notice.
+ */
+/**
+ * The standing note each affected integration's row carries when a boot
+ * migration could not finish — empty when it did.
+ *
+ * Its own function, and exported, so the guard can drive the real thing:
+ * init() cannot be called from a unit test (it starts the reconnect timers and
+ * never lets the process exit), which is the same reason planSecretMigration is
+ * pure and exported.
+ */
+export function secretMigrationNotes(
+  plan: SecretMigration,
+  result: SecretMigrationResult,
+): Map<string, string> {
+  if (result.moved) return new Map();
+  // Scrubbed HERE, at the boundary, rather than trusted from the producer: this
+  // string reaches an integration row and, through it, a broadcast — and a
+  // newline in an errno message is a forged line on every surface that renders
+  // one. log-injection.test.ts reads the interpolation, not the provenance, and
+  // it is right to.
+  const note =
+    `stored credentials could not be moved out of settings.json (${scrub(result.why, 120)}), ` +
+    "so they are still in every config snapshot — see /log";
+  return new Map(Object.keys(plan.found).map((id) => [id, note]));
+}
+
+export async function applySecretMigration(plan: SecretMigration): Promise<SecretMigrationResult> {
+  // Not onto a secrets.bin that exists and will not decrypt. Writing would set
+  // the old file aside as secrets.bin.unreadable-* — which is the right thing
+  // when an OPERATOR re-enters a credential, and the wrong thing here: it spends
+  // that one-time preservation unasked, and after it "fix the key and restart"
+  // no longer recovers in place. Nothing is lost by waiting; the values are
+  // still in settings.json and the next boot migrates them.
+  if (await secretsStore.isUnreadable()) {
+    console.error(
+      `[integration-manager] ${scrub(plan.moved.length)} credential(s) are still in settings.json ` +
+        "and could not be moved: secrets.bin exists but will not decrypt. Fix the encryption key " +
+        "and restart — they will move then, and until they do they remain in every config snapshot.",
+    );
+    return { moved: false, why: "secrets.bin will not decrypt" };
+  }
+  console.log(
+    `[integration-manager] migrating ${scrub(plan.moved.length)} stored credential(s) out of settings.json: ${scrub(plan.moved.join(", "))}`,
+  );
+  // ONE try around the whole sequence, not one per await. Per-step handling
+  // would have nothing extra to offer: the ordering below already guarantees
+  // that a failure at ANY step leaves a state the next boot recovers from, so
+  // there is exactly one thing to say and one place to say it.
+  try {
+    const toStore: Record<string, Record<string, string>> = {};
+    for (const [id, values] of Object.entries(plan.found)) {
+      const next: Record<string, string> = { ...(await secretsStore.getSecrets(id)) };
+      for (const [key, value] of Object.entries(values)) if (!next[key]) next[key] = value;
+      toStore[id] = next;
+    }
+    // One write for the whole blob — secrets.ts re-encrypts the entire file per
+    // save, and this can touch several integrations at once.
+    await secretsStore.setManySecrets(toStore);
+    for (const id of Object.keys(plan.found)) {
+      // Two calls, because a merge cannot delete — and in THIS order.
+      //
+      // Every step is ordered so that a failure leaves a state the next boot can
+      // still recover from. The secrets are written first, so the value exists in
+      // both places before it exists in only one. The marker is written before the
+      // removal, so a removal that throws leaves the credential still in
+      // settings.json — which is where the next boot looks for it — rather than
+      // gone from the config with nothing recording that SafeSpace was on.
+      if (plan.configs[id]?.[SAFESPACE_ENABLED_KEY] === true) {
+        await settingsStore.patchIntegrationConfig(id, { [SAFESPACE_ENABLED_KEY]: true });
+      }
+      // Removed, not nulled: settings.json rides into every snapshot, and a key
+      // set to null is still a key. This also sweeps a stale mask left by an
+      // older build, which planSecretMigration deliberately refuses to STORE.
+      await settingsStore.removeIntegrationConfigKeys(id, secretKeysFor(id));
+    }
+  } catch (err) {
+    // NOT swallowed and NOT rethrown: rethrowing here is the boot loop (see the
+    // note on this function). The failure is returned as a value, and init()
+    // puts it on the affected integrations' rows as well as here.
+    const why = errorMessage(err);
+    console.error(
+      `[integration-manager] ${scrub(plan.moved.length)} credential(s) could not be moved out of ` +
+        `settings.json (${scrub(why, 120)}): ${scrub(plan.moved.join(", "))}. They remain in every config ` +
+        "snapshot until this is fixed, and any of them that had not already reached secrets.bin " +
+        "is not available to its integration. The next start tries again — nothing has been lost.",
+    );
+    return { moved: false, why };
+  }
+  return { moved: true };
 }
 
 class IntegrationManager {
   private states = new Map<string, IntegrationState>();
+
+  /**
+   * Integration id → why its stored credentials are still in settings.json.
+   *
+   * Written once at init, by the boot migration that could not complete, and
+   * never cleared — the condition lasts until an operator fixes the disk or the
+   * key and restarts, which is when this map is rebuilt from nothing.
+   *
+   * It is composed onto the row's message in getStates() rather than written
+   * into `state.message`, because every connection report overwrites that field
+   * and the integration this is about is usually the one that cannot connect
+   * (its credential never reached secrets.bin). Same shape applyCompanionRow
+   * uses to keep two independent facts on one message line.
+   *
+   * Built by {@link secretMigrationNotes}, which is where the text lives so a
+   * test can drive it.
+   */
+  private migrationNotes = new Map<string, string>();
 
   // ── Init ──────────────────────────────────────────────────────────────
 
@@ -819,20 +1250,36 @@ class IntegrationManager {
     console.log("[integration-manager] init");
     propresenterManager.init();
     const settings = await settingsStore.load();
+    // Anything still holding a credential in settings.json moves to secrets.bin
+    // before the state map is built from it — see planSecretMigration.
+    const saved = settings.integrationConfigs ?? {};
+    const plan = planSecretMigration(saved);
+    // Never allowed to throw out of here — this is awaited at server.ts's module
+    // top level, where a rejection is an uncaughtException and an exit 100, and
+    // a write that fails once fails on every restart. applySecretMigration
+    // returns the failure instead; the rows below carry it.
+    const migration = plan ? await applySecretMigration(plan) : null;
+    this.migrationNotes = plan && migration ? secretMigrationNotes(plan, migration) : new Map();
+    // `plan.configs` whether or not the move actually happened. Every secret key
+    // is masked out of the state below either way, so the two maps differ in one
+    // thing: plan.configs carries the SafeSpace marker. A box whose secrets.bin
+    // will not decrypt therefore still says SafeSpace needs its id back, instead
+    // of reading like a site that never had it.
+    const savedConfigs = plan?.configs ?? saved;
 
     for (const descriptor of DESCRIPTORS) {
       // Tolerate a settings.json missing this key entirely. DataStore does not
       // deep-merge on load (deliberately — it keeps migrations honest), so an older
       // config snapshot restored over a newer build can arrive without keys added
       // since. Crashing init over it takes every display down.
-      const savedConfig = settings.integrationConfigs?.[descriptor.id] ?? {};
+      const savedConfig = savedConfigs[descriptor.id] ?? {};
       const enabled = enabledFor(descriptor, settings.integrationEnabled);
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
       // Merge saved non-secret config with any secret keys (masked).
       const maskedConfig: Record<string, unknown> = { ...savedConfig };
       for (const key of secretKeysFor(descriptor.id)) {
-        maskedConfig[key] = secrets[key] ? "••••" : "";
+        maskedConfig[key] = hasSecretValue(secrets[key]) ? MASK : "";
       }
 
       this.states.set(descriptor.id, {
@@ -934,6 +1381,10 @@ class IntegrationManager {
     const setup = this.outOfBandSetup();
     return Array.from(this.states.values()).map((s) => ({
       ...s,
+      // Composed here, not stored: see secretMigrationNotes. Empty for every
+      // integration on every box where the boot migration did its job, which is
+      // all of them.
+      message: withNote(s.message, this.migrationNotes.get(s.id)),
       configured: configuredFor(s, setup, inboundIds.has(s.id)),
       ...(inboundIds.has(s.id) ? { inbound: true as const } : null),
     }));
@@ -954,12 +1405,65 @@ class IntegrationManager {
   /** Live count of connected Companion-module clients (pushed from remote-server
    *  as SSE streams marked with the X-Companion-Module header connect/close). */
   private companionClients = 0;
+  /**
+   * What the OUTBOUND half last said, or null for nothing to say.
+   *
+   * Companion's row is two independent facts on one message line, and each has
+   * its own writer: how many modules are dialled IN (setCompanionClients, from
+   * remote-server as SSE streams open and close) and what this app found when it
+   * last dialled OUT. Whichever wrote last used to be the whole message, so a
+   * module reconnecting erased "12 of 52 connection(s) in error", and — worse —
+   * erased the reason a Test had failed and flipped the row from error back to
+   * connected. Both now compose in applyCompanionRow.
+   *
+   * ONE slot for the outbound half, holding either the Test's answer or the
+   * hourly reconcile's connection health, because they are one fact reported at
+   * two moments. Last writer wins WITHIN the slot, and that is correct: the
+   * reconcile only reaches its health read having just read the export off the
+   * same Companion, so it is newer evidence than a Test that failed an hour ago.
+   */
+  private companionOutbound: { failed: boolean; message: string } | null = null;
+
   setCompanionClients(count: number): void {
     this.companionClients = count;
+    this.applyCompanionRow();
+  }
+
+  /**
+   * What this app found the last time it dialled Companion.
+   *
+   * `message` null clears the slot — a host that just changed, no host at all, or
+   * a Companion too old to report its connection status. `failed` is what puts
+   * the row in error, and only a Test sets it: see applyCompanionRow.
+   */
+  setCompanionOutbound(message: string | null, opts: { failed?: boolean } = {}): void {
+    this.companionOutbound = message === null ? null : { failed: opts.failed ?? false, message };
+    this.applyCompanionRow();
+  }
+
+  /**
+   * The Companion row: the inbound client count, then whatever the outbound half
+   * last said.
+   *
+   * `error` comes from a FAILED TEST and from nothing else. A Test is this app
+   * dialling Companion and being unable to, which is this integration being
+   * down; connections in error behind a Companion that answered are gear in the
+   * building, and a red row for a light in an office is a row an operator learns
+   * to ignore. Note that the row therefore CAN be in error — an earlier comment
+   * on companion-info-panel.tsx claimed it never was, which was wrong and is the
+   * ordinary case for a Companion that is switched off.
+   */
+  private applyCompanionRow(): void {
+    const count = this.companionClients;
+    const out = this.companionOutbound;
+    const parts = [
+      count > 0 ? `${count} Companion client(s) connected` : null,
+      out?.message ?? null,
+    ].filter((p): p is string => p !== null);
     this.setConnectionState(
       "companion",
-      count > 0 ? "connected" : "disconnected",
-      count > 0 ? `${count} Companion client(s) connected` : null,
+      out?.failed ? "error" : count > 0 ? "connected" : "disconnected",
+      parts.length ? parts.join(". ") : null,
     );
     this.broadcastStates();
   }
@@ -1054,7 +1558,100 @@ class IntegrationManager {
     if (!state) throw new Error(`Unknown integration: ${id}`);
 
     const secretKeys = secretKeysFor(id);
-    const { config: nonSecretConfig, secrets: newSecrets } = foldConfigEntries(config, secretKeys, id);
+    const { config: nonSecretConfig, secrets: newSecrets, clearedSecrets } = foldConfigEntries(
+      config,
+      secretKeys,
+      id,
+    );
+
+    // THE MARKER IS DERIVED, SO IT NEVER COMES OFF A REQUEST BODY.
+    //
+    // SAFESPACE_ENABLED_KEY says it is "not a field anyone fills in", and
+    // nothing enforced that: CONFIG_KEY admits the name and RESERVED_KEYS does
+    // not list it, so `foldConfigEntries` put it in the non-secret half and the
+    // patch below wrote whatever a client sent. Three ways that landed, all
+    // driven against a real server:
+    //
+    //   POST {"safeSpaceEnabled":true} on its own — with no id stored anywhere —
+    //   put the box into the permanent "on with no space ID" warning on four
+    //   surfaces until somebody saved the card with the field empty.
+    //
+    //   POST {"safeSpaceEnabled":false} wrote the literal `false` this key's own
+    //   doc forbids, because configuredFor() reads any non-null config value as
+    //   "the operator set this up".
+    //
+    //   POST {"safeSpaceId":"", "safeSpaceEnabled":true} — exactly what a client
+    //   gets back from GET /api/integrations and posts again — deleted the
+    //   credential and then had the patch put the marker straight back, two
+    //   lines after the removal took it out. The comment on that removal claimed
+    //   `merged` could not still carry the key; it could, whenever the body did.
+    //
+    // Dropped once, here, for every integration rather than inside the sensource
+    // branch: no other id has a key by this name today, and one that grew one
+    // would want the same rule. The server's own writes are below this line.
+    //
+    // ONE thing a body may say about it, and it is a COMMAND rather than a
+    // value: `false` means "the operator is turning SafeSpace off". It can only
+    // ever REMOVE the marker, so unlike a writable `true` it cannot manufacture
+    // the warning state, and it never reaches settings.json as a literal.
+    const safeSpaceOff = nonSecretConfig[SAFESPACE_ENABLED_KEY] === false;
+    delete nonSecretConfig[SAFESPACE_ENABLED_KEY];
+
+    // Read here rather than after the config write: the marker decision below
+    // needs to know whether a credential was really stored. A read, so it
+    // changes nothing about the order the writes land in.
+    const existingSecrets = await secretsStore.getSecrets(id);
+    const removed = clearedSecrets.filter((k) => k in existingSecrets);
+
+    // Keep the SafeSpace switch beside the id it belongs to. A save that stores
+    // a new id turns it on; a save that TAKES ONE OUT, or that carries the
+    // explicit off command, turns it off; anything else leaves it exactly as it
+    // was, which is why this is three cases and not a boolean.
+    if (id === "sensource") {
+      const markerWasOn = state.config[SAFESPACE_ENABLED_KEY] === true;
+      // `removed`, not `clearedSecrets`. An emptied field with nothing stored
+      // behind it is the no-op it is for every other integration, and it has to
+      // be, because the dialog posts one on every save in the restore state:
+      // initialConfig() seeds a password field with the mask only when the state
+      // holds a non-empty string, so with no id stored the field seeds as "",
+      // handleSave sees an unmasked value and sends `safeSpaceId: ""`. An
+      // operator changing only the Vea poll interval was therefore switching
+      // SafeSpace off — the warning, the row message, the Test notice and the
+      // panel notice gone at once, with nothing logged because no secret had
+      // actually been removed. That is the exact failure the marker exists to
+      // prevent, in the exact state it exists for.
+      //
+      // Which leaves "off" needing a gesture of its own: in that state there is
+      // no id left to take out. SafeSpaceIdMissingNotice's button sends the
+      // command above. With an id stored, clearing the FIELD is still the way
+      // off and still lands here.
+      if (safeSpaceOff || removed.includes("safeSpaceId")) {
+        // Removed, not set to false — see SAFESPACE_ENABLED_KEY. Before the
+        // patch below, so the `merged` it returns does not still carry the key.
+        // That is now true of a body carrying the marker as well, because the
+        // delete above took it out of `nonSecretConfig` before we got here.
+        await settingsStore.removeIntegrationConfigKeys(id, [SAFESPACE_ENABLED_KEY]);
+        // The marker moving on its own has no other trace. `cleared N stored
+        // credential(s)` below covers a real deletion, but the command path
+        // deletes nothing, and an operator looking at /log for why the occupancy
+        // went back to Vea would have found the save and no reason.
+        if (markerWasOn) {
+          console.log(
+            "[integration-manager] SafeSpace switched OFF on sensource " +
+              `(${scrub(safeSpaceOff ? "the operator turned it off" : "the stored space id was cleared")}). ` +
+              "Occupancy falls back to SenSource Vea, which refreshes about every 78 seconds.",
+          );
+        }
+      } else if (newSecrets.safeSpaceId) {
+        nonSecretConfig[SAFESPACE_ENABLED_KEY] = true;
+        if (!markerWasOn) {
+          console.log(
+            "[integration-manager] SafeSpace switched ON on sensource: a space id is now stored. " +
+              "The id itself lives in secrets.bin and never rides into a config snapshot.",
+          );
+        }
+      }
+    }
 
     // Persist non-secret config.
     //
@@ -1069,17 +1666,37 @@ class IntegrationManager {
     // back off a second load() is the other half of the same race.
     const merged = await settingsStore.patchIntegrationConfig(id, nonSecretConfig);
 
-    // Persist secrets (merge with existing so unchanged ones survive).
-    if (Object.keys(newSecrets).length > 0) {
-      const existing = await secretsStore.getSecrets(id);
-      await secretsStore.setSecrets(id, { ...existing, ...newSecrets });
+    // Persist secrets: merge so unchanged ones survive, and DELETE the ones the
+    // operator emptied. Written as one blob rather than key by key, because
+    // secrets.ts re-encrypts the whole file on every save. `existingSecrets` and
+    // `removed` are read above, where the SafeSpace marker decision needs them.
+    const nextSecrets = { ...existingSecrets, ...newSecrets };
+    for (const key of clearedSecrets) delete nextSecrets[key];
+    // Only when something actually changed. A save that touches no secret used
+    // to rewrite the encrypted blob anyway, and every such write is another
+    // window for the concurrent-write race secrets.ts guards against.
+    const secretsChanged =
+      removed.length > 0 || Object.entries(newSecrets).some(([k, v]) => existingSecrets[k] !== v);
+    if (secretsChanged) {
+      await secretsStore.setSecrets(id, nextSecrets);
+      // Field NAMES, never values. Clearing a credential is an operator decision
+      // with no other trace — the field simply reads empty afterwards, which is
+      // also what it read while the value was still stored.
+      if (removed.length > 0) {
+        console.log(
+          `[integration-manager] cleared ${scrub(removed.length)} stored credential(s) on ${scrub(id)}: ${scrub(removed.join(", "))}`,
+        );
+      }
     }
 
     // Rebuild masked config for state.
     const allSecrets = await secretsStore.getSecrets(id);
     const maskedConfig: Record<string, unknown> = { ...merged };
     for (const key of secretKeys) {
-      maskedConfig[key] = allSecrets[key] ? "••••" : "";
+      // isBlankSecret, not truthiness: a whitespace-only value already on disk
+      // from an older build would otherwise mask as a stored credential on every
+      // surface that reads this, while every reader that trims saw none.
+      maskedConfig[key] = hasSecretValue(allSecrets[key]) ? MASK : "";
     }
 
     this.states.set(id, { ...state, config: maskedConfig });
@@ -1090,6 +1707,11 @@ class IntegrationManager {
       // picker offer another Companion's buttons at coordinates this one will
       // press regardless.
       companionApi.invalidate();
+      // Everything the outbound half had to say belonged to the OLD host — the
+      // connection counts, and the last Test's answer. Left on the row, "12 of
+      // 52 connection(s) in error" would go on describing a box this app no
+      // longer talks to until the next reconcile an hour later.
+      this.setCompanionOutbound(null);
       // And the hourly reconcile follows the host: added here it starts without
       // a restart, and cleared here it stops rather than dialling an address
       // nobody has configured. Boot is the only other place it is started.
@@ -1201,8 +1823,10 @@ class IntegrationManager {
         // outbound to test and the inbound count is the whole answer, exactly as
         // before this integration gained config.
         if (!this.getCompanionTarget()) {
-          this.setConnectionState("companion", n > 0 ? "connected" : "disconnected", inbound);
-          this.broadcastStates();
+          // Through the composition, not around it. Writing the row directly
+          // here is what erased the health and the last Test's reason, and this
+          // was the third of three writers.
+          this.setCompanionOutbound(null);
           return { ok: true, message: inbound };
         }
 
@@ -1219,16 +1843,16 @@ class IntegrationManager {
           const { runCompanionReconcile } = await import("./companion-reconcile.js");
           unsaved = (await runCompanionReconcile())?.failed.length ?? 0;
         }
-        const msg =
-          `${inbound}. ${outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`}` +
+        // What the OUTBOUND half found, without the inbound count: the count is
+        // the other slot and applyCompanionRow puts the two together. Repeating
+        // it here would print it twice on the row.
+        const said =
+          (outbound.ok ? outbound.message : `Cannot reach Companion: ${outbound.message}`) +
           (unsaved > 0 ? ` ${unsaved} cue status(es) could not be saved.` : "");
-        this.setConnectionState(
-          "companion",
-          outbound.ok ? "connected" : "error",
-          msg,
-        );
-        this.broadcastStates();
-        return { ok: outbound.ok, message: msg };
+        this.setCompanionOutbound(said, { failed: !outbound.ok });
+        // The RETURNED message keeps both halves. It is the Test button's own
+        // one-shot answer in the dialog footer, which composes nothing.
+        return { ok: outbound.ok, message: `${inbound}. ${said}` };
       }
 
       if (id === "propresenter") {
@@ -1419,11 +2043,27 @@ class IntegrationManager {
 
     const enabled = this.states.get("propresenter")?.enabled ?? false;
     const { host, port, pollMs } = this.getPropresenterTarget();
+    // WHERE, on every pass, from whatever the settings now say — before the
+    // enablement branch and outside it. Both disable paths below skip straight
+    // to stop(), and while stop() also set the target the old address survived a
+    // save that changed it: the rule editor then read macros off the machine the
+    // operator had just stopped using. See ProPresenterService.setTarget.
+    propresenterService.setTarget(host, port, pollMs ?? undefined);
     if (enabled && host && port) {
-      // configure() starts polling; the listener flips this to connected/error
-      // on the first tick.
-      this.setConnectionState("propresenter", "connecting", `Polling ${host}:${port}`);
-      propresenterService.configure(host, port, pollMs ?? undefined);
+      // start() opens the status stream; the listener flips this to
+      // connected/error once it is up, or once the fallback poll answers.
+      //
+      // ONLY when something is actually being started. Every other applier in
+      // this file hands off to a configure() that restarts unconditionally, so
+      // the service always reports again and this optimistic write is always
+      // taken back. ProPresenter deliberately does not re-dial an unchanged
+      // target, so on an ordinary settings save nothing takes it back and the
+      // row reads "Connecting to h:p" over a live stream until it next drops.
+      // The same two lines are in ProPresenterManager.apply for the extras.
+      if (!propresenterService.isRunning) {
+        this.setConnectionState("propresenter", "connecting", `Connecting to ${host}:${port}`);
+      }
+      propresenterService.start();
     } else {
       propresenterService.stop();
       this.setConnectionState("propresenter", "disconnected", null);
@@ -1473,6 +2113,11 @@ class IntegrationManager {
       this.setConnectionState("prodcom", state, message);
       this.broadcastStates();
     });
+
+    // Before the enable check and outside configure(): this decides what leaves
+    // the server, not what it connects to, so it applies to a stopped service
+    // too and must not drag the stream through a reconnect.
+    prodcomService.setRedactSensitive(prodcomRedactionOn(this.states.get("prodcom")?.config));
 
     const enabled = this.states.get("prodcom")?.enabled ?? false;
     const { host, port } = this.getProdcomTarget();
@@ -1776,23 +2421,49 @@ class IntegrationManager {
   }
 
   private async getSensourceConfig(): Promise<SenSourceConfig> {
+    /** A saved interval field, which the form may have stored as either type. */
+    const seconds = (raw: unknown): number =>
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim()
+          ? parseInt(raw, 10)
+          : NaN;
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");
-    const rawPoll = cfg.pollSeconds;
-    const pollSeconds =
-      typeof rawPoll === "number"
-        ? rawPoll
-        : typeof rawPoll === "string" && rawPoll.trim()
-          ? parseInt(rawPoll, 10)
-          : NaN;
+    const pollSeconds = seconds(cfg.pollSeconds);
+    const resolvedPollSeconds =
+      Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS;
+    const safeSpacePoll = seconds(cfg.safeSpacePollSeconds);
+    const attendancePoll = seconds(cfg.attendancePollSeconds);
     return {
       clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
       clientSecret: secrets.clientSecret || null,
       apiToken: secrets.apiToken || null,
-      pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS,
+      pollSeconds: resolvedPollSeconds,
+      // Unset falls back to the Vea interval ABOVE, not a constant of its own —
+      // see the field's doc comment on SenSourceConfig. Every existing Vea
+      // integration already has an attendance figure, so a fixed fallback faster
+      // than an operator's own pollSeconds would have raised their request
+      // volume the moment this shipped, for anyone who never opened this card.
+      attendancePollSeconds:
+        Number.isFinite(attendancePoll) && attendancePoll > 0 ? attendancePoll : resolvedPollSeconds,
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],
+      // Out of the encrypted store, never out of `cfg` — the state map holds it
+      // MASKED ("••••"), the same rule Resi and YouTube above carry. Reading the
+      // state value would send the mask to SafeSpace as a space id.
+      safeSpaceId: secrets.safeSpaceId?.trim() || null,
+      // Switched ON but with no id is a REAL state, and a distinct one: the id
+      // does not travel in a config snapshot, so a restore lands here. Falling
+      // back to Vea is right; doing it quietly is not. `|| !!secrets.safeSpaceId`
+      // keeps the invariant "an id implies enabled" true even on a box whose
+      // marker never got written.
+      safeSpaceEnabled: cfg[SAFESPACE_ENABLED_KEY] === true || !!secrets.safeSpaceId,
+      safeSpacePollSeconds:
+        Number.isFinite(safeSpacePoll) && safeSpacePoll > 0
+          ? safeSpacePoll
+          : SAFESPACE_DEFAULT_POLL_SECONDS,
     };
   }
 

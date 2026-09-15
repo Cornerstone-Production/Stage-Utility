@@ -21,6 +21,32 @@ export interface ConfigField {
   min?: number;
   max?: number;
   /**
+   * BLANK IS A SETTING on this `number` field, not a missing value — and this is
+   * the short string the empty box shows in its place.
+   *
+   * For a field that resolves at runtime from something else (a poll interval
+   * that falls back to the service's own, an interval that means "same as the
+   * one above") or that simply is not configured yet. Such a field has no
+   * `default` and no numeric `placeholder`, deliberately: both are PREFILLS, and
+   * a prefilled number is saved back the next time the card is saved for any
+   * other reason, so it silently becomes the operator's setting.
+   *
+   * Its presence is the opt-in, which is why it is one property and not two: a
+   * field the form lets you blank, with nothing in the box saying what blank
+   * means, is a field that reads as broken. Keep it short — the box is 176px.
+   *
+   * Distinct from `placeholder`, which is the row's description under the label
+   * and is free prose. This one goes INSIDE the input.
+   *
+   * Honoured by the INTEGRATIONS card only. `wireless-connections-panel.tsx`
+   * renders `ConfigField`s too and ignores it — it has no prefill ladder at all,
+   * so its number fields show 0 until they are set.
+   *
+   * integration-number-fields.test.tsx pins the biconditional: a number field
+   * seeds blank if and only if it declares this.
+   */
+  unsetHint?: string;
+  /**
    * Show this field only while another field in the same card holds this value.
    *
    * For an integration with two ways to connect, where showing both sets at once

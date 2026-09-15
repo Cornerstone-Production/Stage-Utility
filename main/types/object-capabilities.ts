@@ -14,6 +14,7 @@
 // the type merely being mentioned. The repository has shipped that bug.
 
 import type { LayoutObjectType } from "./views.js";
+import { externKeyed } from "./extern-keyed.js";
 
 /**
  * - `readout` — renders data
@@ -32,7 +33,7 @@ export type Capability = "readout" | "control" | "drilldown" | "editable";
  * object would arrive treated as a harmless readout, so there is no default:
  * adding a type to the union forces a decision here.
  */
-export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
+export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed({
   // ── Controls. The only types that invoke an action. ──────────────────────
   "osc-button": ["control"],
   "rosstalk-button": ["control"],
@@ -117,7 +118,7 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = {
   "home-spl": ["readout"],
   "home-screens": ["readout"],
   "home-recent-services": ["readout"],
-};
+});
 
 /**
  * Where a drill-down-capable object goes when pressed in the operator shell.

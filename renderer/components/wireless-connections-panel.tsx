@@ -1,3 +1,4 @@
+import { FORM_MASK, isMask } from "@main/services/mask";
 import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -36,6 +37,7 @@ import { cn } from "../lib/cn";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
+import { numberFieldValue } from "./integration-number-fields";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -43,11 +45,6 @@ function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
 }
 
-const MASKED_PASSWORD = "••••••••";
-
-function isPasswordMasked(value: string): boolean {
-  return /^•+$/.test(value);
-}
 
 // ---- single connection card -------------------------------------------------
 
@@ -68,7 +65,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     for (const field of provider.configSchema) {
       const raw = conn.config[field.key];
       if (field.type === "password" && typeof raw === "string" && raw !== "") {
-        out[field.key] = MASKED_PASSWORD;
+        out[field.key] = FORM_MASK;
       } else {
         out[field.key] = raw ?? "";
       }
@@ -108,7 +105,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     for (const field of provider.configSchema) {
       const raw = conn.config[field.key];
       if (field.type === "password" && typeof raw === "string" && raw !== "") {
-        out[field.key] = MASKED_PASSWORD;
+        out[field.key] = FORM_MASK;
       } else {
         out[field.key] = raw ?? "";
       }
@@ -152,7 +149,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
 
     const v = localConfig[key];
     // Skip if password is still masked
-    if (field.type === "password" && typeof v === "string" && isPasswordMasked(v)) return;
+    if (field.type === "password" && typeof v === "string" && isMask(v)) return;
 
     try {
       const next = await ipc<WirelessConnection[]>("wireless:updateConnection", {
@@ -166,7 +163,16 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     }
   }
 
-  async function handleConfigSelectChange(key: string, value: unknown) {
+  /**
+   * A config field that saves AS IT IS EDITED — a select, a list of addresses.
+   *
+   * One function for both. They were two, byte-identical apart from the value's
+   * type annotation and the tag on the console line, so a fix to one (an error
+   * that only toasts, a patch shape that changes) reached one control and not the
+   * other. The text and number fields are deliberately not here: they save on
+   * blur through handleConfigFieldBlur, because a keystroke is not a decision.
+   */
+  async function handleConfigValueChange(key: string, value: unknown) {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
     try {
       const next = await ipc<WirelessConnection[]>("wireless:updateConnection", {
@@ -175,21 +181,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       });
       onUpdate(next);
     } catch (err) {
-      console.error("[WirelessConnectionsPanel:updateConfigSelect]", err);
-      toast.error(`Failed to save: ${String(err)}`);
-    }
-  }
-
-  async function handleIpListChange(key: string, value: string[]) {
-    setLocalConfig((prev) => ({ ...prev, [key]: value }));
-    try {
-      const next = await ipc<WirelessConnection[]>("wireless:updateConnection", {
-        id: conn.id,
-        patch: { config: { ...conn.config, [key]: value } },
-      });
-      onUpdate(next);
-    } catch (err) {
-      console.error("[WirelessConnectionsPanel:updateIpList]", err);
+      console.error("[WirelessConnectionsPanel:updateConfigValue]", key, err);
       toast.error(`Failed to save: ${String(err)}`);
     }
   }
@@ -263,7 +255,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                 {field.type === "select" ? (
                   <Select
                     value={typeof value === "string" ? value : ""}
-                    onValueChange={(v: string) => handleConfigSelectChange(field.key, v)}
+                    onValueChange={(v: string) => handleConfigValueChange(field.key, v)}
                   >
                     <SelectTrigger className="w-44">
                       <SelectValue placeholder="Select…" />
@@ -279,12 +271,40 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
                 ) : field.type === "ip-list" ? (
                   <IpListField
                     value={Array.isArray(value) ? (value as string[]) : []}
-                    onChange={(v) => handleIpListChange(field.key, v)}
+                    onChange={(v) => handleConfigValueChange(field.key, v)}
                     placeholder={field.placeholder}
                   />
                 ) : field.type === "number" ? (
                   <NumberInput
-                    value={typeof value === "number" ? value : Number(value) || 0}
+                    // The SAME function the integrations panel's form uses.
+                    // This was a second copy of the expression it replaced, left
+                    // alone on the argument that no wireless field means "unset"
+                    // — true today, and not a reason to keep a copy:
+                    // `numberFieldValue` returns that expression to the
+                    // character for a field with no `unsetHint`, so importing it
+                    // is behaviour-identical now and correct by itself the day a
+                    // provider field declares one.
+                    //
+                    // What is still true here: an ABSENT value renders 0, and
+                    // that 0 looks like a setting. What used to make it worse
+                    // was the blur — NumberInput clamped and committed whatever
+                    // the box held on the way out, and `onCommit` below writes
+                    // straight to the server with no Save button in front of it.
+                    // That is fixed in NumberInput itself (see the `edited` ref:
+                    // only a value typed in this edit is clamped), not here, so
+                    // adding a `min` to a provider field no longer turns a click
+                    // in and a click out into a stored number.
+                    //
+                    // Two things to know before adding one anyway. A stepper
+                    // press from the displayed 0 DOES commit `min` in one click,
+                    // because a stepper is a real gesture and 0 is a real value
+                    // to step from. And `onCommit` below ignores the number it
+                    // is handed and re-reads `localConfig[key]`, which React has
+                    // not updated yet inside the same event — so the write that
+                    // press triggers carries the PREVIOUS value, not the stepped
+                    // one. Give the field an `unsetHint` path instead if blank
+                    // ever needs to be a real answer here.
+                    value={numberFieldValue(field, value)}
                     // The number, not String(n): the next blur writes this
                     // straight into the connection's config, and a stringified
                     // port is not what the provider is typed to read.
@@ -459,26 +479,28 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
     queryKey: ["wireless:getMeterRate"],
     queryFn: () => ipc<{ ms: number }>("wireless:getMeterRate"),
   });
-  const [meterInput, setMeterInput] = useState<string>("1000");
+  // A NUMBER, the same as the OSC panel's feedback port beside it. It was held
+  // as a string, read back with parseInt in one place and `Number(x) || 0` in
+  // another, and re-stringified to set it — four conversions for a field whose
+  // only control is a NumberInput that deals in numbers at both ends.
+  const [meterInput, setMeterInput] = useState(1000);
   useResyncOn([meterData], () => {
-    if (meterData) setMeterInput(String(meterData.ms));
+    if (meterData) setMeterInput(meterData.ms);
   });
 
   async function commitMeterRate() {
-    const ms = parseInt(meterInput, 10);
-    if (!Number.isFinite(ms) || ms < 0) {
-      setMeterInput(String(meterData?.ms ?? 1000));
-      return;
-    }
-    if (ms === meterData?.ms) return;
+    // No `ms < 0` check: the bound NumberInput declares `min={0}` and clamps
+    // before it calls onChange, so a negative cannot reach this state at all —
+    // not by typing and not by a stepper press.
+    if (meterInput === meterData?.ms) return;
     try {
-      const next = await ipc<{ ms: number }>("wireless:setMeterRate", { ms });
+      const next = await ipc<{ ms: number }>("wireless:setMeterRate", { ms: meterInput });
       queryClient.setQueryData(["wireless:getMeterRate"], next);
-      setMeterInput(String(next.ms));
+      setMeterInput(next.ms);
       toast.success(`Polling interval set to ${next.ms} ms`);
     } catch (err) {
       toast.error(`Failed to set polling interval: ${String(err)}`);
-      setMeterInput(String(meterData?.ms ?? 1000));
+      setMeterInput(meterData?.ms ?? 1000);
     }
   }
 
@@ -519,8 +541,8 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
         </span>
       </div>
       <NumberInput
-        value={Number(meterInput) || 0}
-        onChange={(n) => setMeterInput(String(n))}
+        value={meterInput}
+        onChange={setMeterInput}
         onCommit={commitMeterRate}
         step={100}
         min={0}

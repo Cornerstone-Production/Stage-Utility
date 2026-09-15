@@ -76,6 +76,7 @@ declare global {
   type ScoresStatusDTO = Stage.ScoresStatusDTO;
   type SportKind = Stage.SportKind;
   type StreamStatusDTO = Stage.StreamStatusDTO;
+  type YouTubeStatusDTO = Stage.YouTubeStatusDTO;
   type ReconnectSchedule = Stage.ReconnectSchedule;
   type ResolvedOutput = Stage.ResolvedOutput;
   type ScriptViewConfig = Stage.ScriptViewConfig;

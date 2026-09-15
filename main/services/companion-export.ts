@@ -14,11 +14,23 @@
 //  - an action names its connection as `connectionId`; 3.x called it `instance`.
 //  - a connection declares its module as `moduleId`; 3.x called it
 //    `instance_type`.
+//  - a control's FEEDBACKS are a top-level `feedbacks[]` array on the control,
+//    beside `steps`, each with its own `connectionId` and `definitionId`. (The
+//    feedbacks nested under a `logic_if`'s `children.condition` are a different
+//    thing and are excluded from the actions by `type`.)
 //
 // Every one of those is read both ways. None of them can be told apart from
 // "this button has no label" or "this button drives nothing" by looking at the
 // output, which is exactly why they are read defensively here rather than
 // assumed.
+
+import {
+  type ControlEntry,
+  type ExportConnection,
+  type InferredStateSource,
+  inferStateSource,
+  learnableConnections,
+} from "./companion-state-source.js";
 
 /** One pressable Companion button, at the coordinates the press API takes. */
 export interface CompanionButton {
@@ -44,9 +56,36 @@ export interface CompanionButton {
    * against and cannot be identified by anything but its coordinates.
    */
   actionIds: string[];
+  /**
+   * Where this button's own device already reports its state, or null.
+   *
+   * Inferred from what the button drives — see companion-state-source.ts. The
+   * import offers it as the default binding, the reconcile fills an empty one
+   * with it, and the rule editor shows it as a hint.
+   *
+   * The evidence it is derived from — the button's feedbacks and its actions'
+   * definition ids — is deliberately NOT carried on the button. It is two more
+   * arrays per button on a list of 536 that crosses to the browser, and this
+   * one field is the only thing anything downstream asks of it.
+   */
+  stateSource: InferredStateSource | null;
+  /**
+   * The labels of the connections this button drives that NO verified table row
+   * covers — the ones a state source can only be LEARNED for.
+   *
+   * EMPTY for almost every button: a button on a module the table knows, and a
+   * button that drives nothing at all, both have nothing to learn. So this is
+   * cheap on a list of 536 that crosses to the browser, which is why it is
+   * carried here while the evidence `stateSource` was derived from is not.
+   *
+   * The LABELS and not the module ids, because a label is what a variable
+   * reference names — `drives` is module ids and cannot be read back through
+   * Companion's value API at all. See companion-state-learn.ts.
+   */
+  learnConnections: string[];
 }
 
-/** Two buttons whose labels differ only by a trailing ON/OFF (or Startup/Shutdown). */
+/** Two buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown or START/STOP. */
 export interface CompanionPair {
   /** The shared label with the suffix removed ("Projectors"). */
   base: string;
@@ -130,11 +169,58 @@ function actionsOf(control: Record<string, unknown>): Record<string, unknown>[] 
 
 /** Connection ids referenced by any action of a control. */
 function connectionsOf(control: Record<string, unknown>): string[] {
-  const out: string[] = [];
-  for (const a of actionsOf(control)) {
+  return actionEntriesOf(control)
+    .map((a) => a.connectionId)
+    .filter((id) => id !== "");
+}
+
+/**
+ * Every action of a control as `{ connectionId, definitionId }`, IN ORDER.
+ *
+ * The order matters: the state-source inference falls back to the FIRST
+ * action's connection, and a button whose first action is the projector and
+ * whose second is a house-lights macro is a button about the projector.
+ */
+function actionEntriesOf(control: Record<string, unknown>): ControlEntry[] {
+  return actionsOf(control).map((a) => ({
     // 5.x names it connectionId; 3.x named it instance.
-    const id = str(a.connectionId) || str(a.instance);
-    if (id) out.push(id);
+    connectionId: str(a.connectionId) || str(a.instance),
+    definitionId: str(a.definitionId),
+  }));
+}
+
+/**
+ * A control's own feedbacks — the top-level `feedbacks[]` array, not the ones
+ * nested inside a `logic_if`'s condition.
+ *
+ * This is what says which connection a key is ABOUT: a `powerState` feedback is
+ * what an operator adds to make the key light up when the device is on.
+ */
+function feedbackEntriesOf(control: Record<string, unknown>): ControlEntry[] {
+  return arr(control.feedbacks).map((entry) => {
+    const f = rec(entry);
+    return {
+      connectionId: str(f.connectionId) || str(f.instance),
+      definitionId: str(f.definitionId) || str(f.type),
+    };
+  });
+}
+
+/**
+ * Every connection in an export, keyed by its id.
+ *
+ * The LABEL is what a variable reference names — `$(VCR-Overhead-Light:power_state)`
+ * — and the module id is what says which variable that connection publishes.
+ */
+export function parseConnections(raw: unknown): Record<string, ExportConnection> {
+  const out: Record<string, ExportConnection> = Object.create(null) as Record<string, ExportConnection>;
+  for (const [id, entry] of Object.entries(rec(rec(raw).instances))) {
+    const inst = rec(entry);
+    out[id] = {
+      label: str(inst.label).trim(),
+      // 5.x: moduleId. 3.x: instance_type.
+      moduleId: str(inst.moduleId) || str(inst.instance_type),
+    };
   }
   return out;
 }
@@ -164,7 +250,7 @@ export function actionIdsOf(control: unknown): string[] {
  */
 export function parseButtons(raw: unknown): CompanionButton[] {
   const doc = rec(raw);
-  const instances = rec(doc.instances);
+  const connections = parseConnections(raw);
   const out: CompanionButton[] = [];
 
   // `pages` is an object keyed by page number in every export seen; an array is
@@ -190,16 +276,20 @@ export function parseButtons(raw: unknown): CompanionButton[] {
         if (!str(control.type).startsWith("button")) continue;
 
         const label = labelOf(control);
-        const connections = connectionsOf(control);
-        if (!label && connections.length === 0) continue;
+        const driven = connectionsOf(control);
+        if (!label && driven.length === 0) continue;
 
-        const drives = [...new Set(connections)]
-          .map((id) => {
-            const inst = rec(instances[id]);
-            // 5.x: moduleId. 3.x: instance_type.
-            return str(inst.moduleId) || str(inst.instance_type);
-          })
+        const drives = [...new Set(driven)]
+          .map((id) => connections[id]?.moduleId ?? "")
           .filter((m) => m !== "");
+
+        // The same two lists feed the inference and the learnable-connection
+        // walk, built ONCE: they are the button's whole evidence and reading
+        // the control twice for them would be two walks over every action set.
+        const entries = {
+          feedbacks: feedbackEntriesOf(control),
+          actions: actionEntriesOf(control),
+        };
 
         out.push({
           page: pageNum,
@@ -210,6 +300,8 @@ export function parseButtons(raw: unknown): CompanionButton[] {
           label,
           drives,
           actionIds: actionIdsOf(control),
+          stateSource: inferStateSource(entries, connections),
+          learnConnections: learnableConnections(entries, connections),
         });
       }
     }
@@ -225,15 +317,33 @@ export function parseButtons(raw: unknown): CompanionButton[] {
  * pair that is wrong here becomes two rules a voice assistant will call, and a
  * guess about what "Open"/"Close" or "Up"/"Down" means on somebody's lighting
  * console is not a guess this should make.
+ *
+ * START/STOP is how a recorder is labelled — "REC START" beside "REC STOP" —
+ * and without it the two halves of every deck, encoder and camera recording
+ * were offered as two unrelated one-shot cues. `Record`/`Stop` is NOT here on
+ * purpose: a lone "Stop" has too many partners, and "MA PGM REC" beside "MA
+ * PGM STOP" would pair under one reading and "MA Cam 1 REC" beside a general
+ * "STOP ALL" under another.
+ *
+ * The two halves are still named `<base>_on` and `<base>_off`, like every other
+ * pair — a Startup/Shutdown pair always was — so "REC START" and "REC STOP"
+ * become `rec_on` and `rec_off`.
  */
 const SUFFIX_PAIRS: readonly (readonly [string, string])[] = [
   ["on", "off"],
   ["startup", "shutdown"],
+  ["start", "stop"],
 ];
 
 const SUFFIXES = SUFFIX_PAIRS.flat();
 
-/** Split "Projectors ON" into ["Projectors", "on"], or null. */
+/**
+ * Split "Projectors ON" into ["Projectors", "on"], or null.
+ *
+ * The suffix is the TRAILING WORD, matched case-insensitively, and the base is
+ * everything before it — so "REC START" and "REC STOP" share the base "REC"
+ * while "Deck 2 START" and "Encoder STOP" share nothing and cannot pair.
+ */
 function splitSuffix(label: string): { base: string; suffix: string } | null {
   const m = /^(.*?)[\s]+(\S+)$/.exec(collapse(label));
   if (!m) return null;
@@ -241,6 +351,46 @@ function splitSuffix(label: string): { base: string; suffix: string } | null {
   const base = m[1]!.trim();
   if (!base || !SUFFIXES.includes(suffix)) return null;
   return { base, suffix };
+}
+
+/**
+ * A single button's label split into the thing and the direction word on the
+ * end of it — `{ base: "VCR Light", word: "on" }` for "VCR Light ON".
+ *
+ * For a TOGGLE button, which is one button with no partner and therefore never
+ * seen by findPairs: the import names its two cues after the thing, not after
+ * whichever word the operator happened to put on the key, or a cue that turns a
+ * light off is called `vcr_light_on_off`.
+ *
+ * `Toggle` is included here and deliberately NOT in SUFFIXES: it has no
+ * opposite, so it can never pair two buttons, and a "Lights Toggle" beside a
+ * "Lights ON" must not be read as a pair. A label that is nothing BUT a
+ * direction word keeps its word — a cue called nothing cannot be called.
+ */
+export function splitToggleLabel(label: string): { base: string; word: string } {
+  const collapsed = collapse(label);
+  const m = /^(.*?)[\s]+(\S+)$/.exec(collapsed);
+  const word = m ? m[2]!.toLowerCase() : "";
+  const base = m ? m[1]!.trim() : "";
+  if (!base || !(SUFFIXES.includes(word) || word === "toggle")) return { base: collapsed, word: "" };
+  return { base, word };
+}
+
+/**
+ * The base a toggle button's pair is named after: its own cue slug with the
+ * direction word taken off the end — `vcr_light_on` -> `vcr_light`.
+ *
+ * The SLUG is stripped rather than the label re-slugged, so a page
+ * disambiguation the slug already carries survives ("stage_vcr_light_on" ->
+ * "stage_vcr_light"). The import route names the two rules from this and the
+ * dialog shows the operator the same two names before they press Import; a
+ * second copy of the rule is how the preview would come to disagree with what
+ * is created.
+ */
+export function togglePairSlug(slug: string, label: string): string {
+  const { word } = splitToggleLabel(label);
+  const suffix = word ? `_${slugForCue(word)}` : "";
+  return suffix && slug.endsWith(suffix) ? slug.slice(0, -suffix.length) : slug;
 }
 
 /**
@@ -311,6 +461,11 @@ export const UTILITY_MODULES: readonly string[] = [
   "tplink-kasasmartplug",
   "tplink-kasasmartbulb",
   "malighting-*",
+  // Recorders. A deck or a stream encoder is setup gear in exactly the sense
+  // this list means — somebody starts it before a service and stops it after —
+  // and the START/STOP pair that drives one is the reason it is here.
+  "bmd-hyperdeck",
+  "magewell-ultrastream",
 ];
 
 /** Does this module id name a utility device? Supports the trailing `*`. */
@@ -447,7 +602,7 @@ export function singleButtons(
 }
 
 /** Which half of an ON/OFF pair a button is, in the NAMES the import writes —
- *  a Startup/Shutdown pair is still named `_on`/`_off`. */
+ *  a Startup/Shutdown or START/STOP pair is still named `_on`/`_off`. */
 export type PairHalf = "on" | "off";
 
 /** The cue the import would create for one button. */
@@ -559,17 +714,78 @@ export function isCompanionVariableName(name: string): boolean {
 }
 
 /**
+ * What Companion accepts as a CONNECTION LABEL — the name in `$(VCR-Light:power_state)`.
+ *
+ * Narrower than a variable name: Companion sanitises a connection label to
+ * letters, digits, `_` and `-`, with no dot. Capped for the same reason the
+ * variable name is — it is pasted into a URL path.
+ */
+const COMPANION_LABEL_RE = /^[A-Za-z0-9_-]{1,100}$/;
+
+/**
+ * Where a cue's state is read from: Companion's own CUSTOM variables, or the
+ * variables a MODULE publishes for one of its connections.
+ *
+ * Companion answers the two at different URLs —
+ * `/api/custom-variable/<name>/value` and `/api/variable/<label>/<name>/value`
+ * — and a binding names which it means. See parseVariableRef.
+ */
+export type VariableRef =
+  | { kind: "custom"; name: string }
+  | { kind: "module"; label: string; name: string };
+
+/**
+ * A binding string as the rule stores it, split into which variable it names.
+ *
+ * Three spellings, and the bare one is the reason the other two exist:
+ *
+ *   `custom:projectors_state`        a custom variable, said explicitly
+ *   `VCR-Overhead-Light:power_state` a MODULE variable on that connection
+ *   `projectors_state`               a custom variable — every binding written
+ *                                    before module variables could be named,
+ *                                    which must go on meaning what it meant
+ *
+ * `custom` wins over a connection that happens to be labelled "custom": the
+ * prefix is Companion's own spelling for its custom variables, and a binding
+ * that changed meaning because somebody named a connection is worse than one
+ * that cannot reach a connection nobody should have called that.
+ *
+ * Returns null for anything neither half of which Companion could have, so a
+ * caller can refuse it rather than build a URL that answers 404 forever.
+ */
+export function parseVariableRef(ref: string): VariableRef | null {
+  const text = ref.trim();
+  if (!text) return null;
+  const colon = text.indexOf(":");
+  if (colon === -1) {
+    return isCompanionVariableName(text) ? { kind: "custom", name: text } : null;
+  }
+  const left = text.slice(0, colon);
+  const right = text.slice(colon + 1);
+  if (!isCompanionVariableName(right)) return null;
+  if (left.toLowerCase() === "custom") return { kind: "custom", name: right };
+  return COMPANION_LABEL_RE.test(left) ? { kind: "module", label: left, name: right } : null;
+}
+
+/** Is this a binding Companion could answer for — custom or module? */
+export function isCompanionVariableRef(ref: string): boolean {
+  return parseVariableRef(ref) !== null;
+}
+
+/**
  * The names of every custom variable in an export, sorted.
  *
  * `custom_variables` is a top-level object keyed by NAME, whose values carry the
  * description, the default and the sort order — none of which this app has any
  * use for. Only the keys are read.
  *
- * An export with no custom variables omits the key entirely on some builds (the
- * 5.0.3 document this was written against has no `custom_variables` at all), so
+ * An export with no custom variables omits the key entirely on some builds, so
  * an absent map is an empty list and never an error. An array of
  * `{ name }` objects is read too, so a hand-built or future document does not
- * come back silently empty.
+ * come back silently empty. The defensiveness is not hypothetical, but the
+ * claim that used to be here — that the 5.0.3 document this was written against
+ * had no `custom_variables` at all — was wrong: 5.0.3+9703's export carries the
+ * key as an object of ten.
  *
  * Names Companion itself could not have are dropped: a key that is not a legal
  * variable name cannot be read back through the value API, and offering it in

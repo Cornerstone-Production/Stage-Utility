@@ -110,6 +110,22 @@ export function bearerOf(authorization: string | undefined): string | null {
   return m ? m[1]! : null;
 }
 
+/**
+ * One phrase saying what was wrong with the Authorization header.
+ *
+ *   no Authorization header          nothing arrived — the caller never sent one
+ *   Authorization is not "Bearer …"  a header arrived without the scheme, which
+ *                                    is what a secrets.yaml holding the bare
+ *                                    token produces
+ *   token not recognised             well-formed, but not one this server minted
+ *                                    (or a revoked one, or another server's)
+ */
+export function refusalReason(authorization: string | undefined): string {
+  if (!authorization || !authorization.trim()) return "no Authorization header";
+  if (bearerOf(authorization) === null) return 'Authorization is not "Bearer <token>" — the scheme is part of the value';
+  return "token not recognised — minted on another server, revoked, or mistyped";
+}
+
 class CueTokenStore {
   private async read(): Promise<CueTokenRecord[]> {
     const secrets = await secretsStore.getSecrets(SLOT);

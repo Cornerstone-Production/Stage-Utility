@@ -269,11 +269,24 @@ describe("homeAssistantYaml", () => {
     assert.deepEqual(scripts(yaml), []);
   });
 
-  test("an `_on` with no partner is not a pair, so it is a script", () => {
-    // The rule for what a pair IS lives in one place; this is the boundary of it.
+  test("an `_on` with no partner is neither a switch NOR a script", () => {
+    // It used to be a script here. It never was one in the manifest — see
+    // isPairHalfName — and the two lists are the same question asked of one
+    // install, so an integration reading /api/cues/manifest and a person
+    // pasting this file must not get different entities.
+    //
+    // THE TRADE, stated because it is a real loss: a cue somebody named
+    // `house_lights_on` on purpose, with no partner, no longer gets a script.
+    // It keeps its rest_command, `POST /api/cues/house_lights_on` still fires
+    // it, and voice still fires it — the way to get a Home entity for it is to
+    // drop the `_on` from the name. That is the price of never publishing half
+    // a switch, which is a button in the house that turns the projectors on
+    // with no way to turn them off. See the "an orphaned pair half" describe.
     const yaml = homeAssistantYaml([cue("house_lights_on", "House lights on")], BASE);
-    assert.deepEqual(scripts(yaml), [{ name: "house_lights_on", alias: "House lights on" }]);
+    assert.deepEqual(scripts(yaml), []);
     assert.deepEqual(friendlyNames(yaml), []);
+    // Not silently dropped: the primitive is still there.
+    assert.deepEqual(commandKeys(yaml), ["su_house_lights_on"]);
   });
 
   test("a pair and a single in one document each get their own object, and only that", () => {
@@ -450,7 +463,13 @@ describe("a pair with a state variable", () => {
       { id: "amps", from: "optimistic" },
       {
         id: "projectors",
-        from: "\"{{ (state_attr('sensor.stage_utility_cues', 'projectors') or {}).get('state') == 'on' }}\"",
+        // `commanded` first: for a few seconds after a press the reading is
+        // still from before it, and a switch templated on the reading alone
+        // flips itself back. Absent — which is every other second — `.get`
+        // falls through to the reading.
+        from:
+          "\"{{ (state_attr('sensor.stage_utility_cues', 'projectors') or {}).get('commanded', " +
+          "(state_attr('sensor.stage_utility_cues', 'projectors') or {}).get('state')) == 'on' }}\"",
       },
     ]);
     // Guarded as a count too: one `optimistic: true` in the document, for the
@@ -672,6 +691,20 @@ describe("the template integration's modern shape", () => {
     assert.equal(/optimistic:/.test(block), false, "a bound switch is optimistic as well as read");
   });
 
+  test("a bound switch shows what was COMMANDED before what was read", () => {
+    // Companion polls the device on its own interval, so for a few seconds
+    // after a press the sensor's reading is from before it. Templated on the
+    // reading alone the switch flips itself back — the same defect the settle
+    // window fixes on the call, arriving through the pasted config instead.
+    const yaml = homeAssistantYaml(DOCUMENTS["one bound pair"]!, BASE);
+    const line = templateBlock(yaml).find((l) => l.trimStart().startsWith("state:"))!;
+    const commanded = line.indexOf("get('commanded'");
+    const read = line.indexOf("get('state')");
+    assert.ok(commanded > 0, `the switch never reads \`commanded\`: ${line}`);
+    assert.ok(read > 0, `the switch never falls back to the reading: ${line}`);
+    assert.ok(commanded < read, `the reading is preferred over the command: ${line}`);
+  });
+
   test("an unbound switch carries NO `state:` at all", () => {
     // Which is what makes it optimistic per the docs — the switch assumes its
     // commands succeeded. `optimistic: true` is spelled out beside it anyway.
@@ -694,7 +727,13 @@ describe("the template integration's modern shape", () => {
 // the diff, decide whether the new output is what you meant, and only then
 // regenerate.
 describe("the document for an install with no bindings", () => {
-  /** A pair, a one-shot cue, and a renamed one-shot — every object this emits. */
+  /**
+   * A pair, a one-shot cue, and a renamed cue whose name ends `_on`.
+   *
+   * The third is there for its rest_command and its "renamed from" comment: it
+   * is an ORPHANED half, so it gets no script — the same answer the manifest
+   * gives. See isPairHalfName.
+   */
   const UNBOUND_FIXTURE = (): Rule[] => [
     cue("projectors_on", "Projectors on"),
     cue("projectors_off", "Projectors off"),
@@ -765,10 +804,6 @@ describe("the document for an install with no bindings", () => {
   "    alias: \"take the screens\"",
   "    sequence:",
   "      - action: rest_command.su_take_screens",
-  "  \"screens_on\":",
-  "    alias: \"Screens on\"",
-  "    sequence:",
-  "      - action: rest_command.su_screens_on",
   "",
   ].join("\n");
 
@@ -789,5 +824,186 @@ describe("the document for an install with no bindings", () => {
     const yaml = homeAssistantYaml(UNBOUND_FIXTURE(), BASE);
     assert.equal(yaml.includes("rest:"), false);
     assert.equal(yaml.includes("state_attr"), false);
+  });
+});
+
+// ── A toggle pair: both halves press one button ───────────────────────────────
+
+describe("a pair whose two halves press the SAME button", () => {
+  /** A cue that presses a real coordinate, which is what makes a toggle one. */
+  const press = (
+    name: string,
+    says: string,
+    at: { page: number; row: number; col: number },
+    state: Record<string, string> = {},
+  ): Rule => ({
+    ...cue(name, says, name, "", state),
+    action: { id: "companion.press", params: { ...at } },
+  });
+
+  const SAME = { page: 1, row: 2, col: 1 };
+  const OTHER = { page: 1, row: 2, col: 2 };
+
+  /** Generate, and collect the `[cues]` warnings it wrote. */
+  function generate(rules: Rule[]): { yaml: string; warnings: string[] } {
+    const warnings: string[] = [];
+    const real = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      return { yaml: homeAssistantYaml(rules, BASE), warnings };
+    } finally {
+      console.warn = real;
+    }
+  }
+
+  test("a BOUND toggle pair is an ordinary state switch, with the comment that says why", () => {
+    const { yaml, warnings } = generate([
+      press("house_lights_on", "House lights on", SAME, { stateVariable: "house_lights_state" }),
+      press("house_lights_off", "House lights off", SAME),
+    ]);
+    assert.equal(
+      comments(yaml).includes(
+        "# toggle button: both directions press the same Companion button, so the state variable is what tells them apart",
+      ),
+      true,
+    );
+    assert.deepEqual(switchStates(yaml), [
+      {
+        id: "house_lights",
+        from:
+          "\"{{ (state_attr('sensor.stage_utility_cues', 'house_lights') or {}).get('commanded', " +
+          "(state_attr('sensor.stage_utility_cues', 'house_lights') or {}).get('state')) == 'on' }}\"",
+      },
+    ]);
+    assert.deepEqual(warnings, [], "a bound toggle is not a warning — it is the supported shape");
+  });
+
+  test("an UNBOUND one is emitted anyway, with a WARNING comment and one log line", () => {
+    // The import cannot make this — a single button with no variable stays a
+    // single cue — so it is two rules somebody wrote by hand, pointed at one
+    // key. Dropping it would be a switch that vanished from Home Assistant with
+    // nothing saying why; it is emitted, and it says what is wrong with it.
+    const { yaml, warnings } = generate([
+      press("house_lights_on", "House lights on", SAME),
+      press("house_lights_off", "House lights off", SAME),
+    ]);
+    assert.equal(
+      comments(yaml).includes(
+        "# WARNING: both halves press the same button and no state variable is bound — Home cannot know which way it went",
+      ),
+      true,
+    );
+    assert.deepEqual(switchStates(yaml), [{ id: "house_lights", from: "optimistic" }]);
+    assert.deepEqual(warnings, ["[cues] pair house_lights presses one button with no state variable"]);
+  });
+
+  test("an ordinary pair on two different buttons gets NEITHER comment", () => {
+    const { yaml, warnings } = generate([
+      press("projectors_on", "Projectors on", SAME),
+      press("projectors_off", "Projectors off", OTHER),
+    ]);
+    const said = comments(yaml).filter((c) => c.includes("toggle") || c.includes("WARNING"));
+    assert.deepEqual(said, []);
+    assert.deepEqual(warnings, []);
+  });
+});
+
+// A pair whose state Stage Utility answers itself — a REAPER Record/Stop cue
+// bound to `app:reaper.recording` (cue-pairs.ts) — is a bound pair here and
+// nowhere else in this generator: the sensor reads `/api/cues/states`, which
+// answers for both namespaces, so the document must not care which it is.
+describe("a pair bound to an app state source", () => {
+  const transport = (name: string, says: string, command: string): Rule => ({
+    ...cue(name, says),
+    action: { id: "reaper.transport", params: { command } },
+  });
+
+  test("renders exactly as a Companion-bound pair does, sensor and all", () => {
+    const yaml = homeAssistantYaml(
+      [
+        transport("reaper_record_on", "the recording on", "record"),
+        transport("reaper_record_off", "the recording off", "stop"),
+        cue("amps_on", "Amps on"),
+        cue("amps_off", "Amps off"),
+      ],
+      BASE,
+    );
+    // The pair is in the sensor's attribute list, which is what makes the
+    // switch's template resolve to anything at all.
+    assert.deepEqual(sensorAttributes(yaml), ["reaper_record"]);
+    assert.deepEqual(switchStates(yaml), [
+      { id: "amps", from: "optimistic" },
+      {
+        id: "reaper_record",
+        from:
+          "\"{{ (state_attr('sensor.stage_utility_cues', 'reaper_record') or {}).get('commanded', " +
+          "(state_attr('sensor.stage_utility_cues', 'reaper_record') or {}).get('state')) == 'on' }}\"",
+      },
+    ]);
+    // The ref itself never appears in the document: Home Assistant reads the
+    // pair's base off the sensor and knows nothing about where the state came
+    // from, which is why nothing here had to change for a second namespace.
+    assert.equal(yaml.includes("app:reaper.recording"), false);
+  });
+});
+
+// ── Half a pair, with its partner deleted ────────────────────────────────────
+//
+// `projectors_on` whose `_off` half is gone is not a pair, so it falls out of
+// `paired` — and it used to come straight back as `script.projectors_on`. That
+// is a button in the house that turns the projectors on with no way to turn
+// them off, and it survives the next re-paste because the generator puts it
+// there every time.
+//
+// The manifest has filtered this since it was written (`isPairHalfName`), the
+// YAML did not, and the two lists are the same question asked of one install:
+// an integration reading /api/cues/manifest and a person pasting this file must
+// not get different entities.
+describe("an orphaned pair half", () => {
+  const orphan = [cue("projectors_on", "Projectors on"), cue("house_lights", "House lights")];
+
+  test("is not emitted as a script", () => {
+    const yaml = homeAssistantYaml(orphan, BASE);
+    assert.deepEqual(
+      scripts(yaml).map((s) => s.name),
+      ["house_lights"],
+      "half a switch was published as something pressable from Home",
+    );
+  });
+
+  test("and there is no switch for it either — a pair needs both halves", () => {
+    assert.deepEqual(switchStates(homeAssistantYaml(orphan, BASE)), []);
+  });
+
+  test("but its rest_command stays, so an already-pasted copy keeps working", () => {
+    // The `rest_command` is the primitive, not an entity: nothing in Home
+    // Assistant creates a device from one. Dropping it would break the copy of
+    // this file somebody pasted while the pair was whole, which is the one
+    // thing a re-paste must not do.
+    assert.deepEqual(commandKeys(homeAssistantYaml(orphan, BASE)), [
+      "su_projectors_on",
+      "su_house_lights",
+    ]);
+  });
+
+  test("an `_off` half orphaned the other way round is the same answer", () => {
+    const yaml = homeAssistantYaml([cue("projectors_off", "Projectors off")], BASE);
+    assert.deepEqual(scripts(yaml), []);
+    assert.deepEqual(switchStates(yaml), []);
+    assert.deepEqual(commandKeys(yaml), ["su_projectors_off"]);
+  });
+
+  test("and a whole pair is still a switch, not two orphans", () => {
+    // The other direction: a filter that dropped every `_on`/`_off` name from
+    // the scripts AND from the pairing would leave an install with no switches
+    // at all, which passes the three cases above.
+    const yaml = homeAssistantYaml(
+      [cue("projectors_on", "Projectors on"), cue("projectors_off", "Projectors off")],
+      BASE,
+    );
+    assert.deepEqual(switchStates(yaml).map((s) => s.id), ["projectors"]);
+    assert.deepEqual(scripts(yaml), []);
   });
 });

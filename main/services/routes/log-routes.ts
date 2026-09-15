@@ -11,6 +11,7 @@ import { getLevelCounts, getLogSince } from "../log-buffer.js";
 import { buildLogChecks } from "../log-checks.js";
 import { integrationManager } from "../integration-manager.js";
 import { renderLogPage } from "../log-page.js";
+import { pcoService } from "../pco-service.js";
 import { SERVER_VERSION } from "../server-version.js";
 import { type RouteCtx, error, json } from "./context.js";
 import { CANONICAL_LOG_PATH, LOG_PAGE_PATHS } from "./log-paths.js";
@@ -84,6 +85,10 @@ export async function logRoutes(c: RouteCtx): Promise<void> {
         ...getLevelCounts(),
         states: integrationManager.getStates(),
         descriptors: integrationManager.getDescriptors(),
+        // PCO's own report of the quota, from the headers it puts on every
+        // response. Not a connection state, so not in the integration row: PCO
+        // can be perfectly reachable and one request from refusing the next.
+        pcoRate: pcoService.rateLimitStatus(),
       }),
     });
     return;

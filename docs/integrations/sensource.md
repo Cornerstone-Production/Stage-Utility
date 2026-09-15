@@ -42,6 +42,11 @@ SenSource has no push, webhook or streaming endpoint, so the poller
 - A poll whose configuration is replaced while it is in flight publishes nothing
   and carries nothing forward: its answers describe a scope the operator has
   already changed.
+- If the site also has **SafeSpace**, the occupancy — and only the occupancy —
+  comes from there instead, on its own faster interval. See
+  [SafeSpace live occupancy](#safespace-live-occupancy).
+- Attendance can also be read on its own faster interval, independent of the
+  poll interval above. See [Attendance interval](#attendance-interval).
 - Counts broadcast on the SSE channel **`people:count`** (skipping re-broadcasts
   when the substantive counts are unchanged); `GET /api/people/count` hydrates a
   freshly loaded display. A rolling trend buffer backs the people-graph.
@@ -56,11 +61,142 @@ ID** and **API Client Secret** (leave the static token blank in the normal case)
 set the **Poll interval**, enable it, and **Test connection** (authenticates and
 reports how many locations are visible). Optionally pick a **location** and/or
 specific **zones** to scope the count — zones are the reliable scoping mechanism.
-The location/zone selection is saved as non-secret config; the client secret and
-static token are stored encrypted.
+The location/zone selection is saved as non-secret config; the client secret, the
+static token and the SafeSpace space ID are stored encrypted. Leave **Attendance
+interval** blank unless attendance needs to keep pace with a faster occupancy
+reading — see [Attendance interval](#attendance-interval).
 
 **On a layout:** add object → **SenSource → people-counter / people-graph /
 people-panel**.
+
+## SafeSpace live occupancy
+
+SafeSpace is SenSource's other product. Where Vea reports a day's worth of
+counting — attendance, per-zone traffic, peak, mean, capacity — SafeSpace
+publishes one number per space: how many people are in it right now, updated far
+more often than Vea's ~78-second refresh.
+
+It is part of this integration rather than a second one, because it is the same
+vendor and the same payload. When a space ID is set, **the occupancy comes from
+SafeSpace and everything else still comes from Vea**. Attendance, the zone
+breakdown, today's peak / lowest / mean and the capacity are unchanged. Nothing
+about SafeSpace is required: leave the field blank and Vea answers everything, as
+it did before.
+
+**Where the space ID comes from.** In SafeSpace, open the space and take the
+live-occupancy value's embed address — the ID is the last path segment of
+`app.safespace.io/api/raw-data/live-occupancy/<space ID>` (their UI may show the
+`display.safespace.io/value/live/<space ID>` form of the same thing, which ends in
+the same ID). Paste that ID into **SafeSpace space ID** on the SenSource card, and
+set **SafeSpace interval** if 10 seconds is not what you want. That field stops
+at 60 seconds: a reading older than that is no fresher than Vea's, so a longer
+interval would leave the count on Vea for most of every cycle. To read SafeSpace
+less often than that, clear the space ID and let Vea answer everything.
+
+**The space ID is a credential and is stored as one.** The endpoint has no key,
+no token and no account check — the ID is the whole of its authority, so anyone
+who has it can read your occupancy from anywhere.
+
+So it is held in the encrypted secret store beside the Vea client secret, not in
+`settings.json`. The field on the card is masked like a password, and the ID is
+**not carried in a config snapshot** (Settings → Advanced → Data → Config
+snapshots, or the automatic backups) — the same rule every API key and password
+follows. A box upgrading from a build that stored it as ordinary config moves it
+into the secret store on the next start and says so on `/log`.
+
+Stage also keeps it out of every log line: the one place that builds a message
+containing the URL redacts it first, so a failure on `/log` reads `<space id>`
+rather than the value.
+
+**After restoring a snapshot, SafeSpace asks for its ID back.** The snapshot
+carries the fact that SafeSpace was switched on, and deliberately not the ID. A
+restored box therefore knows the difference between a site that never had
+SafeSpace and one whose ID did not travel, and it says so in three places rather
+than quietly reverting to Vea:
+
+- a `[sensource]` line on `/log`, naming where to fix it;
+- the SenSource row in Settings → Integrations, whose connection line reads
+  `… — SafeSpace is on but has no space ID`;
+- a notice on the SenSource card itself, above the location and zone pickers.
+
+The count keeps coming from Vea throughout — nothing goes blank — which is
+exactly why it is said out loud. Paste the ID back in, or press **Turn SafeSpace
+off** in that notice to switch it off for good; either way `/log` records which.
+
+Saving the card does not switch SafeSpace off. With no ID stored the field is
+empty on every save, so an ordinary edit — the Vea poll interval, say — would
+otherwise take the reminder with it. Clearing a field that *does* hold an ID
+still switches SafeSpace off, because that deletes the credential.
+
+**What the reading does when it goes wrong.**
+
+- **An empty response is unknown, never zero.** About one reading in six comes
+  back with no number at all. Parsing that as 0 would report an empty building and
+  fire every occupancy threshold in the app, so the last good value stands
+  instead. Nothing is logged for a single empty response — it is the normal case.
+- **A stale reading loses to Vea.** Once the newest SafeSpace value is a minute
+  old, Vea's number is at least as current and the occupancy goes back to it.
+- **A SafeSpace failure falls back to Vea rather than going blank**, and says so
+  once per outage on the terms in [Logging an outage](#logging-an-outage) — not
+  once per reading, which at a 10-second interval would be 360 lines an hour.
+- **Rate limiting is read from the response, not assumed.** SafeSpace reports
+  `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; Stage
+  measures what a request costs from consecutive `Remaining` values and stops
+  asking until the reset the server named, rather than trusting an observed quota.
+  An `HTTP 429` honours `Retry-After`, capped at five minutes.
+
+The published count says which product it came from: the `people:count` payload
+carries `total.occupancySource`, either `"vea"` or `"safespace"`, and a change of
+source is a `[sensource]` line on `/log`. Nothing on a display shows it — read it
+from `GET /api/people/count` or the SSE channel. The Integrations panel's
+connection line names the source too, but it is written when the integration
+connects and is not rewritten on every poll, so treat it as where the count
+started rather than where it is now.
+
+## Attendance interval
+
+SafeSpace above answers one half of the "why do these two numbers on the wall
+disagree" question: occupancy can be read every few seconds. Attendance stayed
+on the poll interval beside it, which is up to an hour if that is what the
+operator set — the other half of the same disagreement.
+
+**Attendance interval**, on the SenSource card, reads `/data/traffic` on its own
+faster clock, the same idea as SafeSpace's own interval. **Blank reproduces
+today's behaviour exactly**: attendance updates only as often as the rest of the
+card. This is not the same guarantee SafeSpace's interval makes — SafeSpace is
+switched off until a space ID is entered, so its interval cannot affect a site
+that never opted in. Attendance has no such switch: every existing Vea
+integration already publishes one, so the blank default has to track whatever
+the poll interval is set to, per site, rather than a fixed number of its own —
+a fixed number faster than some other operator's own poll interval would have
+started polling harder for them the moment this shipped.
+
+It costs one extra request to Vea per tick at whatever rate is set, on the same
+10-second floor and the same Vea flakiness as the poll interval — it is the same
+API, not a separate, gentler one the way SafeSpace is. Set it at or above the
+poll interval and it changes nothing; there is no additional timer running.
+
+**What it publishes.** The fast read never asks Vea for the authoritative
+attendance figure again — that would put the poll's three-request shape on the
+fast clock, which is the reason this reads one endpoint instead of all of them.
+Instead it takes the last attendance the poll interval published and advances it
+by how far `/data/traffic`'s own sum has moved since — the same arithmetic this
+page's [carried-forward](#how-it-works) day aggregates already use when the day
+request fails, just run on every fast tick instead of only a degraded one. That
+keeps the fast number and the poll interval's own number in agreement at every
+poll, rather than stepping between two different bases (the raw zone sum counts
+doors a space total does not) every few seconds.
+
+**It cannot double up with the poll interval's own request.** Whenever the fast
+interval divides evenly into the poll interval, the two would otherwise land on
+the same instant periodically, not just once — and a successful read from
+either one pushes the fast timer's next tick out from that moment, so it is
+never due again within one attendance interval of the last successful fetch.
+
+A failing fast read holds attendance at its last value and says so once per
+outage on the terms in [Logging an outage](#logging-an-outage), the same as
+every other part of this poll — it never takes the poll interval's own request
+down with it.
 
 ## Service history
 
@@ -112,11 +248,52 @@ poll drops to once a minute, and a consumer arriving mid-wait pre-empts it rathe
 than sitting out the rest. It never polls *faster* than the interval you set, so
 raising it to stay inside an API quota does what you expect.
 
-A failing endpoint backs off instead of retrying at full rate, and logs the first
-failure rather than one line per attempt. Outside the service window it goes
-dormant with the other integrations. A partial failure — the day aggregates, or
-the live minute series — is logged when it starts and when it clears, never once
-per poll.
+A failing endpoint backs off instead of retrying at full rate. Outside the service
+window it goes dormant with the other integrations. See
+[Logging an outage](#logging-an-outage) for what a failure writes to `/log`.
+
+**Test connection pauses the live readings for one interval.** The button checks
+the values currently in the form, which are not the saved ones, so while it is
+running the poll, the SafeSpace reading and the fast attendance read each skip
+their next tick rather than publish counts for a location or space nobody has
+saved. Every one of them resumes on its own next interval — a skipped tick is a
+deferral, never a cancellation, so nothing needs re-saving afterwards and no
+back-off is stepped.
+
+## Logging an outage
+
+Each part of the poll that can fail on its own — the day aggregates, the live
+minute series, the `/space` listing, the zone→location join, the token exchange,
+each rejected path — is its own **outage**, logged once when it starts and once
+when it ends, never once per poll.
+
+A run does not end on the first success. It ends on a success that **holds** for
+four poll intervals (at least two minutes). Vea fails by alternating: a request
+is rejected, the next succeeds, the one after is rejected again. Under a
+once-per-transition rule the intervening success clears the state and every
+rejection is a fresh first failure, which is how this integration once wrote
+3,527 warning and error lines in five days — 2,837 of them in one day — against
+under 200 for everything else in the app combined. An alternating outage is one
+run and one line.
+
+- **A different kind of failure is always news.** A 503 arriving during a 401
+  storm is a different problem and gets its own line, so a credentials error
+  cannot mask the network error that replaced it.
+- **A run that lasts reminds you every 15 minutes**, with how many attempts it
+  has cost and how long it has been going, so a broken endpoint is never silent.
+- **Every part that can open an outage also closes one.** A 401 storm on one
+  endpoint, an unreadable `/space` listing, a broken zone join: each writes a line
+  when it clears, naming what the run cost. An outage that opens with a line and
+  ends in silence leaves an operator watching `/log` with no way to know.
+- **The recovery line accounts for the run** it ended — nothing suppressed is
+  dropped without being counted somewhere.
+- **A response whose text changes every time** (a timestamp, a request id) cannot
+  turn that into a line per poll.
+
+The window is four *polls* rather than a fixed two minutes because the interval
+has no ceiling. At the 300s an operator might set to stay inside an API quota, a
+fixed window shorter than one poll would be outlasted by every success and the
+rule would collapse back to once-per-transition.
 
 ## Auth
 
@@ -153,9 +330,15 @@ Stage will not make that worse, and says so on the log when it sees it:
   or waits a minute when the response does not carry one.
 
 The first rejected response of an outage is logged with what Vea said, per
-request — so the reason is on `/log` once, whatever the body says. A response
-whose text changes every time (a timestamp, a request id) does not turn that into
-a line per poll.
+request — so the reason is on `/log` once, on the terms in
+[Logging an outage](#logging-an-outage).
+
+The SafeSpace and attendance readings each have their own interval and their own
+timer, independent of the poll interval and of each other — a live number is
+only worth having if it is read often, and tying either one to a Vea interval
+raised to save API calls would throw that away. Both are on the same idle gate
+the poll itself is: with nothing consuming the count they drop to once a minute,
+and a consumer arriving mid-wait pre-empts whichever wait is idle.
 
 The trend buffer behind the people-graph samples on its own 45s clock rather than
 once per poll, so its ~3h span does not shrink when the interval drops.

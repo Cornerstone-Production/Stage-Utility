@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { UploadIcon, XIcon, DownloadIcon } from "lucide-react";
 
-import { Button, toast } from "../../components/ui";
+import { Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { invoke } from "../../lib/api";
 // The CSV rules live once, in main/services/csv.ts — shared with the archive
 // writer and the patch exporter, which this file has to agree with byte for
@@ -185,15 +185,22 @@ export function PatchImport({
         <div className="mt-3 flex flex-col gap-3">
           <label className="flex items-center gap-2 text-footnote text-fg-muted">
             Import into
-            <select value={rackId} onChange={(e) => setRackId(e.target.value)} className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg">
-              {racks.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
+            <Select value={rackId} onValueChange={setRackId}>
+              <SelectTrigger className="px-2 focus:ring-0"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {racks.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </label>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {FIELDS.map((f) => (
               <label key={f.key} className="flex flex-col gap-1 text-caption2 text-fg-subtle">
                 {f.label}{f.required ? " *" : ""}
+                {/* Left as a raw <select>: its value is a COLUMN INDEX, not an id,
+                    and `autoMap` rewrites the whole map every time a file is
+                    parsed — so the value and the header list are replaced
+                    together and neither can outlive the other. */}
                 <select
                   value={map[f.key]}
                   onChange={(e) => {

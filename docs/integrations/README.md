@@ -17,7 +17,7 @@ countdown, so the app needs it.
 | [OBS Studio](obs.md) | Recording / streaming / virtual-cam state |
 | [REAPER](reaper.md) | Recording state (Web Interface poll) |
 | [ProVideoPlayer](provideoplayer.md) | What is on each PVP layer, and control of layers from rules |
-| [OSC](osc.md) | Control buttons to LAN gear + feedback |
+| [OSC](osc.md) | Control buttons to LAN gear, and inbound feedback that can drive rules |
 | [Resi](resi.md) | Whether Resi is streaming, and for how long |
 | [YouTube](youtube.md) | Whether you are live on YouTube, and for how long |
 | [Bitfocus Companion](companion.md) | Stream-deck control of Stage (reversed — module dials in) |
@@ -38,6 +38,30 @@ Ross TSL **multiviewer feeds** and the ProPresenter **additional instances**,
 which each have their own Save button. Saving from the confirm writes those
 lists as well as the form.
 
+## Credentials
+
+Any field a card shows masked — a password, an API key, a token, SenSource's
+SafeSpace space ID — is stored in the encrypted secret store, never in
+`settings.json`, and is therefore **not carried in a config snapshot**. Restore a
+snapshot onto another box and those fields come back empty for you to re-enter.
+
+In the dialog a stored credential shows as bullets. Three things you can do with
+it, and they mean different things:
+
+| You do | What happens |
+| --- | --- |
+| Leave the bullets alone | The stored value is untouched, whatever else you save |
+| Type a new value | It replaces the stored one |
+| Clear the field and save | The stored value is **deleted** |
+
+Clearing is how you take a credential back off the box — there is no separate
+button for it. It is recorded on `/log` as
+`[integration-manager] cleared N stored credential(s) on <id>`, naming the fields
+and never the values.
+
+A box upgrading from a build that kept a credential in `settings.json` moves it
+into the secret store on the next start, and says how many it moved on `/log`.
+
 ## Adding a new integration
 
 REAPER is the cleanest end-to-end template for a polling integration — see
@@ -49,7 +73,10 @@ REAPER is the cleanest end-to-end template for a polling integration — see
    to throttle or de-duplicate, call `this.bumpRev()` and send
    `this.stamped(snapshot)` at your own broadcast — see the version contract below.
 2. Descriptor + `apply<Id>()` + `get<Id>Target()` + `test()` in
-   `integration-manager.ts`; secret keys in `SECRET_KEYS`.
+   `integration-manager.ts`; secret keys in `SECRET_KEYS`. Every `password` field
+   must appear there and every entry there must be a `password` field —
+   `integration-secret-parity.test.ts` fails otherwise, because the two drifting
+   apart is how a credential ends up in `settings.json` and in every backup.
 3. DTO in its own module under `main/types/` (`live.ts`, `pvp.ts`), re-exported
    from `main/types/stage.ts` (+ mirror in `renderer/types.d.ts`), extending
    `RevisionedStatus`.
@@ -76,6 +103,35 @@ place for a settings page to drift.
 A panel holding a repeater row that cannot wrap marks its root with
 `WIDE_PANEL_ATTR` (`integration-dialog-size.ts`), which puts its dialog in the
 wide variant. A new one that forgets fails `integration-dialog-size.test.tsx`.
+
+A `type: "number"` field prefills when nothing is saved: its `default` if it
+declares one, otherwise its `placeholder` when that parses as a number. A field
+where BLANK is the setting — a poll interval that falls back to the service's
+own, a port that is not configured yet — declares neither, and carries
+`unsetHint` instead: the short string its empty box shows, and the opt-in to
+being blankable at all. Three do (`propresenter.pollMs`, `ross-tsl.port`,
+`sensource.attendancePollSeconds`). Their box opens empty, clearing one back to
+blank is a save the operator can make, and a stepper pressed on a blank one
+lands on the lowest value the field permits — its `min`, or zero where it
+declares none. A number field with none of the three shows a bare 0 for a value
+it does not have: a number the operator reads as a setting, and one a stepper
+press turns into a real one. So a prefill is not optional for a setting that
+must hold a number. `integration-number-fields.test.tsx` pins the count and the
+biconditional.
+
+`min` and `max` bound what can be TYPED into a field, not what may already be
+stored in it. A value saved before the bound existed keeps its number and goes
+on being displayed; only a value the operator enters in that edit is pulled
+inside the bounds. Clamping a stored value on a click in and a click out was a
+silent config change nobody asked for: `propresenter.pollMs` 100 became 200, and
+because the poller ignores anything under 200 that box went from falling back to
+one request a second to making five. Bounds may therefore be added to an
+existing field without rewriting anybody's setting.
+
+Keep `unsetHint` short: the field is 176px, and "Same as poll interval" is
+clipped where "Same as above" is not. The wireless connections panel renders
+`ConfigField`s too and ignores it — it has no prefill ladder at all, so its
+number fields show 0 until they are set.
 
 Build integrations efficiency-first: change-driven broadcasts, reuse the shared
 SSE stream, gate polling and broadcasting on demand, back off when unreachable.

@@ -9,7 +9,7 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon, RotateCcwIcon, EllipsisIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
-import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast } from "../../components/ui";
+import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
@@ -693,14 +693,19 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           <div className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-6 bg-amber-2/40 p-3">
             <label className="flex flex-col gap-1 text-caption2 text-gray-9">
               Merge this recording into
-              <select value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12">
-                <option value="">Select a service…</option>
-                {mergeCandidates.map((s) => (
-                  <option key={s.serviceKey} value={s.serviceKey}>
-                    {(s.planTitle ?? s.serviceKey)}{fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? ` · ${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)}` : ""} · {s.items.length} items
-                  </option>
-                ))}
-              </select>
+              <Select value={mergeTarget} onValueChange={setMergeTarget}>
+                <SelectTrigger className="h-auto rounded-md border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Select a service…</SelectItem>
+                  {mergeCandidates.map((s) => (
+                    <SelectItem key={s.serviceKey} value={s.serviceKey}>
+                      {(s.planTitle ?? s.serviceKey)}{fmtTime(s.serviceTimeStartsAt ?? s.startedAt) ? ` · ${fmtTime(s.serviceTimeStartsAt ?? s.startedAt)}` : ""} · {s.items.length} items
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </label>
             <Button variant="accent" size="small" disabled={!mergeTarget} onClick={doMerge}>Merge + delete this</Button>
             <Button variant="transparent" size="small" onClick={() => setMerging(false)}>Cancel</Button>
@@ -933,17 +938,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             Overview{activeTypeName ? ` · ${activeTypeName}` : ""}{day ? ` · through ${fmtDay(day)}` : " · all time"}
           </span>
           {serviceTypes.length > 1 && (
-            <select
-              value={overviewType ?? ""}
-              onChange={(e) => setOverviewType(e.target.value || null)}
-              aria-label="Overview service type"
-              className="h-6 rounded-md border border-line-strong bg-field px-1.5 text-caption2 text-fg focus:border-focus focus:outline-none"
-            >
-              <option value="">Follow selection</option>
-              {serviceTypes.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
+            <Select value={overviewType ?? ""} onValueChange={(v) => setOverviewType(v || null)}>
+              <SelectTrigger aria-label="Overview service type" className="h-6 px-1.5 text-caption2">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Follow selection</SelectItem>
+                {serviceTypes.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
         </div>
         <OverviewBlend overview={overview} splTrend={splTrend} onSplTrend={saveSplTrend} />

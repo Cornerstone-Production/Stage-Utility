@@ -41,6 +41,47 @@ export function channelHasSubscribers(channel: string): boolean {
 }
 
 /**
+ * HOW MANY clients want a channel, for a producer that says so in the log.
+ *
+ * Beside the boolean rather than replacing it. Every producer in this app asks
+ * "is anybody watching" on a hot path and none of them care how many; the count
+ * exists so one log line can read "for 2 subscriber(s)" instead of "for
+ * somebody". Defaults to 1 when the transport has not registered — the same
+ * "assume watched" fallback the boolean has, said as a number.
+ */
+let subscriberCounter: ((channel: string) => number) | null = null;
+export function setSubscriberCount(fn: (channel: string) => number): void {
+  subscriberCounter = fn;
+}
+export function channelSubscriberCount(channel: string): number {
+  if (subscriberCounter) return subscriberCounter(channel);
+  return channelHasSubscribers(channel) ? 1 : 0;
+}
+
+/**
+ * Somebody subscribed, unsubscribed or disconnected.
+ *
+ * A producer that must run NO TIMER with nobody listening cannot poll the
+ * subscriber check to find out — polling to discover that nothing should be
+ * polled is the timer it was trying not to have. The transport calls
+ * `subscriptionsChanged` whenever its set of clients or their filters moves,
+ * and a producer starts or stops itself from there. See cue-live.ts.
+ */
+const subscriptionListeners: (() => void)[] = [];
+export function addSubscriptionListener(cb: () => void): void {
+  subscriptionListeners.push(cb);
+}
+export function subscriptionsChanged(): void {
+  for (const cb of subscriptionListeners) {
+    try {
+      cb();
+    } catch (err) {
+      console.error("[broadcaster] subscription listener error:", err);
+    }
+  }
+}
+
+/**
  * In-process consumers, keyed by channel.
  *
  * `channelHasSubscribers` can only see BROWSERS. The automation engine is not

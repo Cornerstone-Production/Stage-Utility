@@ -60,8 +60,62 @@ const INVISIBLE = new Set(["chore", "ci", "build", "docs", "test", "refactor", "
 /** `type(scope)!: subject` */
 const CONVENTIONAL = /^([a-z]+)(?:\(([^)]*)\))?(!)?:\s*(.+)$/i;
 
-/** How many bullets a section may carry before the rest are summarised. */
-const CAP = 12;
+/**
+ * How many change bullets one release's notes carry, and the least any section
+ * with something to say gets.
+ *
+ * The lever used to be a CAP of 12 PER SECTION, which is the wrong one. It
+ * cannot tell a three-commit release from a 239-commit one, and it spends the
+ * same allowance on a two-line Breaking section as on forty-nine features:
+ * 1.18.0 hit it in both directions at once and cut 57 of 81 bullets.
+ *
+ * A total budget, floors first and then the rest shared out in proportion to
+ * what each section still has to show, follows the shape of the release
+ * instead. Whatever is left over is counted and stated — see section() — and
+ * the full range is linked below the last one.
+ *
+ * 40 is under the update dialog's own NOTES_CAP of 60 (release-check.ts), so
+ * for a single release the release page and the dialog show the same bullets
+ * and the same count. The dialog's cap is then free to do the job it is for:
+ * bounding a box that installs three releases at once.
+ */
+const BULLET_BUDGET = 40;
+const SECTION_FLOOR = 6;
+
+/**
+ * How many bullets each section gets, given how many each HAS.
+ *
+ * Floors are handed out in display order, so a budget too small for every floor
+ * still favours Breaking over Fixed. The remainder goes in proportion to what
+ * each section still has left, and the rounding loss goes back out in display
+ * order — so the budget is always spent exactly.
+ */
+function allocate(sizes) {
+  const alloc = sizes.map(() => 0);
+  let left = BULLET_BUDGET;
+
+  sizes.forEach((n, i) => {
+    alloc[i] = Math.min(n, SECTION_FLOOR, left);
+    left -= alloc[i];
+  });
+
+  const want = sizes.map((n, i) => n - alloc[i]);
+  const total = want.reduce((a, b) => a + b, 0);
+  const share = left;
+  if (total > 0 && share > 0) {
+    want.forEach((w, i) => {
+      const give = Math.min(w, Math.floor((share * w) / total));
+      alloc[i] += give;
+      left -= give;
+    });
+    for (let i = 0; i < alloc.length && left > 0; i++) {
+      const give = Math.min(left, sizes[i] - alloc[i]);
+      alloc[i] += give;
+      left -= give;
+    }
+  }
+  return alloc;
+}
 
 function log(range) {
   try {
@@ -75,20 +129,20 @@ function log(range) {
 }
 
 /**
- * Subject AND body, so a commit can say something about itself that its subject
- * cannot — see BETA_ONLY.
+ * SHA, subject AND body, so a commit can say something about itself that its
+ * subject cannot — see BETA_ONLY — and so an override can name one.
  *
- * Records are separated by RS and the subject from the body by NUL, because a
- * commit body contains blank lines, bullet lists and code fences, and every
- * cheaper separator has appeared inside one.
+ * Records are separated by RS and the fields by NUL, because a commit body
+ * contains blank lines, bullet lists and code fences, and every cheaper
+ * separator has appeared inside one.
  */
 function commits(range) {
   try {
-    return execFileSync("git", ["log", "--no-merges", "--format=%s%x00%b%x1e", range], { encoding: "utf8" })
+    return execFileSync("git", ["log", "--no-merges", "--format=%H%x00%s%x00%b%x1e", range], { encoding: "utf8" })
       .split("\x1e")
       .map((rec) => {
-        const [subject = "", body = ""] = rec.split("\x00");
-        return { subject: subject.trim(), body };
+        const [sha = "", subject = "", body = ""] = rec.split("\x00");
+        return { sha: sha.trim(), subject: subject.trim(), body };
       })
       .filter((c) => c.subject);
   } catch {
@@ -111,6 +165,86 @@ function commits(range) {
  * either way: someone on the beta track HAS been running the broken version.
  */
 const BETA_ONLY = /^Beta-only:\s*(true|yes)\s*$/im;
+
+/**
+ * Corrections to a `Beta-only:` decision that can no longer be made in the commit.
+ *
+ * The trailer is the author's, and the author gets it wrong. Four cycles have
+ * now shipped a fix whose trailer was missed or misapplied, and by the time a
+ * review finds it the commit is on `beta`, which is never force-pushed — so
+ * there is nowhere left to put the correction except beside the notes.
+ *
+ * docs/release-notes/overrides/1.18.0.json → applied to the v1.18.0 notes, and
+ * nowhere else. A JSON array, each entry naming one commit:
+ *
+ *   [{ "commit": "c9d5c29", "betaOnly": true, "reason": "…" }]
+ *
+ * `betaOnly` is the decision the commit SHOULD have carried, so it works in
+ * both directions: true holds a fix back that has no trailer, false shows one
+ * whose trailer is wrong. `reason` is required — an override with no reason is
+ * the same silent lie moved to a different file — and is printed to stderr when
+ * it is applied, so the release log says what was changed and why.
+ *
+ * Every problem here throws. Generating the notes anyway is exactly the failure
+ * this mechanism exists to prevent, and a stale or mistyped override is a
+ * correction that would silently never be applied.
+ *
+ * @returns {Map<string, {betaOnly: boolean, reason: string, given: string}>} by full SHA
+ */
+function betaOnlyOverrides(v) {
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const file = path.join(here, "..", "docs", "release-notes", "overrides", `${v}.json`);
+  const shown = path.posix.join("docs/release-notes/overrides", `${v}.json`);
+
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (err) {
+    // The ordinary case: no release needs one. Anything else is a file that
+    // exists and could not be read, which is not the same answer at all.
+    if (err.code === "ENOENT") return new Map();
+    throw new Error(`cannot read ${shown}: ${err.message}`, { cause: err });
+  }
+
+  let list;
+  try {
+    list = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`${shown} is not valid JSON: ${err.message}`, { cause: err });
+  }
+  if (!Array.isArray(list)) throw new Error(`${shown} must be a JSON array of overrides`);
+
+  const out = new Map();
+  list.forEach((e, i) => {
+    const at = `${shown} entry ${i}`;
+    if (!e || typeof e !== "object" || Array.isArray(e)) throw new Error(`${at} is not an object`);
+    if (typeof e.commit !== "string" || !e.commit.trim()) throw new Error(`${at} has no "commit"`);
+    // A SHA, not a name. `git rev-parse` resolves "beta" perfectly happily, and
+    // an override pinned to a branch would apply to whatever that branch points
+    // at on the day the release is cut — the one thing a correction to a frozen
+    // commit must not be.
+    if (!/^[0-9a-f]{7,40}$/i.test(e.commit.trim())) {
+      throw new Error(`${at}: "${e.commit}" is not a commit SHA — an override must name one immutable commit`);
+    }
+    if (typeof e.betaOnly !== "boolean") throw new Error(`${at} (${e.commit}) needs "betaOnly": true or false`);
+    if (typeof e.reason !== "string" || !e.reason.trim()) {
+      throw new Error(`${at} (${e.commit}) has no "reason" — say why the commit's own trailer cannot be trusted`);
+    }
+
+    let sha;
+    try {
+      sha = execFileSync("git", ["rev-parse", "--verify", "--quiet", `${e.commit.trim()}^{commit}`], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+    } catch (err) {
+      throw new Error(`${at}: ${e.commit} does not name one commit in this repository`, { cause: err });
+    }
+    if (out.has(sha)) throw new Error(`${at}: ${sha.slice(0, 9)} is overridden twice`);
+    out.set(sha, { betaOnly: e.betaOnly, reason: e.reason.trim(), given: e.commit.trim() });
+  });
+  return out;
+}
 
 const range = fromRef ? `${fromRef}..v${version}` : `v${version}`;
 const entries = commits(range);
@@ -135,15 +269,30 @@ function scopesBefore(ref) {
 
 const features = [];
 const fixes = [];
+/**
+ * `perf`. A section of its own rather than a share of Fixed, which is where
+ * these used to land: "anchor the record clock instead of polling a timecode"
+ * reached an operator as a bug report about their install. The dialog has
+ * rendered an Improved heading since it learned about sections; nothing was
+ * ever routed to it.
+ */
+const improvements = [];
 const breaking = [];
-/** Fixes held back as build-out churn, counted so the omission is stated. */
+/** Held back as build-out churn, counted so each omission is stated. */
 let buildOutFixes = 0;
+let buildOutPerf = 0;
 const seen = new Set();
 
 const parsed = [];
 const featScopes = new Set();
 
-for (const { subject, body } of entries) {
+// A prerelease keeps every fix either way, so its notes are not a place a
+// trailer decision can go wrong and the file for the stable version it is
+// building towards is deliberately not read here.
+const overrides = isPrerelease ? new Map() : betaOnlyOverrides(version);
+const overridesApplied = new Set();
+
+for (const { sha, subject, body } of entries) {
   const m = CONVENTIONAL.exec(subject);
   if (!m) continue;
   const [, rawType, scope, bang, text] = m;
@@ -151,7 +300,37 @@ for (const { subject, body } of entries) {
   if (INVISIBLE.has(type) && !bang) continue;
   const key = scope?.toLowerCase() ?? null;
   if (!bang && type === "feat" && key) featScopes.add(key);
-  parsed.push({ type, scope, key, bang, text, betaOnly: BETA_ONLY.test(body) });
+
+  const trailer = BETA_ONLY.test(body);
+  const override = overrides.get(sha);
+  // Only a fix or a perf is ever held back, so an override on anything else
+  // would read as applied and change nothing. Left unapplied, and caught below.
+  const correctable = !bang && (type === "fix" || type === "perf");
+  if (override && correctable) {
+    overridesApplied.add(sha);
+    console.error(`[release-notes] ${sha.slice(0, 9)} ${say(override.betaOnly, trailer)} — ${override.reason}`);
+  }
+
+  parsed.push({
+    type, scope, key, bang, text,
+    betaOnly: trailer,
+    override: override && correctable ? override.betaOnly : null,
+  });
+}
+
+/** What an applied override did, for the release log. */
+function say(betaOnly, trailer) {
+  if (betaOnly === trailer) return `override changes nothing: the commit already reads ${trailer ? "beta-only" : "not beta-only"}`;
+  if (betaOnly) return "held back as beta-only, overriding a missing trailer";
+  return "kept in the notes, overriding a wrong Beta-only trailer";
+}
+
+for (const [sha, o] of overrides) {
+  if (overridesApplied.has(sha)) continue;
+  throw new Error(
+    `docs/release-notes/overrides/${version}.json names ${o.given}, which is not a non-breaking fix: or perf: ` +
+      `commit in ${range}. An override that matches nothing is a correction that would never be applied.`,
+  );
 }
 
 /**
@@ -174,6 +353,11 @@ for (const { subject, body } of entries) {
  */
 function isBuildOutFix(entry, oldScopes) {
   if (isPrerelease) return false;
+  // An override is the author correcting a decision the commit can no longer
+  // carry, and it decides outright — in BOTH directions. Letting it set only
+  // the trailer would leave the scope heuristic below still suppressing a fix
+  // an override exists to put back.
+  if (entry.override !== null) return entry.override;
   // The author said so outright. No scope reasoning required, and it is the only
   // thing that catches a new feature built under an old scope.
   if (entry.betaOnly) return true;
@@ -193,7 +377,10 @@ for (const entry of parsed) {
 
   if (bang) breaking.push(line);
   else if (type === "feat") features.push(line);
-  else if (type === "fix" || type === "perf") {
+  else if (type === "perf") {
+    if (isBuildOutFix(entry, oldScopes)) buildOutPerf++;
+    else improvements.push(line);
+  } else if (type === "fix") {
     if (isBuildOutFix(entry, oldScopes)) buildOutFixes++;
     else fixes.push(line);
   }
@@ -215,10 +402,10 @@ function scopeLabel(scope) {
 }
 
 /** A capped bullet list, saying plainly how much was left out. */
-function section(title, items) {
+function section(title, items, limit) {
   if (items.length === 0) return "";
-  const shown = items.slice(0, CAP).map((s) => `- ${s}`);
-  const rest = items.length - CAP;
+  const shown = items.slice(0, limit).map((s) => `- ${s}`);
+  const rest = items.length - shown.length;
   if (rest > 0) shown.push(`- …and ${rest} more`);
   return `## ${title}\n\n${shown.join("\n")}\n`;
 }
@@ -244,28 +431,54 @@ running it? Update from **Settings → Advanced → Updates**.
 `;
 
 /**
- * What was held back, said out loud.
+ * A section, and what was held back from it said out loud.
  *
  * A silent filter reads as "nothing else changed", which is the failure this
- * whole file exists to avoid. One line, under the fixes it belongs with.
+ * whole file exists to avoid. The note needs the heading above it, so with
+ * everything held back one is still written — a floating sentence with no
+ * heading reads as a stray line of prose in the middle of a release.
+ *
+ * Fixes and improvements are counted apart so each section's arithmetic is its
+ * own; calling a held-back `perf` a "fix" is the same mislabelling that put
+ * them under Fixed to begin with.
  */
-const buildOutNote = buildOutFixes
-  ? `${buildOutFixes} further fix${buildOutFixes === 1 ? "" : "es"} made while building the features above ${buildOutFixes === 1 ? "is" : "are"} not listed — ${buildOutFixes === 1 ? "it was" : "they were"} never in a released version.\n`
-  : "";
+function renderSection({ title, items, held = 0, one, many }, limit) {
+  const note = held
+    ? `${held} further ${held === 1 ? one : many} made while building the features above ${held === 1 ? "is" : "are"} not listed — ${held === 1 ? "it was" : "they were"} never in a released version.\n`
+    : "";
+  if (items.length) return note ? `${section(title, items, limit)}\n${note}` : section(title, items, limit);
+  return note ? `## ${title}\n\n${note}` : "";
+}
 
-// The note needs the heading above it. With every fix held back there is no
-// section to hang it under, so one is written — a floating sentence with no
-// heading reads as a stray line of prose in the middle of a release.
-const fixed =
-  fixes.length ? `${section("Fixed", fixes)}\n${buildOutNote}`
-  : buildOutNote ? `## Fixed\n\n${buildOutNote}`
+/**
+ * The sections, in SECTION_ORDER — the order the update dialog renders them in.
+ * See main/services/update/release-notes.ts, which must recognise every heading
+ * named here or the section disappears from the dialog without a word.
+ */
+const SECTIONS = [
+  { title: "Breaking", items: breaking },
+  { title: "New", items: features },
+  { title: "Improved", items: improvements, held: buildOutPerf, one: "improvement", many: "improvements" },
+  { title: "Fixed", items: fixes, held: buildOutFixes, one: "fix", many: "fixes" },
+];
+const limits = allocate(SECTIONS.map((s) => s.items.length));
+
+/**
+ * Where the rest of it is.
+ *
+ * Any cap leaves "…and 27 more" pointing nowhere unless something says where
+ * "more" lives. Its own heading, deliberately not one of SECTION_ORDER's, so
+ * the dialog's parser reads it as the end of the change lists rather than
+ * folding a markdown link into the section above it.
+ */
+const fullChangelog = fromRef
+  ? `## Full changelog\n\n[${fromRef}…v${version}](https://github.com/Cornerstone-Production/Stage-Utility/compare/${fromRef}...v${version})\n`
   : "";
 
 const parts = [
   upgradeNotice(version),
-  breaking.length ? section("Breaking", breaking) : "",
-  section("New", features),
-  fixed,
+  ...SECTIONS.map((s, i) => renderSection(s, limits[i])),
+  fullChangelog,
   install,
 ];
 

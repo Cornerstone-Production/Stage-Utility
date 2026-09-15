@@ -1,4 +1,5 @@
 import type { LayoutObjectType, LayoutHAlign } from "./views.js";
+import { externKeyed } from "./extern-keyed.js";
 
 /**
  * The object types that render through the shared Readout.
@@ -136,14 +137,14 @@ export const DEFAULT_READOUT_ALIGN: LayoutHAlign = "left";
  * behind it. Lives here rather than in the renderer's registry so the load-time
  * migration can share the one definition.
  */
-export const LEGACY_TRANSLUCENT_GROUNDS: Readonly<Record<string, string>> = {
+export const LEGACY_TRANSLUCENT_GROUNDS: Readonly<Record<string, string>> = externKeyed({
   "rgba(255,255,255,0.04)": "#141414",
   "rgba(45,212,150,0.08)": "#0d1a15",
   "rgba(229,72,77,0.10)": "#201011",
   "rgba(255,197,61,0.08)": "#1e190e",
   // The "Elevated" surface look, which carried its own translucent ground.
   "rgba(255,255,255,0.06)": "#191919",
-};
+});
 
 /** The opaque ground that replaces a never-chosen translucent one, or null when
  *  the background is anything else — including one the operator chose. */

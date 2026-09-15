@@ -8,6 +8,7 @@ import { afterEach, describe, it } from "node:test";
 import type { PcoLiveDTO } from "../types/stage.js";
 import { AUTOMATION_ACTIONS, liveDeps } from "./automation-actions.js";
 import { advanceGuard } from "./automation-pco-items.js";
+import { reaperDeps } from "./reaper-service.js";
 
 describe("advanceGuard", () => {
   it("allows the step when the next item matches", () => {
@@ -110,5 +111,39 @@ describe("pco.live.advance", () => {
     const r = await action.run({ guardTitle: "doors" }, { simulate: false });
     assert.equal(r.ok, false);
     assert.match(r.detail, /no plan selected/);
+  });
+});
+
+describe("reaper.transport", () => {
+  const action = AUTOMATION_ACTIONS["reaper.transport"];
+  const realFetch = reaperDeps.fetch;
+  afterEach(() => {
+    reaperDeps.fetch = realFetch;
+  });
+
+  it("simulate contacts REAPER not at all", async () => {
+    // The stub counts a contact and refuses it: a simulated cue that reads the
+    // transport is a cue that cannot be tested with REAPER off the network,
+    // which is where a rule is usually written.
+    let called = 0;
+    reaperDeps.fetch = (async () => {
+      called++;
+      throw new Error("simulate reached REAPER");
+    }) as typeof fetch;
+    const r = await action.run({ command: "record" }, { simulate: true });
+    assert.deepEqual(r, { ok: true, detail: "would send record" });
+    assert.equal(called, 0);
+  });
+
+  it("refuses a command it does not have", async () => {
+    const r = await action.run({ command: "rewind" }, { simulate: false });
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /not a REAPER transport command/);
+  });
+
+  it("reports an unconfigured REAPER rather than throwing", async () => {
+    const r = await action.run({ command: "stop" }, { simulate: false });
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /not configured/);
   });
 });

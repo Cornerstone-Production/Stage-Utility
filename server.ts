@@ -76,6 +76,7 @@ import { prodcomService } from "./main/services/prodcom-service.js";
 import { propresenterService } from "./main/services/propresenter-service.js";
 import { sensourceService } from "./main/services/sensource-service.js";
 import { tslService } from "./main/services/tsl-service.js";
+import { oscManager } from "./main/services/osc-manager.js";
 import { remoteServer } from "./main/services/remote-server.js";
 import { stageController } from "./main/services/stage-controller.js";
 import { cacheMaintenance } from "./main/services/cache-maintenance.js";
@@ -157,6 +158,7 @@ async function shutdown(signal: string): Promise<void> {
   prodcomService.stop();
   sensourceService.stop();
   tslService.stop();
+  oscManager.stop();
   await remoteServer.stop();
   await deviceManager.stop();
   console.log("[server] shutdown complete");

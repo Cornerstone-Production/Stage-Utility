@@ -143,7 +143,9 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "key": "pollMs",
         "label": "Poll interval (ms)",
         "type": "number",
-        "placeholder": "500 (lower = snappier, more requests)"
+        "placeholder": "1000 when blank; 200 is the floor",
+        "min": 200,
+        "unsetHint": "1000"
       }
     ]
   },
@@ -171,6 +173,17 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "label": "API Key",
         "type": "password",
         "placeholder": "(only if Require Authentication is on)"
+      },
+      {
+        "key": "redactSensitive",
+        "label": "Hide sensitive keywords",
+        "type": "select",
+        "default": "on",
+        "options": [
+          { "value": "on", "label": "On" },
+          { "value": "off", "label": "Off" }
+        ],
+        "help": "ProdCom keywords marked sensitive are replaced with asterisks before a line is sent to any display. Only affects what THIS app shows — ProdCom's own redaction is unchanged, and the setting does not edit your keywords. The unredacted transcript stays readable at /api/prodcom/transcript/raw, which is gated by STAGE_UTILITY_LOG_TOKEN the same way /log is."
       }
     ]
   },
@@ -453,6 +466,32 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "min": 10,
         "max": 3600,
         "help": "How often Stage asks Vea for the count. Vea's own numbers advance about every 78 seconds, so the interval is the delay Stage adds on top of that: at 15s the count is at worst 15s behind what the Vea dashboard shows. Below 10s buys nothing — the source has not moved. Raise it to cut API calls."
+      },
+      {
+        "key": "attendancePollSeconds",
+        "label": "Attendance interval (s)",
+        "type": "number",
+        "unsetHint": "Same as above",
+        "min": 10,
+        "max": 3600,
+        "help": "How often to re-read just today's attendance count, separate from the poll interval above. Blank reproduces today's behaviour exactly: attendance updates only as often as the rest of the card. Set it lower than the poll interval to catch attendance up to a faster occupancy reading — SafeSpace below, or a shorter interval than this card is normally left at — at the cost of one extra request to Vea per tick at whatever rate you choose. Same 10s floor and the same Vea flakiness as the poll interval, because it is the same API. Left at or above the poll interval, it changes nothing."
+      },
+      {
+        "key": "safeSpaceId",
+        "label": "SafeSpace space ID (optional)",
+        "type": "password",
+        "placeholder": "(only if your site has SafeSpace)",
+        "help": "Optional. If your site also has SenSource SafeSpace, paste the space ID from its live-occupancy embed URL (SafeSpace → the space → the address of its live value ends in the ID). It replaces only the occupancy number with SafeSpace's live reading, which is much fresher than Vea's; attendance, zones, peak and capacity keep coming from Vea. Leave blank to use Vea for everything. The ID is the whole of the endpoint's authority — anyone who has it can read your occupancy without logging in — so it is stored encrypted like a password and is NOT carried in a config snapshot. Restore a snapshot onto another box and Stage says SafeSpace needs its ID re-entered rather than quietly falling back to Vea."
+      },
+      {
+        "key": "safeSpacePollSeconds",
+        "label": "SafeSpace interval (s)",
+        "type": "number",
+        "placeholder": "10",
+        "default": 10,
+        "min": 10,
+        "max": 60,
+        "help": "How often to read the SafeSpace value. Separate from the Vea interval above, because a live number is only worth having if it is read often. SafeSpace rate-limits and Stage reads its limit headers and backs off on its own, but there is nothing to win below 10s. The ceiling is 60s because a reading older than that is no fresher than Vea's and the occupancy goes back to Vea — to read it less often than that, clear the space ID instead. Ignored while the space ID is blank."
       }
     ]
   },
@@ -473,7 +512,10 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "key": "port",
         "label": "TSL Port",
         "type": "number",
-        "placeholder": "(TSL UMD input port on the Ross)"
+        "placeholder": "(TSL UMD input port on the Ross)",
+        "unsetHint": "Not set",
+        "min": 1,
+        "max": 65535
       }
     ]
   },

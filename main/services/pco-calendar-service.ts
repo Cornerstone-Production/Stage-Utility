@@ -23,25 +23,71 @@ import { scrub } from "./scrub.js";
 const CALENDAR_BASE = "https://api.planningcenteronline.com/calendar/v2";
 
 /**
+ * Every version Planning Center CALENDAR publishes, newest first.
+ *
+ * Calendar's own list, with nothing in common with Services' beyond the shared
+ * first date — see the trap named below. Read from
+ * https://api.planningcenteronline.com/calendar/v2/documentation on 2026-09-11,
+ * which serves it as JSON without a credential.
+ */
+export const CALENDAR_API_VERSIONS = [
+  "2026-06-22",
+  "2022-07-07",
+  "2021-07-20",
+  "2020-04-08",
+  "2018-08-01",
+] as const;
+export type CalendarApiVersion = (typeof CALENDAR_API_VERSIONS)[number];
+
+/**
  * The Calendar API version this client is written against.
  *
- * PCO versions each product by DATE, selected with an `X-PCO-API-Version:
- * YYYY-MM-DD` header and resolved to the newest published version at or before
- * it. Send no header and the version is whatever is configured as the app's
- * default in PCO's developer console — a setting that lives outside this
- * repository, differs between installs, and is older than whatever the code was
- * written against.
+ * A VERSION STRING IS PER PRODUCT. Take it from that product's own version list
+ * and nowhere else — not from a sibling client in this repository, not from
+ * another PCO product's docs. PCO resolves an `X-PCO-API-Version: YYYY-MM-DD`
+ * header to the newest published version at or BEFORE the date, silently, with
+ * no error and no warning, so a date that means "current" in one product means
+ * "whatever that product shipped before this date" in another.
+ *
+ * That is not hypothetical. This constant said `2018-11-01` for a year, copied
+ * from Services with a comment reasoning that one app should state one contract
+ * date. Calendar has never published 2018-11-01. Every Calendar request this app
+ * made therefore resolved to 2018-08-01 — Calendar's FIRST version, five
+ * revisions behind current — while Services, reading the identical string,
+ * correctly got its own newest. Nothing failed and nothing logged. The comment
+ * that stood here told the next reader exactly how to bump it, and nobody did,
+ * because the shared-date reasoning read as a reason not to.
+ *
+ * The TYPE is the guard: `CalendarApiVersion` is a union of CALENDAR_API_VERSIONS,
+ * so pasting Services' date here does not compile. pco-api-version.test.ts checks
+ * both products at runtime by running PCO's own resolution rule over each list —
+ * a pin that does not resolve to itself is a pin that is not in force.
  *
  * Deliberately an exact date, never a "newest" sentinel: a floating request lets
  * a PCO release change field names, defaults or pagination under a running
  * install with no change here.
  *
- * Services pins the same date, on purpose: one app, one stated contract date.
- * To bump, take the newest date from the version selector at
- * https://api.planningcenteronline.com/docs/apps/calendar, read its changelog
- * entry for field or pagination changes, then change this string.
+ * Chosen 2026-09-11: 2026-06-22, Calendar's newest. Its changelog entry is the
+ * only one of the five that changes behaviour rather than renaming a field —
+ * "Booking and conflict endpoints now redact event data for users without access
+ * to the event… clients may receive BookedEvent, BookedEventInstance and
+ * BookedEventTime stubs in place of the full Event / EventInstance / EventTime
+ * resources on affected traversals". It does not reach the three reads below:
+ * they are the top-level `event_instances`, `calendars` and `tags` collections,
+ * none of which is a booking or conflict endpoint and none of which traverses
+ * from one. Checked further against the published vertex docs — EventInstance
+ * and Tag are documented identically at 2022-07-07 and 2026-06-22, and every
+ * attribute and include this file reads (`name`, `starts_at`, `ends_at`,
+ * `published_starts_at`, `published_ends_at`, `all_day_event`, `location`,
+ * `church_center_url`, `include=tags`, `include=tag_group`, `order=position`,
+ * `where[starts_at]`, `where[ends_at]`) is present at 2026-06-22.
+ *
+ * To bump: read CALENDAR's version list at
+ * https://api.planningcenteronline.com/calendar/v2/documentation, add the date to
+ * CALENDAR_API_VERSIONS, read its `details` for field or pagination changes, then
+ * change this string.
  */
-export const CALENDAR_API_VERSION = "2018-11-01";
+export const CALENDAR_API_VERSION: CalendarApiVersion = "2026-06-22";
 
 /**
  * Its own cache, not the /services/v2 client's.

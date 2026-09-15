@@ -8,7 +8,6 @@ import type { ConfigField } from "../../types/integrations.js";
 import {
   ShureBaseProvider,
   clamp,
-  formatFrequency,
   normalisedDb,
   safeInt,
   stripBraces,
@@ -95,12 +94,6 @@ export class ShurePsm extends ShureBaseProvider {
         break;
       }
 
-      case "FREQUENCY": {
-        state.frequencyLabel = formatFrequency(value);
-        console.debug(`[shure:${this.id}] ch${channel} freq: ${state.frequencyLabel ?? value}`);
-        break;
-      }
-
       case "RF_MUTE": {
         // "0" = not muted (TX is on); "1" = muted (TX is off).
         const muted = value === "1";
@@ -129,7 +122,14 @@ export class ShurePsm extends ShureBaseProvider {
       }
 
       default:
-        console.debug(`[shure:${this.id}] ch${channel} unrecognized field: ${token}`);
+        // Routed to the shared handler like the other three drivers. PSM was the
+        // one that did not, and it carried its own copy of FREQUENCY to make up
+        // for it — which is how the family drifts. RF_MUTE above stays here: on a
+        // transmitter it means the RF carrier is off, which is "offline", not the
+        // audio mute the common handler reads.
+        if (!this.handleCommonReport(channel, token, value, state)) {
+          console.debug(`[shure:${this.id}] ch${channel} unrecognized field: ${token}`);
+        }
         break;
     }
 

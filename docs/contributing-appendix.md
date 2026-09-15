@@ -68,5 +68,16 @@ Orientation for working in the codebase.
 - **`PP_DEBUG=1`** before `npm run server` logs the ProPresenter slide→section
   resolution each poll (`rawIdx → section / next / text`) — handy when verifying the
   stage view against a live service.
+- **A lookup table keyed from outside the process** — a registry indexed by a string
+  that came off disk, off HTTP or off the LAN — is built with `externKeyed()` from
+  `main/types/extern-keyed.ts`. A plain object inherits `Object.prototype`, so
+  `TABLE["constructor"]` answers with a truthy function and the `if (!def)` line
+  under the lookup reads it as a registered entry; a `Partial<Record<…>>` type with
+  a `?? fallback` does not help, because a function is not nullish. `externKeyed()`
+  returns the same table with no prototype, so every `[]` read and `in` test against
+  it is safe, and iteration, spread and `JSON.stringify` are unchanged. Where the
+  right-hand side of an `in` is data rather than a registry, use `Object.hasOwn`.
+  `extern-keyed.test.ts` and `extern-keyed-tables.test.ts` assert the exact set of
+  wrapped tables.
 - `npm run type-check`, `npm run lint`, and `npm run build` are all expected to pass
   cleanly before merging.

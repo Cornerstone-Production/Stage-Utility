@@ -37,21 +37,35 @@ on it.
 | **Off air** | Resi is reachable and no watched encoder is streaming |
 | **—** | Resi is not set up, or cannot be reached |
 
-Resi does not report when a stream started, so the elapsed time is measured from
-the moment Stage Utility **watched it go live** — a poll that found Resi
-reachable and off air, followed by one that found it streaming. That moment is
-saved, so restarting the server mid-service does not reset the clock to zero.
+Two things are read, from two places. The encoder status list is the live state
+and carries nothing else — no encoder name and no start time. Resi's broadcast
+list supplies both, joined on the encoder id: it is what puts a name rather than
+a bare id under the widget, and what names the encoders in the **Encoders to
+watch** picker.
 
-A stream that was already running the first time Stage Utility looked shows
-**Live** with no elapsed time. This is the honest answer: the app has no way to
-know how long it has been going, and a clock started at first sight would time
-how long the integration had been running, not the broadcast. It happens when
-the integration is set up during a service, or when Resi is unreachable for the
-part of the service in which the stream began. The clock returns for the next
-stream.
+The broadcast list is re-read about once a minute and is allowed to fail. If it
+stops answering, encoder names fall back to their ids and the elapsed clock to
+the rule below, the log says so on a `[resi]` line, and the live/off-air readout
+is unaffected.
 
-If Resi ever does start reporting a real start time, the integration prefers it
-over both.
+### Elapsed time
+
+The broadcast Resi is running carries its own start time, and that is what the
+clock counts from whenever a broadcast matching the live encoder is on the list.
+
+Where there is no matching broadcast, the elapsed time is measured from the
+moment Stage Utility **watched it go live** — a poll that found Resi reachable
+and off air, followed by one that found it streaming. That moment is saved, so
+restarting the server mid-service does not reset the clock to zero.
+
+A stream with neither — already running the first time Stage Utility looked, and
+no matching broadcast on the list — shows **Live** with no elapsed time. This is
+the honest answer: the app has no way to know how long it has been going, and a
+clock started at first sight would time how long the integration had been
+running, not the broadcast. The clock returns for the next stream.
+
+A broadcast whose scheduled end has passed is not used to time a stream running
+now, so last week's service cannot supply today's clock.
 
 ## On a screen
 

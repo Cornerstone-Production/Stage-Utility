@@ -133,6 +133,12 @@ This matters because a connection that has been retrying for days is silent by
 design — the services log the first failure and then back off quietly — so the
 log alone cannot tell you a box is unreachable.
 
+One further chip, when Planning Center has answered at least once: **PCO quota**,
+the requests used against the limit PCO reported on its last response
+(`PCO quota 48/100 per 20s`). It turns amber and reads "holding back" once Stage
+is deliberately slowing itself down. See
+[Rate limits](../integrations/planning-center.md#rate-limits).
+
 The lines carry a date heading whenever the date changes, a source dropdown built
 from the `[tag]` each line opens with, a level filter, a text filter, and copy and
 download buttons. Only the newest 2,000 matching lines are drawn; filtering still
@@ -235,6 +241,12 @@ actually installed.
 grouped as Breaking, New, Changed, Improved and Fixed. Breaking is listed first
 and is never truncated away.
 
+Above the lists sits **the release's own opening words** — the sentence somebody
+wrote because no commit range could produce it, saying whether there is a manual
+step or where something has moved. It is the prose the release notes open with,
+up to their first heading; headings, bullet lists and fenced commands are left
+out, quoted or not, so a dialog never shows an operator a command to type.
+
 It appears after **any** successful update, including one applied automatically,
 and stays until you press Dismiss. Closing the tab or reloading does not count —
 the notice is held by the server, so it is waiting next time. That is also why a
@@ -244,15 +256,27 @@ A release with no usable notes shows the version alone. An install updating from
 a git checkout lists commit subjects without headings, since commit subjects
 carry no sections.
 
+**Each section says how much it is not showing.** A release's notes carry a
+fixed number of bullets and the dialog shows a fixed number of lines, so a busy
+release is listed in part — and every section that was cut ends with the count
+it cut, above whatever the release itself said about the omission. A section cut
+to nothing still appears, as a heading and a count. The **Full changelog** link
+at the foot of the release notes is the complete list.
+
+**Fixed is bugs.** Work that made something quicker rather than repairing it —
+holding one stream open instead of polling, dropping a field from a
+once-per-second read — is listed under **Improved**, so it does not read as a
+report of something that had been broken on your install.
+
 **A stable release does not list the fixes that built its own new features.** It
 folds in thirty-odd betas, so Fixed would otherwise fill with the polish commits
 behind whatever is announced under New — of no use to somebody meeting the
 feature whole, and enough of them to push out the fixes to things they already
 had. A fix is held back only where its scope both shipped a feature in the same
 release and had never appeared before it; a fix to anything that was already
-released is always listed. The count held back is stated at the end of Fixed, so
-the filter is never silent. Prereleases list everything: on the beta track, the
-fix is the reason to update.
+released is always listed. Fixed and Improved each state their own held-back
+count at the end of the section, so the filter is never silent. Prereleases list
+everything: on the beta track, the fix is the reason to update.
 
 Notes are captured **before** the update runs. Afterwards the update status
 describes the next pending release rather than the one just installed, so there

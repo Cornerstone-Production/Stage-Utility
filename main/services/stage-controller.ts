@@ -4049,6 +4049,9 @@ export class StageController {
           cycles: d.cycles ?? null,
           health: d.health ?? null,
           tempC: d.tempC ?? null,
+          timeToFullMinutes: d.timeToFullMinutes ?? null,
+          fault: d.fault ?? null,
+          storageMode: d.storageMode ?? null,
         };
       })
       .sort((a, b) => a.chargerIndex - b.chargerIndex || a.bay - b.bay);

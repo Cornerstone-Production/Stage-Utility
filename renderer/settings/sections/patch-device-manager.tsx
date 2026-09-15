@@ -68,6 +68,10 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
               <div key={d.id} className="rounded-lg border border-line bg-surface-raised">
                 <div className="flex flex-wrap items-center gap-2 px-3 py-2">
                   <Input value={d.name} onChange={(e) => update(d.id, { name: e.target.value })} className="w-44" placeholder="Device name" />
+                  {/* Left as a raw <select>: KINDS is a fixed, exhaustive list of
+                      main/types/patch.ts's PatchDeviceKind union, which has never
+                      dropped a member — a device's kind cannot hold a value this
+                      list does not carry. */}
                   <select
                     value={d.kind}
                     onChange={(e) => update(d.id, { kind: e.target.value as PatchDeviceKind })}

@@ -41,6 +41,23 @@ interface ButtonSpec {
   /** Connection ids the button's down-action drives. */
   connections?: string[];
   /**
+   * The `definitionId` every one of those actions carries. Companion's own
+   * spelling per module — `toggle` on a kasa plug, `StartStopStreaming` on OBS
+   * — and what tells an OBS streaming button from an OBS recording one.
+   */
+  actionDef?: string;
+  /**
+   * The control's own `feedbacks[]`, a TOP-LEVEL array beside `steps`, exactly
+   * as 5.0.3 writes it.
+   *
+   * A `powerState` feedback is what says which connection a key is ABOUT — it
+   * is what makes the key light up when the device is on — and it is the first
+   * evidence the state-source inference reads. Real ones carry `options`,
+   * `isInverted` and a long `styleOverrides` list; none of that is read here,
+   * so none of it is invented.
+   */
+  feedbacks?: { definitionId: string; connectionId: string }[];
+  /**
    * Wrap the down-actions in a `logic_if`, the way a real export nests them.
    *
    * The branches live in `children.actions`/`children.else_actions`, and
@@ -87,7 +104,7 @@ function button(spec: ButtonSpec, pageNum: number): Record<string, unknown> {
     // Unique per CONTROL, not per connection: two buttons on a page driving the
     // same device must not share an id, or a fingerprint identifies both.
     id: fixtureActionId(pageNum, spec.row, spec.col, i),
-    definitionId: "power",
+    definitionId: spec.actionDef ?? "power",
     connectionId,
     options: {},
     children: {},
@@ -119,6 +136,15 @@ function button(spec: ButtonSpec, pageNum: number): Record<string, unknown> {
   return {
     type: "button-layered",
     style: { layers: [...CHROME_LAYERS, textLayer(spec.text)] },
+    feedbacks: (spec.feedbacks ?? []).map((f, i) => ({
+      type: "feedback",
+      id: opaqueId(`control-feedback:${pageNum}:${spec.row}:${spec.col}:${i}`),
+      definitionId: f.definitionId,
+      connectionId: f.connectionId,
+      options: {},
+      isInverted: { value: false, isExpression: false },
+      styleOverrides: [],
+    })),
     steps: { "0": { action_sets: { down, up: [] }, options: { runWhileHeld: [] } } },
   };
 }
@@ -165,6 +191,7 @@ export const FIXTURE_PAGE_IDS: Record<number, string> = {
   2: opaqueId("page:lights"),
   3: opaqueId("page:cameras"),
   4: opaqueId("page:blank"),
+  5: opaqueId("page:recorders"),
 };
 
 /** Fake page names, deliberately — the real ones name a real building. */
@@ -172,6 +199,7 @@ export const FIXTURE_PAGES = {
   screens: "Room A: Screens",
   lights: "Room A: Lighting",
   cameras: "Room A: Cameras",
+  recorders: "Room A: Recorders",
 } as const;
 
 export function companionExportFixture(): Record<string, unknown> {
@@ -196,6 +224,76 @@ export function companionExportFixture(): Record<string, unknown> {
       },
       // The pre-5.x spelling, so a 3.x export is not silently module-less.
       "conn-legacy": { label: "Old Thing", instance_type: "generic-tcp-udp" },
+      // A smart plug, a smart bulb and OBS — the three shapes the state-source
+      // inference reads. The kasa plug is the case the whole thing was built
+      // for: one `toggle` action and a `powerState` feedback, which is exactly
+      // what the VCR light on the real install is.
+      "conn-vcr-light": {
+        label: "VCR-Overhead-Light",
+        enabled: true,
+        moduleId: "tplink-kasasmartplug",
+        moduleInstanceType: "connection",
+        moduleVersionId: "2.2.3",
+      },
+      // A BULB carries a `color` feedback, not a `powerState` one, so it is
+      // only ever found through its first action's connection.
+      "conn-desk-lamp": {
+        label: "Desk-Lamp",
+        enabled: true,
+        moduleId: "tplink-kasasmartbulb",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.1.0",
+      },
+      "conn-foyer-tv": {
+        label: "MA-Foyer-TV-1",
+        enabled: true,
+        moduleId: "vizio-smartcast",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.3.0",
+      },
+      "conn-obs": {
+        label: "Studio-OBS",
+        enabled: true,
+        moduleId: "obs-studio",
+        moduleInstanceType: "connection",
+        moduleVersionId: "3.15.3",
+      },
+      // The recorders and the cameras: modules with no power state at all,
+      // whose transport or record variable is the fact a cue pair is about.
+      // Module versions are the ones the real install runs, because that is the
+      // version the inference table's values were verified against.
+      "conn-deck": {
+        label: "MA_HyperDeck_01",
+        // DISABLED, exactly as all three decks are on the real install. A
+        // disabled connection still carries its actions in the export, so the
+        // inference has everything it needs — and its variables cannot be read,
+        // which is a pair reading unknown and not a pair reading off.
+        enabled: false,
+        moduleId: "bmd-hyperdeck",
+        moduleInstanceType: "connection",
+        moduleVersionId: "2.5.0",
+      },
+      "conn-encoder": {
+        label: "UltraEncode01-MA-PGM",
+        enabled: true,
+        moduleId: "magewell-ultrastream",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.0.1",
+      },
+      "conn-ptz": {
+        label: "SA-PTZ-Camera",
+        enabled: true,
+        moduleId: "panasonic-cameras",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.2.0",
+      },
+      "conn-cine": {
+        label: "MA-CAM-1",
+        enabled: true,
+        moduleId: "red-rcp2",
+        moduleInstanceType: "connection",
+        moduleVersionId: "1.4.8",
+      },
     },
     // Custom variables, keyed by NAME with the definition as the value — the
     // only part of this document a cue's state binding reads, and the part the
@@ -230,9 +328,23 @@ export function companionExportFixture(): Record<string, unknown> {
     },
     pages: {
       "1": page(1, FIXTURE_PAGES.screens, [
-        // A clean pair.
-        { row: 0, col: 1, text: "Projectors ON", connections: ["conn-pjlink"] },
-        { row: 0, col: 2, text: "Projectors OFF", connections: ["conn-pjlink"] },
+        // A clean pair, and both halves carry the `powerState` feedback a
+        // PJLink projector button really does — so the pair infers
+        // `Projectors:powerState` and needs no custom variable.
+        {
+          row: 0,
+          col: 1,
+          text: "Projectors ON",
+          connections: ["conn-pjlink"],
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-pjlink" }],
+        },
+        {
+          row: 0,
+          col: 2,
+          text: "Projectors OFF",
+          connections: ["conn-pjlink"],
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-pjlink" }],
+        },
         // A pair whose label carries Companion's LITERAL \n escape, which is what
         // a two-line button looks like in the export.
         { row: 1, col: 1, text: "Lobby:\\nTVs ON", connections: ["conn-legacy"] },
@@ -251,6 +363,27 @@ export function companionExportFixture(): Record<string, unknown> {
         // Pairing across pages would cross these two.
         { row: 1, col: 0, text: "Projectors ON", connections: ["conn-lights"] },
         { row: 1, col: 1, text: "Projectors OFF", connections: ["conn-lights"] },
+        // A TOGGLE on a smart plug: one key, one `toggle` action, a
+        // `powerState` feedback. The button the whole state-source inference
+        // was built from.
+        {
+          row: 2,
+          col: 0,
+          text: "VCR Light ON",
+          connections: ["conn-vcr-light"],
+          actionDef: "toggle",
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-vcr-light" }],
+        },
+        // A bulb, whose feedback is `color` and not `powerState` — found only
+        // through its first action's connection.
+        {
+          row: 2,
+          col: 1,
+          text: "Desk Lamp Toggle",
+          connections: ["conn-desk-lamp"],
+          actionDef: "powerOff",
+          feedbacks: [{ definitionId: "color", connectionId: "conn-desk-lamp" }],
+        },
       ]),
       "3": page(3, FIXTURE_PAGES.cameras, [
         // TWO buttons that run nothing, deliberately, and the second one is not
@@ -266,9 +399,106 @@ export function companionExportFixture(): Record<string, unknown> {
         // Its actions live inside a `logic_if`. Both what it drives and its
         // fingerprint have to come out of the nesting.
         { row: 0, col: 1, text: "Record Toggle", connections: ["conn-pjlink"], nested: true },
+        // OBS twice on ONE connection. `streaming` is the variable; `recording`
+        // is a different fact on the same box, so only the streaming button
+        // infers anything and the recording one infers nothing at all.
+        {
+          row: 2,
+          col: 0,
+          text: "OBS Rec Toggle",
+          connections: ["conn-obs"],
+          actionDef: "StartStopRecording",
+          feedbacks: [{ definitionId: "recording", connectionId: "conn-obs" }],
+        },
+        // A MACRO button: every action is on Companion's own `internal`
+        // connection (it presses three other keys), and the only thing naming
+        // the device it is about is its `powerState` feedback. The real install
+        // has exactly this shape — its "REC START" key presses three others and
+        // carries an OBS feedback — and read off the actions alone it infers
+        // nothing at all.
+        {
+          row: 3,
+          col: 0,
+          text: "TV Wall ON",
+          connections: ["internal"],
+          actionDef: "button_pressrelease",
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-foyer-tv" }],
+        },
+        {
+          row: 2,
+          col: 1,
+          text: "OBS Stream Toggle",
+          connections: ["conn-obs"],
+          actionDef: "StartStopStreaming",
+          feedbacks: [{ definitionId: "recording", connectionId: "conn-obs" }],
+        },
       ]),
       // A page with nothing but navigation, as most of a real install's are.
       "4": page(4, "PAGE", []),
+      // The recorders page, laid out as the real install's is: one key per
+      // device that starts it and one that stops it, plus the macro key that
+      // starts them all at once.
+      "5": page(5, FIXTURE_PAGES.recorders, [
+        // A START on one device beside a STOP on ANOTHER, both on this page.
+        // Their labels share no base, so they must not pair — an encoder that
+        // stopped when somebody said "deck 2 off" is the mistake.
+        //
+        // FIRST on the page, before the real pair, and that ordering is the
+        // whole point. Pairing by page and direction word rather than by base
+        // is a mistake findPairs's own "first one wins" rule hides when the
+        // matching pair is parsed first: Deck 1 claims both slots and the
+        // wrongly-paired keys never get a look in. Parsed first, they pair with
+        // each other and the guard bites.
+        { row: 0, col: 0, text: "Deck 2 START", connections: ["conn-deck"], actionDef: "rec" },
+        { row: 0, col: 1, text: "Encoder STOP", connections: ["conn-encoder"], actionDef: "record" },
+        // A START/STOP pair on a HyperDeck. The deck's transport variable is
+        // the only thing it publishes — it has no power state — and the pair
+        // infers it from the `rec` action on the ON half.
+        { row: 1, col: 0, text: "Deck 1 START", connections: ["conn-deck"], actionDef: "rec" },
+        { row: 1, col: 1, text: "Deck 1 STOP", connections: ["conn-deck"], actionDef: "stop" },
+        // The encoder's two facts on one connection, one key each.
+        {
+          row: 2,
+          col: 0,
+          text: "PGM Rec Toggle",
+          connections: ["conn-encoder"],
+          actionDef: "record",
+          feedbacks: [{ definitionId: "record", connectionId: "conn-encoder" }],
+        },
+        { row: 2, col: 1, text: "PGM Stream Toggle", connections: ["conn-encoder"], actionDef: "stream" },
+        // A PTZ camera: a power pair, and an SD recording key that is a
+        // different fact on the same connection.
+        {
+          row: 3,
+          col: 0,
+          text: "PTZ ON",
+          connections: ["conn-ptz"],
+          actionDef: "power",
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-ptz" }],
+        },
+        {
+          row: 3,
+          col: 1,
+          text: "PTZ OFF",
+          connections: ["conn-ptz"],
+          actionDef: "power",
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-ptz" }],
+        },
+        { row: 3, col: 2, text: "PTZ SD Rec", connections: ["conn-ptz"], actionDef: "sdCardRec" },
+        // A cinema camera whose record key is a toggle with no partner, exactly
+        // as the five REC START keys on the real install are.
+        {
+          row: 4,
+          col: 0,
+          text: "Cam 1 REC START",
+          connections: ["conn-cine"],
+          actionDef: "toggle_recording",
+        },
+        // A deck key that is NOT about the transport: formatting a disk. It
+        // drives the deck and infers nothing, which is what the row's `when`
+        // fragments are for.
+        { row: 5, col: 0, text: "Format Decks", connections: ["conn-deck"], actionDef: "formatPrepare" },
+      ]),
     },
   };
 }

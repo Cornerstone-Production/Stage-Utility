@@ -34,7 +34,15 @@ import {
   fixtureActionId,
 } from "./fixtures/companion-export.js";
 import { fingerprintParams, readFingerprint } from "./companion-fingerprint.js";
-import { type CueIdentity, type PressEntry, reconcileCues } from "./companion-reconcile.js";
+import {
+  type CueIdentity,
+  type PressEntry,
+  inferBindingPatches,
+  reconcileCues,
+} from "./companion-reconcile.js";
+import { CALL_TRIGGER_ID } from "./cue-aliases.js";
+import { cuePairs } from "./cue-pairs.js";
+import type { Rule } from "../types/automation.js";
 
 const NOW = "2026-09-09T14:00:00.000Z";
 const EARLIER = "2026-09-01T09:00:00.000Z";
@@ -810,5 +818,90 @@ describe("a button somebody renamed", () => {
     assert.equal(r.changes[0]!.status, "in-place");
     assert.notEqual(r.changes[0]!.patch, null, "the label refresh is what makes this saveable");
     assert.equal(String(r.changes[0]!.triggerPatch?.name), "take_stage");
+  });
+});
+
+// ── Filling in a state binding ────────────────────────────────────────────────
+//
+// A pair imported before the state-source inference existed — or one whose
+// button was later pointed at a smart plug — has no binding and reports what it
+// asked for. The hourly pass fills that in from what the `_on` button drives.
+//
+// An EXPLICIT binding is never overwritten. An operator who chose a custom
+// variable their own buttons set meant it, and a housekeeping sweep replacing
+// it with something a module publishes is a switch that silently starts
+// reading a different thing.
+describe("a pair with no state binding", () => {
+  const BUTTONS = parseButtons(companionExportFixture());
+  /** The page 1 Projectors buttons, which carry a PJLink `powerState` feedback. */
+  const on = BUTTONS.find((b) => b.page === 1 && b.row === 0 && b.col === 1)!;
+  const off = BUTTONS.find((b) => b.page === 1 && b.row === 0 && b.col === 2)!;
+
+  /** One pair of rules, `projectors_on` / `projectors_off`, pressing those two. */
+  const rules = (onParams: Record<string, string | number> = {}): Rule[] =>
+    [
+      { id: "on", name: "Projectors ON", cue: "projectors_on", button: on, params: onParams },
+      { id: "off", name: "Projectors OFF", cue: "projectors_off", button: off, params: {} },
+    ].map((r) => ({
+      id: r.id,
+      name: r.name,
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: r.cue, says: r.name, ...r.params } },
+      conditions: [],
+      action: { id: "companion.press", params: fingerprintParams(r.button, "in-place", EARLIER) },
+      cooldownSec: 0,
+      oncePerService: false,
+    }));
+
+  const found = (rs: Rule[]) =>
+    new Map(
+      rs.map((r) => {
+        const f = readFingerprint(r.action.params);
+        return [r.id, BUTTONS.find((b) => b.page === f.page && b.row === f.row && b.col === f.col)!];
+      }),
+    );
+
+  test("is bound to what its ON button drives, on the _on half", () => {
+    const rs = rules();
+    const patches = inferBindingPatches(cuePairs(rs), found(rs));
+    assert.deepEqual([...patches.keys()], ["on"]);
+    assert.deepEqual(patches.get("on")?.patch, {
+      stateVariable: "Projectors:powerState",
+      stateOnValue: "On",
+      stateOffValue: "Off",
+    });
+    assert.equal(
+      patches.get("on")?.log,
+      "[companion] cue projectors: state source inferred Projectors:powerState",
+    );
+  });
+
+  test("an explicit binding is NEVER overwritten", () => {
+    const rs = rules({ stateVariable: "projectors_state" });
+    assert.deepEqual([...inferBindingPatches(cuePairs(rs), found(rs)).keys()], []);
+  });
+
+  test("a binding on the OFF half stops it too — either half is the pair's", () => {
+    // cue-pairs reads the `_off` half as a fallback, so a hand-edited rules
+    // file with the binding on that side is a bound pair. Filling in the ON
+    // half here would give one pair two bindings that then drift.
+    const rs = rules();
+    rs[1]!.trigger.params.stateVariable = "projectors_state";
+    assert.deepEqual([...inferBindingPatches(cuePairs(rs), found(rs)).keys()], []);
+  });
+
+  test("a button that drives nothing this knows is left alone", () => {
+    // The page 2 "Projectors" pair drives a lighting console.
+    const lightsOn = BUTTONS.find((b) => b.page === 2 && b.row === 1 && b.col === 0)!;
+    const lightsOff = BUTTONS.find((b) => b.page === 2 && b.row === 1 && b.col === 1)!;
+    const rs = rules();
+    rs[0]!.action.params = fingerprintParams(lightsOn, "in-place", EARLIER);
+    rs[1]!.action.params = fingerprintParams(lightsOff, "in-place", EARLIER);
+    assert.deepEqual([...inferBindingPatches(cuePairs(rs), found(rs)).keys()], []);
+  });
+
+  test("a MISSING button infers nothing — there is no button to read", () => {
+    const rs = rules();
+    assert.deepEqual([...inferBindingPatches(cuePairs(rs), new Map()).keys()], []);
   });
 });

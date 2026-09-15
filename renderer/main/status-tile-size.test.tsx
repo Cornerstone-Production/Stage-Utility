@@ -40,13 +40,34 @@ afterEach(async () => { cleanup(); await settle(); });
 const obj = (config: Record<string, unknown>) =>
   ({ id: config.type as string, x: 0, y: 0, w: 1, h: 1, z: 0, config }) as never;
 
+// A fixed instant, so the interpolated OBS timecode below is an exact string.
+const NOW = Date.parse("2026-09-11T15:20:00.000Z");
+
+// OBS and REAPER are typed rather than cast: the OBS seed here used to be a
+// `recordTimecode: "00:12:34"` behind `as never`, and when that field became an
+// anchor the cast kept the file compiling against a shape that no longer exists.
 const ctx = makeRenderCtx({
-  obs: { connected: true, recording: true, streaming: false, virtualCam: false, recordTimecode: "00:12:34" } as never,
-  reaper: { connected: true, recording: true, positionString: "00:05:10.250" } as never,
-  resi: { connected: true, live: true, startedAt: new Date(Date.now() - 23 * 60_000 - 49_000).toISOString() } as never,
+  obs: {
+    connected: true,
+    recording: true,
+    recordPaused: false,
+    streaming: false,
+    virtualCam: false,
+    recordAnchorMs: 754_000, // 00:12:34
+    recordSampledAt: new Date(NOW).toISOString(),
+  },
+  reaper: {
+    connected: true,
+    recording: true,
+    recordPaused: false,
+    playing: false,
+    positionSeconds: 310.25,
+    positionString: "00:05:10.250",
+  },
+  resi: { connected: true, live: true, startedAt: new Date(NOW - 23 * 60_000 - 49_000).toISOString() } as never,
   integrations: [{ id: "reaper", connection: "connected" }] as never,
   integrationLabels: { reaper: "REAPER" },
-  now: Date.now(),
+  now: NOW,
 });
 
 async function valueOf(config: Record<string, unknown>) {

@@ -30,9 +30,13 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-sensource-cadence-"))
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { sensourceService, DEFAULT_POLL_SECONDS, MIN_POLL_SECONDS } = await import(
-  "./sensource-service.js"
-);
+const {
+  sensourceService,
+  DEFAULT_POLL_SECONDS,
+  MIN_POLL_SECONDS,
+  SAFESPACE_DEFAULT_POLL_SECONDS,
+  SAFESPACE_MIN_POLL_SECONDS,
+} = await import("./sensource-service.js");
 const { integrationManager } = await import("./integration-manager.js");
 import type { PeopleCountDTO } from "../types/stage.js";
 
@@ -177,6 +181,88 @@ describe("the poll interval has one definition", () => {
     // Unbounded, the input took 0 or a negative and the poller silently ran at
     // MIN_POLL_SECONDS — the form said one thing and the poll did another. The
     // assertion is >=, not ==: a stricter form bound is fine, a looser one lies.
+    assert.ok(
+      typeof field!.min === "number" && field!.min >= MIN_POLL_SECONDS,
+      `form floor ${field!.min} is below the ${MIN_POLL_SECONDS}s the poller enforces`,
+    );
+  });
+});
+
+describe("the SafeSpace interval has one definition too", () => {
+  const field = integrationManager
+    .getDescriptors()
+    .find((d) => d.id === "sensource")
+    ?.configSchema.find((f) => f.key === "safeSpacePollSeconds");
+
+  it("is offered by the settings form, as a number", () => {
+    assert.ok(field, "the SenSource descriptor lost its SafeSpace interval field");
+    assert.equal(field.type, "number");
+  });
+
+  it("shows the form the same default and floor the reading uses", () => {
+    assert.equal(field!.default, SAFESPACE_DEFAULT_POLL_SECONDS);
+    assert.equal(field!.placeholder, String(SAFESPACE_DEFAULT_POLL_SECONDS));
+    assert.ok(
+      typeof field!.min === "number" && field!.min >= SAFESPACE_MIN_POLL_SECONDS,
+      `form floor ${field!.min} is below the ${SAFESPACE_MIN_POLL_SECONDS}s the reading enforces`,
+    );
+  });
+
+  it("offers a space-ID field with no default, because blank means off", () => {
+    const id = integrationManager
+      .getDescriptors()
+      .find((d) => d.id === "sensource")
+      ?.configSchema.find((f) => f.key === "safeSpaceId");
+    assert.ok(id, "the SenSource descriptor lost its SafeSpace space-ID field");
+    // A PASSWORD field, not text. The id is the whole of the endpoint's
+    // authority — no key, no token, no account check — so it is masked in the
+    // form and stored in secrets.bin. integration-secret-parity.test.ts is what
+    // makes that type a promise rather than a label.
+    assert.equal(id.type, "password");
+    assert.equal(id.default, undefined, "a default space ID would turn the section on for everyone");
+  });
+});
+
+describe("the attendance interval has no default of its own", () => {
+  // The SAME shape the space-ID field above is, and for the same reason, not
+  // pollSeconds/safeSpacePollSeconds's: those two guard an opt-in sub-feature
+  // (a poll that already exists, or one gated behind a credential nobody has
+  // by default), so a fixed default there changes nothing for someone who
+  // never touches it. Attendance is not opt-in — every existing Vea
+  // integration already publishes one — so ANY fixed number here, shown as
+  // this field's value the moment the card opens and saved back if the
+  // operator saves it for any other reason, would raise request volume for
+  // every install whose own poll interval is not that exact number. See the
+  // field's own doc comment on SenSourceConfig.
+  //
+  // This block is about the FORM only. The runtime fallback — what
+  // attendanceSeconds() answers for a blank field, and the floor it applies —
+  // is pinned in sensource-attendance-cadence.test.ts under "the interval the
+  // service itself resolves". It was not, when this comment first claimed it
+  // was: `|| this.veaSeconds()` could be `|| 30` and the floor could be dropped
+  // entirely with the whole suite green.
+  const field = integrationManager
+    .getDescriptors()
+    .find((d) => d.id === "sensource")
+    ?.configSchema.find((f) => f.key === "attendancePollSeconds");
+
+  it("is offered by the settings form, as a number", () => {
+    assert.ok(field, "the SenSource descriptor lost its attendance-interval field");
+    assert.equal(field.type, "number");
+  });
+
+  it("has no default and no numeric placeholder", () => {
+    assert.equal(field!.default, undefined, "a default attendance interval would raise volume for everyone");
+    assert.ok(
+      field!.placeholder == null || !Number.isFinite(Number(field!.placeholder)),
+      `a numeric placeholder ("${field!.placeholder}") pre-fills the form exactly like a default would`,
+    );
+  });
+
+  it("never lets the form offer a rate below the floor the fast read enforces", () => {
+    // Same floor as pollSeconds's own — it is the same Vea endpoint, not a
+    // different constraint — and the same >= rather than == pollSeconds's own
+    // test uses: a stricter form bound is fine, a looser one lies.
     assert.ok(
       typeof field!.min === "number" && field!.min >= MIN_POLL_SECONDS,
       `form floor ${field!.min} is below the ${MIN_POLL_SECONDS}s the poller enforces`,

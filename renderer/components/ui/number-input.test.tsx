@@ -12,7 +12,7 @@
 // fight you while typing, and floating-point steppers.
 
 import { strict as assert } from "node:assert";
-import { after, describe, mock, test } from "node:test";
+import { after, beforeEach, describe, mock, test } from "node:test";
 
 // Order matters here, which is why this is not a `before` hook. The DOM has to
 // exist before the component module is evaluated: a hook runs after the module
@@ -23,7 +23,19 @@ import { installDom } from "../../test-dom.js";
 const teardown = installDom();
 
 const { fireEvent, render, screen, cleanup } = await import("@testing-library/react");
+// Only for the one controlled test below. Dynamic like the rest of this file's
+// imports so nothing is evaluated before installDom() has run.
+const { useState } = await import("react");
 const { NumberInput, STEPPER_REPEAT_DELAY_MS, STEPPER_REPEAT_INTERVAL_MS } = await import("./number-input.js");
+
+// Every test below also calls cleanup() on its way out, which is fine and
+// idempotent. This is for the way out it does NOT take: a failing assertion
+// throws past its own cleanup, leaving a mounted field behind, and every
+// later test then dies on "Found multiple elements with the text of: test
+// field" instead of on its own assertion. A red proof has to be readable.
+beforeEach(() => {
+  cleanup();
+});
 
 after(() => {
   cleanup();
@@ -71,22 +83,42 @@ function tickInSteps(totalMs: number, stepMs = 10) {
   }
 }
 
-/** Render with a spy for onChange, and a way to read the last committed value. */
+/** Render with a spy for onChange, and a way to read the last committed value.
+ *
+ *  `"value" in props`, not `props.value ?? 5`: `null` is a value this component
+ *  now takes a real position on, and `??` would have quietly turned every
+ *  unset-field test into a test of the number 5. */
 function setup(props: Partial<React.ComponentProps<typeof NumberInput>> = {}) {
   const calls: number[] = [];
   const commits: number[] = [];
+  const unsets: true[] = [];
   render(
     <NumberInput
-      value={props.value ?? 5}
+      value={"value" in props ? (props.value as number | null) : 5}
       onChange={(v) => calls.push(v)}
       onCommit={(v) => commits.push(v)}
       aria-label="test field"
       {...props}
+      // After the spread, so a test that opts in by passing its own onUnset
+      // still gets counted here. A test that does NOT pass one gets no onUnset
+      // at all, which is the opt-out the component's whole contract rests on.
+      {...(props.onUnset
+        ? {
+            onUnset: () => {
+              unsets.push(true);
+              props.onUnset?.();
+            },
+          }
+        : {})}
     />,
   );
   const field = screen.getByLabelText("test field") as HTMLInputElement;
-  return { field, calls, commits, last: () => calls.at(-1) };
+  return { field, calls, commits, unsets, last: () => calls.at(-1) };
 }
+
+/** An opt-in `onUnset` for the tests below that need one but do not care what
+ *  it does — `setup` wraps it and counts the calls. */
+const OPT_IN = () => {};
 
 describe("NumberInput", () => {
   test("shows the value it was given", () => {
@@ -260,6 +292,76 @@ describe("NumberInput", () => {
     cleanup();
   });
 
+  test("a click in and a click out of a STORED value outside the bounds changes nothing", () => {
+    // THE SILENT REWRITE. The blur used to clamp whatever the box held whether
+    // or not anything had been typed into it, so an operator running a value
+    // from before the field declared its bounds had it rewritten by a gesture
+    // that changed nothing — and the next save made for any other reason put
+    // the new number on disk. Both real cases:
+    //
+    //   propresenter.pollMs  100   -> 200    a 5x request-rate increase
+    //   ross-tsl.port        70000 -> 65535  a port nobody entered
+    //
+    // The value stays out of bounds and the box goes on showing it. Typing
+    // still clamps (the test below), so the operator has a way to fix it; what
+    // they do not have is a way to change it by accident.
+    const low = setup({ value: 100, min: 200 });
+    fireEvent.focus(low.field);
+    fireEvent.blur(low.field);
+    assert.deepEqual(low.calls, [], `a focus and a blur reported ${low.calls}`);
+    assert.deepEqual(low.commits, [], `a focus and a blur committed ${low.commits}`);
+    assert.equal(low.field.value, "100", "the box rewrote a stored value nobody touched");
+    cleanup();
+
+    const high = setup({ value: 70000, min: 1, max: 65535 });
+    fireEvent.focus(high.field);
+    fireEvent.blur(high.field);
+    assert.deepEqual(high.calls, [], `a focus and a blur reported ${high.calls}`);
+    assert.deepEqual(high.commits, [], `a focus and a blur committed ${high.commits}`);
+    assert.equal(high.field.value, "70000", "the box rewrote a stored value nobody touched");
+    cleanup();
+  });
+
+  test("a value the operator TYPES is still clamped on blur", () => {
+    // The other half, and the one that must not break: clamping is for a value
+    // entered in this edit. Typing already clamps on the keystroke; blur clamps
+    // again because the keystroke path can be reached with a partial number.
+    const { field, calls, commits } = setup({ value: 500, min: 200 });
+    fireEvent.change(field, { target: { value: "100" } });
+    fireEvent.blur(field);
+    assert.equal(calls.at(-1), 200, `typing 100 into a min-200 field reported ${calls}`);
+    assert.equal(commits.at(-1), 200, `typing 100 into a min-200 field committed ${commits}`);
+    cleanup();
+  });
+
+  test("a second blur without a second visit commits nothing more", () => {
+    // The edit flag is cleared at BOTH ends of a visit — on focus, and on the
+    // way out of blur. Clearing on focus alone is enough in a browser, where a
+    // blur always follows a focus; clearing on the way out too means the
+    // handler assumes nothing about the order it is called in, and a blur that
+    // arrives twice cannot commit the same edit a second time.
+    const { field, commits } = setup({ value: 100, min: 200 });
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: "50" } });
+    fireEvent.blur(field);
+    fireEvent.blur(field);
+    assert.deepEqual(commits, [200], `two blurs over one edit committed ${commits}`);
+    cleanup();
+  });
+
+  test("a stepper press followed by a blur commits once, not twice", () => {
+    // Why `bumpOnce` deliberately does not mark the box as edited: it has
+    // already reported the stepped value through both callbacks, and a blur
+    // that committed the text it left behind would write the same number a
+    // second time — a duplicate PATCH for every commit-on-blur caller.
+    const { field, commits } = setup({ value: 5, step: 1 });
+    fireEvent.focus(field);
+    tap(screen.getAllByRole("button")[1]);
+    fireEvent.blur(field);
+    assert.deepEqual(commits, [6], `a stepper press and a blur committed ${commits}`);
+    cleanup();
+  });
+
   test("a new value from the parent is what gets displayed", () => {
     // Settings can change from another tab over SSE, so the field has to render
     // whatever it is handed rather than whatever was typed into it last.
@@ -269,6 +371,251 @@ describe("NumberInput", () => {
 
     const second = setup({ value: 250 });
     assert.equal(second.field.value, "250");
+    cleanup();
+  });
+});
+
+// A field where BLANK is a setting, not a missing value.
+//
+// Three integration fields mean "no value" — a ProPresenter poll interval that
+// falls back to the poller's own 1000ms, a Ross TSL port that simply is not
+// configured yet, and a SenSource attendance interval that means "same as the
+// Vea poll interval". All three rendered `0`, and every path out of that 0
+// committed it: a click in and a click out ran the blur clamp and wrote `min`,
+// and a stepper press stepped from zero.
+//
+// NOT UNIT-TESTED HERE, and checked in a browser instead (headless Chrome over
+// CDP, against a real server on a copied data dir):
+//
+//   - that the empty box actually LOOKS empty and shows its placeholder in the
+//     placeholder colour. jsdom loads no stylesheet and paints nothing, so the
+//     `placeholder` assertion below is only that the attribute reached the DOM.
+//   - that the hint string fits the 176px field rather than being clipped.
+//     jsdom reports every width as 0.
+describe("NumberInput, when blank is a real setting", () => {
+  test("no value renders an empty box, not 0", () => {
+    const { field } = setup({ value: null, onUnset: OPT_IN });
+    assert.equal(field.value, "", "an unset field rendered a number the operator never set");
+    cleanup();
+  });
+
+  test("NaN renders empty too", () => {
+    // How the absent value used to ARRIVE here: initialConfig's fallback ladder
+    // produced NaN for a field whose placeholder was prose, and String(NaN)
+    // went through the same `: 0` branch a null did.
+    const { field } = setup({ value: NaN, onUnset: OPT_IN });
+    assert.equal(field.value, "");
+    cleanup();
+  });
+
+  test("the placeholder is what the empty box carries", () => {
+    const { field } = setup({ value: null, onUnset: OPT_IN, placeholder: "Same as poll interval" });
+    assert.equal(field.getAttribute("placeholder"), "Same as poll interval");
+    cleanup();
+  });
+
+  test("without onUnset, no value still renders 0 — the opt-in is the callback", () => {
+    // The reason this is a callback and not a boolean. Twenty-odd call sites
+    // pass neither, and a default-on empty state would have blanked numeric
+    // fields across every settings panel in the app.
+    const { field } = setup({ value: null });
+    assert.equal(field.value, "0", "the unset rendering leaked to a caller that never asked for it");
+    cleanup();
+  });
+
+  test("clearing reports unset on the keystroke, not saved up for blur", () => {
+    // Not a nicety. A form's Save button is disabled until something reports a
+    // change, and a DISABLED button does not take the mousedown that would have
+    // blurred this field — so a clearing held back until blur left the operator
+    // with an empty box, a greyed-out Save, and no gesture that would commit it.
+    const { field, calls, unsets } = setup({ value: 30, onUnset: OPT_IN });
+    fireEvent.change(field, { target: { value: "" } });
+    assert.equal(unsets.length, 1, "the clearing waited for a blur that a disabled Save button never causes");
+    assert.deepEqual(calls, [], "clearing the field reported a number");
+    cleanup();
+  });
+
+  test("a click in and a click out of an unset field invents no number", () => {
+    // THE FAILURE THAT COSTS SOMETHING. On the old blur path an unset field
+    // showing 0 parsed that 0, clamped it up to `min`, and handed the caller a
+    // poll interval nobody chose — which the next save of the card for any
+    // other reason then wrote to disk.
+    const { field, calls, commits } = setup({ value: null, onUnset: OPT_IN, min: 10, max: 3600 });
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+    assert.deepEqual(calls, [], `a focus and a blur reported ${calls}`);
+    assert.deepEqual(commits, [], `a focus and a blur committed ${commits}`);
+    assert.equal(field.value, "", "the field did not stay empty");
+    cleanup();
+  });
+
+  test("blurring a box the operator emptied leaves it empty", () => {
+    const { field, calls, commits, unsets } = setup({ value: 30, onUnset: OPT_IN, min: 10 });
+    fireEvent.change(field, { target: { value: "" } });
+    fireEvent.blur(field);
+    assert.equal(field.value, "", "the field sprang back to a number");
+    assert.deepEqual(calls, [], "a cleared field reported a number");
+    assert.deepEqual(commits, [], "a cleared field committed a number");
+    assert.ok(unsets.length >= 1, "the caller was never told the field is now empty");
+    cleanup();
+  });
+
+  test("without onUnset, blurring an emptied box still springs back", () => {
+    // The old behaviour, pinned. A field that must hold a number cannot be left
+    // holding nothing, and this is the branch that puts the number back.
+    const { field, commits } = setup({ value: 30, min: 10 });
+    fireEvent.change(field, { target: { value: "" } });
+    fireEvent.blur(field);
+    assert.equal(field.value, "30");
+    assert.deepEqual(commits, [30]);
+    cleanup();
+  });
+
+  test("junk typed into an unset field leaves it unset", () => {
+    // Junk is not an answer, so it reverts to the value — and where the value is
+    // itself absent, reverting IS going back to empty. Without the `value == null`
+    // half of the blur guard this committed 0.
+    const { field, calls, commits } = setup({ value: null, onUnset: OPT_IN, min: 10 });
+    fireEvent.change(field, { target: { value: "abc" } });
+    fireEvent.blur(field);
+    assert.equal(field.value, "", "junk on a blank field left something behind");
+    assert.deepEqual(calls, []);
+    assert.deepEqual(commits, [], `junk on a blank field committed ${commits}`);
+    cleanup();
+  });
+
+  test("junk typed over a real value still reverts to that value", () => {
+    // Unsettable does NOT mean "any nonsense clears it". Only an empty box does.
+    const { field, commits } = setup({ value: 30, onUnset: OPT_IN, min: 10 });
+    fireEvent.change(field, { target: { value: "abc" } });
+    fireEvent.blur(field);
+    assert.equal(field.value, "30", "a typo cleared a field that had a value");
+    assert.deepEqual(commits, [30]);
+    cleanup();
+  });
+
+  test("a stepper on an unset field lands on the floor, not a step above it", () => {
+    // There is no number to step FROM, so the first press lands on `clamp(0)` —
+    // the smallest value the field permits.
+    //
+    // `step: 100` against `min: 10` ON PURPOSE, and this is the whole reason the
+    // case is spelled this way: with the app's own three fields (min 200/1/10,
+    // step 1) `clamp(0)` and `clamp(0 + step)` give the SAME answer, so a test
+    // using those numbers passes whichever expression the component holds and
+    // guards nothing. A step larger than the floor is the smallest case that
+    // tells them apart — `0 + step` is 100 here for a press that was asking for
+    // the smallest value there is.
+    const up = setup({ value: null, onUnset: OPT_IN, min: 10, max: 3600, step: 100 });
+    tap(screen.getAllByRole("button")[1]);
+    assert.equal(up.commits.at(-1), 10, "stepping up from blank overshot the floor");
+    cleanup();
+
+    // Down from blank stops at the floor too. Not a distinguishing case on its
+    // own — `clamp(0 - 100)` is also 10 — so the negative half is pinned by the
+    // no-floor test below, where `0 - step` really can escape.
+    const down = setup({ value: null, onUnset: OPT_IN, min: 10, max: 3600, step: 100 });
+    tap(screen.getAllByRole("button")[0]);
+    assert.equal(down.commits.at(-1), 10, "stepping down from blank went below the floor");
+    cleanup();
+  });
+
+  test("a second stepper press carries on from the first", () => {
+    // The landing is only for the press that has nothing to step from. Once
+    // there is a number, the steppers are the steppers.
+    //
+    // CONTROLLED, unlike every test above it, and it has to be: `startRepeat`
+    // re-seeds its running value from the `value` PROP at the start of every
+    // press, on purpose, so a press always steps from wherever the field
+    // actually is. Held at a fixed `value={null}` this field is blank again by
+    // the second press and lands on the floor twice — which is the component
+    // behaving correctly for a caller that ignored its onChange, not a bug.
+    const commits: number[] = [];
+    function Controlled() {
+      const [v, setV] = useState<number | null>(null);
+      return (
+        <NumberInput
+          value={v}
+          onChange={setV}
+          onCommit={(n) => commits.push(n)}
+          onUnset={() => setV(null)}
+          min={10}
+          max={3600}
+          step={100}
+          aria-label="test field"
+        />
+      );
+    }
+    render(<Controlled />);
+    const [, plus] = screen.getAllByRole("button");
+    tap(plus);
+    tap(plus);
+    // `step: 100` for the same reason the floor test above uses it: at the
+    // default step of 1 this sequence is [10, 11] whether the landing is
+    // `clamp(0)` or `clamp(0 + step)`, so the test could not fail on the thing
+    // it is named for. At 100 the two diverge on the FIRST press — [10, 110]
+    // against [100, 200] — and a landing that wrongly applied to every press
+    // would read [10, 10].
+    assert.deepEqual(commits, [10, 110]);
+    assert.equal((screen.getByLabelText("test field") as HTMLInputElement).value, "110");
+    cleanup();
+  });
+
+  test("a stepper on an unset field with no floor lands on zero, either way", () => {
+    // BOTH directions, and the `-` half is the one that costs something: with no
+    // floor to clamp against, `0 - step` is -1, and a negative is exactly what
+    // ross-tsl.port could not have — getRossTslConfig discards anything not > 0
+    // in silence while the card still reads as configured. That field has a
+    // `min: 1` now, but the component must not depend on every future unsettable
+    // field remembering to declare one.
+    const up = setup({ value: null, onUnset: OPT_IN });
+    tap(screen.getAllByRole("button")[1]);
+    assert.equal(up.commits.at(-1), 0, "stepping up from blank with no floor invented a number");
+    cleanup();
+
+    const down = setup({ value: null, onUnset: OPT_IN });
+    tap(screen.getAllByRole("button")[0]);
+    assert.equal(down.commits.at(-1), 0, "stepping down from blank with no floor went negative");
+    cleanup();
+  });
+
+  test("a stepper on an unset field with a NEGATIVE floor lands on zero, not the floor", () => {
+    // `clamp(0)`, not `clamp(min ?? 0)` — the two agree for every non-negative
+    // floor, which is every unsettable field the app ships, and diverge here.
+    // These are the real bounds of the automation `offsetMinutes` param
+    // (min -720, max 720, reached through rule-editor-dialog): blank means "no
+    // offset", and the press that has nothing to step from should land on no
+    // offset rather than twelve hours before the cue. That param does not opt in
+    // today, so this is the component's contract rather than a shipped path.
+    const { commits } = setup({ value: null, onUnset: OPT_IN, min: -720, max: 720 });
+    tap(screen.getAllByRole("button")[1]);
+    assert.equal(commits.at(-1), 0, "stepping up from blank landed on a negative floor");
+    cleanup();
+  });
+
+  test("without onUnset, a stepper on a non-number still steps from 0", () => {
+    // The landing-on-`min` rule is opt-in too, not just the empty rendering.
+    // "Not a number" is reachable for a caller that never asked for any of this:
+    // rule-editor-dialog spells its value `Number(value ?? spec.min ?? 0)`,
+    // which is NaN for a param holding a non-numeric string. That caller keeps
+    // `0 + step` — clamped to 10 here — rather than silently changing which
+    // number it recovers to.
+    const { commits } = setup({ value: NaN, min: 10, max: 3600 });
+    tap(screen.getAllByRole("button")[1]);
+    assert.equal(commits.at(-1), 10, "clamp(0 + 1) is 10, the same as before");
+    cleanup();
+
+    // And with no floor at all it is `0 + step`, not 0.
+    const free = setup({ value: NaN });
+    tap(screen.getAllByRole("button")[1]);
+    assert.equal(free.commits.at(-1), 1, "a caller that did not opt in kept 0 + step");
+    cleanup();
+  });
+
+  test("typing a number into an unset field reports the number", () => {
+    const { field, calls, unsets } = setup({ value: null, onUnset: OPT_IN, min: 10, max: 3600 });
+    fireEvent.change(field, { target: { value: "45" } });
+    assert.deepEqual(calls, [45]);
+    assert.deepEqual(unsets, [], "setting a value reported unset as well");
     cleanup();
   });
 });

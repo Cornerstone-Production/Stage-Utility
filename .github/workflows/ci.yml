@@ -25,6 +25,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The suite asks git questions about history. A release-notes override
+          # names a commit and the guard beside it checks that the commit is
+          # actually reachable, which is the whole point -- a typo'd SHA that
+          # silently does nothing is the failure it exists to catch. In a
+          # shallow clone the object is not there, so the check cannot answer
+          # and the guard reports a failure it has no business reporting.
+          # secret-scan.yml and commit-lint.yml already take the whole history
+          # for the same kind of reason.
+          fetch-depth: 0
 
       # Pinning is only worth anything if it holds. It already slipped once: the
       # references pinned in one PR were complete, and a second PR merged

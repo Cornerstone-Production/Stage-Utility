@@ -19,6 +19,7 @@
 import { clamp } from "../../services/clamp.js";
 import * as https from "node:https";
 import { scrub } from "../../services/scrub.js";
+import { createSseReader, SSE_MAX_BUFFER, type SseEvent, type SseReader } from "../../services/sse-reader.js";
 
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
 import type { ConfigField } from "../../types/integrations.js";
@@ -61,7 +62,7 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
   private running = false;
 
   private req: ReturnType<typeof https.request> | null = null;
-  private sseBuffer = "";
+  private sse: SseReader = newSseReader();
   private sessionUuid: string | null = null;
   private reconnectMs = RECONNECT_BASE_MS;
   private channels = new Map<string, ChannelState>();
@@ -101,7 +102,7 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
       return;
     }
     this.setState("connecting");
-    this.sseBuffer = "";
+    this.sse = newSseReader();
     this.sessionUuid = null;
 
     const req = https.request(
@@ -160,40 +161,54 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
 
   private abortStream(): void {
     if (this.req) {
-      this.req.removeAllListeners();
+      const req = this.req;
+      this.req = null;
+      // BY NAME — these two are the ones openStream() attaches to the REQUEST,
+      // 'response' being the callback passed to https.request(). 'error' is the
+      // one that matters: it calls onStreamClosed(), so destroying a request on
+      // purpose would otherwise schedule a reconnect for a stream we hung up on.
+      // A bare removeAllListeners() would take Node's own listeners with them.
+      //
+      // The data/end/close handlers live on the RESPONSE, which is a different
+      // emitter and was never reachable from here; destroy() below closes it, and
+      // onStreamClosed() is idempotent and gated on `running`.
+      for (const event of ["error", "response"] as const) req.removeAllListeners(event);
+      // An 'error' still arrives AFTER the listeners come off, and it arrives
+      // asynchronously, so the try/catch below cannot see it: Node's HTTP client
+      // manufactures "socket hang up" when a socket closes with a response still
+      // outstanding, which is exactly what destroying a half-open SSE request
+      // does. With nothing listening that is an uncaughtException, and it takes
+      // the whole server down — an operator disabling this integration while it
+      // was mid-reconnect was one keystroke from doing it.
+      //
+      // Absorbed rather than reported: this request was hung up on deliberately,
+      // there is no caller left to hand a failure to, and `running` is already
+      // false. Kept on DEBUG so it is still visible when somebody is pinning the
+      // schema against a real base station.
+      req.on("error", (err: Error) => {
+        if (DEBUG) console.log(`[spectera] discarded stream error after abort: ${scrub(err.message)}`);
+      });
       try {
-        this.req.destroy();
+        req.destroy();
       } catch {
         /* already gone */
       }
-      this.req = null;
     }
   }
 
   // Parse the text/event-stream: events separated by a blank line; each has
-  // optional `event:` and one or more `data:` lines.
+  // optional `event:` and one or more `data:` lines. Framing lives in the shared
+  // reader (services/sse-reader.ts).
   private onSse(chunk: string): void {
-    this.sseBuffer += chunk;
-    let sep: number;
-    while ((sep = this.sseBuffer.indexOf("\n\n")) >= 0) {
-      const raw = this.sseBuffer.slice(0, sep);
-      this.sseBuffer = this.sseBuffer.slice(sep + 2);
-      this.handleEvent(raw);
-    }
-    if (this.sseBuffer.length > 256_000) this.sseBuffer = ""; // runaway guard
+    for (const event of this.sse.push(chunk)) this.handleEvent(event);
   }
 
-  private handleEvent(raw: string): void {
-    let eventName = "message";
-    const dataLines: string[] = [];
-    for (const line of raw.split(/\r?\n/)) {
-      if (line.startsWith("event:")) eventName = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-    }
-    if (dataLines.length === 0) return;
+  private handleEvent(event: SseEvent): void {
+    const eventName = event.event ?? "message";
+    if (!event.data) return;
     let data: unknown;
     try {
-      data = JSON.parse(dataLines.join("\n"));
+      data = JSON.parse(event.data);
     } catch {
       return;
     }
@@ -363,6 +378,22 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * A fresh reader per connection — a partial event does not survive the stream,
+ * and carrying one over would splice the tail of the old stream onto the head of
+ * the new one.
+ *
+ * The overflow line is not DEBUG-gated, unlike the rest of this file's logging.
+ * Everything else here is a successful exchange; this one says telemetry was
+ * dropped, and the old runaway guard cleared the buffer in total silence, so a
+ * base station flooding the stream left nothing at all to read.
+ */
+function newSseReader(): SseReader {
+  return createSseReader({
+    onOverflow: () => console.warn(`[spectera] SSE buffer exceeded ${SSE_MAX_BUFFER} chars — resyncing`),
+  });
+}
 
 function findSessionUuid(data: unknown): string | null {
   if (!data || typeof data !== "object") return null;

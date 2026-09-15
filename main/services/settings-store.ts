@@ -285,6 +285,29 @@ export const settingsStore = {
     return merged;
   },
 
+  /**
+   * Take keys OUT of one integration's non-secret config, inside the write queue.
+   *
+   * `patchIntegrationConfig` merges, so it can set a key to null but can never
+   * remove one — and "set it to null" is not good enough for a credential that
+   * must not be in this file at all: settings.json is in CONFIG_FILES, so every
+   * key in it rides into every config snapshot. The boot migration that moves
+   * plaintext secrets into secrets.bin needs the key GONE, not emptied.
+   *
+   * Same write-queue argument as patchIntegrationConfig: the nested object is
+   * rebuilt inside `store.update`, never from a load() taken outside it.
+   */
+  async removeIntegrationConfigKeys(id: string, keys: readonly string[]): Promise<void> {
+    if (keys.length === 0) return;
+    syncTimeZone(await store.update((current) => {
+      const cfg = { ...(current.integrationConfigs?.[id] ?? {}) };
+      // The names come from SECRET_KEYS and the SafeSpace marker — hard-coded
+      // tables, never a request body — so this is not a caller-chosen delete.
+      for (const key of keys) delete cfg[key];
+      return { ...current, integrationConfigs: { ...current.integrationConfigs, [id]: cfg } };
+    }));
+  },
+
   /** One integration's enabled flag, merged inside the write queue — see
    *  patchIntegrationConfig for why the nested spread cannot sit outside it. */
   async patchIntegrationEnabled(id: string, enabled: boolean): Promise<void> {

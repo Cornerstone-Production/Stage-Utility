@@ -3,7 +3,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { UploadIcon, PlusIcon, Trash2Icon, DownloadIcon, PrinterIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
-import { Button, Input, SkeletonRows, toast, confirm , UnsavedBanner} from "../../components/ui";
+import { Button, Input, SkeletonRows, toast, confirm , UnsavedBanner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { mergeOverrides, diffEndpoints } from "../../lib/patch-resolve";
 import { uid } from "../../lib/uid";
 import { PatchDeviceManager } from "./patch-device-manager";
@@ -300,17 +300,19 @@ export function PatchSection() {
       {/* Variant switcher — Default patch vs a named overlay */}
       <div className="patch-print-hide flex flex-wrap items-center gap-2">
         <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Editing</span>
-        <select
-          value={editingVariantId ?? ""}
-          onChange={(e) => setEditingVariantId(e.target.value || null)}
-          className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:outline-none focus:border-focus"
-        >
-          <option value="">Default patch</option>
-          {plan?.planId && <option value="__week">This week{plan.planTitle ? ` — ${plan.planTitle}` : ""}</option>}
-          {sheet.variants.map((v) => (
-            <option key={v.id} value={v.id}>{v.name}</option>
-          ))}
-        </select>
+        {/* "__week" is only offered while a plan is loaded, so an operator editing
+            this week's tweaks when the plan drops out would otherwise see the
+            switcher snap to "Default patch" and start writing there. */}
+        <Select value={editingVariantId ?? ""} onValueChange={(v) => setEditingVariantId(v || null)}>
+          <SelectTrigger className="px-2"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Default patch</SelectItem>
+            {plan?.planId && <SelectItem value="__week">This week{plan.planTitle ? ` — ${plan.planTitle}` : ""}</SelectItem>}
+            {sheet.variants.map((v) => (
+              <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {editingVariant ? (
           <>
             <Input value={editingVariant.name} onChange={(e) => renameVariant(editingVariant.id, e.target.value)} className="w-40" placeholder="Variant name" />

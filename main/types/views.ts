@@ -9,6 +9,7 @@
 
 
 import type { CalendarSelection } from "./calendar.js";
+import { externKeyed } from "./extern-keyed.js";
 
 export type ViewKind =
   | "slots"
@@ -65,7 +66,7 @@ export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Ex
  * `stage-view-paths.test.tsx` renders every kind and asserts the real DOM
  * against this map, so the two cannot drift apart.
  */
-export const KIND_DRAWS_TOP_BAR: Record<ViewKind, boolean> = {
+export const KIND_DRAWS_TOP_BAR: Record<ViewKind, boolean> = externKeyed({
   slots: true,
   custom: true,
   dashboard: true,
@@ -74,7 +75,7 @@ export const KIND_DRAWS_TOP_BAR: Record<ViewKind, boolean> = {
   script: false,
   "spl-rundown": false,
   calendar: false,
-};
+});
 
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {
@@ -92,6 +93,17 @@ export interface TranscriptLineDTO {
   isFinal: boolean;
   /** ISO timestamp the line was received. */
   at: string;
+  /**
+   * How many spans of `text` were replaced with asterisks because they matched a
+   * ProdCom keyword marked `isSensitive`. Absent when nothing was hidden.
+   *
+   * A count, never the words, and never the keyword list: the flagged words can
+   * themselves be the sensitive thing (a person's name, a diagnosis), so they do
+   * not leave the server. This is enough for a display to say something was
+   * hidden, and for an operator reviewing later to know which lines to re-read
+   * through the unredacted route.
+   */
+  redactions?: number;
 }
 
 /** A ProPresenter slide group/section (e.g. Verse, Chorus) with its color. */
@@ -101,11 +113,24 @@ export interface ProSection {
   colorHex: string;
 }
 
-/** A ProPresenter named timer (countdown/clock) currently running. */
+/** A ProPresenter named timer (countdown/clock) currently doing something.
+ *  Timers in the `stopped` state are dropped and never appear here. */
 export interface ProTimer {
   name: string;
-  /** Display string from the API, e.g. "00:03:00". */
+  /**
+   * ProPresenter's own display text, passed through UNCHANGED — e.g. "00:03:00",
+   * or "-00:00:02" once a timer with overrun enabled is past zero.
+   *
+   * This is the only expression of the timer's position the API has: there is no
+   * numeric counterpart anywhere, so this cannot be anchored and interpolated the
+   * way `ObsStatusDTO.recordAnchorMs` or `PvpLayerDTO.anchorElapsedSec` are, and
+   * a running timer really is one broadcast a second. The four reasons, and the
+   * measurement, are on `proTimersFrom` in propresenter-service.ts — read them
+   * before reaching for an anchor here.
+   */
   time: string;
+  /** One of ProPresenter's own: "running", "complete", "overrunning", "overran".
+   *  Never "stopped" — those are filtered out before this DTO is built. */
   state: string;
 }
 

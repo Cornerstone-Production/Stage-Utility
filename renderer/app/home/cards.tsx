@@ -209,11 +209,15 @@ export function Stat({
   value: string;
   sub?: string;
   to?: string;
-  /** Only the two colours a stat ever earns. Everything else — offline,
+  /** Only the colours a stat actually earns. Everything else — offline,
    *  standby, off air — is the page's own foreground: on Home the caption and
    *  the sub-line carry the grey, and a card that greyed its value too read as
-   *  disabled beside the ones that had not. */
-  tone?: "danger" | "live";
+   *  disabled beside the ones that had not.
+   *
+   *  `warn` is the third and it is deliberately hard to earn: off air is not it,
+   *  because off air is what the page sits in all week. A broadcast that was
+   *  SCHEDULED and has not started is. */
+  tone?: "danger" | "warn" | "live";
 }) {
   const body = (
     <Readout
@@ -226,6 +230,7 @@ export function Stat({
       // white a display uses.
       valueColor={
         tone === "danger" ? "var(--color-danger-11)"
+        : tone === "warn" ? "var(--color-warn-11)"
         : tone === "live" ? "var(--color-live-11)"
         : null
       }
@@ -584,15 +589,23 @@ export function LiveStatusCard({
  */
 export function RecordingCard({
   recorder = "any",
+  now,
+  skewMs,
   showElapsed = true,
 }: {
   recorder?: string;
+  /** The clock comes DOWN, from the one tick the page already runs — the same
+   *  argument StreamingCard makes below. OBS's record timecode is interpolated
+   *  from a server-stamped anchor now rather than pushed once a second, so this
+   *  card needs both the tick and the skew to read it. */
+  now: number;
+  skewMs: number;
   /** Home's "Elapsed time" switch. Off, the card drops the running timecode and
    *  keeps the state — the same thing the same switch does to the streaming card
    *  beside it, which is why it carries the same name. */
   showElapsed?: boolean;
 }) {
-  const list = recorders(useObsState(), useReaperState());
+  const list = recorders(useObsState(), useReaperState(), now, skewMs);
   const chosen = recorder === "any" ? list : list.filter((r) => r.name === recorder);
   const ind = recordIndicator(chosen);
   // Only LIVE takes a colour. Everything else is the page's own foreground, the
@@ -638,7 +651,9 @@ export function StreamingCard({
       label={platform === "any" ? "Streaming" : platform}
       value={ind.value}
       sub={ind.sub ?? undefined}
-      tone={ind.state === "live" ? "live" : undefined}
+      // Late is off air past a scheduled start, and the one off-air moment worth
+      // a colour on a page that sits in off air all week — see streamIndicator.
+      tone={ind.state === "live" ? "live" : ind.state === "late" ? "warn" : undefined}
     />
   );
 }
@@ -970,11 +985,11 @@ export function HomeCard({
     case "home-live-status":
       return <LiveStatusCard pcoLive={pcoLive} now={now} skewMs={skewMs} />;
     case "home-recording":
-      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} showElapsed={c.showElapsed ?? true} />;
+      return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} skewMs={skewMs} showElapsed={c.showElapsed ?? true} />;
     case "home-recording-obs":
-      return <RecordingCard recorder="OBS" />;
+      return <RecordingCard recorder="OBS" now={now} skewMs={skewMs} />;
     case "home-recording-reaper":
-      return <RecordingCard recorder="REAPER" />;
+      return <RecordingCard recorder="REAPER" now={now} skewMs={skewMs} />;
     case "home-streaming":
       return (
         <StreamingCard

@@ -1,3 +1,5 @@
+import { isMask } from "@main/services/mask";
+import type { IntegrationId } from "@main/services/integration-ids";
 import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../lib/api";
 import { useStageState } from "../main/use-stage-state";
@@ -17,6 +19,7 @@ import { ProPresenterInstancesPanel } from "./propresenter-instances-panel";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
 import { integrationDialogClass } from "./integration-dialog-size";
+import { initialConfig, numberFieldValue } from "./integration-number-fields";
 import { useUpdateStatus } from "../app/queries";
 import { docsUrl } from "../lib/docs-url";
 import { UnsavedChangesDialog } from "../editor/unsaved-changes-dialog";
@@ -59,11 +62,6 @@ function ipc<T>(channel: string, ...args: unknown[]): Promise<T> {
   return invoke<T>(channel, args[0] as Record<string, unknown> | undefined);
 }
 
-const MASKED_PASSWORD = "••••••••";
-
-function isPasswordMasked(value: string): boolean {
-  return /^•+$/.test(value);
-}
 
 /**
  * Cards that Getting Started can point at, by integration id.
@@ -99,23 +97,44 @@ export function integrationFlashId(id: string): string {
  * Center and ProdCom still sit next to each other and the Ross pair is still
  * adjacent — which is all the pair card and the headings were really doing.
  */
-const CATEGORY_ORDER: string[][] = [
+const CATEGORY_ORDER = [
   ["planning-center", "prodcom"], // Service & plan
   ["propresenter"], // Presentation
   ["smaart"], // Audio
   ["sensource"], // People
   ["wireless"], // Wireless
   ["resi", "youtube"], // Streaming
-  ["obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"], // Control & output
+  ["companion", "obs", "reaper", "pvp", "osc", "rosstalk", "ross-tsl"], // Control & output
   ["scores"], // Information
-];
+] as const satisfies readonly (readonly IntegrationId[])[];
 
-const ORDER = CATEGORY_ORDER.flat();
+/**
+ * EVERY integration is placed above, and nothing that is not one is.
+ *
+ * `companion` was missing, so its card sorted to the end of its half instead of
+ * into a category slot — silently, because `rank` answers ORDER.length for
+ * anything it does not know. That is the right answer for an id a newer server
+ * has and this build does not; it is the wrong one for an integration this build
+ * ships, and nothing could tell the two apart.
+ *
+ * The constraint NAMES the id: with `companion` missing this reads
+ * `Type '"companion"' does not satisfy the constraint 'never'`.
+ * integrations-category-order.test.ts says the same thing in English, and runs
+ * under `npm test`, which does not typecheck.
+ */
+type Placed = (typeof CATEGORY_ORDER)[number][number];
+type MustBeNever<T extends never> = T;
+export type EveryIntegrationIsPlaced = MustBeNever<Exclude<IntegrationId, Placed>>;
 
-/** Anything not named above sorts to the end of its half, in server order. */
+/** Widened for the lookup below, which is asked about ids off the wire. */
+export const CATEGORY_ORDER_IDS: readonly string[] = CATEGORY_ORDER.flat();
+
+/** An id this build does not ship — a newer server's — sorts to the end of its
+ *  half, in server order. Every integration this build DOES ship is placed, and
+ *  the declaration above is what keeps that true. */
 function rank(id: string): number {
-  const i = ORDER.indexOf(id);
-  return i === -1 ? ORDER.length : i;
+  const i = CATEGORY_ORDER_IDS.indexOf(id);
+  return i === -1 ? CATEGORY_ORDER_IDS.length : i;
 }
 
 /**
@@ -187,34 +206,6 @@ function fmtSynced(iso: string | null | undefined): string {
   return `Synced ${formatClock(d)}`;
 }
 
-/** The form's starting values for an integration — the saved config, with password
- *  fields masked and unset numbers prefilled from their default/placeholder.
- *  Hoisted out of the component so Discard can rebuild exactly the same thing. */
-function initialConfig(
-  descriptor: IntegrationDescriptor,
-  state: IntegrationState,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const field of descriptor.configSchema) {
-    const raw = state.config[field.key];
-    if (field.type === "password" && typeof raw === "string" && raw !== "") {
-      out[field.key] = MASKED_PASSWORD;
-    } else if (field.type === "number") {
-      // Unset numeric fields (e.g. an API port) prefill the integration's
-      // default — field.default if declared, else the numeric placeholder
-      // (the shown default) — so the field displays and saves the real port
-      // instead of a bare 0.
-      const fallback =
-        field.default ?? (field.placeholder != null && field.placeholder !== "" ? Number(field.placeholder) : undefined);
-      const rawNum = raw == null || raw === "" ? NaN : Number(raw);
-      out[field.key] = Number.isFinite(rawNum) && rawNum > 0 ? rawNum : (fallback ?? "");
-    } else {
-      out[field.key] = raw ?? field.default ?? "";
-    }
-  }
-  return out;
-}
-
 /**
  * Flick an integration's enable switch.
  *
@@ -255,11 +246,15 @@ async function toggleIntegration(
 /**
  * A panel that REPLACES the schema form, or null when the schema form is shown.
  *
- * These five have no ConfigField-shaped settings at all — a searchable team
- * picker, a list of receivers, a list of UDP targets, an address to dial us on —
- * and each saves its own list as it is edited. They therefore get no Save /
- * Discard and no Test in the dialog footer, exactly as they had neither in the
- * row.
+ * These FOUR have no ConfigField-shaped settings at all — a list of wireless
+ * receivers, a list of UDP targets, a list of RossTalk targets, a searchable
+ * team picker — and each saves its own list as it is edited. They therefore get
+ * no Save / Discard and no Test in the dialog footer, exactly as they had
+ * neither in the row.
+ *
+ * It said five, and listed Companion's address among them. Companion moved to
+ * panelAbove when its two descriptor fields turned out to be unreachable behind
+ * a bespoke panel that replaced the form — see the comment there.
  */
 function bespokePanelFor(descriptor: IntegrationDescriptor): ReactNode | null {
   if (descriptor.kind === "wireless") return <WirelessConnectionsPanel />;
@@ -475,7 +470,7 @@ export function IntegrationDialog({
       const config: Record<string, unknown> = {};
       for (const field of descriptor.configSchema) {
         const v = localConfig[field.key];
-        if (field.type === "password" && typeof v === "string" && isPasswordMasked(v)) {
+        if (field.type === "password" && typeof v === "string" && isMask(v)) {
           // User hasn't changed this password — omit so the backend keeps the original
           continue;
         }
@@ -644,12 +639,22 @@ export function IntegrationDialog({
                   />
                 ) : field.type === "number" ? (
                   <NumberInput
-                    value={typeof value === "number" ? value : Number(value) || 0}
+                    // `null` ONLY where the descriptor says blank is a setting.
+                    // Everywhere else this is the old `Number(value) || 0` to
+                    // the character, which is what keeps the ten number fields
+                    // that mean a real number rendering exactly as before.
+                    value={numberFieldValue(field, value)}
                     // The number, not String(n): initialConfig stores a number
                     // for a numeric field, so "4455" !== 4455 and one stepper
                     // click left the dialog permanently dirty — raising the
                     // unsaved-changes modal over a config identical to the saved one.
                     onChange={(n) => setField(field.key, n)}
+                    // "" rather than deleting the key: it is what initialConfig
+                    // seeds an unset number field with, so `pristine` and the
+                    // form agree and the dialog is not born dirty — and every
+                    // reader of these three treats "" exactly as absent.
+                    onUnset={field.unsetHint == null ? undefined : () => setField(field.key, "")}
+                    placeholder={field.unsetHint}
                     min={field.min}
                     max={field.max}
                     className="w-44 max-sm:w-full"
