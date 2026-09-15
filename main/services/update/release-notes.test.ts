@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { parseReleaseIntro, parseReleaseSections, SECTION_ORDER } from "./release-notes.js";
+import { INTRO_CAP, mergeReleaseSections, parseReleaseIntro, parseReleaseSections, SECTION_ORDER } from "./release-notes.js";
 
 // What an operator reads once, after an update they may not have watched happen.
 // The section a line came from is the part the old parser threw away, and it is
@@ -21,8 +21,8 @@ describe("release notes, by section", () => {
 - Duplicating a console no longer makes a display
 `);
     assert.deepEqual(out, [
-      { section: "New", lines: ["Export a layout", "Find a server by name"] },
-      { section: "Fixed", lines: ["Duplicating a console no longer makes a display"] },
+      { section: "New", lines: ["Export a layout", "Find a server by name"], omitted: 0 },
+      { section: "Fixed", lines: ["Duplicating a console no longer makes a display"], omitted: 0 },
     ]);
   });
 
@@ -51,7 +51,7 @@ describe("release notes, by section", () => {
 
   test("a heading used twice is merged rather than rendered twice", () => {
     const out = parseReleaseSections("## New\n- one\n\n## Install\n- ignored\n\n## New\n- two\n");
-    assert.deepEqual(out, [{ section: "New", lines: ["one", "two"] }]);
+    assert.deepEqual(out, [{ section: "New", lines: ["one", "two"], omitted: 0 }]);
   });
 
   test("markdown emphasis and code ticks are stripped", () => {
@@ -59,9 +59,82 @@ describe("release notes, by section", () => {
     assert.deepEqual(out[0].lines, ["Bold and code"]);
   });
 
-  test("the notes generator's own truncation marker is dropped", () => {
+  test("the notes generator's own truncation count is kept, not thrown away", () => {
+    // It used to be dropped as markdown furniture. The generator honestly wrote
+    // how much it had cut and the dialog deleted the sentence saying so, then
+    // rendered twelve of forty-nine features as though that were the release.
     const out = parseReleaseSections("## Fixed\n- real one\n- …and 12 more\n");
-    assert.deepEqual(out[0].lines, ["real one"]);
+    assert.deepEqual(out[0].lines, ["real one"], "the marker must not become a bullet");
+    assert.equal(out[0].omitted, 12, "the count the generator published was discarded");
+  });
+
+  test("the ... spelling of the marker counts too", () => {
+    assert.equal(parseReleaseSections("## Fixed\n- real one\n- ...and 5 more\n")[0].omitted, 5);
+  });
+
+  test("the cap's OWN truncation is counted, not just the generator's", () => {
+    // Two places cut, and this was the silent one: the body says nothing about
+    // it, so a section trimmed here left no trace at all.
+    const body = "## Fixed\n" + Array.from({ length: 30 }, (_, i) => `- f${i}`).join("\n")
+      + "\n\n## Breaking\n- the one that matters\n";
+    const out = parseReleaseSections(body, 5);
+    assert.equal(out[1].section, "Fixed");
+    assert.equal(out[1].lines.length, 4);
+    assert.equal(out[1].omitted, 26);
+  });
+
+  test("both cuts add up in one count", () => {
+    const body = "## Fixed\n- a\n- b\n- c\n- …and 20 more\n";
+    const out = parseReleaseSections(body, 2);
+    assert.deepEqual(out[0].lines, ["a", "b"]);
+    assert.equal(out[0].omitted, 21, "one line cut here plus twenty cut by the generator");
+  });
+
+  test("a section the cap cannot reach at all still says what it holds", () => {
+    // Dropping it would be the same bug one level up: "thirty fixes and one
+    // breaking change" rendering as the breaking change with nothing to say
+    // thirty fixes had gone.
+    const body = "## Breaking\n- a\n- b\n\n## Fixed\n"
+      + Array.from({ length: 30 }, (_, i) => `- f${i}`).join("\n") + "\n";
+    const out = parseReleaseSections(body, 2);
+    assert.deepEqual(out.map((s) => s.section), ["Breaking", "Fixed"]);
+    assert.deepEqual(out[1].lines, []);
+    assert.equal(out[1].omitted, 30);
+  });
+
+  test("the generator's held-back sentence reaches the dialog", () => {
+    // A paragraph, not a bullet, so the old parser dropped it for the same
+    // reason it dropped the count: it read `- ` lines and nothing else.
+    const out = parseReleaseSections(
+      "## Fixed\n\n- one\n\n36 further fixes made while building the features above are not listed.\n",
+    );
+    assert.equal(out[0].note, "36 further fixes made while building the features above are not listed.");
+  });
+
+  test("a hard-wrapped note comes back as one paragraph", () => {
+    const out = parseReleaseSections("## Fixed\n\n- one\n\n36 further fixes\nare not listed.\n");
+    assert.equal(out[0].note, "36 further fixes are not listed.");
+  });
+
+  test("a section that is nothing but a held-back note still renders", () => {
+    // Every fix held back: no bullets, and a sentence that would otherwise be a
+    // stray line of prose under no heading.
+    const out = parseReleaseSections("## Fixed\n\n12 further fixes are not listed.\n");
+    assert.deepEqual(out.map((s) => s.section), ["Fixed"]);
+    assert.deepEqual(out[0].lines, []);
+    assert.equal(out[0].note, "12 further fixes are not listed.");
+  });
+
+  test("a fenced block under a change heading is not prose", () => {
+    // A shell command rendered as a paragraph in a dialog is something an
+    // operator might try to type.
+    const out = parseReleaseSections("## Fixed\n\n- one\n\n```bash\ncurl -fsSL https://example.invalid | sh\n```\n");
+    assert.equal(out[0].note, undefined, `a fenced command became prose: ${out[0].note}`);
+  });
+
+  test("prose under a heading that is not a change section stays out", () => {
+    const out = parseReleaseSections("## Fixed\n- one\n\n## Install\n\nTwo supported ways in.\n");
+    assert.deepEqual(out, [{ section: "Fixed", lines: ["one"], omitted: 0 }]);
   });
 
   test("prose outside a change section is ignored", () => {
@@ -79,7 +152,7 @@ describe("release notes, by section", () => {
 ## Fixed
 - the real one
 `);
-    assert.deepEqual(out, [{ section: "Fixed", lines: ["the real one"] }]);
+    assert.deepEqual(out, [{ section: "Fixed", lines: ["the real one"], omitted: 0 }]);
   });
 
   test("a body with no recognised sections yields nothing, not one blob", () => {
@@ -108,6 +181,37 @@ describe("release notes, by section", () => {
 
   test("a line that is only emphasis markers does not become an empty bullet", () => {
     assert.deepEqual(parseReleaseSections("## New\n- ****\n- real\n")[0].lines, ["real"]);
+  });
+});
+
+// A box three releases behind installs all three at once, so one dialog has to
+// describe all three — and each of the three cut its own list and held its own
+// fixes back. One release's numbers standing for all three is a number that is
+// wrong for two of them.
+describe("three releases in one dialog", () => {
+  test("the counts they each cut add up", () => {
+    const out = mergeReleaseSections([
+      parseReleaseSections("## Fixed\n- a\n- …and 10 more\n"),
+      parseReleaseSections("## Fixed\n- b\n- …and 7 more\n"),
+    ]);
+    assert.deepEqual(out, [{ section: "Fixed", lines: ["a", "b"], omitted: 17 }]);
+  });
+
+  test("and the cap spent on the merge adds to it", () => {
+    const out = mergeReleaseSections([
+      parseReleaseSections("## Fixed\n- a\n- b\n- …and 10 more\n"),
+      parseReleaseSections("## Fixed\n- c\n"),
+    ], 2);
+    assert.deepEqual(out[0].lines, ["a", "b"]);
+    assert.equal(out[0].omitted, 11, "ten from the release body, one cut by the merge");
+  });
+
+  test("each release's held-back sentence survives", () => {
+    const out = mergeReleaseSections([
+      parseReleaseSections("## Fixed\n\n- a\n\n3 further fixes are not listed.\n"),
+      parseReleaseSections("## Fixed\n\n- b\n\n9 further fixes are not listed.\n"),
+    ]);
+    assert.equal(out[0].note, "3 further fixes are not listed.\n\n9 further fixes are not listed.");
   });
 });
 
@@ -201,35 +305,91 @@ curl -fsSL https://example.invalid/install.sh | sudo bash
   });
 });
 
-describe("the cap is big enough for the notices actually written", () => {
-  test("a two-paragraph overview survives whole", () => {
-    // The regression this exists for: the first cap was 600 and cut the real
-    // 1.11.0 notice off mid-sentence, losing the last thing it had to say.
-    const real = readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "release-notes", "1.11.0.md"),
-      "utf8",
-    );
-    const intro = parseReleaseIntro(`${real}\n## Install\n\ncurl …\n`) ?? "";
-    assert.ok(intro, "the shipped notice produces no intro at all");
-    assert.doesNotMatch(intro, /…$/, "the shipped notice is being truncated");
-    assert.match(intro, /Resi and\s+YouTube now sit alongside/, "the closing sentence was cut");
+// A notice too long for the dialog is cut mid-sentence, losing the last thing
+// its writer chose to say — which is the failure INTRO_CAP's own doc comment
+// says the cap exists to avoid. The first cap was 600 and did exactly that to
+// the real 1.11.0 notice.
+//
+// The release in progress is the only one that can ever fail this: a shipped
+// notice is frozen. So the guard reads the DIRECTORY rather than a filename,
+// which is what stops it degrading into a frozen check the moment the next
+// release opens — the previous version of this file named "1.18.0.md" and a
+// literal closing sentence, and its own comment admitted the 1.11.0 test above
+// it could no longer fail.
+describe("every release notice fits the dialog", () => {
+  const NOTES_DIR = path.join(
+    path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "release-notes",
+  );
+
+  /**
+   * Notices that reach the dialog as NOTHING, exactly.
+   *
+   * parseReleaseIntro stops at the first heading, and each of these opens with
+   * one — 1.10.0's inside its own blockquote, 1.13.0's as `## Highlights`. Both
+   * are shipped and frozen, and neither is ever shown now: the dialog renders
+   * the NEWEST release's prose only. Listed rather than skipped, because a new
+   * notice written the same way would otherwise go quiet instead of red.
+   */
+  const NO_INTRO = ["1.10.0.md", "1.13.0.md"];
+
+  /** parseReleaseIntro returns null for a body with no headings, and a notice
+   *  file is pure prose — so it is read the way the generator assembles it. */
+  const introOf = (text: string, cap?: number) =>
+    parseReleaseIntro(`${text}\n## Install\n\ncurl …\n`, cap) ?? "";
+
+  const collapse = (v: string) => v.replace(/\s+/g, " ").trim();
+  const read = (file: string) => fs.readFileSync(path.join(NOTES_DIR, file), "utf8");
+
+  const files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith(".md")).sort();
+
+  test("the walk finds the notices, so everything below is a real check", () => {
+    // Without this every assertion below passes on an empty list. 1.10.0 is the
+    // anchor: it is the release that cannot self-update, and its notice can
+    // never legitimately go away.
+    assert.ok(files.includes("1.10.0.md"), `no notices found in docs/release-notes: ${files.join(", ")}`);
   });
 
-  test("the overview being written right now survives whole too", () => {
-    // The cap is only ever hit by the release in progress, and the file for a
-    // release nobody has cut yet is the one that grows a sentence per feature.
-    // 1.11.0 above is frozen and can no longer fail; this one can.
-    const real = readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "docs", "release-notes", "1.18.0.md"),
-      "utf8",
-    );
-    const intro = parseReleaseIntro(`${real}\n## Install\n\ncurl …\n`) ?? "";
-    assert.ok(intro, "the shipped notice produces no intro at all");
-    assert.doesNotMatch(intro, /…$/, `the 1.18.0 overview is ${intro.length} characters and is being cut`);
-    // `\s+` between every word, like the 1.11.0 guard above: the overview is a
-    // hard-wrapped file, so a sentence that gains a word re-wraps and a literal
-    // space in this pattern fails on a line break rather than on a truncation —
-    // which is the one thing this is here to catch.
-    assert.match(intro, /REC\s+START\s+and\s+REC\s+STOP\s+import\s+as\s+one\s+pair/, "the closing sentence was cut");
+  test("exactly these notices reach the dialog as nothing", () => {
+    // Exact, not a floor: a new notice that opens with a heading says nothing
+    // to the operator, and this is where that shows up.
+    assert.deepEqual(files.filter((f) => !introOf(read(f))), NO_INTRO);
+  });
+
+  for (const file of files.filter((f) => !NO_INTRO.includes(f))) {
+    test(`${file} survives the cap whole`, () => {
+      const text = read(file);
+
+      // The real length, not a sniff for a trailing ellipsis — a notice that
+      // ends in one would satisfy that test while being cut.
+      const full = introOf(text, Number.POSITIVE_INFINITY);
+      assert.ok(
+        full.length <= INTRO_CAP,
+        `${file}: the overview is ${full.length} characters against an INTRO_CAP of ${INTRO_CAP}. `
+          + `Shorten the notice, or raise the cap and check the dialog still reads as an overview.`,
+      );
+
+      // And the last thing the writer chose to say is still there. Derived from
+      // the file, so it follows a rewrite; collapsed, because the notices are
+      // hard-wrapped and a sentence that gains a word re-wraps.
+      const tail = collapse(full).slice(-60);
+      assert.ok(
+        collapse(introOf(text)).endsWith(tail),
+        `${file}: the closing sentence is being cut — "…${tail}"`,
+      );
+    });
+  }
+
+  test("no notice puts a shell command in the dialog, quoted or not", () => {
+    // 1.10.0's whole notice is a blockquote, so its fences read `> ```bash` and
+    // the fence check — which ran on the line with its quote marker still on —
+    // missed them. The dialog an operator saw rendered the install commands as
+    // paragraphs and then cut the last one off mid-URL.
+    for (const file of files) {
+      assert.doesNotMatch(
+        introOf(read(file), Number.POSITIVE_INFINITY),
+        /curl -fsSL|irm https|brew upgrade|sudo bash/,
+        `${file}: an install command reached the dialog as a sentence`,
+      );
+    }
   });
 });

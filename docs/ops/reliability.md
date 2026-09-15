@@ -134,6 +134,23 @@ still holds. Fix the permissions or the mount and save again.
 Fix the cause and save again — the retry is an ordinary save, with nothing left
 over from the attempt that failed.
 
+### When a credential could not be moved out of `settings.json`
+
+A box upgrading from a build that stored a credential as ordinary config moves it
+into `secrets.bin` on the next start. If that write cannot happen — a read-only
+data directory, a full disk, `EACCES` after an install changed ownership — the box
+**still starts**, and says so twice:
+
+- an `[integration-manager]` line on `/log` naming how many credentials, why, and
+  that they are still in every config snapshot;
+- a note on each affected integration's row in Settings → Integrations, which
+  stays there whatever the connection does.
+
+Nothing is lost: the credentials are left exactly where they were, so fixing the
+disk or the permissions and restarting completes the move. Until then they ride
+into every config snapshot, and any of them that had not already reached
+`secrets.bin` is not available to its integration.
+
 ## Backups
 
 **Back up this directory.** Lose `encryption.key` and the encrypted credentials

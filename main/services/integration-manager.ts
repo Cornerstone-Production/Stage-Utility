@@ -721,6 +721,14 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
  *  cannot be inbound in one place and dialable in another. */
 const inboundIds = new Set(DESCRIPTORS.filter((d) => d.inbound).map((d) => d.id));
 
+/** A row's connection message with a standing note appended, or either one
+ *  alone. The note outlives every connection report, so it is composed at read
+ *  time rather than written into the state — see secretMigrationNotes. */
+function withNote(message: string | null, note: string | undefined): string | null {
+  if (!note) return message;
+  return message ? `${message} — ${note}` : note;
+}
+
 /**
  * Is this integration on, at load?
  *
@@ -770,23 +778,25 @@ export interface OutOfBandSetup {
  * panel that would let them finish. `empty-schema-configured.test.ts` fails if a
  * schema-less integration is added without an entry.
  */
-// Keyed by IntegrationId, not by string. A typo'd key on a `Record<string, …>`
-// is a valid entry that nothing ever looks up, so the integration it was meant
-// for stays permanently "Not set up" — the exact failure this table was added to
-// fix, arriving back through the table itself. Partial because most
-// integrations answer from their config and belong nowhere near here.
-const OUT_OF_BAND_CONFIGURED: Partial<Record<
-  IntegrationId,
-  (setup: OutOfBandSetup) => boolean
->> = {
-  wireless: (s) => s.wirelessConnections > 0,
-  osc: (s) => s.oscTargets > 0,
-  rosstalk: (s) => s.rossTalkTargets > 0,
-  scores: (s) => s.followedTeams > 0,
-};
+// A MAP keyed by IntegrationId, not a record keyed by string, for the two
+// reasons SECRET_KEYS below is one:
+//
+// A typo'd key on a `Record<string, …>` is a valid entry that nothing ever looks
+// up, so the integration it was meant for stays permanently "Not set up" — the
+// exact failure this table was added to fix, arriving back through the table
+// itself. And the read below takes an id that came off an HTTP body, where a
+// record answers `Object.prototype` for "__proto__" and a truthy non-function
+// reaches the call. Most integrations answer from their config and belong
+// nowhere near here, so most ids are legitimately absent.
+const OUT_OF_BAND_CONFIGURED = new Map<IntegrationId, (setup: OutOfBandSetup) => boolean>([
+  ["wireless", (s) => s.wirelessConnections > 0],
+  ["osc", (s) => s.oscTargets > 0],
+  ["rosstalk", (s) => s.rossTalkTargets > 0],
+  ["scores", (s) => s.followedTeams > 0],
+]);
 
 /** Ids that answer "configured" from their own list rather than from config. */
-export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = Object.keys(OUT_OF_BAND_CONFIGURED);
+export const OUT_OF_BAND_CONFIGURED_IDS: readonly string[] = [...OUT_OF_BAND_CONFIGURED.keys()];
 
 /**
  * Fold a request body into the config to persist and the secrets to store.
@@ -925,7 +935,7 @@ export function configuredFor(
   // and descriptors as plain strings, while the table is keyed by IntegrationId
   // so a typo in the table itself is a compile error. An unknown id here is a
   // miss, which is the same answer a string-keyed table would have given.
-  const outOfBand = OUT_OF_BAND_CONFIGURED[state.id as IntegrationId];
+  const outOfBand = OUT_OF_BAND_CONFIGURED.get(state.id as IntegrationId);
   if (outOfBand) return outOfBand(setup);
   // YouTube asks for one of two sets of fields depending on how it is set to
   // check, so "any value present" would call it configured the moment the mode
@@ -948,32 +958,42 @@ export function configuredFor(
 
 // Keys that are secrets for each integration id.
 //
-// Keyed by IntegrationId for the same reason as OUT_OF_BAND_CONFIGURED above,
-// and the cost of a typo here is worse: an id that does not match falls back to
-// `[]`, so every field of that integration — passwords and tokens included — is
-// written to settings.json as ordinary config instead of to secrets.bin.
-const SECRET_KEYS: Partial<Record<IntegrationId, string[]>> = {
-  "planning-center": ["secret"],
-  wireless: [],
-  companion: [],
-  propresenter: [],
-  prodcom: ["apiKey"],
-  smaart: ["password"],
-  obs: ["password"],
-  pvp: ["token"],
-  reaper: [],
+// A MAP, not a record — the house rule for anything looked up by a key that came
+// from outside. secretKeysFor() is called on every key of settings.json's
+// `integrationConfigs`, and `JSON.parse('{"__proto__":{}}')` keeps "__proto__"
+// as an own enumerable key that Object.entries yields. On a record that read
+// answers `Object.prototype`, which is truthy, so the `?? []` never fires and
+// `.filter` on it is a TypeError inside init() — no boot, from a hand-edited or
+// damaged settings.json. "constructor" and "toString" do it too. A Map answers
+// `undefined` for all of them because it has no prototype chain to walk.
+//
+// Still typed by IntegrationId for the same reason as OUT_OF_BAND_CONFIGURED
+// above, and the cost of a typo here is worse: an id that does not match falls
+// back to `[]`, so every field of that integration — passwords and tokens
+// included — is written to settings.json as ordinary config instead of to
+// secrets.bin.
+const SECRET_KEYS = new Map<IntegrationId, readonly string[]>([
+  ["planning-center", ["secret"]],
+  ["wireless", []],
+  ["companion", []],
+  ["propresenter", []],
+  ["prodcom", ["apiKey"]],
+  ["smaart", ["password"]],
+  ["obs", ["password"]],
+  ["pvp", ["token"]],
+  ["reaper", []],
   // No account, no key. ESPN's scoreboard endpoints are public and unauthenticated.
-  scores: [],
-  resi: ["password"],
-  youtube: ["apiKey", "clientSecret", "refreshToken"],
+  ["scores", []],
+  ["resi", ["password"]],
+  ["youtube", ["apiKey", "clientSecret", "refreshToken"]],
   // safeSpaceId is here for the reason safespace-client.ts states in capitals:
   // "THE SPACE ID IS THE ENTIRE CREDENTIAL. There is no key, no token and no
   // account check." It was ordinary config, so it sat in settings.json and rode
   // verbatim into every config snapshot — a bundle the UI presents as safe to
   // hand to somebody.
-  sensource: ["clientSecret", "apiToken", "safeSpaceId"],
-  "ross-tsl": [],
-};
+  ["sensource", ["clientSecret", "apiToken", "safeSpaceId"]],
+  ["ross-tsl", []],
+]);
 
 /**
  * The non-secret record that SafeSpace is switched on.
@@ -996,13 +1016,14 @@ const SECRET_KEYS: Partial<Record<IntegrationId, string[]>> = {
 const SAFESPACE_ENABLED_KEY = "safeSpaceEnabled";
 
 /** The secret field names for an integration id, or none. A helper rather than a
- *  bare index because SECRET_KEYS is keyed by IntegrationId — so a typo in the
- *  TABLE is a compile error — while every call site carries a plain string.
+ *  bare lookup because SECRET_KEYS is keyed by IntegrationId — so a typo in the
+ *  TABLE is a compile error — while every call site carries a plain string, some
+ *  of them straight off a JSON-parsed settings.json.
  *
  *  Exported for integration-secret-parity.test.ts, which pins this table against
  *  the `password` fields the descriptors declare. */
 export function secretKeysFor(id: string): readonly string[] {
-  return SECRET_KEYS[id as IntegrationId] ?? [];
+  return SECRET_KEYS.get(id as IntegrationId) ?? [];
 }
 
 /** What a boot migration would move, worked out without touching disk. */
@@ -1075,20 +1096,69 @@ export function planSecretMigration(
 }
 
 /**
+ * What a {@link applySecretMigration} did. Not a boolean: the decline and the
+ * failure have different causes and the operator needs the reason, on the row
+ * as well as on the log.
+ */
+export type SecretMigrationResult =
+  | { moved: true }
+  /** Nothing was moved. `why` is a short phrase for an integration row. */
+  | { moved: false; why: string };
+
+/**
  * Carry out a {@link planSecretMigration}.
  *
  * secrets.bin WINS a collision. Every slot but safeSpaceId has been masked at
  * init since the slot existed, so a value still in settings.json for one of
  * those is a stale copy from before the split, not the value in use.
  *
- * @returns whether it ran. FALSE is not a failure to hand upwards — it is a
- *   deliberate decline, said on the log with the fix named, and there is nothing
- *   different for the caller to do with the config map: init masks every secret
- *   key out of the state either way, so the map it builds from is the same one.
- *   Returned rather than void so the decline is a value somebody can assert on
- *   instead of a log line they have to notice.
+ * NEVER THROWS, and that is the whole reason for the try below. init() is
+ * awaited at server.ts's module top level, where a rejection surfaces as an
+ * uncaughtException (not an unhandledRejection — the handlers differ, and this
+ * was measured against this repo's own pair), which exits 100 for the supervisor
+ * to restart. A read-only data directory, a full disk or an EACCES after a chown
+ * during an install then fails the same write on the next boot, forever, with
+ * the HTTP server never binding — so /log and /api/version are gone too, which
+ * is the stretch server.ts's own crash-handler comment calls least diagnosable.
+ *
+ * Continuing is safe because every step is already ordered so the NEXT boot can
+ * recover: the secrets are written before the settings are cleaned, and the
+ * SafeSpace marker before the removal. So a failure anywhere leaves the
+ * credentials where the next boot looks for them.
+ *
+ * @returns what happened. `moved: false` is not a failure to hand upwards — the
+ *   caller cannot retry it and must not die of it — but it is not nothing
+ *   either: init() puts `why` on the affected integrations' rows, because a
+ *   credential still in settings.json is in every config snapshot, and a
+ *   credential that never reached secrets.bin is one that integration no longer
+ *   has. A log line alone is a thing somebody has to notice.
  */
-export async function applySecretMigration(plan: SecretMigration): Promise<boolean> {
+/**
+ * The standing note each affected integration's row carries when a boot
+ * migration could not finish — empty when it did.
+ *
+ * Its own function, and exported, so the guard can drive the real thing:
+ * init() cannot be called from a unit test (it starts the reconnect timers and
+ * never lets the process exit), which is the same reason planSecretMigration is
+ * pure and exported.
+ */
+export function secretMigrationNotes(
+  plan: SecretMigration,
+  result: SecretMigrationResult,
+): Map<string, string> {
+  if (result.moved) return new Map();
+  // Scrubbed HERE, at the boundary, rather than trusted from the producer: this
+  // string reaches an integration row and, through it, a broadcast — and a
+  // newline in an errno message is a forged line on every surface that renders
+  // one. log-injection.test.ts reads the interpolation, not the provenance, and
+  // it is right to.
+  const note =
+    `stored credentials could not be moved out of settings.json (${scrub(result.why, 120)}), ` +
+    "so they are still in every config snapshot — see /log";
+  return new Map(Object.keys(plan.found).map((id) => [id, note]));
+}
+
+export async function applySecretMigration(plan: SecretMigration): Promise<SecretMigrationResult> {
   // Not onto a secrets.bin that exists and will not decrypt. Writing would set
   // the old file aside as secrets.bin.unreadable-* — which is the right thing
   // when an OPERATOR re-enters a credential, and the wrong thing here: it spends
@@ -1101,42 +1171,78 @@ export async function applySecretMigration(plan: SecretMigration): Promise<boole
         "and could not be moved: secrets.bin exists but will not decrypt. Fix the encryption key " +
         "and restart — they will move then, and until they do they remain in every config snapshot.",
     );
-    return false;
+    return { moved: false, why: "secrets.bin will not decrypt" };
   }
   console.log(
     `[integration-manager] migrating ${scrub(plan.moved.length)} stored credential(s) out of settings.json: ${scrub(plan.moved.join(", "))}`,
   );
-  const toStore: Record<string, Record<string, string>> = {};
-  for (const [id, values] of Object.entries(plan.found)) {
-    const next: Record<string, string> = { ...(await secretsStore.getSecrets(id)) };
-    for (const [key, value] of Object.entries(values)) if (!next[key]) next[key] = value;
-    toStore[id] = next;
-  }
-  // One write for the whole blob — secrets.ts re-encrypts the entire file per
-  // save, and this can touch several integrations at once.
-  await secretsStore.setManySecrets(toStore);
-  for (const id of Object.keys(plan.found)) {
-    // Two calls, because a merge cannot delete — and in THIS order.
-    //
-    // Every step is ordered so that a failure leaves a state the next boot can
-    // still recover from. The secrets are written first, so the value exists in
-    // both places before it exists in only one. The marker is written before the
-    // removal, so a removal that throws leaves the credential still in
-    // settings.json — which is where the next boot looks for it — rather than
-    // gone from the config with nothing recording that SafeSpace was on.
-    if (plan.configs[id]?.[SAFESPACE_ENABLED_KEY] === true) {
-      await settingsStore.patchIntegrationConfig(id, { [SAFESPACE_ENABLED_KEY]: true });
+  // ONE try around the whole sequence, not one per await. Per-step handling
+  // would have nothing extra to offer: the ordering below already guarantees
+  // that a failure at ANY step leaves a state the next boot recovers from, so
+  // there is exactly one thing to say and one place to say it.
+  try {
+    const toStore: Record<string, Record<string, string>> = {};
+    for (const [id, values] of Object.entries(plan.found)) {
+      const next: Record<string, string> = { ...(await secretsStore.getSecrets(id)) };
+      for (const [key, value] of Object.entries(values)) if (!next[key]) next[key] = value;
+      toStore[id] = next;
     }
-    // Removed, not nulled: settings.json rides into every snapshot, and a key
-    // set to null is still a key. This also sweeps a stale mask left by an
-    // older build, which planSecretMigration deliberately refuses to STORE.
-    await settingsStore.removeIntegrationConfigKeys(id, secretKeysFor(id));
+    // One write for the whole blob — secrets.ts re-encrypts the entire file per
+    // save, and this can touch several integrations at once.
+    await secretsStore.setManySecrets(toStore);
+    for (const id of Object.keys(plan.found)) {
+      // Two calls, because a merge cannot delete — and in THIS order.
+      //
+      // Every step is ordered so that a failure leaves a state the next boot can
+      // still recover from. The secrets are written first, so the value exists in
+      // both places before it exists in only one. The marker is written before the
+      // removal, so a removal that throws leaves the credential still in
+      // settings.json — which is where the next boot looks for it — rather than
+      // gone from the config with nothing recording that SafeSpace was on.
+      if (plan.configs[id]?.[SAFESPACE_ENABLED_KEY] === true) {
+        await settingsStore.patchIntegrationConfig(id, { [SAFESPACE_ENABLED_KEY]: true });
+      }
+      // Removed, not nulled: settings.json rides into every snapshot, and a key
+      // set to null is still a key. This also sweeps a stale mask left by an
+      // older build, which planSecretMigration deliberately refuses to STORE.
+      await settingsStore.removeIntegrationConfigKeys(id, secretKeysFor(id));
+    }
+  } catch (err) {
+    // NOT swallowed and NOT rethrown: rethrowing here is the boot loop (see the
+    // note on this function). The failure is returned as a value, and init()
+    // puts it on the affected integrations' rows as well as here.
+    const why = errorMessage(err);
+    console.error(
+      `[integration-manager] ${scrub(plan.moved.length)} credential(s) could not be moved out of ` +
+        `settings.json (${scrub(why, 120)}): ${scrub(plan.moved.join(", "))}. They remain in every config ` +
+        "snapshot until this is fixed, and any of them that had not already reached secrets.bin " +
+        "is not available to its integration. The next start tries again — nothing has been lost.",
+    );
+    return { moved: false, why };
   }
-  return true;
+  return { moved: true };
 }
 
 class IntegrationManager {
   private states = new Map<string, IntegrationState>();
+
+  /**
+   * Integration id → why its stored credentials are still in settings.json.
+   *
+   * Written once at init, by the boot migration that could not complete, and
+   * never cleared — the condition lasts until an operator fixes the disk or the
+   * key and restarts, which is when this map is rebuilt from nothing.
+   *
+   * It is composed onto the row's message in getStates() rather than written
+   * into `state.message`, because every connection report overwrites that field
+   * and the integration this is about is usually the one that cannot connect
+   * (its credential never reached secrets.bin). Same shape applyCompanionRow
+   * uses to keep two independent facts on one message line.
+   *
+   * Built by {@link secretMigrationNotes}, which is where the text lives so a
+   * test can drive it.
+   */
+  private migrationNotes = new Map<string, string>();
 
   // ── Init ──────────────────────────────────────────────────────────────
 
@@ -1148,7 +1254,12 @@ class IntegrationManager {
     // before the state map is built from it — see planSecretMigration.
     const saved = settings.integrationConfigs ?? {};
     const plan = planSecretMigration(saved);
-    if (plan) await applySecretMigration(plan);
+    // Never allowed to throw out of here — this is awaited at server.ts's module
+    // top level, where a rejection is an uncaughtException and an exit 100, and
+    // a write that fails once fails on every restart. applySecretMigration
+    // returns the failure instead; the rows below carry it.
+    const migration = plan ? await applySecretMigration(plan) : null;
+    this.migrationNotes = plan && migration ? secretMigrationNotes(plan, migration) : new Map();
     // `plan.configs` whether or not the move actually happened. Every secret key
     // is masked out of the state below either way, so the two maps differ in one
     // thing: plan.configs carries the SafeSpace marker. A box whose secrets.bin
@@ -1270,6 +1381,10 @@ class IntegrationManager {
     const setup = this.outOfBandSetup();
     return Array.from(this.states.values()).map((s) => ({
       ...s,
+      // Composed here, not stored: see secretMigrationNotes. Empty for every
+      // integration on every box where the boot migration did its job, which is
+      // all of them.
+      message: withNote(s.message, this.migrationNotes.get(s.id)),
       configured: configuredFor(s, setup, inboundIds.has(s.id)),
       ...(inboundIds.has(s.id) ? { inbound: true as const } : null),
     }));
@@ -1928,11 +2043,27 @@ class IntegrationManager {
 
     const enabled = this.states.get("propresenter")?.enabled ?? false;
     const { host, port, pollMs } = this.getPropresenterTarget();
+    // WHERE, on every pass, from whatever the settings now say — before the
+    // enablement branch and outside it. Both disable paths below skip straight
+    // to stop(), and while stop() also set the target the old address survived a
+    // save that changed it: the rule editor then read macros off the machine the
+    // operator had just stopped using. See ProPresenterService.setTarget.
+    propresenterService.setTarget(host, port, pollMs ?? undefined);
     if (enabled && host && port) {
-      // configure() opens the status stream; the listener flips this to
+      // start() opens the status stream; the listener flips this to
       // connected/error once it is up, or once the fallback poll answers.
-      this.setConnectionState("propresenter", "connecting", `Connecting to ${host}:${port}`);
-      propresenterService.configure(host, port, pollMs ?? undefined);
+      //
+      // ONLY when something is actually being started. Every other applier in
+      // this file hands off to a configure() that restarts unconditionally, so
+      // the service always reports again and this optimistic write is always
+      // taken back. ProPresenter deliberately does not re-dial an unchanged
+      // target, so on an ordinary settings save nothing takes it back and the
+      // row reads "Connecting to h:p" over a live stream until it next drops.
+      // The same two lines are in ProPresenterManager.apply for the extras.
+      if (!propresenterService.isRunning) {
+        this.setConnectionState("propresenter", "connecting", `Connecting to ${host}:${port}`);
+      }
+      propresenterService.start();
     } else {
       propresenterService.stop();
       this.setConnectionState("propresenter", "disconnected", null);

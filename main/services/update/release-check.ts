@@ -117,9 +117,10 @@ export const NOTES_CAP = 60;
  * the post-update dialog wants the sections. Two parsers would eventually
  * disagree about which is which.
  *
- * The commit TYPE is deliberately not reconstructed. `## Fixed` holds both
- * `fix` and `perf`, so labelling every line `fix(...)` to match a checkout's
- * display exactly would mean stating something false about perf commits.
+ * The commit TYPE is deliberately not reconstructed. The section a line came
+ * from is close but not the same thing — a hand-written release body can use
+ * any of SECTION_ORDER's headings — so labelling every line `fix(...)` to match
+ * a checkout's display exactly would mean stating something that is not true.
  */
 export function changeLinesFrom(body: string | null): string[] {
   return parseReleaseSections(body, CHANGELOG_CAP).flatMap((s) => s.lines);

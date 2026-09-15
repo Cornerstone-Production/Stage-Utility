@@ -25,6 +25,8 @@ import {
   stateBindingOf,
   stateBindingParams,
   stateBindingProblem,
+  stateFor,
+  STATE_ANY_OTHER,
   STATE_OFF_DEFAULT,
   STATE_ON_DEFAULT,
 } from "./cue-pairs.js";
@@ -399,5 +401,42 @@ describe("app: state sources", () => {
       ),
       /both "yes"/,
     );
+  });
+});
+
+// ── What a value means for a binding ─────────────────────────────────────────
+//
+// ONE predicate for a question two places ask: the read that answers
+// `GET /api/cues/states`, and the settle re-read that decides whether a press
+// has landed. They used to disagree — the settle path compared the value
+// against `binding.offValue` literally, and that is the string `*` on six of
+// the twelve rows in companion-state-source.ts.
+describe("stateFor", () => {
+  const exact = { variable: "plug_state", onValue: "On", offValue: "Off" };
+  const star = { variable: "deck_state", onValue: "Record", offValue: STATE_ANY_OTHER };
+
+  test("an exact binding answers on, off, or neither", () => {
+    assert.equal(stateFor(exact, "On"), "on");
+    assert.equal(stateFor(exact, "Off"), "off");
+    // A projector warming up is neither, and that is the whole reason a power
+    // row keeps an exact off value.
+    assert.equal(stateFor(exact, "WARMUP"), null);
+    assert.equal(stateFor(exact, ""), null);
+    // Case-sensitive on purpose: `on` against a variable holding `On` is a pair
+    // that reads unknown forever with nothing on screen saying why.
+    assert.equal(stateFor(exact, "on"), null);
+  });
+
+  test("`*` is off for everything that is not the on value, INCLUDING empty", () => {
+    assert.equal(stateFor(star, "Record"), "on");
+    for (const value of ["Stopped", "Preview", "Play", "Jog", "", "*"]) {
+      assert.equal(stateFor(star, value), "off", value);
+    }
+  });
+
+  test("`*` never makes the ON value read off", () => {
+    // The direction that breaks an OFF press: `*` is "anything that is NOT the
+    // on value", so a deck still recording has not settled.
+    assert.notEqual(stateFor(star, star.onValue), "off");
   });
 });

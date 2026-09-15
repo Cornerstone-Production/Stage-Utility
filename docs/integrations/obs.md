@@ -38,8 +38,15 @@ re-read: OBS stops advancing `outputDuration` while paused, so there is nothing
 to correct. An idle OBS is asked nothing at all.
 
 A keepalive that cannot reach OBS logs one `[obs] record anchor` warning per
-streak and one line when it recovers. The timecode keeps running from the last
-good anchor meanwhile, so it may drift from OBS until the next successful read.
+**outage**, reminds every fifteen minutes while it is still going, and writes one
+line when it recovers that accounts for the whole run. A different kind of
+failure inside the same run is always a new line, so one cannot mask another. An
+OBS that answers every other read is one outage, not one line per miss — the same
+rule every other poll in the app follows, described under [Logging an
+outage](sensource.md#logging-an-outage).
+
+The timecode keeps running from the last good anchor meanwhile, so it may drift
+from OBS until the next successful read.
 
 ### When it stops trying
 

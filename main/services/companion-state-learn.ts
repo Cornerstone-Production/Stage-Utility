@@ -74,7 +74,7 @@ export const CANDIDATE_VARIABLES: readonly string[] = [
   //    list without anybody remembering to. Today that is `power_state`,
   //    `power`, `powerState`, `status`, `recording`, `streaming`,
   //    `stream_status` and `record_status`.
-  ...new Set(Object.values(STATE_SOURCES).flatMap((rows) => rows.map((r) => r.name))),
+  ...new Set([...STATE_SOURCES.values()].flatMap((rows) => rows.map((r) => r.name))),
   // 2. The common shapes the table does NOT already supply. Nothing here may
   //    repeat a name from the group above — the two lists are concatenated, not
   //    de-duplicated, so a name in both would be two GETs for one answer and
@@ -151,8 +151,20 @@ export interface CandidateObservation {
 export interface LearningState {
   /** How many presses have been observed without a binding coming out. */
   attempts: number;
-  /** Per candidate ref, what it has been seen to do. */
-  observed: Record<string, CandidateObservation>;
+  /**
+   * Per candidate ref, what it has been seen to do.
+   *
+   * A MAP. The key is a candidate ref, and a ref comes back out of the rules
+   * file through parseCandidates, which admits anything Companion could name a
+   * custom variable — and `COMPANION_VARIABLE_RE` allows `_`, so `__proto__`
+   * and `constructor` are both legal Companion variable names. On a plain
+   * record `observed["__proto__"] = entry` sets the prototype and the candidate
+   * disappears, and `observed["constructor"]` reads back the Object function,
+   * whose `.values` is a static METHOD — `entry.values.includes(...)` is then
+   * "not a function", thrown out of a timer callback with nobody to catch it.
+   * See learningParams for where this becomes JSON.
+   */
+  observed: ReadonlyMap<string, CandidateObservation>;
   /**
    * Why learning is over, or absent while it is still going.
    *
@@ -179,7 +191,7 @@ export interface LearningState {
 }
 
 /** Nothing observed yet. */
-const EMPTY: LearningState = { attempts: 0, observed: {} };
+const EMPTY: LearningState = { attempts: 0, observed: new Map() };
 
 /**
  * How many observed presses learning gets before it stops.
@@ -226,7 +238,7 @@ export function parseLearning(params: Record<string, string | number>): Learning
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return EMPTY;
   const rec = parsed as Record<string, unknown>;
-  const observed: Record<string, CandidateObservation> = {};
+  const observed = new Map<string, CandidateObservation>();
   for (const [ref, entry] of Object.entries(
     typeof rec.observed === "object" && rec.observed && !Array.isArray(rec.observed)
       ? (rec.observed as Record<string, unknown>)
@@ -241,7 +253,7 @@ export function parseLearning(params: Record<string, string | number>): Learning
     };
     if (typeof e.on === "string") observation.on = e.on;
     if (typeof e.off === "string") observation.off = e.off;
-    observed[ref] = observation;
+    observed.set(ref, observation);
   }
   const state: LearningState = {
     attempts: Number.isFinite(rec.attempts) ? Math.max(0, Math.trunc(Number(rec.attempts))) : 0,
@@ -273,7 +285,11 @@ export function learningParams(
 ): Record<string, string> {
   return {
     stateCandidates: candidates.join(","),
-    stateLearning: JSON.stringify(state),
+    // `observed` is a Map and JSON.stringify writes a Map as `{}`. This is the
+    // one place it becomes an object; Object.fromEntries defines own
+    // properties, so a candidate named `__proto__` is a key in the document
+    // rather than a prototype swap, and parseLearning reads it back.
+    stateLearning: JSON.stringify({ ...state, observed: Object.fromEntries(state.observed) }),
   };
 }
 
@@ -318,9 +334,9 @@ export function shouldProbe(
 export interface Observation {
   want: "on" | "off";
   /** Value per candidate ref as read at the start of the window. */
-  before: Record<string, string>;
+  before: ReadonlyMap<string, string>;
   /** Value per candidate ref as read once it settled, or absent when unread. */
-  after: Record<string, string>;
+  after: ReadonlyMap<string, string>;
 }
 
 /** A binding learning has decided on. */
@@ -361,31 +377,31 @@ export function observePress(
   observation: Observation,
   candidates: readonly string[],
 ): LearnOutcome {
-  const observed: Record<string, CandidateObservation> = {};
+  const observed = new Map<string, CandidateObservation>();
   // Carried across from the previous rounds first, so a candidate that moved
   // two presses ago is still remembered.
-  for (const [ref, entry] of Object.entries(previous.observed)) {
-    if (candidates.includes(ref)) observed[ref] = { ...entry, values: [...entry.values] };
+  for (const [ref, entry] of previous.observed) {
+    if (candidates.includes(ref)) observed.set(ref, { ...entry, values: [...entry.values] });
   }
 
   for (const ref of candidates) {
-    const before = observation.before[ref];
-    const after = observation.after[ref];
+    const before = observation.before.get(ref);
+    const after = observation.after.get(ref);
     // Either read failed. Not a hit and not a disqualification: an unreachable
     // Companion mid-window must not make a candidate look static.
     if (before === undefined || after === undefined) continue;
     if (before === after) continue;
-    const entry = observed[ref] ?? { values: [] };
+    const entry = observed.get(ref) ?? { values: [] };
     entry[observation.want] = after;
     if (!entry.values.includes(after)) entry.values.push(after);
-    observed[ref] = entry;
+    observed.set(ref, entry);
   }
 
   const attempts = previous.attempts + 1;
-  const qualified = candidates.filter((ref) => qualifies(observed[ref]));
+  const qualified = candidates.filter((ref) => qualifies(observed.get(ref)));
   if (qualified.length > 0) {
     const chosen = pickCandidate(qualified);
-    const entry = observed[chosen]!;
+    const entry = observed.get(chosen)!;
     return {
       state: {
         attempts,

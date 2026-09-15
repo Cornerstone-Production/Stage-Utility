@@ -33,7 +33,13 @@
 // Open, like `GET /api/cues/states` and the YAML: it carries cue names and
 // on/off, never a token.
 
-import { cuePairs, isHiddenFromHome, isTogglePair, spokenCueName } from "./cue-pairs.js";
+import {
+  cuePairs,
+  isHiddenFromHome,
+  isPairHalfName,
+  isTogglePair,
+  spokenCueName,
+} from "./cue-pairs.js";
 import { readFingerprint } from "./companion-fingerprint.js";
 import { scrub } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
@@ -155,7 +161,7 @@ export async function cueManifest(): Promise<CueManifest> {
       hidden += 1;
       continue;
     }
-    const row = states?.states[pair.base];
+    const row = states?.states.get(pair.base);
     const entry: ManifestSwitch = {
       id: pair.base,
       name: spokenName(pair.on, pair.base),
@@ -187,7 +193,7 @@ export async function cueManifest(): Promise<CueManifest> {
     // a momentary button for the moment between the two deletes, and Home
     // Assistant created and removed an entity for it. Half a switch is not a
     // thing anyone should be able to press from Home.
-    if (/_(on|off)$/.test(cue)) continue;
+    if (isPairHalfName(cue)) continue;
     if (isHiddenFromHome(rule.trigger.params)) {
       hidden += 1;
       continue;

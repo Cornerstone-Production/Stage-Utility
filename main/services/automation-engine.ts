@@ -107,6 +107,22 @@ class AutomationEngine {
     await signalStore.init();
     this.rules = await automationStore.loadRules();
     this.settings = await automationStore.loadSettings();
+    // The rules file is not always something this app wrote. A restored config
+    // archive, a hand edit, a merge of two installs: all three land here
+    // unchecked, and until now the ONLY validation a cue ever got was on the
+    // create and update routes. A name the routes would refuse therefore rides
+    // in, and the consequences are downstream and silent — a base of
+    // `__proto__` is half of the pair key everything from the states route to
+    // the Home Assistant switch is keyed by.
+    //
+    // Reported, never deleted and never fatal. Deleting is destroying the
+    // operator's own work to tidy something up; throwing means one bad line in
+    // a restored archive is a server that will not boot. The line is the point:
+    // "this cue would not save today" is a question somebody can answer, and
+    // nothing said it before.
+    for (const bad of this.invalidLoadedCues()) {
+      console.warn(`[cues] rule "${scrub(bad.rule)}" would be refused if you saved it: ${scrub(bad.problem)}`);
+    }
     // Re-seeding on every init is deliberate: a restart must never inherit stale
     // edges from the previous process.
     this.prev.clear();
@@ -135,6 +151,27 @@ class AutomationEngine {
         });
       });
     }
+  }
+
+  /**
+   * The loaded rules the write path would refuse, and why.
+   *
+   * The SAME check the routes run — assertCueValid, with the rule excepted from
+   * its own clash search — rather than a second copy of the grammar that would
+   * drift from it. Returned rather than logged in place: the caller decides
+   * what to tell the operator, and init() is the only caller today.
+   */
+  private invalidLoadedCues(): { rule: string; problem: string }[] {
+    const out: { rule: string; problem: string }[] = [];
+    for (const rule of this.rules) {
+      if (rule.trigger?.id !== CALL_TRIGGER_ID) continue;
+      try {
+        this.assertCueValid(rule, rule.id);
+      } catch (err) {
+        out.push({ rule: rule.name || String(rule.trigger.params?.name ?? rule.id), problem: errorMessage(err) });
+      }
+    }
+    return out;
   }
 
   listRules(): Rule[] {
@@ -580,12 +617,7 @@ class AutomationEngine {
       // variable and the value it will hold once the device catches up, and
       // cue-states needs both to re-read it. Read from the pair here so nothing
       // downstream has to resolve the pair a second time.
-      const of = (want: "on" | "off"): CueCommand => ({
-        base: pair.base,
-        want,
-        variable: binding.variable,
-        wantValue: want === "on" ? binding.onValue : binding.offValue,
-      });
+      const of = (want: "on" | "off"): CueCommand => ({ base: pair.base, want, binding });
       if (pair.on.id === rule.id) return of("on");
       if (pair.off.id === rule.id) return of("off");
     }
@@ -635,7 +667,7 @@ class AutomationEngine {
   private async readCueState(base: string): Promise<{ state: CueStateName; value: string | null }> {
     try {
       const answer = await cueStates.read();
-      const row = answer.states[base];
+      const row = answer.states.get(base);
       return { state: row?.state ?? "unknown", value: row?.value ?? null };
     } catch (err) {
       // NOT swallowed: "unknown" IS the failure, returned to the caller — it

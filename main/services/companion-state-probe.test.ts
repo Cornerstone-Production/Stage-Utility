@@ -47,8 +47,15 @@ import type { Rule } from "../types/automation.js";
 const real = { ...stateProbeDeps };
 
 let clock = Date.parse("2026-09-10T14:00:00.000Z");
-/** What each ref answers. Anything absent is Companion's 404 sentence. */
-let values: Record<string, string> = {};
+/**
+ * What each ref answers. Anything absent is Companion's 404 sentence.
+ *
+ * A MAP for the same reason the module under test uses one: a candidate ref can
+ * be `constructor` or `__proto__` — both legal Companion custom variable names
+ * — and a record stand-in for Companion would swallow the second and answer the
+ * first with the Object function.
+ */
+let values = new Map<string, string>();
 /** Every ref that was read, in order — what an assert on the cost reads. */
 let reads: string[] = [];
 /** Set to make every read fail as a transport failure rather than a 404. */
@@ -92,7 +99,7 @@ async function tick(toMs: number): Promise<void> {
 
 beforeEach(() => {
   clock = Date.parse("2026-09-10T14:00:00.000Z");
-  values = {};
+  values = new Map();
   reads = [];
   unreachable = "";
   writes = [];
@@ -102,8 +109,9 @@ beforeEach(() => {
   stateProbeDeps.read = async (ref) => {
     reads.push(ref);
     if (unreachable) return { error: unreachable };
-    return ref in values
-      ? { value: values[ref]! }
+    const value = values.get(ref);
+    return value !== undefined
+      ? { value }
       : { error: `no such variable ${ref} in Companion` };
   };
   stateProbeDeps.setTimeout = (fn, ms) => {
@@ -221,10 +229,10 @@ describe("which pairs get probed", () => {
 
 describe("probing", () => {
   test("records only the names that exist, in candidate order", async () => {
-    values = { "Rack:status": "Standby", "Rack:power": "1" };
+    values = new Map([["Rack:status", "Standby"], ["Rack:power", "1"]]);
     const probed = await probeRefs(["Rack:status", "Rack:mute", "Rack:power"]);
     assert.deepEqual(probed?.existing, ["Rack:status", "Rack:power"]);
-    assert.deepEqual(probed?.values, { "Rack:status": "Standby", "Rack:power": "1" });
+    assert.deepEqual(probed?.values, new Map([["Rack:status", "Standby"], ["Rack:power", "1"]]));
     assert.deepEqual(reads, ["Rack:status", "Rack:mute", "Rack:power"]);
   });
 
@@ -241,7 +249,7 @@ describe("probing", () => {
       {},
       { on: { learnConnections: ["Rack"] }, off: { learnConnections: ["Rack", "Deck"] } },
     );
-    values = { "Rack:status": "Standby" };
+    values = new Map([["Rack:status", "Standby"]]);
     const outcomes = await probeStateCandidates(pairs, found);
     assert.equal(reads.length, CANDIDATE_VARIABLES.length * 2, "one GET per name per connection");
     assert.equal(new Set(reads).size, reads.length, "no name asked for twice");
@@ -253,9 +261,10 @@ describe("probing", () => {
     // The value read at probe time is the baseline the first press compares
     // against, so a candidate that has never moved is not later mistaken for a
     // two-state variable.
-    assert.deepEqual(parseLearning(outcomes[0]!.patch).observed, {
-      "Rack:status": { values: ["Standby"] },
-    });
+    assert.deepEqual(
+      [...parseLearning(outcomes[0]!.patch).observed],
+      [["Rack:status", { values: ["Standby"] }]],
+    );
   });
 
   test("writes nothing and logs nothing when Companion is unreachable", async () => {
@@ -324,7 +333,7 @@ describe("probing", () => {
     // Companion again for names it has already answered for cannot change the
     // answer unless somebody reconfigures the connection, for which there is
     // Learn again.
-    values = { "Rack:status": "Standby" };
+    values = new Map([["Rack:status", "Standby"]]);
     const { pairs, found } = pairAnd();
     const first = await probeStateCandidates(pairs, found);
     assert.equal(first[0]?.patch.stateCandidates, "Rack:status");
@@ -338,15 +347,19 @@ describe("probing", () => {
 });
 
 describe("watching a press", () => {
-  const learningOn = (candidates: string[], observed: Record<string, { values: string[] }> = {}) =>
-    learningParams(candidates, { attempts: 0, observed, probedAt: new Date(clock).toISOString() });
+  const learningOn = (candidates: string[], observed: [string, { values: string[] }][] = []) =>
+    learningParams(candidates, {
+      attempts: 0,
+      observed: new Map(observed),
+      probedAt: new Date(clock).toISOString(),
+    });
 
   test("reads only the pair's own candidates, and only after the press", async () => {
     // The cost of the press path. A pre-press read would put a Companion round
     // trip in front of every learning pair's voice call for nothing the caller
     // needs, and Companion polls the device on its own interval anyway — the
     // reason the settle window exists at all.
-    values = { "Rack:status": "Standby" };
+    values = new Map([["Rack:status", "Standby"]]);
     notePressForLearning({
       ruleId: "id-rack_on",
       base: "rack",
@@ -369,7 +382,7 @@ describe("watching a press", () => {
   test("does nothing once learning has stopped", async () => {
     const stopped = learningParams(["Rack:status"], {
       attempts: 2,
-      observed: {},
+      observed: new Map(),
       stopped: "bound",
     });
     notePressForLearning({ ruleId: "id-rack_on", base: "rack", want: "on", params: stopped });
@@ -381,7 +394,7 @@ describe("watching a press", () => {
   test("an ON press then an OFF press binds, with the right two values", async () => {
     // The whole feature, end to end over the injected clock: a device that
     // catches up two seconds after each press.
-    values = { "Rack:status": "Standby" };
+    values = new Map([["Rack:status", "Standby"]]);
     notePressForLearning({
       ruleId: "id-rack_on",
       base: "rack",
@@ -389,12 +402,12 @@ describe("watching a press", () => {
       params: learningOn(["Rack:status"]),
     });
     await tick(0);
-    values["Rack:status"] = "Active";
+    values.set("Rack:status", "Active");
     await tick(SETTLE_POLL_MS * 3);
     assert.equal(writes.length, 1, "the first press records what it saw");
     assert.equal(writes[0]?.patch.stateVariable, undefined, "one direction is not a binding");
     const after = parseLearning(writes[0]!.patch);
-    assert.deepEqual(after.observed["Rack:status"], { on: "Active", values: ["Active"] });
+    assert.deepEqual(after.observed.get("Rack:status"), { on: "Active", values: ["Active"] });
 
     notePressForLearning({
       ruleId: "id-rack_on",
@@ -403,7 +416,7 @@ describe("watching a press", () => {
       params: writes[0]!.patch,
     });
     await tick(0);
-    values["Rack:status"] = "Standby";
+    values.set("Rack:status", "Standby");
     await tick(SETTLE_POLL_MS * 3);
     assert.equal(writes.length, 2);
     assert.deepEqual(
@@ -424,7 +437,7 @@ describe("watching a press", () => {
     // Re-reading a candidate whose settled value is already known costs seven
     // more GETs to learn nothing — and it only shows up with a SECOND candidate
     // still moving, because a window in which everything has moved ends early.
-    values = { "Rack:status": "Standby", "Rack:mute": "0" };
+    values = new Map([["Rack:status", "Standby"], ["Rack:mute", "0"]]);
     notePressForLearning({
       ruleId: "id-rack_on",
       base: "rack",
@@ -432,7 +445,7 @@ describe("watching a press", () => {
       params: learningOn(["Rack:status", "Rack:mute"]),
     });
     await tick(0);
-    values["Rack:status"] = "Active";
+    values.set("Rack:status", "Active");
     await tick(SETTLE_MS + SETTLE_POLL_MS);
     assert.deepEqual(
       reads.filter((r) => r === "Rack:status"),
@@ -447,7 +460,7 @@ describe("watching a press", () => {
   });
 
   test("a candidate that never moves is polled to the end of the window and ruled out", async () => {
-    values = { "Rack:status": "Standby" };
+    values = new Map([["Rack:status", "Standby"]]);
     notePressForLearning({
       ruleId: "id-rack_on",
       base: "rack",
@@ -457,7 +470,7 @@ describe("watching a press", () => {
     await tick(SETTLE_MS + SETTLE_POLL_MS);
     assert.equal(reads.length, 1 + SETTLE_MS / SETTLE_POLL_MS, "one read per second, once each");
     assert.equal(writes.length, 1);
-    assert.deepEqual(parseLearning(writes[0]!.patch).observed, {}, "nothing was learned");
+    assert.deepEqual([...parseLearning(writes[0]!.patch).observed], [], "nothing was learned");
     assert.equal(parseLearning(writes[0]!.patch).attempts, 1, "the press is still spent");
   });
 
@@ -466,7 +479,7 @@ describe("watching a press", () => {
     const realWarn = console.warn;
     console.warn = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
     try {
-      values = { "Rack:status": "Standby" };
+      values = new Map([["Rack:status", "Standby"]]);
       let params: Record<string, string | number> = learningOn(["Rack:status"]);
       for (let i = 0; i < 3; i++) {
         notePressForLearning({ ruleId: "id-rack_on", base: "rack", want: "on", params });
@@ -484,18 +497,18 @@ describe("watching a press", () => {
   });
 
   test("a second press inside the window restarts the watch rather than running two", async () => {
-    values = { "Rack:status": "Standby" };
+    values = new Map([["Rack:status", "Standby"]]);
     const params = learningOn(["Rack:status"]);
     notePressForLearning({ ruleId: "id-rack_on", base: "rack", want: "on", params });
     await tick(SETTLE_POLL_MS);
     notePressForLearning({ ruleId: "id-rack_on", base: "rack", want: "off", params });
-    values["Rack:status"] = "Idle";
+    values.set("Rack:status", "Idle");
     await tick(SETTLE_MS + SETTLE_POLL_MS);
     // ONE write, for the second press's direction. Two watches on one pair
     // would attribute the same movement to both directions and bind a variable
     // from a single press.
     assert.equal(writes.length, 1);
-    assert.deepEqual(parseLearning(writes[0]!.patch).observed["Rack:status"], {
+    assert.deepEqual(parseLearning(writes[0]!.patch).observed.get("Rack:status"), {
       off: "Idle",
       values: ["Idle"],
     });
@@ -506,7 +519,7 @@ describe("watching a press", () => {
     const realWarn = console.warn;
     console.warn = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
     try {
-      values = { "Rack:status": "Standby" };
+      values = new Map([["Rack:status", "Standby"]]);
       writeFails = "EROFS: read-only file system";
       notePressForLearning({
         ruleId: "id-rack_on",
@@ -515,7 +528,7 @@ describe("watching a press", () => {
         params: learningOn(["Rack:status"]),
       });
       await tick(0);
-      values["Rack:status"] = "Active";
+      values.set("Rack:status", "Active");
       await tick(SETTLE_POLL_MS * 2);
     } finally {
       console.warn = realWarn;
@@ -526,7 +539,7 @@ describe("watching a press", () => {
   });
 
   test("an unreachable Companion mid-window learns nothing and spends the press", async () => {
-    values = { "Rack:status": "Standby" };
+    values = new Map([["Rack:status", "Standby"]]);
     notePressForLearning({
       ruleId: "id-rack_on",
       base: "rack",
@@ -537,6 +550,53 @@ describe("watching a press", () => {
     unreachable = "fetch failed";
     await tick(SETTLE_MS + SETTLE_POLL_MS);
     assert.equal(writes.length, 1);
-    assert.deepEqual(parseLearning(writes[0]!.patch).observed, {});
+    assert.deepEqual([...parseLearning(writes[0]!.patch).observed], []);
+  });
+});
+
+// ── A candidate ref that is a key on Object.prototype ────────────────────────
+//
+// The learn-side guards are in companion-state-learn.test.ts. This is the one
+// that matters operationally: the fold runs inside the settle window, off a
+// `void poll(watch)` timer callback with no catch above it, so a throw there is
+// an unhandled rejection — which is a process exit under Node's default. A
+// candidate called `constructor` used to do exactly that:
+//
+//   TypeError: entry.values.includes is not a function
+//
+// `constructor` is a legal Companion custom variable name (COMPANION_VARIABLE_RE
+// allows letters, digits, `_`, `.` and `-`), and a candidate list comes back out
+// of automation-rules.json — a restored config archive, or a hand edit.
+describe("a candidate ref that is a key on Object.prototype", () => {
+  const hand = (candidates: string) => ({
+    stateCandidates: candidates,
+    stateLearning: JSON.stringify({ attempts: 0, observed: {}, probedAt: new Date(clock).toISOString() }),
+  });
+
+  test("a `constructor` candidate is folded in rather than taking the process down", async () => {
+    values = new Map([["constructor", "Idle"]]);
+    notePressForLearning({ ruleId: "id-rack_on", base: "rack", want: "on", params: hand("constructor") });
+    await tick(0);
+    values.set("constructor", "Active");
+    await tick(SETTLE_POLL_MS * 3);
+    assert.equal(writes.length, 1, "the observation was never written");
+    assert.deepEqual(
+      [...parseLearning(writes[0]!.patch).observed],
+      [["constructor", { on: "Active", values: ["Active"] }]],
+    );
+  });
+
+  test("a `__proto__` candidate is remembered, and pollutes nothing", async () => {
+    values = new Map([["__proto__", "Idle"]]);
+    notePressForLearning({ ruleId: "id-rack_on", base: "rack", want: "on", params: hand("__proto__") });
+    await tick(0);
+    values.set("__proto__", "Active");
+    await tick(SETTLE_POLL_MS * 3);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(
+      [...parseLearning(writes[0]!.patch).observed],
+      [["__proto__", { on: "Active", values: ["Active"] }]],
+    );
+    assert.equal((({}) as Record<string, unknown>).on, undefined, "Object.prototype was polluted");
   });
 });

@@ -148,22 +148,25 @@ export interface StateRow {
  * pair reading on whatever the device is doing, saved by housekeeping, with no
  * 400 anywhere to catch it. The test walks every row.
  */
-export const STATE_SOURCES: Readonly<Record<string, readonly StateRow[]>> = {
+export const STATE_SOURCES: ReadonlyMap<string, readonly StateRow[]> = new Map<
+  string,
+  readonly StateRow[]
+>([
   // Both kasa modules answer On/Off on the same variable name.
-  "tplink-kasasmartplug": [
+  ["tplink-kasasmartplug", [
     { name: "power_state", on: "On", off: "Off", source: "live read, VCR-Overhead-Light" },
-  ],
-  "tplink-kasasmartbulb": [
+  ]],
+  ["tplink-kasasmartbulb", [
     { name: "power_state", on: "On", off: "Off", source: "live read, Ethan-Office-Desk-Lamp-Left" },
-  ],
-  "vizio-smartcast": [{ name: "power", on: "On", off: "Off", source: "live read, Box-Foyer-TV" }],
-  "generic-pjlink": [
+  ]],
+  ["vizio-smartcast", [{ name: "power", on: "On", off: "Off", source: "live read, Box-Foyer-TV" }]],
+  ["generic-pjlink", [
     { name: "powerState", on: "On", off: "Off", source: "live read, MA_HL_Projector" },
-  ],
+  ]],
   // A PTZ camera: a real power state, and an SD card recording that is a
   // different fact on the same connection. Both are the module's OFF/ON enum,
   // which is `OFF`/`ON` in capitals and not `Off`/`On`.
-  "panasonic-cameras": [
+  ["panasonic-cameras", [
     {
       name: "power",
       on: "ON",
@@ -178,11 +181,11 @@ export const STATE_SOURCES: Readonly<Record<string, readonly StateRow[]>> = {
       when: ["sdcardrec", "sdrecstate"],
       source: "live read SA-PTZ-Camera/recording = OFF; src/variables.js v1.2.0 ['recording','recordSD',ENUM_OFF_ON]",
     },
-  ],
+  ]],
   // OBS: a stream and a recording on one connection. The install this was built
   // against has three recording buttons and no streaming one, so a recording
   // toggle bound to `streaming` would report a stream nobody started.
-  "obs-studio": [
+  ["obs-studio", [
     {
       name: "streaming",
       on: "Live",
@@ -197,12 +200,12 @@ export const STATE_SOURCES: Readonly<Record<string, readonly StateRow[]>> = {
       when: ["record"],
       source: "live read MA_Video_Mac_Mini_OBS/recording = Stopped; 3.15.3 index.js sets Recording/Paused/Stopped",
     },
-  ],
+  ]],
   // A HyperDeck has no power state at all: `status` is its TRANSPORT, and the
   // module capitalises the first letter of the protocol's own word — so
   // `record` on the wire is `Record` in the variable, beside Stopped, Preview,
   // Play, Forward, Rewind, Jog and Shuttle.
-  "bmd-hyperdeck": [
+  ["bmd-hyperdeck", [
     {
       name: "status",
       on: "Record",
@@ -212,12 +215,12 @@ export const STATE_SOURCES: Readonly<Record<string, readonly StateRow[]>> = {
         "bmd-hyperdeck 2.5.0 src/variables.ts `newValues['status'] = capitalise(instance.transportInfo.status)`, " +
         "TransportStatus.RECORD = 'record' (hyperdeck-connection dist/enums.d.ts)",
     },
-  ],
+  ]],
   // An UltraEncode streams and records, and its two status variables read
   // `Streaming`/`Stream` and `Recording`/`Record` — the idle spellings are one
   // letter off the busy ones, which is why the ON value is the only one written
   // here and `Record` is NOT it.
-  "magewell-ultrastream": [
+  ["magewell-ultrastream", [
     {
       name: "stream_status",
       on: "Streaming",
@@ -232,11 +235,11 @@ export const STATE_SOURCES: Readonly<Record<string, readonly StateRow[]>> = {
       when: ["record"],
       source: "src/variables.ts v1.0.1 'Recording' : 'Record' — the live read was `Record`, which is IDLE",
     },
-  ],
+  ]],
   // A RED camera reports its record state as one of five words, and an empty
   // string until the camera answers at all — which is what the live read
   // returned, the cameras being powered down.
-  "red-rcp2": [
+  ["red-rcp2", [
     {
       name: "recording",
       on: "Recording",
@@ -246,8 +249,8 @@ export const STATE_SOURCES: Readonly<Record<string, readonly StateRow[]>> = {
         "red-rcp2 1.4.8 src/main.js RECORD_STATE stateMap { 0:'Idle', 1:'Recording', 2:'Finalizing', " +
         "3:'Pre-Recording', 4:'Encoding' }",
     },
-  ],
-};
+  ]],
+]);
 
 /** The definitionId of the feedback that means "this key shows a device's power". */
 const POWER_FEEDBACK = "powerstate";
@@ -324,7 +327,7 @@ function rowFor(
   moduleId: string,
   ids: { actions: readonly string[]; feedbacks: readonly string[] },
 ): StateRow | null {
-  const rows = STATE_SOURCES[moduleId.trim().toLowerCase()];
+  const rows = STATE_SOURCES.get(moduleId.trim().toLowerCase());
   if (!rows) return null;
   for (const definitionIds of [ids.actions, ids.feedbacks]) {
     for (const row of rows) {
@@ -361,7 +364,7 @@ export function learnableConnections(
   for (const entry of [...button.actions, ...button.feedbacks]) {
     const connection = connections[entry.connectionId];
     if (!connection?.label) continue;
-    if (STATE_SOURCES[connection.moduleId.trim().toLowerCase()]) continue;
+    if (STATE_SOURCES.has(connection.moduleId.trim().toLowerCase())) continue;
     if (!out.includes(connection.label)) out.push(connection.label);
   }
   return out;
