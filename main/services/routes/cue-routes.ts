@@ -50,7 +50,7 @@ import { runCompanionReconcile } from "../companion-reconcile.js";
 import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-tokens.js";
 import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
-import { cueStates } from "../cue-states.js";
+import { cueStates, cueStatesBody } from "../cue-states.js";
 import { cueManifest } from "../cue-manifest.js";
 import { stageController } from "../stage-controller.js";
 import type { Rule } from "../../types/automation.js";
@@ -169,7 +169,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // Reads Companion on demand and serves the answer for five seconds
     // (cue-states.ts), so a sensor polling every ten seconds costs one round of
     // reads and an install nobody polls costs nothing.
-    json(res, await cueStates.read());
+    json(res, cueStatesBody(await cueStates.read()));
     return;
   }
 

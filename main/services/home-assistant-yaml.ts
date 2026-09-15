@@ -49,7 +49,13 @@
 
 import { CALL_TRIGGER_ID } from "./automation-triggers.js";
 import { parseAliases } from "./cue-aliases.js";
-import { cuePairs, isHiddenFromHome, isTogglePair, type StateBinding } from "./cue-pairs.js";
+import {
+  cuePairs,
+  isHiddenFromHome,
+  isPairHalfName,
+  isTogglePair,
+  type StateBinding,
+} from "./cue-pairs.js";
 import { scrub } from "./scrub.js";
 import type { Rule } from "../types/automation.js";
 
@@ -337,8 +343,15 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     );
   }
 
-  // Every visible cue that is not half of a pair.
-  const scripts = visible.filter((c) => !paired.has(c.name));
+  // Every visible cue that is not half of a pair, and not an ORPHANED half.
+  //
+  // `projectors_on` whose `_off` half was deleted is not in `paired`, and
+  // emitted here it becomes a `script.projectors_on` somebody can press from
+  // Home — half a switch, with no way to turn the projectors back off. The
+  // manifest has filtered orphans since it was written and this did not, so a
+  // freshly downloaded fragment put the entity back. isPairHalfName is the one
+  // predicate both now ask.
+  const scripts = visible.filter((c) => !paired.has(c.name) && !isPairHalfName(c.name));
 
   // ONE disambiguation over both kinds. A switch's friendly_name and a script's
   // alias are the same thing to a voice assistant, so they cannot be separated

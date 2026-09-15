@@ -169,9 +169,14 @@ export function probeTargets(
  */
 export async function probeRefs(
   refs: readonly string[],
-): Promise<{ existing: string[]; values: Record<string, string> } | null> {
+): Promise<{ existing: string[]; values: ReadonlyMap<string, string> } | null> {
   const existing: string[] = [];
-  const values: Record<string, string> = {};
+  // A MAP, like every other ref-keyed collection in learning: a candidate ref
+  // is `<label>:<name>` when it is built here, but the same key space comes
+  // back out of the rules file through parseCandidates, where `__proto__` and
+  // `constructor` are both legal Companion variable names. See
+  // LearningState.observed.
+  const values = new Map<string, string>();
   let unreachable = "";
 
   for (let i = 0; i < refs.length && !unreachable; i += PROBE_CONCURRENCY) {
@@ -194,7 +199,7 @@ export async function probeRefs(
     for (const { ref, result } of results) {
       if ("value" in result) {
         existing.push(ref);
-        values[ref] = result.value;
+        values.set(ref, result.value);
         continue;
       }
       // "no such variable X in Companion" is the 404 sentence companion-api
@@ -240,8 +245,8 @@ export async function probeStateCandidates(
       // The baseline for the first observation: what each candidate held when
       // it was probed. Kept as the `values` seen so far so a candidate that
       // never moves is not later mistaken for a two-state variable.
-      observed: Object.fromEntries(
-        probed.existing.map((ref) => [ref, { values: [probed.values[ref]!] }]),
+      observed: new Map(
+        probed.existing.map((ref) => [ref, { values: [probed.values.get(ref)!] }]),
       ),
       probedAt: new Date(stateProbeDeps.now()).toISOString(),
       probes,
@@ -285,8 +290,8 @@ interface Watch {
    * dependency on the engine in a path that already has one for the write.
    */
   previous: LearningState;
-  before: Record<string, string>;
-  after: Record<string, string>;
+  before: Map<string, string>;
+  after: Map<string, string>;
   startedAt: number;
   timer: NodeJS.Timeout | null;
 }
@@ -341,8 +346,8 @@ export function notePressForLearning(input: {
     want: input.want,
     candidates,
     previous: state,
-    before: {},
-    after: {},
+    before: new Map(),
+    after: new Map(),
     startedAt: stateProbeDeps.now(),
     timer: null,
   };
@@ -366,8 +371,8 @@ export function notePressForLearning(input: {
 }
 
 /** Every candidate's value, the ones that could be read. */
-async function readAll(refs: readonly string[]): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
+async function readAll(refs: readonly string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
   for (let i = 0; i < refs.length; i += PROBE_CONCURRENCY) {
     const batch = refs.slice(i, i + PROBE_CONCURRENCY);
     const results = await Promise.all(
@@ -385,7 +390,7 @@ async function readAll(refs: readonly string[]): Promise<Record<string, string>>
     // A ref that could not be read is ABSENT rather than "": the pure fold
     // treats an absent reading as "no evidence" and an empty string as a real
     // value a module writes for a device it has not heard from.
-    for (const { ref, result } of results) if ("value" in result) out[ref] = result.value;
+    for (const { ref, result } of results) if ("value" in result) out.set(ref, result.value);
   }
   return out;
 }
@@ -412,16 +417,17 @@ function schedule(watch: Watch): void {
 async function poll(watch: Watch): Promise<void> {
   if (watching.get(watch.base) !== watch) return;
   watch.timer = null;
-  const pending = watch.candidates.filter((ref) => watch.after[ref] === undefined);
+  const pending = watch.candidates.filter((ref) => watch.after.get(ref) === undefined);
   const values = await readAll(pending);
   if (watching.get(watch.base) !== watch) return;
-  for (const [ref, value] of Object.entries(values)) {
-    if (watch.before[ref] !== undefined && value !== watch.before[ref]) watch.after[ref] = value;
+  for (const [ref, value] of values) {
+    const before = watch.before.get(ref);
+    if (before !== undefined && value !== before) watch.after.set(ref, value);
   }
 
   const done =
     stateProbeDeps.now() - watch.startedAt >= SETTLE_MS ||
-    watch.candidates.every((ref) => watch.after[ref] !== undefined);
+    watch.candidates.every((ref) => watch.after.get(ref) !== undefined);
   if (!done) {
     schedule(watch);
     return;
@@ -431,12 +437,12 @@ async function poll(watch: Watch): Promise<void> {
   // Every candidate that never moved settles to its pre-press value, which is
   // what the fold compares: absent would read as "could not be read" and a
   // static candidate would never be ruled out.
-  const after: Record<string, string> = { ...watch.before, ...watch.after };
+  const after = new Map([...watch.before, ...watch.after]);
   await finish(watch, after);
 }
 
 /** Fold the readings in, write the result, log what it decided. */
-async function finish(watch: Watch, after: Record<string, string>): Promise<void> {
+async function finish(watch: Watch, after: ReadonlyMap<string, string>): Promise<void> {
   const outcome = observePress(
     watch.previous,
     { want: watch.want, before: watch.before, after },
