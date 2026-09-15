@@ -24,6 +24,12 @@ manager uses Node's built-in `dgram` plus a hand-rolled OSC codec.
 The receive socket is open whether or not the OSC integration is enabled, so
 feedback arrives as soon as gear is pointed at the port.
 
+If the feedback port cannot be bound — most often another process already
+listening on it — every enabled target reports **error**, naming the port and
+the reason, even though sending is unaffected: it uses a different socket and
+keeps working. This is what tells you feedback silently stopped rather than
+leaving every target reading a false "connected".
+
 ### What a received message becomes
 
 | | |

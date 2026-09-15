@@ -179,6 +179,14 @@ const NOT_SCANNED = new Map<string, string>([
   ["app-root.ts", UNAUDITED],
   ["archive/archive-bundle.ts", UNAUDITED],
   ["archive/csv-appender.ts", UNAUDITED],
+  // Its one line reports a failed save of automation-log.json itself — a
+  // filesystem error (ENOSPC, EACCES) — never an entry's ruleName/detail/caller,
+  // which is the operator-typed content an HTTP body can reach. Audited, not
+  // just excused: there is nothing here for a request to put a newline into.
+  [
+    "automation-log.ts",
+    "logs its own save failures only (a filesystem error), never an entry's content; audited",
+  ],
   ["backup-scheduler.ts", UNAUDITED],
   ["baptism-timer-service.ts", UNAUDITED],
   ["bar-config-store.ts", UNAUDITED],
