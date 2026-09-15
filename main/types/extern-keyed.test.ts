@@ -157,7 +157,12 @@ describe("server tables keyed from outside, reached through their callers", () =
     for (const id of INHERITED) {
       assert.throws(
         () => formatCommand(id, {}),
-        new RegExp(`unknown command "${id.replace(/[$]/g, "\\$&")}"`),
+        // A predicate, not a RegExp built from the id. `id` is a prototype
+        // member name here, but the shape generalises: interpolating a value
+        // into a pattern means escaping every metacharacter correctly, and the
+        // escape this used to carry handled `$` and nothing else. Matching the
+        // string directly cannot be got wrong.
+        (err: unknown) => err instanceof Error && err.message.includes(`unknown command "${id}"`),
         `formatCommand("${id}") did not report an unknown command`,
       );
     }
