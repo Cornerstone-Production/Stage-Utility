@@ -431,6 +431,15 @@ time. The cooldown stops one flapping sensor firing repeatedly.
 baseline and is never evaluated, so an update or crash mid-service cannot read it as
 a change and fire everything at once.
 
+**A rule this build does not understand** — `automation-rules.json` travels: it is
+exported, restored onto other machines and hand-edited. A rule naming a trigger,
+condition or action this version does not have is refused and reported rather than
+guessed at. An unknown **condition** fails closed and names itself in the activity
+log, so the rule does not fire. An unknown **action** is logged as failed. An
+unknown **trigger** has no channel, so the rule simply never fires. Nothing about a
+rules file can stop the server, whatever is in it; anything it could not evaluate
+appears on `/log` under `[automation]`.
+
 The activity log records suppressions as well as fires, with the reason:
 
 ```

@@ -9,6 +9,7 @@
 import type { HomeCardSize, HomeVisibility, LayoutObject, LayoutObjectConfig } from "@main/types/views";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import type { HomeMode, HomeModeOrUnknown } from "./home-mode";
+import { externKeyed } from "@main/types/extern-keyed";
 
 /** Columns in the grid. Every size is a whole number of these. */
 export const COLUMNS = 3;
@@ -24,7 +25,7 @@ export const COLUMNS = 3;
  * What this gives up, knowingly: `M + M` is 4 over a 3-wide row, so two equal
  * halves side by side is not expressible. Thirds and 1/3 + 2/3 replace it.
  */
-export const SIZES: Record<HomeCardSize, { w: number; h: number; label: string }> = {
+export const SIZES: Record<HomeCardSize, { w: number; h: number; label: string }> = externKeyed({
   s: { w: 1, h: 1, label: "Small" },
   m: { w: 2, h: 1, label: "Medium" },
   l: { w: 2, h: 2, label: "Large" },
@@ -34,16 +35,16 @@ export const SIZES: Record<HomeCardSize, { w: number; h: number; label: string }
   // the list IS the widget. Height costs nothing in the tiling: only widths pack
   // into rows, so a taller tile cannot strand a gap the others could not.
   tall: { w: 3, h: 4, label: "Tall" },
-};
+});
 
 export const SIZE_ORDER: HomeCardSize[] = ["s", "m", "l", "xl", "tall"];
 
 /** What each visibility means, in the operator's words. */
-export const WHEN_LABELS: Record<HomeVisibility, string> = {
+export const WHEN_LABELS: Record<HomeVisibility, string> = externKeyed({
   always: "Always",
   live: "During a service",
   idle: "Rest of the week",
-};
+});
 
 /** A card's size, falling back to the registry's default for its type. */
 export function sizeOf(o: LayoutObject): HomeCardSize {

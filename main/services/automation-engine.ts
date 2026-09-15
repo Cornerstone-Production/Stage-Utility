@@ -136,7 +136,19 @@ class AutomationEngine {
       addBroadcastListener((channel, payload) => {
         // Never recurse on our own channels.
         if (channel.startsWith("automation:")) return;
-        void this.handleBroadcast(channel, payload, Date.now());
+        // The TOP of a fire-and-forget chain: the bus does not await this and
+        // there is no caller to hand a failure back to, so the operator is the
+        // caller and the server log is the return value. Bare `void` made any
+        // throw in here an unhandled rejection, which on Node's default is the
+        // process exiting — observed from a rules file whose condition id was a
+        // prototype member name, which made the registry lookup answer with
+        // `Object` and `def.holds` throw. That particular lookup is fixed at the
+        // table (see extern-keyed.ts); this is the backstop for the next one.
+        this.handleBroadcast(channel, payload, Date.now()).catch((e: unknown) => {
+          console.error(
+            `[automation] evaluating "${scrub(channel)}" threw; rules on that channel did not run: ${scrub(errorMessage(e))}`,
+          );
+        });
       });
     }
   }

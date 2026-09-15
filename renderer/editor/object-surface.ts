@@ -22,6 +22,7 @@
 
 import type { LayoutSurface } from "@main/types/views";
 import { CARD_PRESETS, CARD_RADIUS, HAIRLINE, HAIRLINE_COLOR } from "../main/layout-objects";
+import { externKeyed } from "@main/types/extern-keyed";
 
 export type SurfaceKind = LayoutSurface;
 export type TintKind = "none" | "neutral" | "green" | "red" | "amber";
@@ -34,7 +35,7 @@ export type TintKind = "none" | "neutral" | "green" | "red" | "amber";
  * layout — these are style patches, not a stored enum — and LEGACY_ELEVATED
  * below keeps an object already wearing it naming itself.
  */
-export const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
+export const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = externKeyed({
   flat: { surface: "flat", background: null, borderColor: null, borderWidth: 0 },
   // GLASS STAYS TRANSLUCENT. It is the one look whose whole point is that the
   // canvas shows through, so making it opaque would leave no way to ask for
@@ -53,7 +54,7 @@ export const SURFACE_PRESETS: Record<SurfaceKind, LayoutStyle> = {
   // be all but invisible on the black it sits on. Width matches the others; only
   // the colour is louder, because it is doing a different job.
   outline: { surface: "outline", background: null, borderColor: "rgba(255,255,255,0.35)", borderWidth: HAIRLINE, cornerRadius: CARD_RADIUS },
-};
+});
 
 export const SURFACES: { value: SurfaceKind; label: string; hint: string }[] = [
   // "None", not "Flat". Asked what the difference between Flat and Solid was,

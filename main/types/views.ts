@@ -9,6 +9,7 @@
 
 
 import type { CalendarSelection } from "./calendar.js";
+import { externKeyed } from "./extern-keyed.js";
 
 export type ViewKind =
   | "slots"
@@ -65,7 +66,7 @@ export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Ex
  * `stage-view-paths.test.tsx` renders every kind and asserts the real DOM
  * against this map, so the two cannot drift apart.
  */
-export const KIND_DRAWS_TOP_BAR: Record<ViewKind, boolean> = {
+export const KIND_DRAWS_TOP_BAR: Record<ViewKind, boolean> = externKeyed({
   slots: true,
   custom: true,
   dashboard: true,
@@ -74,7 +75,7 @@ export const KIND_DRAWS_TOP_BAR: Record<ViewKind, boolean> = {
   script: false,
   "spl-rundown": false,
   calendar: false,
-};
+});
 
 /** A live transcript line from ProdCom (pushed on "prodcom:transcript"). */
 export interface TranscriptLineDTO {

@@ -204,7 +204,10 @@ function readsByType(): Map<string, Set<string>> {
   assert.ok(element, "the <HomeCard> element was not found — its props could not be mapped");
   // What the branch reads OUTSIDE the HomeCard element applies to every home
   // card... except the wall-twin path, which only the WALL_TWIN types take.
-  const twinStart = RENDERER.findIndex((l) => l.startsWith("const WALL_TWIN = {"));
+  // Matched without its initializer, so wrapping the table (it is externKeyed(),
+  // see extern-keyed.ts) does not silently unscan the wall-twin path. The two
+  // assertions below are what keep that tolerance from passing vacuously.
+  const twinStart = RENDERER.findIndex((l) => l.startsWith("const WALL_TWIN = "));
   assert.notEqual(twinStart, -1, "WALL_TWIN was not found — the wall-twin path would go unscanned");
   const twinEnd = RENDERER.findIndex((l, i) => i > twinStart && l.startsWith("}"));
   const wallTwins = new Set<string>();

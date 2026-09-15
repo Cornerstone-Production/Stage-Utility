@@ -202,7 +202,11 @@ export type SettingKey = ToggleKey | PickKey;
  */
 export function pickedValue(card: LayoutObject, key: PickKey): string | null {
   const config = card.config as Config;
-  if (!((config.type as string) in PICKS[key])) return null;
+  // hasOwn, not `in`: the type comes off a saved card, and every prototype
+  // member is `in` a plain object — a card typed "constructor" would claim to
+  // support every picked setting. Same reasoning as isDisplayKind in
+  // routes/context.ts and extern-keyed.ts.
+  if (!Object.hasOwn(PICKS[key], config.type as string)) return null;
   const value = config[key];
   // A card saved before the field existed has no value, and neither has one
   // explicitly set to null — both are doing whatever PICK_FALLBACK names.
@@ -304,7 +308,8 @@ type Config = Record<string, unknown>;
 export function togglesFor(card: LayoutObject): CardToggle[] {
   const config = card.config as Config;
   const type = config.type as string;
-  const supports = (key: ToggleKey) => type in (APPLIES[key] as Record<string, true>);
+  // hasOwn for the same reason as pickedValue above: `type` is off a saved card.
+  const supports = (key: ToggleKey) => Object.hasOwn(APPLIES[key] as Record<string, true>, type);
   const valueOf = (spec: (typeof SPECS)[number]) =>
     spec.key in config ? config[spec.key] : spec.fallbackFor?.[type] ?? spec.fallback;
 

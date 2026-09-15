@@ -209,7 +209,10 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
       }
       // Keep the legacy single-metric fields populated (primary metric) for back-compat.
       const pk = this.current.metricKey;
-      if (pk && pk in sample.metrics) {
+      // hasOwn, not `in`: metricKey is configured, so it reaches here off disk,
+      // and `"constructor" in metrics` is true of any parsed object — which
+      // would then average a function into the Leq as NaN. See extern-keyed.ts.
+      if (pk && Object.hasOwn(sample.metrics, pk)) {
         const v = sample.metrics[pk];
         item.maxSpl = item.maxSpl == null ? v : Math.max(item.maxSpl, v);
         item.leqSpl = addLeqSample(item.leqSpl ?? null, item.sampleCount, v);

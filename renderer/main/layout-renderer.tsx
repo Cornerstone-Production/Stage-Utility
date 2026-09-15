@@ -50,6 +50,7 @@ import { TranscriptFeed } from "./transcript-feed";
 import { LiveControls } from "./live-controls";
 import { Loader2Icon, ZapIcon } from "lucide-react";
 import { displayHourCycle, formatClock } from "../lib/clock-format";
+import { externKeyed } from "@main/types/extern-keyed";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
@@ -623,11 +624,11 @@ export function obsModeText(mode: string): { active: string; idle: string } {
  * says. An explicit record rather than a prefix test: the prefix would also
  * catch a future home-streaming-* card that has no wall twin.
  */
-const WALL_TWIN = {
+const WALL_TWIN = externKeyed({
   "home-streaming": null,
   "home-streaming-resi": "Resi",
   "home-streaming-youtube": "YouTube",
-} as const;
+} as const);
 
 function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
   const c = o.config;
@@ -1880,7 +1881,7 @@ function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded";
 // A multi-metric people summary: several building-wide counts side by side (or
 // stacked), each value over a small label. All building-level (peak/min/avg are
 // not per-zone). avgService = mean peak across recorded services.
-const PEOPLE_PANEL_LABELS: Record<string, string> = {
+const PEOPLE_PANEL_LABELS: Record<string, string> = externKeyed({
   occupancy: "In room",
   peak: "Peak att.",
   attendance: "Entries (day)",
@@ -1892,7 +1893,7 @@ const PEOPLE_PANEL_LABELS: Record<string, string> = {
   avgService: "Avg / service",
   capacity: "Capacity",
   vsAverage: "vs avg",
-};
+});
 function PeoplePanel({
   config,
   people,

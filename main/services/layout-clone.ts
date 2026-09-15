@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { LayoutDTO, LayoutObject, View, ViewKind } from "../types/stage.js";
+import { externKeyed } from "../types/extern-keyed.js";
 
 // Deep-clone an object and its whole subtree, minting a fresh id at every depth.
 // Nested children must be cloned too, or duplicated Views/templates would share
@@ -100,7 +101,7 @@ export function forEachViewSourcedSlotsGrid(
  * Rundown view were both created called "Slots". Every kind now has to be named
  * here, or the build fails.
  */
-const DEFAULT_VIEW_NAMES: Record<ViewKind, string> = {
+const DEFAULT_VIEW_NAMES: Record<ViewKind, string> = externKeyed({
   slots: "Slots",
   dashboard: "Dashboard",
   stage: "Stage",
@@ -109,7 +110,7 @@ const DEFAULT_VIEW_NAMES: Record<ViewKind, string> = {
   script: "Script",
   "spl-rundown": "SPL Rundown",
   calendar: "Calendar",
-};
+});
 
 export function defaultViewName(kind: ViewKind): string {
   // The lookup can still miss: `kind` reaches here from a request body and from
