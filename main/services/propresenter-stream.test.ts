@@ -578,6 +578,16 @@ describe("the event name ProPresenter actually sends", () => {
       "timers/current",
       "timer/system_time",
     ]);
+    // Waited for, not asserted outright. `lastSubscribeBody` is set by the STUB
+    // SERVER when the request arrives; this line is written by the CLIENT in its
+    // response callback. Those are two different events, and asserting on the
+    // second after waiting for the first is a race that widens under load -- it
+    // read `0 !== 1` on a CI runner. Wait for at least one, then assert exactly
+    // one, so "said once" is still guarded.
+    await until(
+      "the streaming line to be logged",
+      () => loggedMatching(/streaming 6 endpoints from 127\.0\.0\.1:/).length > 0,
+    );
     assert.deepEqual(loggedMatching(/streaming 6 endpoints from 127\.0\.0\.1:/).length, 1);
   });
 
