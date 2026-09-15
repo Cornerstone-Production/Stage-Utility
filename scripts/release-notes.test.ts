@@ -432,11 +432,11 @@ describe("the overrides in docs/release-notes/overrides", () => {
     }
   });
 
-  it("1.18.0 corrects both trailers the release review found", () => {
+  it("1.18.0 corrects the three trailers the release review found", () => {
     // Frozen on purpose: a shipped release's overrides stop changing. Matched by
     // the SUBJECT git reports for the SHA, so a wrong SHA cannot satisfy it.
     const list = JSON.parse(fs.readFileSync(path.join(OVERRIDE_DIR, "1.18.0.json"), "utf8")) as Override[];
-    assert.equal(list.length, 2);
+    assert.equal(list.length, 3);
     const bySubject = new Map(list.map((e) => [subjectOf(e.commit), e]));
 
     const safespace = bySubject.get("fix: SafeSpace edges a pre-PR review found by driving them");
@@ -446,6 +446,14 @@ describe("the overrides in docs/release-notes/overrides", () => {
     const simulated = bySubject.get("fix(cues): the verdict line says when a dispatch was simulated");
     assert.ok(simulated, "the simulated-dispatch commit is no longer overridden — its wrong trailer wins again");
     assert.equal(simulated.betaOnly, false, "v1.17.1 logged a bare 'dispatched' in simulate mode, which is the default");
+
+    const skippedTick = bySubject.get("fix(sensource): a skipped tick defers the reading instead of killing it");
+    assert.ok(skippedTick, "the skipped-tick commit is no longer overridden — it returns to the Fixed list");
+    assert.equal(
+      skippedTick.betaOnly,
+      true,
+      "it must be held back: the SafeSpace and fast-attendance pollers it fixes do not exist at v1.17.1",
+    );
   });
 });
 

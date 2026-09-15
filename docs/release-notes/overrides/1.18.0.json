@@ -2,11 +2,16 @@
   {
     "commit": "c9d5c2994950d2356d70dc2bc0f22f755f6da34c",
     "betaOnly": true,
-    "reason": "The body says it outright — 'All five are in SafeSpace code from this branch, so none can have been hit from a stable tag' — but the Beta-only trailer was never added, and beta is never force-pushed. Without this the subject reaches an upgrader as 'SafeSpace edges a pre-PR review found by driving them', reviewer shorthand for a bug they never had, in one of twelve Fixed slots."
+    "reason": "The body says it outright \u2014 'All five are in SafeSpace code from this branch, so none can have been hit from a stable tag' \u2014 but the Beta-only trailer was never added, and beta is never force-pushed. Without this the subject reaches an upgrader as 'SafeSpace edges a pre-PR review found by driving them', reviewer shorthand for a bug they never had, in one of twelve Fixed slots."
   },
   {
     "commit": "c1d60219539cee6a7c864c368c16222a960b8f92",
     "betaOnly": false,
     "reason": "The Beta-only trailer is wrong. v1.17.1 ships both halves of this bug: automation-engine.ts reads `const verdict = result.ok ? \"dispatched\" : \"blocked (action-failed)\"` and defaults `simulate: true`, so a 1.17.1 install in its default configuration logged 'dispatched' while nothing reached a device. The trailer deletes a real fix from the notes."
+  },
+  {
+    "commit": "9c593df775c4f60d8cef3e3894c6dc4ac9776b2e",
+    "betaOnly": true,
+    "reason": "Beta-only and untrailered. The bug is that a skipped tick cancelled the reading instead of deferring it, in the SafeSpace and fast-attendance pollers -- neither of which exists at v1.17.1: that tree has zero occurrences of safespace and zero of readAttendance in sensource-service.ts. Nobody upgrading from a stable tag has the feature, let alone the bug. The omission was found after the commit was already on beta, which is never force-pushed."
   }
 ]
