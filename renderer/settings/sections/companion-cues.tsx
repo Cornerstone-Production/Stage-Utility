@@ -13,11 +13,21 @@
 // driven in a browser instead; the server side they call is covered in
 // main/services/routes/cue-routes.test.ts.
 //
-// The IMPORT dialog is the exception, in companion-import.test.tsx, because what
-// it decides is not visual: which boxes are ticked before anybody touches one,
-// and whether the second section's picks reach the request at all. Both are
-// assertable as strings, and a wrong default there creates cues that press real
-// buttons.
+// FOUR things here ARE unit-tested, because what each decides is not visual but
+// a string, a patch or an attribute — and each is a silent failure otherwise:
+//
+//   companion-import.test.tsx        which boxes are ticked before anybody
+//                                    touches one, and whether the second
+//                                    section's picks reach the request at all
+//   companion-press-fields.test.tsx  that picking a button and typing a
+//                                    coordinate both write the stored identity
+//   companion-button-status.test.tsx that the reconcile pill is absent for a
+//                                    rule never reconciled, and names the status
+//   cue-access-download.test.tsx     that the Download YAML anchor carries an
+//                                    href and a `download` attribute at all
+//
+// This list said "the IMPORT dialog is the exception", singular, while three
+// more grew beside it.
 
 import { errorMessage } from "@main/services/errors";
 import { defaultStateVariable } from "@main/services/cue-pairs";

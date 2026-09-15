@@ -294,6 +294,84 @@ describe("one rule", () => {
     assert.equal((JSON.parse(String(saved[0]?.body)) as { name: string }).name, "Screens");
   });
 
+  test("Save keeps a change the server made while the dialog was open", async () => {
+    // The hourly Companion reconcile finds a button that has moved and writes
+    // new page/row/col. The dialog has been open since before that pass. Sending
+    // the whole rule put the old coordinates back, and the cue pressed the wrong
+    // button until the next hourly pass with nothing on screen having said so.
+    await mount();
+    await openRow("Rule take_screens");
+    RULES = RULES.map((r) => ({
+      ...r,
+      action: { ...r.action, params: { page: 4, row: 2, col: 3 } },
+    }));
+    await act(async () => {
+      await client!.invalidateQueries({ queryKey: ["automation:rules"] });
+    });
+    await settle();
+
+    await typeIn(field("Name"), "Screens", "Name");
+    await press(button("Save"), "Save");
+
+    const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
+    assert.equal(body.name, "Screens");
+    assert.equal(body.action, undefined, "Save sent the action it opened with");
+    assert.deepEqual(
+      RULES[0]?.action.params,
+      { page: 4, row: 2, col: 3 },
+      "the moved button's coordinates were overwritten with the ones the dialog opened on",
+    );
+  });
+
+  test("Save carries a param the server added, alongside the one it changed", async () => {
+    // The learn pass writes what it found into the TRIGGER's params, which are
+    // the same params the cue name lives in — so a key-level diff is not enough
+    // on its own. The patch merges this dialog's changes onto what the server
+    // holds now.
+    await mount();
+    await openRow("Rule take_screens");
+    RULES = RULES.map((r) => ({
+      ...r,
+      trigger: { ...r.trigger, params: { ...r.trigger.params, stateCandidates: "kasa:power_state" } },
+    }));
+    await act(async () => {
+      await client!.invalidateQueries({ queryKey: ["automation:rules"] });
+    });
+    await settle();
+
+    await typeIn(field("Cue name"), "the_screens", "Cue name");
+    await press(button("Save"), "Save");
+
+    const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
+    assert.deepEqual(body.trigger?.params, {
+      name: "the_screens",
+      says: "the screens",
+      stateCandidates: "kasa:power_state",
+    });
+  });
+
+  test("swapping the action away and back saves the CLEARED params, not the old ones", async () => {
+    // The Action select clears the params when it swaps, so the three
+    // coordinates read 0 on screen. A patch merged onto the live action would
+    // put 1/0/1 back — a box reading 0 and a save writing 1.
+    await mount();
+    await openRow("Rule take_screens");
+    const actionSelect = () =>
+      [...document.querySelectorAll("select")].find((s) =>
+        [...s.options].some((o) => o.value === "companion.press"),
+      ) ?? null;
+    for (const id of ["log.message", "companion.press"]) {
+      await act(async () => {
+        fireEvent.change(actionSelect()!, { target: { value: id } });
+      });
+      await settle();
+    }
+    await press(button("Save"), "Save");
+
+    const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
+    assert.deepEqual(body.action, { id: "companion.press", params: {} });
+  });
+
   test("a rule that is not a cue gets no pair section and no halves", async () => {
     RULES = [
       {
@@ -384,9 +462,12 @@ describe("a pair", () => {
 
     const saved = writes();
     const on = JSON.parse(String(saved[0]?.body)) as { trigger: { params: Record<string, string> } };
-    const off = JSON.parse(String(saved[1]?.body)) as { trigger: { params: Record<string, string> } };
+    const off = JSON.parse(String(saved[1]?.body)) as { trigger?: { params: Record<string, string> } };
     assert.equal(on.trigger.params.homeAssistant, "hidden");
-    assert.notEqual(off.trigger.params.homeAssistant, "hidden");
+    // The OFF half's patch does not mention its trigger AT ALL, which is
+    // stronger than "not hidden": a patch is merged server-side, so an omitted
+    // key is the server keeping its own.
+    assert.equal(off.trigger, undefined, "the off half's trigger was rewritten for a pair setting");
   });
 
   test("a setting the OFF half carries alone is shown, and moves to the ON half", async () => {
@@ -421,6 +502,98 @@ describe("a pair", () => {
       { hidden: off.trigger.params.homeAssistant, variable: off.trigger.params.stateVariable },
       { hidden: "", variable: "" },
       "the pair's settings were left on the off half as well, free to disagree",
+    );
+  });
+
+  test("a setting the OFF half carries alone can be CLEARED, and stays cleared", async () => {
+    // The read path above only proves the dialog SHOWS an off-half setting. The
+    // writer was not symmetric with the reader: the write landed on the ON half,
+    // the fallback re-read the OFF half on the next render, and the control
+    // snapped straight back. Nothing here can be asserted without operating the
+    // control — which is why the read-path test passed on this bug.
+    RULES = [
+      cue("projectors_on", { says: "the projectors on" }),
+      cue("projectors_off", { room: "Auditorium" }),
+    ];
+    await mount();
+    await openPair("the projectors");
+    assert.equal(field("Room")?.value, "Auditorium", "the off half's room was not shown");
+
+    await typeIn(field("Room"), "", "Room");
+    assert.equal(field("Room")?.value, "", "Room repopulated itself — it cannot be cleared");
+
+    await press(button("Save"), "Save");
+    const saved = writes();
+    const on = JSON.parse(String(saved[0]?.body)) as { trigger: { params: Record<string, string> } };
+    const off = JSON.parse(String(saved[1]?.body)) as { trigger: { params: Record<string, string> } };
+    assert.deepEqual(
+      { on: on.trigger.params.room, off: off.trigger.params.room },
+      { on: "", off: "" },
+      "the cleared room came back on one of the halves",
+    );
+  });
+
+  test("a state binding the OFF half carries alone can be cleared", async () => {
+    // The worst of the three. "No state" snapped back AND the save then wrote
+    // the still-resolving off-half binding onto the ON half, actively undoing
+    // the clear.
+    RULES = [
+      cue("projectors_on", { says: "the projectors on" }),
+      cue("projectors_off", { stateVariable: "projectors_state", stateOnValue: "on", stateOffValue: "off" }),
+    ];
+    await mount();
+    await openPair("the projectors");
+    const variable = selectField("State variable");
+    assert.equal(variable?.value, "projectors_state", "the off half's binding was not shown");
+
+    await act(async () => {
+      fireEvent.change(variable!, { target: { value: "" } });
+    });
+    await settle();
+    // The control SWAPS when nothing is left to offer: with no custom variables
+    // in Companion and no stored variable, CueStateFields falls back to a text
+    // input under the same label. Either way the field has to be empty.
+    assert.equal(
+      (selectField("State variable") ?? field("State variable"))?.value,
+      "",
+      "the binding repopulated itself — No state cannot be chosen",
+    );
+
+    await press(button("Save"), "Save");
+    const saved = writes();
+    const on = JSON.parse(String(saved[0]?.body)) as { trigger: { params: Record<string, string> } };
+    const off = JSON.parse(String(saved[1]?.body)) as { trigger: { params: Record<string, string> } };
+    assert.deepEqual(
+      { on: on.trigger.params.stateVariable, off: off.trigger.params.stateVariable },
+      { on: "", off: "" },
+      "the save put the off half's binding back",
+    );
+  });
+
+  test("a hidden flag the OFF half carries alone can be turned back on", async () => {
+    RULES = [
+      cue("projectors_on", { says: "the projectors on" }),
+      cue("projectors_off", { homeAssistant: "hidden" }),
+    ];
+    await mount();
+    await openPair("the projectors");
+    const home = () => document.querySelector("[data-pair-settings] [data-cue-home]");
+    assert.equal(home()?.getAttribute("data-cue-home"), "hidden");
+
+    await press(document.querySelector('[aria-label="Shown in Home Assistant"]'), "the Home switch");
+    assert.equal(
+      home()?.getAttribute("data-cue-home"),
+      "shown",
+      "the hidden flag repopulated itself from the off half",
+    );
+
+    await press(button("Save"), "Save");
+    const saved = writes();
+    const on = JSON.parse(String(saved[0]?.body)) as { trigger: { params: Record<string, string> } };
+    const off = JSON.parse(String(saved[1]?.body)) as { trigger: { params: Record<string, string> } };
+    assert.deepEqual(
+      { on: on.trigger.params.homeAssistant, off: off.trigger.params.homeAssistant },
+      { on: "", off: "" },
     );
   });
 

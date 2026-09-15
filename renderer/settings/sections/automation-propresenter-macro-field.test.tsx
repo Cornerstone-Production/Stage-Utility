@@ -64,6 +64,9 @@ const REGISTRY = {
 let RULES: StubRule[] = [];
 /** What the macro option route answers — empty models a booth machine that is off. */
 let MACRO_ITEMS: { value: string; label: string }[] = [];
+/** The instances that did not answer. `null` models a server from before the
+ *  route carried the field at all, which must still render. */
+let MACRO_UNREACHABLE: string[] | null = null;
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
   const url = String(input);
@@ -75,7 +78,11 @@ let MACRO_ITEMS: { value: string; label: string }[] = [];
   else if (url.includes("/api/automation/plan-items")) body = { items: [] };
   else if (url.includes("/api/automation/propresenter-instances")) {
     body = { items: [{ value: "default", label: "MA" }] };
-  } else if (url.includes("/api/automation/propresenter-macros")) body = { items: MACRO_ITEMS };
+  } else if (url.includes("/api/automation/propresenter-macros")) {
+    body = MACRO_UNREACHABLE === null
+      ? { items: MACRO_ITEMS }
+      : { items: MACRO_ITEMS, unreachable: MACRO_UNREACHABLE };
+  }
   else if (url.includes("/api/rosstalk/targets")) body = { targets: [] };
   else if (url.includes("/api/rosstalk/commands")) body = [];
   else if (url.includes("/api/cues/tokens")) body = { tokens: [] };
@@ -145,8 +152,15 @@ function macroValue(): string {
   return target ? target.value : "(no macro select)";
 }
 
+/** The notice under an option field, by source, or "" when none is rendered. */
+function optionNotice(source: string): string {
+  const el = document.querySelector(`[data-option-notice="${source}"]`);
+  return el?.textContent ?? "";
+}
+
 beforeEach(() => {
   RULES = [rule("DOORS")];
+  MACRO_UNREACHABLE = null;
   MACRO_ITEMS = [
     { value: "DOORS", label: "DOORS" },
     { value: "SONG INTRO", label: "SONG INTRO" },
@@ -197,6 +211,44 @@ describe("the ProPresenter macro field", () => {
       "SONG INTRO|SONG INTRO · not found",
     ]);
     assert.equal(macroValue(), "SONG INTRO");
+  });
+
+  test("says WHICH instance did not answer when the route reports one", async () => {
+    // A single-instance site with the machine off: the list is empty and the
+    // select offers "Pick one…" and nothing else. Without this there was nothing
+    // on screen anywhere saying why, so the operator read it as "this app has
+    // forgotten my macros".
+    MACRO_ITEMS = [];
+    MACRO_UNREACHABLE = ["Chapel"];
+    await open();
+    assert.equal(
+      optionNotice("propresenter-macros"),
+      "Chapel did not answer. A macro that only lives there is missing from this list.",
+    );
+  });
+
+  test("names every instance that did not answer, plural", async () => {
+    MACRO_UNREACHABLE = ["MA", "Chapel"];
+    await open();
+    assert.equal(
+      optionNotice("propresenter-macros"),
+      "MA, Chapel did not answer. A macro that only lives there is missing from this list.",
+    );
+  });
+
+  test("a whole list says nothing", async () => {
+    MACRO_UNREACHABLE = [];
+    await open();
+    assert.equal(optionNotice("propresenter-macros"), "");
+  });
+
+  test("a server that does not send the field at all still renders", async () => {
+    // The field is newer than the route. An older server answers { items } and
+    // nothing else, and the editor has to open exactly as it did before.
+    MACRO_UNREACHABLE = null;
+    await open();
+    assert.deepEqual(macroOptions(), ["|Pick one…", "DOORS|DOORS", "SONG INTRO|SONG INTRO"]);
+    assert.equal(optionNotice("propresenter-macros"), "");
   });
 
   test("a rule with no macro chosen is NOT given a phantom option", async () => {

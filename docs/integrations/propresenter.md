@@ -175,6 +175,10 @@ not asked — marking every macro the reachable one reported as living there
 "only" states that it does not exist on the other, which is not known. The
 response names the instances that did not answer instead.
 
+When an instance does not answer, the field says which one, under the dropdown:
+`Chapel did not answer. A macro that only lives there is missing from this list.`
+A short list is then a machine that is off rather than macros that have gone.
+
 Changing an instance's host or port drops its cached list immediately, so a
 repointed instance never offers the previous machine's macros — and the address
 follows the SETTINGS, not the connection, so an instance repointed and switched

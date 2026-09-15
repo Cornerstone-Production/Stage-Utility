@@ -37,6 +37,11 @@ import {
   STATE_ON_DEFAULT,
 } from "@main/services/cue-pairs";
 import type { InferredStateSource } from "@main/services/companion-state-source";
+// The server's own shapes, imported rather than restated. Type-only, so nothing
+// these modules reach at runtime is pulled into the settings bundle.
+import type { CueStateRow } from "@main/services/cue-states";
+import type { ParamDef, Rule } from "@main/types/automation";
+import type { OptionSources } from "./automation-option-sources";
 import {
   LEARN_MAX_ATTEMPTS,
   learnAgainParams,
@@ -74,41 +79,29 @@ import { CompanionPressFields } from "./companion-cues";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
-export interface ParamSpec {
-  key: string;
-  label: string;
-  type: "number" | "string" | "enum" | "multi-enum" | "key-value";
-  min?: number;
-  max?: number;
-  options?: { value: string; label: string }[];
-  optionsFrom?: string;
-  optional?: boolean;
-  help?: string;
-  keyLabel?: string;
-  valueLabel?: string;
-}
+/**
+ * One definition as `GET /api/automation/registry` sends it — every data field
+ * of a TriggerDef, ConditionDef or ActionDef, with `didFire`/`holds`/`run`
+ * dropped on the way out.
+ *
+ * `params` is the SERVER's own {@link ParamDef}, not a copy of it. A local copy
+ * here widened one field — `optionsFrom`, a closed union of eight literals on
+ * the server — to bare `string`, and that widening is the whole reason a
+ * condition could declare `optionsFrom: "service-types"` with nothing in the
+ * renderer answering it: the select offered "Pick one…" and nothing else, and
+ * no compiler and no test could say so. Keyed off the real union,
+ * automation-option-sources.ts cannot compile until every source is answered.
+ */
 export interface Spec {
   id: string;
   label: string;
-  params: ParamSpec[];
+  params: ParamDef[];
   help?: string;
 }
 export interface Registry {
   triggers: (Spec & { channel: string })[];
   conditions: Spec[];
   actions: Spec[];
-}
-
-export interface Rule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: { id: string; params: Record<string, string | number> }[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-  confirmRequired?: boolean;
 }
 
 /**
@@ -125,21 +118,6 @@ export interface PairRowData {
   hidden: boolean;
   on: Rule;
   off: Rule;
-}
-
-/** One bound pair's state, as `GET /api/cues/states` sends it. */
-export interface CueStateRow {
-  on: string;
-  off: string;
-  variable: string;
-  value: string | null;
-  state: "on" | "off" | "unknown";
-  reason?: string;
-  /** True for up to eight seconds after a press, while `state` may still be
-   *  the pre-press reading — see `main/services/cue-states.ts`. */
-  settling?: true;
-  /** What that press asked for. Present exactly when `settling` is. */
-  commanded?: "on" | "off";
 }
 
 // ── Shared row helpers, matching the layout inspector's shape ─────────────────
@@ -192,7 +170,7 @@ function KeyValueField({
   value,
   onChange,
 }: {
-  spec: ParamSpec;
+  spec: ParamDef;
   value: string | number | undefined;
   onChange: (v: string) => void;
 }) {
@@ -270,14 +248,34 @@ function ParamField({
   spec,
   value,
   onChange,
-  dynamicOptions,
+  optionSources,
 }: {
-  spec: ParamSpec;
+  spec: ParamDef;
   value: string | number | undefined;
   onChange: (v: string | number) => void;
-  dynamicOptions: Record<string, { value: string; label: string }[]>;
+  optionSources: OptionSources;
 }) {
-  const options = spec.optionsFrom ? (dynamicOptions[spec.optionsFrom] ?? []) : (spec.options ?? []);
+  // `optionSources` is exhaustive over the closed set `optionsFrom` can name, so
+  // a source with no answer is a compile error in automation-option-sources.ts
+  // rather than an empty select the operator discovers on a Sunday.
+  //
+  // The `??` is still here, and not for that: the registry comes off the WIRE,
+  // and a kiosk tab left open across an update is an old bundle talking to a new
+  // server. A ninth source that server knows about is `undefined` here, and
+  // reading `.options` off it would throw inside the render and take the whole
+  // Automation section down — a blank page where the operator's rules were,
+  // rather than one dropdown that is short.
+  const source = spec.optionsFrom ? (optionSources[spec.optionsFrom] ?? null) : null;
+  const options = source ? source.options : (spec.options ?? []);
+  // WHY the list is short, when the source can say. Under the field, for any
+  // source — a single-instance site whose ProPresenter is off got "Pick one…"
+  // and nothing else, with nothing anywhere on screen saying the machine had not
+  // answered. Renders nothing at all when the list is whole, which is normally.
+  const notice = source?.notice ? (
+    <span data-option-notice={spec.optionsFrom} className="block pt-0.5 text-caption2 text-amber-11">
+      {source.notice}
+    </span>
+  ) : null;
 
   if (spec.type === "key-value") {
     return <KeyValueField spec={spec} value={value} onChange={onChange} />;
@@ -305,37 +303,46 @@ function ParamField({
             written is gone from the list while the rule still names it. Select
             carries a stored value with no matching option as its own option
             rather than rendering blank — see missingValue in select.tsx. */}
-        <Select value={current} onValueChange={onChange}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>
-            {options.map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <>
+          <Select value={current} onValueChange={onChange}>
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>
+              {options.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {notice}
+        </>
       </Row>
     );
   }
   // A string param can still name a runtime source. It stays typeable on purpose:
   // the list only knows the plan that is loaded right now, and a rule is written
   // for every week — so picking is a convenience, not a constraint.
-  if (spec.optionsFrom && options.length > 0) {
+  if (spec.optionsFrom) {
     const listId = `opts-${spec.optionsFrom}`;
+    // `list` only when there is something to suggest: an input bound to an empty
+    // datalist draws a picker affordance in some browsers and opens on nothing.
+    const hasList = options.length > 0;
     return (
       <Row label={spec.label} hint={spec.help}>
         <>
           <Input
             value={String(value ?? "")}
-            list={listId}
+            list={hasList ? listId : undefined}
             onChange={(e) => onChange(e.target.value)}
             className="h-7 text-footnote"
           />
-          <datalist id={listId}>
-            {options.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </datalist>
+          {hasList && (
+            <datalist id={listId}>
+              {options.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </datalist>
+          )}
+          {notice}
         </>
       </Row>
     );
@@ -773,7 +780,7 @@ export function RuleEditorBody({
   draft,
   setDraft,
   registry,
-  dynamicOptions,
+  optionSources,
   customVariables,
   appSources,
   inferredSource,
@@ -784,7 +791,7 @@ export function RuleEditorBody({
   draft: Rule;
   setDraft: (next: Rule) => void;
   registry: Registry;
-  dynamicOptions: Record<string, { value: string; label: string }[]>;
+  optionSources: OptionSources;
   customVariables: string[];
   /** App state sources whose integration is set up. See useConfiguredIntegrations. */
   appSources: string[];
@@ -851,7 +858,7 @@ export function RuleEditorBody({
             key={p.key}
             spec={p}
             value={draft.trigger.params[p.key]}
-            dynamicOptions={dynamicOptions}
+            optionSources={optionSources}
             onChange={(v) => setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, [p.key]: v } } })}
           />
         ))}
@@ -927,7 +934,7 @@ export function RuleEditorBody({
                 key={p.key}
                 spec={p}
                 value={c.params[p.key]}
-                dynamicOptions={dynamicOptions}
+                optionSources={optionSources}
                 onChange={(v) => {
                   const next = [...draft.conditions];
                   next[i] = { ...c, params: { ...c.params, [p.key]: v } };
@@ -992,7 +999,7 @@ export function RuleEditorBody({
             key={p.key}
             spec={p}
             value={draft.action.params[p.key]}
-            dynamicOptions={dynamicOptions}
+            optionSources={optionSources}
             onChange={(v) => setDraft({ ...draft, action: { ...draft.action, params: { ...draft.action.params, [p.key]: v } } })}
           />
         ))
@@ -1065,6 +1072,79 @@ function pairStateParams(
 
 const roomOf = (params: Record<string, string | number>): string => String(params.room ?? "").trim();
 
+/** One trigger or action, as a rule stores it. */
+type RuleStep = Rule["trigger"];
+
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * One trigger or action as it should be SAVED, or null when this dialog changed
+ * nothing about it.
+ *
+ * `live` is what the server holds now, as of this page's last read; `seed` is
+ * what the drafts were built from when the dialog opened. Merging this dialog's
+ * own changes onto `live` is what keeps a concurrent server write: the hourly
+ * Companion reconcile rewrites a moved button's page/row/col and fingerprint,
+ * and the learn pass writes what it found into the trigger's params — both into
+ * fields nobody has on screen, and both lost if Save sent the whole step.
+ */
+function mergedStep(seed: RuleStep, draft: RuleStep, live: RuleStep): RuleStep | null {
+  if (same(draft, seed)) return null;
+  // A DIFFERENT trigger or action. Its params are a fresh set — the Select that
+  // swaps one clears them — so merging the old ones in would carry settings over
+  // from a step that is gone.
+  if (draft.id !== seed.id) return draft;
+  // A key the seed had and the draft does not is a RESET, not an edit — swapping
+  // the action away and back clears its params. Merging onto the live step would
+  // put the old values back, so the box would read 0 and the save would write 1.
+  for (const key of Object.keys(seed.params)) if (!(key in draft.params)) return draft;
+  const changed: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(draft.params)) {
+    if (value !== seed.params[key]) changed[key] = value;
+  }
+  // The server's step is no longer the one this dialog seeded from: somebody
+  // swapped the trigger or action out from under it, and there is nothing safe
+  // to merge onto. This dialog's own view is then what gets written.
+  const base = live.id === seed.id ? live.params : draft.params;
+  return { id: draft.id, params: { ...base, ...changed } };
+}
+
+/**
+ * What this dialog CHANGED, as a patch onto whatever the server holds now.
+ *
+ * automation-engine's updateRule is `Object.assign(r, patch)`, so a key this
+ * patch omits keeps the server's own value. Sending the whole rule instead — as
+ * this dialog did, and as the editor it replaced did with a `useResyncOn` in
+ * front of it — means every field is written back as it was when the dialog
+ * opened, however long ago that was.
+ *
+ * The case it costs: the hourly Companion reconcile finds a button that has
+ * moved and writes new coordinates. The dialog has been open since before that
+ * pass. The operator renames the rule, presses Save, and the old coordinates go
+ * back — the cue presses the wrong button until the next hourly pass, with
+ * nothing on screen having said so. companion-state-probe.ts requires the SERVER
+ * to re-read immediately before a write "never from a snapshot … an operator may
+ * have saved the rule in between"; this is the same requirement pointing the
+ * other way.
+ *
+ * Every draft is a spread of its seed, so no key is ever dropped and iterating
+ * the draft's own keys sees all of them.
+ */
+function changesOnly(seed: Rule, draft: Rule, live: Rule): Partial<Omit<Rule, "id">> {
+  const patch: Partial<Omit<Rule, "id">> = {};
+  if (draft.name !== seed.name) patch.name = draft.name;
+  if (draft.enabled !== seed.enabled) patch.enabled = draft.enabled;
+  if (draft.cooldownSec !== seed.cooldownSec) patch.cooldownSec = draft.cooldownSec;
+  if (draft.oncePerService !== seed.oncePerService) patch.oncePerService = draft.oncePerService;
+  if (draft.confirmRequired !== seed.confirmRequired) patch.confirmRequired = draft.confirmRequired;
+  if (!same(draft.conditions, seed.conditions)) patch.conditions = draft.conditions;
+  const trigger = mergedStep(seed.trigger, draft.trigger, live.trigger);
+  if (trigger) patch.trigger = trigger;
+  const action = mergedStep(seed.action, draft.action, live.action);
+  if (action) patch.action = action;
+  return patch;
+}
+
 /**
  * The rule editor, over the list.
  *
@@ -1078,7 +1158,7 @@ export function RuleEditorDialog({
   target,
   onClose,
   registry,
-  dynamicOptions,
+  optionSources,
   customVariables,
   appSources,
   inferredFor,
@@ -1087,7 +1167,7 @@ export function RuleEditorDialog({
   target: RuleEditorTarget;
   onClose: () => void;
   registry: Registry;
-  dynamicOptions: Record<string, { value: string; label: string }[]>;
+  optionSources: OptionSources;
   customVariables: string[];
   appSources: string[];
   inferredFor: (rule: Rule) => InferredStateSource | null;
@@ -1096,6 +1176,24 @@ export function RuleEditorDialog({
   const isPair = target.kind === "pair";
   const [onDraft, setOnDraft] = useState<Rule>(isPair ? target.pair.on : target.rule);
   const [offDraft, setOffDraft] = useState<Rule | null>(isPair ? target.pair.off : null);
+  /**
+   * The rules the drafts were SEEDED from, frozen at open.
+   *
+   * `target` is re-resolved from the live query on every render, so it moves
+   * when the server writes; this does not. The difference between the two is
+   * what somebody else changed while this dialog was open, and the difference
+   * between a draft and this is what the operator changed — see `changesOnly`.
+   *
+   * A ref, and initialised once: the dialog is keyed `${kind}:${id}` upstream,
+   * which does NOT change when the rule's contents change, so a `useState`
+   * seeded from `target` would be reseeded by nothing and a dependency on
+   * `target` would reseed it on every server write, throwing away the edit in
+   * progress. That is what the editor this replaced did.
+   */
+  const seed = useRef<{ on: Rule; off: Rule | null }>({
+    on: isPair ? target.pair.on : target.rule,
+    off: isPair ? target.pair.off : null,
+  });
   const [half, setHalf] = useState<"on" | "off">("on");
   const [busy, setBusy] = useState(false);
 
@@ -1124,8 +1222,40 @@ export function RuleEditorDialog({
 
   const title = isPair ? target.pair.name : onDraft.name;
 
+  /**
+   * A pair setting: written to the ON half, and CLEARED on the OFF one.
+   *
+   * SYMMETRIC WITH HOW IT IS READ. Each of the three settings above is the ON
+   * half's value with the OFF half's as a fallback, so a write that touched only
+   * the ON half left the old value sitting on the OFF half — the fallback read
+   * it back on the very next render and the control snapped straight back to
+   * where it was. Three settings were in that state (Home Assistant, Room, the
+   * state binding); the fourth, the service guard, was already symmetric because
+   * it has no fallback to read.
+   *
+   * A pair whose off cue carried `room: "Auditorium"` — which the 1.14 editor
+   * allowed — could not have its Room cleared AT ALL. The state binding was
+   * worse than stuck: choosing "No state" snapped back, and the save then wrote
+   * the still-resolving off-half binding onto the on half, actively undoing the
+   * clear the operator had asked for.
+   *
+   * The off half is touched only where it actually carries the key. Writing a
+   * blank into every pair's off rule would rewrite half the rules file to say
+   * nothing — the same rule `offHalfPatch` follows on save — and returning the
+   * draft unchanged keeps this off the render path for the ordinary pair that
+   * carries nothing on its off half.
+   */
   function setPairParams(patch: Record<string, string>) {
     setOnDraft((d) => ({ ...d, trigger: { ...d.trigger, params: { ...d.trigger.params, ...patch } } }));
+    setOffDraft((d) => {
+      if (d === null) return d;
+      const cleared: Record<string, string> = {};
+      for (const key of Object.keys(patch)) {
+        if (String(d.trigger.params[key] ?? "").trim() !== "") cleared[key] = "";
+      }
+      if (Object.keys(cleared).length === 0) return d;
+      return { ...d, trigger: { ...d.trigger, params: { ...d.trigger.params, ...cleared } } };
+    });
   }
 
   function setPairAllowed(allowed: boolean) {
@@ -1179,10 +1309,22 @@ export function RuleEditorDialog({
       // ON FIRST. It is where the pair's settings live, so a failure on the off
       // half leaves the pair's own settings saved rather than a rules file
       // where the off half claims settings the on half no longer has.
-      await invoke("automation:updateRule", { id: onDraft.id, patch: onHalfPatch() });
-      if (offDraft) {
+      // ONLY WHAT CHANGED, and merged onto what the server holds NOW. Both
+      // halves are still written, and in this order, even when one of them has
+      // nothing in it: the ordering is the guarantee, and an empty patch is a
+      // no-op the server already handles.
+      const liveOn = isPair ? target.pair.on : target.rule;
+      await invoke("automation:updateRule", {
+        id: onDraft.id,
+        patch: changesOnly(seed.current.on, onHalfPatch(), liveOn),
+      });
+      if (offDraft && seed.current.off) {
         writing = "Turn off";
-        await invoke("automation:updateRule", { id: offDraft.id, patch: offHalfPatch(offDraft) });
+        const liveOff = isPair ? target.pair.off : seed.current.off;
+        await invoke("automation:updateRule", {
+          id: offDraft.id,
+          patch: changesOnly(seed.current.off, offHalfPatch(offDraft), liveOff),
+        });
       }
       onClose();
     } catch (e) {
@@ -1354,7 +1496,7 @@ export function RuleEditorDialog({
             draft={selected}
             setDraft={(next) => setSelected(next)}
             registry={registry}
-            dynamicOptions={dynamicOptions}
+            optionSources={optionSources}
             customVariables={customVariables}
             appSources={appSources}
             inferredSource={inferredFor(selected)}
