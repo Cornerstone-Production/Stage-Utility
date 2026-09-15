@@ -180,6 +180,25 @@ export { hostnameOf, isCrossOrigin } from "./http-origin.js";
 /** Methods that change server state, and so must be same-origin. */
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * What an unhandled throw out of a route module answers.
+ *
+ * Some failures are the caller's situation, not a broken server, and the
+ * difference matters to the UI: an oversized body is 413, and editing a service
+ * that is recording right now is 409. Anything a route did not deliberately
+ * label stays a 500 — a status is opt-in so a stray `status` field on some
+ * unrelated error cannot turn a real fault into a 2xx-ish answer the caller
+ * shrugs off.
+ *
+ * EXPORTED so a route test can assert the status a throw becomes without
+ * writing a second copy of this rule. callRoute stops at the route, so the only
+ * alternative is a test that restates the mapping and then agrees with itself.
+ */
+export function handlerErrorStatus(err: unknown): number {
+  const declared = (err as { status?: number } | null)?.status;
+  return declared === 413 || declared === 409 ? declared : 500;
+}
+
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
 // Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
@@ -572,14 +591,7 @@ export class RemoteServer {
         await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
       } catch (err) {
         const msg = errorMessage(err);
-        // Some failures are the caller's situation, not a broken server, and the
-        // difference matters to the UI: an oversized body is 413, and editing a
-        // service that is recording right now is 409. Anything a route did not
-        // deliberately label stays a 500 — a status is opt-in so a stray `status`
-        // field on some unrelated error cannot turn a real fault into a 2xx-ish
-        // answer the caller shrugs off.
-        const declared = (err as { status?: number })?.status;
-        const status = declared === 413 || declared === 409 ? declared : 500;
+        const status = handlerErrorStatus(err);
         console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
         // The reader paused an over-limit body rather than destroying the socket,
         // so the response reaches the client; closing after it releases the rest.

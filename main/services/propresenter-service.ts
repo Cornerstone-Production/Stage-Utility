@@ -112,6 +112,26 @@ const SOCKET_KEEPALIVE_MS = 30_000;
 const STREAM_IDLE_MS = 15_000;
 
 /**
+ * How many consecutive streams may deliver NOTHING before the badge says so.
+ *
+ * A ProPresenter whose HTTP server is alive but whose update publisher is wedged
+ * accepts the subscription, emits zero bytes and loops: report("connected") ->
+ * the watchdog above -> endStream -> reconnect -> /version answers -> repeat.
+ * endStream deliberately leaves the badge alone, reasoning that "the next
+ * connect() probes /version, and a machine that is genuinely gone fails THERE" —
+ * which holds only when /version also fails. Here it does not, so the card stays
+ * green while every stage display shows the slide from before the wedge:
+ * precisely what STREAM_IDLE_MS's own note says it exists to prevent, arriving
+ * by the other door.
+ *
+ * Two, not one: a single silent stream is one subscribe that lost a race, and
+ * two is about thirty-five seconds — fast enough to matter during a service and
+ * slow enough that a re-dial across a flapping switch port does not flap the
+ * card with it.
+ */
+const SILENT_STREAMS_BEFORE_ERROR = 2;
+
+/**
  * Buffer cap for this stream, four times the shared default.
  *
  * `presentation/active` carries the whole document — every group, slide, note and
@@ -533,6 +553,25 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   /** STREAM_IDLE_MS, as an instance field so a test can shorten it rather than
    *  spend fifteen seconds proving the watchdog fires. */
   private streamIdleMs = STREAM_IDLE_MS;
+  /** Has the CURRENT stream delivered a single byte? Set by the data handler,
+   *  cleared when a stream opens. A stream that ends having delivered nothing is
+   *  a wedged publisher, not an outage — see SILENT_STREAMS_BEFORE_ERROR. */
+  private streamHadData = false;
+  /** Consecutive streams that ended having delivered nothing. */
+  private silentStreams = 0;
+  /**
+   * Fires once the current stream has lasted long enough to be worth forgiving
+   * the back-off for — see sustainMs(). Null while nothing is held.
+   *
+   * The reset used to live in the 'data' handler, whose own comment says data
+   * rather than a 2xx is what proves a stream is real. It is not enough: a peer
+   * that sends its six-frame subscribe snapshot and hangs up delivers data every
+   * time, so `attempt` went back to 0 on every cycle. The delay then never left
+   * the 5s base, and `const first = this.attempt === 0` in endStream was always
+   * true — so the line that is supposed to be said once was written every five
+   * to twenty seconds, indefinitely.
+   */
+  private sustainTimer: ReturnType<typeof setTimeout> | null = null;
   /** PLAYLIST_RETRY_BASE_MS and PLAYLIST_RETRY_MAX_MS, for the same reason: the
    *  doubling and the ceiling are only observable by letting real deadlines
    *  elapse, and at the shipped numbers that is thirty minutes of waiting. A
@@ -572,14 +611,50 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     return this.getLatest();
   }
 
-  configure(host: string, port: number, pollMs?: number): void {
-    this.host = host?.trim() || null;
-    this.port = port > 0 ? Math.floor(port) : null;
+  /**
+   * Point this instance at a machine — WHERE, and nothing about WHETHER.
+   *
+   * Split from start()/stop() because the two used to be one call and the target
+   * then outlived the lifecycle. `this.host` and `this.port` were written here
+   * and nowhere else, and both disable paths (the integration switched off, or
+   * the host cleared) call stop() WITHOUT calling this — so the old address
+   * survived. The consequences were live:
+   *
+   *   Host is auditorium A. The operator changes it to B and unticks Enabled in
+   *   one save. stop() drops the macro cache; the host stays A. The rule editor
+   *   asks every instance with `hasTarget`, which is still true, reads MACHINE A,
+   *   and offers A's macros as this instance's. They pick one that does not exist
+   *   on B and it 404s on Sunday. That is verbatim the failure b12bda22 was
+   *   written to prevent — that commit closed the stale-CACHE door and this is
+   *   the stale-TARGET door beside it.
+   *
+   * Called on every apply pass with whatever the settings currently say, so
+   * clearing the host makes `hasTarget` false the moment the operator saves.
+   *
+   * A changed target tears down; an unchanged one does NOT. The poll interval is
+   * not a reason to drop a healthy stream — and it was: the manager calls the
+   * apply pass on every settings write, so a bare interval change re-dialled the
+   * booth machine, and listMacros() reported a perfectly healthy machine as
+   * "reconfigured while its macros were being read" because the epoch had moved
+   * under a save that changed nothing about where to dial.
+   */
+  setTarget(host: string | null, port: number | null, pollMs?: number): void {
+    const nextHost = host?.trim() || null;
+    const nextPort = port && port > 0 ? Math.floor(port) : null;
+    const moved = nextHost !== this.host || nextPort !== this.port;
+    this.host = nextHost;
+    this.port = nextPort;
     // Clamp to a sane floor so a bad setting can't hammer ProPresenter. Only the
-    // fallback poll reads this; the stream has no cadence to set.
+    // fallback poll reads this, and it reads the field live, so a change takes
+    // effect on the next cycle without a reconnect.
     this.pollMs = pollMs && pollMs >= 200 ? Math.floor(pollMs) : POLL_INTERVAL_MS;
-    this.resetReport();
-    this.restart();
+    if (!moved) return;
+    // Everything this instance has learned belongs to the machine it is leaving:
+    // the macro names, the playlist, the frames, the fallback verdict. stop()
+    // bumps the epoch and teardown() drops all of it. Starting again is the
+    // caller's call, because only the caller knows whether it is switched on.
+    // stop() resets the report, so a repoint gets fresh feedback too.
+    this.stop();
   }
 
   override start(): void {
@@ -588,11 +663,35 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   }
 
   /**
+   * Is this instance switched on?
+   *
+   * Public because both appliers have to tell "I am starting this" from "this
+   * was already running": start() is a no-op on a running instance, and a row
+   * told "Connecting to h:p" that nothing then re-dials sits on that message for
+   * the rest of the service. See applyPropresenter and ProPresenterManager.apply.
+   */
+  get isRunning(): boolean {
+    return this.running;
+  }
+
+  /**
    * End this run before tearing anything down, so every continuation parked on
    * an await abandons its work when it resumes. See `epoch`.
+   *
+   * And forget what the row was last told. Every other integration resets the
+   * report in configure(), which runs on every apply pass; this one deliberately
+   * does not re-dial an unchanged target, so stop() is the only moment left that
+   * means "the operator changed something". Without it, switching the
+   * integration OFF and back ON left the row on the applier's "Connecting to
+   * h:p" for ever: the stream came straight back up, reported the identical
+   * "Streaming from h:p" it had reported before the disable, and report() —
+   * which compares the state AND the message — dropped it. A live, healthy
+   * stream under a row that says it is still connecting, and toggling an
+   * integration off and on is the first thing anybody tries.
    */
   override stop(): void {
     this.epoch++;
+    this.resetReport();
     super.stop();
   }
 
@@ -607,11 +706,17 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
    * instance been reconfigured or torn down since I captured the epoch", asked by
    * work that is legitimate on an instance that is not running.
    *
-   * listMacros is the only such caller and needs exactly this: the rule editor
-   * asks every CONFIGURED instance (`hasTarget`), and an instance whose
-   * integration is switched off is still configured, so `stale()` would report
-   * every one of its reads as abandoned and the editor would never list its
-   * macros at all.
+   * It exists for work that is legitimate on an instance that is not running:
+   * the rule editor asks every CONFIGURED instance (`hasTarget`), and an
+   * instance whose integration is switched off is still configured, so `stale()`
+   * would report every one of its reads as abandoned and the editor would never
+   * list its macros at all.
+   *
+   * listMacros used to be the only caller and no longer is one: the question
+   * there is "is this answer still about the machine I am pointed at", which the
+   * ADDRESS answers exactly and this answers too broadly — the epoch moves on
+   * any stop(), so a save that changed nothing about where to dial reported a
+   * perfectly healthy machine as unreadable. Only `stale()` composes it now.
    */
   private superseded(epoch: number): boolean {
     return epoch !== this.epoch;
@@ -653,6 +758,12 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     // restarting Stage; short of that the fallback is for the life of the run,
     // which the log line says out loud.
     this.streamFallback = false;
+    // And the silent-stream run, for the same reason the macro cache above goes:
+    // it is a fact about the machine this instance is leaving. Carried across a
+    // repoint it would put the new machine's card red on its first missed
+    // stream, or — the other way round — swallow the threshold line because the
+    // count had already passed it.
+    this.silentStreams = 0;
   }
 
   /** Hang up on the held stream and disarm everything it armed. */
@@ -662,6 +773,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       this.publishTimer = null;
     }
     this.clearIdleWatchdog();
+    this.clearSustainTimer();
     this.unreadable.clear();
     const { stream, req } = this;
     this.stream = null;
@@ -723,7 +835,6 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   async listMacros(): Promise<MacroListResult> {
     const { host, port } = this;
     if (!host || !port) return { names: [], error: "ProPresenter is not configured" };
-    const epoch = this.epoch;
     const now = Date.now();
     if (this.macroCache && now - this.macroCache.at < MACRO_CACHE_MS) {
       return { names: this.macroCache.names, error: null };
@@ -734,12 +845,19 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       // at. Returning these names would be the same lie the stale cache told,
       // one round trip wide instead of thirty seconds, so it is a returned
       // failure and nothing is cached. The next open reads the new machine.
-      if (this.superseded(epoch)) {
+      //
+      // THE TARGET, not the epoch. The question here is "is this answer still
+      // about the machine I am pointed at", and the epoch answered a broader
+      // one: it moves on any stop(), so with the old configure() a save that
+      // only changed the poll interval reported a perfectly healthy machine as
+      // unreachable and the editor showed an empty list. Comparing the address
+      // asks what the guard is actually for.
+      if (this.host !== host || this.port !== port) {
         console.warn(
           `[propresenter] macro list from ${host}:${port} discarded — ` +
-            "the instance was reconfigured while it was being read",
+            "the instance was pointed at another machine while it was being read",
         );
-        return { names: [], error: "ProPresenter was reconfigured while its macros were being read" };
+        return { names: [], error: "ProPresenter was re-pointed while its macros were being read" };
       }
       const names = Array.isArray(body)
         ? body.map((m) => asString(pick(m, "id", "name"))).filter((n): n is string => !!n)
@@ -775,6 +893,14 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     if (!name) return { ok: false, detail: "no macro chosen" };
     const { host, port } = this;
     if (!host || !port) return { ok: false, detail: `${label} is not configured` };
+    // SWITCHED OFF is not the same as unconfigured, and it is a refusal too. The
+    // action had no enablement gate at all, so a `propresenter.macro` rule
+    // firing while the operator had this integration turned off still issued a
+    // real trigger at the configured booth machine. `running` is exactly the
+    // question now that start()/stop() carry enablement alone — see setTarget.
+    if (!this.running) {
+      return { ok: false, detail: `${label} is switched off — nothing was sent to ${host}:${port}` };
+    }
     try {
       // Names contain spaces (SONG INTRO), so the name is a single encoded path
       // segment — unencoded it would be three segments and a 404 at best.
@@ -921,8 +1047,17 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
           // content-type at all, so requiring one would reject the live shape.
           this.stream = res;
           res.setEncoding("utf8");
+          this.streamHadData = false;
+          this.armSustainTimer();
           console.log(`[propresenter] streaming ${STREAM_ENDPOINTS.length} endpoints from ${host}:${port}`);
-          this.report("connected", `Streaming from ${host}:${port}`);
+          // A 2xx is NOT proof while the publisher is wedged — a 2xx is exactly
+          // what a wedged one gives, every fifteen seconds, for ever. Reporting
+          // it here unconditionally is what put the row back to green after the
+          // threshold had turned it red and left it there: the listener saw
+          // connected, error, connected, and nothing red it again because the
+          // count had already passed the threshold. Past the threshold the row
+          // waits for a BYTE (below), which a wedged publisher never sends.
+          if (this.silentStreams < SILENT_STREAMS_BEFORE_ERROR) this.reportStreaming(host, port);
 
           const reader = createSseReader({
             maxBuffer: STREAM_MAX_BUFFER,
@@ -932,11 +1067,21 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
               ),
           });
           res.on("data", (chunk: string) => {
-            // Data, not a 2xx, is what proves the stream is real. Resetting the
-            // back-off on the response header instead would let a peer that
-            // accepts the subscribe and hangs up immediately spin at the base
-            // delay for ever.
-            this.resetBackoff();
+            // Data proves the stream is REAL. It does not prove it is WORTH
+            // anything, which is why the back-off reset is not here any more: a
+            // peer that sends its subscribe snapshot and hangs up delivers data
+            // on every cycle, and resetting on it pinned the delay at the base
+            // for ever. Lasting longer than sustainMs() is what forgives the
+            // back-off now; this only records that the stream was not silent.
+            if (!this.streamHadData) {
+              this.streamHadData = true;
+              // The first byte, and the ONLY thing a wedged publisher cannot
+              // fake. For an ordinary stream this is a no-op — report() drops
+              // the identical pair already sent on the 2xx above — and past the
+              // threshold it is what clears the red row, because the 2xx no
+              // longer does.
+              this.reportStreaming(host, port);
+            }
             this.armIdleWatchdog();
             for (const event of reader.push(chunk)) this.handleStreamEvent(event.event, event.data);
           });
@@ -985,19 +1130,113 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   /** The stream is over. Log it once per outage, then back off and re-dial. */
   private endStream(reason: string): void {
     if (!this.stream && !this.req) return; // already torn down on purpose
+    const hadData = this.streamHadData;
     this.closeStream();
     if (!this.running) return;
-    // `attempt` is 0 for the first end after data last flowed, so an isolated
-    // drop is logged and a peer flapping open/closed says it once. The badge is
-    // left alone on purpose: the next connect() probes /version, and a machine
-    // that is genuinely gone fails THERE and reports the error with an address
-    // in it. Flipping it here would flap the card green/red on every reconnect.
+    // A stream that delivered NOTHING is not an outage of the machine — /version
+    // will answer, the subscribe will be accepted, and the whole cycle will
+    // repeat. Counting them is what lets the badge stop agreeing with a display
+    // that has been frozen since the publisher wedged.
+    this.silentStreams = hadData ? 0 : this.silentStreams + 1;
+    // `attempt` no longer resets on the first byte (see sustainTimer), so this
+    // really is "the first end since a stream last held", and a peer flapping
+    // open/closed says it once and then rides the ramp.
     const first = this.attempt === 0;
     this.scheduleReconnect();
     if (first) {
       console.warn(
         `[propresenter] stream ended (${reason}) — reconnecting in ${Math.round(this.nextDelayMs / 1000)}s`,
       );
+    }
+    // The badge is left alone for an ordinary drop, on purpose: the next
+    // connect() probes /version, a machine that is genuinely gone fails THERE
+    // and reports the error with an address in it, and flipping it here would
+    // flap the card green/red on every reconnect.
+    //
+    // That reasoning holds only while /version can fail. A ProPresenter whose
+    // HTTP server is alive and whose update publisher is wedged answers
+    // /version, accepts the subscribe and then says nothing — so nothing ever
+    // fails "THERE", the card stays green, and every stage display holds the
+    // slide from before the wedge.
+    //
+    // AT OR PAST the threshold, not exactly at it. Strict equality reported the
+    // wedge once, at two, and never again — so the next stream's 2xx put the row
+    // back to green and the third, fourth and fifth silent streams could not
+    // take it back. The row on a permanently wedged publisher read green, which
+    // is the whole thing this counter exists to stop.
+    if (this.silentStreams >= SILENT_STREAMS_BEFORE_ERROR) {
+      const detail =
+        `${this.host}:${this.port} accepts the status subscription and then sends nothing — ` +
+        "the displays are holding the last slide it sent. Is ProPresenter's Network view wedged?";
+      // ONCE in the log, at the threshold: an operator wants the line, not one
+      // every fifteen seconds for the rest of the service. The counter resets on
+      // the first byte of any stream, so a machine that recovers and wedges
+      // again says so again.
+      if (this.silentStreams === SILENT_STREAMS_BEFORE_ERROR) console.warn(`[propresenter] ${detail}`);
+      // EVERY time. report() drops the identical pair, so while the row is
+      // already red this costs nothing — and if anything on the stream path ever
+      // reports connected in between, the next silent stream takes it back.
+      this.report("error", detail);
+      this.goOffline();
+    }
+  }
+
+  /** "Streaming from h:p", from whichever proof of a live publisher came first —
+   *  the 2xx, or the first byte. One template, because the two have to dedupe
+   *  against each other in report(). */
+  private reportStreaming(host: string, port: number): void {
+    this.report("connected", `Streaming from ${host}:${port}`);
+  }
+
+  /**
+   * How long a stream must hold before its back-off is forgiven.
+   *
+   * TWO heartbeat windows, plus the delay that got us here — and that third term
+   * CAPPED at one more window, which is the whole point of the Math.min.
+   *
+   * Two rather than one because surviving exactly one window is a dead heat with
+   * the idle watchdog — both are armed at the same instant on the same
+   * response — and a stream that only just outlived the watchdog has proved
+   * nothing anyway. Plus the back-off, so a peer that accepts the subscription
+   * and dies cannot reset a ramp it is supposed to be climbing however far out
+   * the ramp has got. `streamIdleMs` rather than the constant, so a test that
+   * shortens the watchdog shortens this with it.
+   *
+   * UNCAPPED, that third term made the bar move with the ramp and the ramp could
+   * never be forgiven. At the shipped 5s base and 15s watchdog the windows ran
+   * 35s, 40s, 50s, 70s, 110s, 150s: a booth machine whose SSE dies every ~25s
+   * reaches attempt 3 in a couple of minutes, and from then on a 60-second
+   * stream delivering a heartbeat a second cannot clear a bar that has moved
+   * past it. It re-dials on the 2-minute service-window clamp instead of the 5s
+   * base it used to, and says nothing in the log, because `const first =
+   * this.attempt === 0` is false for ever.
+   *
+   * Capped at one window the worst case is 3 x streamIdleMs — 45s — which is
+   * under the 2-minute reconnect ceiling, so a stream that survives a single
+   * reconnect cycle always forgives. The gradient the term was for survives; the
+   * unboundedness that made it a regression does not. The case it was written
+   * for — a peer that accepts the subscription and hangs up — is covered by the
+   * silent-stream counter, which the back-off is not the right tool for.
+   */
+  private sustainMs(): number {
+    return Math.min(this.nextDelayMs, this.streamIdleMs) + this.streamIdleMs * 2;
+  }
+
+  private armSustainTimer(): void {
+    this.clearSustainTimer();
+    this.sustainTimer = setTimeout(() => {
+      this.sustainTimer = null;
+      // Held long enough to count. Only now is the back-off forgiven, and only
+      // now does a silent run stop being a run.
+      this.resetBackoff();
+      this.silentStreams = 0;
+    }, this.sustainMs());
+  }
+
+  private clearSustainTimer(): void {
+    if (this.sustainTimer) {
+      clearTimeout(this.sustainTimer);
+      this.sustainTimer = null;
     }
   }
 
@@ -1056,11 +1295,10 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     } catch (err) {
       // Degraded rather than rethrown, for the same reason the playlist read a
       // hundred lines below is: a frame this app cannot read is ONE field going
-      // stale, and dropping a healthy stream over it would blank the slide, the
-      // sections and the timers with it. The failure is returned to the operator
-      // as that field simply ceasing to advance, and it is on the log with the
-      // endpoint, the reason and the address — a truncated frame and a schema
-      // change are the same blank panel and different fixes.
+      // absent, and dropping a healthy stream over it would blank the slide, the
+      // sections and the timers with it. It is on the log with the endpoint, the
+      // reason and the address — a truncated frame and a schema change are the
+      // same blank panel and different fixes.
       //
       // Once per endpoint per stream, matching the playlist's discipline: a
       // schema change fires on every slide advance, and a line each would be the
@@ -1069,33 +1307,48 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
         this.unreadable.add(endpoint);
         console.warn(
           `[propresenter] unreadable ${endpoint} frame from ${this.host}:${this.port} ` +
-            `(${errorMessage(err)}) — that field stops advancing, staying quiet about the rest`,
+            `(${errorMessage(err)}) — that field goes blank, staying quiet about the rest`,
         );
       }
+      // DROPPED, not kept. Keeping the last good value is only "that field stops
+      // advancing" when the fields are independent, and they are not: the
+      // `presentation/current` document is where the section name, the slide
+      // COUNT and the progress come from, and `presentation/slide_index` goes on
+      // arriving beside it. Held, they describe slide 9 of the previous
+      // document's 6 — confidently wrong rather than stale, which is worse on a
+      // stage display than a blank. Published immediately for the same reason.
+      if (!this.storeFrame(endpoint, null)) return;
+      this.queuePublish();
       return;
     }
 
+    if (!this.storeFrame(endpoint, parsed)) return;
+    this.queuePublish();
+  }
+
+  /** File a parsed frame (or `null`, for one that could not be read) under the
+   *  endpoint it belongs to. False for an endpoint this app does not keep. */
+  private storeFrame(endpoint: string, value: unknown): boolean {
     switch (endpoint) {
       case "status/slide":
-        this.frames.slide = parsed;
-        break;
+        this.frames.slide = value;
+        return true;
       case "presentation/slide_index":
-        this.frames.slideIndex = parsed;
-        break;
+        this.frames.slideIndex = value;
+        return true;
       case "presentation/active":
       case "presentation/current":
-        this.frames.active = parsed;
-        break;
+        this.frames.active = value;
+        return true;
       case "playlist/active":
-        this.frames.playlistActive = parsed;
-        break;
+        this.frames.playlistActive = value;
+        return true;
       case "timers/current":
-        this.frames.timers = parsed;
-        break;
+        this.frames.timers = value;
+        return true;
       default:
-        return; // not one of ours
+        return false; // not one of ours
     }
-    this.queuePublish();
   }
 
   /** Collapse a burst of frames into one DTO. See PUBLISH_COALESCE_MS. */
@@ -1129,12 +1382,18 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       this.publishAgain = true;
       return;
     }
+    // The epoch, not `running` — the one await continuation in this file that
+    // read the flag instead, against a class doc (see `epoch`) saying every one
+    // re-checks the counter. configure() is stop-then-start inside a tick, so
+    // `running` is back to true by the time this resumes and the loop runs
+    // another publish for a run that has already been superseded.
+    const epoch = this.epoch;
     this.publishing = true;
     try {
       do {
         this.publishAgain = false;
         await this.publish();
-      } while (this.publishAgain && this.running);
+      } while (this.publishAgain && !this.stale(epoch));
     } finally {
       this.publishing = false;
     }
@@ -1452,11 +1711,25 @@ class ProPresenterManager {
         this.extras.set(e.id, svc);
       }
       this.names.set(e.id, e.name?.trim() || e.id);
+      // WHERE first and unconditionally, from whatever the settings now say —
+      // see setTarget. An instance left pointed at its old machine while
+      // switched off is one whose macros the rule editor reads off the wrong
+      // booth machine.
+      svc.setTarget(e.host, e.port, e.pollMs);
       if (e.enabled !== false && e.host && e.port > 0) {
         // "Connecting to", not "Polling": this instance holds a stream, and only
         // the fallback polls at all. The message survives until the first tick.
-        this.conn.set(e.id, { state: "connecting", message: `Connecting to ${e.host}:${e.port}` });
-        svc.configure(e.host, e.port, e.pollMs);
+        //
+        // ONLY when something is actually being started. start() is a no-op on
+        // an instance that is already running, and setTarget does not re-dial an
+        // unchanged target — so on an ordinary settings save this wrote
+        // "Connecting to h:p" over a live stream and nothing ever took it back.
+        // The same two lines are in integration-manager.applyPropresenter for
+        // the primary.
+        if (!svc.isRunning) {
+          this.conn.set(e.id, { state: "connecting", message: `Connecting to ${e.host}:${e.port}` });
+        }
+        svc.start();
       } else {
         svc.stop();
         this.conn.set(e.id, { state: "disconnected", message: null });

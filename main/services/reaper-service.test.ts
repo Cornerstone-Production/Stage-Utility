@@ -9,13 +9,17 @@ import assert from "node:assert/strict";
 import { afterEach, test, describe } from "node:test";
 
 import { parseTransport, reaperDeps, reaperService } from "./reaper-service.js";
+import type { ReaperStatusDTO } from "../types/stage.js";
 
 const line = (playstate: number, pos = "12.5", repeat = "0", posStr = "0:12.500") =>
   `TRANSPORT\t${playstate}\t${pos}\t${repeat}\t${posStr}\t1.1.00`;
 
+/** The snapshot half, for the bit-math cases below — `read` has its own block. */
+const statusOf = (body: string): ReaperStatusDTO => parseTransport(body).status;
+
 describe("parseTransport", () => {
   test("playstate 0 is stopped", () => {
-    const s = parseTransport(line(0));
+    const s = statusOf(line(0));
     assert.deepEqual({ playing: s.playing, recording: s.recording, recordPaused: s.recordPaused }, {
       playing: false,
       recording: false,
@@ -24,20 +28,20 @@ describe("parseTransport", () => {
   });
 
   test("playstate 1 is playing", () => {
-    const s = parseTransport(line(1));
+    const s = statusOf(line(1));
     assert.equal(s.playing, true);
     assert.equal(s.recording, false);
   });
 
   test("playstate 2 is paused, not playing", () => {
-    const s = parseTransport(line(2));
+    const s = statusOf(line(2));
     assert.equal(s.playing, false);
     assert.equal(s.recording, false);
   });
 
   test("playstate 5 is recording", () => {
     // bit2 (record) + bit0 (play) — REAPER's "rolling and recording".
-    const s = parseTransport(line(5));
+    const s = statusOf(line(5));
     assert.equal(s.recording, true);
     assert.equal(s.recordPaused, false);
     assert.equal(s.playing, false, "recording takes precedence over playing in the DTO");
@@ -45,54 +49,70 @@ describe("parseTransport", () => {
 
   test("playstate 6 is record-paused", () => {
     // bit2 (record) + bit1 (pause).
-    const s = parseTransport(line(6));
+    const s = statusOf(line(6));
     assert.equal(s.recording, true);
     assert.equal(s.recordPaused, true);
   });
 
   test("position is parsed as a number and the position string is passed through", () => {
-    const s = parseTransport(line(1, "93.25", "0", "1:33.250"));
+    const s = statusOf(line(1, "93.25", "0", "1:33.250"));
     assert.equal(s.positionSeconds, 93.25);
     assert.equal(s.positionString, "1:33.250");
   });
 
   test("reaching REAPER at all counts as connected", () => {
-    assert.equal(parseTransport(line(0)).connected, true);
+    assert.equal(statusOf(line(0)).connected, true);
   });
 
   test("a malformed body still reports connected, since the HTTP request landed", () => {
-    const s = parseTransport("something unexpected");
+    const s = statusOf("something unexpected");
     assert.equal(s.connected, true);
     assert.equal(s.recording, false);
     assert.equal(s.positionSeconds, null);
   });
 
   test("an empty body does not throw", () => {
-    assert.equal(parseTransport("").connected, true);
+    assert.equal(statusOf("").connected, true);
   });
 
   test("a TRANSPORT line with no fields after the tag is handled", () => {
-    assert.equal(parseTransport("TRANSPORT").recording, false);
+    assert.equal(statusOf("TRANSPORT").recording, false);
   });
 
   test("the TRANSPORT line is found among other lines", () => {
     const body = "SOMETHINGELSE\t1\nTRANSPORT\t5\t1.0\t0\t0:01.000\t1.1.00\nTRAILING\tx";
-    assert.equal(parseTransport(body).recording, true);
+    assert.equal(statusOf(body).recording, true);
   });
 
   test("an unparseable position becomes null rather than NaN", () => {
-    const s = parseTransport(line(1, "abc"));
+    const s = statusOf(line(1, "abc"));
     assert.equal(s.positionSeconds, null);
   });
 
   test("an empty position field becomes null", () => {
-    const s = parseTransport(line(1, ""));
+    const s = statusOf(line(1, ""));
     assert.equal(s.positionSeconds, null);
   });
 
   test("an empty position string becomes null rather than an empty string", () => {
-    const s = parseTransport(line(1, "1.0", "0", ""));
+    const s = statusOf(line(1, "1.0", "0", ""));
     assert.equal(s.positionString, null);
+  });
+
+  // `read` — "REAPER answered" as distinct from "REAPER said stopped". The two
+  // used to be the same value, and transport("record") presses a TOGGLE on it.
+  test("a well-formed line reads", () => {
+    assert.equal(parseTransport(line(0)).read, true);
+  });
+
+  test("a 200 whose body is not REAPER's does NOT read", () => {
+    // A captive-portal redirect on a re-DHCPed VLAN, a reverse proxy, a REAPER
+    // build answering a login page on /_/. All of them are HTTP 200.
+    assert.equal(parseTransport("<html>ok</html>").read, false);
+    assert.equal(parseTransport("").read, false);
+    // The tag with no fields after it is not a transport either — there is no
+    // playstate to have read.
+    assert.equal(parseTransport("TRANSPORT").read, false);
   });
 });
 
@@ -117,14 +137,16 @@ interface Call {
 let calls: Call[] = [];
 const realFetch = reaperDeps.fetch;
 
-/** A stub answering `/_/TRANSPORT` with `playstate`, and any action with "". */
-function stubReaper(opts: { playstate?: number; status?: number } = {}): void {
+/** A stub answering `/_/TRANSPORT` with `playstate`, and any action with "".
+ *  `transportBody` replaces the transport line outright, for the case where
+ *  something other than REAPER answers the request with an HTTP 200. */
+function stubReaper(opts: { playstate?: number; status?: number; transportBody?: string } = {}): void {
   calls = [];
   reaperDeps.fetch = (async (input: unknown) => {
     const url = String(input);
     calls.push({ url });
     const status = opts.status ?? 200;
-    const body = url.endsWith("/TRANSPORT") ? line(opts.playstate ?? 0) : "";
+    const body = url.endsWith("/TRANSPORT") ? (opts.transportBody ?? line(opts.playstate ?? 0)) : "";
     return {
       ok: status >= 200 && status < 300,
       status,
@@ -174,6 +196,39 @@ describe("reaperService.transport", () => {
     );
   });
 
+  test("record REFUSES when the transport could not be read — 1013 is a toggle", async () => {
+    // GUARD, and the more dangerous half of the toggle. The case above stubs a
+    // well-formed line, so it only ever proved the "already recording" branch.
+    // Here something in front of REAPER's web interface answers 200 with
+    // non-TRANSPORT text while REAPER is recording the 9am service. Parsed as
+    // `recording: false`, a "start recording" cue sent 1013 — which STOPS the
+    // recording — and reported ok: true.
+    stubReaper({ transportBody: "<html>ok</html>" });
+    configured();
+    const result = await reaperService.transport("record");
+    assert.equal(result.ok, false, "an unreadable transport reported success");
+    assert.match(result.detail, /could not read REAPER's transport/);
+    assert.deepEqual(
+      calls.map((c) => c.url),
+      ["http://reaper.example:8080/_/TRANSPORT"],
+      "1013 went out on an answer nothing could read — that stops a recording already running",
+    );
+  });
+
+  test("stop and play still go out when the transport cannot be read", async () => {
+    // The refusal is about the TOGGLE, not about REAPER being unreachable. Both
+    // of these are idempotent in REAPER itself, and an operator pressing Stop
+    // wants it pressed.
+    stubReaper({ transportBody: "<html>ok</html>" });
+    configured();
+    assert.deepEqual(await reaperService.transport("stop"), { ok: true, detail: "sent 1016" });
+    assert.deepEqual(await reaperService.transport("play"), { ok: true, detail: "sent 1007" });
+    assert.deepEqual(calls.map((c) => c.url), [
+      "http://reaper.example:8080/_/1016",
+      "http://reaper.example:8080/_/1007",
+    ]);
+  });
+
   test("stop sends 1016 unconditionally, with no transport read", async () => {
     stubReaper({ playstate: 5 });
     configured();
@@ -206,5 +261,61 @@ describe("reaperService.transport", () => {
     const result = await reaperService.transport("stop");
     assert.equal(result.ok, false);
     assert.match(result.detail, /HTTP 500/);
+  });
+});
+
+// ── the poll's own verdict ────────────────────────────────────────────────────
+//
+// The same distinction one level up. A 200 whose body is not REAPER's used to
+// parse as `recording: false` and report "Connected to REAPER at …": a green
+// badge and a confident "not recording" over a machine nothing could read, which
+// is exactly what `test()` has always refused to call a working connection.
+
+describe("the poll's connection verdict", () => {
+  /** The poll and its schedulers. Stubbed so no real timer survives a case. */
+  type Poll = {
+    connect: () => Promise<void>;
+    scheduleIn: (ms: number) => void;
+    scheduleReconnect: () => void;
+  };
+  const poll = reaperService as unknown as Poll;
+  let reports: { state: string; message: string | null }[] = [];
+
+  afterEach(() => {
+    reaperDeps.fetch = realFetch;
+    reaperService.setConnectionListener(() => {});
+    reaperService.configure("", 0);
+    reaperService.stop();
+  });
+
+  /** Configure and drive ONE poll, with both schedulers stubbed out. */
+  async function pollOnce(opts: Parameters<typeof stubReaper>[0]): Promise<void> {
+    stubReaper(opts);
+    reports = [];
+    poll.scheduleIn = () => {};
+    poll.scheduleReconnect = () => {};
+    reaperService.setConnectionListener((state, message) => reports.push({ state, message }));
+    reaperService.configure("reaper.example", 8080);
+    await poll.connect();
+  }
+
+  test("a well-formed line reports connected", async () => {
+    await pollOnce({ playstate: 5 });
+    assert.deepEqual(reports, [
+      { state: "connected", message: "Connected to REAPER at reaper.example:8080" },
+    ]);
+  });
+
+  test("a 200 that is not REAPER's transport reports an error, not a green badge", async () => {
+    // GUARD. With the verdict taken from `status.recording` alone this is
+    // `connected`, and the REAPER card is green while every reading it shows is
+    // invented.
+    await pollOnce({ transportBody: "<html>ok</html>" });
+    assert.deepEqual(
+      reports.map((r) => r.state),
+      ["error"],
+      "a machine whose transport could not be read was reported as connected",
+    );
+    assert.match(reports[0].message ?? "", /was not REAPER's transport/);
   });
 });

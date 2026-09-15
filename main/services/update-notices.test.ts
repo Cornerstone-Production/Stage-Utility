@@ -67,7 +67,7 @@ describe("what an update leaves behind for the operator", () => {
       justUpdated: {
         version: "v1.12.0",
         fromVersion: "1.11.0",
-        notes: [{ section: "Breaking", lines: ["displays without a slug redirect"] }],
+        notes: [{ section: "Breaking", lines: ["displays without a slug redirect"], omitted: 0 }],
         lines: [],
         at: "2026-08-18T00:00:00.000Z",
       },
@@ -78,7 +78,7 @@ describe("what an update leaves behind for the operator", () => {
     assert.equal(after.justUpdated?.version, "v1.12.0");
     assert.equal(after.justUpdated?.fromVersion, "1.11.0");
     assert.deepEqual(after.justUpdated?.notes, [
-      { section: "Breaking", lines: ["displays without a slug redirect"] },
+      { section: "Breaking", lines: ["displays without a slug redirect"], omitted: 0 },
     ]);
   });
 

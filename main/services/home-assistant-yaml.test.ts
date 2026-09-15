@@ -269,11 +269,24 @@ describe("homeAssistantYaml", () => {
     assert.deepEqual(scripts(yaml), []);
   });
 
-  test("an `_on` with no partner is not a pair, so it is a script", () => {
-    // The rule for what a pair IS lives in one place; this is the boundary of it.
+  test("an `_on` with no partner is neither a switch NOR a script", () => {
+    // It used to be a script here. It never was one in the manifest — see
+    // isPairHalfName — and the two lists are the same question asked of one
+    // install, so an integration reading /api/cues/manifest and a person
+    // pasting this file must not get different entities.
+    //
+    // THE TRADE, stated because it is a real loss: a cue somebody named
+    // `house_lights_on` on purpose, with no partner, no longer gets a script.
+    // It keeps its rest_command, `POST /api/cues/house_lights_on` still fires
+    // it, and voice still fires it — the way to get a Home entity for it is to
+    // drop the `_on` from the name. That is the price of never publishing half
+    // a switch, which is a button in the house that turns the projectors on
+    // with no way to turn them off. See the "an orphaned pair half" describe.
     const yaml = homeAssistantYaml([cue("house_lights_on", "House lights on")], BASE);
-    assert.deepEqual(scripts(yaml), [{ name: "house_lights_on", alias: "House lights on" }]);
+    assert.deepEqual(scripts(yaml), []);
     assert.deepEqual(friendlyNames(yaml), []);
+    // Not silently dropped: the primitive is still there.
+    assert.deepEqual(commandKeys(yaml), ["su_house_lights_on"]);
   });
 
   test("a pair and a single in one document each get their own object, and only that", () => {
@@ -714,7 +727,13 @@ describe("the template integration's modern shape", () => {
 // the diff, decide whether the new output is what you meant, and only then
 // regenerate.
 describe("the document for an install with no bindings", () => {
-  /** A pair, a one-shot cue, and a renamed one-shot — every object this emits. */
+  /**
+   * A pair, a one-shot cue, and a renamed cue whose name ends `_on`.
+   *
+   * The third is there for its rest_command and its "renamed from" comment: it
+   * is an ORPHANED half, so it gets no script — the same answer the manifest
+   * gives. See isPairHalfName.
+   */
   const UNBOUND_FIXTURE = (): Rule[] => [
     cue("projectors_on", "Projectors on"),
     cue("projectors_off", "Projectors off"),
@@ -785,10 +804,6 @@ describe("the document for an install with no bindings", () => {
   "    alias: \"take the screens\"",
   "    sequence:",
   "      - action: rest_command.su_take_screens",
-  "  \"screens_on\":",
-  "    alias: \"Screens on\"",
-  "    sequence:",
-  "      - action: rest_command.su_screens_on",
   "",
   ].join("\n");
 
@@ -931,5 +946,64 @@ describe("a pair bound to an app state source", () => {
     // pair's base off the sensor and knows nothing about where the state came
     // from, which is why nothing here had to change for a second namespace.
     assert.equal(yaml.includes("app:reaper.recording"), false);
+  });
+});
+
+// ── Half a pair, with its partner deleted ────────────────────────────────────
+//
+// `projectors_on` whose `_off` half is gone is not a pair, so it falls out of
+// `paired` — and it used to come straight back as `script.projectors_on`. That
+// is a button in the house that turns the projectors on with no way to turn
+// them off, and it survives the next re-paste because the generator puts it
+// there every time.
+//
+// The manifest has filtered this since it was written (`isPairHalfName`), the
+// YAML did not, and the two lists are the same question asked of one install:
+// an integration reading /api/cues/manifest and a person pasting this file must
+// not get different entities.
+describe("an orphaned pair half", () => {
+  const orphan = [cue("projectors_on", "Projectors on"), cue("house_lights", "House lights")];
+
+  test("is not emitted as a script", () => {
+    const yaml = homeAssistantYaml(orphan, BASE);
+    assert.deepEqual(
+      scripts(yaml).map((s) => s.name),
+      ["house_lights"],
+      "half a switch was published as something pressable from Home",
+    );
+  });
+
+  test("and there is no switch for it either — a pair needs both halves", () => {
+    assert.deepEqual(switchStates(homeAssistantYaml(orphan, BASE)), []);
+  });
+
+  test("but its rest_command stays, so an already-pasted copy keeps working", () => {
+    // The `rest_command` is the primitive, not an entity: nothing in Home
+    // Assistant creates a device from one. Dropping it would break the copy of
+    // this file somebody pasted while the pair was whole, which is the one
+    // thing a re-paste must not do.
+    assert.deepEqual(commandKeys(homeAssistantYaml(orphan, BASE)), [
+      "su_projectors_on",
+      "su_house_lights",
+    ]);
+  });
+
+  test("an `_off` half orphaned the other way round is the same answer", () => {
+    const yaml = homeAssistantYaml([cue("projectors_off", "Projectors off")], BASE);
+    assert.deepEqual(scripts(yaml), []);
+    assert.deepEqual(switchStates(yaml), []);
+    assert.deepEqual(commandKeys(yaml), ["su_projectors_off"]);
+  });
+
+  test("and a whole pair is still a switch, not two orphans", () => {
+    // The other direction: a filter that dropped every `_on`/`_off` name from
+    // the scripts AND from the pairing would leave an install with no switches
+    // at all, which passes the three cases above.
+    const yaml = homeAssistantYaml(
+      [cue("projectors_on", "Projectors on"), cue("projectors_off", "Projectors off")],
+      BASE,
+    );
+    assert.deepEqual(switchStates(yaml).map((s) => s.id), ["projectors"]);
+    assert.deepEqual(scripts(yaml), []);
   });
 });

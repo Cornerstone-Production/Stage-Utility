@@ -95,16 +95,33 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
   // open regardless. The label says which instance a name is missing from, so
   // an operator can see that a macro only half the building has is only half
   // the building's.
+  //
+  // `unreachable` IS CARRIED, and was being destructured away. Two consequences,
+  // the second worse than the first: a single-instance site with the machine off
+  // rendered "Pick one…" and nothing else, with nothing anywhere saying why —
+  // and with two instances where one is off, `instanceCount` counts every
+  // instance with a target INCLUDING the one that did not answer, so every macro
+  // the reachable machine reported was labelled "SONG INTRO (Main only)". That is
+  // a positive false statement — the macro does not exist on the other machine —
+  // when the truth is that the other machine was not asked successfully.
+  //
+  // So the suffix is suppressed outright while anything is unreachable. "Only"
+  // is a claim about the machines that ANSWERED, and it cannot be made about a
+  // set that is incomplete.
   if (method === "GET" && pathname === "/api/automation/propresenter-macros") {
-    const { names, instanceCount } = await propresenterManager.allMacros();
+    const { names, instanceCount, unreachable } = await propresenterManager.allMacros();
+    const complete = unreachable.length === 0;
     json(res, {
       items: names.map(({ name, instances }) => ({
         value: name,
         label:
-          instanceCount > 1 && instances.length < instanceCount
+          complete && instanceCount > 1 && instances.length < instanceCount
             ? `${name} (${instances.join(", ")} only)`
             : name,
       })),
+      // For the editor to say WHY a list is short or empty. Named instances, not
+      // a count: "Chapel did not answer" is actionable and "1 unreachable" is not.
+      unreachable,
     });
     return;
   }

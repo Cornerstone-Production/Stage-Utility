@@ -74,6 +74,16 @@ export abstract class ConnectionLifecycle {
     if (this.running || !this.configured) return;
     this.running = true;
     this.reconnectAttempt = 0;
+    this.begin();
+  }
+
+  /**
+   * Take the first attempt. Split out of start() for the one subclass whose
+   * cadence is not this class's timer: SenSource drives its poll through a
+   * Ticker (see ticker.ts), and a bare `void this.connect()` here would run a
+   * poll the ticker knows nothing about and so never re-arms.
+   */
+  protected begin(): void {
     void this.connect();
   }
 
@@ -174,12 +184,25 @@ export abstract class ConnectionLifecycle {
    */
   protected scheduleReconnect(): void {
     if (!this.running) return;
+    this.scheduleIn(this.nextReconnectDelayMs());
+  }
+
+  /**
+   * The next back-off delay, and the attempt counter's own step.
+   *
+   * Split out of scheduleReconnect for a subclass that owns its own timer and so
+   * needs the NUMBER rather than the arming — SenSource's poll ticker asks for
+   * it on a failed tick. Calling it is what advances the back-off, exactly as
+   * calling scheduleReconnect was, so it is called once per failure and not
+   * peeked at.
+   */
+  protected nextReconnectDelayMs(): number {
     const delay = serviceWindow.capDelayMs(
       this.reconnectBaseMs * 2 ** this.reconnectAttempt,
       channelHasSubscribers(this.channel),
     );
     this.reconnectAttempt++;
-    this.scheduleIn(delay);
+    return delay;
   }
 
   /**

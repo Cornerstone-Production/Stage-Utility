@@ -62,7 +62,7 @@ after(async () => {
 
 afterEach(() => {
   propresenterManager.apply(null, []);
-  propresenterService.configure("", 0);
+  propresenterService.setTarget(null, null);
   propresenterService.stop();
   clearMacroCache();
 });
@@ -74,7 +74,7 @@ function clearMacroCache(): void {
 }
 
 function primaryAt(p: number): void {
-  propresenterService.configure("127.0.0.1", p);
+  propresenterService.setTarget("127.0.0.1", p);
   propresenterService.stop();
   clearMacroCache();
 }
@@ -151,20 +151,47 @@ describe("GET /api/automation/propresenter-macros", () => {
     assert.deepEqual(items(r.json), []);
   });
 
-  it("one instance being off costs its macros, never the reachable one's", async () => {
+  it("one instance being off costs its macros, and does NOT mark the rest \"only\"", async () => {
+    // GUARD. `instanceCount` counts instances with a target, INCLUDING the one
+    // that did not answer — so every macro the reachable machine reported came
+    // back labelled "DOORS (MA only)". That is a positive false statement: it
+    // says the macro does not exist on the chapel machine, when the truth is
+    // that the chapel machine was not asked successfully. An operator reading it
+    // would go and create a macro that is already there.
+    //
+    // "Only" is a claim about the machines that ANSWERED, and it cannot be made
+    // while the set is incomplete — so the suffix is suppressed outright.
     primaryAt(port);
     propresenterManager.apply("MA", [
       { id: "chapel", name: "Chapel", host: "127.0.0.1", port: DEAD_PORT, enabled: true },
     ]);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     assert.equal(r.status, 200);
-    // Two instances are configured and only one answered, so each name it did
-    // return is marked as living on that one alone — which is true, as far as
-    // anything can be known while the other machine is off.
     assert.deepEqual(items(r.json), [
-      { value: "DOORS", label: "DOORS (MA only)" },
-      { value: "SONG INTRO", label: "SONG INTRO (MA only)" },
+      { value: "DOORS", label: "DOORS" },
+      { value: "SONG INTRO", label: "SONG INTRO" },
     ]);
+  });
+
+  it("names the instances that did not answer, so the editor can say why", async () => {
+    // GUARD, and the reason the suffix above can be suppressed safely: the
+    // information is not lost, it is moved to where it is true. allMacros has
+    // threaded `unreachable` out since it was written — "silently dropping it
+    // would make its macros look deleted" — and the route destructured it away.
+    //
+    // A single-instance site with the machine off is the sharper case: the
+    // editor renders "Pick one…" and nothing else, and without this there is
+    // nothing anywhere on screen or in the payload saying why.
+    primaryAt(DEAD_PORT);
+    propresenterManager.apply("MA", []);
+    const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
+    assert.equal(r.status, 200);
+    assert.deepEqual(items(r.json), []);
+    assert.deepEqual(
+      (r.json as { unreachable?: string[] }).unreachable,
+      ["MA"],
+      "the editor has an empty list and nothing to say about it",
+    );
   });
 
   it("a name on both instances carries no suffix", async () => {
@@ -178,6 +205,47 @@ describe("GET /api/automation/propresenter-macros", () => {
       { value: "DOORS", label: "DOORS" },
       { value: "SONG INTRO", label: "SONG INTRO" },
     ]);
+    assert.deepEqual((r.json as { unreachable?: string[] }).unreachable, []);
+  });
+
+  it("an instance repointed and switched off in one save does not serve the old machine's macros", async () => {
+    // GUARD, and verbatim the failure b12bda22 was written to prevent — that
+    // commit closed the stale-CACHE door and this is the stale-TARGET door
+    // beside it.
+    //
+    // `this.host` and `this.port` were written in configure() and NOWHERE else,
+    // and both disable paths call stop() without going near configure(). So an
+    // operator who repoints an auditorium at another booth machine and unticks
+    // Enabled in one save leaves the instance pointed at the OLD machine: the
+    // rule editor sees hasTarget true, the cache empty, reads the machine they
+    // just stopped using, and offers its macros. They pick one that does not
+    // exist on the new machine and it 404s on a Sunday.
+    propresenterService.setTarget(null, null); // the primary is out of this
+    propresenterService.stop();
+    clearMacroCache();
+
+    propresenterManager.apply("MA", [
+      { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true },
+    ]);
+    const before = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
+    assert.deepEqual(
+      items(before.json).map((i) => i.value),
+      ["DOORS", "SONG INTRO"],
+      "the fixture never read the first machine",
+    );
+
+    // One save: pointed at the other machine AND switched off.
+    propresenterManager.apply("MA", [
+      { id: "chapel", name: "Chapel", host: "127.0.0.1", port: DEAD_PORT, enabled: false },
+    ]);
+    const after = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
+
+    assert.deepEqual(
+      items(after.json),
+      [],
+      "the machine the operator stopped using was read anyway, and its macros offered as this instance's",
+    );
+    assert.deepEqual((after.json as { unreachable?: string[] }).unreachable, ["Chapel"]);
   });
 
   it("a ProPresenter that was never set up says NOTHING in the log", async () => {
@@ -186,7 +254,7 @@ describe("GET /api/automation/propresenter-macros", () => {
     // in the log of every site that does not use ProPresenter, every time
     // somebody opened the rule editor. The empty list alone cannot show this:
     // it is empty either way. The log line is the whole difference.
-    propresenterService.configure("", 0);
+    propresenterService.setTarget(null, null);
     propresenterService.stop();
     clearMacroCache();
     propresenterManager.apply("MA", []);

@@ -123,6 +123,18 @@ snapshot, no schedule reaches it.
 Every call, allowed or refused, lands in the automation Activity log with the
 calling token's label, and on a `[cues]` line in the server log.
 
+A cue name is checked when it is saved, and a rules file is not always something
+this app wrote — a restored config archive replaces `automation-rules.json`
+whole. At boot, every cue the save path would refuse is named on its own line
+with the reason, and nothing is removed:
+
+```
+[cues] rule "Bad name from a restore" would be refused if you saved it: "__proto___on" is not a usable cue name — use lower_snake_case
+```
+
+The cue still loads and still fires; the line is there so a name that can never
+be edited into shape through the editor is visible rather than silent.
+
 ### Tokens
 
 Settings → Automation → **Calling cues** mints one token per caller. The token is
@@ -294,7 +306,9 @@ Relabel a button in Companion and the cue named after it is renamed to match, so
 The old name **keeps answering**: `POST /api/cues/projectors_on` still fires the
 cue, so a Home Assistant config already pasted into `configuration.yaml` — and
 any HomeKit switch made from it — carries on working. Re-paste the YAML when
-convenient; the generated fragment names each renamed cue in a comment.
+convenient; the generated fragment names each renamed cue in a comment. The
+[integration](#the-integration) needs none of that: the rename reaches it on the
+`cues` channel and the entity follows.
 
 A cue keeps up to five former names, oldest dropped first, and they share one
 namespace with live names: no other cue may take a name or a former name that is
@@ -316,6 +330,73 @@ pair's spoken name is composed by the import and never follows.
 
 ### Home Assistant
 
+Two ways in, and they are alternatives rather than layers. The **integration**
+is the supported one: cues arrive as real entities, follow the cue list as it
+changes, and report what the gear is actually doing. The **generated YAML** is
+the fallback for an install that cannot run a custom integration.
+
+Do not run both. Each produces its own controls for the same cues, so a cue
+would appear twice in Home Assistant under two different entity ids, and an
+Apple Home household would see two switches for one projector.
+
+#### The integration
+
+[`Cornerstone-Production/ha-stage-utility`][ha-repo] — a Home Assistant custom
+integration. It needs Home Assistant 2025.2 or newer, and Stage Utility 1.18.0
+or newer, which is the release that added `/api/cues/manifest`.
+
+[ha-repo]: https://github.com/Cornerstone-Production/ha-stage-utility
+
+**Install it through [HACS](https://hacs.xyz) as a custom repository.** HACS →
+the three-dot menu → **Custom repositories**; the repository URL above, type
+**Integration**; add it, find **Stage Utility** in HACS, download and restart
+Home Assistant. While the integration is still on a prerelease version, turn on
+**Show beta versions** in the download dialog or nothing is offered. Without
+HACS, copy `custom_components/stage_utility` into Home Assistant's
+`config/custom_components` and restart.
+
+**Then Settings → Devices & services → Add integration → Stage Utility.**
+
+| | |
+|---|---|
+| **Host** | an address on the network — `192.168.1.50`, `192.168.1.50:8788` or `http://stage-utility:8788`. Leave the scheme and port off and it assumes plain HTTP on 8788, where every install starts |
+| **Cue token** | an `su_…` secret from Settings → Automation → **Calling cues**, shown once when it is minted |
+
+Setup reads the cue manifest to prove it found a Stage Utility, then calls a cue
+name that cannot exist to prove the token is accepted — a `404` means the token
+was fine, a `401` means it was not. Nothing on stage is pressed to find out. A
+server older than 1.18.0 is told apart from an unreachable one and says so.
+
+One entry per server, keyed by the server's own LAN address, so adding the same
+appliance a second time by another name is refused rather than doubling every
+switch.
+
+**What appears.** One device per server, carrying a switch for every ON/OFF pair
+and a button for every cue that is not half of one. Each is named by the cue
+alone, and the room named here is offered as the Home Assistant area. A switch
+whose Companion button has gone missing goes **unavailable** rather than
+pretending a press would do something. A pair with a state source reports what
+the gear says and follows it when somebody turns the projector off at the wall;
+without one the switch reads **unknown** and shows separate on and off buttons,
+with a `reason` attribute saying why.
+
+**No polling.** The integration holds one subscription to the `cues` channel on
+this server's event stream and is pushed both state changes and changes to the
+cue list, so a cue added, renamed or deleted here reaches Home Assistant in
+seconds with nothing to re-paste and nothing to restart. It falls back to
+reading `/api/cues/states` every thirty seconds only while the stream is down.
+
+Two options on the entry, under **Configure**: whether the server's own web
+interface appears in the Home Assistant sidebar, and whether a HomeKit Bridge is
+reloaded when the cue list changes — a bridge only works out what to publish on
+reload, so without that a new cue is missing from the Apple Home app and a
+deleted one shows as *No Response*.
+
+#### The generated YAML
+
+The fallback, for an install not running the integration. It is a snapshot: it
+does not follow the cue list, so it is re-pasted whenever cues change.
+
 **Copy YAML** and **Download YAML** in the same panel both produce the whole
 configuration fragment: one `rest_command` per cue, a template switch per pair
 under the `template:` key, and a `script` per cue that is not half of a pair.
@@ -328,6 +409,14 @@ comment naming the `rest_command` it used to be; former names are never emitted
 as commands of their own. Copy YAML writes it to the clipboard, which needs a
 secure browsing context and fails on the plain-HTTP LAN address most installs
 run on — use **Download YAML** there instead.
+
+A cue named `<base>_on` or `<base>_off` whose partner does not exist gets its
+`rest_command` and nothing else — no switch, because half a pair is not one, and
+no script either, because a script for half a switch is a button in the house
+that turns the projectors on with no way to turn them off. `/api/cues/manifest`
+answers the same way. `POST /api/cues/<name>` and voice still fire it; to give
+such a cue an entity in Home Assistant, rename it without the `_on`/`_off`
+suffix.
 
 Save the download as `packages/stage_utility.yaml` in Home Assistant's config
 folder, and add this to `configuration.yaml` once:
@@ -356,10 +445,16 @@ so Home Assistant shows what it asked for rather than what the device did.
 ### Keeping a cue out of Home Assistant
 
 Each cue's editor carries a **Home Assistant** switch. Turned off, the cue is
-voice-only: it is left out of `/api/cues/manifest` and out of the generated
-YAML, so no entity is created for it and it appears under **Everything else** in
-the Automations tab. `POST /api/cues/<name>` still fires it, and so does
-anything already calling it that way.
+voice-only: it is left out of `/api/cues/manifest`, out of the generated YAML
+and off the `cues` channel, so no entity is created for it and it appears under
+**Everything else** in the Automations tab. `POST /api/cues/<name>` still fires
+it, and so does anything already calling it that way.
+
+A hidden pair's state is still read, and still shown on its row in the
+Automations tab — hiding a cue changes which entities Home Assistant is told
+to create and nothing else. `GET /api/cues/states` therefore still carries the
+pair, marked `hiddenFromHome: true`; the generated sensor only lifts the pairs
+the YAML listed, which are the shown ones.
 
 For a pair the switch belongs to the ON half and covers both halves — one
 switch, hidden or shown together. Turning it off removes the entity from Home
@@ -372,8 +467,8 @@ again.
 A cue is a rule, and every rule has an action — a Companion press is only the
 most common one. A cue whose action is anything else appears in Home Assistant
 the same way, through the same manifest and the same generated YAML: cues named
-`<base>_on` and `<base>_off` become one switch, and a cue on its own becomes a
-script.
+`<base>_on` and `<base>_off` become one switch, and a cue on its own — one whose
+name does not end `_on` or `_off` — becomes a script.
 
 The **REAPER transport** action is the worked example:
 
@@ -643,7 +738,9 @@ Flipping a switch in Apple Home several times quickly is what this is for: the
 off*, press nothing, and leave the light on with Home showing it off.
 
 While a pair is inside its window, that one variable is re-read every second
-until it holds the commanded value — so `/api/cues/states`, the manifest and the
+until it agrees with what was asked for — which for a pair whose off value is
+`*` is any value that is not its on value, the same rule the read itself uses —
+so `/api/cues/states`, the manifest and the
 [`cues`](../reference/api.md#channels) channel carry the truth about a second
 after the device moves rather than at the next five-second poll. Both the states
 route and the manifest also carry `settling: true` and `commanded` for that
@@ -740,7 +837,8 @@ reported as a fault.
 
 ### For Home Assistant
 
-Two things exist for an integration to build on, beside the pasted YAML above:
+What the [integration](#the-integration) is built on, and what anything else
+talking to this server can use:
 
 - `GET /api/cues/manifest` — every cue as JSON, with a `version` that goes up on
   any rule change, this server's name and LAN address, one entry per ON/OFF pair

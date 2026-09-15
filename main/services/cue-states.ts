@@ -40,7 +40,7 @@
 
 import { readAppState } from "./app-state-reads.js";
 import { isAppStateRef } from "./app-state-sources.js";
-import { boundCuePairs, STATE_ANY_OTHER } from "./cue-pairs.js";
+import { boundCuePairs, stateFor, type StateBinding } from "./cue-pairs.js";
 import { errorMessage } from "./errors.js";
 import { companionApi, type VariableResult } from "./companion-api.js";
 import { scrub } from "./scrub.js";
@@ -92,10 +92,15 @@ export interface CueCommand {
   /** The pair's base — the key everything else in here is keyed by. */
   base: string;
   want: "on" | "off";
-  /** The pair's bound variable, which is what gets re-read while it settles. */
-  variable: string;
-  /** The value that variable will hold once the device has caught up. */
-  wantValue: string;
+  /**
+   * The WHOLE binding, not the one value the press is waiting for.
+   *
+   * It used to be a flattened `wantValue`, fed straight from `binding.offValue`
+   * — which is `*` on six of the twelve rows in companion-state-source.ts, and
+   * `*` is a predicate, not a value. See stateFor in cue-pairs.ts. The variable
+   * to re-read is `binding.variable`.
+   */
+  binding: StateBinding;
 }
 
 /** One pair's state, keyed in the answer by the pair's base. */
@@ -121,6 +126,24 @@ export interface CueStateRow {
   settling?: true;
   /** What that press asked for. Present exactly when `settling` is. */
   commanded?: "on" | "off";
+  /**
+   * The operator turned this pair's **Home Assistant** switch off. Absent
+   * otherwise, never false.
+   *
+   * The row is STILL HERE, on purpose. `isHiddenFromHome` is about which
+   * entities Home Assistant is told to create "and nothing else": the app's own
+   * rules page reads this route for the state pill on every pair row, and a
+   * hidden pair that went blank there would be a presentation setting silently
+   * turning off the only feedback the operator has that the binding works.
+   * Home Assistant never sees it either way — the generated sensor lifts only
+   * the bases in its `json_attributes` list, which the YAML builds from the
+   * SHOWN pairs.
+   *
+   * The `cues` channel, which has no audience but an integration, drops these
+   * rows rather than pushing state for a pair the manifest says does not exist.
+   * That is what this flag is for; see cue-live.ts.
+   */
+  hiddenFromHome?: true;
 }
 
 export interface CueStatesAnswer {
@@ -128,8 +151,47 @@ export interface CueStatesAnswer {
   ok: boolean;
   /** When these values were read, ISO. Home Assistant reads it as the sensor's state. */
   checkedAt: string;
-  /** Keyed by the pair's base — the Home Assistant switch id. */
+  /**
+   * Keyed by the pair's base — the Home Assistant switch id.
+   *
+   * A MAP, and it stays one all the way to the route, because the key is a cue
+   * name out of the rules file and every reader of this object looks a key up
+   * dynamically. On a plain record `states["constructor"]` is
+   * `Object.prototype.constructor` — a truthy function, from the prototype
+   * chain, for a pair that is not in the answer at all — and `constructor_on`
+   * / `constructor_off` is a name the engine accepts today. `__proto__` is
+   * worse on the way in: `record["__proto__"] = row` sets the prototype rather
+   * than adding a property, so the pair vanishes and every object in the
+   * process gains its fields.
+   *
+   * The Map is what makes that unrepresentable rather than something four
+   * call sites each have to remember. `cueStatesBody` is the one place it
+   * becomes a plain object, on its way out as JSON.
+   */
+  states: ReadonlyMap<string, CueStateRow>;
+}
+
+/** `CueStatesAnswer` as `GET /api/cues/states` serves it. */
+export interface CueStatesBody {
+  ok: boolean;
+  checkedAt: string;
   states: Record<string, CueStateRow>;
+}
+
+/**
+ * The answer as JSON — the ONE place the Map becomes a plain object.
+ *
+ * `Object.fromEntries` defines own properties, so a base of `__proto__` is a
+ * key in the document rather than a prototype swap, and a base of
+ * `constructor` shadows the inherited one. The renderer reads it back with
+ * `Object.hasOwn` for the same reason; see automation-section.tsx.
+ */
+export function cueStatesBody(answer: CueStatesAnswer): CueStatesBody {
+  return {
+    ok: answer.ok,
+    checkedAt: answer.checkedAt,
+    states: Object.fromEntries(answer.states),
+  };
 }
 
 /**
@@ -204,7 +266,15 @@ class CueStates {
    */
   private settling = new Map<
     string,
-    { timer: NodeJS.Timeout | null; startedAt: number; wantValue: string; last: string | null }
+    {
+      timer: NodeJS.Timeout | null;
+      startedAt: number;
+      /** Which way the press went, which is what the re-read is waiting for. */
+      want: "on" | "off";
+      /** The whole binding, so `*` is read as the predicate it is. See stateFor. */
+      binding: StateBinding;
+      last: string | null;
+    }
   >();
 
   /**
@@ -244,7 +314,7 @@ class CueStates {
   noteCommand(command: CueCommand): void {
     // Before the invalidate: what the variable last read is what the settle
     // re-read compares against to notice the device moving.
-    const last = this.cached?.answer.states[command.base]?.value ?? null;
+    const last = this.cached?.answer.states.get(command.base)?.value ?? null;
     this.commands.set(command.base, { want: command.want, at: cueStatesDeps.now() });
     this.invalidate();
     this.startSettling(command, last);
@@ -287,10 +357,10 @@ class CueStates {
   private withSettling(answer: CueStatesAnswer): CueStatesAnswer {
     const now = cueStatesDeps.now();
     if (![...this.commands.keys()].some((base) => this.commandedWithin(base, now))) return answer;
-    const states: Record<string, CueStateRow> = {};
-    for (const [base, row] of Object.entries(answer.states)) {
+    const states = new Map<string, CueStateRow>();
+    for (const [base, row] of answer.states) {
       const command = this.commandedWithin(base, now);
-      states[base] = command ? { ...row, settling: true, commanded: command.want } : row;
+      states.set(base, command ? { ...row, settling: true, commanded: command.want } : row);
     }
     return { ...answer, states };
   }
@@ -304,17 +374,19 @@ class CueStates {
    * capped by the window either way — no timer outlives it.
    */
   private startSettling(command: CueCommand, last: string | null): void {
-    const running = this.settling.get(command.variable);
+    const variable = command.binding.variable;
+    const running = this.settling.get(variable);
     if (running?.timer) cueStatesDeps.clearTimeout(running.timer);
-    this.settling.set(command.variable, {
+    this.settling.set(variable, {
       timer: null,
       startedAt: cueStatesDeps.now(),
-      wantValue: command.wantValue,
+      want: command.want,
+      binding: command.binding,
       // A restart keeps what the previous loop last saw, so a value that
       // changed under the old command is not announced twice.
       last: running?.last ?? last,
     });
-    this.scheduleSettleRead(command.variable);
+    this.scheduleSettleRead(variable);
   }
 
   private scheduleSettleRead(variable: string): void {
@@ -355,7 +427,10 @@ class CueStates {
         this.invalidate();
         for (const listener of settleListeners) listener(variable);
       }
-      if (result.value === entry.wantValue) {
+      // stateFor, NOT `value === wantValue`: an off value of `*` means
+      // "anything that is not the on value", and compared literally a pair
+      // bound on `Recording` / off `*` never settles. See cue-pairs.ts.
+      if (stateFor(entry.binding, result.value) === entry.want) {
         this.settling.delete(variable);
         console.log(
           `[cues] state of ${scrub(variable)} settled to ${scrub(result.value)} ` +
@@ -392,11 +467,7 @@ class CueStates {
       }),
     );
 
-    // A MAP, not a plain record. The key is the pair's base, which comes from a
-    // cue name in the rules file — and `record["__proto__"] = row` does not add
-    // a property, it replaces the object's prototype, so the pair vanishes from
-    // the answer and every object in the process gains its fields. A Map holds
-    // any string, and Object.fromEntries below defines an own property for it.
+    // A MAP, and the one this answer carries — see CueStatesAnswer.states.
     const states = new Map<string, CueStateRow>();
     for (const pair of pairs) {
       const binding = pair.binding!;
@@ -410,19 +481,21 @@ class CueStates {
       };
       if ("error" in result) {
         row.reason = result.error;
-      } else if (result.value === binding.onValue) {
-        row.state = "on";
-      } else if (binding.offValue === STATE_ANY_OTHER || result.value === binding.offValue) {
-        // `*` is "anything that is not the on value", so a status variable with
-        // seven off values needs one row rather than six unknowns. The variable
-        // was READ — an empty string included — so this is off and not unknown;
-        // a variable that could not be read at all is the `error` branch above.
-        row.state = "off";
       } else {
-        row.reason =
-          `value "${result.value}" matches neither ` +
-          `"${binding.onValue}" nor "${binding.offValue}"`;
+        // The SAME predicate the settle re-read uses. `*` is "anything that is
+        // not the on value", so a status variable with seven off values needs
+        // one row rather than six unknowns — and the variable was READ, an
+        // empty string included, so that is off and not unknown. A variable
+        // that could not be read at all is the `error` branch above.
+        const state = stateFor(binding, result.value);
+        if (state) row.state = state;
+        else {
+          row.reason =
+            `value "${result.value}" matches neither ` +
+            `"${binding.onValue}" nor "${binding.offValue}"`;
+        }
       }
+      if (pair.hiddenFromHome) row.hiddenFromHome = true;
       this.note(pair.base, binding.variable, row.reason ?? null);
       states.set(pair.base, row);
     }
@@ -430,7 +503,7 @@ class CueStates {
     const answer: CueStatesAnswer = {
       ok: [...states.values()].every((s) => s.state !== "unknown"),
       checkedAt: new Date(cueStatesDeps.now()).toISOString(),
-      states: Object.fromEntries(states),
+      states,
     };
     this.cached = { at: cueStatesDeps.now(), answer };
     return answer;

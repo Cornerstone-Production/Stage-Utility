@@ -30,6 +30,9 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { settingsStore } = await import("./settings-store.js");
+const { secretsStore } = await import("./secrets.js");
+const { integrationManager } = await import("./integration-manager.js");
+import type { IntegrationState } from "../types/integrations.js";
 
 after(async () => {
   await fs.rm(TMP, { recursive: true, force: true });
@@ -93,5 +96,67 @@ describe("two integrations written at once", () => {
     const merged = await settingsStore.patchIntegrationConfig("alpha", { port: 4456 });
     assert.deepEqual(merged, { host: "203.0.113.10", port: 4456 });
     assert.deepEqual((await onDisk()).integrationConfigs?.alpha, { host: "203.0.113.10", port: 4456 });
+  });
+});
+
+// ── and the encrypted file is not rewritten for a save that touched no secret ──
+//
+// secrets.ts re-encrypts the WHOLE blob on every save, and the concurrent-write
+// race it guards against is per write — so an ordinary edit (the poll interval,
+// a zone selection) rewriting the credentials file is a window opened for
+// nothing. setConfig's `if (secretsChanged)` is what closes it, and nothing in
+// the suite noticed when it was changed to `if (true)`.
+//
+// Driven through the real setConfig, against the real secrets store. sensource
+// is the integration used because its apply pass is inert without credentials —
+// `hasCreds` is false, so it stops the poller and contacts nothing.
+
+describe("a save that touches no secret", () => {
+  const manager = integrationManager as unknown as { states: Map<string, IntegrationState> };
+  const realSetSecrets = secretsStore.setSecrets.bind(secretsStore);
+  let writes: string[] = [];
+
+  before(() => {
+    // init() cannot be called from a unit test — it starts the reconnect timers
+    // and never lets the process exit — so the one row setConfig needs is seeded
+    // the way every other case in this repo seeds it.
+    manager.states.set("sensource", {
+      id: "sensource",
+      enabled: false,
+      connection: "disconnected",
+      message: null,
+      config: {},
+    });
+  });
+
+  after(() => {
+    secretsStore.setSecrets = realSetSecrets;
+  });
+
+  it("does not rewrite secrets.bin, however many times it is saved", async () => {
+    // GUARD. Exactly zero, not "few": one rewrite is one window.
+    writes = [];
+    secretsStore.setSecrets = async (id: string, values: Record<string, string>) => {
+      writes.push(id);
+      return realSetSecrets(id, values);
+    };
+
+    await integrationManager.setConfig("sensource", { pollSeconds: 30 });
+    await integrationManager.setConfig("sensource", { pollSeconds: 30 });
+
+    assert.deepEqual(writes, [], "an ordinary edit re-encrypted the whole credentials file");
+  });
+
+  it("...and a save that DOES carry one writes exactly once", async () => {
+    // The other direction, so the case above cannot pass on a setSecrets that
+    // never runs at all.
+    writes = [];
+    await integrationManager.setConfig("sensource", { clientSecret: "vea-invented-secret-0005" });
+    assert.deepEqual(writes, ["sensource"], "a new credential was not written");
+
+    // ...and saving the SAME value again is not a change either.
+    writes = [];
+    await integrationManager.setConfig("sensource", { clientSecret: "vea-invented-secret-0005" });
+    assert.deepEqual(writes, [], "re-saving an unchanged credential rewrote the file");
   });
 });
