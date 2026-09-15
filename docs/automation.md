@@ -218,6 +218,13 @@ happening in the building. It runs only when something calls
 `POST /api/cues/<name>` with a bearer token, so it is how a voice assistant, a
 script or Home Assistant reaches Stage Utility.
 
+Getting cues into Home Assistant — and from there into Apple Home — is the
+[Home Assistant integration](integrations/companion.md#the-integration): install
+it from HACS, give it this server's address and a cue token, and every cue is a
+switch or a button there. A generated
+[YAML fragment](integrations/companion.md#the-generated-yaml) is the fallback
+for an install that cannot run a custom integration.
+
 **For setup and teardown, not for cues during a service.** Turning the projectors
 on before a rehearsal, turning the foyer televisions off after. Every cue imported
 from Companion carries the **no service is live** condition, and refuses with a

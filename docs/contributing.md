@@ -113,6 +113,44 @@ a file does not mean sharing a bug, and a fix to a new feature in a file no
 `feat:` commit happened to touch is invisible to it — the trailer remains the
 author's call.
 
+#### Correcting a trailer after the commit is on `beta`
+
+A trailer that was missed, or added to a commit that did not need one, can only
+be repaired in the commit until the commit reaches `beta`. `beta` is never
+force-pushed, so from then on the body is fixed and the notes generator is the
+only place left to say otherwise.
+
+`docs/release-notes/overrides/<version>.json` is that place — a JSON array read
+only when generating the notes for that exact version:
+
+```json
+[
+  {
+    "commit": "c9d5c299",
+    "betaOnly": true,
+    "reason": "The body says all five findings are in code from this branch, and the trailer was never added."
+  }
+]
+```
+
+| Field | |
+|---|---|
+| `commit` | a commit SHA, seven characters or more. Not a branch or a tag: a name that can move would apply the correction to whatever it points at on the day the release is cut |
+| `betaOnly` | the decision the commit **should** have carried. `true` holds the fix back; `false` shows it, overriding both a wrong trailer and the new-scope heuristic |
+| `reason` | required. An override with no reason is the same silent decision moved to a different file |
+
+The reason is printed to the release log when the override is applied, so the
+run says what it changed and why.
+
+Everything here is a hard failure rather than a fallback: unreadable or
+unparseable JSON, a missing field, a commit that does not resolve, one commit
+listed twice, and an override naming a commit that is not a non-breaking
+`fix:`/`perf:` in the release's range — that last one is a correction that would
+never be applied, which reads as handled and is not.
+
+A prerelease reads no override file. It keeps every fix regardless, because
+somebody on the beta track has been running the broken version.
+
 ## Releases
 
 Automated from the commit types above, by `.github/workflows/release.yml`. Your
