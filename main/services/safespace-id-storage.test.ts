@@ -205,7 +205,7 @@ describe("the boot migration off an upgrading box", () => {
     const settings = await settingsStore.load();
     const ran = await applySecretMigration(planSecretMigration(settings.integrationConfigs)!);
 
-    assert.equal(ran, false, "it wrote onto a secrets.bin it could not read");
+    assert.equal(ran.moved, false, "it wrote onto a secrets.bin it could not read");
     assert.equal(
       await fs.readFile(path.join(TMP, "secrets.bin"), "utf8"),
       "not a valid GCM payload",

@@ -163,7 +163,7 @@ for "idle", because before it runs we do not know that it is idle.
 | Send a RossTalk command | a Carbonite or Ultrix command at a target |
 | Send an OSC message | to an OSC target |
 | Advance PCO Live one item | steps the live plan forward once |
-| REAPER transport | Record, Stop or Play, through the same web interface the [REAPER](integrations/reaper.md) integration polls. Record does nothing when REAPER is already recording |
+| REAPER transport | Record, Stop or Play, through the same web interface the [REAPER](integrations/reaper.md) integration polls. Record does nothing when REAPER is already recording, and refuses outright when the transport cannot be read — 1013 is a toggle, so pressing it on an unknown is how "start recording" ends one |
 | Trigger a ProPresenter macro | runs one of your own ProPresenter macros, on a chosen instance — see [Triggering a macro from a rule](integrations/propresenter.md#triggering-a-macro-from-a-rule) |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
@@ -206,10 +206,15 @@ for "idle", because before it runs we do not know that it is idle.
 > fails with `no macro called "SONG INTRO" on MA` rather than a bare 404.
 >
 > The macro dropdown lists what every configured instance reports, so an
-> instance that is switched off simply contributes nothing — the rule editor
-> still opens. When more than one instance is set up, a name only some of them
-> have is marked, `DOORS (MA only)`. A macro already chosen on a rule is always
-> shown, marked, even while the machine that has it is off.
+> instance that could not be read simply contributes nothing — the rule editor
+> still opens. When more than one instance is set up and all of them answered, a
+> name only some of them have is marked, `DOORS (MA only)`; while any instance is
+> unreachable the mark is dropped, because "only" is a claim about the machines
+> that answered. A macro already chosen on a rule is always shown, marked, even
+> while the machine that has it is off.
+>
+> A rule whose ProPresenter is **switched off** triggers nothing and says so —
+> `MA is switched off` — rather than dialling the last address the card held.
 
 ## Cues
 

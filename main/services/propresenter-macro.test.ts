@@ -107,11 +107,20 @@ after(() => {
   otherServer.close();
 });
 
-/** A configured, STOPPED primary instance: `configure` starts the poll, and a
- *  stopped service keeps host/port, still runs a command, and leaves no timer. */
+/**
+ * A configured, ENABLED, timer-free primary instance.
+ *
+ * stop() first, so no poll and no stream is left running — every case here is
+ * about one request. Then `running` is set back by hand, because triggerMacro
+ * now refuses while the integration is switched off and `running` is exactly
+ * that question since start()/stop() started carrying enablement alone (see
+ * ProPresenterService.setTarget). The refusal itself has its own case below,
+ * which does NOT do this.
+ */
 function configured(): void {
-  propresenterService.configure("127.0.0.1", port);
+  point("127.0.0.1", port);
   propresenterService.stop();
+  (propresenterService as unknown as { running: boolean }).running = true;
   seen = [];
   triggerStatus = 204;
   // The macro cache is per-instance and 30s long, so a case that expects a
@@ -126,10 +135,21 @@ function clearMacroCache(): void {
 }
 
 function unconfigured(): void {
-  propresenterService.configure("", 0);
+  point("", 0);
   propresenterService.stop();
   seen = [];
   clearMacroCache();
+}
+
+
+/** setTarget + start, which is what the old configure() did in one call. The
+ *  service now separates WHERE (setTarget) from WHETHER (start/stop), because
+ *  the two disable paths call stop() without ever revisiting the target — see
+ *  ProPresenterService.setTarget. */
+function point(host: string, port: number, pollMs?: number): void {
+  propresenterService.setTarget(host, port, pollMs);
+  if (host && port > 0) propresenterService.start();
+  else propresenterService.stop();
 }
 
 describe("propresenterService.triggerMacro", () => {
@@ -172,12 +192,32 @@ describe("propresenterService.triggerMacro", () => {
 
   it("an unreachable ProPresenter fails rather than throwing, and names the address", async () => {
     // A port nothing is listening on: the connection is refused, which is
-    // exactly what a booth machine that is off does.
-    propresenterService.configure("127.0.0.1", 9);
+    // exactly what a booth machine that is off does. `running` is put back after
+    // the stop for the reason configured() does it — this case is about the
+    // machine being unreachable, not about the integration being switched off,
+    // and the two are different refusals with different messages.
+    point("127.0.0.1", 9);
     propresenterService.stop();
+    (propresenterService as unknown as { running: boolean }).running = true;
     const r = await propresenterService.triggerMacro("DOORS", "MA");
     assert.equal(r.ok, false);
     assert.match(r.detail, /127\.0\.0\.1:9/);
+    assert.doesNotMatch(r.detail, /switched off/, "the wrong refusal answered");
+  });
+
+  it("a SWITCHED-OFF ProPresenter refuses, and contacts nothing", async () => {
+    // GUARD. The action had no enablement gate at all: automation-actions.ts
+    // calls triggerMacro() straight through, so a `propresenter.macro` rule
+    // firing while the operator had this integration turned off still issued a
+    // real trigger at the last-configured booth machine. "Off" has to mean the
+    // app does not talk to it.
+    point("127.0.0.1", port);
+    propresenterService.stop(); // exactly what the apply pass does when disabled
+    seen = [];
+    const r = await propresenterService.triggerMacro("DOORS", "MA");
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /switched off/);
+    assert.deepEqual(macroPaths(), [], "a switched-off ProPresenter was triggered anyway");
   });
 
   it("an unconfigured ProPresenter fails, and contacts nothing", async () => {
@@ -207,6 +247,32 @@ describe("propresenterService.listMacros", () => {
     assert.deepEqual(macroPaths(), ["/v1/macros"]);
   });
 
+  it("an interval-only save does not make a healthy machine read as unreachable", async () => {
+    // GUARD. listMacros compared the EPOCH, which moves on any stop() — so with
+    // the old configure() (unconditionally restart()) a save that changed only
+    // the fallback poll interval landed inside the round trip and the editor was
+    // told "ProPresenter was reconfigured while its macros were being read". The
+    // machine was perfectly healthy and the list came back empty.
+    configured();
+    holdMacros = true;
+    const inFlight = propresenterService.listMacros();
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(heldMacros.length, 1, "the macro read never reached the stub");
+
+    // The interval edit, landing inside the round trip. Same host, same port.
+    propresenterService.setTarget("127.0.0.1", port, 900);
+    holdMacros = false;
+    releaseMacros();
+
+    const r = await inFlight;
+    assert.deepEqual(
+      r.names,
+      ["DOORS", "SONG INTRO", "Kids Worship"],
+      `a healthy machine was reported unreadable: ${r.error}`,
+    );
+    assert.equal(r.error, null);
+  });
+
   it("caches, so opening the rule editor twice is one round trip", async () => {
     configured();
     await propresenterService.listMacros();
@@ -215,7 +281,7 @@ describe("propresenterService.listMacros", () => {
   });
 
   it("does NOT cache a failure — a machine rebooting must not pin an empty list", async () => {
-    propresenterService.configure("127.0.0.1", 9);
+    point("127.0.0.1", 9);
     propresenterService.stop();
     clearMacroCache();
     const first = await propresenterService.listMacros();
@@ -224,7 +290,7 @@ describe("propresenterService.listMacros", () => {
 
     // Now point it at the live stub without clearing anything: a cached empty
     // list would still be within MACRO_CACHE_MS and would answer from it.
-    propresenterService.configure("127.0.0.1", port);
+    point("127.0.0.1", port);
     propresenterService.stop();
     seen = [];
     const second = await propresenterService.listMacros();
@@ -232,7 +298,7 @@ describe("propresenterService.listMacros", () => {
   });
 
   it("an unreachable ProPresenter returns an empty list plus the reason", async () => {
-    propresenterService.configure("127.0.0.1", 9);
+    point("127.0.0.1", 9);
     propresenterService.stop();
     clearMacroCache();
     const r = await propresenterService.listMacros();
@@ -260,7 +326,7 @@ describe("propresenterService.listMacros", () => {
     // booth machine, opens a rule within thirty seconds, and picks a macro off a
     // list that belongs to the machine they just stopped using. It then 404s on
     // a Sunday morning.
-    propresenterService.configure("127.0.0.1", port);
+    point("127.0.0.1", port);
     propresenterService.stop();
     clearMacroCache();
     const before = await propresenterService.listMacros();
@@ -268,7 +334,7 @@ describe("propresenterService.listMacros", () => {
 
     // Repointed, and asked again at once — well inside MACRO_CACHE_MS. Nothing
     // clears the cache here; teardown() has to.
-    propresenterService.configure("127.0.0.1", otherPort);
+    point("127.0.0.1", otherPort);
     propresenterService.stop();
     const after = await propresenterService.listMacros();
     assert.deepEqual(
@@ -283,7 +349,7 @@ describe("propresenterService.listMacros", () => {
     // the reconfigure lands, so teardown() clears a cache that the resuming
     // continuation then fills straight back in — with the old machine's names,
     // and with a fresh thirty-second lease on them.
-    propresenterService.configure("127.0.0.1", port);
+    point("127.0.0.1", port);
     propresenterService.stop();
     clearMacroCache();
 
@@ -293,14 +359,14 @@ describe("propresenterService.listMacros", () => {
     assert.equal(heldMacros.length, 1, "the macro read never reached the stub");
 
     // The repoint, landing inside the round trip.
-    propresenterService.configure("127.0.0.1", otherPort);
+    point("127.0.0.1", otherPort);
     propresenterService.stop();
     holdMacros = false;
     releaseMacros();
 
     const abandoned = await inFlight;
     assert.deepEqual(abandoned.names, [], "the old machine's names were returned to the editor");
-    assert.match(abandoned.error ?? "", /reconfigured/);
+    assert.match(abandoned.error ?? "", /re-pointed/);
 
     // And nothing was cached: the next open reads the machine it is now pointed
     // at, rather than answering from what the abandoned read left behind.
@@ -437,7 +503,7 @@ describe("the propresenter.macro action", () => {
   });
 
   it("an unreachable ProPresenter fails rather than throwing", async () => {
-    propresenterService.configure("127.0.0.1", 9);
+    point("127.0.0.1", 9);
     propresenterService.stop();
     propresenterManager.apply("MA", []);
     const r = await action.run({ instance: "default", macro: "DOORS" }, { simulate: false });

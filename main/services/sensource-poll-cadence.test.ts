@@ -233,8 +233,14 @@ describe("the attendance interval has no default of its own", () => {
   // this field's value the moment the card opens and saved back if the
   // operator saves it for any other reason, would raise request volume for
   // every install whose own poll interval is not that exact number. See the
-  // field's own doc comment on SenSourceConfig, and
-  // sensource-attendance-cadence.test.ts for the runtime fallback this pins.
+  // field's own doc comment on SenSourceConfig.
+  //
+  // This block is about the FORM only. The runtime fallback — what
+  // attendanceSeconds() answers for a blank field, and the floor it applies —
+  // is pinned in sensource-attendance-cadence.test.ts under "the interval the
+  // service itself resolves". It was not, when this comment first claimed it
+  // was: `|| this.veaSeconds()` could be `|| 30` and the floor could be dropped
+  // entirely with the whole suite green.
   const field = integrationManager
     .getDescriptors()
     .find((d) => d.id === "sensource")

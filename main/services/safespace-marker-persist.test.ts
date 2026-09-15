@@ -59,7 +59,7 @@ async function sensourceOnDisk(): Promise<Record<string, unknown>> {
 }
 
 describe("the boot migration writes the SafeSpace marker to disk", () => {
-  let ran: boolean;
+  let ran: { moved: boolean };
 
   before(async () => {
     // The precondition, asserted rather than assumed: no marker anywhere before
@@ -81,7 +81,7 @@ describe("the boot migration writes the SafeSpace marker to disk", () => {
   });
 
   test("it ran at all, so the assertions below are not passing on a decline", () => {
-    assert.equal(ran, true, "the migration declined; nothing below is evidence about the marker");
+    assert.equal(ran.moved, true, "the migration declined; nothing below is evidence about the marker");
   });
 
   test("the id is out of settings.json and into secrets.bin", async () => {

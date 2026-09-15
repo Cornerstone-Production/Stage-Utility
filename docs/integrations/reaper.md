@@ -40,6 +40,15 @@ up beyond this integration's host and port. REAPER's Record is a toggle, so the
 action reads the transport first and sends nothing when REAPER is already
 recording.
 
+**Record refuses when the transport cannot be read.** Anything that answers the
+request with an HTTP 200 that is not a TRANSPORT line — a captive-portal
+redirect, a reverse proxy, a login page on `/_/` — is *unknown*, not *stopped*,
+and pressing a toggle on an unknown is how "start recording" ends the recording
+of the service. The action fails with a message naming the host instead, and the
+poll reports the same thing on the REAPER row rather than a green badge over a
+machine it cannot read. Stop and Play are idempotent in REAPER itself and still
+go out.
+
 A `_on`/`_off` cue pair built from Record and Stop reports its real state to Home
 Assistant, read from this poll rather than from Companion. See
 [Automation](../automation.md#state-from-stage-utility).

@@ -86,12 +86,16 @@ type Poller = {
   zonesCache: unknown;
   spacesCache: unknown;
   configure: (cfg: SenSourceConfig) => void;
-  scheduleIn: (ms: number) => void;
-  scheduleReconnect: () => void;
-  /** The attendance reading's own timer. Stubbed for the same reason scheduleIn
+  /** The three clocks, each owning its own timer — see ticker.ts. Their `arm`
+   *  is stubbed for the same reason the base class's scheduler was: nothing
+   *  here wants a real timer.
+   *
+   *  The attendance one is stubbed for the same reason the poll
    *  is: every successful poll() here now also calls noteAttendanceSample(),
    *  which would otherwise arm a REAL setTimeout this file never reads. */
-  scheduleAttendanceIn: (ms: number) => void;
+  pollTicker: { arm: (ms: number) => void };
+  safeSpaceTicker: { arm: (ms: number) => void };
+  attendanceTicker: { arm: (ms: number) => void };
   /** Stubbed alongside the scheduler: configure() restarts the poller, and a
    *  case about what configure() DERIVES must not also start a poll. */
   restart: () => void;
@@ -299,9 +303,9 @@ describe("SenSource day aggregates", () => {
     clock = Date.UTC(2026, 8, 6, 15, 0, 0);
     Date.now = () => clock;
     // The poll re-arms itself through these; a test must not leave a timer live.
-    svc.scheduleIn = () => {};
-    svc.scheduleReconnect = () => {};
-    svc.scheduleAttendanceIn = () => {};
+    svc.pollTicker.arm = () => {};
+    svc.safeSpaceTicker.arm = () => {};
+    svc.attendanceTicker.arm = () => {};
     svc.restart = () => {};
     svc.emit = (dto: PeopleCountDTO) => {
       emitted.push(dto);
@@ -763,9 +767,9 @@ describe("SenSource token rejection", () => {
     resetService();
     clock = Date.UTC(2026, 8, 6, 15, 0, 0);
     Date.now = () => clock;
-    svc.scheduleIn = () => {};
-    svc.scheduleReconnect = () => {};
-    svc.scheduleAttendanceIn = () => {};
+    svc.pollTicker.arm = () => {};
+    svc.safeSpaceTicker.arm = () => {};
+    svc.attendanceTicker.arm = () => {};
     svc.restart = () => {};
     svc.emit = (dto: PeopleCountDTO) => {
       emitted.push(dto);
