@@ -14,7 +14,13 @@ guesswork.
 `prodcom-service.ts` holds one WebSocket to `GET /api/v1/ws`, subscribes to the
 `transcript` stream, normalises each entry into a `TranscriptLineDTO`, keeps a
 rolling buffer (up to 100 lines from the last four hours), and re-broadcasts on
-the `prodcom:transcript` channel. It reconnects (~4 s) if the connection drops.
+the `prodcom:transcript` channel.
+
+It reconnects 4 s after a connection drops, then doubles that for each further
+failure in a row, clamped by the service window the way every other integration
+is — so a box that is off all week is not dialled every four seconds all week.
+Any connection that comes up resets the ramp, so a drop mid-service is always
+retried in about four seconds.
 
 ProdCom sends a `{"type":"ping"}` heartbeat over that socket every 30 seconds
 whether or not anyone is speaking, and the app answers it. Three missed
@@ -80,6 +86,10 @@ The `/log` page has the evidence when something looks wrong:
 - `[prodcom] websocket open — streams offered: …` on every connection
 - `[prodcom] no websocket frame for 90s — heartbeat missed …` when the box goes
 - `[prodcom] websocket unavailable (…) — falling back to the transcript SSE stream`
+  once per outage, not once per retry, with a reminder carrying the attempt count
+  every 15 minutes while it lasts, and `[prodcom] websocket is back …` when it
+  recovers. The per-retry "retrying the websocket after N SSE reconnect(s)" is
+  `console.debug`, so it is in the terminal but deliberately not on `/log`.
 - `[prodcom] backfill: N line(s) over P page(s)`, and
   `[prodcom] backfill failed after P page(s) (…)` when a page did not answer
 - `[prodcom] backfill skipped N line(s) older than 4h`

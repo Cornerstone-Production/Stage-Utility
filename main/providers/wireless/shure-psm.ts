@@ -89,7 +89,12 @@ export class ShurePsm extends ShureBaseProvider {
     switch (token) {
       case "CHAN_NAME": {
         // PSM CHAN_NAME max 8 chars.
-        state.name = stripBraces(value).slice(0, 8) || null;
+        const name = stripBraces(value).slice(0, 8) || null;
+        // CHAN_NAME is in every `GET 0 ALL` dump, so an unconditional line here
+        // is one per channel per poll, for ever. Same gate as mute and
+        // interference: log the change, not the reading.
+        if (name === state.name) break;
+        state.name = name;
         console.log(`[shure:${this.id}] ch${channel} name: ${state.name ?? "(none)"}`);
         break;
       }

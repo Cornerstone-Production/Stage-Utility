@@ -48,14 +48,29 @@ export class ShureCharger extends ShureBaseProvider {
    *  than written by whichever landed last. */
   private bayState = new Map<number, string>();
   private bayError = new Map<number, number>();
-  /** Faults already logged, so a charger left with a dead pack in it does not
-   *  reprint the same line every poll for a week. */
+  /**
+   * Faults already LOGGED, per bay, so a charger left with a dead pack in it does
+   * not reprint the same line every poll for a week.
+   *
+   * A bay absent from this map has no fault on the record — which is not the same
+   * as "healthy and previously faulted", and conflating the two is what made a
+   * healthy charger announce a clearance for all eight bays on every connect.
+   * Only ever holds real fault strings; a clearance DELETES rather than storing
+   * an empty one.
+   */
   private loggedFaults = new Map<number, string>();
+
+  /** The last STORAGE_MODE actually logged, or null for "not said yet on this
+   *  connection". The charger re-reports the field on every dump. */
+  private loggedStorageMode: boolean | null = null;
 
   protected initChannelStates(count: number): void {
     this.bayState.clear();
     this.bayError.clear();
     this.loggedFaults.clear();
+    // A fresh connection states the mode once. Cleared alongside the faults
+    // because both are "what this connection has already said".
+    this.loggedStorageMode = null;
     super.initChannelStates(count);
   }
 
@@ -216,7 +231,13 @@ export class ShureCharger extends ShureBaseProvider {
           state.storageMode = on;
           this.emitChannel(n);
         }
-        console.log(`[shure:${this.id}] storage mode ${on ? "ON — bays charge to ~40% and stop" : "off"}`);
+        // The field is in every dump, so an unconditional line here was half of
+        // what a healthy charger wrote to /log. State it once per connection and
+        // then only on a change.
+        if (on !== this.loggedStorageMode) {
+          this.loggedStorageMode = on;
+          console.log(`[shure:${this.id}] storage mode ${on ? "ON — bays charge to ~40% and stop" : "off"}`);
+        }
         break;
       }
 
@@ -258,10 +279,29 @@ export class ShureCharger extends ShureBaseProvider {
     const faulted = code > 0 || this.bayState.get(bay) === "ERROR";
     const fault = !faulted ? null : code > 0 ? `Error ${String(code).padStart(3, "0")}` : "Error";
     state.fault = fault;
-    if (this.loggedFaults.get(bay) === (fault ?? "")) return;
-    this.loggedFaults.set(bay, fault ?? "");
-    if (fault) console.warn(`[shure:${this.id}] bay ${bay} faulted: ${fault} (state ${this.bayState.get(bay) ?? "?"})`);
-    else console.log(`[shure:${this.id}] bay ${bay} fault cleared`);
+
+    const previous = this.loggedFaults.get(bay) ?? null;
+    if (fault === previous) return;
+
+    if (!fault) {
+      // Only news if this bay's fault was actually PUT on the record. A bay seen
+      // healthy for the first time has nothing to clear — and every bay is seen
+      // for the first time on each connect and each reconnect, both of which
+      // re-run initChannelStates. That is how eight "fault cleared" lines came
+      // out of a charger with nothing wrong with it.
+      if (previous === null) return;
+      this.loggedFaults.delete(bay);
+      console.log(`[shure:${this.id}] bay ${bay} fault cleared`);
+      return;
+    }
+
+    this.loggedFaults.set(bay, fault);
+    // BATT_STATE ERROR arrives one frame before BATT_ERROR 007, so the same fault
+    // is derived first as the code-less "Error" and then refined to "Error 007".
+    // That is one fault, not two: record the refinement, do not reprint it. A
+    // change between two real CODES is a different fault and still speaks.
+    if (previous === "Error") return;
+    console.warn(`[shure:${this.id}] bay ${bay} faulted: ${fault} (state ${this.bayState.get(bay) ?? "?"})`);
   }
 
   /** Wipe a bay's readings when the battery leaves it. Every field, in one place:
