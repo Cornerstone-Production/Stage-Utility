@@ -400,7 +400,7 @@ describe("the overrides in docs/release-notes/overrides", () => {
 
   /** Every release with an override, EXACTLY. Adding one is a deliberate act and
    *  should have to be declared here; a file quietly disappearing is the bug. */
-  const VERSIONS_WITH_OVERRIDES = ["1.18.0"];
+  const VERSIONS_WITH_OVERRIDES = ["1.18.0", "1.19.0"];
 
   interface Override { commit: string; betaOnly: boolean; reason: string }
 
