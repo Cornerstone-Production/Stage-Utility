@@ -84,11 +84,16 @@ an eye per object, which hides it while you work on what is underneath.
 The **Canvas** popover sets the design canvas, either from a preset —
 
 Landscape 16:9 · Portrait 9:16 · Standard 4:3 · Widescreen 16:10 ·
-Ultrawide 21:9 · Super ultrawide 32:9 · Square 1:1 · 3:2 · 5:4
+Ultrawide 21:9 · Super ultrawide 32:9 · Square 1:1 · 3:2 · 5:4 ·
+Ultritouch-2 1366 x 203 · Ultritouch-2-HR 1920 x 285 · Ultritouch-4 1366 x 485
 
 — or by typing a width and height. Only the **shape** matters: the renderer
 scales the design canvas to whatever screen it lands on, so a 16:9 layout is not
 a 1080p layout. The **fit** below is chosen in the same popover.
+
+The three Ultritouch presets are pixel sizes rather than shapes: a Ross
+Ultritouch panel's browser frame is exactly that many pixels, and a layout for
+it is letterboxed, never reflowed. See [Ultritouch](../integrations/ultritouch.md).
 
 ### Grid
 
@@ -157,6 +162,10 @@ A layout has one **fit**, set in the **Canvas** popover:
 | Responsive | Reflows to the window it is on | A control surface, which is on whatever window the operator has |
 
 A control surface with no fit stored is responsive; a wall screen is letterboxed.
+
+An Ultritouch canvas is always letterboxed and the fit control is disabled while
+one is chosen: the panel's pixels are known, so the layout keeps its shape and
+scales evenly wherever it is previewed.
 
 ### What responsive does
 
