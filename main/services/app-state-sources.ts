@@ -227,14 +227,6 @@ export function isAppStateRef(variable: string): boolean {
   return variable.trim().startsWith(APP_STATE_PREFIX);
 }
 
-/** The source this ref names, or null when nothing here answers to it. */
-export function appStateSourceId(variable: string): AppStateSourceId | null {
-  const trimmed = variable.trim();
-  if (!isAppStateRef(trimmed)) return null;
-  const id = trimmed.slice(APP_STATE_PREFIX.length);
-  return APP_STATE_SOURCES.has(id as AppStateSourceId) ? (id as AppStateSourceId) : null;
-}
-
 /**
  * What this ref names — a fixed source, one member of a family, or nothing.
  *
