@@ -28,6 +28,8 @@ export const APP_STATE_SOURCE_IDS = [
   "obs.recording",
   "obs.streaming",
   "obs.virtualCam",
+  "youtube.live",
+  "resi.live",
 ] as const;
 
 export type AppStateSourceId = (typeof APP_STATE_SOURCE_IDS)[number];
@@ -102,6 +104,35 @@ export const APP_STATE_SOURCES = new Map<AppStateSourceId, AppStateSourceDef>([
       hint: "Read from Stage Utility's OBS connection. Nothing to set up.",
       channel: "obs:status",
       integrationId: "obs",
+      onValue: "on",
+      offValue: "off",
+    },
+  ],
+  // The first two sources with NO action behind them. Nothing here has ever
+  // required one: `implicitStateBinding` is a table keyed by action id, and a
+  // source no row names is simply never implied — it is picked in the State
+  // variable select like any other. Stage Utility cannot start a YouTube or a
+  // Resi broadcast, so a pair that reads one is an operator's own Companion
+  // button pair, or a cue that starts the encoder feeding it, with the truth
+  // read off the platform rather than off what the button asked for.
+  [
+    "youtube.live",
+    {
+      label: "YouTube live (Stage Utility)",
+      hint: "Read from Stage Utility's YouTube connection. Nothing to set up.",
+      channel: "youtube:status",
+      integrationId: "youtube",
+      onValue: "on",
+      offValue: "off",
+    },
+  ],
+  [
+    "resi.live",
+    {
+      label: "Resi live (Stage Utility)",
+      hint: "Read from Stage Utility's Resi connection. Nothing to set up.",
+      channel: "resi:status",
+      integrationId: "resi",
       onValue: "on",
       offValue: "off",
     },

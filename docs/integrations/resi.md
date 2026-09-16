@@ -101,7 +101,17 @@ status beside it. The surface decides, not which of the two objects you picked.
 
 - **Triggers:** Resi goes live · Resi stops streaming
 - **Condition:** Resi is streaming
+- **Cue pair state:** `app:resi.live`
 
 "Stops streaming" deliberately does not fire when Resi merely becomes
 unreachable. Unreachable is unknown, not stopped, and a rule that stopped a
 recording because an API call timed out would do it mid-service.
+
+An ON/OFF cue pair can read `app:resi.live` as its state, so a console button or
+a Home Assistant switch shows green exactly while Resi is on air rather than
+while somebody once pressed it. Pick it in the **State variable** select on the
+`_on` half. There is no action here that starts a broadcast — the pair is
+whatever your own cue does, and this is the truthful answer about what came of
+it. A Resi this app cannot reach reads unknown, for the same reason the trigger
+does not fire. See [State from Stage
+Utility](../automation.md#state-from-stage-utility).

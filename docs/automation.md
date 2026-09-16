@@ -365,6 +365,14 @@ select whenever the integration behind them is set up.
 | `app:obs.recording` | `on` while OBS is recording — a paused recording is still a recording — `off` while it is connected and not, unknown while it is not connected |
 | `app:obs.streaming` | `on` while OBS is streaming, `off` while it is connected and not, unknown while it is not connected |
 | `app:obs.virtualCam` | `on` while OBS's virtual camera is running, `off` while it is connected and not, unknown while it is not connected |
+| `app:youtube.live` | `on` while YouTube is broadcasting, `off` while it is connected and not, unknown while it is not connected |
+| `app:resi.live` | `on` while Resi is broadcasting, `off` while it is connected and not, unknown while it is not connected |
+
+`app:youtube.live` and `app:resi.live` are read-only: there is no action here that
+starts or stops a broadcast on either platform. Bind a pair to one when the cue
+that goes on air is something else — an operator's own Companion button, or a cue
+that starts the encoder feeding it — and the switch then reports what the
+platform says rather than what the button asked for.
 
 A pair is bound to one of these without anybody choosing it when its `_on` half
 is one of the actions that starts what the source watches:

@@ -166,5 +166,14 @@ status beside it. The surface decides, not which of the two objects you picked.
 
 - **Triggers:** YouTube goes live · YouTube stops streaming
 - **Condition:** YouTube is streaming
+- **Cue pair state:** `app:youtube.live`
 
 "Stops streaming" does not fire when YouTube simply becomes unreachable.
+
+An ON/OFF cue pair can read `app:youtube.live` as its state, so a console button
+or a Home Assistant switch shows green exactly while YouTube is on air rather
+than while somebody once pressed it. Pick it in the **State variable** select on
+the `_on` half. There is no action here that starts a broadcast — the pair is
+whatever your own cue does, and this is the truthful answer about what came of
+it. A YouTube this app cannot reach reads unknown, never off. See [State from
+Stage Utility](../automation.md#state-from-stage-utility).
