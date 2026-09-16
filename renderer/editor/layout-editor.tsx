@@ -2163,10 +2163,14 @@ export function LayoutEditor({
               </div>
               <div className="flex flex-col gap-1.5">
                 <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Size (px)</span>
+                {/* Two fields share the popover's width. The themed input is
+                    w-full and a flex item's min-width defaults to its content,
+                    so without min-w-0 the second field ran off the popover's
+                    right edge. */}
                 <div className="flex items-center gap-1">
-                  <NumberField value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
+                  <NumberField className="min-w-0 flex-1" value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
                   <span className="text-caption2 text-fg-subtle">×</span>
-                  <NumberField value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
+                  <NumberField className="min-w-0 flex-1" value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
