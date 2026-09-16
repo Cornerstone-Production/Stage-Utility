@@ -11,7 +11,7 @@ import { useState, type ChangeEvent, type ReactNode } from "react";
 
 import { Dialog, Input, Radio, RadioGroup, Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { dashboardTemplate, confidenceMonitorTemplate } from "../../editor/layout-editor";
+import { dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel } from "../../editor/layout-editor";
 import type { SectionHandlers } from "../types";
 import { everyViewKind, type ViewSurface } from "@main/types/views";
 import { externKeyed } from "@main/types/extern-keyed";
@@ -61,7 +61,7 @@ const KIND_ORDER = everyViewKind([
   "custom",
 ]);
 
-type StartFrom = "blank" | "dashboard" | "confidence";
+type StartFrom = "blank" | "dashboard" | "confidence" | UltritouchModel;
 
 export function NewViewDialog({
   handlers,
@@ -96,10 +96,11 @@ export function NewViewDialog({
         // View can be a console. The server enforces this too.
         const id = await handlers.handleAddView(name.trim(), kind, kind === "custom" ? surface : "display");
         if (id && kind === "custom" && startFrom !== "blank") {
-          const objects = startFrom === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate();
+          const strip = startFrom.startsWith("ultritouch-") ? (startFrom as UltritouchModel) : null;
+          const objects = strip ? ultritouchTemplate(strip) : startFrom === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate();
           await handlers.handleSetViewLayout(id, {
             version: 1,
-            canvas: { width: 1920, height: 1080, background: null },
+            canvas: strip ? ultritouchCanvas(strip) : { width: 1920, height: 1080, background: null },
             objects,
           });
         }
@@ -173,6 +174,9 @@ export function NewViewDialog({
                 <SelectItem value="blank">Blank canvas</SelectItem>
                 <SelectItem value="dashboard">Dashboard template</SelectItem>
                 <SelectItem value="confidence">Confidence Monitor template</SelectItem>
+                <SelectItem value="ultritouch-2">Ultritouch-2 strip</SelectItem>
+                <SelectItem value="ultritouch-2-hr">Ultritouch-2-HR strip</SelectItem>
+                <SelectItem value="ultritouch-4">Ultritouch-4 strip</SelectItem>
               </SelectContent>
             </Select>
           </label>

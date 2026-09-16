@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { CANVAS_PRESETS, ULTRITOUCH_PRESETS, isUltritouchCanvas } from "./layout-templates.js";
+import { CANVAS_PRESETS, ULTRITOUCH_PRESETS, isUltritouchCanvas, ultritouchTemplate, ultritouchCanvas } from "./layout-templates.js";
 
 describe("Ultritouch canvas presets", () => {
   test("the three panels, at the User Guide's pixels", () => {
@@ -33,4 +33,24 @@ describe("Ultritouch canvas presets", () => {
     assert.equal(isUltritouchCanvas(1920, 1080), false);
     assert.equal(isUltritouchCanvas(1366, 204), false);
   });
+});
+
+describe("Ultritouch strip templates", () => {
+  for (const model of ["ultritouch-2", "ultritouch-2-hr", "ultritouch-4"] as const) {
+    test(`${model}: eight cue buttons per row and one countdown, all on the canvas`, () => {
+      const objects = ultritouchTemplate(model);
+      const cueButtons = objects.filter((o) => o.config.type === "cue-button");
+      assert.equal(cueButtons.length, model === "ultritouch-4" ? 16 : 8);
+      assert.equal(objects.filter((o) => o.config.type === "countdown-timer").length, 1);
+      assert.equal(objects.length, cueButtons.length + 1);
+      for (const o of objects) {
+        assert.ok(o.x >= 0 && o.y >= 0 && o.x + o.w <= 1.0001 && o.y + o.h <= 1.0001, `${o.id} off the canvas`);
+      }
+      // Unbound: a template must never ship a cue name that may not exist here.
+      for (const b of cueButtons) assert.equal((b.config as { cue: string }).cue, "");
+      const canvas = ultritouchCanvas(model);
+      assert.equal(canvas.fit, "contain");
+      assert.equal(canvas.background, "#0e0e0e");
+    });
+  }
 });

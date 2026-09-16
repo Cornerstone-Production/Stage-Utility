@@ -101,12 +101,12 @@ import { AlignmentGuides } from "./alignment-guides";
  *  that deliberate placement is never fought, large enough to catch a hand. */
 const ALIGN_TOLERANCE_PX = 8;
 
-import { uid, dashboardTemplate, confidenceMonitorTemplate, CANVAS_PRESETS, isUltritouchCanvas, canvasAfterPreset } from "./layout-templates";
+import { uid, dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel, CANVAS_PRESETS, isUltritouchCanvas, canvasAfterPreset } from "./layout-templates";
 import { Inspector } from "./inspector";
 import {
   NumberField, 
 } from "./inspector-rows";
-export { dashboardTemplate, confidenceMonitorTemplate };
+export { dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel };
 import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
 import { PlanSwitcher } from "../settings/sections/plan-switcher";
 import { UnsavedWorkProvider, useUnsavedWork } from "../components/unsaved-work";
@@ -1550,6 +1550,17 @@ export function LayoutEditor({
     setSelectedIds(new Set());
     setDirty(true);
   }
+  // Replace the layout and canvas with one of the three Ultritouch strip
+  // starters: unlike the other starters, the panel's canvas is part of what
+  // "starting from" this template means — a strip laid out on the wrong
+  // canvas is not this starter, it is a stack of unreadable labels.
+  function startFromUltritouch(model: UltritouchModel) {
+    pushHistory();
+    setCanvas(ultritouchCanvas(model));
+    setObjects(ultritouchTemplate(model));
+    setSelectedIds(new Set());
+    setDirty(true);
+  }
 
   // Snap EVERY object (position + size, recursively) onto the grid in one click —
   // for cleaning up existing layouts whose objects predate grid snapping. Locked
@@ -2212,6 +2223,15 @@ export function LayoutEditor({
               </DropdownMenu.Item>
               <DropdownMenu.Item onSelect={startFromConfidenceMonitor} className={MENU_ITEM}>
                 <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Confidence Monitor template
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => startFromUltritouch("ultritouch-2")} className={MENU_ITEM}>
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Ultritouch-2 strip
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => startFromUltritouch("ultritouch-2-hr")} className={MENU_ITEM}>
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Ultritouch-2-HR strip
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => startFromUltritouch("ultritouch-4")} className={MENU_ITEM}>
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Ultritouch-4 strip
               </DropdownMenu.Item>
               {templates.length > 0 && (
                 <>

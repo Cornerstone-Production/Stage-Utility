@@ -29,10 +29,11 @@ See [Widget reference](widgets.md) for what each widget's Content settings mean.
 ## Starting from something
 
 A custom view can start blank or from a built-in layout. **Screens → New view →
-*Custom Layout*** offers **Start from**: *Blank canvas*, *Dashboard template*, or
-*Confidence Monitor template*. The two templates are the app's own dashboard and
-stage screen, built as ordinary editable objects rather than a fixed rendering —
-so they are a starting point you take apart, not a mode.
+*Custom Layout*** offers **Start from**: *Blank canvas*, *Dashboard template*,
+*Confidence Monitor template*, and three Ultritouch strips, one per panel, each
+a row of unbound cue buttons and a countdown on that panel's canvas. Every
+template is built as ordinary editable objects rather than a fixed rendering —
+so it is a starting point you take apart, not a mode.
 
 Inside the editor, **Replace** does the same thing to a layout that already
 exists, and lists your **saved layouts** underneath. **Save as layout**, on the
