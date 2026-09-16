@@ -64,8 +64,10 @@ describe("a widget you just added", () => {
     // 59/31 before the two ProVideoPlayer "what is on now" widgets: `pvp-now`
     // is carded like every other wall readout, `home-pvp-now` is bare because
     // Home's grid frames it.
-    assert.equal(all.length, 61);
-    assert.equal(all.filter(hasCard).length, 32);
+    // 61/32 before the cue button, which is carded: it is a pill on a panel,
+    // and it paints no box of its own.
+    assert.equal(all.length, 62);
+    assert.equal(all.filter(hasCard).length, 33);
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });
 

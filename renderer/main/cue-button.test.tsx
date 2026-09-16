@@ -74,6 +74,14 @@ function mount(cues: CuesLive | null, cue: string, interactive = true) {
   return render(React.createElement(ObjectContent as never, { o: obj, ctx }));
 }
 
+/**
+ * Let the press settle: the call promise, React's state update, and the render
+ * it schedules. Two macrotasks rather than one — with a single tick the last
+ * setState landed after the test had ended, and node:test reported the render
+ * as "asynchronous activity after the test ended" once the dom was torn down.
+ */
+const settle = () => new Promise((r) => setTimeout(r, 20));
+
 const stateOf = (container: HTMLElement) =>
   container.querySelector("[data-state]")?.getAttribute("data-state");
 
@@ -87,7 +95,7 @@ describe("cue button", () => {
     const { container } = mount(live(), "");
     assert.match(container.textContent ?? "", /Unbound/);
     fireEvent.click(container.querySelector("button")!);
-    await new Promise((r) => setTimeout(r, 0));
+    await settle();
     assert.equal(calls, 0);
   });
 
@@ -119,7 +127,7 @@ describe("cue button", () => {
     fireEvent.click(mount(live({}, { state: "off" }), "haze").container.querySelector("button")!);
     fireEvent.click(mount(live({}, { state: "on" }), "haze").container.querySelector("button")!);
     fireEvent.click(mount(live(), "confetti").container.querySelector("button")!);
-    await new Promise((r) => setTimeout(r, 0));
+    await settle();
     assert.deepEqual(names, ["haze_on", "haze_off", "confetti"]);
   });
 
@@ -134,7 +142,7 @@ describe("cue button", () => {
         "button",
       )!,
     );
-    await new Promise((r) => setTimeout(r, 0));
+    await settle();
     assert.deepEqual(names, ["haze_on"]);
   });
 
@@ -146,7 +154,7 @@ describe("cue button", () => {
     };
     fireEvent.click(mount(live({ available: false }), "haze").container.querySelector("button")!);
     fireEvent.click(mount(live(), "haze", false).container.querySelector("button")!);
-    await new Promise((r) => setTimeout(r, 0));
+    await settle();
     assert.equal(calls, 0);
   });
 
@@ -158,7 +166,7 @@ describe("cue button", () => {
     });
     const { container } = mount(live(), "haze");
     fireEvent.click(container.querySelector("button")!);
-    await new Promise((r) => setTimeout(r, 0));
+    await settle();
     assert.match(container.textContent ?? "", /Not allowed during a service/);
   });
 
@@ -170,7 +178,7 @@ describe("cue button", () => {
     };
     const { container } = mount(live(), "haze");
     fireEvent.click(container.querySelector("button")!);
-    await new Promise((r) => setTimeout(r, 0));
+    await settle();
     assert.match(container.textContent ?? "", /Could not reach the server/);
   });
 
@@ -178,7 +186,7 @@ describe("cue button", () => {
     cueButtonDeps.call = async () => ({ status: 202, detail: "awaiting confirmation" });
     const { container } = mount(live(), "haze");
     fireEvent.click(container.querySelector("button")!);
-    await new Promise((r) => setTimeout(r, 0));
+    await settle();
     assert.match(container.textContent ?? "", /confirmation/i);
   });
 });
