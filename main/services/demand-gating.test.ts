@@ -388,20 +388,21 @@ describe("demand is registered for everything automation reads", () => {
     assert.equal(channelDemandSourceCount("reaper:status"), 3);
   });
 
-  it("obs:status has exactly four demand sources", () => {
-    // Four, by three routes, the same shape as REAPER's above:
+  it("obs:status has exactly five demand sources", () => {
+    // Five, by three routes, the same shape as REAPER's above:
     //
     //  1. the trigger loop, for obs.recording-started / -stopped and the
     //     streaming and virtual-cam pairs beside them. ONE registration however
     //     many triggers name the channel.
     //  2. the obs.is-recording CONDITION, pulled at fire time.
-    //  3. TWO cue-pair sources — `app:obs.recording` and `app:obs.streaming`
-    //     (app-state-sources.ts) — one registration each, because the loop in
-    //     automation-engine.ts walks the sources rather than the channels.
+    //  3. THREE cue-pair sources — `app:obs.recording`, `app:obs.streaming` and
+    //     `app:obs.virtualCam` (app-state-sources.ts) — one registration each,
+    //     because the loop in automation-engine.ts walks the sources rather
+    //     than the channels.
     //
-    // An EXACT count: the two app sources share `obs:status` with the triggers,
-    // so dropping either registration is invisible to every other assertion in
-    // this file.
-    assert.equal(channelDemandSourceCount("obs:status"), 4);
+    // An EXACT count: the three app sources share `obs:status` with the
+    // triggers, so dropping any one registration is invisible to every other
+    // assertion in this file.
+    assert.equal(channelDemandSourceCount("obs:status"), 5);
   });
 });

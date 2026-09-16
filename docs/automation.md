@@ -169,6 +169,7 @@ for "idle", because before it runs we do not know that it is idle.
 | REAPER transport | Record, Stop or Play, through the same web interface the [REAPER](integrations/reaper.md) integration polls. Record does nothing when REAPER is already recording, and refuses outright when the transport cannot be read — 1013 is a toggle, so pressing it on an unknown is how "start recording" ends one |
 | OBS recording | Start or stop OBS's recording over the same obs-websocket connection the [OBS](integrations/obs.md) integration holds — no Companion button in between. Start does nothing when OBS is already recording, Stop does nothing when it is not |
 | OBS streaming | Start or stop OBS's stream, on the same connection and with the same start/stop idempotency |
+| OBS virtual camera | Start or stop the virtual camera a video call picks up as a webcam, on the same connection and with the same start/stop idempotency |
 | Trigger a ProPresenter macro | runs one of your own ProPresenter macros, on a chosen instance — see [Triggering a macro from a rule](integrations/propresenter.md#triggering-a-macro-from-a-rule) |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
@@ -191,7 +192,7 @@ for "idle", because before it runs we do not know that it is idle.
 > layer a cue uses is set in ProVideoPlayer, not here. See
 > [ProVideoPlayer](integrations/provideoplayer.md).
 
-> **OBS recording** and **OBS streaming** need nothing beyond the
+> **OBS recording**, **OBS streaming** and **OBS virtual camera** need nothing beyond the
 > [OBS](integrations/obs.md) integration being set up and connected — they use
 > its websocket, not a second one. A command sent while the output is already in
 > that state is answered `already recording` / `already stopped` and nothing goes
@@ -363,6 +364,7 @@ select whenever the integration behind them is set up.
 | `app:reaper.recording` | `on` while REAPER is recording, `off` while it is connected and not, unknown while it is not connected |
 | `app:obs.recording` | `on` while OBS is recording — a paused recording is still a recording — `off` while it is connected and not, unknown while it is not connected |
 | `app:obs.streaming` | `on` while OBS is streaming, `off` while it is connected and not, unknown while it is not connected |
+| `app:obs.virtualCam` | `on` while OBS's virtual camera is running, `off` while it is connected and not, unknown while it is not connected |
 
 A pair is bound to one of these without anybody choosing it when its `_on` half
 is one of the actions that starts what the source watches:
@@ -372,6 +374,7 @@ is one of the actions that starts what the source watches:
 | **REAPER transport** → Record | `app:reaper.recording` |
 | **OBS recording** → Start recording | `app:obs.recording` |
 | **OBS streaming** → Start streaming | `app:obs.streaming` |
+| **OBS virtual camera** → Start virtual camera | `app:obs.virtualCam` |
 
 It is the only answer there is, and the two values are fixed at `on` and `off`,
 so the value rows are not offered. Setting **State variable** to anything else on

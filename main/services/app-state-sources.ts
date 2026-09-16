@@ -23,7 +23,12 @@
 export const APP_STATE_PREFIX = "app:";
 
 /** Every source, as a union — see the header for why the readers are elsewhere. */
-export const APP_STATE_SOURCE_IDS = ["reaper.recording", "obs.recording", "obs.streaming"] as const;
+export const APP_STATE_SOURCE_IDS = [
+  "reaper.recording",
+  "obs.recording",
+  "obs.streaming",
+  "obs.virtualCam",
+] as const;
 
 export type AppStateSourceId = (typeof APP_STATE_SOURCE_IDS)[number];
 
@@ -79,6 +84,21 @@ export const APP_STATE_SOURCES = new Map<AppStateSourceId, AppStateSourceDef>([
     "obs.streaming",
     {
       label: "OBS streaming (Stage Utility)",
+      hint: "Read from Stage Utility's OBS connection. Nothing to set up.",
+      channel: "obs:status",
+      integrationId: "obs",
+      onValue: "on",
+      offValue: "off",
+    },
+  ],
+  [
+    "obs.virtualCam",
+    {
+      // `virtualCam`, matching ObsStatusDTO's field rather than the `obs.x.y`
+      // lower-case shape of the two above: the id is what an operator pastes
+      // into a rule, and one of these written both ways is a binding that reads
+      // unknown forever. The DTO field is the one spelling that already exists.
+      label: "OBS virtual camera (Stage Utility)",
       hint: "Read from Stage Utility's OBS connection. Nothing to set up.",
       channel: "obs:status",
       integrationId: "obs",

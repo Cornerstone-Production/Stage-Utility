@@ -12,7 +12,7 @@ import { advanceGuard } from "./automation-pco-items.js";
 import { broadcast } from "./broadcaster.js";
 import { companionApi } from "./companion-api.js";
 import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
-import { isObsOutputCommand, obsOutput, type ObsOutputKind } from "./obs-service.js";
+import { isObsOutputCommand, obsOutput, obsOutputNoun, type ObsOutputKind } from "./obs-service.js";
 import { oscManager } from "./osc-manager.js";
 import { propresenterManager } from "./propresenter-service.js";
 import { isReaperTransportCommand, reaperService } from "./reaper-service.js";
@@ -70,7 +70,7 @@ async function runObsOutput(
   // Ahead of the service on purpose, exactly as reaper.transport is: a simulated
   // run must not read the snapshot either, so a rule can be written and tested
   // with OBS not running — which is when a rule is usually written.
-  if (simulate) return ok(`would ${command} ${kind === "record" ? "recording" : "streaming"}`);
+  if (simulate) return ok(`would ${command} ${obsOutputNoun(kind)}`);
   const result = await obsOutput(kind, command);
   return result.ok ? ok(`${command}: ${result.detail}`) : fail(`${command}: ${result.detail}`);
 }
@@ -321,6 +321,27 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
       },
     ],
     run: async (params, ctx) => runObsOutput("stream", params, ctx.simulate),
+  },
+
+  "obs.virtual-cam": {
+    id: "obs.virtual-cam",
+    label: "OBS virtual camera",
+    help:
+      "Starts or stops OBS's virtual camera over the SAME obs-websocket connection the OBS integration holds — the " +
+      "output a video call picks up as a webcam. Start does nothing when it is already running and Stop does " +
+      "nothing when it is not, exactly as the recording action does.",
+    params: [
+      {
+        key: "command",
+        label: "Command",
+        type: "enum",
+        options: [
+          { value: "start", label: "Start virtual camera" },
+          { value: "stop", label: "Stop virtual camera" },
+        ],
+      },
+    ],
+    run: async (params, ctx) => runObsOutput("virtualCam", params, ctx.simulate),
   },
 
   "propresenter.macro": {

@@ -32,6 +32,7 @@ export interface AppStateValue {
 const REAPER = APP_STATE_SOURCES.get("reaper.recording")!;
 const OBS_RECORDING = APP_STATE_SOURCES.get("obs.recording")!;
 const OBS_STREAMING = APP_STATE_SOURCES.get("obs.streaming")!;
+const OBS_VIRTUAL_CAM = APP_STATE_SOURCES.get("obs.virtualCam")!;
 
 const READS: Record<AppStateSourceId, () => AppStateValue> = {
   "reaper.recording": () => {
@@ -59,6 +60,11 @@ const READS: Record<AppStateSourceId, () => AppStateValue> = {
     const status = obsService.getLatest();
     if (!status.connected) return { value: null, reason: "OBS is not connected" };
     return { value: status.streaming ? OBS_STREAMING.onValue : OBS_STREAMING.offValue };
+  },
+  "obs.virtualCam": () => {
+    const status = obsService.getLatest();
+    if (!status.connected) return { value: null, reason: "OBS is not connected" };
+    return { value: status.virtualCam ? OBS_VIRTUAL_CAM.onValue : OBS_VIRTUAL_CAM.offValue };
   },
 };
 

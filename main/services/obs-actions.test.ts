@@ -55,6 +55,7 @@ function obsIsGone(): void {
 
 const record = () => AUTOMATION_ACTIONS["obs.record"]!;
 const stream = () => AUTOMATION_ACTIONS["obs.stream"]!;
+const virtualCam = () => AUTOMATION_ACTIONS["obs.virtual-cam"]!;
 const live = { simulate: false };
 
 beforeEach(() => {
@@ -223,6 +224,68 @@ describe("obs.stream", () => {
   });
 });
 
+describe("obs.virtual-cam", () => {
+  test("start while stopped sends StartVirtualCam", async () => {
+    obsIs({ virtualCam: false });
+    const r = await virtualCam().run({ command: "start" }, live);
+    assert.deepEqual(r, { ok: true, detail: "start: sent StartVirtualCam" });
+    assert.deepEqual(sent, ["StartVirtualCam"]);
+  });
+
+  test("start while already running sends nothing and says so", async () => {
+    obsIs({ virtualCam: true });
+    const r = await virtualCam().run({ command: "start" }, live);
+    assert.deepEqual(r, { ok: true, detail: "start: already running" });
+    assert.deepEqual(sent, []);
+  });
+
+  test("stop while running sends StopVirtualCam", async () => {
+    obsIs({ virtualCam: true });
+    const r = await virtualCam().run({ command: "stop" }, live);
+    assert.deepEqual(r, { ok: true, detail: "stop: sent StopVirtualCam" });
+    assert.deepEqual(sent, ["StopVirtualCam"]);
+  });
+
+  test("stop while stopped sends nothing", async () => {
+    obsIs({ virtualCam: false });
+    const r = await virtualCam().run({ command: "stop" }, live);
+    assert.deepEqual(r, { ok: true, detail: "stop: already stopped" });
+    assert.deepEqual(sent, []);
+  });
+
+  test("recording and streaming are not the virtual camera", async () => {
+    // Three rows share one snapshot now. A virtual-cam row reading `recording`
+    // would answer "already running" during any service that records, and the
+    // call on the other end of the camera would see nothing at all.
+    obsIs({ recording: true, streaming: true, virtualCam: false });
+    await virtualCam().run({ command: "start" }, live);
+    assert.deepEqual(sent, ["StartVirtualCam"]);
+  });
+
+  test("the virtual camera is not recording", async () => {
+    obsIs({ virtualCam: true, recording: false });
+    await record().run({ command: "start" }, live);
+    assert.deepEqual(sent, ["StartRecord"]);
+  });
+
+  test("a disconnected OBS is a failure that names it", async () => {
+    obsIsGone();
+    const r = await virtualCam().run({ command: "start" }, live);
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /OBS is not connected/);
+    assert.deepEqual(sent, []);
+  });
+
+  test("simulate contacts OBS not at all, and says what it would do in words", async () => {
+    // "the virtual camera", not the kind's own key: a message reading "would
+    // start virtualCam" is the internal name leaking onto the Activity log.
+    obsIs({ virtualCam: false });
+    const r = await virtualCam().run({ command: "start" }, { simulate: true });
+    assert.deepEqual(r, { ok: true, detail: "would start the virtual camera" });
+    assert.deepEqual(sent, [], "a simulated cue sent a request to OBS");
+  });
+});
+
 describe("the state a pair of these cues reads", () => {
   test("an ON half that starts an OBS recording reads app:obs.recording", () => {
     assert.deepEqual(implicitStateBinding({ id: "obs.record", params: { command: "start" } }), {
@@ -240,13 +303,23 @@ describe("the state a pair of these cues reads", () => {
     });
   });
 
-  test("the two are not crossed", () => {
-    // One table drives both. A source pasted from the line above would give the
-    // stream pair the recording's state — a switch reporting the wrong device.
-    assert.notEqual(
-      implicitStateBinding({ id: "obs.record", params: { command: "start" } })?.variable,
-      implicitStateBinding({ id: "obs.stream", params: { command: "start" } })?.variable,
+  test("an ON half that starts the virtual camera reads app:obs.virtualCam", () => {
+    assert.deepEqual(implicitStateBinding({ id: "obs.virtual-cam", params: { command: "start" } }), {
+      variable: "app:obs.virtualCam",
+      onValue: "on",
+      offValue: "off",
+    });
+  });
+
+  test("no two of them are crossed", () => {
+    // One table drives all three. A source pasted from the line above would give
+    // one pair another's state — a switch reporting the wrong device. Compared
+    // as a SET rather than pairwise, so a fourth row added by copy and paste
+    // fails here too.
+    const refs = ["obs.record", "obs.stream", "obs.virtual-cam"].map(
+      (id) => implicitStateBinding({ id, params: { command: "start" } })?.variable,
     );
+    assert.equal(new Set(refs).size, refs.length, `two OBS pairs read the same source: ${refs.join(", ")}`);
   });
 
   test("REAPER's implicit binding still stands", () => {
@@ -259,6 +332,7 @@ describe("the state a pair of these cues reads", () => {
   test("a STOP half implies nothing — the pair is bound from its ON half", () => {
     assert.equal(implicitStateBinding({ id: "obs.record", params: { command: "stop" } }), null);
     assert.equal(implicitStateBinding({ id: "obs.stream", params: { command: "stop" } }), null);
+    assert.equal(implicitStateBinding({ id: "obs.virtual-cam", params: { command: "stop" } }), null);
     assert.equal(implicitStateBinding({ id: "reaper.transport", params: { command: "stop" } }), null);
   });
 

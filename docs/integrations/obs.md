@@ -66,12 +66,13 @@ before. Saving or testing the OBS integration starts it again.
 
 ## Driving OBS from a cue
 
-Two automation actions drive OBS over the connection this integration already
-holds: **OBS recording** and **OBS streaming**, each with a Start and a Stop.
-Nothing else is set up, and no Companion button is involved.
+Three automation actions drive OBS over the connection this integration already
+holds: **OBS recording**, **OBS streaming** and **OBS virtual camera**, each with
+a Start and a Stop. Nothing else is set up, and no Companion button is involved.
 
-Either is idempotent. Start while OBS is already recording answers `already
+Each is idempotent. Start while OBS is already recording answers `already
 recording` and sends nothing; Stop while it is not answers `already stopped`.
+The virtual camera answers `already running`.
 That is not politeness — obs-websocket rejects a redundant `StartRecord` with a
 request error, so without it a cue called twice would be a red line in the
 Activity log over a recording that is running perfectly well. With OBS
@@ -89,7 +90,9 @@ pushes the instant it changes, rather than what the cue asked for:
 | `obs_record_off` | OBS recording → Stop recording |
 
 `obs_stream_on` / `obs_stream_off` work the same way against
-`app:obs.streaming`. See [State from Stage
+`app:obs.streaming`, and `obs_vcam_on` / `obs_vcam_off` against
+`app:obs.virtualCam` — the output a video call picks up as a webcam, so a switch
+in the house says whether the call can see anything. See [State from Stage
 Utility](../automation.md#state-from-stage-utility) and [Calling a cue by
 name](companion.md#calling-a-cue-by-name).
 

@@ -111,6 +111,36 @@ describe("app:obs.streaming", () => {
   });
 });
 
+describe("app:obs.virtualCam", () => {
+  test("reads on while OBS's virtual camera is running", () => {
+    obs({ virtualCam: true });
+    assert.deepEqual(readAppState("app:obs.virtualCam"), { value: "on" });
+  });
+
+  test("reads off while OBS is connected and the virtual camera is stopped", () => {
+    obs({ virtualCam: false });
+    assert.deepEqual(readAppState("app:obs.virtualCam"), { value: "off" });
+  });
+
+  test("recording and streaming do not move the virtual camera reading", () => {
+    // Three sources now share one snapshot and one channel. The virtual camera
+    // is the one an operator is least likely to be watching, so a reader that
+    // picked up `recording` would report a camera nothing is publishing.
+    obs({ recording: true, streaming: true, virtualCam: false });
+    assert.deepEqual(readAppState("app:obs.virtualCam"), { value: "off" });
+  });
+
+  test("the virtual camera does not move the recording reading", () => {
+    obs({ virtualCam: true, recording: false });
+    assert.deepEqual(readAppState("app:obs.recording"), { value: "off" });
+  });
+
+  test("an OBS nobody can reach is unreadable, not off", () => {
+    obsService.getLatest = () => OBS_OFFLINE;
+    assert.deepEqual(readAppState("app:obs.virtualCam"), { error: "OBS is not connected" });
+  });
+});
+
 describe("app:reaper.recording", () => {
   test("reads on while REAPER is recording", () => {
     reaperService.getLatest = () => ({ ...REAPER_OFFLINE, connected: true, recording: true });
@@ -124,13 +154,13 @@ describe("app:reaper.recording", () => {
 
 describe("the registry and the readers", () => {
   test("every shipped source answers, and nothing else does", () => {
-    // EXACT, over the union rather than a list written here: a fourth source
+    // EXACT, over the union rather than a list written here: a fifth source
     // added without a reader does not compile, and one added without reaching
     // this file would still be read here. `obs` is connected, so no source may
     // answer with an error.
     obs({});
     reaperService.getLatest = () => ({ ...REAPER_OFFLINE, connected: true });
-    assert.equal(APP_STATE_SOURCE_IDS.length, 3);
+    assert.equal(APP_STATE_SOURCE_IDS.length, 4);
     for (const id of APP_STATE_SOURCE_IDS) {
       const answer = readAppState(`app:${id}`);
       assert.equal("value" in answer, true, `app:${id} answered with no value`);
@@ -138,6 +168,10 @@ describe("the registry and the readers", () => {
   });
 
   test("a ref nothing answers to is named, not guessed at", () => {
+    // `virtualcam` with a small c. `app:obs.virtualCam` IS a source now, so this
+    // is also the case-sensitivity question: the lookup is an exact Map hit, and
+    // a ref that differs only in case is a typo, not a near miss to be helped
+    // along into somebody's house reporting a camera it never read.
     assert.deepEqual(readAppState("app:obs.virtualcam"), {
       error: 'no Stage Utility state source called "app:obs.virtualcam"',
     });

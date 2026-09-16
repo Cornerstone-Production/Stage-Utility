@@ -28,10 +28,11 @@
 // A cue that does NOT press a Companion button has no such variable to read, and
 // does not need one — this app is already talking to the device. Those bindings
 // are `app:<source>` (see app-state-sources.ts), and a pair whose ON half
-// starts a recorder — `reaper.transport` RECORD, `obs.record` START,
-// `obs.stream` START — is bound to that recorder's source IMPLICITLY: it is the
-// only answer there is, and a Record/Stop pair reporting nothing until
-// somebody found a select would be optimistic for no reason. An explicit
+// starts an output this app can watch — `reaper.transport` RECORD, `obs.record`
+// START, `obs.stream` START, `obs.virtual-cam` START — is bound to that
+// output's source IMPLICITLY: it is the only answer there is, and a Record/Stop
+// pair reporting nothing until somebody found a select would be optimistic for
+// no reason. An explicit
 // `stateVariable` on either half always wins over the implicit one, so a pair
 // can still be pointed somewhere else, or left unbound, by hand.
 //
@@ -357,9 +358,9 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
  * An ON action that starts something this app can watch, and the source that
  * watches it.
  *
- * A table rather than three `if`s: each entry is an action id, the one command
+ * A table rather than four `if`s: each entry is an action id, the one command
  * value that means "start", and the `app:` source reporting whether it is
- * running. Stage Utility is already talking to all three devices, so the state
+ * running. Stage Utility is already talking to both devices, so the state
  * costs nothing — and the alternative, an optimistic pair, reports "recording"
  * after a Record the recorder never carried out.
  */
@@ -367,6 +368,7 @@ const IMPLIED_SOURCES: { actionId: string; command: string; source: AppStateSour
   { actionId: "reaper.transport", command: "record", source: "reaper.recording" },
   { actionId: "obs.record", command: "start", source: "obs.recording" },
   { actionId: "obs.stream", command: "start", source: "obs.streaming" },
+  { actionId: "obs.virtual-cam", command: "start", source: "obs.virtualCam" },
 ];
 
 /**
