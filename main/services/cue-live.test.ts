@@ -29,8 +29,11 @@ import * as fsp from "node:fs/promises";
 // the data directory at import.
 process.env.STAGE_UTILITY_DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "cue-live-"));
 
-const { cueLive, cueLiveDeps, CUES_POLL_MS } = await import("./cue-live.js");
+const { cueLive, cueLiveDeps, CUES_POLL_MS, CUES_CHANNEL, CUES_ALL_CHANNEL } = await import(
+  "./cue-live.js"
+);
 const { cueStates } = await import("./cue-states.js");
+const { setSubscriberCheck, setSubscriberCount } = await import("./broadcaster.js");
 type CuesEvent = import("./cue-live.js").CuesEvent;
 
 /**
@@ -43,6 +46,12 @@ type CuesEvent = import("./cue-live.js").CuesEvent;
  * cache refresh".
  */
 const realRead = cueLiveDeps.read;
+/**
+ * The PRODUCTION subscriber deps, captured for the same reason: beforeEach
+ * replaces both, so which CHANNELS they ask about is never executed otherwise.
+ */
+const realWatched = cueLiveDeps.watched;
+const realSubscribers = cueLiveDeps.subscribers;
 
 type Row = {
   state: "on" | "off" | "unknown";
@@ -56,6 +65,8 @@ let STATES: Record<string, Row> = {};
 let reads = 0;
 let subscribed = false;
 let events: CuesEvent[] = [];
+/** What went out on `cues:all` — every pair, hidden or not. */
+let allEvents: CuesEvent[] = [];
 let lines: string[] = [];
 /** The interval callback the producer registered, and how often it asked. */
 let tick: (() => void) | null = null;
@@ -69,6 +80,7 @@ beforeEach(() => {
   reads = 0;
   subscribed = false;
   events = [];
+  allEvents = [];
   lines = [];
   tick = null;
   everyMs = 0;
@@ -94,6 +106,7 @@ beforeEach(() => {
     tick = null;
   };
   cueLiveDeps.emit = (e) => events.push(e);
+  cueLiveDeps.emitAll = (e) => allEvents.push(e);
   console.log = (...args: unknown[]) => {
     lines.push(args.map(String).join(" "));
   };
@@ -298,6 +311,76 @@ describe("a pair hidden from Home Assistant", () => {
       { type: "state", id: "voice_only", state: "on" },
     ]);
     await stopEverything();
+  });
+});
+
+// ── The all-cues channel ─────────────────────────────────────────────────────
+//
+// `cues` is what the Home Assistant integration has always read and must stay
+// exactly that. `cues:all` is the app's own cue buttons: every pair, hidden from
+// Home Assistant or not, each hidden one saying so.
+describe("the all-cues channel", () => {
+  test("a hidden pair is pushed on cues:all and not on cues", async () => {
+    STATES = {
+      projectors: { state: "on" },
+      haze: { state: "off", hiddenFromHome: true },
+    };
+    subscribed = true;
+    cueLive.subscriptionsChanged();
+    await settle();
+    assert.deepEqual(events, [{ type: "state", id: "projectors", state: "on" }]);
+    assert.deepEqual(allEvents, [
+      { type: "state", id: "projectors", state: "on" },
+      { type: "state", id: "haze", state: "off", hiddenFromHome: true },
+    ]);
+    await stopEverything();
+  });
+
+  test("each channel remembers what IT was sent", async () => {
+    // One `last` map for both channels is how a pair that was hidden when the
+    // panel first saw it would never be pushed to Home Assistant on unhiding:
+    // the key was already set by the all-channel push nobody on `cues` got.
+    STATES = { haze: { state: "on", hiddenFromHome: true } };
+    subscribed = true;
+    cueLive.subscriptionsChanged();
+    await settle();
+    assert.deepEqual(events, []);
+    assert.equal(allEvents.length, 1);
+
+    STATES = { haze: { state: "on" } };
+    await poll();
+    assert.deepEqual(events, [{ type: "state", id: "haze", state: "on" }]);
+    assert.equal(allEvents.length, 1, "the all channel re-stated an unchanged pair");
+    await stopEverything();
+  });
+
+  test("a rules change announces the manifest on both", async () => {
+    cueLive.rulesChanged();
+    assert.equal(events.at(-1)?.type, "manifest");
+    assert.equal(allEvents.at(-1)?.type, "manifest");
+    assert.deepEqual(events.at(-1), allEvents.at(-1));
+    console.log = realLog;
+  });
+
+  test("a panel alone starts the poll", async () => {
+    // The real deps, not the stubs: which channels they ask about is the whole
+    // point, and a console on a panel with no Home Assistant anywhere is the
+    // install where getting it wrong means the buttons never move.
+    const asked: string[] = [];
+    setSubscriberCheck((channel) => {
+      asked.push(channel);
+      return channel === CUES_ALL_CHANNEL;
+    });
+    setSubscriberCount((channel) => (channel === CUES_ALL_CHANNEL ? 1 : 0));
+    try {
+      assert.equal(realWatched(), true, "a cues:all subscriber did not start the poll");
+      assert.deepEqual([...new Set(asked)].sort(), [CUES_ALL_CHANNEL, CUES_CHANNEL].sort());
+      assert.equal(realSubscribers(), 1);
+    } finally {
+      setSubscriberCheck(() => false);
+      setSubscriberCount(() => 0);
+      console.log = realLog;
+    }
   });
 });
 

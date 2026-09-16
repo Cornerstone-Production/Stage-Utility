@@ -383,7 +383,7 @@ something to change:
 `prodcom:transcript` · `slots:devices` · `integrations:state-changed` ·
 `wireless:connections-changed` · `osc:targets-changed` ·
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
-`rosstalk:simulated` · `automation:rules` · `cues` ·
+`rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
 `automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` ·
 `display:refresh` · `settings:allowedServiceTypeIds-changed`
 
@@ -404,6 +404,11 @@ one client is subscribed the bound Companion variables are read every five
 seconds and only changes are pushed; with nobody subscribed there is no timer
 and nothing is read. A value that lands while a
 pair is settling is read and pushed at once rather than at the next tick.
+
+`cues:all` is the same two messages for the app's own cue buttons, carrying
+every pair including those hidden from Home Assistant (each with
+`hiddenFromHome: true`). An integration reads `cues`; a panel reads `cues:all`.
+Either channel having a subscriber starts the five-second read.
 
 ## Outside `/api`
 
