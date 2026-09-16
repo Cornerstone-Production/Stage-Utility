@@ -29,7 +29,14 @@ import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { AUTOMATION_TRIGGERS, CALL_CHANNEL, CALL_TRIGGER_ID, isValidCueName, triggersForChannel } from "./automation-triggers.js";
-import { APP_STATE_SOURCES, appStateRef, type AppStateSourceId } from "./app-state-sources.js";
+import {
+  APP_STATE_FAMILIES,
+  APP_STATE_SOURCES,
+  appStateRef,
+  parseAppStateRef,
+  type AppStateFamilyId,
+  type AppStateSourceId,
+} from "./app-state-sources.js";
 import { boundCuePairs, cuePairs, stateBindingProblem } from "./cue-pairs.js";
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
@@ -924,6 +931,25 @@ class AutomationEngine {
     const ref = appStateRef(id);
     return boundCuePairs(this.rules).some((pair) => pair.binding?.variable === ref);
   }
+
+  /**
+   * Does any cue pair read its state from this app source FAMILY?
+   *
+   * The same question as above for a parameterised source, and it cannot be
+   * asked the same way: `app:pvp.layer-hidden:Lyrics` is one of an unbounded set
+   * of refs, so an exact-id match sees none of them and PVP polls at its idle
+   * cadence for every switch bound to a layer. The demand is per FAMILY, not per
+   * layer — a pair bound to any layer is demand on the whole PVP poll, which is
+   * the one thing that poll produces.
+   *
+   * Not gated on `disarmed`, for the reason above.
+   */
+  wantsAppStateFamily(family: AppStateFamilyId): boolean {
+    return boundCuePairs(this.rules).some((pair) => {
+      const parsed = parseAppStateRef(pair.binding?.variable ?? "");
+      return parsed?.kind === "family" && parsed.family === family;
+    });
+  }
 }
 
 export const automationEngine = new AutomationEngine();
@@ -982,4 +1008,16 @@ for (const [conditionId, def] of Object.entries(AUTOMATION_CONDITIONS)) {
  */
 for (const [id, def] of APP_STATE_SOURCES) {
   addChannelDemandSource(def.channel, () => automationEngine.wantsAppStateSource(id));
+}
+
+/**
+ * The parameterised families, registered per FAMILY rather than per ref.
+ *
+ * There is no finite list of `app:pvp.layer-hidden:<name>` refs to walk, and
+ * there does not need to be: every member of a family reads the same poll, so
+ * one registration asking "is any pair bound to this family" is the whole
+ * question. Derived from the registry, as the loop above is.
+ */
+for (const [family, def] of APP_STATE_FAMILIES) {
+  addChannelDemandSource(def.channel, () => automationEngine.wantsAppStateFamily(family));
 }

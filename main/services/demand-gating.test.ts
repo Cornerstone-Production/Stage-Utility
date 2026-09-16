@@ -41,7 +41,7 @@ const { AUTOMATION_CONDITIONS } = await import("./automation-conditions.js");
 const { reaperService } = await import("./reaper-service.js");
 const { prodcomService } = await import("./prodcom-service.js");
 const { stageController } = await import("./stage-controller.js");
-const { addBroadcastListener, channelDemandSourceCount, setSubscriberCheck } =
+const { addBroadcastListener, channelDemandSourceCount, channelInDemand, setSubscriberCheck } =
   await import("./broadcaster.js");
 
 // THE unattended box. Without this the broadcaster fails open — its documented
@@ -404,6 +404,58 @@ describe("demand is registered for everything automation reads", () => {
     // triggers, so dropping any one registration is invisible to every other
     // assertion in this file.
     assert.equal(channelDemandSourceCount("obs:status"), 5);
+  });
+
+  it("a cue pair bound to a PVP LAYER puts pvp:status in demand", async () => {
+    // The parameterised case, and the one an exact-ref match cannot see:
+    // `app:pvp.layer-hidden:Lyrics` is one of an unbounded set of refs, so
+    // wantsAppStateSource — which compares against a fixed id — answers false for
+    // every one of them and PVP polls at its idle cadence for a switch somebody
+    // is reading. Driven through the real rules, the real pair resolution and the
+    // real broadcaster check rather than by calling the engine method directly.
+    await setRules([]);
+    assert.equal(
+      channelInDemand("pvp:status"),
+      false,
+      "pvp:status was already in demand with no rules at all — this case proves nothing",
+    );
+
+    await setRules([
+      {
+        trigger: { id: "call.by-name", params: { name: "lyrics_on", stateVariable: "app:pvp.layer-hidden:Lyrics", stateOnValue: "on", stateOffValue: "off" } },
+        action: { id: "pvp.hide-layer", params: { layer: "Lyrics" } },
+      },
+      {
+        trigger: { id: "call.by-name", params: { name: "lyrics_off" } },
+        action: { id: "pvp.unhide-layer", params: { layer: "Lyrics" } },
+      },
+    ]);
+    assert.equal(
+      channelInDemand("pvp:status"),
+      true,
+      "a cue pair bound to app:pvp.layer-hidden:Lyrics registered no demand on pvp:status. " +
+        "PVP polls at its idle cadence, so the switch in Home Assistant answers from a " +
+        "snapshot seconds old with nothing anywhere saying so.",
+    );
+
+    await setRules([]);
+  });
+
+  it("pvp:status has exactly eight demand sources", () => {
+    // Eight, by three routes:
+    //
+    //  1. the trigger loop, ONE registration for every pvp.* trigger.
+    //  2. FIVE pvp CONDITIONS, pulled at fire time — one registration each:
+    //     layer-has-content, layer-is-playing, layer-is-hidden, layer-is-muted
+    //     and workspace-has-content.
+    //  3. TWO cue-pair FAMILIES — `app:pvp.layer-hidden:<name>` and
+    //     `app:pvp.layer-muted:<name>` — one registration per family, because
+    //     there is no finite list of refs to walk.
+    //
+    // An EXACT count: the families share `pvp:status` with the triggers and the
+    // conditions, so dropping either family's registration is invisible to the
+    // in-demand case above the moment any pvp rule exists.
+    assert.equal(channelDemandSourceCount("pvp:status"), 8);
   });
 
   it("youtube:status and resi:status have exactly three demand sources each", () => {
