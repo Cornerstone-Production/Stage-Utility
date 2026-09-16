@@ -19,6 +19,12 @@ type(scope): subject
   `design`, `patch`, `history`, `scriptview`, `attendance`, `integrations`, `sse`,
   `recorders`, `layout`, `layout-editor`, `advanced`, `server`, `pco`, `updater`,
   `types`, `rosstalk`.
+- **scope, when it names the machinery** — `release`, `ci`, `dx` and `test` name
+  this project's own tooling. A `feat`, `fix` or `perf` under one of them is typed
+  honestly and still invisible to every operator, so it appears in no release
+  notes and mints no release. The list is `main/services/internal-scopes.json`,
+  read by the notes generator, the update dialog and the workflow alike. A
+  breaking `!` is shown and counted whatever its scope.
 - **subject** — imperative mood, no trailing period. Say what the change does, not
   what you did: "add rack color to the header", not "added rack color".
 
@@ -161,8 +167,10 @@ commit type is what picks the version, so it is worth getting right.
 | `beta` | a prerelease `X.Y.Z-beta.N`, tagged, published as a GitHub prerelease |
 | `main` | the release `X.Y.Z`, tagged, published as the latest GitHub release |
 
-A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build` produces **no
-release at all**, so documentation churn does not mint versions. Otherwise the level
+A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build`, or only
+`feat`/`fix`/`perf` commits scoped to the tooling (`release`, `ci`, `dx`, `test`),
+produces **no release at all**, so documentation churn and release-machinery fixes
+do not mint versions. The rule is `scripts/release-level.sh`. Otherwise the level
 is the highest severity among every commit since the last stable release — one `feat`
 among twenty `docs` makes it a minor.
 

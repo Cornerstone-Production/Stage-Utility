@@ -85,17 +85,10 @@ jobs:
           STABLE=$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -v -- '-' | head -1 || true)
           echo "last tag: ${LAST:-<none>}  last stable: ${STABLE:-<none>}"
 
-          level_of() { # highest level among commits in the given range
-            local range="$1" subjects bodies
-            subjects=$(git log --no-merges --format='%s' $range)
-            bodies=$(git log --no-merges --format='%b' $range)
-            if grep -qE '^(feat|fix|perf|refactor|docs|test|build|ci|chore)(\([^)]+\))?!:' <<<"$subjects" \
-               || grep -q 'BREAKING CHANGE' <<<"$bodies"; then echo major
-            elif grep -qE '^feat(\([^)]+\))?:' <<<"$subjects"; then echo minor
-            elif grep -qE '^(fix|perf)(\([^)]+\))?:' <<<"$subjects"; then echo patch
-            else echo none
-            fi
-          }
+          # The level rule lives in scripts/release-level.sh so a test can drive it
+          # over a fixture history, and so a fix to the release tooling itself
+          # (fix(release), fix(ci)) neither mints a release nor picks its level.
+          level_of() { scripts/release-level.sh "$@"; }
 
           # Has anything releasable landed that this branch has not published?
           #
@@ -107,9 +100,9 @@ jobs:
           # the very release the merge exists to produce. That is exactly what
           # happened to v1.9.3 — "Nothing user-visible since v1.9.3-beta.1".
           if [ "$BRANCH" = main ]; then
-            NEWS=$(level_of "${STABLE:+$STABLE..HEAD}")
+            NEWS=$(level_of ${STABLE:+"$STABLE..HEAD"})
           else
-            NEWS=$(level_of "${LAST:+$LAST..HEAD}")
+            NEWS=$(level_of ${LAST:+"$LAST..HEAD"})
           fi
           TOTAL=$(git log --no-merges --oneline ${LAST:+$LAST..HEAD} | wc -l | tr -d ' ')
 
@@ -128,8 +121,10 @@ jobs:
               echo "No version was minted and no artifacts were built."
               echo
               echo "Only \`feat\`, \`fix\`, \`perf\` or a breaking change trigger a release."
-              echo "\`refactor\`, \`docs\`, \`test\`, \`build\`, \`ci\` and \`chore\` do not —"
-              echo "they ride along with the next one that does. See docs/contributing.md."
+              echo "\`refactor\`, \`docs\`, \`test\`, \`build\`, \`ci\` and \`chore\` do not, and"
+              echo "neither does a \`feat\`/\`fix\`/\`perf\` scoped to the release tooling itself"
+              echo "(\`release\`, \`ci\`, \`dx\`, \`test\`) — they ride along with the next one"
+              echo "that does. See docs/contributing.md."
               echo
               echo "**Since \`${LAST:-the beginning of history}\`** ($TOTAL commit(s)):"
               echo
@@ -148,7 +143,7 @@ jobs:
             exit 0
           fi
 
-          LEVEL=$(level_of "${STABLE:+$STABLE..HEAD}")
+          LEVEL=$(level_of ${STABLE:+"$STABLE..HEAD"})
           echo "new since $LAST: $NEWS   accumulated since ${STABLE:-<none>}: $LEVEL"
 
           # Where the accumulated work since the last stable release lands.
