@@ -169,7 +169,7 @@ const PREVIEW_ASPECTS = [
 - [ ] **Step 4: Run it, expect green; then typecheck**
 
 ```bash
-node --import tsx --test renderer/editor/layout-templates.test.ts && npm run -s typecheck
+node --import tsx --test renderer/editor/layout-templates.test.ts && npm run -s type-check
 ```
 
 - [ ] **Step 5: Docs**
@@ -288,15 +288,15 @@ and give both fit `<Button>`s `disabled={isUltritouchCanvas(canvas.width, canvas
 - [ ] **Step 5: Run the test, typecheck, lint**
 
 ```bash
-node --import tsx --test renderer/editor/layout-editor-fit-lock.test.ts && npm run -s typecheck && npm run -s lint
+node --import tsx --test renderer/editor/layout-editor-fit-lock.test.ts && npm run -s type-check && npm run -s lint
 ```
 
 - [ ] **Step 6: Drive the real editor**
 
-Start a test server on a copied data dir (never `~/.stage-utility`, never port 8788):
+Start a test server on an EMPTY data dir (never a copy of `~/.stage-utility`: a copy dials the Shure receivers, Planning Center and Vea regardless of integration flags; never port 8788):
 
 ```bash
-cp -R ~/.stage-utility /tmp/su-ultritouch && STAGE_UTILITY_DATA=/tmp/su-ultritouch STAGE_UTILITY_PORT=8799 npm run dev
+mkdir -p /tmp/su-ultritouch && STAGE_UTILITY_DATA=/tmp/su-ultritouch STAGE_UTILITY_PORT=8799 npm run dev
 ```
 
 Open `/screens`, New view → Custom Layout → console → Edit → Canvas → pick Ultritouch-2. Confirm the fit buttons grey out and Letterbox is lit. Pick 16:9; confirm they re-enable. Kill the server by port:
@@ -722,7 +722,7 @@ Expected: FAIL on both counts.
 ```bash
 node --import tsx --test main/types/object-capabilities.test.ts renderer/main/object-catalog.test.ts renderer/main/widget-docs.test.ts
 ```
-`npm run -s typecheck` will fail with a non-exhaustive `switch` in `layout-renderer.tsx` until Task 8. Do not commit a broken typecheck: add a temporary `case "cue-button": return <span>cue</span>;` at line 1338 now and replace it in Task 8.
+`npm run -s type-check` will fail with a non-exhaustive `switch` in `layout-renderer.tsx` until Task 8. Do not commit a broken typecheck: add a temporary `case "cue-button": return <span>cue</span>;` at line 1338 now and replace it in Task 8.
 
 - [ ] **Step 4: Commit**
 
@@ -929,7 +929,7 @@ export function useCueLive(enabled: boolean): CuesLive | null {
 - [ ] **Step 4: Run, typecheck**
 
 ```bash
-node --import tsx --test renderer/main/use-cue-live.test.ts && npm run -s typecheck
+node --import tsx --test renderer/main/use-cue-live.test.ts && npm run -s type-check
 ```
 
 - [ ] **Step 5: Commit**
@@ -1204,7 +1204,7 @@ Check the token names `--green-9`, `--amber-9`, `--su-fg-faint`, `--brand-accent
 - [ ] **Step 5: Run, typecheck, lint**
 
 ```bash
-node --import tsx --test renderer/main/cue-button.test.tsx renderer/main/object-catalog.test.ts main/types/object-capabilities.test.ts && npm run -s typecheck && npm run -s lint
+node --import tsx --test renderer/main/cue-button.test.tsx renderer/main/object-catalog.test.ts main/types/object-capabilities.test.ts && npm run -s type-check && npm run -s lint
 ```
 
 - [ ] **Step 6: Commit**
@@ -1249,15 +1249,15 @@ Import `useCueLive` in `inspector.tsx`; call `const cues = useCueLive(c.type ===
 - [ ] **Step 2: Typecheck and lint**
 
 ```bash
-npm run -s typecheck && npm run -s lint
+npm run -s type-check && npm run -s lint
 ```
 
 - [ ] **Step 3: Drive the real path on a test server**
 
-Companion must NOT be reachable from the test server. Copy the data dir, then before booting set the Companion integration disabled in the copied config (find its file under the copy and set `enabled: false`), and confirm after boot:
+Companion must NOT be reachable from the test server. Use an EMPTY data dir and seed the cues you need through the API; a copied data dir dials real devices regardless of integration flags. Confirm after boot:
 
 ```bash
-cp -R ~/.stage-utility /tmp/su-cue && STAGE_UTILITY_DATA=/tmp/su-cue STAGE_UTILITY_PORT=8799 npm run dev
+mkdir -p /tmp/su-cue && STAGE_UTILITY_DATA=/tmp/su-cue STAGE_UTILITY_PORT=8799 npm run dev
 ```
 ```bash
 curl -s localhost:8799/api/version && grep -c "\[companion\]" <server log> 
@@ -1419,9 +1419,9 @@ Import `ultritouchTemplate, ultritouchCanvas, type UltritouchModel` from `../../
 - [ ] **Step 5: Run, typecheck, drive**
 
 ```bash
-node --import tsx --test renderer/editor/layout-templates.test.ts && npm run -s typecheck && npm run -s lint
+node --import tsx --test renderer/editor/layout-templates.test.ts && npm run -s type-check && npm run -s lint
 ```
-On the test server from Task 9's recipe: New view → console → "Ultritouch-2 strip" → Edit. Confirm eight buttons, one countdown, Letterbox locked. Resize the browser tall and wide: the strip keeps its shape. Kill by port.
+On a test server with an EMPTY data dir (Task 9's recipe): New view → console → "Ultritouch-2 strip" → Edit. Confirm eight buttons, one countdown, Letterbox locked. Resize the browser tall and wide: the strip keeps its shape. Kill by port.
 
 - [ ] **Step 6: Docs and commit**
 
@@ -1513,7 +1513,7 @@ git commit -m "docs(integrations): a console on a Ross Ultritouch"
 ## Gate before each PR
 
 ```bash
-npm run -s typecheck && npm run -s lint && npm test 2>&1 | tail -8
+npm run -s type-check && npm run -s lint && npm test 2>&1 | tail -8
 ```
 Expected: `fail 0`. Record the pass count in the PR body. Every PR body answers the two questions: what docs changed, and what an operator can read on `/log` (for B: the existing `[cues]` call line now says `console`).
 
