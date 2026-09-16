@@ -200,3 +200,50 @@ describe("simulate and test-fire", () => {
     assert.equal(fires(), 1);
   });
 });
+
+// Rule edits used to save and broadcast silently, so an operator who lost 300
+// rules in one evening had nothing to read on /log. One line per add, update
+// and remove, tagged [automation].
+describe("rule edits are logged", () => {
+  const realLog = console.log;
+  let lines: string[] = [];
+
+  beforeEach(async () => {
+    await automationEngine.init();
+    lines = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+  });
+
+  after(() => {
+    console.log = realLog;
+  });
+
+  const matching = (re: RegExp) => lines.filter((l) => re.test(l));
+
+  test("add, update and remove each emit exactly one [automation] line", async () => {
+    const id = await ruleFiringOnServiceStart({ name: "front wash" });
+    assert.deepEqual(
+      matching(/^\[automation\] rule added /),
+      [`[automation] rule added "front wash" (${id})`],
+      "adding a rule logged nothing, or logged more than once",
+    );
+
+    lines = [];
+    await automationEngine.updateRule(id, { name: "front wash 2" });
+    assert.deepEqual(
+      matching(/^\[automation\] rule updated /),
+      [`[automation] rule updated "front wash 2" (${id})`],
+      "updating a rule logged nothing, or logged more than once",
+    );
+
+    lines = [];
+    await automationEngine.removeRule(id);
+    assert.deepEqual(
+      matching(/^\[automation\] rule removed /),
+      [`[automation] rule removed "front wash 2" (${id})`],
+      "removing a rule logged nothing — the name must be captured before the filter",
+    );
+  });
+});

@@ -264,6 +264,9 @@ and **Save**; Escape, the overlay and Cancel all discard the draft, and a save
 the server refuses leaves the dialog open with the change still in it. Deleting
 asks first, naming the cues that go.
 
+Adds, edits and deletes are each logged on `/log` under `[automation]`, with the
+rule's name and id, so a bulk delete leaves a record of exactly which rules went.
+
 A pair opens ONE dialog. **This pair** holds the settings that belong to the
 pair rather than to one direction of it — Home Assistant, Allowed during a
 service, State variable, Room — and a **Turn on** / **Turn off** control below
