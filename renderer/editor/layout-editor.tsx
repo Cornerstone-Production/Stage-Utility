@@ -2055,16 +2055,46 @@ export function LayoutEditor({
             The palette it opens carries the same set the dropdown listed, and
             the hide-unconfigured filter now lives in the palette's own header,
             beside the list it filters. */}
-        <Button
-          variant={paletteOpen ? "accent" : "filled"}
-          size="small"
-          onClick={() => setPaletteOpen((v) => !v)}
-          aria-label="Add an object"
-          aria-pressed={paletteOpen}
-          tooltip="Every widget, with a line on what each shows. Drag one onto the canvas, or click to add it."
-        >
-          <PlusIcon className="size-3.5" /> Add object
-        </Button>
+        {/* The palette floats from this button rather than sitting in the
+            canvas row. In the row it was capped at the canvas's own height,
+            which on a 1366x203 Ultritouch strip left a 160px list with a
+            search box and one visible widget. Non-modal and kept open across
+            outside clicks so a drag onto the canvas, or three clicks to add
+            three widgets, does not keep reopening it; the button toggles it. */}
+        <Popover.Root open={isEditing && paletteOpen} onOpenChange={setPaletteOpen} modal={false}>
+          <Popover.Trigger asChild>
+            <Button
+              variant={paletteOpen ? "accent" : "filled"}
+              size="small"
+              onClick={() => setPaletteOpen((v) => !v)}
+              aria-label="Add an object"
+              aria-pressed={paletteOpen}
+              tooltip="Every widget, with a line on what each shows. Drag one onto the canvas, or click to add it."
+            >
+              <PlusIcon className="size-3.5" /> Add object
+            </Button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              align="start"
+              sideOffset={6}
+              onInteractOutside={(e) => e.preventDefault()}
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              className="z-50 w-64 max-h-[min(70vh,44rem)] overflow-y-auto rounded-xl border border-line-strong bg-popover shadow-md backdrop-blur-xl"
+            >
+              <Palette
+                types={paletteTypes}
+                dimmed={dimmedTypes}
+                hideUnconfigured={hideUnconfigured}
+                onToggleHideUnconfigured={toggleHideUnconfigured}
+                onAdd={addObject}
+                onDragStart={(t) => { paletteDragType.current = t; }}
+                onDragEnd={() => { paletteDragType.current = null; }}
+                onDropAt={dropObjectAtClient}
+              />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
@@ -2301,26 +2331,6 @@ export function LayoutEditor({
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
-        {/* Palette — what the toolbar's "Add object" button opens. Hidden
-            outside edit mode, and collapsible for anyone who wants the canvas
-            wider. */}
-        {isEditing && paletteOpen && (
-          <div
-            className="w-56 shrink-0 overflow-y-auto rounded-xl border border-line bg-surface @max-4xl:w-full @max-4xl:max-h-64"
-            style={{ maxHeight: canvasH ?? undefined }}
-          >
-            <Palette
-              types={paletteTypes}
-              dimmed={dimmedTypes}
-              hideUnconfigured={hideUnconfigured}
-              onToggleHideUnconfigured={toggleHideUnconfigured}
-              onAdd={addObject}
-              onDragStart={(t) => { paletteDragType.current = t; }}
-              onDragEnd={() => { paletteDragType.current = null; }}
-              onDropAt={dropObjectAtClient}
-            />
-          </div>
-        )}
         <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl:flex-none" style={{ height: canvasH ?? undefined }}>
           {previewShape.vp ? (
             // The live edit state, not the saved view: the point is to check the

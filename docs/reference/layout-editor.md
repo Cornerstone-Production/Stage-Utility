@@ -44,8 +44,11 @@ Replacing swaps the canvas outright, and **Undo** takes it back.
 
 ## The object palette
 
-**Add widget** opens the palette, grouped by what a widget reads from, with a
-search box over it. **Hide widgets whose integration is not set up** removes the
+**Add widget** opens the palette as a panel floating from that button, grouped
+by what a widget reads from, with a search box over it. It stays open while you
+drag or click widgets onto the canvas and closes from the same button, and its
+height follows the window rather than the canvas, so a short Ultritouch strip
+does not shorten the list. **Hide widgets whose integration is not set up** removes the
 ones you have no gear for — from the palette and from the right-click (or tap
 and hold) Add menu alike. Left on, they stay listed but dimmed, which is the
 right default while you are still connecting things.
@@ -150,8 +153,8 @@ The object toolbar above the inspector carries Duplicate and Delete, along with
 lock, layer order and snap-to-grid, and it appears only when exactly one object
 is selected.
 
-While the palette is stacked above the canvas on a narrow window, dragging a
-widget out of it scrolls the list instead; tap to add there.
+On a touch screen, dragging a widget out of the palette scrolls the list
+instead; tap to add there.
 
 ## Fit, and other window shapes
 
