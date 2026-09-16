@@ -4,7 +4,7 @@
 // because it is the seam with no dependencies in either direction — the dialog
 // that creates a view imports the templates without wanting the editor.
 
-import type { LayoutObject, LayoutObjectConfig, LayoutStyle } from "@main/types/views";
+import type { LayoutCanvas, LayoutObject, LayoutObjectConfig, LayoutStyle } from "@main/types/views";
 import { CARD_PRESETS } from "../main/layout-objects";
 
 export function uid(): string {
@@ -179,6 +179,18 @@ export const CANVAS_PRESETS: CanvasPreset[] = [
  *  stored flag, so a layout imported from another install behaves the same. */
 export function isUltritouchCanvas(w: number, h: number): boolean {
   return ULTRITOUCH_PRESETS.some((p) => p.w === w && p.h === h);
+}
+
+/**
+ * The canvas after a preset is chosen. An Ultritouch preset also sets Letterbox
+ * fit: the panel's pixels are known and a reflowed strip is what turned a wall
+ * layout into a stack of unreadable labels. Any other preset changes only the
+ * shape and leaves the operator's fit where it was.
+ */
+export function canvasAfterPreset(canvas: LayoutCanvas, preset: { w: number; h: number }): LayoutCanvas {
+  const next: LayoutCanvas = { ...canvas, width: preset.w, height: preset.h };
+  if (isUltritouchCanvas(preset.w, preset.h)) next.fit = "contain";
+  return next;
 }
 
 

@@ -163,6 +163,10 @@ A layout has one **fit**, set in the **Canvas** popover:
 
 A control surface with no fit stored is responsive; a wall screen is letterboxed.
 
+An Ultritouch canvas is always letterboxed and the fit control is disabled while
+one is chosen: the panel's pixels are known, so the layout keeps its shape and
+scales evenly wherever it is previewed.
+
 ### What responsive does
 
 Four mechanisms, each optional and **off by default** — a layout that sets none

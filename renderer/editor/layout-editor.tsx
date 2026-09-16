@@ -101,7 +101,7 @@ import { AlignmentGuides } from "./alignment-guides";
  *  that deliberate placement is never fought, large enough to catch a hand. */
 const ALIGN_TOLERANCE_PX = 8;
 
-import { uid, dashboardTemplate, confidenceMonitorTemplate, CANVAS_PRESETS } from "./layout-templates";
+import { uid, dashboardTemplate, confidenceMonitorTemplate, CANVAS_PRESETS, isUltritouchCanvas, canvasAfterPreset } from "./layout-templates";
 import { Inspector } from "./inspector";
 import {
   NumberField, 
@@ -2141,7 +2141,7 @@ export function LayoutEditor({
                         <button
                           key={p.id}
                           type="button"
-                          onClick={() => { setCanvas({ ...canvas, width: p.w, height: p.h }); setDirty(true); }}
+                          onClick={() => { setCanvas(canvasAfterPreset(canvas, p)); setDirty(true); }}
                           className={`rounded-md px-2 py-1 text-caption2 tabular-nums transition-colors ${active ? "bg-accent text-on-accent" : "bg-fill text-fg-muted hover:bg-fill-hover hover:text-fg"}`} aria-label={p.label}>
                           {p.id}
                         </button>
@@ -2160,6 +2160,8 @@ export function LayoutEditor({
               </div>
               <div className="flex flex-col gap-1.5">
                 <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Fit</span>
+                {/* Locked on an Ultritouch canvas: the panel's pixels are known, so the
+                    layout keeps its shape and scales evenly. See canvasAfterPreset. */}
                 <ButtonGroup>
                   {/* Letterbox or Responsive. "Fill" was the old name for the
                       right-hand option and only reflowed proportionally; it is
@@ -2168,14 +2170,16 @@ export function LayoutEditor({
                   <Button
                     variant={effectiveFit === "contain" ? "accent" : "filled"}
                     size="small"
+                    disabled={isUltritouchCanvas(canvas.width, canvas.height)}
                     onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }}
-                    tooltip="Letterbox: keep the design's shape exactly, with bars on a screen of a different shape. Right for a wall screen."
+                    tooltip="Letterbox: keep the design's shape exactly, with bars on a screen of a different shape. Right for a wall screen, and locked on for an Ultritouch panel."
                   >
                     Letterbox
                   </Button>
                   <Button
                     variant={effectiveFit === "responsive" ? "accent" : "filled"}
                     size="small"
+                    disabled={isUltritouchCanvas(canvas.width, canvas.height)}
                     onClick={() => { setCanvas({ ...canvas, fit: "responsive" }); setDirty(true); }}
                     tooltip="Responsive: use the whole window. Objects hold their anchors, keep their shape where asked, and stack into a column when the window is a very different shape."
                   >
