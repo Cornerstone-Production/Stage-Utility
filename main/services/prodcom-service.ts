@@ -27,6 +27,7 @@ import { broadcast, channelInDemand } from "./broadcaster.js";
 import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { ConnectionLifecycle } from "./integration-base.js";
+import { OutageLog } from "./repeat-log.js";
 import { createSseReader, keepSocketAlive, parseSseBlock, SSE_MAX_BUFFER, type SseEvent } from "./sse-reader.js";
 
 const RECONNECT_MS = 4000;
@@ -418,6 +419,17 @@ export class ProdComService extends ConnectionLifecycle {
    *  and which log lines make sense. */
   private onWebSocket = false;
 
+  /**
+   * The WebSocket's outage, so falling back says so ONCE.
+   *
+   * A box with the API off fails the upgrade on every single reconnect, and the
+   * fallback line was unconditional: an outage wrote "websocket unavailable …
+   * falling back" every few seconds for as long as it lasted. Same rule as
+   * SenSource's and OBS's — first failure, a reminder every 15 minutes carrying
+   * the attempt count, and one line when it comes back.
+   */
+  private readonly wsOutages = new OutageLog();
+
   /** id → {name, colour} from GET /api/v1/channels. */
   private channels = new Map<string, ChannelMeta>();
   private channelsFetchedAt = 0;
@@ -516,6 +528,10 @@ export class ProdComService extends ConnectionLifecycle {
     this.apiKey = apiKey?.trim() || null;
     this.useWebSocket = true;
     this.sseReconnects = 0;
+    // Nothing learned about the old box or the old key is true of the new one,
+    // and carrying the run across would swallow the first line of the next
+    // outage.
+    this.wsOutages.forget();
     this.resetReport();
     this.restart();
   }
@@ -856,13 +872,19 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   /**
-   * ProdCom streams live captions, so it keeps its flat 4s retry rather than the
-   * base's exponential window-aware back-off: a transcript that reconnects
-   * minutes late has already missed the sentence it existed to show.
+   * ProdCom's first retry is fast — 4s rather than the base's 3s — because a
+   * transcript that reconnects minutes late has already missed the sentence it
+   * existed to show.
+   *
+   * It is only the FIRST retry that matters for that. This used to override
+   * scheduleReconnect() to a flat 4s forever, which meant a box that was off all
+   * week was dialled every four seconds all week, ignoring the service window
+   * every other integration respects. The ramp is reset the moment a transport
+   * comes up (see noteWebSocketHealthy and the SSE response handler), so a real
+   * drop mid-service still retries in 4s.
    */
-  protected override scheduleReconnect(): void {
-    if (!this.running) return;
-    this.scheduleIn(this.reconnectMs);
+  protected override get reconnectBaseMs(): number {
+    return this.reconnectMs;
   }
 
   protected async connect(): Promise<void> {
@@ -902,6 +924,7 @@ export class ProdComService extends ConnectionLifecycle {
       if (this.ws !== ws) return;
       this.onWebSocket = true;
       this.sseReconnects = 0;
+      this.noteWebSocketHealthy();
       this.report("connected", `Streaming from ${host}:${port}`);
       // Only the transcript stream is consumed here. The live box offers
       // transcript / status / automation / activity (the spec's list says
@@ -914,8 +937,10 @@ export class ProdComService extends ConnectionLifecycle {
     ws.onmessage = (ev: MessageEvent) => {
       if (this.ws !== ws) return;
       // Any frame proves the peer is alive, heartbeat included — that is the
-      // whole point of moving here.
+      // whole point of moving here. It is also what ends a WebSocket outage:
+      // recovery is a transport that has HELD, not one that opened once.
       this.armIdleWatchdog();
+      this.noteWebSocketHealthy();
       this.handleWsFrame(typeof ev.data === "string" ? ev.data : String(ev.data));
     };
 
@@ -947,9 +972,37 @@ export class ProdComService extends ConnectionLifecycle {
     this.ws = null;
     this.onWebSocket = false;
     this.useWebSocket = false;
-    console.warn(`[prodcom] websocket unavailable (${reason}) — falling back to the transcript SSE stream`);
+    this.noteWebSocketDown(reason);
     if (!this.running) return;
     this.connectSse(host, port);
+  }
+
+  /**
+   * The WebSocket is unavailable. Says so once per outage.
+   *
+   * `reason` is the KIND, so a box that starts refusing the key after having
+   * refused the upgrade is still news — but a thousand repeats of code 1006 are
+   * one line.
+   */
+  protected noteWebSocketDown(reason: string): void {
+    const out = this.wsOutages.fail("websocket", reason, this.now());
+    if (out.log) {
+      console.warn(
+        `[prodcom] websocket unavailable (${scrub(reason)}) — falling back to the transcript SSE stream${out.note}`,
+      );
+    }
+  }
+
+  /**
+   * The WebSocket is carrying traffic. Called on open AND on every frame, which
+   * is what gives OutageLog's settle window its meaning: a peer that accepts the
+   * upgrade and drops it again has not recovered, and must not print one
+   * "websocket is back" per flap.
+   */
+  protected noteWebSocketHealthy(): void {
+    this.resetBackoff();
+    const back = this.wsOutages.ok("websocket", this.now());
+    if (back.log) console.log(`[prodcom] websocket is back${back.note}`);
   }
 
   /**
@@ -1036,6 +1089,10 @@ export class ProdComService extends ConnectionLifecycle {
           this.scheduleReconnect();
           return;
         }
+        // The stream is open on the fallback transport: the ramp has done its
+        // job, so the next drop retries in 4s rather than wherever the back-off
+        // had climbed to.
+        this.resetBackoff();
         this.report("connected", `Streaming from ${host}:${port}`);
         this.priming = this.primeFromRest(host, port);
         res.setEncoding("utf8");
@@ -1086,7 +1143,12 @@ export class ProdComService extends ConnectionLifecycle {
   private countSseReconnect(): void {
     this.sseReconnects++;
     if (this.sseReconnects % WS_RETRY_EVERY === 0) {
-      console.log(`[prodcom] retrying the websocket after ${this.sseReconnects} SSE reconnect(s)`);
+      // debug, not log: console.debug is the one level log-buffer does not
+      // capture, so this stays out of /log. It is a routine step inside an
+      // outage that is already reported once by noteWebSocketDown, with the
+      // attempt count on its 15-minute reminder — an operator reading /log
+      // wants the outage, not each probe inside it.
+      console.debug(`[prodcom] retrying the websocket after ${this.sseReconnects} SSE reconnect(s)`);
       this.useWebSocket = true;
     }
   }
