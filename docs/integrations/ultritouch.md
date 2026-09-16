@@ -39,6 +39,11 @@ letterboxed, so a few pixels of background at the sides is the worst case.
    panel's shape; that is what the panel will draw.
 5. **File → Save As**, then on the Ultritouch's device page **Manage
    CustomPanels → Upload to Folder**, and open it from **Manage Open Views**.
+   Re-uploading a file under the same name does not replace the copy the panel
+   already has open; closing and reopening the view served the old one, and only
+   a reboot loaded the new file. Upload a revision under a new name, or reboot.
+   The panel file only needs to change once: the console itself lives in Stage
+   Utility and updates on the panel as you edit it.
 
 ## If the panel shows nothing
 
