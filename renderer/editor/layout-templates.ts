@@ -5,7 +5,7 @@
 // that creates a view imports the templates without wanting the editor.
 
 import type { LayoutCanvas, LayoutObject, LayoutObjectConfig, LayoutStyle } from "@main/types/views";
-import { CARD_PRESETS } from "../main/layout-objects";
+import { CARD_PRESETS, PILL } from "../main/layout-objects";
 
 export function uid(): string {
   const c = globalThis.crypto;
@@ -191,6 +191,58 @@ export function canvasAfterPreset(canvas: LayoutCanvas, preset: { w: number; h: 
   const next: LayoutCanvas = { ...canvas, width: preset.w, height: preset.h };
   if (isUltritouchCanvas(preset.w, preset.h)) next.fit = "contain";
   return next;
+}
+
+export type UltritouchModel = "ultritouch-2" | "ultritouch-2-hr" | "ultritouch-4";
+
+export function ultritouchCanvas(model: UltritouchModel): LayoutCanvas {
+  const p = ULTRITOUCH_PRESETS.find((x) => x.id === model)!;
+  // The kiosk ground, so the letterbox bars and the buttons' ground are one colour.
+  return { width: p.w, height: p.h, background: "#0e0e0e", fit: "contain" };
+}
+
+/**
+ * A row of eight cue buttons (two rows on the 4) and a countdown at the right,
+ * proportioned to the panel. Fractions of the canvas, like every layout; the
+ * pixel figures in the comments are what they come to on the real panel.
+ */
+export function ultritouchTemplate(model: UltritouchModel): LayoutObject[] {
+  const rows = model === "ultritouch-4" ? 2 : 1;
+  const pad = 0.06;                 // of height: 12 px on a 203 strip
+  const gapX = 0.008;               // of width
+  const readoutW = 0.16;            // of width
+  const gridW = 1 - pad * (203 / 1366) * 2 - readoutW - gapX; // buttons' share of the width
+  const left = pad * (203 / 1366);
+  const cols = 8;
+  const bw = (gridW - gapX * (cols - 1)) / cols;
+  const bh = (1 - pad * 2 - (rows - 1) * pad) / rows;
+  const objects: LayoutObject[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      objects.push({
+        id: uid(),
+        x: left + c * (bw + gapX),
+        y: pad + r * (bh + pad),
+        w: bw,
+        h: bh,
+        z: 1,
+        config: { type: "cue-button", cue: "", label: "", showDevice: true },
+        // Label ≈ 26 px on the 2, 36 on the 2-HR, 30 on the 4: a fraction of HEIGHT.
+        style: PILL({ fontSize: model === "ultritouch-4" ? 0.062 : 0.128 }),
+      });
+    }
+  }
+  objects.push({
+    id: uid(),
+    x: 1 - left - readoutW,
+    y: pad,
+    w: readoutW,
+    h: 1 - pad * 2,
+    z: 1,
+    config: { type: "countdown-timer", caption: "TO END OF SET", hideWhenIdle: false },
+    style: { fontSize: model === "ultritouch-4" ? 0.25 : 0.32, fontWeight: 500, color: "#ededf0", textAlign: "left", vAlign: "middle" },
+  });
+  return objects;
 }
 
 

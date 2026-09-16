@@ -249,8 +249,9 @@ const TEXT = (over: LayoutStyle = {}): LayoutStyle => ({
 const CARD = (over: LayoutStyle = {}): LayoutStyle => ({ ...CARD_PRESETS.neutral, ...TEXT(over) });
 /** A big bold tabular readout in a card (clock, countdown, timers, counters). */
 const READOUT = (fontSize: number): LayoutStyle => CARD({ fontSize, fontWeight: 700 });
-/** A compact glass pill (status chips, buttons, single mic tiles). */
-const PILL = (over: LayoutStyle = {}): LayoutStyle => CARD({ fontSize: 0.05, fontWeight: 600, ...over });
+/** A compact glass pill (status chips, buttons, single mic tiles). Exported for
+ *  the Ultritouch strip templates, the one caller outside this file. */
+export const PILL = (over: LayoutStyle = {}): LayoutStyle => CARD({ fontSize: 0.05, fontWeight: 600, ...over });
 /**
  * No styling at all.
  *

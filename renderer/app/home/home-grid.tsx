@@ -183,6 +183,7 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
     resi: d.resi,
     youtube: d.youtube,
     osc: d.osc,
+    cues: d.cues,
     peopleCount: d.peopleCount,
     serviceLow: d.serviceLow,
     serviceAttendance: d.serviceAttendance,
