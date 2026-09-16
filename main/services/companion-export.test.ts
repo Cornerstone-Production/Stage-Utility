@@ -448,3 +448,62 @@ describe("parseVariableRef", () => {
     assert.equal(isCompanionVariableRef("a/b"), false);
   });
 });
+
+describe("Open/Closed is a pair", () => {
+  // In this building the distribution amp and two doors are labelled that way.
+  // Without it "Distribution Open" and "Distribution Closed" were two unrelated
+  // one-shot cues, so the thing could be opened by voice and not closed.
+  const page = 7;
+  const named = (label: string, col: number) => ({
+    ...at(1, 2, 1)!,
+    page,
+    pageName: FIXTURE_PAGES.lights,
+    row: 0,
+    col,
+    label,
+  });
+
+  test("Open/Closed pairs, and the halves are _on and _off like every other pair", () => {
+    const together = [named("Distribution Open", 0), named("Distribution Closed", 1)];
+    const pairs = findPairs(together);
+
+    assert.equal(pairs.length, 1, "Distribution Open/Closed was not read as a pair");
+    assert.equal(pairs[0]!.base, "Distribution");
+    assert.equal(pairs[0]!.on.label, "Distribution Open");
+    assert.equal(pairs[0]!.off.label, "Distribution Closed");
+
+    const cues = importedCues(together);
+    assert.equal(cues.get(`${page}:0:0`)?.slug, "distribution_on");
+    assert.equal(cues.get(`${page}:0:1`)?.slug, "distribution_off");
+    assert.equal(cues.get(`${page}:0:0`)?.pair?.half, "on");
+    assert.equal(cues.get(`${page}:0:1`)?.pair?.half, "off");
+
+    // The reconcile has to recognise a relabelled half as named after its
+    // button, or it leaves it alone as hand-named.
+    assert.ok(importedCueNames("Distribution Open", FIXTURE_PAGES.lights).includes("distribution_on"));
+    assert.ok(importedCueNames("Distribution Closed", FIXTURE_PAGES.lights).includes("distribution_off"));
+  });
+
+  test("Open/Close, the other spelling, pairs the same way", () => {
+    const together = [named("Distribution Open", 0), named("Distribution Close", 1)];
+    const pairs = findPairs(together);
+    assert.equal(pairs.length, 1, "Distribution Open/Close was not read as a pair");
+    assert.equal(pairs[0]!.off.label, "Distribution Close");
+    assert.equal(importedCues(together).get(`${page}:0:1`)?.slug, "distribution_off");
+  });
+
+  test("a lone Open is not a pair", () => {
+    const together = [named("Lobby Open", 0)];
+    assert.deepEqual(findPairs(together), [], "a single Open paired with nothing at all");
+    assert.deepEqual(
+      singleButtons(together, []).map((b) => b.label),
+      ["Lobby Open"],
+      "a lone Open must stay a one-shot cue",
+    );
+  });
+
+  test("an Open on one page does not pair with a Closed on another", () => {
+    const together = [named("Distribution Open", 0), { ...named("Distribution Closed", 1), page: 8 }];
+    assert.deepEqual(findPairs(together), [], "pairing crossed a page boundary");
+  });
+});

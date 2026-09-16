@@ -158,15 +158,18 @@ mitigation there is the same: an ACL on the switch port Companion is on.
 
 Settings → Automation → **Import from Companion…** finds, per page, buttons whose
 labels differ only by a trailing direction word — `ON`/`OFF`,
-`Startup`/`Shutdown` or `START`/`STOP` — and offers each pair as two cues,
-`<name>_on` and `<name>_off`. Whichever pair of words the buttons use, the cues
-are named `_on` and `_off`: "REC START" and "REC STOP" become `rec_on` and
-`rec_off`.
+`Startup`/`Shutdown`, `START`/`STOP` or `Open`/`Closed` (`Open`/`Close` is read
+the same way) — and offers each pair as two cues, `<name>_on` and `<name>_off`.
+Whichever pair of words the buttons use, the cues are named `_on` and `_off`:
+"REC START" and "REC STOP" become `rec_on` and `rec_off`, and "Distribution
+Open" and "Distribution Closed" become `distribution_on` and `distribution_off`.
 
 The word is the **trailing word** and the base is everything before it, so a
 "Deck 2 START" beside an "Encoder STOP" on one page is two single buttons and
 not a pair. `Record`/`Stop` is deliberately not a pair of words: a lone "Stop"
-has too many partners.
+has too many partners. `Open` only pairs when a matching `Closed` or `Close`
+shares its base on the same page — a lone "Open" stays a single cue, because
+what it means on somebody's lighting console is not a guess this should make.
 
 A pair whose buttons drive a utility device — a projector, a television, a smart
 plug or bulb, a lighting console, a recorder or stream encoder — is ticked by
@@ -227,7 +230,8 @@ Give the row a **Toggle with state** variable and it is imported as an ON/OFF
 two directions apart, so `<name>_on` presses when the variable says off — and when
 it cannot be read at all — but not when it already says on. `<name>_off` mirrors
 it. See [Real state](#real-state). A trailing direction word — `ON`, `OFF`,
-`Startup`, `Shutdown`, `START`, `STOP` or `Toggle` — comes off the name first:
+`Startup`, `Shutdown`, `START`, `STOP`, `Open`, `Closed`, `Close` or `Toggle` —
+comes off the name first:
 "VCR Light ON" becomes `vcr_light_on` and `vcr_light_off`, not
 `vcr_light_on_off`.
 
