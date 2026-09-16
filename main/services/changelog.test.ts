@@ -41,6 +41,24 @@ describe("summarizeChangelog", () => {
     }
   });
 
+  test("a fix or feat to the release tooling itself is not news", () => {
+    // 1.18.0 shipped four of these under New and Fixed: "correct a Beta-only
+    // trailer", "an override must name a SHA". An operator cannot see any of
+    // them. The scope names the machinery, and the list of such scopes is
+    // shared with the notes generator and the workflow's version decision.
+    for (const scope of ["release", "ci", "dx", "test"]) {
+      for (const t of ["feat", "fix", "perf"]) {
+        assert.deepEqual(summarizeChangelog([`${t}(${scope}): something`]), [], `${t}(${scope})`);
+      }
+    }
+    // Case-insensitive, as every other match here is.
+    assert.deepEqual(summarizeChangelog(["Fix(Release): something"]), []);
+    // A breaking change is a breaking change whatever it is scoped to.
+    assert.deepEqual(summarizeChangelog(["feat(release)!: notes now need a token"]), [
+      "feat(release)!: notes now need a token",
+    ]);
+  });
+
   test("a breaking marker does not hide the entry, and is not shortened away", () => {
     // The `!` is the only mark a breaking change gets. Shortening the line to
     // "types — rename a field" leaves the one entry an operator must not skim
