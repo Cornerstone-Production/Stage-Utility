@@ -4,7 +4,7 @@
 // because it is the seam with no dependencies in either direction — the dialog
 // that creates a view imports the templates without wanting the editor.
 
-import type { LayoutObject, LayoutObjectConfig, LayoutStyle } from "@main/types/views";
+import type { LayoutCanvas, LayoutObject, LayoutObjectConfig, LayoutStyle } from "@main/types/views";
 import { CARD_PRESETS } from "../main/layout-objects";
 
 export function uid(): string {
@@ -144,9 +144,25 @@ export function confidenceMonitorTemplate(): LayoutObject[] {
 }
 
 
-// Canvas aspect presets. Resolution is irrelevant (the renderer scales the design
-// canvas to fit any screen, incl. 4K) — only the aspect/orientation matters.
-export const CANVAS_PRESETS: { id: string; label: string; w: number; h: number }[] = [
+// Canvas aspect presets. Resolution is irrelevant for a screen (the renderer
+// scales the design canvas to fit any screen, incl. 4K) — only the aspect and
+// orientation matter. The Ultritouch entries are the exception: they ARE
+// pixel sizes, because the panel's browser frame is exactly that many pixels
+// and the layout is letterboxed into it. See isUltritouchCanvas.
+export type CanvasPreset = { id: string; label: string; w: number; h: number };
+
+/**
+ * The three Ross Ultritouch panels, from the Ultritouch User Guide
+ * (2201DR-304, Table 1). Picking one locks Letterbox fit in the editor: a
+ * control surface for a panel whose pixels are known has no reason to reflow.
+ */
+export const ULTRITOUCH_PRESETS: CanvasPreset[] = [
+  { id: "ultritouch-2", label: "Ultritouch-2 · 1366 x 203", w: 1366, h: 203 },
+  { id: "ultritouch-2-hr", label: "Ultritouch-2-HR · 1920 x 285", w: 1920, h: 285 },
+  { id: "ultritouch-4", label: "Ultritouch-4 · 1366 x 485", w: 1366, h: 485 },
+];
+
+export const CANVAS_PRESETS: CanvasPreset[] = [
   { id: "16:9", label: "Landscape · 16:9", w: 1920, h: 1080 },
   { id: "9:16", label: "Portrait · 9:16", w: 1080, h: 1920 },
   { id: "4:3", label: "Standard · 4:3", w: 1440, h: 1080 },
@@ -156,7 +172,26 @@ export const CANVAS_PRESETS: { id: string; label: string; w: number; h: number }
   { id: "1:1", label: "Square · 1:1", w: 1080, h: 1080 },
   { id: "3:2", label: "3:2", w: 1620, h: 1080 },
   { id: "5:4", label: "5:4", w: 1350, h: 1080 },
+  ...ULTRITOUCH_PRESETS,
 ];
+
+/** True when a canvas is exactly one of the Ultritouch panels. By pixels, not a
+ *  stored flag, so a layout imported from another install behaves the same. */
+export function isUltritouchCanvas(w: number, h: number): boolean {
+  return ULTRITOUCH_PRESETS.some((p) => p.w === w && p.h === h);
+}
+
+/**
+ * The canvas after a preset is chosen. An Ultritouch preset also sets Letterbox
+ * fit: the panel's pixels are known and a reflowed strip is what turned a wall
+ * layout into a stack of unreadable labels. Any other preset changes only the
+ * shape and leaves the operator's fit where it was.
+ */
+export function canvasAfterPreset(canvas: LayoutCanvas, preset: { w: number; h: number }): LayoutCanvas {
+  const next: LayoutCanvas = { ...canvas, width: preset.w, height: preset.h };
+  if (isUltritouchCanvas(preset.w, preset.h)) next.fit = "contain";
+  return next;
+}
 
 
 
