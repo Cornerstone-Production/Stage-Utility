@@ -19,6 +19,7 @@ import {
   type AppStateSourceId,
 } from "./app-state-sources.js";
 import type { VariableResult } from "./companion-api.js";
+import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
 
 /** A source's answer: a value, or why nobody can say. */
@@ -29,6 +30,8 @@ export interface AppStateValue {
 }
 
 const REAPER = APP_STATE_SOURCES.get("reaper.recording")!;
+const OBS_RECORDING = APP_STATE_SOURCES.get("obs.recording")!;
+const OBS_STREAMING = APP_STATE_SOURCES.get("obs.streaming")!;
 
 const READS: Record<AppStateSourceId, () => AppStateValue> = {
   "reaper.recording": () => {
@@ -38,6 +41,24 @@ const READS: Record<AppStateSourceId, () => AppStateValue> = {
     // recorded when the truth is that we do not know.
     if (!status.connected) return { value: null, reason: "REAPER is not connected" };
     return { value: status.recording ? REAPER.onValue : REAPER.offValue };
+  },
+  // OBS costs nothing to read: the snapshot is pushed by obs-websocket on
+  // RecordStateChanged and StreamStateChanged, so it is already what OBS said
+  // rather than what a poll last managed to ask.
+  "obs.recording": () => {
+    const status = obsService.getLatest();
+    // Unknown, not "off", for the same reason REAPER's reader refuses to guess:
+    // a recorder nobody can reach reported as "not recording" is a switch
+    // saying the service is not being recorded when the truth is nobody knows.
+    // A PAUSED recording is still a recording — OBS has one in progress, and
+    // the snapshot's `recording` already says so.
+    if (!status.connected) return { value: null, reason: "OBS is not connected" };
+    return { value: status.recording ? OBS_RECORDING.onValue : OBS_RECORDING.offValue };
+  },
+  "obs.streaming": () => {
+    const status = obsService.getLatest();
+    if (!status.connected) return { value: null, reason: "OBS is not connected" };
+    return { value: status.streaming ? OBS_STREAMING.onValue : OBS_STREAMING.offValue };
   },
 };
 

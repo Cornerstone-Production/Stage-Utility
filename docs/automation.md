@@ -351,6 +351,8 @@ select whenever the integration behind them is set up.
 | Source | Reads |
 |---|---|
 | `app:reaper.recording` | `on` while REAPER is recording, `off` while it is connected and not, unknown while it is not connected |
+| `app:obs.recording` | `on` while OBS is recording — a paused recording is still a recording — `off` while it is connected and not, unknown while it is not connected |
+| `app:obs.streaming` | `on` while OBS is streaming, `off` while it is connected and not, unknown while it is not connected |
 
 A pair whose `_on` half is a **REAPER transport** Record is bound to
 `app:reaper.recording` without anybody choosing it: it is the only answer there

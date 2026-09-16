@@ -8,9 +8,10 @@
 // A cue that does not press a Companion button at all has no such variable, and
 // does not need one — Stage Utility is already talking to the device. A cue that
 // starts a REAPER recording is bound to `app:reaper.recording`, which is read
-// straight off the REAPER transport poll. The `app:` prefix is what keeps the
-// two namespaces apart: everything without it is a Companion ref, exactly as
-// before.
+// straight off the REAPER transport poll; one that starts an OBS recording is
+// bound to `app:obs.recording`, which OBS pushes on its own websocket the
+// instant it changes. The `app:` prefix is what keeps the two namespaces apart:
+// everything without it is a Companion ref, exactly as before.
 //
 // PURE, and it must stay that way. The rule editor imports cue-pairs.ts, which
 // imports this — a browser bundle that reached reaper-service.ts would drag the
@@ -22,7 +23,7 @@
 export const APP_STATE_PREFIX = "app:";
 
 /** Every source, as a union — see the header for why the readers are elsewhere. */
-export const APP_STATE_SOURCE_IDS = ["reaper.recording"] as const;
+export const APP_STATE_SOURCE_IDS = ["reaper.recording", "obs.recording", "obs.streaming"] as const;
 
 export type AppStateSourceId = (typeof APP_STATE_SOURCE_IDS)[number];
 
@@ -59,6 +60,28 @@ export const APP_STATE_SOURCES = new Map<AppStateSourceId, AppStateSourceDef>([
       hint: "Read from Stage Utility's REAPER connection. Nothing to set up.",
       channel: "reaper:status",
       integrationId: "reaper",
+      onValue: "on",
+      offValue: "off",
+    },
+  ],
+  [
+    "obs.recording",
+    {
+      label: "OBS recording (Stage Utility)",
+      hint: "Read from Stage Utility's OBS connection. Nothing to set up.",
+      channel: "obs:status",
+      integrationId: "obs",
+      onValue: "on",
+      offValue: "off",
+    },
+  ],
+  [
+    "obs.streaming",
+    {
+      label: "OBS streaming (Stage Utility)",
+      hint: "Read from Stage Utility's OBS connection. Nothing to set up.",
+      channel: "obs:status",
+      integrationId: "obs",
       onValue: "on",
       offValue: "off",
     },
