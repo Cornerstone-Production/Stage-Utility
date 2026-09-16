@@ -446,6 +446,16 @@ nothing.
 see the same text. See [OSC](../integrations/osc.md) and
 [RossTalk](../integrations/rosstalk.md).
 
+**Cue button** binds to a cue from the rules list, including pairs hidden from
+Home Assistant. A pair shows on or off from its state variable; a tap presses
+the opposite half, and a pair whose reading is unknown presses ON. In the eight
+seconds after a press it shows what was asked for and says it is settling. A
+dashed amber ring means Companion has lost the device and the reading cannot be
+trusted. A cue that refuses — switched off, disarmed, not allowed during a
+service — says why on the button. One that needs a confirmation cannot be fired
+from a panel; the rules page has the Test button for that. A press is recorded
+in the [automation log](../automation.md) with the caller `console`.
+
 ## Layout
 
 | Widget | What it is |
