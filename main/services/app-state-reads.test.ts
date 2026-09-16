@@ -22,9 +22,11 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-app-state-reads-"));
 process.env.STAGE_UTILITY_DATA = path.join(TMP, "data");
 process.env.HOME = path.join(TMP, "home");
 
-const { APP_STATE_SOURCE_IDS } = await import("./app-state-sources.js");
+const { APP_STATE_FAMILY_IDS, APP_STATE_SOURCE_IDS, parseAppStateRef } =
+  await import("./app-state-sources.js");
 const { readAppState } = await import("./app-state-reads.js");
 const { obsService } = await import("./obs-service.js");
+const { pvpService } = await import("./pvp-service.js");
 const { reaperService } = await import("./reaper-service.js");
 const { resiService } = await import("./resi-service.js");
 const { youtubeService } = await import("./youtube-service.js");
@@ -69,6 +71,40 @@ const RESI_OFFLINE: ReturnType<typeof resiService.getLatest> = {
   detail: null,
 };
 
+type PvpStatus = ReturnType<typeof pvpService.getLatest>;
+
+const PVP_OFFLINE_SNAPSHOT: PvpStatus = {
+  connected: false,
+  layers: [],
+  sampledAt: null,
+  imageDurationSec: null,
+};
+
+/** One layer, with only the fields these readers touch varied. */
+const layer = (name: string, patch: Partial<PvpStatus["layers"][number]> = {}): PvpStatus["layers"][number] => ({
+  uuid: `uuid-${name}`,
+  name,
+  index: 0,
+  state: "still",
+  mediaName: null,
+  mediaUuid: null,
+  lastCueName: null,
+  lastCueUuid: null,
+  nextCueName: null,
+  mediaSinceAt: null,
+  hidden: false,
+  muted: false,
+  opacity: 1,
+  playbackRate: 0,
+  anchorElapsedSec: null,
+  durationSec: null,
+  ...patch,
+});
+
+function pvp(...layers: PvpStatus["layers"]): void {
+  pvpService.getLatest = () => ({ ...PVP_OFFLINE_SNAPSHOT, connected: true, layers });
+}
+
 function obs(patch: Partial<ObsStatus>): void {
   obsService.getLatest = () => ({ ...OBS_OFFLINE, connected: true, ...patch });
 }
@@ -78,6 +114,7 @@ beforeEach(() => {
   reaperService.getLatest = () => REAPER_OFFLINE;
   youtubeService.getLatest = () => YOUTUBE_OFFLINE;
   resiService.getLatest = () => RESI_OFFLINE;
+  pvpService.getLatest = () => PVP_OFFLINE_SNAPSHOT;
 });
 
 describe("app:obs.recording", () => {
@@ -216,6 +253,76 @@ describe("app:reaper.recording", () => {
   });
 });
 
+describe("app:pvp.layer-hidden:<name> and app:pvp.layer-muted:<name>", () => {
+  test("reads a hidden layer as on and a shown one as off", () => {
+    pvp(layer("Lyrics", { hidden: true }), layer("Lower Thirds", { hidden: false }));
+    assert.deepEqual(readAppState("app:pvp.layer-hidden:Lyrics"), { value: "on" });
+    assert.deepEqual(readAppState("app:pvp.layer-hidden:Lower Thirds"), { value: "off" });
+  });
+
+  test("the two families are not crossed", () => {
+    // Two readers over the SAME snapshot differing only in which boolean they
+    // read. One reading the other's field is a switch labelled "muted" that
+    // reports whether the layer is on screen, and every other assertion in this
+    // file would still pass.
+    pvp(layer("Lyrics", { hidden: true, muted: false }));
+    assert.deepEqual(readAppState("app:pvp.layer-hidden:Lyrics"), { value: "on" });
+    assert.deepEqual(readAppState("app:pvp.layer-muted:Lyrics"), { value: "off" });
+  });
+
+  test("a layer name is matched as the action matches it — trimmed, any case", () => {
+    // pvp-actions.ts resolveLayer lower-cases and trims. A reader stricter than
+    // the action would leave a rule that WORKS beside a switch that reads
+    // unknown, which is the one combination an operator cannot diagnose.
+    pvp(layer("Lyrics", { muted: true }));
+    assert.deepEqual(readAppState("app:pvp.layer-muted:  lyrics  "), { value: "on" });
+  });
+
+  test("a layer PVP does not have is unknown, and says which name", () => {
+    pvp(layer("Lyrics"));
+    assert.deepEqual(readAppState("app:pvp.layer-hidden:Lyric"), {
+      error: 'No PVP layer called "Lyric"',
+    });
+  });
+
+  test("a PVP nobody can reach is unknown, not shown", () => {
+    assert.deepEqual(readAppState("app:pvp.layer-hidden:Lyrics"), {
+      error: "ProVideoPlayer is not connected",
+    });
+  });
+
+  test("two layers of one name are unknown, never the first of them", () => {
+    // PVP allows duplicate names. Answering from the first hit is a switch
+    // reporting a layer the operator did not mean, with nothing saying so.
+    pvp(layer("Lyrics", { hidden: true }), layer("Lyrics", { hidden: false }));
+    assert.deepEqual(readAppState("app:pvp.layer-hidden:Lyrics"), {
+      error: 'Two or more PVP layers are called "Lyrics"',
+    });
+  });
+
+  test("a layer name containing a colon survives the ref round trip", () => {
+    // The param is everything after the family and ONE colon. Split again and
+    // "Lower Thirds: Speaker" resolves to "Lower Thirds", which is a different
+    // layer that may well exist.
+    pvp(layer("Lower Thirds: Speaker", { hidden: true }), layer("Lower Thirds"));
+    assert.deepEqual(readAppState("app:pvp.layer-hidden:Lower Thirds: Speaker"), { value: "on" });
+    const parsed = parseAppStateRef("app:pvp.layer-hidden:Lower Thirds: Speaker");
+    assert.equal(parsed?.kind === "family" && parsed.param, "Lower Thirds: Speaker");
+  });
+
+  test("a family with no layer name at all is refused, not read as any layer", () => {
+    pvp(layer("Lyrics", { hidden: true }));
+    assert.equal(parseAppStateRef("app:pvp.layer-hidden:"), null);
+    assert.deepEqual(readAppState("app:pvp.layer-hidden:"), {
+      error: 'no Stage Utility state source called "app:pvp.layer-hidden:"',
+    });
+  });
+
+  test("a family id with no parameter is not a source", () => {
+    assert.equal(parseAppStateRef("app:pvp.layer-hidden"), null);
+  });
+});
+
 describe("the registry and the readers", () => {
   test("every shipped source answers, and nothing else does", () => {
     // EXACT, over the union rather than a list written here: a seventh source
@@ -230,6 +337,18 @@ describe("the registry and the readers", () => {
     for (const id of APP_STATE_SOURCE_IDS) {
       const answer = readAppState(`app:${id}`);
       assert.equal("value" in answer, true, `app:${id} answered with no value`);
+    }
+  });
+
+  test("every shipped FAMILY answers for a layer that exists", () => {
+    // The parameterised half of the check above, over the family union rather
+    // than a list written here: a third family added without a reader does not
+    // compile, and one added without reaching this file is still read here.
+    pvp(layer("Lyrics"));
+    assert.equal(APP_STATE_FAMILY_IDS.length, 2);
+    for (const family of APP_STATE_FAMILY_IDS) {
+      const answer = readAppState(`app:${family}:Lyrics`);
+      assert.equal("value" in answer, true, `app:${family}:Lyrics answered with no value`);
     }
   });
 

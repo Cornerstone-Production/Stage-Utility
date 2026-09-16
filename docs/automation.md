@@ -367,6 +367,17 @@ select whenever the integration behind them is set up.
 | `app:obs.virtualCam` | `on` while OBS's virtual camera is running, `off` while it is connected and not, unknown while it is not connected |
 | `app:youtube.live` | `on` while YouTube is broadcasting, `off` while it is connected and not, unknown while it is not connected |
 | `app:resi.live` | `on` while Resi is broadcasting, `off` while it is connected and not, unknown while it is not connected |
+| `app:pvp.layer-hidden:<name>` | `on` while the ProVideoPlayer layer called `<name>` is hidden, `off` while it is shown, unknown while PVP is not connected |
+| `app:pvp.layer-muted:<name>` | `on` while the ProVideoPlayer layer called `<name>` is muted, `off` while it is not, unknown while PVP is not connected |
+
+The two ProVideoPlayer sources take a layer NAME, matched the same way the PVP
+actions match it — trimmed, and case-insensitively. `<name>` is everything after
+the second colon, so a layer called `Lower Thirds: Speaker` is written
+`app:pvp.layer-hidden:Lower Thirds: Speaker`. Renaming the layer in PVP stops
+the reading, exactly as it stops the action: the state then reads unknown with
+`No PVP layer called "<name>"` rather than reporting the layer as shown. Two
+layers of one name read unknown too — PVP allows the duplicate, and a switch
+that silently picked one of them would report a layer nobody chose.
 
 `app:youtube.live` and `app:resi.live` are read-only: there is no action here that
 starts or stops a broadcast on either platform. Bind a pair to one when the cue
