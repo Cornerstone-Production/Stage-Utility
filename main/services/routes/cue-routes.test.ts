@@ -274,14 +274,31 @@ describe("the token gate on a call", () => {
     assert.equal(refusals.some((w) => w.includes("su_wrong") || w.includes("su_bare")), false, "a refusal line carried the token");
   });
 
-  test("a same-origin browser does NOT get a free pass on a call", async () => {
-    // Deliberately unlike the management routes. There is no operator-at-the-
-    // console case for firing a cue; the rule editor has a Test button.
+  test("a same-origin browser calls a cue as the console, no token", async () => {
+    // The premise this route was built on — no operator-at-the-console case —
+    // stopped being true when a cue button became a layout object. A browser on
+    // this origin can already press the same gear through /api/action/invoke
+    // and edit the rule itself, so this grants nothing new. See the header.
     await withCue();
     const r = await callRoute(cueRoutes, "/api/cues/projectors_on", {
       method: "POST",
       headers: browser,
     });
+    assert.equal(r.status, 200);
+  });
+
+  test("the console is who the log says pressed it", async () => {
+    // "the settings page", the label the management routes use, is wrong on a
+    // panel in the auditorium — an operator reading /log has to be able to tell
+    // a cue button from a Test press.
+    await withCue();
+    await callRoute(cueRoutes, "/api/cues/projectors_on", { method: "POST", headers: browser });
+    assert.equal(automationLog.list()[0]?.caller, "console");
+  });
+
+  test("no Origin still needs a token", async () => {
+    await withCue();
+    const r = await callRoute(cueRoutes, "/api/cues/projectors_on", { method: "POST", headers: {} });
     assert.equal(r.status, 401);
   });
 

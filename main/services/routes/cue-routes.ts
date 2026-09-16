@@ -8,8 +8,13 @@
 //
 // Three gates, and the differences are deliberate:
 //
-//  - `POST /api/cues/<name>` ALWAYS needs a bearer token, browser or not. There
-//    is no operator-at-the-console case for it; the console has a Test button.
+//  - `POST /api/cues/<name>` needs a bearer token unless the request is a
+//    same-origin browser write — a cue button on a console is an operator at
+//    the console. Until the cue button existed there was no such case and the
+//    route refused browsers too; the exemption is the same one the management
+//    writes and /api/action/invoke use, and a browser on this origin could
+//    already press the same gear through the latter. Such a call is logged as
+//    `console`, not as a token label.
 //  - the management WRITES (mint, revoke, import-pairs, buttons/refresh) need one
 //    unless the request is a same-origin browser write — an `Origin` naming
 //    this server, which a page on this app's own origin always sends on a POST
@@ -190,8 +195,8 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
 
   const callMatch = pathname.match(/^\/api\/cues\/([^/]+)$/);
   if (method === "POST" && callMatch) {
-    // No same-origin exemption. See the header comment.
-    const caller = await requireCaller(c, { allowSameOrigin: false });
+    // A same-origin browser is an operator at a console. See the header comment.
+    const caller = await requireCaller(c, { allowSameOrigin: true });
     if (!caller) return;
 
     // The confirmation may arrive either way round: Home Assistant's
@@ -200,7 +205,11 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     const confirm = url.searchParams.get("confirm") ?? (typeof body.confirm === "string" ? body.confirm : null);
 
     const result = await automationEngine.callByName(callMatch[1]!, {
-      caller: caller.label,
+      // requireCaller labels a browser "the settings page", which is what the
+      // management writes are. A cue fired from a browser came off a cue button
+      // on a console, and that is what an operator reading /automation needs to
+      // see beside it.
+      caller: caller.id === "browser" ? "console" : caller.label,
       confirm,
     });
 
