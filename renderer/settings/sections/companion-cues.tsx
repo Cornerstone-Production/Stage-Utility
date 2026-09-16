@@ -815,7 +815,8 @@ export function ImportPairsDialog({
               }}
             />
             <p className="pb-1 text-caption2 text-fg-subtle">
-              Buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown or START/STOP.
+              Buttons whose labels differ only by a trailing ON/OFF, Startup/Shutdown, START/STOP or
+              Open/Closed.
               Each becomes two cues — <span className="text-fg">_on</span> and{" "}
               <span className="text-fg">_off</span>, whichever words the buttons use — and one Home
               Assistant switch. Select all and Clear act on the rows a search has left on screen.

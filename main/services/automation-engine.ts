@@ -283,6 +283,7 @@ class AutomationEngine {
     const next: Rule = { ...rule, id: randomUUID() };
     this.rules.push(next);
     await automationStore.saveRules(this.rules);
+    console.log(`[automation] rule added "${scrub(next.name)}" (${scrub(next.id)})`);
     this.rulesChanged();
     return next;
   }
@@ -293,13 +294,18 @@ class AutomationEngine {
     this.assertCueValid({ ...r, ...patch }, id);
     Object.assign(r, patch);
     await automationStore.saveRules(this.rules);
+    console.log(`[automation] rule updated "${scrub(r.name)}" (${scrub(id)})`);
     this.rulesChanged();
     return this.listRules();
   }
 
   async removeRule(id: string): Promise<Rule[]> {
+    // The name has to be read before the filter — afterwards the rule is gone and
+    // the log line that says which 300 rules went is the only record left.
+    const gone = this.rules.find((r) => r.id === id);
     this.rules = this.rules.filter((r) => r.id !== id);
     await automationStore.saveRules(this.rules);
+    if (gone) console.log(`[automation] rule removed "${scrub(gone.name)}" (${scrub(id)})`);
     this.rulesChanged();
     return this.listRules();
   }
