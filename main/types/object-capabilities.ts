@@ -40,6 +40,8 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   "live-controls": ["control"],
   // The general form of the two above: bound to any action in the registry.
   "action-button": ["control"],
+  // A cue with its state on it. A control on a panel; a readout on a wall.
+  "cue-button": ["control"],
 
   // ── Editable. These hold the operator's own work product. ───────────────
   notes: ["editable"],

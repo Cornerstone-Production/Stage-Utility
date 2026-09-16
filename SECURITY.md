@@ -66,10 +66,17 @@ When reporting, please include:
   reach the port directly can still call the API. Firewall the port regardless.
 
 - **Cue tokens, and what they are not.** Calling a cue (`POST /api/cues/<name>`) presses a
-  real button on real gear on behalf of a caller that is not a browser — a voice assistant, a
-  script — so it is the one route that requires a credential. Callers present
+  real button on real gear, usually on behalf of a caller that is not a browser — a voice
+  assistant, a script — so it is the one route that requires a credential. Callers present
   `Authorization: Bearer su_…`; a request without a valid token is refused `401` before
   anything is dispatched.
+
+  The exception is a **same-origin browser write**, matching `POST /api/action/invoke` and
+  the cue-token writes below: a cue button on a console is an operator standing at the
+  console, and the page firing it is on this app's own origin. It grants nothing new — a
+  browser on this origin can already press the same gear through `/api/action/invoke`, and
+  can edit the cue itself, since the rule routes are ungated like every other setting. Such
+  a call is recorded in the activity log as `console` rather than as a token label.
 
   Tokens are 32 bytes of CSPRNG output, shown **once** at mint. Only a SHA-256 of the token
   is stored, inside the existing AES-256-GCM `secrets.bin`, so reading that file does not

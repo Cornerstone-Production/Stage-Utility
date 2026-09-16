@@ -383,6 +383,11 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // holding a single entry is a heading with nothing under it.
   { type: "scores", label: "Live scores", group: "Status", after: "stream-status" },
   { type: "home-scores", label: "Scores", group: "Status", after: "scores" },
+  // A cue with its live state on it, for a console or a panel. At the END of
+  // Control rather than beside the action button it is a specialised form of:
+  // `notes` already claims to sit directly after `action-button`, and that claim
+  // is a pinned fact about what shipped.
+  { type: "cue-button", label: "Cue button", group: "Control", after: "checklist" },
 ];
 
 /**

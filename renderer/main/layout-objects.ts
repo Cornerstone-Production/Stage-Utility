@@ -779,6 +779,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },
 
+  "cue-button": {
+    label: "Cue button",
+    blurb: "Fires a cue and shows whether its device is on",
+    group: "Control",
+    config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
+    style: () => PILL({ fontSize: 0.12 }),
+  },
+
   // Status
   "integration-status": {
     label: "Integration status",

@@ -438,12 +438,23 @@ nothing.
 | **OSC button** | Sends an OSC message, and can reflect the device's state back | LAN gear over UDP |
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
 | **Action button** | Runs one of the app's own actions | This app |
+| **Cue button** | Fires a cue and shows its device's state: on, off, settling after a press, stale when Companion has lost the device, dimmed when the cue refuses | This app, via Companion |
 | **Notes** | A shared note anyone can type into | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
 
 **Notes** and **Checklist** are shared, not per-screen: two people looking at them
 see the same text. See [OSC](../integrations/osc.md) and
 [RossTalk](../integrations/rosstalk.md).
+
+**Cue button** binds to a cue from the rules list, including pairs hidden from
+Home Assistant. A pair shows on or off from its state variable; a tap presses
+the opposite half, and a pair whose reading is unknown presses ON. In the eight
+seconds after a press it shows what was asked for and says it is settling. A
+dashed amber ring means Companion has lost the device and the reading cannot be
+trusted. A cue that refuses — switched off, disarmed, not allowed during a
+service — says why on the button. One that needs a confirmation cannot be fired
+from a panel; the rules page has the Test button for that. A press is recorded
+in the [automation log](../automation.md) with the caller `console`.
 
 ## Layout
 

@@ -149,7 +149,8 @@ Its buttons fire; the same layout on a wall display draws them and does nothing.
 **Building one.** Screens → **New view** → *Custom Layout*, then pick **A
 control surface you operate** rather than *A wall screen anyone can see*. Only
 custom views can be consoles — the built-in kinds have no layout to put a
-control on.
+control on. A **cue button** on one fires a cue and shows what its device is
+doing; see [Widgets](../reference/widgets.md#control).
 
 **Reaching one.** Every console gets its own row in the sidebar, at
 `/consoles/<view id>`, and the console's own name heads the page. Renaming the
