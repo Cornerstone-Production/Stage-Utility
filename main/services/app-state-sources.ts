@@ -19,6 +19,8 @@
 // app-state-reads.ts, which is server-only, and a `Record<AppStateSourceId, …>`
 // over the union below is what stops a source shipping without one.
 
+import type { IntegrationId } from "./integration-ids.js";
+
 /** What marks a `stateVariable` as read from this app rather than Companion. */
 export const APP_STATE_PREFIX = "app:";
 
@@ -52,8 +54,14 @@ export interface AppStateSourceDef {
    * editor offers a source only when its integration is set up — there is no
    * state to read otherwise — and deriving that from the source id's first
    * segment would be a convention nothing enforces.
+   *
+   * TYPED, not a string: the editor's filter is
+   * `configuredIntegrations.has(def.integrationId)`, so `youtub` would compile,
+   * pass every test here, and make the source vanish from the State variable
+   * select with nothing anywhere saying why. integration-ids.ts imports
+   * nothing, so this module stays pure and the renderer can still load it.
    */
-  integrationId: string;
+  integrationId: IntegrationId;
   /** The two values this source reports. A pair bound to it is fixed to them. */
   onValue: string;
   offValue: string;
