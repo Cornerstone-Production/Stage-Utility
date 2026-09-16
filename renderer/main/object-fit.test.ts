@@ -32,9 +32,10 @@ describe("the object type registry", () => {
     // The design doc said 38 while the registry held 41 — three types had been
     // added without anyone re-reading it.
     //
-    // OWED: `cue-button`, added with the number bumped but WITHOUT the browser
-    // sweep — the agent that added it had no browser. Run the sweep against a
-    // bound cue button at a narrow tile size before this ships.
+    // `cue-button` swept 16 Sep 2026 on a 1366x203 canvas at true scale: four
+    // buttons at 110x149, bound, unbound and a three-word label, none of them
+    // overflowing (scrollWidth within clientWidth), and a tap landed in the
+    // automation log as `console`.
     assert.equal(Object.keys(CAPABILITIES).length, 62);
   });
 });
