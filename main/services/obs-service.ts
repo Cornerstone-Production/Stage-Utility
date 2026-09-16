@@ -128,6 +128,19 @@ export function reduceObsEvent(prev: ObsStatusDTO, evt: ObsEvent, at: number = D
   }
 }
 
+/**
+ * One line per output transition, and only on a transition. OBS sends STARTING
+ * then STARTED for one press, and the fold above produces the same DTO for
+ * both, so this compares the folded state and not the event: a recording that
+ * ran on Sunday leaves exactly two lines on /log, start and stop, whichever
+ * button or cue caused them. Exported for the test.
+ */
+export function logOutputChange(before: ObsStatusDTO, after: ObsStatusDTO): void {
+  if (before.recording !== after.recording) console.log(`[obs] recording ${after.recording ? "started" : "stopped"}`);
+  if (before.streaming !== after.streaming) console.log(`[obs] streaming ${after.streaming ? "started" : "stopped"}`);
+  if (before.virtualCam !== after.virtualCam) console.log(`[obs] virtual camera ${after.virtualCam ? "started" : "stopped"}`);
+}
+
 class ObsService extends StatusIntegration<ObsStatusDTO> {
   private host: string | null = null;
   private port: number | null = null;
@@ -285,7 +298,9 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
     // RecordStateChanged, so it was always true: OBS sends STARTING then
     // STARTED, and STOPPING then STOPPED, and each pair put two identical
     // frames on the wire. The same mistake the 1 Hz poll made, one event apart.
+    const before = this.last;
     this.emitIfChanged(reduceObsEvent(this.last, evt));
+    logOutputChange(before, this.last);
     // RecordStateChanged is the ONLY thing that moves the record clock, and it
     // covers all four transitions OBS has — started, stopped, paused, resumed.
     // The fold above rolled the anchor forward from what we already knew; this
