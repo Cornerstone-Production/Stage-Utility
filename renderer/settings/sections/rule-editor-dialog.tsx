@@ -21,10 +21,13 @@
 import { errorMessage } from "@main/services/errors";
 import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
 import {
+  APP_STATE_FAMILIES,
   APP_STATE_SOURCES,
+  appStateFamilyRef,
   appStateRef,
   appStateSourceDef,
   isAppStateRef,
+  parseAppStateRef,
 } from "@main/services/app-state-sources";
 import {
   homeVisibilityParams,
@@ -64,10 +67,13 @@ import {
   DialogTitle,
   InfoHint,
   Input,
+  NOT_OFFERED,
   NumberInput,
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
   Separator,
@@ -542,6 +548,7 @@ function CueStateFields({
   inferred,
   onAction,
   appSources,
+  pvpLayers,
   onChange,
 }: {
   params: Record<string, string | number>;
@@ -555,6 +562,9 @@ function CueStateFields({
   onAction: Rule["action"];
   /** App state sources whose integration is set up, so there is something to read. */
   appSources: string[];
+  /** Every layer ProVideoPlayer currently has, for the parameterised sources.
+   *  Empty when PVP is not set up or has not been read yet. */
+  pvpLayers: string[];
   onChange: (patch: Record<string, string>) => void;
 }) {
   const binding = stateBindingOf(params);
@@ -591,6 +601,27 @@ function CueStateFields({
     const ref = appStateRef(id);
     return appSources.includes(ref) || effective === ref ? [{ value: ref, text: def.label }] : [];
   });
+  // THE PARAMETERISED SOURCES, one option per live layer per family. There is
+  // no fixed list of them — `app:pvp.layer-hidden:<name>` is as many refs as
+  // PVP has layers — so they are built from the layers PVP currently reports
+  // rather than from the registry.
+  //
+  // A STORED ref whose layer is no longer live keeps an option of its own, for
+  // the reason the Companion branch below keeps a renamed variable: a native
+  // select cannot show a value with no option, so it would silently select
+  // something else and the next save would write the substitute back. This is
+  // the case a rename in PVP produces, and it is exactly when the operator needs
+  // to see what the rule still says.
+  const pvpOffered = [...APP_STATE_FAMILIES].flatMap(([family, def]) =>
+    pvpLayers.map((name) => ({ value: appStateFamilyRef(family, name), text: def.label(name) })),
+  );
+  const effectiveFamily = parseAppStateRef(effective);
+  if (effectiveFamily?.kind === "family" && !pvpOffered.some((o) => o.value === effective)) {
+    pvpOffered.push({
+      value: effective,
+      text: `${effectiveFamily.def.label(effectiveFamily.param)} ${NOT_OFFERED}`,
+    });
+  }
   const offered = [
     ...appOffered,
     ...(inferred && !options.includes(inferred.variable)
@@ -657,7 +688,7 @@ function CueStateFields({
               : `A Companion custom variable your ON/OFF buttons set, or a module's own variable as <connection label>:<name>. The generated Home Assistant switch for "${base}" then reports what the device is doing instead of what it was asked to do. Blank leaves it optimistic.`)
         }
       >
-        {offered.length > 0 ? (
+        {offered.length + pvpOffered.length > 0 ? (
           // `effective`, not `variable`: an IMPLIED binding is shown as selected
           // even though nothing is stored, because it is what the switch really
           // reads. Choosing anything else — including "No state" — stores that
@@ -674,6 +705,18 @@ function CueStateFields({
               {offered.map((o) => (
                 <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
               ))}
+              {/* GROUPED, unlike everything above: there is one pair of these
+                  per PVP layer, so on a workspace with eight layers they are
+                  sixteen of the list's options and would otherwise bury the
+                  handful of fixed sources and the Companion variables. */}
+              {pvpOffered.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>ProVideoPlayer layers</SelectLabel>
+                  {pvpOffered.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.text}</SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
             </SelectContent>
           </Select>
         ) : (
@@ -783,6 +826,7 @@ export function RuleEditorBody({
   optionSources,
   customVariables,
   appSources,
+  pvpLayers,
   inferredSource,
   pairBase,
   pairIsToggle,
@@ -795,6 +839,8 @@ export function RuleEditorBody({
   customVariables: string[];
   /** App state sources whose integration is set up. See useConfiguredIntegrations. */
   appSources: string[];
+  /** Every layer ProVideoPlayer currently has. See CueStateFields. */
+  pvpLayers: string[];
   /** Where this rule's own Companion button says its device reports state. */
   inferredSource: InferredStateSource | null;
   /** The pair's base when this rule is its `_on` half, else null. */
@@ -879,6 +925,7 @@ export function RuleEditorBody({
           inferred={inferredSource}
           onAction={draft.action}
           appSources={appSources}
+          pvpLayers={pvpLayers}
           onChange={(patch) =>
             setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, ...patch } } })
           }
@@ -1161,6 +1208,7 @@ export function RuleEditorDialog({
   optionSources,
   customVariables,
   appSources,
+  pvpLayers,
   inferredFor,
   onChanged,
 }: {
@@ -1170,6 +1218,8 @@ export function RuleEditorDialog({
   optionSources: OptionSources;
   customVariables: string[];
   appSources: string[];
+  /** Every layer ProVideoPlayer currently has. See CueStateFields. */
+  pvpLayers: string[];
   inferredFor: (rule: Rule) => InferredStateSource | null;
   onChanged: () => void;
 }) {
@@ -1451,6 +1501,7 @@ export function RuleEditorDialog({
                 inferred={inferredFor(onDraft)}
                 onAction={onDraft.action}
                 appSources={appSources}
+                pvpLayers={pvpLayers}
                 onChange={setPairParams}
               />
               <Row label="Room" hint="Where the thing this pair drives is. Shown in the log; not used to route anything.">
@@ -1499,6 +1550,7 @@ export function RuleEditorDialog({
             optionSources={optionSources}
             customVariables={customVariables}
             appSources={appSources}
+            pvpLayers={pvpLayers}
             inferredSource={inferredFor(selected)}
             pairBase={isPair ? target.pair.base : null}
             pairIsToggle={isPair ? target.toggle : false}
