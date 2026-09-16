@@ -133,6 +133,23 @@ ProVideoPlayer stops the rule**, silently. Nothing else will tell you. A name th
 is only digits cannot be used at all: PVP reads an all-digits value as a position
 rather than a name, and Stage refuses it rather than firing at the wrong thing.
 
+## Layer state on a cue pair
+
+A cue pair can report a layer's own state instead of a Companion variable, so the
+switch in Home Assistant says what ProVideoPlayer is doing rather than what the
+cue asked for. The two sources are `app:pvp.layer-hidden:<layer name>` and
+`app:pvp.layer-muted:<layer name>`, picked under **ProVideoPlayer layers** in the
+rule editor's **State variable** select, which lists every layer PVP currently
+has. A pair whose ON half is **Hide a ProVideoPlayer layer** or **Mute a
+ProVideoPlayer layer** is bound to the matching source for the layer it names
+without anybody choosing it; Unhide and Unmute imply nothing, because their "on"
+direction is the opposite one.
+
+Layer names are matched here exactly as the actions match them, and break the
+same way: rename the layer in PVP and the state reads unknown with `No PVP layer
+called "<name>"`, beside an action that has stopped working. A PVP that is not
+connected reads unknown too — never "shown".
+
 ## What is verified, and what is not
 
 **ProVideoPlayer answers every command with "OK" whether or not it acted on it,

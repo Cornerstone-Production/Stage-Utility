@@ -394,6 +394,12 @@ is one of the actions that starts what the source watches:
 | **OBS recording** → Start recording | `app:obs.recording` |
 | **OBS streaming** → Start streaming | `app:obs.streaming` |
 | **OBS virtual camera** → Start virtual camera | `app:obs.virtualCam` |
+| **Hide a ProVideoPlayer layer** | `app:pvp.layer-hidden:<the layer it names>` |
+| **Mute a ProVideoPlayer layer** | `app:pvp.layer-muted:<the layer it names>` |
+
+Unhide and Unmute imply nothing as an ON half: their "on" direction is the
+opposite one, so a pair built that way is left unbound rather than bound to a
+source it would report backwards.
 
 It is the only answer there is, and the two values are fixed at `on` and `off`,
 so the value rows are not offered. Setting **State variable** to anything else on

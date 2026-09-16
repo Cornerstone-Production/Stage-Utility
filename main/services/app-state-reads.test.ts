@@ -378,6 +378,43 @@ describe("the registry and the readers", () => {
     );
   });
 
+  test("exactly two PVP actions imply a layer source, and only the switch-on direction", () => {
+    // The parameterised half of the check above, and the same exactness: every
+    // action in the registry is offered a layer, so a row copied onto
+    // `pvp.unhide-layer` — whose "on" means the layer is SHOWN — would bind a
+    // switch that reports itself backwards, and nothing else here would notice.
+    //
+    // `pvp.clear-layer` and `pvp.set-layer-opacity` take the same `layer` param
+    // and must imply nothing: neither hides nor mutes anything.
+    const implied = new Map<string, string>();
+    for (const id of Object.keys(AUTOMATION_ACTIONS)) {
+      const binding = implicitStateBinding({ id, params: { layer: "Lyrics" } });
+      if (binding) implied.set(id, binding.variable);
+    }
+    assert.deepEqual(
+      [...implied].sort(),
+      [
+        ["pvp.hide-layer", "app:pvp.layer-hidden:Lyrics"],
+        ["pvp.mute-layer", "app:pvp.layer-muted:Lyrics"],
+      ],
+    );
+  });
+
+  test("an implied layer binding carries the source's own two values", () => {
+    assert.deepEqual(implicitStateBinding({ id: "pvp.hide-layer", params: { layer: "Lyrics" } }), {
+      variable: "app:pvp.layer-hidden:Lyrics",
+      onValue: "on",
+      offValue: "off",
+    });
+  });
+
+  test("a hide-layer cue with no layer named implies nothing", () => {
+    // `app:pvp.layer-hidden:` is refused by the parser, so implying it would
+    // show the editor a binding that cannot be saved.
+    assert.equal(implicitStateBinding({ id: "pvp.hide-layer", params: { layer: "  " } }), null);
+    assert.equal(implicitStateBinding({ id: "pvp.hide-layer", params: {} }), null);
+  });
+
   test("a ref nothing answers to is named, not guessed at", () => {
     // `virtualcam` with a small c. `app:obs.virtualCam` IS a source now, so this
     // is also the case-sensitivity question: the lookup is an exact Map hit, and
