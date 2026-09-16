@@ -16,8 +16,11 @@ A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build` produces **
 release**, so documentation churn does not mint versions.
 
 Otherwise the level is the highest severity among every commit since the last
-**stable** release — one `feat` among twenty `docs` makes it a minor. Measuring from
-the last stable rather than the last tag is what lets a beta line accumulate:
+**stable** release — one `feat` among twenty `docs` makes it a minor. A `feat`,
+`fix` or `perf` scoped to the tooling itself (`release`, `ci`, `dx`, `test`) is
+left out of that reading, and out of the notes; see `scripts/release-level.sh`.
+Measuring from the last stable rather than the last tag is what lets a beta line
+accumulate:
 
 ```
 v1.9.2            last stable release

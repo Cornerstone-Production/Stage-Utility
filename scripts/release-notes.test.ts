@@ -400,7 +400,7 @@ describe("the overrides in docs/release-notes/overrides", () => {
 
   /** Every release with an override, EXACTLY. Adding one is a deliberate act and
    *  should have to be declared here; a file quietly disappearing is the bug. */
-  const VERSIONS_WITH_OVERRIDES = ["1.18.0"];
+  const VERSIONS_WITH_OVERRIDES = ["1.18.0", "1.19.0"];
 
   interface Override { commit: string; betaOnly: boolean; reason: string }
 
@@ -465,6 +465,89 @@ describe("the overrides in docs/release-notes/overrides", () => {
 // The dialog has rendered an Improved heading since it learned about sections
 // (SECTION_ORDER, and a tone for it in update-notices.tsx). Nothing was ever
 // routed there.
+describe("a change to the release tooling itself is not user-visible", () => {
+  // 1.18.0's published notes carried "correct a Beta-only trailer the commit
+  // can no longer carry" under New and three more like it under Fixed. Real
+  // commits, honestly typed — and invisible to every operator. The scope says
+  // which machinery moved, so the scope is what decides, from the one list
+  // main/services/internal-scopes.json that the update dialog and the
+  // workflow's version decision also read.
+  const LEVEL = path.join(HERE, "release-level.sh");
+  const level = (range: string, cwd: string) =>
+    execFileSync("bash", [LEVEL, range], {
+      encoding: "utf8",
+      cwd,
+      env: { ...process.env, REPO_ROOT: path.join(HERE, "..") },
+    }).trim();
+
+  function toolingRepo(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-tooling-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@t",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@t",
+        },
+      });
+    const commit = (subject: string) => {
+      fs.appendFileSync(path.join(dir, "f"), `${subject}\n`);
+      git("add", "-A");
+      git("commit", "-q", "-m", subject);
+    };
+    git("init", "-q", "-b", "main");
+    commit("feat(patch): the patch sheet");
+    git("tag", "v1.0.0");
+    commit("feat(release): correct a Beta-only trailer the commit can no longer carry");
+    commit("fix(release): an override must name a SHA, not a branch");
+    commit("fix(ci): fetch the whole history so the ancestry guard can run");
+    commit("perf(dx): cache the typecheck between runs");
+    commit("fix(test): a fixture that depended on the host clock");
+    git("tag", "v1.0.1");
+    commit("fix(patch): a column that would not save");
+    git("tag", "v1.0.2");
+    commit("feat(release)!: notes now need a token");
+    git("tag", "v2.0.0");
+    return dir;
+  }
+  const dir = toolingRepo();
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it("leaves no line and no count behind in the notes", () => {
+    const out = notesFor("1.0.1", "v1.0.0", dir);
+    for (const word of ["trailer", "override", "ancestry", "typecheck", "fixture"]) {
+      assert.ok(!out.includes(word), `${word} reached the notes:\n${out}`);
+    }
+    // Not "held back" either: a tooling commit was never a candidate, so it
+    // must not inflate the "N further fixes not listed" line.
+    assert.ok(!/further (fix|improvement)/.test(out), out);
+    assert.ok(!out.includes("## Fixed"), out);
+  });
+
+  it("does not release on tooling alone, and does not let it pick the level", () => {
+    assert.equal(level("v1.0.0..v1.0.1", dir), "none");
+    // The feat(release) in range must not lift this patch to a minor.
+    assert.equal(level("v1.0.0..v1.0.2", dir), "patch");
+  });
+
+  it("a breaking change still counts and still shows, whatever its scope", () => {
+    assert.equal(level("v1.0.2..v2.0.0", dir), "major");
+    assert.match(sectionText(notesFor("2.0.0", "v1.0.2", dir), "Breaking"), /notes now need a token/);
+  });
+
+  it("the scopes the in-app dialog hides are the scopes the notes hide", () => {
+    // One file, read by all three consumers. If someone adds a fourth list this
+    // is where it shows.
+    const file = path.join(HERE, "..", "main", "services", "internal-scopes.json");
+    const shared = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.deepEqual(shared.scopes, ["ci", "dx", "release", "test"]);
+  });
+});
+
 describe("perf is an improvement, not a bug fix", () => {
   const repo = buildRepo();
   after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));

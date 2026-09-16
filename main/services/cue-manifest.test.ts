@@ -262,3 +262,53 @@ describe("the version", () => {
     assert.equal((await cueManifest()).version, next);
   });
 });
+
+describe("a panel sees every cue, Home Assistant sees the shown ones", () => {
+  test("includeHidden lists a hidden pair and says so", async () => {
+    RULES = [
+      cue("projectors_on", { says: "Projectors on" }),
+      cue("projectors_off", { at: { page: 1, row: 0, col: 2 } }),
+      cue("haze_on", {
+        says: "Haze on",
+        params: { homeAssistant: "hidden" },
+        at: { page: 1, row: 1, col: 1 },
+      }),
+      cue("haze_off", { at: { page: 1, row: 1, col: 2 } }),
+      cue("confetti", {
+        says: "Confetti",
+        params: { homeAssistant: "hidden" },
+        at: { page: 1, row: 2, col: 1 },
+      }),
+    ];
+    const forHome = await cueManifest();
+    assert.deepEqual(forHome.switches.map((s) => s.id), ["projectors"]);
+    assert.deepEqual(forHome.buttons.map((b) => b.id), []);
+
+    const forPanel = await cueManifest({ includeHidden: true });
+    assert.deepEqual(
+      forPanel.switches.map((s) => [s.id, s.hiddenFromHome ?? false]),
+      // Pairs come out in cuePairs' order, which is by base name.
+      [
+        ["haze", true],
+        ["projectors", false],
+      ],
+    );
+    assert.deepEqual(
+      forPanel.buttons.map((b) => [b.id, b.hiddenFromHome ?? false]),
+      [["confetti", true]],
+    );
+  });
+
+  test("the default is unchanged, exactly", async () => {
+    // The Home Assistant integration reads the default. A flag leaking into it
+    // would create entities for pairs the operator hid.
+    RULES = [
+      cue("projectors_on", { says: "Projectors on" }),
+      cue("projectors_off", { at: { page: 1, row: 0, col: 2 } }),
+      cue("haze_on", { params: { homeAssistant: "hidden" }, at: { page: 1, row: 1, col: 1 } }),
+      cue("haze_off", { at: { page: 1, row: 1, col: 2 } }),
+    ];
+    const forHome = await cueManifest();
+    for (const s of forHome.switches) assert.equal("hiddenFromHome" in s, false);
+  });
+});

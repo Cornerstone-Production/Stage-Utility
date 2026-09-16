@@ -101,12 +101,12 @@ import { AlignmentGuides } from "./alignment-guides";
  *  that deliberate placement is never fought, large enough to catch a hand. */
 const ALIGN_TOLERANCE_PX = 8;
 
-import { uid, dashboardTemplate, confidenceMonitorTemplate, CANVAS_PRESETS } from "./layout-templates";
+import { uid, dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel, CANVAS_PRESETS, isUltritouchCanvas, canvasAfterPreset } from "./layout-templates";
 import { Inspector } from "./inspector";
 import {
   NumberField, 
 } from "./inspector-rows";
-export { dashboardTemplate, confidenceMonitorTemplate };
+export { dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel };
 import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
 import { PlanSwitcher } from "../settings/sections/plan-switcher";
 import { UnsavedWorkProvider, useUnsavedWork } from "../components/unsaved-work";
@@ -1550,6 +1550,17 @@ export function LayoutEditor({
     setSelectedIds(new Set());
     setDirty(true);
   }
+  // Replace the layout and canvas with one of the three Ultritouch strip
+  // starters: unlike the other starters, the panel's canvas is part of what
+  // "starting from" this template means — a strip laid out on the wrong
+  // canvas is not this starter, it is a stack of unreadable labels.
+  function startFromUltritouch(model: UltritouchModel) {
+    pushHistory();
+    setCanvas(ultritouchCanvas(model));
+    setObjects(ultritouchTemplate(model));
+    setSelectedIds(new Set());
+    setDirty(true);
+  }
 
   // Snap EVERY object (position + size, recursively) onto the grid in one click —
   // for cleaning up existing layouts whose objects predate grid snapping. Locked
@@ -2044,16 +2055,46 @@ export function LayoutEditor({
             The palette it opens carries the same set the dropdown listed, and
             the hide-unconfigured filter now lives in the palette's own header,
             beside the list it filters. */}
-        <Button
-          variant={paletteOpen ? "accent" : "filled"}
-          size="small"
-          onClick={() => setPaletteOpen((v) => !v)}
-          aria-label="Add an object"
-          aria-pressed={paletteOpen}
-          tooltip="Every widget, with a line on what each shows. Drag one onto the canvas, or click to add it."
-        >
-          <PlusIcon className="size-3.5" /> Add object
-        </Button>
+        {/* The palette floats from this button rather than sitting in the
+            canvas row. In the row it was capped at the canvas's own height,
+            which on a 1366x203 Ultritouch strip left a 160px list with a
+            search box and one visible widget. Non-modal and kept open across
+            outside clicks so a drag onto the canvas, or three clicks to add
+            three widgets, does not keep reopening it; the button toggles it. */}
+        <Popover.Root open={isEditing && paletteOpen} onOpenChange={setPaletteOpen} modal={false}>
+          <Popover.Trigger asChild>
+            <Button
+              variant={paletteOpen ? "accent" : "filled"}
+              size="small"
+              onClick={() => setPaletteOpen((v) => !v)}
+              aria-label="Add an object"
+              aria-pressed={paletteOpen}
+              tooltip="Every widget, with a line on what each shows. Drag one onto the canvas, or click to add it."
+            >
+              <PlusIcon className="size-3.5" /> Add object
+            </Button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              align="start"
+              sideOffset={6}
+              onInteractOutside={(e) => e.preventDefault()}
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              className="z-50 w-64 max-h-[min(70vh,44rem)] overflow-y-auto rounded-xl border border-line-strong bg-popover shadow-md backdrop-blur-xl"
+            >
+              <Palette
+                types={paletteTypes}
+                dimmed={dimmedTypes}
+                hideUnconfigured={hideUnconfigured}
+                onToggleHideUnconfigured={toggleHideUnconfigured}
+                onAdd={addObject}
+                onDragStart={(t) => { paletteDragType.current = t; }}
+                onDragEnd={() => { paletteDragType.current = null; }}
+                onDropAt={dropObjectAtClient}
+              />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
         <Button variant={gridOn ? "accent" : "filled"} size="small" onClick={() => setGridOn((v) => !v)} aria-label="Toggle snap grid">
           <Grid3x3Icon className="size-3.5" /> Grid
         </Button>
@@ -2141,7 +2182,7 @@ export function LayoutEditor({
                         <button
                           key={p.id}
                           type="button"
-                          onClick={() => { setCanvas({ ...canvas, width: p.w, height: p.h }); setDirty(true); }}
+                          onClick={() => { setCanvas(canvasAfterPreset(canvas, p)); setDirty(true); }}
                           className={`rounded-md px-2 py-1 text-caption2 tabular-nums transition-colors ${active ? "bg-accent text-on-accent" : "bg-fill text-fg-muted hover:bg-fill-hover hover:text-fg"}`} aria-label={p.label}>
                           {p.id}
                         </button>
@@ -2152,14 +2193,20 @@ export function LayoutEditor({
               </div>
               <div className="flex flex-col gap-1.5">
                 <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Size (px)</span>
+                {/* Two fields share the popover's width. The themed input is
+                    w-full and a flex item's min-width defaults to its content,
+                    so without min-w-0 the second field ran off the popover's
+                    right edge. */}
                 <div className="flex items-center gap-1">
-                  <NumberField value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
+                  <NumberField className="min-w-0 flex-1" value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
                   <span className="text-caption2 text-fg-subtle">×</span>
-                  <NumberField value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
+                  <NumberField className="min-w-0 flex-1" value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
                 <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Fit</span>
+                {/* Locked on an Ultritouch canvas: the panel's pixels are known, so the
+                    layout keeps its shape and scales evenly. See canvasAfterPreset. */}
                 <ButtonGroup>
                   {/* Letterbox or Responsive. "Fill" was the old name for the
                       right-hand option and only reflowed proportionally; it is
@@ -2168,14 +2215,16 @@ export function LayoutEditor({
                   <Button
                     variant={effectiveFit === "contain" ? "accent" : "filled"}
                     size="small"
+                    disabled={isUltritouchCanvas(canvas.width, canvas.height)}
                     onClick={() => { setCanvas({ ...canvas, fit: "contain" }); setDirty(true); }}
-                    tooltip="Letterbox: keep the design's shape exactly, with bars on a screen of a different shape. Right for a wall screen."
+                    tooltip="Letterbox: keep the design's shape exactly, with bars on a screen of a different shape. Right for a wall screen, and locked on for an Ultritouch panel."
                   >
                     Letterbox
                   </Button>
                   <Button
                     variant={effectiveFit === "responsive" ? "accent" : "filled"}
                     size="small"
+                    disabled={isUltritouchCanvas(canvas.width, canvas.height)}
                     onClick={() => { setCanvas({ ...canvas, fit: "responsive" }); setDirty(true); }}
                     tooltip="Responsive: use the whole window. Objects hold their anchors, keep their shape where asked, and stack into a column when the window is a very different shape."
                   >
@@ -2208,6 +2257,15 @@ export function LayoutEditor({
               </DropdownMenu.Item>
               <DropdownMenu.Item onSelect={startFromConfidenceMonitor} className={MENU_ITEM}>
                 <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Confidence Monitor template
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => startFromUltritouch("ultritouch-2")} className={MENU_ITEM}>
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Ultritouch-2 strip
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => startFromUltritouch("ultritouch-2-hr")} className={MENU_ITEM}>
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Ultritouch-2-HR strip
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => startFromUltritouch("ultritouch-4")} className={MENU_ITEM}>
+                <LayoutTemplateIcon className="size-3.5 text-fg-subtle" /> Ultritouch-4 strip
               </DropdownMenu.Item>
               {templates.length > 0 && (
                 <>
@@ -2277,26 +2335,6 @@ export function LayoutEditor({
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
-        {/* Palette — what the toolbar's "Add object" button opens. Hidden
-            outside edit mode, and collapsible for anyone who wants the canvas
-            wider. */}
-        {isEditing && paletteOpen && (
-          <div
-            className="w-56 shrink-0 overflow-y-auto rounded-xl border border-line bg-surface @max-4xl:w-full @max-4xl:max-h-64"
-            style={{ maxHeight: canvasH ?? undefined }}
-          >
-            <Palette
-              types={paletteTypes}
-              dimmed={dimmedTypes}
-              hideUnconfigured={hideUnconfigured}
-              onToggleHideUnconfigured={toggleHideUnconfigured}
-              onAdd={addObject}
-              onDragStart={(t) => { paletteDragType.current = t; }}
-              onDragEnd={() => { paletteDragType.current = null; }}
-              onDropAt={dropObjectAtClient}
-            />
-          </div>
-        )}
         <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl:flex-none" style={{ height: canvasH ?? undefined }}>
           {previewShape.vp ? (
             // The live edit state, not the saved view: the point is to check the

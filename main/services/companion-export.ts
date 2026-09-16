@@ -325,17 +325,32 @@ export function parseButtons(raw: unknown): CompanionButton[] {
  * PGM STOP" would pair under one reading and "MA Cam 1 REC" beside a general
  * "STOP ALL" under another.
  *
+ * OPEN/CLOSED and OPEN/CLOSE are here despite the warning above about "Open"
+ * generally, because in this building the things labelled that way are a
+ * distribution amp and a set of doors — each a two-state thing with exactly one
+ * opposite, and "Distribution Open" beside "Distribution Closed" was two
+ * unrelated one-shot cues, so the amp could be opened by voice and not closed.
+ * It stays a pair only when BOTH halves share a base on one page, which is what
+ * keeps a lone "Open" on a lighting console from being guessed at. Both
+ * spellings appear on real keys; `closed` is listed first so a page carrying all
+ * three of Open, Closed and Close pairs the past tense and not the imperative.
+ *
  * The two halves are still named `<base>_on` and `<base>_off`, like every other
  * pair — a Startup/Shutdown pair always was — so "REC START" and "REC STOP"
- * become `rec_on` and `rec_off`.
+ * become `rec_on` and `rec_off`, and "Distribution Open" and "Distribution
+ * Closed" become `distribution_on` and `distribution_off`.
  */
 const SUFFIX_PAIRS: readonly (readonly [string, string])[] = [
   ["on", "off"],
   ["startup", "shutdown"],
   ["start", "stop"],
+  ["open", "closed"],
+  ["open", "close"],
 ];
 
-const SUFFIXES = SUFFIX_PAIRS.flat();
+/** Every word that can be a suffix, deduplicated — `open` is the ON half of two
+ *  pairs, and this list is only ever asked whether it contains a word. */
+const SUFFIXES = [...new Set(SUFFIX_PAIRS.flat())];
 
 /**
  * Split "Projectors ON" into ["Projectors", "on"], or null.

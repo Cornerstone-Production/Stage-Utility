@@ -1,0 +1,4 @@
+{
+  "_comment": "Commit scopes that name the project's own machinery rather than anything an operator runs. A feat, fix or perf under one of these is real work and honestly typed, and still invisible to every user, so it neither appears in release notes nor mints a release. Read by main/services/changelog.ts (a checkout's update dialog), scripts/release-notes.mjs (the published release body) and scripts/release-level.sh (the workflow's version decision), so the three cannot drift. A breaking change (!) is exempt: it is shown and it counts, whatever it is scoped to.",
+  "scopes": ["ci", "dx", "release", "test"]
+}

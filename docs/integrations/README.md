@@ -24,6 +24,7 @@ countdown, so the app needs it.
 | [SenSource Vea](sensource.md) | People counts (attendance / occupancy) |
 | [Ross MultiViewer (TSL)](ross-tsl.md) | Pushes a count onto a multiviewer tile |
 | [RossTalk (Carbonite / Ultrix)](rosstalk.md) | Commands to Ross gear — custom controls, switching, routing, salvos |
+| [Ross Ultritouch](ultritouch.md) | A console on a Ross touch panel, through DashBoard's Browser component |
 | [Live scores](scores.md) | Followed teams' live scores (ESPN public scoreboard) |
 
 ## Closing a settings dialog with unsaved edits

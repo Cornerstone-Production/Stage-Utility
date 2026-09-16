@@ -36,6 +36,9 @@ const PREVIEW_ASPECTS = [
   { id: "9:16", label: "9:16 · portrait", ratio: 9 / 16 },
   { id: "4:3", label: "4:3", ratio: 4 / 3 },
   { id: "21:9", label: "21:9 · ultrawide", ratio: 21 / 9 },
+  { id: "ultritouch-2", label: "Ultritouch-2 · 1366 x 203", ratio: 1366 / 203 },
+  { id: "ultritouch-2-hr", label: "Ultritouch-2-HR · 1920 x 285", ratio: 1920 / 285 },
+  { id: "ultritouch-4", label: "Ultritouch-4 · 1366 x 485", ratio: 1366 / 485 },
 ];
 
 /** Sentinel for the ScriptView column picker's "all columns" choice. */

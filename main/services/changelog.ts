@@ -17,10 +17,7 @@
 /** Commit types that change nothing an operator could notice. */
 const INVISIBLE = new Set(["chore", "ci", "build", "docs", "test", "refactor", "style"]);
 
-/** `type(optional-scope)!: subject` */
-const CONVENTIONAL = /^([a-z]+)(?:\([^)]*\))?!?:\s*(.+)$/i;
-
-/** The same, with the scope captured so it can lead the line. */
+/** `type(optional-scope)!: subject`, with the scope captured so it can lead the line. */
 const SCOPED = /^([a-z]+)(?:\(([^)]*)\))?!?:\s*(.+)$/i;
 
 /** `type!:` or `type(scope)!:` — a breaking change, whatever its type. */
@@ -35,7 +32,15 @@ const MERGE = /^Merge (pull request|branch|remote-tracking)\b/i;
 const CI_DIRECTIVE = /\s*\[(skip ci|ci skip|no ci)\]\s*$/i;
 
 import SCOPE_LABEL_FILE from "./scope-labels.json" with { type: "json" };
+import INTERNAL_SCOPE_FILE from "./internal-scopes.json" with { type: "json" };
 import { externKeyed } from "../types/extern-keyed.js";
+
+/**
+ * Scopes that name the release machinery itself. A `fix(release)` is honestly a
+ * fix, and an operator cannot see it — 1.18.0 listed four such lines. Shared
+ * with scripts/release-notes.mjs and scripts/release-level.sh.
+ */
+const INTERNAL_SCOPES = new Set<string>(INTERNAL_SCOPE_FILE.scopes);
 
 /** Jargon scopes and what to call them. Shared with scripts/release-notes.mjs. */
 const SCOPE_LABELS: Record<string, string> = externKeyed(
@@ -58,8 +63,9 @@ export function summarizeChangelog(subjects: readonly string[], cap = 20): strin
   for (const raw of subjects) {
     const subject = raw.replace(CI_DIRECTIVE, "").trim();
     if (!subject || MERGE.test(subject)) continue;
-    const m = CONVENTIONAL.exec(subject);
+    const m = SCOPED.exec(subject);
     if (m && INVISIBLE.has(m[1].toLowerCase())) continue;
+    if (m && m[2] && INTERNAL_SCOPES.has(m[2].toLowerCase()) && !BREAKING.test(subject)) continue;
     if (seen.has(subject)) continue;
     seen.add(subject);
     out.push(presentable(subject));

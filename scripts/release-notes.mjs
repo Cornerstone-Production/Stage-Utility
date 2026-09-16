@@ -18,6 +18,7 @@
 
 import { execFileSync } from "node:child_process";
 import SCOPE_LABEL_FILE from "../main/services/scope-labels.json" with { type: "json" };
+import INTERNAL_SCOPE_FILE from "../main/services/internal-scopes.json" with { type: "json" };
 
 const SCOPE_LABELS = Object.fromEntries(
   Object.entries(SCOPE_LABEL_FILE).filter(([k]) => !k.startsWith("_")),
@@ -56,6 +57,14 @@ function upgradeNotice(v) {
 
 /** Commit types that change nothing an operator could notice. */
 const INVISIBLE = new Set(["chore", "ci", "build", "docs", "test", "refactor", "style"]);
+
+/**
+ * Scopes that name this machinery rather than the app. `fix(release)` is a
+ * real fix and honestly typed, and 1.18.0's notes carried four such lines that
+ * no operator could act on. Shared with the update dialog and the workflow's
+ * version decision via main/services/internal-scopes.json.
+ */
+const INTERNAL_SCOPES = new Set(INTERNAL_SCOPE_FILE.scopes);
 
 /** `type(scope)!: subject` */
 const CONVENTIONAL = /^([a-z]+)(?:\(([^)]*)\))?(!)?:\s*(.+)$/i;
@@ -299,6 +308,9 @@ for (const { sha, subject, body } of entries) {
   const type = rawType.toLowerCase();
   if (INVISIBLE.has(type) && !bang) continue;
   const key = scope?.toLowerCase() ?? null;
+  // Skipped before featScopes: a feat(release) must not make `release` read as
+  // a surface introduced this cycle.
+  if (key && INTERNAL_SCOPES.has(key) && !bang) continue;
   if (!bang && type === "feat" && key) featScopes.add(key);
 
   const trailer = BETA_ONLY.test(body);

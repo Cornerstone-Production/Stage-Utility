@@ -851,6 +851,22 @@ export async function invoke<T>(channel: string, params?: Params): Promise<T> {
     // Read on demand and cached for five seconds server-side, so the rules list
     // polling this while it is open costs one round of Companion reads.
     case "cues:states": return apiFetch("/api/cues/states");
+    // The app's own cue buttons: every cue, hidden from Home Assistant or not.
+    case "cues:manifest": return apiFetch("/api/cues/manifest?all=1");
+    // Whatever the status, the body is the answer: 200 dispatched, 202 needs a
+    // confirmation the panel cannot give, 409 refused with a reason. The button
+    // reads all three; throwing on a 409 would turn "not allowed during a
+    // service" into a generic failure toast. So not post(), which throws.
+    case "cues:call": {
+      const res = await fetch(`/api/cues/${encodeURIComponent(String(p.name))}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      return { ...body, status: res.status } as T;
+    }
     case "cues:mintToken": return post("/api/cues/tokens", params);
     case "cues:revokeToken": return del(`/api/cues/tokens/${encodeURIComponent(String(p.id))}`);
     // YAML, not JSON — the one text response in this file, so it cannot go

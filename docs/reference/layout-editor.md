@@ -29,10 +29,11 @@ See [Widget reference](widgets.md) for what each widget's Content settings mean.
 ## Starting from something
 
 A custom view can start blank or from a built-in layout. **Screens → New view →
-*Custom Layout*** offers **Start from**: *Blank canvas*, *Dashboard template*, or
-*Confidence Monitor template*. The two templates are the app's own dashboard and
-stage screen, built as ordinary editable objects rather than a fixed rendering —
-so they are a starting point you take apart, not a mode.
+*Custom Layout*** offers **Start from**: *Blank canvas*, *Dashboard template*,
+*Confidence Monitor template*, and three Ultritouch strips, one per panel, each
+a row of unbound cue buttons and a countdown on that panel's canvas. Every
+template is built as ordinary editable objects rather than a fixed rendering —
+so it is a starting point you take apart, not a mode.
 
 Inside the editor, **Replace** does the same thing to a layout that already
 exists, and lists your **saved layouts** underneath. **Save as layout**, on the
@@ -43,8 +44,11 @@ Replacing swaps the canvas outright, and **Undo** takes it back.
 
 ## The object palette
 
-**Add widget** opens the palette, grouped by what a widget reads from, with a
-search box over it. **Hide widgets whose integration is not set up** removes the
+**Add widget** opens the palette as a panel floating from that button, grouped
+by what a widget reads from, with a search box over it. It stays open while you
+drag or click widgets onto the canvas and closes from the same button, and its
+height follows the window rather than the canvas, so a short Ultritouch strip
+does not shorten the list. **Hide widgets whose integration is not set up** removes the
 ones you have no gear for — from the palette and from the right-click (or tap
 and hold) Add menu alike. Left on, they stay listed but dimmed, which is the
 right default while you are still connecting things.
@@ -84,11 +88,16 @@ an eye per object, which hides it while you work on what is underneath.
 The **Canvas** popover sets the design canvas, either from a preset —
 
 Landscape 16:9 · Portrait 9:16 · Standard 4:3 · Widescreen 16:10 ·
-Ultrawide 21:9 · Super ultrawide 32:9 · Square 1:1 · 3:2 · 5:4
+Ultrawide 21:9 · Super ultrawide 32:9 · Square 1:1 · 3:2 · 5:4 ·
+Ultritouch-2 1366 x 203 · Ultritouch-2-HR 1920 x 285 · Ultritouch-4 1366 x 485
 
 — or by typing a width and height. Only the **shape** matters: the renderer
 scales the design canvas to whatever screen it lands on, so a 16:9 layout is not
 a 1080p layout. The **fit** below is chosen in the same popover.
+
+The three Ultritouch presets are pixel sizes rather than shapes: a Ross
+Ultritouch panel's browser frame is exactly that many pixels, and a layout for
+it is letterboxed, never reflowed. See [Ultritouch](../integrations/ultritouch.md).
 
 ### Grid
 
@@ -144,8 +153,8 @@ The object toolbar above the inspector carries Duplicate and Delete, along with
 lock, layer order and snap-to-grid, and it appears only when exactly one object
 is selected.
 
-While the palette is stacked above the canvas on a narrow window, dragging a
-widget out of it scrolls the list instead; tap to add there.
+On a touch screen, dragging a widget out of the palette scrolls the list
+instead; tap to add there.
 
 ## Fit, and other window shapes
 
@@ -157,6 +166,10 @@ A layout has one **fit**, set in the **Canvas** popover:
 | Responsive | Reflows to the window it is on | A control surface, which is on whatever window the operator has |
 
 A control surface with no fit stored is responsive; a wall screen is letterboxed.
+
+An Ultritouch canvas is always letterboxed and the fit control is disabled while
+one is chosen: the panel's pixels are known, so the layout keeps its shape and
+scales evenly wherever it is previewed.
 
 ### What responsive does
 
