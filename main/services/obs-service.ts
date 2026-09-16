@@ -26,6 +26,7 @@ import {
   closeCodeOf,
   ObsWebSocketAdapter,
   standDownReason,
+  type ObsAdapter,
   type ObsClose,
   type ObsEvent,
 } from "./obs-protocol.js";
@@ -183,6 +184,18 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
     this.clearPoll();
     this.adapter?.close();
     this.adapter = null;
+  }
+
+  /**
+   * The live obs-websocket link, or null when there is nothing to send on.
+   *
+   * `connected` as well as the adapter: the adapter exists from the moment
+   * `connect()` builds it, handshake or no handshake, and a request written into
+   * a socket that never identified rejects on a timeout seconds later. The
+   * automation actions want the honest "OBS is not connected" now.
+   */
+  liveAdapter(): ObsAdapter | null {
+    return this.last.connected ? this.adapter : null;
   }
 
   /** One-shot reachability check for the Integrations "Test connection" button. */
@@ -397,3 +410,92 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
 }
 
 export const obsService = new ObsService();
+
+/**
+ * What each output is called on the wire, and where it is read off the snapshot.
+ *
+ * One table rather than four literals: the start/stop pair, the request names
+ * and the field that says whether it is already running have to agree, and a
+ * `StopStream` guarded by `recording` is a cue that stops nothing and reports
+ * success.
+ */
+const OUTPUTS = {
+  record: { start: "StartRecord", stop: "StopRecord", active: (s: ObsStatusDTO) => s.recording, running: "recording" },
+  stream: { start: "StartStream", stop: "StopStream", active: (s: ObsStatusDTO) => s.streaming, running: "streaming" },
+} as const;
+
+/** Which OBS output an action drives. */
+export type ObsOutputKind = keyof typeof OUTPUTS;
+/** What it asks that output to do. */
+export type ObsOutputCommand = "start" | "stop";
+
+export function isObsOutputKind(value: string): value is ObsOutputKind {
+  return Object.hasOwn(OUTPUTS, value);
+}
+
+export function isObsOutputCommand(value: string): value is ObsOutputCommand {
+  return value === "start" || value === "stop";
+}
+
+/**
+ * The one seam: tests drive the output actions without an OBS.
+ *
+ * Both halves, not just the socket — the decision below is made from the
+ * snapshot, and a test able to stub only the adapter would have to reach into
+ * the service to say what OBS is currently doing.
+ */
+export const obsOutputDeps: {
+  adapter: () => Pick<ObsAdapter, "request"> | null;
+  status: () => ObsStatusDTO;
+} = {
+  adapter: () => obsService.liveAdapter(),
+  status: () => obsService.getLatest(),
+};
+
+/**
+ * Start or stop an OBS output over the connection the integration already holds.
+ *
+ * IDEMPOTENT, and not because OBS is forgiving: `StartRecord` while recording is
+ * a 500-series request error, so a cue said twice — by a person, by Home
+ * Assistant repeating itself, by a rule that fired on two triggers — would be
+ * reported as a failed cue with a live recording underneath it. The snapshot
+ * says what OBS is doing, so the answer is "already recording" and nothing goes
+ * on the wire.
+ *
+ * Never throws: a failure is a returned result, as every automation action's is.
+ */
+export async function obsOutput(
+  kind: ObsOutputKind,
+  command: ObsOutputCommand,
+): Promise<{ ok: boolean; detail: string }> {
+  const out = OUTPUTS[kind];
+  const adapter = obsOutputDeps.adapter();
+  const status = obsOutputDeps.status();
+  if (!adapter || !status.connected) {
+    const detail = "OBS is not connected";
+    console.warn(`[obs] ${kind} ${command} refused: ${detail}`);
+    return { ok: false, detail };
+  }
+  const active = out.active(status);
+  if (command === "start" && active) {
+    console.log(`[obs] ${kind} start -> already ${out.running}`);
+    return { ok: true, detail: `already ${out.running}` };
+  }
+  if (command === "stop" && !active) {
+    console.log(`[obs] ${kind} stop -> already stopped`);
+    return { ok: true, detail: "already stopped" };
+  }
+  const requestType = out[command];
+  try {
+    await adapter.request(requestType);
+    console.log(`[obs] ${kind} ${command} -> sent ${requestType}`);
+    // Nothing is emitted here. OBS answers with its own RecordStateChanged /
+    // StreamStateChanged within the same breath, and publishing an optimistic
+    // snapshot would be this app deciding what OBS did.
+    return { ok: true, detail: `sent ${requestType}` };
+  } catch (err) {
+    const detail = errorMessage(err);
+    console.warn(`[obs] ${kind} ${command} failed: ${detail}`);
+    return { ok: false, detail };
+  }
+}

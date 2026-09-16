@@ -27,9 +27,10 @@
 //
 // A cue that does NOT press a Companion button has no such variable to read, and
 // does not need one — this app is already talking to the device. Those bindings
-// are `app:<source>` (see app-state-sources.ts), and a pair whose ON half is a
-// `reaper.transport` RECORD is bound to `app:reaper.recording` IMPLICITLY: it is
-// the only answer there is, and a Record/Stop pair reporting nothing until
+// are `app:<source>` (see app-state-sources.ts), and a pair whose ON half
+// starts a recorder — `reaper.transport` RECORD, `obs.record` START,
+// `obs.stream` START — is bound to that recorder's source IMPLICITLY: it is the
+// only answer there is, and a Record/Stop pair reporting nothing until
 // somebody found a select would be optimistic for no reason. An explicit
 // `stateVariable` on either half always wins over the implicit one, so a pair
 // can still be pointed somewhere else, or left unbound, by hand.
@@ -43,6 +44,7 @@ import {
   appStateProblem,
   appStateRef,
   isAppStateRef,
+  type AppStateSourceId,
 } from "./app-state-sources.js";
 import { isCompanionVariableRef } from "./companion-export.js";
 import { STATE_ANY_OTHER } from "./companion-state-source.js";
@@ -352,12 +354,23 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
 }
 
 /**
- * The binding this pair's own ON action implies, or null.
+ * An ON action that starts something this app can watch, and the source that
+ * watches it.
  *
- * ONE case today: an ON half that starts a REAPER recording reads
- * `app:reaper.recording`. Stage Utility polls REAPER's transport already, so
- * the state costs nothing — and the alternative, an optimistic pair, reports
- * "recording" after a Record that REAPER never carried out.
+ * A table rather than three `if`s: each entry is an action id, the one command
+ * value that means "start", and the `app:` source reporting whether it is
+ * running. Stage Utility is already talking to all three devices, so the state
+ * costs nothing — and the alternative, an optimistic pair, reports "recording"
+ * after a Record the recorder never carried out.
+ */
+const IMPLIED_SOURCES: { actionId: string; command: string; source: AppStateSourceId }[] = [
+  { actionId: "reaper.transport", command: "record", source: "reaper.recording" },
+  { actionId: "obs.record", command: "start", source: "obs.recording" },
+  { actionId: "obs.stream", command: "start", source: "obs.streaming" },
+];
+
+/**
+ * The binding this pair's own ON action implies, or null.
  *
  * Never overrides a stored `stateVariable`: cuePairs applies it last.
  *
@@ -365,11 +378,12 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
  * a draft the operator is still typing, which is not a saved Rule.
  */
 export function implicitStateBinding(onAction: Rule["action"]): StateBinding | null {
-  if (onAction.id !== "reaper.transport") return null;
-  if (String(onAction.params.command ?? "").trim() !== "record") return null;
-  const source = APP_STATE_SOURCES.get("reaper.recording")!;
+  const command = String(onAction.params.command ?? "").trim();
+  const implied = IMPLIED_SOURCES.find((s) => s.actionId === onAction.id && s.command === command);
+  if (!implied) return null;
+  const source = APP_STATE_SOURCES.get(implied.source)!;
   return {
-    variable: appStateRef("reaper.recording"),
+    variable: appStateRef(implied.source),
     onValue: source.onValue,
     offValue: source.offValue,
   };
