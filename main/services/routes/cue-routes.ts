@@ -178,7 +178,11 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // names, room names, on/off and this server's own LAN address — all of
     // which GET /api/automation/rules and GET /api/version already serve to
     // anyone on the LAN — and never a token.
-    json(res, await cueManifest());
+    //
+    // `?all=1` is the app's own console asking: a cue button on a panel must
+    // list a pair the operator hid from Home Assistant, which the default
+    // manifest leaves out for the integration that reads it.
+    json(res, await cueManifest({ includeHidden: url.searchParams.get("all") === "1" }));
     return;
   }
 
