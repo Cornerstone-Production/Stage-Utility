@@ -42,6 +42,12 @@ letterboxed, so a few pixels of background at the sides is the worst case.
 
 ## If the panel shows nothing
 
+- A white frame with no text at all is usually the panel failing to reach the
+  address, not the page failing to run. On the Ultritouch's own **Network
+  Settings**, DHCP off leaves both DNS fields at `0.0.0.0`, so a hostname never
+  resolves and the browser draws blank. Fill in a DNS server, or use the
+  server's IP address in the URL. `http://<server>/api/health` is a plain line
+  of text and tells reachability apart from a page problem.
 - The Browser **Type**: if CHROMIUM shows blank on the panel but not on your
   computer, the panel's DashBoard lacks it; try DEFAULT.
 - The URL needs its scheme: `http://`, not `http:`.
