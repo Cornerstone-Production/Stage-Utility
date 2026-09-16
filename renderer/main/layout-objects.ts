@@ -763,6 +763,14 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => PILL({ fontSize: 0.045 }),
   },
 
+  "cue-button": {
+    label: "Cue button",
+    blurb: "Fires a cue and shows whether its device is on",
+    group: "Control",
+    config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
+    style: () => PILL({ fontSize: 0.12 }),
+  },
+
   notes: {
     label: "Notes",
     blurb: "A shared note anyone can type into",

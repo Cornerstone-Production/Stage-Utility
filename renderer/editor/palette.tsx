@@ -21,6 +21,7 @@ import {
   DiscIcon, CircleDotIcon, PlugIcon, SendIcon, TvIcon, ZapIcon, LayersIcon, TrophyIcon,
   SkipForwardIcon, StickyNoteIcon, CheckSquareIcon, FrameIcon, CastIcon,
   MonitorPlayIcon,
+  ToggleRightIcon,
   type LucideIcon,
   RadioTowerIcon,
 } from "lucide-react";
@@ -74,6 +75,7 @@ const ICONS: Record<LayoutObjectType, LucideIcon> = {
   "osc-button": SendIcon,
   "rosstalk-button": TvIcon,
   "action-button": ZapIcon,
+  "cue-button": ToggleRightIcon,
   "live-controls": SkipForwardIcon,
   notes: StickyNoteIcon,
   checklist: CheckSquareIcon,

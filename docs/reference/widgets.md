@@ -438,6 +438,7 @@ nothing.
 | **OSC button** | Sends an OSC message, and can reflect the device's state back | LAN gear over UDP |
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
 | **Action button** | Runs one of the app's own actions | This app |
+| **Cue button** | Fires a cue and shows its device's state: on, off, settling after a press, stale when Companion has lost the device, dimmed when the cue refuses | This app, via Companion |
 | **Notes** | A shared note anyone can type into | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
 

@@ -1337,6 +1337,10 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       );
     case "action-button":
       return <ActionButton config={c} interactive={ctx.interactive} ts={ts} />;
+    // Temporary: the component and its live state land in the next commit. The
+    // type checker demands the case now that the type exists.
+    case "cue-button":
+      return <span>cue</span>;
     case "osc-button":
       return (
         <OscButton
