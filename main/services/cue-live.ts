@@ -22,6 +22,11 @@
 // ONLY CHANGES GO OUT. A projector that has been on since Thursday is not an
 // event; sending its state every five seconds is a channel an integration has
 // to de-duplicate itself, and a log nobody can read.
+//
+// TWO CHANNELS, ONE ROUND OF READS. `cues` is the integration's and carries
+// what the manifest carries — hidden pairs are not on it. `cues:all` is this
+// app's own cue buttons and carries every pair, each hidden one saying so. A
+// subscriber on either starts the poll; both are fed from the same read.
 
 import {
   addSubscriptionListener,
@@ -36,6 +41,12 @@ import { scrub } from "./scrub.js";
 
 /** The SSE channel. */
 export const CUES_CHANNEL = "cues";
+
+/**
+ * Every pair, hidden from Home Assistant or not, for the app's own cue buttons.
+ * `cues` stays exactly what the integration has always read.
+ */
+export const CUES_ALL_CHANNEL = "cues:all";
 
 /**
  * How often bound variables are read while somebody is subscribed.
@@ -56,9 +67,12 @@ interface LiveRow {
   hiddenFromHome?: true;
 }
 
-/** What goes out on the channel. */
+/**
+ * What goes out on either channel. `hiddenFromHome` is said only on `cues:all`;
+ * on `cues` a hidden pair is not an event at all.
+ */
 export type CuesEvent =
-  | ({ type: "state"; id: string } & LiveRow)
+  | ({ type: "state"; id: string; hiddenFromHome?: true } & LiveRow)
   | { type: "manifest"; version: number };
 
 /**
@@ -74,9 +88,13 @@ export const cueLiveDeps: {
   setInterval: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearInterval: (t: NodeJS.Timeout) => void;
   emit: (event: CuesEvent) => void;
+  emitAll: (event: CuesEvent) => void;
 } = {
-  subscribers: () => channelSubscriberCount(CUES_CHANNEL),
-  watched: () => channelHasSubscribers(CUES_CHANNEL),
+  // BOTH channels, in both: the reads are the same round either way, and a
+  // console on a panel with no Home Assistant anywhere is an install where
+  // counting only `cues` means the poll never starts and no button ever moves.
+  subscribers: () => channelSubscriberCount(CUES_CHANNEL) + channelSubscriberCount(CUES_ALL_CHANNEL),
+  watched: () => channelHasSubscribers(CUES_CHANNEL) || channelHasSubscribers(CUES_ALL_CHANNEL),
   read: async () => {
     cueStates.invalidate();
     return cueStates.read();
@@ -89,12 +107,20 @@ export const cueLiveDeps: {
   },
   clearInterval: (t) => clearInterval(t),
   emit: (event) => broadcast(CUES_CHANNEL, event),
+  emitAll: (event) => broadcast(CUES_ALL_CHANNEL, event),
 };
 
 class CueLive {
   private timer: NodeJS.Timeout | null = null;
-  /** The last state pushed for each pair, so only CHANGES go out. */
+  /** The last state pushed for each pair on `cues`, so only CHANGES go out. */
   private last = new Map<string, string>();
+  /**
+   * The same for `cues:all`, and a SEPARATE map because the two channels are
+   * sent different sets. Shared, a pair that was hidden when a panel first saw
+   * it would never be pushed to Home Assistant on unhiding: the key would
+   * already be set by a push nobody on `cues` was sent.
+   */
+  private lastAll = new Map<string, string>();
   /** One read at a time: a slow Companion must not stack ticks. */
   private reading = false;
 
@@ -126,11 +152,14 @@ class CueLive {
   /** The rules changed: the manifest has a new version, and anything watching
    *  should re-read it. */
   rulesChanged(): void {
-    cueLiveDeps.emit({ type: "manifest", version: bumpManifestVersion() });
+    const event: CuesEvent = { type: "manifest", version: bumpManifestVersion() };
+    cueLiveDeps.emit(event);
+    cueLiveDeps.emitAll(event);
     // What a pair is may have changed entirely — a binding edited, a pair
     // deleted — so the last-pushed states are no longer a comparison anything
     // can be trusted against.
     this.last.clear();
+    this.lastAll.clear();
   }
 
   private start(): void {
@@ -152,6 +181,7 @@ class CueLive {
     cueLiveDeps.clearInterval(this.timer);
     this.timer = null;
     this.last.clear();
+    this.lastAll.clear();
     console.log(`[cues] live channel: polling stopped`);
   }
 
@@ -161,56 +191,23 @@ class CueLive {
     this.reading = true;
     try {
       const answer = await cueLiveDeps.read();
-      // HIDDEN PAIRS ARE NOT ON THIS CHANNEL. The manifest omits a hidden pair
+      // HIDDEN PAIRS ARE NOT ON `cues`. The manifest omits a hidden pair
       // entirely — `/api/cues/manifest` says it does not exist — so pushing
       // state for it is this server telling an integration about an entity it
       // has just been told not to create. `/api/cues/states` keeps the row,
       // deliberately: the app's own rules page reads that route for the state
       // pill on every pair, hidden or not. See CueStateRow.hiddenFromHome.
       //
-      // Filtered ONCE, here, so the prune below compares against what was
-      // actually pushed rather than against the whole answer.
-      const rows = [...answer.states].filter(([, row]) => !row.hiddenFromHome);
-      for (const [id, row] of rows) {
-        // The REASON is part of the comparison: a pair that goes from
-        // unreachable to "value matches neither" is still unknown, and an
-        // integration showing why has been told the wrong why until something
-        // else changes.
-        //
-        // And so is SETTLING, in both directions. Entering the window is worth
-        // an event — it is what tells an integration to show the commanded
-        // state rather than a reading it has been told is stale — and so is
-        // leaving it, or a subscriber told a pair was settling would believe it
-        // for the rest of the day.
-        //
-        // The separator was a literal NUL byte in this file, which is legal and
-        // invisible. A space does the same job here: `state` and `commanded`
-        // are both closed sets, so no two rows can spell one key between them.
-        const key = `${row.state} ${row.reason ?? ""} ${row.commanded ?? ""}`;
-        if (this.last.get(id) === key) continue;
-        this.last.set(id, key);
-        const event: CuesEvent = { type: "state", id, state: row.state };
-        if (row.reason) event.reason = row.reason;
-        if (row.settling) {
-          event.settling = true;
-          event.commanded = row.commanded;
-        }
-        cueLiveDeps.emit(event);
-      }
-      // A pair that has gone away — deleted, unbound, or hidden — stops being
-      // compared against, or re-adding it later would push nothing until its
-      // state changed.
+      // They ARE on `cues:all`, whose audience is this app's own cue buttons —
+      // a panel is the operator's console, not Home Assistant, and a button
+      // bound to a hidden pair must still show what its device is doing.
       //
-      // A SET of what was pushed, and `has` rather than `in`. This was
-      // `id in answer.states` over a plain object, which walks the PROTOTYPE
-      // CHAIN: of every key on Object.prototype exactly one is a legal cue name,
-      // and `constructor_on`/`constructor_off` is a pair the engine accepts
-      // today. `"constructor" in {}` is true, so that base was never pruned —
-      // delete the pair, re-create it, and `last` still held the stale key, so
-      // no `state` event went out and the entity read unknown until the device
-      // physically changed.
-      const pushed = new Set(rows.map(([id]) => id));
-      for (const id of this.last.keys()) if (!pushed.has(id)) this.last.delete(id);
+      // Filtered ONCE, here, so each channel's prune compares against what that
+      // channel was actually sent rather than against the whole answer.
+      const all = [...answer.states];
+      const shown = all.filter(([, row]) => !row.hiddenFromHome);
+      this.push(shown, this.last, cueLiveDeps.emit, false);
+      this.push(all, this.lastAll, cueLiveDeps.emitAll, true);
     } catch (err) {
       // NOT swallowed: cueStates.read is documented as never throwing, so this
       // is the case where that contract broke. Logged and the poll carries on,
@@ -221,6 +218,62 @@ class CueLive {
     } finally {
       this.reading = false;
     }
+  }
+
+  /**
+   * Push what changed since the last round on one channel.
+   *
+   * `sayHidden` is what separates the two: on `cues:all` a hidden pair carries
+   * `hiddenFromHome: true` so a cue button can draw it as what it is, and on
+   * `cues` a hidden pair never reaches here at all.
+   */
+  private push(
+    rows: [string, LiveRow][],
+    last: Map<string, string>,
+    emit: (event: CuesEvent) => void,
+    sayHidden: boolean,
+  ): void {
+    for (const [id, row] of rows) {
+      // The REASON is part of the comparison: a pair that goes from
+      // unreachable to "value matches neither" is still unknown, and an
+      // integration showing why has been told the wrong why until something
+      // else changes.
+      //
+      // And so is SETTLING, in both directions. Entering the window is worth
+      // an event — it is what tells an integration to show the commanded
+      // state rather than a reading it has been told is stale — and so is
+      // leaving it, or a subscriber told a pair was settling would believe it
+      // for the rest of the day.
+      //
+      // The separator was a literal NUL byte in this file, which is legal and
+      // invisible. A space does the same job here: `state` and `commanded`
+      // are both closed sets, so no two rows can spell one key between them.
+      const key = `${row.state} ${row.reason ?? ""} ${row.commanded ?? ""}`;
+      if (last.get(id) === key) continue;
+      last.set(id, key);
+      const event: CuesEvent = { type: "state", id, state: row.state };
+      if (row.reason) event.reason = row.reason;
+      if (row.settling) {
+        event.settling = true;
+        event.commanded = row.commanded;
+      }
+      if (sayHidden && row.hiddenFromHome) event.hiddenFromHome = true;
+      emit(event);
+    }
+    // A pair that has gone away — deleted, unbound, or hidden — stops being
+    // compared against, or re-adding it later would push nothing until its
+    // state changed.
+    //
+    // A SET of what was pushed, and `has` rather than `in`. This was
+    // `id in answer.states` over a plain object, which walks the PROTOTYPE
+    // CHAIN: of every key on Object.prototype exactly one is a legal cue name,
+    // and `constructor_on`/`constructor_off` is a pair the engine accepts
+    // today. `"constructor" in {}` is true, so that base was never pruned —
+    // delete the pair, re-create it, and `last` still held the stale key, so
+    // no `state` event went out and the entity read unknown until the device
+    // physically changed.
+    const pushed = new Set(rows.map(([id]) => id));
+    for (const id of last.keys()) if (!pushed.has(id)) last.delete(id);
   }
 }
 

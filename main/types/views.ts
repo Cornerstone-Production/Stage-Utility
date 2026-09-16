@@ -488,6 +488,10 @@ export type LayoutObjectConfig =
   // layouts keep working — this is for everything else the registry can already
   // do, including advancing PCO Live.
   | { type: "action-button"; actionId: string; params?: Record<string, unknown>; label?: string }
+  // A cue from the cue manifest, with its live state on the button. `cue` is the
+  // manifest id: a pair's base for a switch, the cue name for a lone button.
+  // Empty is unbound and renders as such, never as a fake state.
+  | { type: "cue-button"; cue: string; label?: string; showDevice?: boolean }
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
   // ChargerBay id) with an optional custom label; `show` toggles each metric.
   | {

@@ -23,7 +23,7 @@ const SRC = readFileSync(new URL("./layout-renderer.tsx", import.meta.url), "utf
 const READOUT_SRC = readFileSync(new URL("./readout.tsx", import.meta.url), "utf8");
 
 describe("the object type registry", () => {
-  test("holds exactly 61 types", () => {
+  test("holds exactly 62 types", () => {
     // An EXACT count, never a floor. A floor with slack is how three config
     // stores went missing from every backup with the suite green. When this
     // fails, the answer is not to bump the number: it is to run the browser
@@ -31,7 +31,12 @@ describe("the object type registry", () => {
     //
     // The design doc said 38 while the registry held 41 — three types had been
     // added without anyone re-reading it.
-    assert.equal(Object.keys(CAPABILITIES).length, 61);
+    //
+    // `cue-button` swept 16 Sep 2026 on a 1366x203 canvas at true scale: four
+    // buttons at 110x149, bound, unbound and a three-word label, none of them
+    // overflowing (scrollWidth within clientWidth), and a tap landed in the
+    // automation log as `console`.
+    assert.equal(Object.keys(CAPABILITIES).length, 62);
   });
 });
 

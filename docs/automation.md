@@ -59,7 +59,7 @@ poll after.
 | A ProVideoPlayer clip stops rolling | a clip has stopped, ended or been paused |
 | A ProVideoPlayer layer is hidden / unhidden | the layer's hidden flag flips |
 | A ProVideoPlayer layer is muted / unmuted | the layer's mute flag flips |
-| Called by name | something called `POST /api/cues/<name>` with a token. This one NEVER fires by itself — see [Cues](#cues) |
+| Called by name | something called `POST /api/cues/<name>` with a token, or a cue button on one of this app's own consoles. This one NEVER fires by itself — see [Cues](#cues) |
 
 Every trigger fires on an **edge** — the moment something changes — never on a
 state that merely persists. The channels carry state snapshots, re-sent
@@ -224,7 +224,9 @@ for "idle", because before it runs we do not know that it is idle.
 A **cue** is a rule triggered by **Called by name** rather than by anything
 happening in the building. It runs only when something calls
 `POST /api/cues/<name>` with a bearer token, so it is how a voice assistant, a
-script or Home Assistant reaches Stage Utility.
+script or Home Assistant reaches Stage Utility. A page on this app's own origin
+needs no token — that is how a cue button on a console fires, and such a call is
+logged as `console`.
 
 Getting cues into Home Assistant — and from there into Apple Home — is the
 [Home Assistant integration](integrations/companion.md#the-integration): install

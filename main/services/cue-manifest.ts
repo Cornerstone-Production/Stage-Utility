@@ -77,6 +77,9 @@ export interface ManifestSwitch {
   stateSource?: string;
   /** False when a half's Companion button is missing — it cannot be pressed. */
   available: boolean;
+  /** The operator hid this from Home Assistant. Present only when the caller
+   *  asked for hidden cues; the default manifest omits the entry instead. */
+  hiddenFromHome?: true;
 }
 
 /** One cue that is not half of a pair. Momentary; there is nothing to read. */
@@ -87,6 +90,9 @@ export interface ManifestButton {
   room: string;
   cue: string;
   available: boolean;
+  /** The operator hid this from Home Assistant. Present only when the caller
+   *  asked for hidden cues; the default manifest omits the entry instead. */
+  hiddenFromHome?: true;
 }
 
 export interface CueManifest {
@@ -139,8 +145,13 @@ export const cueManifestDeps: {
  * The state comes from cueStates, which is the same five-second cached read
  * `GET /api/cues/states` and the live channel use — so an integration polling
  * the manifest and a browser with the rules list open share one round of reads.
+ *
+ * `includeHidden` is the app's own console asking: a cue button on a panel must
+ * list a pair the operator hid from Home Assistant. Each such entry carries
+ * `hiddenFromHome: true`. The default answer is what the integration reads and
+ * is unchanged by this option.
  */
-export async function cueManifest(): Promise<CueManifest> {
+export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promise<CueManifest> {
   const rules = await cueManifestDeps.rules();
   const pairs = cuePairs(rules);
   // Only when something is bound. An install with no bound pair must not pay a
@@ -157,9 +168,12 @@ export async function cueManifest(): Promise<CueManifest> {
     // the operator hid, twice, under different ids.
     paired.add(pair.on.id);
     paired.add(pair.off.id);
+    // Counted whichever way the caller asked, so the log line below says the
+    // same thing for a panel's read as for the integration's — it is a
+    // process-wide "what changed" line and must not flap with the caller.
     if (pair.hiddenFromHome) {
       hidden += 1;
-      continue;
+      if (!opts.includeHidden) continue;
     }
     const row = states?.states.get(pair.base);
     const entry: ManifestSwitch = {
@@ -180,6 +194,7 @@ export async function cueManifest(): Promise<CueManifest> {
       entry.commanded = row.commanded;
     }
     if (pair.binding) entry.stateSource = pair.binding.variable;
+    if (pair.hiddenFromHome) entry.hiddenFromHome = true;
     switches.push(entry);
   }
 
@@ -194,11 +209,13 @@ export async function cueManifest(): Promise<CueManifest> {
     // Assistant created and removed an entity for it. Half a switch is not a
     // thing anyone should be able to press from Home.
     if (isPairHalfName(cue)) continue;
-    if (isHiddenFromHome(rule.trigger.params)) {
+    const hiddenButton = isHiddenFromHome(rule.trigger.params);
+    if (hiddenButton) {
       hidden += 1;
-      continue;
+      if (!opts.includeHidden) continue;
     }
     buttons.push({
+      ...(hiddenButton ? { hiddenFromHome: true as const } : {}),
       id: cue,
       name: spokenName(rule, cue),
       room: roomOf(rule),

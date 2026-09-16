@@ -53,6 +53,7 @@ import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, pvpLayerStateWord, type P
 import { usePvpState } from "../main/use-pvp-state";
 import { useQuery } from "@tanstack/react-query";
 import { useReaperState } from "../main/use-reaper-state";
+import { useCueLive } from "../main/use-cue-live";
 import { useOscTargets } from "../main/use-osc-state";
 import { useStageState } from "../main/use-stage-state";
 import { usePlanItems } from "../main/use-plan-items";
@@ -440,6 +441,11 @@ export function Inspector({
   const pvp = usePvpState();
   const peopleCount = usePeopleCountState();
   const oscTargets = useOscTargets();
+  // The cue manifest, for the cue-button picker. Gated on the object type like
+  // the scores query below — unconditional, selecting a text box would open the
+  // cues:all channel and start the server's Companion read. Hooks cannot be
+  // conditional, so the flag is the argument.
+  const cues = useCueLive(c.type === "cue-button");
   // RossTalk targets + command catalogue for the rosstalk-button inspector. Loaded
   // once here rather than per-object; both are small and change rarely.
   const [rosstalkTargets, setRosstalkTargets] = useState<RossTalkTarget[]>([]);
@@ -1325,6 +1331,25 @@ export function Inspector({
                 <RowText label="Active color" value={fb.activeColor ?? ""} placeholder="var(--red-9)" onChange={(v) => onConfig({ ...c, feedback: { ...fb, activeColor: v } })} />
               </>
             )}
+          </>
+        );
+      })()}
+      {c.type === "cue-button" && (() => {
+        const switches = cues?.manifest.switches ?? [];
+        const buttons = cues?.manifest.buttons ?? [];
+        return (
+          <>
+            <Row label="Cue" hint="A pair from the rules list shows on and off; a lone cue is a momentary button. Pairs hidden from Home Assistant are listed too.">
+              <Select value={c.cue} onValueChange={(v: string) => onConfig({ ...c, cue: v })}>
+                <SelectTrigger><SelectValue placeholder={cues ? "Select a cue" : "Loading cues…"} /></SelectTrigger>
+                <SelectContent>
+                  {switches.map((sw) => <SelectItem key={sw.id} value={sw.id}>{sw.name}{sw.room ? ` · ${sw.room}` : ""} (switch)</SelectItem>)}
+                  {buttons.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}{b.room ? ` · ${b.room}` : ""} (button)</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Row>
+            <RowText label="Label" hint="Blank uses the cue's own name." value={c.label ?? ""} placeholder="Cue's name" onChange={(v) => onConfig({ ...c, label: v })} />
+            <RowSwitch label="Show device" hint="The room or device under the label, and the reason when a reading is stale." checked={c.showDevice !== false} onChange={(v) => onConfig({ ...c, showDevice: v })} />
           </>
         );
       })()}
