@@ -264,6 +264,24 @@ describe("calling one", () => {
   });
 });
 
+describe("poll demand", () => {
+  test("a built-in switch holds its integration's poll at the active cadence", () => {
+    // NO stored rules at all, which is the install this whole feature is for.
+    // REAPER and PVP fall to their idle cadence when nothing is watching, so a
+    // built-in that registered no demand would be a switch in Home Assistant —
+    // and a cue button on a panel — reading a snapshot five seconds old, with
+    // nothing anywhere saying so.
+    assert.deepEqual(automationEngine.listRules(), []);
+    ENABLED = new Set(["reaper", "pvp"]);
+    LAYERS = ["Lyrics"];
+    assert.equal(automationEngine.wantsAppStateSource("reaper.recording"), true);
+    assert.equal(automationEngine.wantsAppStateFamily("pvp.layer-hidden"), true);
+    assert.equal(automationEngine.wantsAppStateFamily("pvp.layer-muted"), true);
+    // And nothing is demanded for an integration that is switched off.
+    assert.equal(automationEngine.wantsAppStateSource("obs.recording"), false);
+  });
+});
+
 describe("the set changing", () => {
   test("a PVP layer rename bumps the version and says manifest on cues", async () => {
     ENABLED = new Set(["pvp"]);

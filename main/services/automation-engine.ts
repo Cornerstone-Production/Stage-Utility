@@ -969,7 +969,12 @@ class AutomationEngine {
    */
   wantsAppStateSource(id: AppStateSourceId): boolean {
     const ref = appStateRef(id);
-    return boundCuePairs(this.rules).some((pair) => pair.binding?.variable === ref);
+    // WITH the built-ins, exactly as every other cue reader is. A built-in
+    // switch is a bound pair nobody had to save, so an install with no stored
+    // rules at all still has Home Assistant reading `app:reaper.recording` —
+    // and asking `this.rules` there is a switch answering from a five-second-old
+    // snapshot on the unattended booth machine this demand exists for.
+    return boundCuePairs(this.rulesWithBuiltins()).some((pair) => pair.binding?.variable === ref);
   }
 
   /**
@@ -985,7 +990,10 @@ class AutomationEngine {
    * Not gated on `disarmed`, for the reason above.
    */
   wantsAppStateFamily(family: AppStateFamilyId): boolean {
-    return boundCuePairs(this.rules).some((pair) => {
+    // WITH the built-ins, for the reason above: every ProVideoPlayer layer has
+    // a shown and a muted switch nobody saved, and PVP at its idle cadence is
+    // what they would read from.
+    return boundCuePairs(this.rulesWithBuiltins()).some((pair) => {
       const parsed = parseAppStateRef(pair.binding?.variable ?? "");
       return parsed?.kind === "family" && parsed.family === family;
     });
