@@ -413,9 +413,12 @@ Three things cause it:
   polling, so the counter does not move while you are away and your `since` can
   look perfectly current when it is not. The registry is what knows otherwise.
 
-Channel filtering applies to both the buffered frames and the snapshot, so a
-client that reported a narrow set through `/api/events/subscribe` receives only
-that set here too.
+Channel filtering applies to the buffered frames, so a client that reported a
+narrow set through `/api/events/subscribe` is not sent the rest of the firehose.
+It does **not** apply to the snapshot: the SSE hello burst is unfiltered too, and
+for the same reason — a client caches every hydrated channel at connect so that a
+component mounting later is served from that cache rather than waiting for the
+channel to change.
 
 A `cid` that has not polled for 30 seconds is dropped. Poll clients count as
 subscribers exactly as open streams do, so a producer that only runs while

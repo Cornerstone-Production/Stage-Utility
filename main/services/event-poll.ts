@@ -140,9 +140,17 @@ export class EventPollHub {
     const returning = this.touch(cid);
     this.trim(this.now());
 
+    // The snapshot is NOT channel-filtered, and the SSE hello burst is not
+    // either — a stream client caches every hydrated channel at connect whether
+    // or not it renders one yet, which is the whole point of the burst: a
+    // component mounting later is served from that cache. Filtering it here
+    // made the poll client the exception, so a panel that subscribed to two
+    // channels had nothing cached for the other twenty-one and any later mount
+    // sat blank until that channel happened to change. Frames after `since`
+    // stay filtered; that is the per-broadcast firehose the filter exists for.
     const oldest = this.buffer.length > 0 ? this.buffer[0].seq : this.lastSeq + 1;
     if (since == null) {
-      return { seq: this.lastSeq, resync: false, frames: snapshot().filter((f) => wants(f.channel)) };
+      return { seq: this.lastSeq, resync: false, frames: snapshot() };
     }
     // `returning` is the case the sequence numbers cannot see. record() is a
     // no-op with no clients attached, so while this cid was expired the counter
@@ -151,7 +159,7 @@ export class EventPollHub {
     // forever while the service ran on without it. The registry is the only
     // thing that knows a gap happened.
     if (returning || since + 1 < oldest || since > this.lastSeq) {
-      return { seq: this.lastSeq, resync: true, frames: snapshot().filter((f) => wants(f.channel)) };
+      return { seq: this.lastSeq, resync: true, frames: snapshot() };
     }
     const frames: PollFrame[] = [];
     for (const f of this.buffer) {

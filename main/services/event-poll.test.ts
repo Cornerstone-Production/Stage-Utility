@@ -136,7 +136,7 @@ describe("event-poll response", () => {
     assert.deepEqual(r.frames.map((f) => f.channel), ["c"]);
   });
 
-  it("applies the client's channel filter to both the buffer and the snapshot", () => {
+  it("filters the buffered frames by the client's channel set", () => {
     const { hub } = hubWithClient();
     hub.record("spl:metrics", { db: 1 });
     hub.record("pco:live", { mode: "item" });
@@ -144,12 +144,30 @@ describe("event-poll response", () => {
     assert.deepEqual(
       hub.buildPollResponse("c1", 0, wants, snapshot).frames.map((f) => f.channel),
       ["pco:live"],
-      "a filtered channel must not arrive through the buffer",
+      "the per-broadcast firehose is exactly what the filter exists for",
     );
+  });
+
+  it("does NOT filter the snapshot, so the client's hydrate cache is complete", () => {
+    // The SSE hello burst is unfiltered: a stream client caches every hydrated
+    // channel at connect whether or not it renders one yet, and a component
+    // mounting later is served from that cache. Filtering the poll snapshot
+    // made the polling client the exception — a panel subscribed to two
+    // channels had nothing cached for the other twenty-one, and any later mount
+    // sat blank until that channel happened to change, which on a quiet one is
+    // days.
+    const { hub } = hubWithClient();
+    const wants = (c: string) => c === "pco:live";
     assert.deepEqual(
       hub.buildPollResponse("c1", null, wants, snapshot).frames.map((f) => f.channel),
-      ["server:hello", "pco:live"],
-      "a filtered channel must not arrive through the snapshot either",
+      ["server:hello", "pco:live", "spl:metrics"],
+      "a polling client must connect with the same snapshot a streaming one gets",
+    );
+    hub.record("x", {});
+    assert.deepEqual(
+      hub.buildPollResponse("c1", 0, wants, snapshot).frames.map((f) => f.channel),
+      [],
+      "premise: the filter is real, and still applies to everything after the snapshot",
     );
   });
 });
