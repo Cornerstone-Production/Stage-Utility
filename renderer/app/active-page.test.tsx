@@ -116,12 +116,13 @@ describe("every registered route resolves a title", () => {
     );
   });
 
-  test("seventeen of the twenty registered routes are titled", () => {
+  test("eighteen of the twenty-one registered routes are titled", () => {
     // An EXACT count, not a floor. A floor with slack is how three of these went
     // untitled with the suite green.
     const titled = REGISTERED.filter((p) => resolvePage(fill(p), CONSOLES)?.page.label);
-    assert.equal(REGISTERED.length, 20);
-    assert.equal(titled.length, 17);
+    // 21 since /scriptview split into the tablet's page and /scriptview/manage.
+    assert.equal(REGISTERED.length, 21);
+    assert.equal(titled.length, 18);
   });
 });
 
@@ -172,6 +173,13 @@ describe("exact versus prefix", () => {
     assert.equal(active?.exact, true);
     // And the operator's own page still wins its own URL.
     assert.equal(resolvePage("/history/manage", CONSOLES)?.page.path, "/history/manage");
+  });
+
+  test("the tablet's ScriptView is its own page, not a child of the operator's", () => {
+    const active = resolvePage("/scriptview", CONSOLES);
+    assert.equal(active?.page.label, "ScriptView");
+    assert.equal(active?.exact, true);
+    assert.equal(resolvePage("/scriptview/manage", CONSOLES)?.page.path, "/scriptview/manage");
   });
 
   test("an unrouted URL claims nothing, so Home does not swallow a 404", () => {
@@ -307,6 +315,7 @@ describe("hidesChrome adds the shared read-only pages beside a console's own fla
     assert.equal(hidesChrome("/scriptview/61695/lyrics", VIEWS), true);
     assert.equal(hidesChrome("/scriptview/61695/all", undefined), true);
     assert.equal(hidesChrome("/scriptview/presets", VIEWS), false);
+    assert.equal(hidesChrome("/scriptview/manage", VIEWS), false);
     assert.equal(hidesChrome("/scriptviewx", VIEWS), false);
   });
 

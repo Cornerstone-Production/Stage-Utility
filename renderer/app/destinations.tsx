@@ -73,7 +73,10 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: ScreensRoute,
   },
   {
-    path: "/scriptview",
+    // The OPERATOR's launcher, in the shell. The same page at /scriptview is
+    // the one a stage tablet opens and renders with no chrome, the same split
+    // /history and /history/manage make.
+    path: "/scriptview/manage",
     label: "ScriptView",
     description: "Pick a service to open its rundown.",
     icon: <ListChecksIcon className="size-4" />,
@@ -178,7 +181,7 @@ export const UNGROUPED_PATHS = ["/"];
 export const NAV_GROUPS: { label: string; paths: string[] }[] = [
   // What is shown. Patch belongs here because volunteers READ it at /patch; the
   // "output" in its description is XLR, not a display.
-  { label: "Content", paths: ["/scriptview", "/patch"] },
+  { label: "Content", paths: ["/scriptview/manage", "/patch"] },
   // Where it shows.
   { label: "Screens", paths: ["/screens"] },
   // What it talks to. Automation rules act ON integrations.
@@ -243,6 +246,11 @@ const HISTORY_SHARED_PAGE = {
  * ever say what it is — the same reason a console draws its own name in the
  * layout editor.
  */
+/** The tablet's ScriptView launcher: chromeless, so it draws its own heading. */
+function ScriptViewShared() {
+  return <ScriptViewIndex standalone />;
+}
+
 function ServiceHistoryShared() {
   return (
     <div className="flex flex-col gap-4">
@@ -279,6 +287,14 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
     path: "/history",
     Component: ServiceHistoryShared,
     ...HISTORY_SHARED_PAGE,
+  },
+  // Titled here for the same reason /history is: /scriptview/manage does not
+  // prefix-match /scriptview, so the tablet's page would have no name.
+  {
+    path: "/scriptview",
+    Component: ScriptViewShared,
+    label: "ScriptView",
+    description: "Pick a service and a layout to open its rundown.",
   },
   { path: "/scriptview/$serviceType/$layout", Component: ScriptViewPlanRoute },
   { path: "/scriptview/presets", Component: ScriptViewSection },
