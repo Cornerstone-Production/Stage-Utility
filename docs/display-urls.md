@@ -93,6 +93,12 @@ the link shows nothing else of the app. The operator's own history — edit
 recorded times, merge a split service, delete one — is `/history/manage`, in the
 sidebar under Services, with the app's usual chrome.
 
+`/scriptview` and each rundown under it, `/scriptview/<service type>/<layout>`,
+render the same way: no sidebar, no header, the launcher with its own
+"ScriptView" heading and the rundown as the whole window, because both are read
+on a stage tablet or a producer's second screen rather than operated.
+`/scriptview/presets`, which edits layouts, keeps the chrome.
+
 ## QR codes
 
 A QR encodes the `/<id>` address and never a slug, since a printed code outlives

@@ -298,6 +298,18 @@ describe("hidesChrome adds the shared read-only pages beside a console's own fla
     assert.equal(hidesChrome("/history", VIEWS), true);
   });
 
+  test("ScriptView's viewer pages are chromeless, the presets editor is not", () => {
+    // A rundown is read on a stage iPad or a producer's second screen; the
+    // rail and the context bar are the operator's, not the reader's. The
+    // presets page edits layouts and stays an ordinary settings page.
+    assert.equal(hidesChrome("/scriptview", undefined), true);
+    assert.equal(hidesChrome("/scriptview/", VIEWS), true);
+    assert.equal(hidesChrome("/scriptview/61695/lyrics", VIEWS), true);
+    assert.equal(hidesChrome("/scriptview/61695/all", undefined), true);
+    assert.equal(hidesChrome("/scriptview/presets", VIEWS), false);
+    assert.equal(hidesChrome("/scriptviewx", VIEWS), false);
+  });
+
   test("/history/manage — the operator's page, in the rail — keeps its chrome", () => {
     assert.equal(hidesChrome("/history/manage", VIEWS), false);
     assert.equal(hidesChrome("/history/manage", undefined), false);

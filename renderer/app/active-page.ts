@@ -160,7 +160,13 @@ export const SHARED_CHROMELESS_PATHS: ReadonlySet<string> = new Set(["/history"]
  */
 export function isSharedChromelessPath(pathname: string): boolean {
   const bare = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
-  return SHARED_CHROMELESS_PATHS.has(bare);
+  if (SHARED_CHROMELESS_PATHS.has(bare)) return true;
+  // ScriptView's two VIEWER pages: the launcher and a rundown. Both are read on
+  // a stage iPad or a producer's second screen, where the rail and the context
+  // bar belong to the operator and not the reader. `/scriptview/presets` edits
+  // layouts and stays an ordinary settings page, so only the exact launcher
+  // path and the three-deep rundown path qualify.
+  return bare === "/scriptview" || /^\/scriptview\/(?!presets$)[^/]+\/[^/]+$/.test(bare);
 }
 
 export function hidesChrome(pathname: string, views: readonly View[] | undefined): boolean {
