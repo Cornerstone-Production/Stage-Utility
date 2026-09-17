@@ -488,6 +488,11 @@ Companion for it, and the pair is never probed for a state source or marked
 `button missing` — it has no button. See
 [State from Stage Utility](../automation.md#state-from-stage-utility).
 
+**OBS recording** and **OBS streaming** pair up the same way — `obs_record_on` /
+`obs_record_off` against `app:obs.recording` — over the websocket the
+[OBS](obs.md) integration already holds. See [Driving OBS from a
+cue](obs.md#driving-obs-from-a-cue).
+
 ### Real state
 
 Companion answers a press the moment it hands it to a control and never says what

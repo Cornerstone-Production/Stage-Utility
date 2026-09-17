@@ -12,6 +12,7 @@ import { advanceGuard } from "./automation-pco-items.js";
 import { broadcast } from "./broadcaster.js";
 import { companionApi } from "./companion-api.js";
 import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
+import { isObsOutputCommand, obsOutput, type ObsOutputKind } from "./obs-service.js";
 import { oscManager } from "./osc-manager.js";
 import { propresenterManager } from "./propresenter-service.js";
 import { isReaperTransportCommand, reaperService } from "./reaper-service.js";
@@ -46,6 +47,32 @@ function parseRows(raw: unknown): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+/**
+ * The body of both OBS output actions, written once.
+ *
+ * Two actions rather than one with a second dropdown, because a cue pair's two
+ * halves each carry ONE action with ONE command — and the two outputs are bound
+ * to different state sources. What they share is this, so "simulate reaches
+ * nothing" and "a command nobody chose is refused" cannot hold for recording and
+ * quietly not for streaming.
+ */
+async function runObsOutput(
+  kind: ObsOutputKind,
+  params: Record<string, unknown>,
+  simulate: boolean,
+): Promise<ActionResult> {
+  const command = String(params.command ?? "").trim();
+  if (!isObsOutputCommand(command)) {
+    return fail(command ? `"${command}" is not an OBS ${kind} command` : "no command chosen");
+  }
+  // Ahead of the service on purpose, exactly as reaper.transport is: a simulated
+  // run must not read the snapshot either, so a rule can be written and tested
+  // with OBS not running — which is when a rule is usually written.
+  if (simulate) return ok(`would ${command} ${kind === "record" ? "recording" : "streaming"}`);
+  const result = await obsOutput(kind, command);
+  return result.ok ? ok(`${command}: ${result.detail}`) : fail(`${command}: ${result.detail}`);
 }
 
 /** The two things the PCO Live action touches, behind a seam. Tests replace them;
@@ -251,6 +278,49 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
       const result = await reaperService.transport(command);
       return result.ok ? ok(`${command}: ${result.detail}`) : fail(`${command}: ${result.detail}`);
     },
+  },
+
+  "obs.record": {
+    id: "obs.record",
+    label: "OBS recording",
+    help:
+      "Starts or stops OBS's recording over the SAME obs-websocket connection the OBS integration holds, so there " +
+      "is nothing else to set up and no Companion button in the middle. Start does nothing when OBS is already " +
+      "recording, and Stop does nothing when it is not — OBS answers a redundant one with a request error, which " +
+      "would read as a failed cue over a recording that is running perfectly well.",
+    params: [
+      {
+        key: "command",
+        label: "Command",
+        type: "enum",
+        options: [
+          { value: "start", label: "Start recording" },
+          { value: "stop", label: "Stop recording" },
+        ],
+      },
+    ],
+    run: async (params, ctx) => runObsOutput("record", params, ctx.simulate),
+  },
+
+  "obs.stream": {
+    id: "obs.stream",
+    label: "OBS streaming",
+    help:
+      "Starts or stops OBS's stream over the SAME obs-websocket connection the OBS integration holds. Start does " +
+      "nothing when OBS is already streaming and Stop does nothing when it is not, exactly as the recording action " +
+      "does — and for the same reason.",
+    params: [
+      {
+        key: "command",
+        label: "Command",
+        type: "enum",
+        options: [
+          { value: "start", label: "Start streaming" },
+          { value: "stop", label: "Stop streaming" },
+        ],
+      },
+    ],
+    run: async (params, ctx) => runObsOutput("stream", params, ctx.simulate),
   },
 
   "propresenter.macro": {

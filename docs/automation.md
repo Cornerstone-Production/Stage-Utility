@@ -167,6 +167,8 @@ for "idle", because before it runs we do not know that it is idle.
 | Send an OSC message | to an OSC target |
 | Advance PCO Live one item | steps the live plan forward once |
 | REAPER transport | Record, Stop or Play, through the same web interface the [REAPER](integrations/reaper.md) integration polls. Record does nothing when REAPER is already recording, and refuses outright when the transport cannot be read — 1013 is a toggle, so pressing it on an unknown is how "start recording" ends one |
+| OBS recording | Start or stop OBS's recording over the same obs-websocket connection the [OBS](integrations/obs.md) integration holds — no Companion button in between. Start does nothing when OBS is already recording, Stop does nothing when it is not |
+| OBS streaming | Start or stop OBS's stream, on the same connection and with the same start/stop idempotency |
 | Trigger a ProPresenter macro | runs one of your own ProPresenter macros, on a chosen instance — see [Triggering a macro from a rule](integrations/propresenter.md#triggering-a-macro-from-a-rule) |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
@@ -188,6 +190,14 @@ for "idle", because before it runs we do not know that it is idle.
 > argument and ignores it, playing the cue on its own configured layer. Which
 > layer a cue uses is set in ProVideoPlayer, not here. See
 > [ProVideoPlayer](integrations/provideoplayer.md).
+
+> **OBS recording** and **OBS streaming** need nothing beyond the
+> [OBS](integrations/obs.md) integration being set up and connected — they use
+> its websocket, not a second one. A command sent while the output is already in
+> that state is answered `already recording` / `already stopped` and nothing goes
+> to OBS: obs-websocket rejects a redundant `StartRecord` with a request error,
+> which would read as a failed cue over a recording that is running perfectly
+> well. With OBS disconnected the action fails and says so; it never queues.
 
 > **REAPER transport** needs REAPER's web interface switched on — the same
 > prerequisite as the [REAPER](integrations/reaper.md) integration, and the same
@@ -351,16 +361,30 @@ select whenever the integration behind them is set up.
 | Source | Reads |
 |---|---|
 | `app:reaper.recording` | `on` while REAPER is recording, `off` while it is connected and not, unknown while it is not connected |
+| `app:obs.recording` | `on` while OBS is recording — a paused recording is still a recording — `off` while it is connected and not, unknown while it is not connected |
+| `app:obs.streaming` | `on` while OBS is streaming, `off` while it is connected and not, unknown while it is not connected |
 
-A pair whose `_on` half is a **REAPER transport** Record is bound to
-`app:reaper.recording` without anybody choosing it: it is the only answer there
-is, and the two values are fixed at `on` and `off`, so the value rows are not
-offered. Setting **State variable** to anything else on that pair overrides it.
+A pair is bound to one of these without anybody choosing it when its `_on` half
+is one of the actions that starts what the source watches:
+
+| ON half | Bound to |
+|---|---|
+| **REAPER transport** → Record | `app:reaper.recording` |
+| **OBS recording** → Start recording | `app:obs.recording` |
+| **OBS streaming** → Start streaming | `app:obs.streaming` |
+
+It is the only answer there is, and the two values are fixed at `on` and `off`,
+so the value rows are not offered. Setting **State variable** to anything else on
+that pair overrides it.
 
 Such a pair is a switch in Home Assistant like any other, reports a real state,
 and is idempotent — "start the recording" said twice while it is recording
 answers `already on` and sends nothing, which matters because REAPER's Record is
-a toggle.
+a toggle and because OBS rejects a redundant start outright.
+
+None of them involve Companion: the cue drives the recorder directly and the
+state comes off the same connection, so there is no button to build and no
+module variable to wait for.
 
 ## Firing an item on time
 
