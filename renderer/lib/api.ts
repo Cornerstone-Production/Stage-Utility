@@ -1085,7 +1085,9 @@ function reportChannels(): void {
 //
 //   Opt out: localStorage.setItem("stage:sharedSse", "0")  (then reload)
 let sharedSse = (() => {
-  if (POLL_TRANSPORT) return false; // the worker owns an EventSource; we have none
+  // The worker exists to SHARE one EventSource across tabs. On the polling
+  // transport there is no stream to share, so it would open one nobody reads.
+  if (POLL_TRANSPORT) return false;
   try {
     return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") !== "0";
   } catch {
@@ -1120,6 +1122,9 @@ export const __sseFallback = {
     fallbackWrappers.length = 0;
     sseListeners.length = 0;
     workerHandlers.clear();
+    // The direct-path callback registry too: a case that left subscribers in it
+    // would have the next case's frames delivered into its own handlers.
+    directHandlers.clear();
   },
 };
 
