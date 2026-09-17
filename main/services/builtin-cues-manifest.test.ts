@@ -313,6 +313,29 @@ describe("calling one", () => {
   });
 });
 
+describe("the boot line", () => {
+  test("init says what is offered, without anything reading the manifest", async () => {
+    // An install with no Home Assistant and no panel open never reads the
+    // manifest, so the count line — emitted on a read — was never said at all
+    // and `/log` had nothing about the cues a console is bound to.
+    __resetBuiltinCues();
+    ENABLED = new Set(["obs"]);
+    const said: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => said.push(args.map(String).join(" "));
+    try {
+      await automationEngine.init();
+      await automationEngine.setSettings({ simulate: false, disarmed: false });
+    } finally {
+      console.log = realLog;
+    }
+    assert.deepEqual(
+      said.filter((l) => l.includes("built-in cues offered")),
+      ["[cues] 4 built-in cues offered (obs 3, app 1)"],
+    );
+  });
+});
+
 describe("poll demand", () => {
   test("a built-in switch holds its integration's poll at the active cadence", () => {
     // NO stored rules at all, which is the install this whole feature is for.

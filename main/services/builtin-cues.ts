@@ -37,6 +37,7 @@ import {
   type AppStateSourceId,
 } from "./app-state-sources.js";
 import { CALL_TRIGGER_ID, parseAliases } from "./cue-aliases.js";
+import { errorMessage } from "./errors.js";
 import { stateBindingParams, type StateBinding } from "./cue-pairs.js";
 import { integrationManager } from "./integration-manager.js";
 import { pvpService } from "./pvp-service.js";
@@ -291,9 +292,19 @@ export const builtinCuesDeps: {
     ),
   pvpLayers: () => pvpService.getLatest().layers.map((l) => l.name),
   changed: () => {
-    void import("./cue-live.js").then((m) => {
-      m.cueLive.rulesChanged();
-    });
+    // Fire and forget, so a `.catch` rather than a bare `void`: there is no
+    // caller to hand a failure back to — the bus does not await a listener —
+    // and a rejected import here is every integration never hearing that the
+    // set changed, with nothing anywhere saying so. The log is the caller.
+    import("./cue-live.js")
+      .then((m) => {
+        m.cueLive.rulesChanged();
+      })
+      .catch((err: unknown) => {
+        console.error(
+          `[cues] could not announce the built-in set changing: ${scrub(errorMessage(err))}`,
+        );
+      });
   },
 };
 
@@ -465,6 +476,20 @@ export function builtinCueRules(stored: readonly Rule[]): Rule[] {
   return out;
 }
 
+/**
+ * Say what is offered, for the log and nothing else.
+ *
+ * Called once when the engine finishes loading its rules, because the count
+ * line is otherwise emitted only by the first READ of the manifest — and an
+ * install with no Home Assistant and no panel open never reads it, so an
+ * operator looking at `/log` after a boot found nothing at all about the cues
+ * their console is bound to. Change-gated like every other emission of it, so
+ * this is the only line unless the set moves.
+ */
+export function logBuiltinCues(stored: readonly Rule[]): void {
+  builtinCueRules(stored);
+}
+
 /** The tone for a built-in switch's base, or undefined for the default one. */
 export function builtinTone(base: string): CueTone | undefined {
   return FIXED_SWITCHES.find((s) => s.base === base)?.tone;
@@ -508,17 +533,22 @@ export function __resetBuiltinCues(): void {
 }
 
 /**
- * What the offered set depends on, as one comparable string.
+ * The OFFERED set, as one comparable string.
  *
- * The integration flags and the PVP layer names, and nothing else: suppression
- * depends on the stored rules, and a change to those already bumps the version
- * through the engine's own rulesChanged.
+ * The cue names themselves, not the inputs they are derived from. Built from
+ * the inputs, this said "something changed" for every integration in the app:
+ * switching ProPresenter on offers no built-in and must not make every Home
+ * Assistant entity re-read, and a ProVideoPlayer that drops off the network
+ * publishes an empty layer list without changing what is offered — the last
+ * layers are kept deliberately — so that flapped the version on every
+ * reconnect, which is the churn this whole design avoids.
+ *
+ * Suppression is deliberately not in it: it depends on the stored rules, and a
+ * change to those already bumps the version through the engine's rulesChanged.
  */
 function signature(): string {
-  const enabled = [...builtinCuesDeps.enabled()].sort().join(",");
-  const connected = [...builtinCuesDeps.connected()].sort().join(",");
-  const layers = builtinCuesDeps.pvpLayers().join(" ");
-  return `${enabled}|${connected}|${layers}`;
+  const { switches, buttons } = offeredDefs();
+  return [...switches.map((s) => s.base), ...buttons.map((b) => b.base)].join(",");
 }
 
 let lastSignature: string | null = null;
@@ -530,6 +560,13 @@ let lastSignature: string | null = null;
  * Seeded on the FIRST call rather than compared against "": boot publishes a
  * status on every channel, and a bump for each of them at start-up is a
  * manifest re-read per integration for a set that has not changed.
+ *
+ * It also RECORDS the layers, through offeredDefs, which is why the listener
+ * below runs on `pvp:status` whether or not the version moves: the retention
+ * that keeps a layer's entities alive across a disconnect would otherwise
+ * depend on somebody having read the manifest while PVP was up, and a server
+ * that booted with PVP already offline would forget layers it had been told
+ * about on the channel.
  */
 export function builtinInputsChanged(): void {
   const next = signature();

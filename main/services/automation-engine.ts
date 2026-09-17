@@ -38,7 +38,7 @@ import {
   type AppStateSourceId,
 } from "./app-state-sources.js";
 import { boundCuePairs, cuePairs, stateBindingProblem } from "./cue-pairs.js";
-import { builtinCueRules, reservedCueNames } from "./builtin-cues.js";
+import { builtinCueRules, logBuiltinCues, reservedCueNames } from "./builtin-cues.js";
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
@@ -131,6 +131,13 @@ class AutomationEngine {
     for (const bad of this.invalidLoadedCues()) {
       console.warn(`[cues] rule "${scrub(bad.rule)}" would be refused if you saved it: ${scrub(bad.problem)}`);
     }
+    // What the app itself offers, said once at boot. The count line is
+    // otherwise emitted only by the first READ of the manifest, so an install
+    // with no Home Assistant and no panel open said nothing at all about the
+    // cues a console is bound to. Here rather than at the top of the file
+    // because integration-manager calls this LAST, with every integration's
+    // enabled flag already loaded.
+    logBuiltinCues(this.rules);
     // Re-seeding on every init is deliberate: a restart must never inherit stale
     // edges from the previous process.
     this.prev.clear();

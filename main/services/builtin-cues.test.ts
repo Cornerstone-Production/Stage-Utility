@@ -46,7 +46,9 @@ const {
   reservedCueNames,
 } = await import("./builtin-cues.js");
 const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
-const { parseAppStateRef } = await import("./app-state-sources.js");
+const { APP_STATE_FAMILIES, appStateFamilyRef, parseAppStateRef } = await import(
+  "./app-state-sources.js"
+);
 const { implicitStateBinding, cuePairs } = await import("./cue-pairs.js");
 const { isValidCueName } = await import("./automation-triggers.js");
 const { CALL_TRIGGER_ID } = await import("./cue-aliases.js");
@@ -180,17 +182,28 @@ describe("the table", () => {
   });
 
   test("the shown pair is the hidden family, inverted", () => {
+    // Compared against the FAMILY'S OWN values rather than against "on" and
+    // "off" written out here: the registry is what the reader answers with, so
+    // a family that ever reported a different pair of values would give a
+    // switch that reads unknown forever while this file went on agreeing with
+    // itself.
+    const hidden = APP_STATE_FAMILIES.get("pvp.layer-hidden")!;
+    const muted_ = APP_STATE_FAMILIES.get("pvp.layer-muted")!;
     const [shown, muted] = layerSwitches("Lyrics", "lyrics");
     assert.deepEqual(shown!.binding, {
-      variable: "app:pvp.layer-hidden:Lyrics",
-      onValue: "off",
-      offValue: "on",
+      variable: appStateFamilyRef("pvp.layer-hidden", "Lyrics"),
+      // INVERTED: the switch is on when the layer is NOT hidden.
+      onValue: hidden.offValue,
+      offValue: hidden.onValue,
     });
     assert.deepEqual(muted!.binding, {
-      variable: "app:pvp.layer-muted:Lyrics",
-      onValue: "on",
-      offValue: "off",
+      variable: appStateFamilyRef("pvp.layer-muted", "Lyrics"),
+      onValue: muted_.onValue,
+      offValue: muted_.offValue,
     });
+    // And the ref really is the one the reader parses back to that layer.
+    const parsed = parseAppStateRef(shown!.binding.variable);
+    assert.equal(parsed?.kind === "family" && parsed.param, "Lyrics");
   });
 
   test("only the live switches carry a tone", () => {
@@ -346,12 +359,56 @@ describe("reserved names", () => {
 });
 
 describe("the set changing", () => {
+  test("an integration with no built-ins announces nothing", () => {
+    // The signature is the OFFERED CUE NAMES, not the inputs they come from.
+    // Built from the inputs, switching ProPresenter on — which offers no
+    // built-in at all — bumped the manifest version and made every Home
+    // Assistant entity re-read for nothing.
+    builtinInputsChanged();
+    ENABLED = new Set(["obs", "reaper", "pvp", "propresenter"]);
+    builtinInputsChanged();
+    assert.equal(CHANGED, 0, "enabling an integration with no built-ins announced a change");
+    ENABLED = new Set(["obs", "reaper", "pvp"]);
+    builtinInputsChanged();
+    assert.equal(CHANGED, 0);
+  });
+
+  test("PVP going offline and back announces nothing", () => {
+    LAYERS = ["Lyrics"];
+    builtinInputsChanged();
+    // PVP publishes PVP_OFFLINE, whose layers are empty, and publishes them
+    // again on reconnect. The offered set never changed — the last layers are
+    // kept deliberately — so the version must not flap on every reconnect.
+    LAYERS = [];
+    builtinInputsChanged();
+    assert.equal(CHANGED, 0, "a disconnect announced a change");
+    LAYERS = ["Lyrics"];
+    builtinInputsChanged();
+    assert.equal(CHANGED, 0, "a reconnect announced a change");
+  });
+
+  test("the layers are recorded by the signature, not only by a read", () => {
+    // The `pvp:status` listener calls builtinInputsChanged on every status,
+    // which is what keeps the retention alive on a server that has never had
+    // its manifest read — nothing reads it on an install with no Home
+    // Assistant and no panel open until somebody opens one.
+    LAYERS = ["Lyrics"];
+    builtinInputsChanged();
+    LAYERS = [];
+    assert.ok(
+      cueNames(builtinCueRules([])).includes("pvp_lyrics_shown_on"),
+      "a layer seen only on the channel was forgotten",
+    );
+  });
+
   test("announces only when the inputs move", () => {
     builtinInputsChanged();
     assert.equal(CHANGED, 0, "the first call announced on a set that had not changed");
     builtinInputsChanged();
     assert.equal(CHANGED, 0);
-    ENABLED = new Set(["obs", "reaper", "pvp", "youtube"]);
+    // OBS switched OFF: three switches stop being offered, which every
+    // integration has to be told about.
+    ENABLED = new Set(["reaper", "pvp"]);
     builtinInputsChanged();
     assert.equal(CHANGED, 1);
     builtinInputsChanged();
