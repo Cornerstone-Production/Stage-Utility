@@ -21,6 +21,7 @@ import {
   setSubscriberCount,
   subscriptionsChanged,
 } from "./broadcaster.js";
+import { EventPollHub, type PollFrame } from "./event-poll.js";
 
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
@@ -218,6 +219,18 @@ const SSE_MAX_BUFFER_BYTES = 2_000_000;
 const resCid = new WeakMap<http.ServerResponse, string>();
 const clientChannels = new Map<string, Set<string>>();
 
+// Clients on the polling transport (`GET /api/events/poll`), which read the same
+// broadcasts out of a short replay buffer instead of holding a stream open. They
+// share the cid namespace with the streams above, so POST /api/events/subscribe
+// filters both without knowing which transport a client is on.
+const eventPoll = new EventPollHub({
+  subscriptionsChanged,
+  // A cid's reported channel filter outlives its stream, so drop it with the
+  // client the way the stream's close handler does — otherwise every panel that
+  // ever polled leaves an entry behind for the life of the process.
+  onExpire: (cid) => clientChannels.delete(cid),
+});
+
 // Currently-connected Companion-module clients (SSE streams opened with the
 // X-Companion-Module header / ?client=companion marker). A Set keyed by the
 // response means the reported count can't drift (no double-count on a fast
@@ -243,7 +256,9 @@ function sseWriteFrame(res: http.ServerResponse, frame: string): boolean {
   }
 }
 /** How many connected clients want this channel — a client with no reported
- *  filter wants all of them. */
+ *  filter wants all of them. Poll clients (`?transport=poll`) count exactly the
+ *  same, keyed by the same cid: a producer that idles with nobody watching must
+ *  run for a panel on the polling transport too. */
 function countSubscribers(channel: string): number {
   let n = 0;
   for (const client of sseClients) {
@@ -251,11 +266,115 @@ function countSubscribers(channel: string): number {
     const chans = cid ? clientChannels.get(cid) : undefined;
     if (!chans || chans.has(channel)) n++;
   }
+  for (const cid of eventPoll.clientIds()) {
+    const chans = clientChannels.get(cid);
+    if (!chans || chans.has(channel)) n++;
+  }
   return n;
 }
 
-function sseWrite(res: http.ServerResponse, event: string, data: unknown): boolean {
-  return sseWriteFrame(res, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+/**
+ * Where a hello-burst frame goes.
+ *
+ * An open SSE stream, or a collector the poll transport drains. One burst, two
+ * transports — the snapshot a polling client receives is the same list of
+ * channels in the same order, and cannot drift from the stream's because there
+ * is only one list.
+ */
+type EventSink = http.ServerResponse | { readonly collected: PollFrame[] };
+
+function sseWrite(res: EventSink, event: string, data: unknown): boolean {
+  const serialized = JSON.stringify(data);
+  if (!(res instanceof http.ServerResponse)) {
+    res.collected.push({ channel: event, serialized });
+    return true;
+  }
+  return sseWriteFrame(res, `event: ${event}\ndata: ${serialized}\n\n`);
+}
+
+/**
+ * The connect-time state snapshot ("the hello burst").
+ *
+ * These channels otherwise broadcast only on change, so a client that has just
+ * attached would render blank until something moved - on a quiet channel, days.
+ * Written to whichever sink the client is on: the SSE stream writes it once at
+ * connect, and the poll transport rebuilds it for any client asking with no
+ * `since`. One list, so the two transports cannot drift.
+ *
+ * Stays in this file with every channel name written as a quoted literal on its
+ * own line: hydrated-channels.test.ts reads this source as text and pins the
+ * list against the client's replay list, and its scan can only see a channel
+ * name that is quoted at the call. Do not write an example of the shape it
+ * matches anywhere in a comment — doing so makes the scan find a channel named
+ * by prose, and this comment did exactly that on its first draft.
+ */
+function writeHelloBurst(res: EventSink): void {
+  // Advertise the running code version so a kiosk that reconnects after an
+  // update/restart and sees a new version reloads itself (see useStageState).
+  sseWrite(res, "server:hello", { version: SERVER_VERSION });
+  // Send initial snapshots so the client is immediately in sync — these
+  // channels otherwise only broadcast on change, leaving a fresh client blank.
+  stageController.ensureResolvedFresh(); // fold in any device status that changed while idle
+  sseWrite(res, "stage:state-changed", stageController.getState());
+  sseWrite(res, "pco:live", stageController.getLastLive());
+  sseWrite(res, "propresenter:status", propresenterService.getStatus());
+  sseWrite(res, "propresenter:instances", propresenterManager.getInstancesDto());
+  sseWrite(res, "spl:metrics", smaartService.getLatest());
+  sseWrite(res, "spl:history", splRecorder.getCurrent());
+  sseWrite(res, "attendance:history", attendanceRecorder.getCurrent());
+  sseWrite(res, "service-timeline:history", serviceTimelineRecorder.getCurrent());
+  sseWrite(res, "baptism:state", baptismTimerService.getState());
+  sseWrite(res, "obs:status", obsService.getLatest());
+  sseWrite(res, "reaper:status", reaperService.getLatest());
+  sseWrite(res, "pvp:status", pvpService.getLatest());
+  // Scores hydrate for the same reason: a display opened at half time shows
+  // the score it is already at rather than waiting for the next one.
+  sseWrite(res, "scores:status", scoresService.getLatest());
+  // Streaming state hydrates for the same reason recording does: a display
+  // that loads mid-service must show the truth immediately, not wait for
+  // the next poll to notice nothing has changed.
+  sseWrite(res, "resi:status", resiService.getLatest());
+  sseWrite(res, "youtube:status", youtubeService.getLatest());
+  // Update status must hydrate on (re)connect: every update ends by restarting
+  // the server, which drops+reconnects this socket. Without this, the settings
+  // Updates panel never learns the post-restart state and stays stuck on its
+  // last-seen step ("Downloading…") until a manual refresh.
+  sseWrite(res, "update:status", updater.getStatus());
+  // Without this a reconnecting Companion module has blank signal variables
+  // until the next evaluation — potentially days.
+  sseWrite(res, "companion:signals", signalStore.all());
+  sseWrite(res, "osc:feedback", oscManager.getFeedback());
+  sseWrite(res, "people:count", sensourceService.getLatest());
+  // Wireless telemetry only broadcasts when a reading changes, and a pack
+  // sitting in a drawer changes nothing for days — so a display opening
+  // mid-week would show dashes until somebody keyed a mic.
+  // The LITERAL, not the constant: hydrated-channels.test.ts reads this file
+  // as text to check the hydrate list against the replay list, and its regex
+  // can only see a quoted channel name — passing the constant failed it,
+  // correctly, because as far as the scan could tell nothing hydrated this
+  // channel at all. `satisfies` keeps the two in step: change the constant
+  // and this line stops compiling.
+  //
+  // Do not write an example of that regex's shape in a comment here. Doing
+  // so once made the scan find a channel named by prose, which is the same
+  // trap from the other side.
+  sseWrite(res, "wireless:channels" satisfies typeof WIRELESS_STATUS_CHANNEL, stageController.wirelessChannelStatuses());
+  // A calendar is STATE, not an event: a display opened in the middle of a
+  // month must show it at once, not sit blank until somebody moves a booking
+  // — which on this channel can be days.
+  // The LITERAL with `satisfies`, matching the wireless line above: the
+  // hydrated-channels scan can only see a quoted channel name, and the
+  // `satisfies` is what makes renaming CALENDAR_CHANNEL stop compiling here
+  // rather than silently leaving this burst writing to a dead channel.
+  sseWrite(res, "calendar:grid" satisfies typeof CALENDAR_CHANNEL, calendarBroadcaster.getLatest());
+  sseWrite(res, "displays:presence", presenceSnapshot());
+}
+
+/** The hello burst as frames, for a client on the polling transport. */
+function helloSnapshot(): PollFrame[] {
+  const sink = { collected: [] as PollFrame[] };
+  writeHelloBurst(sink);
+  return sink.collected;
 }
 
 // gzip for static text assets — a Pi re-downloads the whole (re-fingerprinted) build
@@ -522,6 +641,10 @@ export class RemoteServer {
     setSubscriberCount(countSubscribers);
 
     addBroadcastListener((channel, payload, serialized) => {
+      // Poll clients collect from a replay buffer rather than a held stream.
+      // A no-op when none are attached, so an appliance with only SSE clients
+      // pays nothing for this.
+      eventPoll.record(channel, payload, serialized);
       let frame: string | null = null; // serialize at most once, only if a client wants it
       for (const client of sseClients) {
         const cid = resCid.get(client);
@@ -660,6 +783,7 @@ export class RemoteServer {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+    eventPoll.stopSweep();
     // Force-close all tracked sockets so the server shuts down promptly.
     for (const socket of this.sockets) {
       socket.destroy();
@@ -808,66 +932,11 @@ export class RemoteServer {
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no", // disable proxy buffering (nginx etc.)
       });
-      // Advertise the running code version so a kiosk that reconnects after an
-      // update/restart and sees a new version reloads itself (see useStageState).
-      sseWrite(res, "server:hello", { version: SERVER_VERSION });
-      // Send initial snapshots so the client is immediately in sync — these
-      // channels otherwise only broadcast on change, leaving a fresh client blank.
-      stageController.ensureResolvedFresh(); // fold in any device status that changed while idle
-      sseWrite(res, "stage:state-changed", stageController.getState());
-      sseWrite(res, "pco:live", stageController.getLastLive());
-      sseWrite(res, "propresenter:status", propresenterService.getStatus());
-      sseWrite(res, "propresenter:instances", propresenterManager.getInstancesDto());
-      sseWrite(res, "spl:metrics", smaartService.getLatest());
-      sseWrite(res, "spl:history", splRecorder.getCurrent());
-      sseWrite(res, "attendance:history", attendanceRecorder.getCurrent());
-      sseWrite(res, "service-timeline:history", serviceTimelineRecorder.getCurrent());
-      sseWrite(res, "baptism:state", baptismTimerService.getState());
-      sseWrite(res, "obs:status", obsService.getLatest());
-      sseWrite(res, "reaper:status", reaperService.getLatest());
-      sseWrite(res, "pvp:status", pvpService.getLatest());
-      // Scores hydrate for the same reason: a display opened at half time shows
-      // the score it is already at rather than waiting for the next one.
-      sseWrite(res, "scores:status", scoresService.getLatest());
-      // Streaming state hydrates for the same reason recording does: a display
-      // that loads mid-service must show the truth immediately, not wait for
-      // the next poll to notice nothing has changed.
-      sseWrite(res, "resi:status", resiService.getLatest());
-      sseWrite(res, "youtube:status", youtubeService.getLatest());
-      // Update status must hydrate on (re)connect: every update ends by restarting
-      // the server, which drops+reconnects this socket. Without this, the settings
-      // Updates panel never learns the post-restart state and stays stuck on its
-      // last-seen step ("Downloading…") until a manual refresh.
-      sseWrite(res, "update:status", updater.getStatus());
-      // Without this a reconnecting Companion module has blank signal variables
-      // until the next evaluation — potentially days.
-      sseWrite(res, "companion:signals", signalStore.all());
-      sseWrite(res, "osc:feedback", oscManager.getFeedback());
-      sseWrite(res, "people:count", sensourceService.getLatest());
-      // Wireless telemetry only broadcasts when a reading changes, and a pack
-      // sitting in a drawer changes nothing for days — so a display opening
-      // mid-week would show dashes until somebody keyed a mic.
-      // The LITERAL, not the constant: hydrated-channels.test.ts reads this file
-      // as text to check the hydrate list against the replay list, and its regex
-      // can only see a quoted channel name — passing the constant failed it,
-      // correctly, because as far as the scan could tell nothing hydrated this
-      // channel at all. `satisfies` keeps the two in step: change the constant
-      // and this line stops compiling.
-      //
-      // Do not write an example of that regex's shape in a comment here. Doing
-      // so once made the scan find a channel named by prose, which is the same
-      // trap from the other side.
-      sseWrite(res, "wireless:channels" satisfies typeof WIRELESS_STATUS_CHANNEL, stageController.wirelessChannelStatuses());
-      // A calendar is STATE, not an event: a display opened in the middle of a
-      // month must show it at once, not sit blank until somebody moves a booking
-      // — which on this channel can be days.
-      // The LITERAL with `satisfies`, matching the wireless line above: the
-      // hydrated-channels scan can only see a quoted channel name, and the
-      // `satisfies` is what makes renaming CALENDAR_CHANNEL stop compiling here
-      // rather than silently leaving this burst writing to a dead channel.
-      sseWrite(res, "calendar:grid" satisfies typeof CALENDAR_CHANNEL, calendarBroadcaster.getLatest());
-      sseWrite(res, "displays:presence", presenceSnapshot());
+      writeHelloBurst(res);
       sseClients.add(res);
+      // Who is actually attached, on a tagged line. The only prior evidence that
+      // a display had dropped its stream was the display itself going stale.
+      console.log(`[events] stream client connected (${sseClients.size} streams)`);
       // Correlate this stream to its client id so POST /api/events/subscribe can set
       // its channel filter. No cid (or no report yet) → the fan-out sends everything.
       const cid = _url.searchParams.get("cid");
@@ -884,6 +953,7 @@ export class RemoteServer {
       }
       req.on("close", () => {
         sseClients.delete(res);
+        console.log(`[events] stream client closed (${sseClients.size} streams)`);
         if (cid) clientChannels.delete(cid);
         if (isCompanion) {
           companionClients.delete(res);
@@ -896,6 +966,28 @@ export class RemoteServer {
       // this can see it. A stream with no `cid` wants every channel until it
       // says otherwise, so this alone can start one.
       subscriptionsChanged();
+      return;
+    }
+    // ── Polling event transport ───────────────────────────────────────────
+    // For a browser that cannot hold the stream above. See event-poll.ts.
+    if (method === "GET" && pathname === "/api/events/poll") {
+      const cid = _url.searchParams.get("cid");
+      if (!cid) {
+        error(res, "cid is required", 400);
+        return;
+      }
+      const sinceRaw = _url.searchParams.get("since");
+      const sinceNum = sinceRaw === null ? null : Number(sinceRaw);
+      const since = sinceNum !== null && Number.isFinite(sinceNum) ? sinceNum : null;
+      const chans = clientChannels.get(cid);
+      const result = eventPoll.buildPollResponse(cid, since, (c) => !chans || chans.has(c), helloSnapshot);
+      // Assembled by string concatenation: every frame is ALREADY a JSON string,
+      // and JSON.stringify over the response object would parse-and-reserialize
+      // the lot — including the full StageState with its base64 branding.
+      const frames = result.frames.map((f) => `{"channel":${JSON.stringify(f.channel)},"data":${f.serialized}}`);
+      const body = `{"seq":${result.seq},"resync":${result.resync},"frames":[${frames.join(",")}]}`;
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(body);
       return;
     }
     if (method === "POST" && pathname === "/api/events/subscribe") {
