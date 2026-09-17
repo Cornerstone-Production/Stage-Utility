@@ -60,6 +60,16 @@ const timerIds = new Map<number, Pending>();
   timerIds.delete(id);
 };
 
+/** Fire the pending 200 ms channel report, if one is armed. Returns whether
+ *  there was one. */
+function fireReport(): boolean {
+  const i = pending.findIndex((p) => p.ms === 200);
+  if (i < 0) return false;
+  const [entry] = pending.splice(i, 1);
+  entry.fn();
+  return true;
+}
+
 /** Fire the pending poll timer (the only one this module schedules besides the
  *  200 ms subscribe report). Returns the delay it had been given. */
 function firePoll(): number {
@@ -247,7 +257,7 @@ describe("?transport=poll", () => {
     );
   });
 
-  test("caps the backoff at 30 s", async () => {
+  test("caps the backoff below the server's 30 s client expiry", async () => {
     for (let i = 0; i < 12; i++) {
       fails();
       firePoll();
@@ -255,11 +265,35 @@ describe("?transport=poll", () => {
     }
     assert.equal(
       pending.find((p) => p.ms !== 200)?.ms,
-      30_000,
-      "an unbounded doubling reaches delays no unattended panel ever comes back from",
+      20_000,
+      "a ceiling at or above the server's 30 s TTL expires the client every cycle, " +
+        "discarding the channel filter with nothing to re-report it",
     );
     serves({ seq: 90, resync: false, frames: [] });
     firePoll();
     await flush();
+  });
+
+  test("re-reports the channel set on a resync", async () => {
+    // One cause of a resync is the server having expired this cid, which
+    // discards the channel filter it was holding. Nothing else sends it again:
+    // reportChannels fires only when a subscription changes, and none has.
+    const off = onNotification("pco:live", () => {});
+    fireReport(); // drain the report this subscribe armed
+    const before = requests.filter((r) => r.startsWith("/api/events/subscribe")).length;
+
+    serves({ seq: 300, resync: true, frames: [] });
+    firePoll();
+    await flush();
+
+    assert.ok(fireReport(), "a resync must arm a fresh channel report");
+    await flush();
+    assert.equal(
+      requests.filter((r) => r.startsWith("/api/events/subscribe")).length,
+      before + 1,
+      "without this the client silently receives every channel on the box, metrics firehose included",
+    );
+    off();
+    fireReport();
   });
 });

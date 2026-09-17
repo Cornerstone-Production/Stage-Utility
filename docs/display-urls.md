@@ -119,9 +119,11 @@ against a stream's one connection — plus up to two seconds of latency on every
 update. A held stream is cheaper and immediate, so this is opt-in per URL and
 never sticky: drop the query string and the page is back on the stream.
 
-A failing poll backs off, doubling to a 30 second ceiling, and returns to two
-seconds on the first success. A page brought back into view polls immediately
-rather than waiting out the rest of its interval.
+A failing poll backs off, doubling to a 20 second ceiling, and returns to two
+seconds on the first success. The ceiling is deliberately under the server's 30
+second client expiry, so a backed-off client is not dropped from the registry
+every cycle. A page brought back into view polls immediately rather than waiting
+out the rest of its interval.
 
 The server names polling clients on [`/log`](ops/updates-and-logs.md):
 

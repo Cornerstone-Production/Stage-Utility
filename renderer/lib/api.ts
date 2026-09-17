@@ -1378,7 +1378,18 @@ function ensureEventSource(): EventSource {
 // See POLL_TRANSPORT above. A chain of timeouts rather than an interval, so a
 // failing server is backed off from instead of queued against.
 const POLL_INTERVAL_MS = 2000;
-const POLL_MAX_INTERVAL_MS = 30_000;
+/**
+ * Ceiling on the backoff, and it must stay UNDER the server's 30 s poll-client
+ * TTL (`POLL_CLIENT_TTL_MS` in event-poll.ts).
+ *
+ * At 30 s the two were equal, so a backed-off client was expired on almost
+ * every cycle: the server dropped its registry entry and, with it, the channel
+ * filter reported through /api/events/subscribe — and nothing re-reported one,
+ * because reportChannels only fires when a subscription changes. The client
+ * then quietly received every channel on the box, including the 4 Hz metrics
+ * firehose, on the slowest connection it has.
+ */
+const POLL_MAX_INTERVAL_MS = 20_000;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pollDelayMs = POLL_INTERVAL_MS;
 /** The newest seq this client has seen. null means "send me a snapshot" — the
@@ -1423,10 +1434,19 @@ async function pollOnce(): Promise<void> {
       pollFailures = 0;
     }
     pollDelayMs = POLL_INTERVAL_MS;
-    // A resync means the server handed us a fresh snapshot instead of a
-    // continuation, so drop our position and ask for one again rather than
-    // resuming from a seq whose predecessors we never saw.
-    pollSince = body.resync ? null : body.seq;
+    if (body.resync) {
+      // A resync means the server handed us a fresh snapshot instead of a
+      // continuation, so drop our position and ask for one again rather than
+      // resuming from a seq whose predecessors we never saw.
+      pollSince = null;
+      // And re-report our channel set. One cause of a resync is that the server
+      // expired this cid, which also discards the filter it was holding for us.
+      // Nothing else would ever send it again — reportChannels fires only when
+      // a subscription changes, and none has.
+      reportChannels();
+    } else {
+      pollSince = body.seq;
+    }
     for (const frame of body.frames) dispatch(frame.channel, frame.data, false);
   } catch (err) {
     pollFailures++;
