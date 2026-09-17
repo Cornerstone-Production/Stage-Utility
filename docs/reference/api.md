@@ -400,12 +400,18 @@ With no `since`, the response is the connect-time snapshot — the same channels
 the stream hydrates, `server:hello` first — and `resync` is `false`, because
 nothing was missed.
 
-`resync: true` means the request's `since` is no longer covered: the server keeps
-only the last 500 broadcasts, and only for 60 seconds, so a client that stopped
-asking has a gap it cannot fill. The frames are a fresh snapshot rather than a
-continuation, and the client should drop its position and ask for a snapshot
-again rather than resume from the returned `seq`. A `since` ahead of the server's
-own counter — a client that outlived a server restart — answers the same way.
+`resync: true` means the request's `since` is no longer covered. The frames are a
+fresh snapshot rather than a continuation, and the client should drop its
+position and ask for a snapshot again rather than resume from the returned `seq`.
+Three things cause it:
+
+- the server keeps only the last 500 broadcasts, and only for 60 seconds, so a
+  client that stopped asking has a gap it cannot fill;
+- a `since` ahead of the server's own counter — a client that outlived a server
+  restart;
+- a `cid` that had expired and come back. Nothing is buffered while no client is
+  polling, so the counter does not move while you are away and your `since` can
+  look perfectly current when it is not. The registry is what knows otherwise.
 
 Channel filtering applies to both the buffered frames and the snapshot, so a
 client that reported a narrow set through `/api/events/subscribe` receives only

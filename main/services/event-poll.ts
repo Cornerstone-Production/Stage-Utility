@@ -128,7 +128,8 @@ export class EventPollHub {
    * same frames with `resync: true` so the client knows to drop its position.
    * A `since` AHEAD of what this process has issued gets one too: that is a
    * client whose server restarted and reset the counter, which would otherwise
-   * sit on an empty response forever.
+   * sit on an empty response forever. So does a cid that had expired and come
+   * back, whose `since` can look current while it is anything but.
    */
   buildPollResponse(
     cid: string,
@@ -136,14 +137,20 @@ export class EventPollHub {
     wants: (channel: string) => boolean,
     snapshot: () => PollFrame[],
   ): PollResponse {
-    this.touch(cid);
+    const returning = this.touch(cid);
     this.trim(this.now());
 
     const oldest = this.buffer.length > 0 ? this.buffer[0].seq : this.lastSeq + 1;
     if (since == null) {
       return { seq: this.lastSeq, resync: false, frames: snapshot().filter((f) => wants(f.channel)) };
     }
-    if (since + 1 < oldest || since > this.lastSeq) {
+    // `returning` is the case the sequence numbers cannot see. record() is a
+    // no-op with no clients attached, so while this cid was expired the counter
+    // did not move — a client coming back with the last seq it saw looks
+    // perfectly up to date, and would be answered with an empty frame list
+    // forever while the service ran on without it. The registry is the only
+    // thing that knows a gap happened.
+    if (returning || since + 1 < oldest || since > this.lastSeq) {
       return { seq: this.lastSeq, resync: true, frames: snapshot().filter((f) => wants(f.channel)) };
     }
     const frames: PollFrame[] = [];
@@ -155,14 +162,22 @@ export class EventPollHub {
 
   // ── client registry ────────────────────────────────────────────────────
 
-  /** Record that `cid` is alive. Announces a client that was not there before. */
-  touch(cid: string): void {
+  /**
+   * Record that `cid` is alive.
+   *
+   * @returns true when this cid was NOT in the registry — a first sight, or a
+   * return after expiry. The caller needs the difference: a returning client
+   * missed everything broadcast while it was gone, and nothing in the sequence
+   * numbers says so.
+   */
+  touch(cid: string): boolean {
     const known = this.clients.has(cid);
     this.clients.set(cid, this.now());
-    if (known) return;
+    if (known) return false;
     console.log(`[events] poll client ${scrub(cid)} started`);
     this.startSweep();
     this.subscriptionsChanged();
+    return true;
   }
 
   /** Live poll-client ids, for the subscriber accounting in remote-server. */

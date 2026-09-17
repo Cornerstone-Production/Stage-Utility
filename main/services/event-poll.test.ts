@@ -196,6 +196,39 @@ describe("event-poll client registry", () => {
     assert.deepEqual(hub.clientIds(), []);
   });
 
+  it("resyncs a client that expired and came back, whose seq looks current", () => {
+    // The gap the sequence numbers cannot see. record() is a no-op with no
+    // clients attached, so while this cid was expired the counter did not move:
+    // the client returns holding the last seq it saw, which still equals the
+    // server's, and every arithmetic check says it is up to date. It is not —
+    // everything broadcast while it was away was never buffered at all. Left
+    // unfixed, a panel that slept through a song comes back and is answered
+    // with an empty frame list for the rest of the service.
+    const c = clock();
+    const { hub } = makeHub({ now: c.now });
+    captureLog(() => {
+      hub.buildPollResponse("panel-1", null, wantsAll, snapshot);
+      hub.record("pco:live", { mode: "item" });
+      const caught = hub.buildPollResponse("panel-1", 0, wantsAll, snapshot);
+      assert.deepEqual(caught.frames.map((f) => f.channel), ["pco:live"], "premise: it was keeping up");
+      assert.equal(caught.seq, 1);
+
+      c.advance(POLL_CLIENT_TTL_MS + 1);
+      hub.sweep();
+      // The service runs on with nobody polling, so nothing is recorded.
+      hub.record("pco:live", { mode: "item", label: "much later" });
+
+      const back = hub.buildPollResponse("panel-1", 1, wantsAll, snapshot);
+      assert.equal(back.resync, true, "a returning client is handed a snapshot, not told it is up to date");
+      assert.deepEqual(
+        back.frames.map((f) => f.channel),
+        ["server:hello", "pco:live", "spl:metrics"],
+        "and the snapshot is what rebuilds the state it slept through",
+      );
+    });
+    hub.stopSweep();
+  });
+
   it("keeps a client that is still polling", () => {
     const c = clock();
     const { hub, expired } = makeHub({ now: c.now });
