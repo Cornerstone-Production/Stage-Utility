@@ -167,6 +167,9 @@ for "idle", because before it runs we do not know that it is idle.
 | Send an OSC message | to an OSC target |
 | Advance PCO Live one item | steps the live plan forward once |
 | REAPER transport | Record, Stop or Play, through the same web interface the [REAPER](integrations/reaper.md) integration polls. Record does nothing when REAPER is already recording, and refuses outright when the transport cannot be read — 1013 is a toggle, so pressing it on an unknown is how "start recording" ends one |
+| OBS recording | Start or stop OBS's recording over the same obs-websocket connection the [OBS](integrations/obs.md) integration holds — no Companion button in between. Start does nothing when OBS is already recording, Stop does nothing when it is not |
+| OBS streaming | Start or stop OBS's stream, on the same connection and with the same start/stop idempotency |
+| OBS virtual camera | Start or stop the virtual camera a video call picks up as a webcam, on the same connection and with the same start/stop idempotency |
 | Trigger a ProPresenter macro | runs one of your own ProPresenter macros, on a chosen instance — see [Triggering a macro from a rule](integrations/propresenter.md#triggering-a-macro-from-a-rule) |
 | Refresh all displays | reloads every connected display |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
@@ -188,6 +191,14 @@ for "idle", because before it runs we do not know that it is idle.
 > argument and ignores it, playing the cue on its own configured layer. Which
 > layer a cue uses is set in ProVideoPlayer, not here. See
 > [ProVideoPlayer](integrations/provideoplayer.md).
+
+> **OBS recording**, **OBS streaming** and **OBS virtual camera** need nothing beyond the
+> [OBS](integrations/obs.md) integration being set up and connected — they use
+> its websocket, not a second one. A command sent while the output is already in
+> that state is answered `already recording` / `already stopped` and nothing goes
+> to OBS: obs-websocket rejects a redundant `StartRecord` with a request error,
+> which would read as a failed cue over a recording that is running perfectly
+> well. With OBS disconnected the action fails and says so; it never queues.
 
 > **REAPER transport** needs REAPER's web interface switched on — the same
 > prerequisite as the [REAPER](integrations/reaper.md) integration, and the same
@@ -351,16 +362,57 @@ select whenever the integration behind them is set up.
 | Source | Reads |
 |---|---|
 | `app:reaper.recording` | `on` while REAPER is recording, `off` while it is connected and not, unknown while it is not connected |
+| `app:obs.recording` | `on` while OBS is recording — a paused recording is still a recording — `off` while it is connected and not, unknown while it is not connected |
+| `app:obs.streaming` | `on` while OBS is streaming, `off` while it is connected and not, unknown while it is not connected |
+| `app:obs.virtualCam` | `on` while OBS's virtual camera is running, `off` while it is connected and not, unknown while it is not connected |
+| `app:youtube.live` | `on` while YouTube is broadcasting, `off` while it is connected and not, unknown while it is not connected |
+| `app:resi.live` | `on` while Resi is broadcasting, `off` while it is connected and not, unknown while it is not connected |
+| `app:pvp.layer-hidden:<name>` | `on` while the ProVideoPlayer layer called `<name>` is hidden, `off` while it is shown, unknown while PVP is not connected |
+| `app:pvp.layer-muted:<name>` | `on` while the ProVideoPlayer layer called `<name>` is muted, `off` while it is not, unknown while PVP is not connected |
 
-A pair whose `_on` half is a **REAPER transport** Record is bound to
-`app:reaper.recording` without anybody choosing it: it is the only answer there
-is, and the two values are fixed at `on` and `off`, so the value rows are not
-offered. Setting **State variable** to anything else on that pair overrides it.
+The two ProVideoPlayer sources take a layer NAME, matched the same way the PVP
+actions match it — trimmed, and case-insensitively. `<name>` is everything after
+the second colon, so a layer called `Lower Thirds: Speaker` is written
+`app:pvp.layer-hidden:Lower Thirds: Speaker`. Renaming the layer in PVP stops
+the reading, exactly as it stops the action: the state then reads unknown with
+`No PVP layer called "<name>"` rather than reporting the layer as shown. Two
+layers of one name read unknown too — PVP allows the duplicate, and a switch
+that silently picked one of them would report a layer nobody chose.
+
+`app:youtube.live` and `app:resi.live` are read-only: there is no action here that
+starts or stops a broadcast on either platform. Bind a pair to one when the cue
+that goes on air is something else — an operator's own Companion button, or a cue
+that starts the encoder feeding it — and the switch then reports what the
+platform says rather than what the button asked for.
+
+A pair is bound to one of these without anybody choosing it when its `_on` half
+is one of the actions that starts what the source watches:
+
+| ON half | Bound to |
+|---|---|
+| **REAPER transport** → Record | `app:reaper.recording` |
+| **OBS recording** → Start recording | `app:obs.recording` |
+| **OBS streaming** → Start streaming | `app:obs.streaming` |
+| **OBS virtual camera** → Start virtual camera | `app:obs.virtualCam` |
+| **Hide a ProVideoPlayer layer** | `app:pvp.layer-hidden:<the layer it names>` |
+| **Mute a ProVideoPlayer layer** | `app:pvp.layer-muted:<the layer it names>` |
+
+Unhide and Unmute imply nothing as an ON half: their "on" direction is the
+opposite one, so a pair built that way is left unbound rather than bound to a
+source it would report backwards.
+
+It is the only answer there is, and the two values are fixed at `on` and `off`,
+so the value rows are not offered. Setting **State variable** to anything else on
+that pair overrides it.
 
 Such a pair is a switch in Home Assistant like any other, reports a real state,
 and is idempotent — "start the recording" said twice while it is recording
 answers `already on` and sends nothing, which matters because REAPER's Record is
-a toggle.
+a toggle and because OBS rejects a redundant start outright.
+
+None of them involve Companion: the cue drives the recorder directly and the
+state comes off the same connection, so there is no button to build and no
+module variable to wait for.
 
 ## Firing an item on time
 

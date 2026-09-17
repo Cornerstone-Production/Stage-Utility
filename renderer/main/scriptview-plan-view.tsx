@@ -77,18 +77,14 @@ export function ScriptViewPlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const render = useScriptViewRender(rundown, layout, roles, pcoLive, now, skewMs);
 
   return (
-    // FULL BLEED, like a console. The shell gutters its content, so this kiosk
-    // surface rendered as a dark slab inside a light frame: 20px down each side
-    // and 16px under the strip. The negative margins take the sides back; the
-    // shell withholds the top for a full-bleed route (isFullBleedPath), because
-    // a negative TOP margin on an h-full box moves it without resizing it and
-    // just puts the band at the bottom instead.
+    // FULL BLEED, like a console. The shell's content column keeps its
+    // horizontal gutter on every page, chromeless or not, and a console cancels
+    // it with negative margins; this does the same. The shell withholds the
+    // vertical padding for a full-bleed route (isFullBleedPath), because a
+    // negative TOP margin on an h-full box moves it without resizing it.
     //
-    // h-full, not 100dvh. This lives below the context bar, so asking for the
-    // whole viewport made it 60px taller than the space it was given — it
-    // overflowed and scrolled by exactly the height of the chrome above it. The
-    // display document, which really does own the viewport, is a different
-    // entry point.
+    // Chromeless since isSharedChromelessPath named this route: no rail and no
+    // context bar, so h-full is the whole window.
     <div className="flex flex-col h-full overflow-hidden kiosk-surface -mx-5 max-sm:-mx-3 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* The bar and the rundown are shared with the script View-kind and the
           layout object; only the two navigation slots are this page's own. */}

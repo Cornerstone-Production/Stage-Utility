@@ -41,7 +41,7 @@ const { AUTOMATION_CONDITIONS } = await import("./automation-conditions.js");
 const { reaperService } = await import("./reaper-service.js");
 const { prodcomService } = await import("./prodcom-service.js");
 const { stageController } = await import("./stage-controller.js");
-const { addBroadcastListener, channelDemandSourceCount, setSubscriberCheck } =
+const { addBroadcastListener, channelDemandSourceCount, channelInDemand, setSubscriberCheck } =
   await import("./broadcaster.js");
 
 // THE unattended box. Without this the broadcaster fails open — its documented
@@ -386,5 +386,92 @@ describe("demand is registered for everything automation reads", () => {
     // than as a qualifier — or a switch in somebody's house — quietly answering
     // from a five-second-old snapshot.
     assert.equal(channelDemandSourceCount("reaper:status"), 3);
+  });
+
+  it("obs:status has exactly five demand sources", () => {
+    // Five, by three routes, the same shape as REAPER's above:
+    //
+    //  1. the trigger loop, for obs.recording-started / -stopped and the
+    //     streaming and virtual-cam pairs beside them. ONE registration however
+    //     many triggers name the channel.
+    //  2. the obs.is-recording CONDITION, pulled at fire time.
+    //  3. THREE cue-pair sources — `app:obs.recording`, `app:obs.streaming` and
+    //     `app:obs.virtualCam` (app-state-sources.ts) — one registration each,
+    //     because the loop in automation-engine.ts walks the sources rather
+    //     than the channels.
+    //
+    // An EXACT count: the three app sources share `obs:status` with the
+    // triggers, so dropping any one registration is invisible to every other
+    // assertion in this file.
+    assert.equal(channelDemandSourceCount("obs:status"), 5);
+  });
+
+  it("a cue pair bound to a PVP LAYER puts pvp:status in demand", async () => {
+    // The parameterised case, and the one an exact-ref match cannot see:
+    // `app:pvp.layer-hidden:Lyrics` is one of an unbounded set of refs, so
+    // wantsAppStateSource — which compares against a fixed id — answers false for
+    // every one of them and PVP polls at its idle cadence for a switch somebody
+    // is reading. Driven through the real rules, the real pair resolution and the
+    // real broadcaster check rather than by calling the engine method directly.
+    await setRules([]);
+    assert.equal(
+      channelInDemand("pvp:status"),
+      false,
+      "pvp:status was already in demand with no rules at all — this case proves nothing",
+    );
+
+    await setRules([
+      {
+        trigger: { id: "call.by-name", params: { name: "lyrics_on", stateVariable: "app:pvp.layer-hidden:Lyrics", stateOnValue: "on", stateOffValue: "off" } },
+        action: { id: "pvp.hide-layer", params: { layer: "Lyrics" } },
+      },
+      {
+        trigger: { id: "call.by-name", params: { name: "lyrics_off" } },
+        action: { id: "pvp.unhide-layer", params: { layer: "Lyrics" } },
+      },
+    ]);
+    assert.equal(
+      channelInDemand("pvp:status"),
+      true,
+      "a cue pair bound to app:pvp.layer-hidden:Lyrics registered no demand on pvp:status. " +
+        "PVP polls at its idle cadence, so the switch in Home Assistant answers from a " +
+        "snapshot seconds old with nothing anywhere saying so.",
+    );
+
+    await setRules([]);
+  });
+
+  it("pvp:status has exactly eight demand sources", () => {
+    // Eight, by three routes:
+    //
+    //  1. the trigger loop, ONE registration for every pvp.* trigger.
+    //  2. FIVE pvp CONDITIONS, pulled at fire time — one registration each:
+    //     layer-has-content, layer-is-playing, layer-is-hidden, layer-is-muted
+    //     and workspace-has-content.
+    //  3. TWO cue-pair FAMILIES — `app:pvp.layer-hidden:<name>` and
+    //     `app:pvp.layer-muted:<name>` — one registration per family, because
+    //     there is no finite list of refs to walk.
+    //
+    // An EXACT count: the families share `pvp:status` with the triggers and the
+    // conditions, so dropping either family's registration is invisible to the
+    // in-demand case above the moment any pvp rule exists.
+    assert.equal(channelDemandSourceCount("pvp:status"), 8);
+  });
+
+  it("youtube:status and resi:status have exactly three demand sources each", () => {
+    // Three each, by the same three routes: the trigger loop (one registration
+    // for the platform's whole streamTriggers set), the `<platform>.is-streaming`
+    // CONDITION, and ONE cue-pair source — `app:youtube.live` / `app:resi.live`.
+    //
+    // These two poll a PLATFORM API rather than a box on the LAN, so the idle
+    // cadence is the slowest in the app. A pair bound here and not registered
+    // would be a console button reporting "on air" from a reading taken minutes
+    // ago — which is the whole window in which anybody acts on it.
+    //
+    // Asserted TOGETHER and separately from obs:status because the two are built
+    // by the same factory: a registration reaching one and not the other is
+    // exactly the copy-paste this file exists to catch.
+    assert.equal(channelDemandSourceCount("youtube:status"), 3);
+    assert.equal(channelDemandSourceCount("resi:status"), 3);
   });
 });

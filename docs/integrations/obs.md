@@ -1,7 +1,8 @@
 # OBS Studio integration
 
 Surfaces OBS's live output state (recording / streaming / virtual cam) on stage
-displays via a custom-layout **OBS status** object — red while recording.
+displays via a custom-layout **OBS status** object — red while recording — and
+starts and stops those outputs from a rule or a cue.
 
 ## How it works
 
@@ -62,6 +63,46 @@ a retry, because retrying cannot change the answer:
 Each is logged on a `[obs]` line and shown on the Integrations page. Everything
 else — a network drop, OBS restarting, OBS not running yet — reconnects as
 before. Saving or testing the OBS integration starts it again.
+
+Every recording, stream and virtual-camera start and stop leaves one `[obs]`
+line on `/log`, whichever button, cue or hand in OBS caused it, so "did the
+recording run" has an answer on Monday.
+
+## Driving OBS from a cue
+
+Three automation actions drive OBS over the connection this integration already
+holds: **OBS recording**, **OBS streaming** and **OBS virtual camera**, each with
+a Start and a Stop. Nothing else is set up, and no Companion button is involved.
+
+Each is idempotent. Start while OBS is already recording answers `already
+recording` and sends nothing; Stop while it is not answers `already stopped`.
+The virtual camera answers `already running`.
+That is not politeness — obs-websocket rejects a redundant `StartRecord` with a
+request error, so without it a cue called twice would be a red line in the
+Activity log over a recording that is running perfectly well. With OBS
+disconnected the action fails with `OBS is not connected` and sends nothing.
+
+Paired as `obs_record_on` / `obs_record_off`, the two halves are an ON/OFF cue
+pair — a switch in Home Assistant, a cue button on the rules page — and the pair
+binds itself to `app:obs.recording` with nobody choosing it. So the switch
+reports what OBS is actually doing, from the `RecordStateChanged` event OBS
+pushes the instant it changes, rather than what the cue asked for:
+
+| Cue | Action |
+|---|---|
+| `obs_record_on` | OBS recording → Start recording |
+| `obs_record_off` | OBS recording → Stop recording |
+
+`obs_stream_on` / `obs_stream_off` work the same way against
+`app:obs.streaming`, and `obs_vcam_on` / `obs_vcam_off` against
+`app:obs.virtualCam` — the output a video call picks up as a webcam, so a switch
+in the house says whether the call can see anything. See [State from Stage
+Utility](../automation.md#state-from-stage-utility) and [Calling a cue by
+name](companion.md#calling-a-cue-by-name).
+
+Each decision is logged on an `[obs]` line — `[obs] record start -> sent
+StartRecord`, `[obs] record start -> already recording`, `[obs] record start
+refused: OBS is not connected`.
 
 ## Setup
 

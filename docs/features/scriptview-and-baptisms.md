@@ -6,7 +6,10 @@ Two operator surfaces built on the Planning Center plan.
 
 A rundown dashboard at `/scriptview` — every plan item with the note columns your
 department cares about, section headers, lengths, a clock and a live countdown.
-The current item highlights while a service is running.
+The current item highlights while a service is running. That address and the
+rundowns under it render without the app's sidebar and header, for a stage
+tablet; the same launcher with the chrome is **ScriptView** in the sidebar, at
+`/scriptview/manage`.
 
 Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/scriptview/weekend/audio`) you can pin in its own tab. The clock follows

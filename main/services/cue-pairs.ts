@@ -27,10 +27,12 @@
 //
 // A cue that does NOT press a Companion button has no such variable to read, and
 // does not need one — this app is already talking to the device. Those bindings
-// are `app:<source>` (see app-state-sources.ts), and a pair whose ON half is a
-// `reaper.transport` RECORD is bound to `app:reaper.recording` IMPLICITLY: it is
-// the only answer there is, and a Record/Stop pair reporting nothing until
-// somebody found a select would be optimistic for no reason. An explicit
+// are `app:<source>` (see app-state-sources.ts), and a pair whose ON half
+// starts an output this app can watch — `reaper.transport` RECORD, `obs.record`
+// START, `obs.stream` START, `obs.virtual-cam` START — is bound to that
+// output's source IMPLICITLY: it is the only answer there is, and a Record/Stop
+// pair reporting nothing until somebody found a select would be optimistic for
+// no reason. An explicit
 // `stateVariable` on either half always wins over the implicit one, so a pair
 // can still be pointed somewhere else, or left unbound, by hand.
 //
@@ -39,10 +41,14 @@
 // isHiddenFromHome — absent means shown, so nothing an upgrade finds changes.
 
 import {
+  APP_STATE_FAMILIES,
   APP_STATE_SOURCES,
+  appStateFamilyRef,
   appStateProblem,
   appStateRef,
   isAppStateRef,
+  type AppStateFamilyId,
+  type AppStateSourceId,
 } from "./app-state-sources.js";
 import { isCompanionVariableRef } from "./companion-export.js";
 import { STATE_ANY_OTHER } from "./companion-state-source.js";
@@ -352,12 +358,43 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
 }
 
 /**
- * The binding this pair's own ON action implies, or null.
+ * An ON action that starts something this app can watch, and the source that
+ * watches it.
  *
- * ONE case today: an ON half that starts a REAPER recording reads
- * `app:reaper.recording`. Stage Utility polls REAPER's transport already, so
- * the state costs nothing — and the alternative, an optimistic pair, reports
- * "recording" after a Record that REAPER never carried out.
+ * A table rather than four `if`s: each entry is an action id, the one command
+ * value that means "start", and the `app:` source reporting whether it is
+ * running. Stage Utility is already talking to both devices, so the state
+ * costs nothing — and the alternative, an optimistic pair, reports "recording"
+ * after a Record the recorder never carried out.
+ */
+const IMPLIED_SOURCES: { actionId: string; command: string; source: AppStateSourceId }[] = [
+  { actionId: "reaper.transport", command: "record", source: "reaper.recording" },
+  { actionId: "obs.record", command: "start", source: "obs.recording" },
+  { actionId: "obs.stream", command: "start", source: "obs.streaming" },
+  { actionId: "obs.virtual-cam", command: "start", source: "obs.virtualCam" },
+];
+
+/**
+ * The PARAMETERISED implications: an ON action whose own `layer` param names
+ * what the source reads.
+ *
+ * Separate from the table above because the two ask different questions. Those
+ * four are one action id carrying one command value out of several; these are a
+ * whole action id ("hide a layer" is not a command on a "layer" action), and the
+ * source they imply is not fixed — it is the layer the rule names.
+ *
+ * ONLY the switch-on direction, exactly as above. `pvp.unhide-layer` as an ON
+ * half is a cue whose "on" means the layer is SHOWN, so binding it to
+ * `layer-hidden` would report the switch backwards; it is left unbound and the
+ * operator picks what they mean.
+ */
+const IMPLIED_FAMILIES: { actionId: string; family: AppStateFamilyId }[] = [
+  { actionId: "pvp.hide-layer", family: "pvp.layer-hidden" },
+  { actionId: "pvp.mute-layer", family: "pvp.layer-muted" },
+];
+
+/**
+ * The binding this pair's own ON action implies, or null.
  *
  * Never overrides a stored `stateVariable`: cuePairs applies it last.
  *
@@ -365,13 +402,28 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
  * a draft the operator is still typing, which is not a saved Rule.
  */
 export function implicitStateBinding(onAction: Rule["action"]): StateBinding | null {
-  if (onAction.id !== "reaper.transport") return null;
-  if (String(onAction.params.command ?? "").trim() !== "record") return null;
-  const source = APP_STATE_SOURCES.get("reaper.recording")!;
+  const command = String(onAction.params.command ?? "").trim();
+  const implied = IMPLIED_SOURCES.find((s) => s.actionId === onAction.id && s.command === command);
+  if (implied) {
+    const source = APP_STATE_SOURCES.get(implied.source)!;
+    return {
+      variable: appStateRef(implied.source),
+      onValue: source.onValue,
+      offValue: source.offValue,
+    };
+  }
+  const family = IMPLIED_FAMILIES.find((f) => f.actionId === onAction.id);
+  if (!family) return null;
+  // The layer the rule NAMES. A draft with the field still blank implies
+  // nothing: `app:pvp.layer-hidden:` is refused by the same parser that reads
+  // it, so implying it would be a field showing a binding that cannot be saved.
+  const layer = String(onAction.params.layer ?? "").trim();
+  if (!layer) return null;
+  const def = APP_STATE_FAMILIES.get(family.family)!;
   return {
-    variable: appStateRef("reaper.recording"),
-    onValue: source.onValue,
-    offValue: source.offValue,
+    variable: appStateFamilyRef(family.family, layer),
+    onValue: def.onValue,
+    offValue: def.offValue,
   };
 }
 

@@ -8,7 +8,10 @@ Reach it from **Screens**, then **Edit layout** on any view with a custom layout
 ## The inspector
 
 Select an object and its settings appear on the right, in three sections that are
-always in the same order:
+always in the same order. The panel is dragged wider or narrower from its left
+edge and remembers the width; double-click the edge to reset it. Whatever the
+width, every row fits inside it, stacking its controls when it gets narrow,
+and the panel never scrolls sideways.
 
 | | |
 |---|---|
@@ -46,9 +49,9 @@ Replacing swaps the canvas outright, and **Undo** takes it back.
 
 **Add widget** opens the palette as a panel floating from that button, grouped
 by what a widget reads from, with a search box over it. It stays open while you
-drag or click widgets onto the canvas and closes from the same button, and its
-height follows the window rather than the canvas, so a short Ultritouch strip
-does not shorten the list. **Hide widgets whose integration is not set up** removes the
+drag or click widgets onto the canvas; a click anywhere else, Escape, or the
+same button closes it. Its height follows the window rather than the canvas, so
+a short Ultritouch strip does not shorten the list. **Hide widgets whose integration is not set up** removes the
 ones you have no gear for — from the palette and from the right-click (or tap
 and hold) Add menu alike. Left on, they stay listed but dimmed, which is the
 right default while you are still connecting things.

@@ -57,7 +57,7 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 | --- | --- |
 | `/` | Home |
 | `/screens` | Screens and the views they show |
-| `/scriptview` | Rundown viewer |
+| `/scriptview/manage` | Rundown launcher |
 | `/patch` | This week's stage patch, for volunteers |
 | `/automation` | Automation rules |
 | `/plan` | Which service and plan this machine follows |
@@ -92,6 +92,13 @@ the app's sidebar and header — just the record and its own "History" heading �
 the link shows nothing else of the app. The operator's own history — edit
 recorded times, merge a split service, delete one — is `/history/manage`, in the
 sidebar under Services, with the app's usual chrome.
+
+`/scriptview` works the same way: the rundown launcher with its own "ScriptView"
+heading and no sidebar or header, for a stage tablet or a producer's second
+screen, and each rundown under it, `/scriptview/<service type>/<layout>`, is the
+whole window. The operator's copy of the launcher is `/scriptview/manage`, in the
+sidebar under Content, with the app's usual chrome; `/scriptview/presets`, which
+edits layouts, keeps the chrome too.
 
 ## QR codes
 

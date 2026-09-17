@@ -386,7 +386,7 @@ function PlanAttachmentConfig({
         </Select>
       </Row>
       <Row label="Crop %">
-        <div className="grid grid-cols-2 gap-1 flex-1 @max-[248px]/insp:w-full">
+        <div className="grid grid-cols-2 gap-1 flex-1 @max-[288px]/insp:w-full">
           <NumberInput value={Math.round((crop.top ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("top", v)} />
           <NumberInput value={Math.round((crop.bottom ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("bottom", v)} />
           <NumberInput value={Math.round((crop.left ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("left", v)} />
@@ -1690,7 +1690,7 @@ export function Inspector({
       <span className="text-caption2 text-fg-muted">
         Position &amp; size ({Math.round(parentW)}×{Math.round(parentH)}{nested ? " · in container" : ""})
       </span>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2 @max-[248px]/insp:grid-cols-1">
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2 @max-[288px]/insp:grid-cols-1">
         <PixelField label="X" value={o.x} dim={parentW} onChange={(v) => onGeom({ x: clamp(v, 0, 1 - o.w) })} />
         <PixelField label="Y" value={o.y} dim={parentH} onChange={(v) => onGeom({ y: clamp(v, 0, 1 - o.h) })} />
         <PixelField label="W" value={o.w} dim={parentW} onChange={(v) => onGeom({ w: clamp(v, MIN, 1 - o.x) })} />

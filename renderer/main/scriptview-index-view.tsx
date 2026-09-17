@@ -25,7 +25,12 @@ export function scriptViewUrl(typeName: string, layoutId: string, layoutName?: s
 // ScriptView landing at "/scriptview". Lists PCO service types, each with a layout
 // dropdown + open arrow, deep-linking to /scriptview/{serviceTypeId}/{layoutId}.
 // Our own take on ScriptViewer's "Plans" page, in the kiosk design language.
-export function ScriptViewIndex() {
+/**
+ * `standalone` is the chromeless `/scriptview` the tablet opens: no rail and no
+ * context bar, so the page draws its own heading, as `/history` does. The
+ * operator's `/scriptview/manage` renders inside the shell, which titles it.
+ */
+export function ScriptViewIndex({ standalone = false }: { standalone?: boolean } = {}) {
   const { isLoading: stateLoading } = useStageState();
   const [types, setTypes] = useState<ServiceTypeDTO[] | null>(null);
   const [layouts, setLayouts] = useState<ScriptViewLayout[]>([]);
@@ -65,15 +70,17 @@ export function ScriptViewIndex() {
 
 
   return (
-    // `h-full` rather than `h-[100dvh]`, and no `kiosk-surface` or safe-area
-    // padding: this renders inside the operator shell, below the rail and the
-    // context bar, and follows the light/dark toggle. All three were correct
-    // when it was served as a standalone chrome-free page.
-    //
-    // The brand top bar and its settings QR are gone too - the rail carries the
-    // logo, the app name and a Settings link, so repeating them here put two
-    // brand rows on one screen.
-    <div className="flex flex-col h-full overscroll-none">
+    // Two URLs, one page. /scriptview is chromeless (isSharedChromelessPath),
+    // like /history, and draws its own heading because nothing else on the
+    // screen says what it is; /scriptview/manage sits in the shell, which
+    // titles it, so the heading would be a second one there.
+    <div className="flex flex-col h-full overscroll-none pt-[env(safe-area-inset-top)]">
+      {standalone && (
+        <div className="pt-5">
+          <h1 className="text-subheadline font-semibold text-fg">ScriptView</h1>
+          <p className="text-footnote text-fg-muted">Pick a service and a layout to open its rundown.</p>
+        </div>
+      )}
       {/* Scroll container + inner min-h-full centering wrapper: centers when the
           list is short, scrolls without clipping the ends when it's long. */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">

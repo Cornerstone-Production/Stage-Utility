@@ -7,6 +7,7 @@ export { MENU_ITEM, MENU_ITEM_DANGER, menuContent } from "./menu-classes";
 export { Input, type InputProps } from "./input";
 export { NumberInput, type NumberInputProps } from "./number-input";
 export {
+  NOT_OFFERED,
   Select,
   SelectGroup,
   SelectLabel,

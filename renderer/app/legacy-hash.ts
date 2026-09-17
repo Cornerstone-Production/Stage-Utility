@@ -29,7 +29,7 @@ const ROUTES: Record<(typeof LEGACY_SECTION_IDS)[number], string> = {
   plan: "/",
   // Views and Displays merged into Screens in Phase 2.
   views: "/screens",
-  scriptview: "/scriptview",
+  scriptview: "/scriptview/manage",
   displays: "/screens",
   patch: "/patch",
   automation: "/automation",

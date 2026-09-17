@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import type { ObsStatusDTO } from "../types/stage.js";
-import { reduceObsEvent } from "./obs-service.js";
+import { logOutputChange, reduceObsEvent } from "./obs-service.js";
 
 const OFFLINE: ObsStatusDTO = {
   connected: false,
@@ -127,5 +127,35 @@ describe("reduceObsEvent", () => {
       { recording: s.recording, streaming: s.streaming, virtualCam: s.virtualCam },
       { recording: true, streaming: true, virtualCam: true },
     );
+  });
+});
+
+describe("logOutputChange", () => {
+  // The Sunday-morning question "did the recording actually run" had no line
+  // to answer it: the state reached displays and never the log.
+  function captured(fn: () => void): string[] {
+    const lines: string[] = [];
+    const real = console.log;
+    console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+    try { fn(); } finally { console.log = real; }
+    return lines;
+  }
+  const idle = { ...OFFLINE, connected: true };
+
+  test("a recording that starts and stops leaves exactly two lines", () => {
+    const rec = { ...idle, recording: true };
+    assert.deepEqual(captured(() => logOutputChange(idle, rec)), ["[obs] recording started"]);
+    assert.deepEqual(captured(() => logOutputChange(rec, idle)), ["[obs] recording stopped"]);
+  });
+
+  test("STARTING then STARTED is one transition, not two", () => {
+    const rec = { ...idle, recording: true };
+    assert.deepEqual(captured(() => logOutputChange(rec, { ...rec })), []);
+  });
+
+  test("streaming and the virtual camera have their own lines, and nothing else logs", () => {
+    assert.deepEqual(captured(() => logOutputChange(idle, { ...idle, streaming: true })), ["[obs] streaming started"]);
+    assert.deepEqual(captured(() => logOutputChange(idle, { ...idle, virtualCam: true })), ["[obs] virtual camera started"]);
+    assert.deepEqual(captured(() => logOutputChange(idle, { ...idle, recordPaused: true })), []);
   });
 });
