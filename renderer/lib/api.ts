@@ -1018,6 +1018,21 @@ function dispatch(channel: string, payload: unknown, replayed: boolean): void {
 const directHandlers = new Map<string, Set<(payload: unknown, replayed: boolean) => void>>();
 
 /**
+ * That one wire listener, by channel, so the LAST subscriber to leave can find
+ * it.
+ *
+ * Held here rather than in the closure of the subscriber that created it. That
+ * closure only belongs to whichever subscriber arrived FIRST, so the listener
+ * came off the stream only when the first to arrive was also the last to leave
+ * — and unmounting two components in the order they mounted, which is the
+ * ordinary React case, left it attached with its callback set already gone. The
+ * next subscriber to the channel then counted as the first again and added a
+ * SECOND listener, so every frame was dispatched twice and every list rendered
+ * twice, for the life of the page.
+ */
+const channelListeners = new Map<string, SseListener>();
+
+/**
  * Test seam — forget the replay cache, so a case can model a COLD page.
  *
  * The cache is module-level and a test file shares one module registry across
@@ -1122,9 +1137,10 @@ export const __sseFallback = {
     fallbackWrappers.length = 0;
     sseListeners.length = 0;
     workerHandlers.clear();
-    // The direct-path callback registry too: a case that left subscribers in it
-    // would have the next case's frames delivered into its own handlers.
+    // The direct-path registries too: a case that left subscribers in one would
+    // have the next case's frames delivered into its own handlers.
     directHandlers.clear();
+    channelListeners.clear();
   },
 };
 
@@ -1526,7 +1542,6 @@ export function onNotification(
   // to matter. On the polling transport there is no stream; the poller is
   // already running from module scope, which is what makes the hydrate snapshot
   // available to a subscriber that mounts later.
-  let entry: SseListener | null = null;
   if (first && !POLL_TRANSPORT) {
     const handler = (e: MessageEvent) => {
       try {
@@ -1535,9 +1550,18 @@ export function onNotification(
         console.error(`[api] SSE parse error for "${channel}":`, err);
       }
     };
-    entry = { channel, handler };
+    // The stream FIRST, then the registration. ensureEventSource re-attaches
+    // everything in sseListeners when it builds or rebuilds the stream, so
+    // registering before calling it attached this handler twice — once in that
+    // loop and once below. It only bit the very first subscriber on a page,
+    // because every later call finds the stream already open and re-attaches
+    // nothing, which is why a channel somewhere rendered every update twice
+    // while every other channel was fine.
+    const es = ensureEventSource();
+    const entry: SseListener = { channel, handler };
+    channelListeners.set(channel, entry);
     sseListeners.push(entry);
-    ensureEventSource().addEventListener(channel, handler);
+    es.addEventListener(channel, handler);
   }
 
   // Replay the connect-time snapshot this subscriber was too late for. Deferred
@@ -1553,7 +1577,11 @@ export function onNotification(
     set.delete(cb);
     if (set.size === 0) {
       directHandlers.delete(channel);
+      // Looked up by CHANNEL, never captured from the subscribe that created
+      // it: see channelListeners.
+      const entry = channelListeners.get(channel);
       if (entry) {
+        channelListeners.delete(channel);
         const idx = sseListeners.indexOf(entry);
         if (idx !== -1) sseListeners.splice(idx, 1);
         eventSource?.removeEventListener(channel, entry.handler);
