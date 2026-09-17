@@ -211,7 +211,7 @@ describe("event-poll client registry", () => {
       lines.includes("[events] poll client panel-1 expired (no poll for 30s)"),
       `expected an expiry line, got: ${lines.join(" | ")}`,
     );
-    assert.deepEqual(hub.clientIds(), []);
+    assert.deepEqual([...hub.clientIds()], []);
   });
 
   it("resyncs a client that expired and came back, whose seq looks current", () => {
@@ -257,6 +257,25 @@ describe("event-poll client registry", () => {
     hub.sweep();
     assert.deepEqual(expired, [], "40 s of continuous polling must not evict anybody");
     hub.stopSweep();
+  });
+
+  it("reset() forgets the clients and the buffer a stopping server was holding", () => {
+    // The updater restarts the server inside the same process. stopSweep alone
+    // left the registry populated, so the next start counted clients that are
+    // not there as subscribers and kept producers running for nobody — with no
+    // sweep left to expire them.
+    const c = clock();
+    const { hub } = makeHub({ now: c.now });
+    captureLog(() => hub.buildPollResponse("panel-1", null, wantsAll, snapshot));
+    hub.record("pco:live", { mode: "item" });
+    assert.deepEqual([...hub.clientIds()], ["panel-1"], "premise: a client is attached");
+    assert.equal(hub.bufferSize(), 1, "premise: a frame is buffered");
+
+    hub.reset();
+
+    assert.deepEqual([...hub.clientIds()], [], "a client that outlives the server it registered with is a phantom subscriber");
+    assert.equal(hub.bufferSize(), 0);
+    assert.equal(hub.sweepRunning(), false);
   });
 
   it("runs no sweep timer with nobody polling", () => {

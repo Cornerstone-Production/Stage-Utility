@@ -783,7 +783,7 @@ export class RemoteServer {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
-    eventPoll.stopSweep();
+    eventPoll.reset();
     // Force-close all tracked sockets so the server shuts down promptly.
     for (const socket of this.sockets) {
       socket.destroy();

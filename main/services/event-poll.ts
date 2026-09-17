@@ -188,9 +188,16 @@ export class EventPollHub {
     return true;
   }
 
-  /** Live poll-client ids, for the subscriber accounting in remote-server. */
-  clientIds(): string[] {
-    return [...this.clients.keys()];
+  /**
+   * Live poll-client ids, for the subscriber accounting in remote-server.
+   *
+   * An iterator, not an array. countSubscribers runs once per channel per
+   * broadcast — on the 4 Hz metrics channel with a busy box that is thousands
+   * of calls a minute — and handing back a fresh array each time allocates one
+   * per call for a set that is almost always empty or one long.
+   */
+  clientIds(): IterableIterator<string> {
+    return this.clients.keys();
   }
 
   /** For tests: is the expiry sweep armed? */
@@ -210,8 +217,9 @@ export class EventPollHub {
       expired++;
       // The duration is spelled out rather than interpolated: log-injection's
       // scan cannot tell a constant from wire data and rejects any unscrubbed
-      // interpolation, which is the right default. TTL_IS_30S below is what
-      // stops the two drifting.
+      // interpolation, which is the right default. The `satisfies 30_000` on
+      // POLL_CLIENT_TTL_MS is what stops the two drifting: change the constant
+      // and this wording stops compiling.
       console.log(`[events] poll client ${scrub(cid)} expired (no poll for 30s)`);
     }
     if (this.clients.size === 0) {
@@ -233,5 +241,20 @@ export class EventPollHub {
     if (!this.sweepTimer) return;
     clearInterval(this.sweepTimer);
     this.sweepTimer = null;
+  }
+
+  /**
+   * Forget every client and every buffered frame, and stop the sweep.
+   *
+   * What a stopping server wants. stopSweep alone left the registry and the
+   * buffer populated, so a restart in the same process (the updater restarts
+   * the server without exiting) began with clients that are not there —
+   * counted as subscribers by countSubscribers, keeping producers running for
+   * nobody until the sweep they no longer had would have expired them.
+   */
+  reset(): void {
+    this.stopSweep();
+    this.clients.clear();
+    this.buffer.length = 0;
   }
 }

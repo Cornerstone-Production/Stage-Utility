@@ -274,6 +274,40 @@ describe("?transport=poll", () => {
     await flush();
   });
 
+  test("becoming visible polls at once, but does not undo a running backoff", async () => {
+    // A kiosk tab that flips on a screensaver would otherwise drop a 20 s
+    // backoff to 2 s on every flip, hammering a server that is still down —
+    // which is what the backoff exists to prevent. Becoming visible says
+    // nothing about whether the server came back; one immediate attempt is the
+    // right amount of optimism.
+    fails();
+    firePoll();
+    await flush();
+    fails();
+    firePoll();
+    await flush();
+    const backedOff = pending.find((p) => p.ms !== 200)?.ms ?? 0;
+    assert.equal(backedOff, 8000, "premise: two failures have backed the loop off");
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    assert.equal(firePoll(), 0, "a visible tab must collect immediately rather than wait out its interval");
+    fails();
+    await flush();
+
+    // Carried on from where it was, not restarted: 8 s doubles to 16 s. A reset
+    // would show 4 s here, having gone back to the 2 s base.
+    assert.equal(
+      pending.find((p) => p.ms !== 200)?.ms,
+      16_000,
+      "the backoff restarted on a visibility flip, so a screensaver would hammer a server that is still down",
+    );
+
+    serves({ seq: 200, resync: false, frames: [] });
+    firePoll();
+    await flush();
+    fireReport();
+  });
+
   test("re-reports the channel set on a resync", async () => {
     // One cause of a resync is the server having expired this cid, which
     // discards the channel filter it was holding. Nothing else sends it again:

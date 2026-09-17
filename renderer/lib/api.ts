@@ -1511,8 +1511,19 @@ if (typeof document !== "undefined") {
     if (document.visibilityState !== "visible") return;
     // Polling path: a panel that was hidden is up to one backed-off interval
     // behind, so collect now rather than waiting the rest of it out.
+    //
+    // The backoff is deliberately left alone. Becoming visible says nothing
+    // about whether the server came back, and a kiosk whose tab flips on a
+    // screensaver would otherwise drop a 20 s backoff to 2 s on every flip —
+    // hammering a server that is still down, which is what the backoff exists
+    // to prevent. One immediate attempt is the right amount of optimism; if it
+    // succeeds, pollOnce resets the delay itself.
+    //
+    // There is no `pollDelayMs = POLL_INTERVAL_MS` here even for the healthy
+    // case: a successful poll already set it to exactly that, so the assignment
+    // could not change anything, and a version guarded on `pollFailures === 0`
+    // would not go red on removal.
     if (POLL_TRANSPORT) {
-      pollDelayMs = POLL_INTERVAL_MS;
       schedulePoll(0);
       return;
     }
