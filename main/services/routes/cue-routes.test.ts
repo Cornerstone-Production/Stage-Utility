@@ -992,7 +992,7 @@ describe("GET /api/cues/manifest", () => {
       version: number;
       server: { name: string; lanUrl: string | null };
       switches: { id: string; name: string; on: string; off: string; state: string; available: boolean }[];
-      buttons: { id: string; name: string; cue: string; available: boolean }[];
+      buttons: { id: string; name: string; cue: string; available: boolean; builtin?: true }[];
     };
   };
 
@@ -1009,8 +1009,15 @@ describe("GET /api/cues/manifest", () => {
       ["projectors|Projectors|projectors_on|projectors_off|on|true"],
     );
     assert.deepEqual(
-      m.buttons.map((x) => `${x.id}|${x.name}|${x.cue}|${x.available}`),
+      // The app's own built-ins are listed too and carry `builtin: true`; this
+      // assertion is about the cues the fixture saved. See builtin-cues.ts.
+      m.buttons.filter((x) => !x.builtin).map((x) => `${x.id}|${x.name}|${x.cue}|${x.available}`),
       ["take_screens|Take screens|take_screens|true"],
+    );
+    assert.deepEqual(
+      m.buttons.filter((x) => x.builtin).map((x) => x.id),
+      ["display_refresh"],
+      "the built-ins are not marked, or one appeared for an integration nothing enabled",
     );
     assert.equal(typeof m.server.name, "string");
   });
@@ -1489,8 +1496,11 @@ describe("the Home Assistant config", () => {
     assert.equal(r.headers["Content-Disposition"], 'attachment; filename="stage_utility.yaml"');
     const yaml = r.body;
 
-    // Four cues from the import above -> four commands, two pairs -> two switches.
-    assert.equal((yaml.match(/^ {2}su_\w+:$/gm) ?? []).length, 4);
+    // Four cues from the import above plus `display_refresh`, which the app
+    // ships and offers on every install -> five commands; two pairs -> two
+    // switches. See builtin-cues.ts.
+    assert.equal((yaml.match(/^ {2}su_\w+:$/gm) ?? []).length, 5);
+    assert.match(yaml, /^ {2}su_display_refresh:$/m);
     assert.equal((yaml.match(/^ {8}optimistic: true$/gm) ?? []).length, 2);
     assert.match(yaml, /url: "http:\/\/[^"]+\/api\/cues\/room_a_screens_projectors_on"/);
     assert.match(yaml, /authorization: !secret stage_utility_token/);
@@ -3205,7 +3215,14 @@ describe("a cue that drives REAPER rather than a Companion button", () => {
     reaperDeps.fetch = realReaperFetch;
   });
 
-  /** A REAPER pair, `<base>_on` running `onCommand` and `<base>_off` a Stop. */
+  /**
+   * A REAPER pair, `<base>_on` running `onCommand` and `<base>_off` a Stop.
+   *
+   * The base is the operator's own word — `booth_record`, not `reaper_record`,
+   * which is a built-in's name and reserved (see builtin-cues.ts). The point
+   * here is the OPERATOR'S pair getting the implied binding, which is what a
+   * rules file written before the built-ins existed holds.
+   */
   async function withReaperPair(
     base: string,
     onCommand: string,
@@ -3236,9 +3253,9 @@ describe("a cue that drives REAPER rather than a Companion button", () => {
   });
 
   test("_on while REAPER is already recording answers already on and sends nothing", async () => {
-    await withReaperPair("reaper_record", "record");
+    await withReaperPair("booth_record", "record");
     recording = true;
-    const r = await call("reaper_record_on");
+    const r = await call("booth_record_on");
     assert.equal(r.status, 200);
     const body = r.json as Record<string, unknown>;
     assert.equal(String(body.detail), "already on");
@@ -3248,8 +3265,8 @@ describe("a cue that drives REAPER rather than a Companion button", () => {
   });
 
   test("_on while REAPER is idle really does send Record", async () => {
-    await withReaperPair("reaper_record", "record");
-    const r = await call("reaper_record_on");
+    await withReaperPair("booth_record", "record");
+    const r = await call("booth_record_on");
     assert.equal(r.status, 200);
     assert.equal((r.json as Record<string, unknown>).skipped, undefined);
     assert.deepEqual(transport, [
@@ -3259,11 +3276,11 @@ describe("a cue that drives REAPER rather than a Companion button", () => {
   });
 
   test("the manifest names Stage Utility as the state source", async () => {
-    await withReaperPair("reaper_record", "record");
+    await withReaperPair("booth_record", "record");
     recording = true;
     const r = await callRoute(cueRoutes, "/api/cues/manifest");
     const { switches } = r.json as { switches: Record<string, unknown>[] };
-    const entry = switches.find((s) => s.id === "reaper_record")!;
+    const entry = switches.find((s) => s.id === "booth_record")!;
     assert.equal(entry.stateSource, "app:reaper.recording");
     assert.equal(entry.state, "on");
     assert.equal(entry.available, true, "a cue with no Companion button cannot be button-missing");

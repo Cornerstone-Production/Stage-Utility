@@ -38,6 +38,7 @@ import {
   type AppStateSourceId,
 } from "./app-state-sources.js";
 import { boundCuePairs, cuePairs, stateBindingProblem } from "./cue-pairs.js";
+import { builtinCueRules, reservedCueNames } from "./builtin-cues.js";
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
@@ -185,6 +186,24 @@ class AutomationEngine {
     return this.rules.map((r) => ({ ...r }));
   }
 
+  /**
+   * The stored rules plus the ones the app ships. See builtin-cues.ts.
+   *
+   * What every CUE reader asks for — the call route, the manifest, the states
+   * read and the generated Home Assistant config — and the only thing that ever
+   * sees a built-in. `listRules()` is deliberately unchanged: the Automation
+   * page, the export, the import and the config snapshot all read that one, and
+   * a synthesised rule appearing there would be a rule an operator could edit
+   * and could not delete.
+   *
+   * Built fresh on every call, because what is offered depends on which
+   * integrations are enabled and on what ProVideoPlayer last reported. Nothing
+   * is persisted.
+   */
+  rulesWithBuiltins(): Rule[] {
+    return [...this.listRules(), ...builtinCueRules(this.rules)];
+  }
+
   getSettings(): AutomationSettings {
     return { ...this.settings };
   }
@@ -218,6 +237,20 @@ class AutomationEngine {
     if (!name) throw new Error("A called cue needs a name");
     if (!isValidCueName(name)) {
       throw new Error(`"${name}" is not a usable cue name — use lower_snake_case`);
+    }
+
+    // A BUILT-IN'S NAME IS TAKEN. The app ships a rule answering to it, so a
+    // stored rule under the same name would be two things behind one URL and
+    // one Home Assistant entity id. Refused here, where it is still a 400
+    // somebody can read, rather than resolved at call time where it would be a
+    // coin toss.
+    //
+    // Except for the rule that ALREADY holds it: an install that built its own
+    // OBS pair before this existed must stay editable, and its built-in is left
+    // out instead — see builtinCueRules, which logs which and why.
+    const editing = this.rules.find((r) => r.id === exceptId);
+    if (name !== (editing ? this.cueNameOf(editing) : "") && reservedCueNames().has(name)) {
+      throw new Error(`"${name}" is a built-in cue`);
     }
 
     // One index of everything the OTHER rules answer to, so both checks below
@@ -363,11 +396,15 @@ class AutomationEngine {
     // NAMES FIRST, then former names. A live name always wins: a rule that is
     // called by its own name must never be shadowed by another rule that used to
     // be called that.
+    // BUILT-INS INCLUDED, and the stored rules first in the list, so a stored
+    // rule that owns a built-in's name resolves to itself. builtinCueRules
+    // leaves that built-in out anyway; this is the belt to its braces.
+    const callable = this.rulesWithBuiltins();
     const rule =
       wanted === ""
         ? undefined
-        : (this.rules.find((r) => this.cueNameOf(r) === wanted) ??
-          this.rules.find((r) => this.cueAliasesOf(r).includes(wanted)));
+        : (callable.find((r) => this.cueNameOf(r) === wanted) ??
+          callable.find((r) => this.cueAliasesOf(r).includes(wanted)));
 
     // What the log line calls this call. A call through a former name says both,
     // with an arrow — otherwise the only trace of a Home Assistant still holding
@@ -623,7 +660,10 @@ class AutomationEngine {
    */
   private desiredStateOf(rule: Rule): CueCommand | null {
     if (rule.trigger.id !== CALL_TRIGGER_ID) return null;
-    for (const pair of cuePairs(this.rules)) {
+    // Over the BUILT-INS too: a built-in switch is a bound pair, and without it
+    // here `POST /api/cues/obs_record_on` said twice would send a second Start
+    // to a recorder that is already running rather than answering "already on".
+    for (const pair of cuePairs(this.rulesWithBuiltins())) {
       const binding = pair.binding;
       if (binding === null) continue;
       // The whole binding, not just the base: what a press COMMANDS is the

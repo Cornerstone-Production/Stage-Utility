@@ -19,7 +19,7 @@ every cue has, so every consumer of cues works unchanged:
 
 | Field | Value |
 |---|---|
-| `id` | `builtin:<base>` |
+| `id` | `builtin:<cue name>` — `builtin:obs_record_on`. A pair is two rules and each needs its own id; the design said `builtin:<base>`, which two rules cannot share. |
 | `trigger` | Called by name, `name: <base>_on` / `<base>_off`, or `<base>` for a button |
 | `action` | the table's ON or OFF action |
 | `conditions` | none: a panel button must work during a service |
@@ -74,17 +74,25 @@ layer, 3 fixed buttons.
 
 ## Where they enter
 
-One function, `builtinCueRules(): Rule[]`, in a new `main/services/builtin-cues.ts`,
-reading the integration flags and the last PVP status. A second,
-`cueRules()` on the engine, returns stored rules plus built-ins and replaces
-`listRules()` in exactly these readers:
+One function, `builtinCueRules(stored: readonly Rule[]): Rule[]`, in a new
+`main/services/builtin-cues.ts`, reading the integration flags and the last PVP
+status. A second, `rulesWithBuiltins()` on the engine, returns stored rules plus
+built-ins and replaces `listRules()` in exactly these readers:
+
+The design called that second one `cueRules()`. That name is taken: the engine
+already has a `cueRules()` meaning "the STORED rules whose trigger is
+`call.by-name`", and companion-reconcile walks it to match Companion buttons to
+rules it may write a fingerprint back to. Feeding it built-ins would have the
+reconcile writing to rules that do not exist.
 
 - `callByName` (the call route), so `POST /api/cues/obs_record_on` runs the
   action through the same path as any cue: disarm, idempotent "already on",
   settle window, `[cues]` log line, activity log.
 - `cueManifestDeps.rules` and `cueStatesDeps.rules`, so the manifest lists them
   as switches and buttons and `/api/cues/states` reads their state.
-- `home-assistant-yaml.ts`, so the YAML fallback carries them too.
+- the `home-assistant-yaml.ts` call site in `routes/cue-routes.ts`, so the YAML
+  fallback carries them too. The generator itself is pure — rules in, text out —
+  so the swap is at the one place that feeds it.
 
 `listRules()` is unchanged: the Automation page, export, import and the config
 snapshot never see a built-in. Nothing is persisted.

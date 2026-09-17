@@ -158,7 +158,9 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // purpose: the docs tell the operator to save it as
     // packages/stage_utility.yaml, and a filename that drifted with the server's
     // own name would make that instruction wrong.
-    text(c, homeAssistantYaml(automationEngine.listRules(), baseUrlFor(c)), {
+    // WITH the built-ins, so the fragment an operator pastes carries the
+    // same entities `/api/cues/manifest` lists.
+    text(c, homeAssistantYaml(automationEngine.rulesWithBuiltins(), baseUrlFor(c)), {
       "Content-Type": "text/yaml; charset=utf-8",
       "Content-Disposition": 'attachment; filename="stage_utility.yaml"',
     });
