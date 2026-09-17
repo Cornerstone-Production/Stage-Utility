@@ -59,6 +59,16 @@ const REGISTRY = {
   actions: [
     { id: "companion.press", label: "Press a Companion button", params: [] },
     {
+      id: "pvp.hide-layer",
+      label: "Hide a ProVideoPlayer layer",
+      params: [{ key: "layer", label: "Layer", type: "string" }],
+    },
+    {
+      id: "pvp.unhide-layer",
+      label: "Unhide a ProVideoPlayer layer",
+      params: [{ key: "layer", label: "Layer", type: "string" }],
+    },
+    {
       id: "reaper.transport",
       label: "REAPER transport",
       params: [
@@ -89,7 +99,21 @@ const transport = (name: string, command: string, params: Record<string, string>
   oncePerService: false,
 });
 
+/** A cue hiding or unhiding a ProVideoPlayer layer. */
+const pvpCue = (name: string, action: string, layer: string, params: Record<string, string> = {}): StubRule => ({
+  id: `rule-${name}`,
+  name,
+  enabled: true,
+  trigger: { id: CALL_TRIGGER_ID, params: { name, says: name, ...params } },
+  conditions: [],
+  action: { id: action, params: { layer } },
+  cooldownSec: 0,
+  oncePerService: false,
+});
+
 let RULES: StubRule[] = [];
+/** What `GET /api/pvp/status` says PVP currently has. */
+let PVP_LAYERS: string[] = [];
 /** What `integrations:list` says is set up. */
 let CONFIGURED: string[] = [];
 
@@ -101,6 +125,31 @@ let CONFIGURED: string[] = [];
     body = { rules: RULES, settings: { simulate: false, disarmed: false } };
   } else if (url.includes("/api/automation/log")) body = { entries: [] };
   else if (url.includes("/api/automation/plan-items")) body = { items: [] };
+  else if (url.includes("/api/pvp/status")) {
+    body = {
+      connected: PVP_LAYERS.length > 0,
+      sampledAt: null,
+      imageDurationSec: null,
+      layers: PVP_LAYERS.map((name, i) => ({
+        uuid: `uuid-${i}`,
+        name,
+        index: i,
+        state: "still",
+        mediaName: null,
+        mediaUuid: null,
+        lastCueName: null,
+        lastCueUuid: null,
+        nextCueName: null,
+        mediaSinceAt: null,
+        hidden: false,
+        muted: false,
+        opacity: 1,
+        playbackRate: 0,
+        anchorElapsedSec: null,
+        durationSec: null,
+      })),
+    };
+  }
   else if (url.includes("/api/rosstalk/targets")) body = { targets: [] };
   else if (url.includes("/api/rosstalk/commands")) body = [];
   else if (url.includes("/api/cues/tokens")) body = { tokens: [] };
@@ -194,6 +243,7 @@ const stateVariableOptions = (): { value: string; selectable: boolean }[] =>
 beforeEach(() => {
   RULES = [];
   CONFIGURED = ["reaper"];
+  PVP_LAYERS = [];
 });
 afterEach(async () => {
   cleanup();
@@ -318,5 +368,90 @@ describe("a REAPER Record/Stop pair's state field", () => {
     assert.equal(command === undefined, false, "the command param rendered no picker at all");
     assert.deepEqual(command?.options, ["", "record", "stop", "play"]);
     assert.equal(command?.value, "record");
+  });
+});
+
+describe("a ProVideoPlayer layer pair's state field", () => {
+  // The PARAMETERISED sources. There is no fixed list of them — one pair of
+  // options per layer PVP currently has — so these cases assert the picker is
+  // built from the live layers and that a ref whose layer is gone is still
+  // there to be seen and cleared.
+  //
+  // NOT unit-tested here, and driven in a browser instead: that the options land
+  // in a labelled group in the open list. jsdom renders the <optgroup> into the
+  // markup, but whether a native picker draws the label is the browser's call
+  // and no assertion here can see it.
+  test("offers both families for every live layer, and implies the one the cue hides", async () => {
+    CONFIGURED = ["pvp"];
+    PVP_LAYERS = ["Lyrics", "Lower Thirds"];
+    RULES = [
+      pvpCue("lyrics_on", "pvp.hide-layer", "Lyrics"),
+      pvpCue("lyrics_off", "pvp.unhide-layer", "Lyrics"),
+    ];
+    await mount();
+    await open("lyrics_on");
+    assert.equal(stateVariableValue(), "app:pvp.layer-hidden:Lyrics");
+    assert.deepEqual(stateVariableOptions(), [
+      { value: "", selectable: false },
+      { value: "app:pvp.layer-hidden:Lyrics", selectable: true },
+      { value: "app:pvp.layer-hidden:Lower Thirds", selectable: true },
+      { value: "app:pvp.layer-muted:Lyrics", selectable: true },
+      { value: "app:pvp.layer-muted:Lower Thirds", selectable: true },
+    ]);
+  });
+
+  test("with PVP not set up, no layer is offered even though one is live", async () => {
+    // The hook that reads the layers is gated on the integration being
+    // configured — it is also what registers demand on the PVP poll — so an
+    // ungated one would hold an unconfigured PVP's poll open for anybody who
+    // opened this page, and offer bindings with nothing behind them.
+    //
+    // A REAPER pair, so the select still exists and what is being asserted
+    // absent is the layer options rather than the whole control. An IMPLIED
+    // layer ref is offered whatever the integration list says, exactly as
+    // `app:reaper.recording` is — the select cannot show a value that is not
+    // among its options — so a hide-layer pair could not tell the two apart.
+    CONFIGURED = ["reaper"];
+    PVP_LAYERS = ["Lyrics"];
+    RULES = [transport("reaper_play_on", "play"), transport("reaper_play_off", "stop")];
+    await mount();
+    await open("reaper_play_on");
+    assert.deepEqual(stateVariableOptions(), [
+      { value: "", selectable: true },
+      { value: "app:reaper.recording", selectable: true },
+    ]);
+  });
+
+  test("a stored ref whose layer PVP no longer has is still offered, and still selected", async () => {
+    // The rename case, which is the whole reason these are keyed by name. A
+    // native select cannot show a value with no option: it would silently select
+    // a different layer and the next save would write that back as though the
+    // operator had chosen it.
+    CONFIGURED = ["pvp"];
+    PVP_LAYERS = ["Lyrics"];
+    RULES = [
+      pvpCue("ghost_on", "pvp.hide-layer", "Ghost", {
+        stateVariable: "app:pvp.layer-hidden:Ghost",
+        stateOnValue: "on",
+        stateOffValue: "off",
+      }),
+      pvpCue("ghost_off", "pvp.unhide-layer", "Ghost"),
+    ];
+    await mount();
+    await open("ghost_on");
+    assert.equal(stateVariableValue(), "app:pvp.layer-hidden:Ghost");
+    assert.equal(
+      stateVariableOptions().some((o) => o.value === "app:pvp.layer-hidden:Ghost" && o.selectable),
+      true,
+      "a bound layer PVP no longer has vanished from the list, taking the stored ref with it",
+    );
+    // And it says so, rather than reading as a layer that is simply there.
+    assert.match(
+      [...(stateVariableSelect()?.options ?? [])]
+        .filter((o) => o.value === "app:pvp.layer-hidden:Ghost")
+        .map((o) => o.textContent ?? "")
+        .join(""),
+      /Layer Ghost hidden \(Stage Utility\).*not found/,
+    );
   });
 });

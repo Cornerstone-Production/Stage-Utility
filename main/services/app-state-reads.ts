@@ -14,15 +14,19 @@
 // the operator as the cue state's `reason`.
 
 import {
+  APP_STATE_FAMILIES,
   APP_STATE_SOURCES,
-  appStateSourceId,
+  parseAppStateRef,
+  type AppStateFamilyId,
   type AppStateSourceId,
 } from "./app-state-sources.js";
 import type { VariableResult } from "./companion-api.js";
 import { obsService } from "./obs-service.js";
+import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
+import type { PvpLayerDTO } from "../types/pvp.js";
 
 /** A source's answer: a value, or why nobody can say. */
 export interface AppStateValue {
@@ -88,13 +92,62 @@ const READS: Record<AppStateSourceId, () => AppStateValue> = {
   },
 };
 
+const PVP_HIDDEN = APP_STATE_FAMILIES.get("pvp.layer-hidden")!;
+const PVP_MUTED = APP_STATE_FAMILIES.get("pvp.layer-muted")!;
+
+/**
+ * The one PVP layer this ref names, or why nobody can say.
+ *
+ * Matched exactly as pvp-actions.ts's `resolveLayer` matches — trimmed and
+ * case-insensitively — so the switch and the action that drives it find the same
+ * layer or fail together. A reading that resolved a name the action could not
+ * would be a switch reporting a state for a layer the cue never touched.
+ *
+ * Two layers of the same name is UNKNOWN rather than the first hit: PVP allows
+ * it, `resolveLayer` would address whichever came back first, and a switch
+ * silently reporting one of two layers is worse than one saying it cannot tell.
+ */
+function pvpLayer(name: string): { layer: PvpLayerDTO } | { reason: string } {
+  const status = pvpService.getLatest();
+  // Not "shown"/"unmuted" for a PVP nobody can reach, for the reason every
+  // reader above refuses to guess: a layer reported as visible when the truth is
+  // that nobody knows is a switch lying during the one hour it is watched.
+  if (!status.connected) return { reason: "ProVideoPlayer is not connected" };
+  const want = name.trim().toLowerCase();
+  const hits = status.layers.filter((l) => l.name.trim().toLowerCase() === want);
+  if (hits.length > 1) return { reason: `Two or more PVP layers are called "${name}"` };
+  const layer = hits[0];
+  if (!layer) return { reason: `No PVP layer called "${name}"` };
+  return { layer };
+}
+
+const flag = (
+  name: string,
+  read: (layer: PvpLayerDTO) => boolean,
+  def: { onValue: string; offValue: string },
+): AppStateValue => {
+  const got = pvpLayer(name);
+  if ("reason" in got) return { value: null, reason: got.reason };
+  return { value: read(got.layer) ? def.onValue : def.offValue };
+};
+
+/**
+ * One reader per FAMILY, taking the parameter — a Record over the family union,
+ * so a family added without a reader does not compile, exactly as above.
+ */
+const FAMILY_READS: Record<AppStateFamilyId, (param: string) => AppStateValue> = {
+  "pvp.layer-hidden": (name) => flag(name, (l) => l.hidden, PVP_HIDDEN),
+  "pvp.layer-muted": (name) => flag(name, (l) => l.muted, PVP_MUTED),
+};
+
 /**
  * Read one `app:` ref, in the same shape `companionApi.readVariable` answers in
  * — so cue-states.ts treats both namespaces identically from there on.
  */
 export function readAppState(variable: string): VariableResult {
-  const id = appStateSourceId(variable);
-  if (!id) return { error: `no Stage Utility state source called "${variable.trim()}"` };
-  const answer = READS[id]();
+  const parsed = parseAppStateRef(variable);
+  if (!parsed) return { error: `no Stage Utility state source called "${variable.trim()}"` };
+  const answer =
+    parsed.kind === "source" ? READS[parsed.id]() : FAMILY_READS[parsed.family](parsed.param);
   return answer.value === null ? { error: answer.reason ?? "cannot be read" } : { value: answer.value };
 }

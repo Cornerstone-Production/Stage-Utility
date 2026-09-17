@@ -64,6 +64,10 @@ Each is logged on a `[obs]` line and shown on the Integrations page. Everything
 else — a network drop, OBS restarting, OBS not running yet — reconnects as
 before. Saving or testing the OBS integration starts it again.
 
+Every recording, stream and virtual-camera start and stop leaves one `[obs]`
+line on `/log`, whichever button, cue or hand in OBS caused it, so "did the
+recording run" has an answer on Monday.
+
 ## Driving OBS from a cue
 
 Three automation actions drive OBS over the connection this integration already

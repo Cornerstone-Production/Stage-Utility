@@ -30,6 +30,7 @@ import {
 } from "./rule-editor-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfiguredIntegrations } from "../../main/use-integration-states";
+import { usePvpState } from "../../main/use-pvp-state";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DownloadIcon, OctagonXIcon, PlusIcon, SearchIcon } from "lucide-react";
 
@@ -423,6 +424,17 @@ export function AutomationSection() {
         .map(([id]) => appStateRef(id)),
     [configuredIntegrations],
   );
+
+  // The layers behind the PARAMETERISED sources — `app:pvp.layer-hidden:<name>`
+  // is one ref per layer, so the picker is built from what PVP currently has
+  // rather than from the registry.
+  //
+  // GATED on PVP being set up, and not merely because there would be nothing to
+  // offer: this hook's `enabled` is what registers demand on the channel, and an
+  // ungated one would hold an unconfigured PVP's poll open for anybody who
+  // opened the Automation page.
+  const pvp = usePvpState(configuredIntegrations.has("pvp"));
+  const pvpLayers = useMemo(() => (pvp?.layers ?? []).map((l) => l.name), [pvp]);
 
   // Memoised because the pair resolution below depends on it: `data?.rules ?? []`
   // is a new array on every render, which would re-resolve every pair each time.
@@ -851,6 +863,7 @@ export function AutomationSection() {
           optionSources={optionSources}
           customVariables={companionPairs?.customVariables ?? []}
           appSources={appSources}
+          pvpLayers={pvpLayers}
           inferredFor={inferredFor}
           onChanged={refresh}
         />

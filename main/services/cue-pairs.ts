@@ -41,10 +41,13 @@
 // isHiddenFromHome — absent means shown, so nothing an upgrade finds changes.
 
 import {
+  APP_STATE_FAMILIES,
   APP_STATE_SOURCES,
+  appStateFamilyRef,
   appStateProblem,
   appStateRef,
   isAppStateRef,
+  type AppStateFamilyId,
   type AppStateSourceId,
 } from "./app-state-sources.js";
 import { isCompanionVariableRef } from "./companion-export.js";
@@ -372,6 +375,25 @@ const IMPLIED_SOURCES: { actionId: string; command: string; source: AppStateSour
 ];
 
 /**
+ * The PARAMETERISED implications: an ON action whose own `layer` param names
+ * what the source reads.
+ *
+ * Separate from the table above because the two ask different questions. Those
+ * four are one action id carrying one command value out of several; these are a
+ * whole action id ("hide a layer" is not a command on a "layer" action), and the
+ * source they imply is not fixed — it is the layer the rule names.
+ *
+ * ONLY the switch-on direction, exactly as above. `pvp.unhide-layer` as an ON
+ * half is a cue whose "on" means the layer is SHOWN, so binding it to
+ * `layer-hidden` would report the switch backwards; it is left unbound and the
+ * operator picks what they mean.
+ */
+const IMPLIED_FAMILIES: { actionId: string; family: AppStateFamilyId }[] = [
+  { actionId: "pvp.hide-layer", family: "pvp.layer-hidden" },
+  { actionId: "pvp.mute-layer", family: "pvp.layer-muted" },
+];
+
+/**
  * The binding this pair's own ON action implies, or null.
  *
  * Never overrides a stored `stateVariable`: cuePairs applies it last.
@@ -382,12 +404,26 @@ const IMPLIED_SOURCES: { actionId: string; command: string; source: AppStateSour
 export function implicitStateBinding(onAction: Rule["action"]): StateBinding | null {
   const command = String(onAction.params.command ?? "").trim();
   const implied = IMPLIED_SOURCES.find((s) => s.actionId === onAction.id && s.command === command);
-  if (!implied) return null;
-  const source = APP_STATE_SOURCES.get(implied.source)!;
+  if (implied) {
+    const source = APP_STATE_SOURCES.get(implied.source)!;
+    return {
+      variable: appStateRef(implied.source),
+      onValue: source.onValue,
+      offValue: source.offValue,
+    };
+  }
+  const family = IMPLIED_FAMILIES.find((f) => f.actionId === onAction.id);
+  if (!family) return null;
+  // The layer the rule NAMES. A draft with the field still blank implies
+  // nothing: `app:pvp.layer-hidden:` is refused by the same parser that reads
+  // it, so implying it would be a field showing a binding that cannot be saved.
+  const layer = String(onAction.params.layer ?? "").trim();
+  if (!layer) return null;
+  const def = APP_STATE_FAMILIES.get(family.family)!;
   return {
-    variable: appStateRef(implied.source),
-    onValue: source.onValue,
-    offValue: source.offValue,
+    variable: appStateFamilyRef(family.family, layer),
+    onValue: def.onValue,
+    offValue: def.offValue,
   };
 }
 
