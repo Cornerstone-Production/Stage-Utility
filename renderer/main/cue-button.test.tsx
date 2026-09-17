@@ -190,3 +190,48 @@ describe("cue button", () => {
     assert.match(container.textContent ?? "", /confirmation/i);
   });
 });
+
+describe("the live tone", () => {
+  // The COLOURS are not asserted, for the reason at the top of this file: jsdom
+  // loads no stylesheet, so `var(--red-9)` resolves to "" and a guard over the
+  // ring would assert a string this file wrote to itself. `data-tone` is the
+  // attribute the colours are chosen from, and it is asserted beside
+  // `data-state` — the two together are the whole decision. The red ring on and
+  // the green ring off were checked in a browser.
+  const toneOf = (container: HTMLElement) =>
+    container.querySelector("[data-state]")?.getAttribute("data-tone");
+
+  test("a live switch says so, in every state", () => {
+    for (const state of [{ state: "on" as const }, { state: "off" as const }]) {
+      assert.equal(toneOf(mount(live({ tone: "live" }, state), "haze").container), "live");
+    }
+    assert.equal(
+      toneOf(mount(live({ tone: "live" }, { state: "unknown", reason: "gone" }), "haze").container),
+      "live",
+    );
+  });
+
+  test("a switch without one is unchanged", () => {
+    assert.equal(toneOf(mount(live({}, { state: "on" }), "haze").container), null);
+    assert.equal(stateOf(mount(live({}, { state: "on" }), "haze").container), "on");
+  });
+
+  test("a button never carries one", () => {
+    // Momentary: there is nothing to read back, so there is no on state to
+    // colour, and a tone on it would be a lamp that never lights.
+    assert.equal(toneOf(mount(live(), "confetti").container), null);
+  });
+
+  test("its on and off states are still the ordinary ones", () => {
+    // The tone changes the COLOUR and nothing else: the press, the states and
+    // the halves are exactly a default switch's.
+    assert.equal(stateOf(mount(live({ tone: "live" }, { state: "on" }), "haze").container), "on");
+    assert.equal(stateOf(mount(live({ tone: "live" }, { state: "off" }), "haze").container), "idle");
+    assert.equal(
+      stateOf(
+        mount(live({ tone: "live" }, { state: "unknown", reason: "gone" }), "haze").container,
+      ),
+      "stale",
+    );
+  });
+});

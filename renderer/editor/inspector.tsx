@@ -78,6 +78,7 @@ import {
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
+import { CuePicker } from "./cue-picker";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
 import {
@@ -1335,18 +1336,10 @@ export function Inspector({
         );
       })()}
       {c.type === "cue-button" && (() => {
-        const switches = cues?.manifest.switches ?? [];
-        const buttons = cues?.manifest.buttons ?? [];
         return (
           <>
-            <Row label="Cue" hint="A pair from the rules list shows on and off; a lone cue is a momentary button. Pairs hidden from Home Assistant are listed too.">
-              <Select value={c.cue} onValueChange={(v: string) => onConfig({ ...c, cue: v })}>
-                <SelectTrigger><SelectValue placeholder={cues ? "Select a cue" : "Loading cues…"} /></SelectTrigger>
-                <SelectContent>
-                  {switches.map((sw) => <SelectItem key={sw.id} value={sw.id}>{sw.name}{sw.room ? ` · ${sw.room}` : ""} (switch)</SelectItem>)}
-                  {buttons.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}{b.room ? ` · ${b.room}` : ""} (button)</SelectItem>)}
-                </SelectContent>
-              </Select>
+            <Row label="Cue" hint="Built in cues drive OBS, REAPER, ProVideoPlayer and the app itself with no rule behind them. Your own cues come from the rules list: a pair shows on and off, a lone cue is a momentary button. Pairs hidden from Home Assistant are listed too.">
+              <CuePicker cues={cues} value={c.cue} onChange={(v) => onConfig({ ...c, cue: v })} />
             </Row>
             <RowText label="Label" hint="Blank uses the cue's own name." value={c.label ?? ""} placeholder="Cue's name" onChange={(v) => onConfig({ ...c, label: v })} />
             <RowSwitch label="Show device" hint="The room or device under the label, and the reason when a reading is stale." checked={c.showDevice !== false} onChange={(v) => onConfig({ ...c, showDevice: v })} />
