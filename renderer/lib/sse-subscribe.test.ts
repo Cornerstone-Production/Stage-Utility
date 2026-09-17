@@ -146,6 +146,29 @@ describe("onNotification on the EventSource path", () => {
     offB();
   });
 
+  test("a subscriber that arrives DURING a dispatch does not get that frame", () => {
+    // Why fanOut copies the callback set. A Set iterator visits an entry added
+    // while it is running, so a handler that subscribes something in response to
+    // a frame would have the new subscriber handed that same frame — from before
+    // it existed — and then the replayed snapshot on top of it.
+    //
+    // Not the self-unsubscribe case, which needs no copy at all: deleting the
+    // CURRENT entry of a Set mid-iteration is safe. A test written for that
+    // passed with the copy removed, which is why this one is the one that ships.
+    const ch = "scores:favourites-changed";
+    const late: unknown[] = [];
+    let offLate: null | (() => void) = null;
+    const offFirst = onNotification(ch, () => {
+      if (!offLate) offLate = onNotification(ch, (p) => late.push(p));
+    });
+    stream().emit(ch, { n: 1 });
+    assert.deepEqual(late, [], "a subscriber was handed a frame from before it subscribed");
+    stream().emit(ch, { n: 2 });
+    assert.deepEqual(late, [{ n: 2 }], "and must still receive the next one");
+    offFirst();
+    if (offLate) (offLate as () => void)();
+  });
+
   test("a hydrated channel replays its cached frame to a late subscriber", () => {
     // The replay path, on this transport rather than the polling one — the two
     // must behave identically, which is the point of the shared dispatch.

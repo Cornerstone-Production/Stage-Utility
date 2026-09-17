@@ -998,12 +998,36 @@ const lastPayload = new Map<string, unknown>();
  * poller, is the shape this repo keeps paying for.
  */
 function dispatch(channel: string, payload: unknown, replayed: boolean): void {
+  fanOut(channel, payload, replayed, directHandlers.get(channel));
+}
+
+type SseCallback = (payload: unknown, replayed: boolean) => void;
+
+/**
+ * Hand one parsed frame to a set of callbacks. The ONE place a frame is
+ * delivered, on any of the three transports.
+ *
+ * This shape existed three times — here, in the shared worker's port onmessage,
+ * and in the wrapper abandonWorker builds — and the three had already drifted:
+ * only this one copied the callback set before iterating it, and only this one
+ * wrote the hydrate cache. Neither difference had produced a reported bug (the
+ * worker keeps its own replay cache, and on the direct stream ensureEventSource
+ * attaches a cache listener to every hydrated channel), but three copies of a
+ * delivery rule is three places the next change has to be made, and this repo's
+ * most expensive recurring mistake is making it in two of them.
+ *
+ * The copy is not about unsubscribing: deleting the CURRENT entry of a Set
+ * mid-iteration is safe, and deleting a later one is the caller saying it does
+ * not want the frame. It is about SUBSCRIBING during dispatch — a Set iterator
+ * visits an entry added while it is running, so a subscriber that arrived
+ * half-way through would be handed a frame from before it existed, and then the
+ * replayed snapshot on top of it. A handler's throw is contained so one broken
+ * subscriber cannot cost the others their frame.
+ */
+function fanOut(channel: string, payload: unknown, replayed: boolean, callbacks: Iterable<SseCallback> | undefined): void {
   if (hydratedSet.has(channel)) lastPayload.set(channel, payload);
-  const set = directHandlers.get(channel);
-  if (!set) return;
-  // A copy: a handler may unsubscribe itself, and mutating the live set while
-  // iterating it silently skips the next subscriber.
-  for (const cb of [...set]) {
+  if (!callbacks) return;
+  for (const cb of [...callbacks]) {
     try {
       cb(payload, replayed);
     } catch (err) {
@@ -1171,10 +1195,7 @@ function ensureWorker(): boolean {
       // something the server just sent" — the same distinction the direct path
       // draws, so a subscriber cannot tell which transport it is on.
       const { channel, data, replay } = msg as { channel: string; data: unknown; replay?: boolean };
-      const set = workerHandlers.get(channel);
-      if (set) for (const cb of set) {
-        try { cb(data, replay === true); } catch (err) { console.error(`[api] SSE handler error for "${channel}":`, err); }
-      }
+      fanOut(channel, data, replay === true, workerHandlers.get(channel));
     };
     sseWorker.port.start();
     startWorkerHeartbeat();
@@ -1228,10 +1249,14 @@ function abandonWorker(why: string): void {
       const handler = (e: MessageEvent) => {
         try {
           // A frame off the wire, never a replay — this is the direct
-          // EventSource path standing in for the abandoned worker.
-          cb(JSON.parse(e.data), false);
+          // EventSource path standing in for the abandoned worker. Through
+          // fanOut so this frame seeds the hydrate cache like any other: a tab
+          // that has fallen back is ON the direct path, where a late subscriber
+          // is served from that cache.
+          fanOut(channel, JSON.parse(e.data), false, [cb]);
         } catch (err) {
-          console.error(`[api] SSE handler error for "${channel}":`, err);
+          // fanOut contains a handler's throw, so this is a malformed frame.
+          console.error(`[api] SSE parse error for "${channel}":`, err);
         }
       };
       fallbackWrappers.push({ channel, handler });
