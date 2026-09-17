@@ -192,14 +192,19 @@ describe("cue button", () => {
 });
 
 describe("the live tone", () => {
-  // The COLOURS are not asserted, for the reason at the top of this file: jsdom
-  // loads no stylesheet, so `var(--red-9)` resolves to "" and a guard over the
-  // ring would assert a string this file wrote to itself. `data-tone` is the
-  // attribute the colours are chosen from, and it is asserted beside
-  // `data-state` — the two together are the whole decision. The red ring on and
-  // the green ring off were checked in a browser.
+  // The INLINE colours ARE asserted. jsdom resolves no custom property, but it
+  // keeps an inline `box-shadow: … var(--red-9)` verbatim, so "which token did
+  // this button choose" is a real question it can answer — and it is the whole
+  // decision the tone exists to make. What jsdom still cannot answer is what
+  // those tokens LOOK like and whether the ring is visible against the button's
+  // own fill; that was checked in a browser.
   const toneOf = (container: HTMLElement) =>
     container.querySelector("[data-state]")?.getAttribute("data-tone");
+  const ringOf = (container: HTMLElement) =>
+    (container.querySelector("[data-state]") as HTMLElement).style.boxShadow;
+  /** The lamp: the first span, which the button renders aria-hidden. */
+  const dotOf = (container: HTMLElement) =>
+    (container.querySelector("[data-state] span[aria-hidden]") as HTMLElement).style.background;
 
   test("a live switch says so, in every state", () => {
     for (const state of [{ state: "on" as const }, { state: "off" as const }]) {
@@ -220,6 +225,44 @@ describe("the live tone", () => {
     // Momentary: there is nothing to read back, so there is no on state to
     // colour, and a tone on it would be a lamp that never lights.
     assert.equal(toneOf(mount(live(), "confetti").container), null);
+  });
+
+  test("on is red, ring and dot", () => {
+    // RED, not green. A recording in progress and a projector that is on are
+    // not the same fact, and the whole point of the tone is that a lit console
+    // button reads as "we are live" rather than "this is working".
+    const { container } = mount(live({ tone: "live" }, { state: "on" }), "haze");
+    assert.match(ringOf(container), /var\(--red-9\)/);
+    assert.equal(dotOf(container), "var(--red-9)");
+  });
+
+  test("off is the green standby ring", () => {
+    // The device answered, and said it is not recording: connected and standing
+    // by. The dot stays the faint one — the ring is what says standby, and a
+    // green dot here would be indistinguishable from an ordinary switch that is
+    // ON.
+    const { container } = mount(live({ tone: "live" }, { state: "off" }), "haze");
+    assert.match(ringOf(container), /var\(--green-9\)/);
+    assert.equal(dotOf(container), "var(--su-fg-faint)");
+  });
+
+  test("an unreadable live switch is the amber ring, not a green one", () => {
+    // `stale` is "nobody can say", and a green standby ring over a recorder
+    // nobody can reach is the exact claim this must never make.
+    const { container } = mount(
+      live({ tone: "live" }, { state: "unknown", reason: "gone" }),
+      "haze",
+    );
+    assert.match(ringOf(container), /var\(--amber-9\)/);
+  });
+
+  test("a switch without a tone is green on and unringed off", () => {
+    const on = mount(live({}, { state: "on" }), "haze");
+    assert.match(ringOf(on.container), /var\(--green-9\)/);
+    assert.equal(dotOf(on.container), "var(--green-9)");
+    const off = mount(live({}, { state: "off" }), "haze");
+    assert.equal(ringOf(off.container), "", "an ordinary switch grew a ring when off");
+    assert.equal(dotOf(off.container), "var(--su-fg-faint)");
   });
 
   test("its on and off states are still the ordinary ones", () => {
