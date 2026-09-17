@@ -57,6 +57,7 @@ import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
 import { cueStates, cueStatesBody } from "../cue-states.js";
 import { cueManifest } from "../cue-manifest.js";
+import { reservedCueNames } from "../builtin-cues.js";
 import { stageController } from "../stage-controller.js";
 import type { Rule } from "../../types/automation.js";
 
@@ -384,7 +385,12 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
  * and for the toggle import both.
  */
 function takenCueNames(): Set<string> {
-  const taken = new Set<string>();
+  // The BUILT-INS first: the app ships rules answering to those names and
+  // `assertCueValid` refuses a stored rule that takes one, so an offer that
+  // left them out would show `obs_record_on` as free, tick it, and then be
+  // refused at the moment the operator pressed Import. Every name in the
+  // table, whatever is enabled right now — see reservedCueNames.
+  const taken = new Set<string>(reservedCueNames());
   for (const rule of automationEngine.listRules()) {
     const name = automationEngine.cueNameOf(rule);
     if (name) taken.add(name);

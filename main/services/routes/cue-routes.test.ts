@@ -48,6 +48,7 @@ const { runCompanionReconcile } = await import("../companion-reconcile.js");
 const { cueStates, SETTLE_MS } = await import("../cue-states.js");
 const { __resetWatches, stateProbeDeps } = await import("../companion-state-probe.js");
 const { reaperDeps, reaperService } = await import("../reaper-service.js");
+const { builtinCuesDeps, __resetBuiltinCues } = await import("../builtin-cues.js");
 
 after(async () => {
   await fsp.rm(TMP, { recursive: true, force: true });
@@ -1582,7 +1583,17 @@ describe("importing single buttons", () => {
       false,
       "a single button must not arrive pre-ticked — that is a cue somebody can say by accident",
     );
-    assert.equal(buttons.every((b) => b.exists === false), true);
+    // `obs_stream_toggle` is the ONE exception, and it is not about the rule
+    // store: its toggle base is `obs_stream`, whose two halves are cues the app
+    // ships (builtin-cues.ts), so the offer marks it taken however empty the
+    // rules are. That is the answer the operator needs — the built-in drives
+    // OBS over the websocket and reports real state, which the Companion press
+    // cannot — and the alternative is a name shown as free and refused at the
+    // moment Import is pressed.
+    assert.deepEqual(
+      buttons.filter((b) => b.exists !== false).map((b) => b.slug),
+      ["obs_stream_toggle"],
+    );
   });
 
   test("each becomes ONE cue, guarded and on a cooldown, and presses its coordinates", async () => {
@@ -1635,7 +1646,9 @@ describe("importing single buttons", () => {
     const buttons = await offered();
     assert.deepEqual(
       buttons.filter((b) => b.exists).map((b) => b.slug),
-      ["take_screens", "cam_1"],
+      // `obs_stream_toggle` is taken by the built-in OBS stream pair rather than
+      // by a rule — see the case above.
+      ["take_screens", "cam_1", "obs_stream_toggle"],
     );
   });
 
@@ -3312,5 +3325,98 @@ describe("a cue that drives REAPER rather than a Companion button", () => {
       __resetWatches();
       delete variables["Lighting:status"];
     }
+  });
+});
+
+// ── The cues the app ships, through the real routes ───────────────────────────
+//
+// LAST in the file, after the import cases, for the same reason they are last:
+// this block switches an integration on for the length of one test, and the
+// offer above is counted against whatever the rule store holds.
+//
+// Driven through callRoute rather than through cueManifest and the engine
+// directly, because what is asked here is whether the ROUTES carry them: the
+// manifest route, the call route and the rules route are three different
+// readers and only two of them are meant to see a built-in.
+describe("built-in cues through the routes", () => {
+  const realEnabled = builtinCuesDeps.enabled;
+
+  /** Run `fn` with OBS switched on, as Settings would have it. */
+  async function withObsEnabled(fn: () => Promise<void>): Promise<void> {
+    __resetBuiltinCues();
+    builtinCuesDeps.enabled = () => new Set(["obs"]);
+    try {
+      await fn();
+    } finally {
+      builtinCuesDeps.enabled = realEnabled;
+      __resetBuiltinCues();
+    }
+  }
+
+  test("the manifest route lists one, the rules route does not, and the call route runs it", async () => {
+    await withObsEnabled(async () => {
+      const m = (await callRoute(cueRoutes, "/api/cues/manifest")).json as {
+        switches: { id: string; builtin?: true; tone?: string; state: string }[];
+      };
+      const rec = m.switches.find((s) => s.id === "obs_record");
+      assert.ok(rec, "the manifest route does not carry the built-in");
+      assert.equal(rec.builtin, true);
+      assert.equal(rec.tone, "live");
+
+      // The Automation page's own route. A synthesised rule here is one an
+      // operator can edit, cannot delete, and would find back next boot.
+      const rules = (await callRoute(automationRoutes, "/api/automation/rules")).json as {
+        rules: { id: string }[];
+      };
+      assert.deepEqual(
+        rules.rules.filter((r) => r.id.startsWith("builtin:")),
+        [],
+        "a built-in reached the Automation page",
+      );
+
+      // NOT a 404: whatever the answer is, it is the ENGINE'S. OBS is not
+      // connected in this file, so the action fails — which is what proves the
+      // call reached the action rather than falling off the name lookup.
+      const r = await call("obs_record_on");
+      assert.notEqual(r.status, 404, "the call route could not find a built-in");
+      assert.equal(typeof (r.json as Record<string, unknown>).detail, "string");
+    });
+  });
+
+  test("the import offer treats a built-in's name as taken", async () => {
+    // The offer marks what exists so the dialog can disable it, and the toggle
+    // import refuses a pair whose halves are taken. Both read takenCueNames,
+    // which now carries the reserved names — without them the dialog would show
+    // `obs_record_on` as free, tick it, and addRule would refuse it at the
+    // moment the operator pressed Import.
+    const r = await callRoute(cueRoutes, "/api/automation/rules/import-pairs", {
+      method: "POST",
+      headers: browser,
+      body: {
+        buttons: [
+          {
+            page: 1,
+            row: 0,
+            col: 0,
+            pageId: "p1",
+            label: "OBS Record ON",
+            slug: "obs_record",
+            actionIds: ["x"],
+            stateVariable: "obs_state",
+          },
+        ],
+      },
+    });
+    assert.equal(r.status, 200);
+    const { created, skipped } = r.json as {
+      created: string[];
+      skipped: { name: string; why: string }[];
+    };
+    assert.deepEqual(created, [], "a rule was created under a built-in's name");
+    assert.deepEqual(
+      skipped.map((s) => s.name),
+      ["obs_record_on"],
+    );
+    assert.match(skipped[0]!.why, /already used/);
   });
 });
