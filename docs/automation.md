@@ -352,6 +352,67 @@ Set the whole thing up under [Companion](integrations/companion.md#calling-a-cue
 the button picker, the ON/OFF and single-button import, the tokens and the Home
 Assistant paste.
 
+### Built-in cues
+
+Some cues need no rule behind them. Stage Utility ships them, and they appear
+wherever a cue appears — in the cue manifest, in Home Assistant, on a cue
+button, at `POST /api/cues/<name>` — without anything being saved. They are not
+on the Automation page, they are not in a config export, and they cannot be
+edited or deleted.
+
+Switches, listed while the integration is switched on in Settings:
+
+| Cue | What it does | State |
+|---|---|---|
+| `obs_record_on` / `obs_record_off` | OBS recording | `app:obs.recording` |
+| `obs_stream_on` / `obs_stream_off` | OBS stream | `app:obs.streaming` |
+| `obs_virtual_cam_on` / `obs_virtual_cam_off` | OBS virtual camera | `app:obs.virtualCam` |
+| `reaper_record_on` / `reaper_record_off` | REAPER recording | `app:reaper.recording` |
+
+Two more per ProVideoPlayer layer, named from the layer — `Lower Thirds` becomes
+`lower_thirds`:
+
+| Cue | What it does | State |
+|---|---|---|
+| `pvp_<layer>_shown_on` / `_off` | shows and hides the layer | the layer is not hidden |
+| `pvp_<layer>_muted_on` / `_off` | mutes and unmutes the layer | the layer is muted |
+
+**Shown** is the operator's direction: the switch is on when the layer is on
+screen.
+
+Buttons, which are momentary:
+
+| Cue | What it does | Listed while |
+|---|---|---|
+| `pvp_<layer>_clear` | takes everything off that layer | ProVideoPlayer is on |
+| `pvp_clear_workspace` | blanks every PVP layer at once | ProVideoPlayer is on |
+| `pco_advance` | steps Planning Center Live forward one item | Planning Center is connected |
+| `display_refresh` | reloads every display | always |
+
+Each switch reports what the gear is doing, from the same connection that drives
+it, and each is idempotent — "start the recording" said twice while it is
+recording answers `already on` and sends nothing. None of them involve
+Companion, and none carry the **no service is live** condition: a panel button
+has to work during a service.
+
+**The names are reserved.** A rule that tries to take one is refused with
+*"obs_record_on" is a built-in cue*. A rule saved before these existed and
+already holding one keeps working; the built-in with that name is left out
+instead, and the server log says which and why:
+
+```
+[cues] built-in obs_record not offered: rule "REC on" owns obs_record_on
+```
+
+That pair can be deleted whenever you like — the built-in appears in its place,
+under the same name, so nothing in Home Assistant has to be repasted.
+
+The set changes when an integration is switched on or off, when Planning Center
+connects, and when ProVideoPlayer reports different layer names. The cue
+manifest's version moves with it, so an integration re-reads. A ProVideoPlayer
+that goes offline keeps its layers listed, reading unknown, rather than removing
+every entity until it comes back.
+
 ### State from Stage Utility
 
 A cue that does not press a Companion button has no Companion variable to read,
