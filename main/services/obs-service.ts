@@ -414,14 +414,38 @@ export const obsService = new ObsService();
 /**
  * What each output is called on the wire, and where it is read off the snapshot.
  *
- * One table rather than four literals: the start/stop pair, the request names
+ * One table rather than six literals: the start/stop pair, the request names
  * and the field that says whether it is already running have to agree, and a
  * `StopStream` guarded by `recording` is a cue that stops nothing and reports
  * success.
+ *
+ * `running` is what "already …" says; `noun` is what a SIMULATED run says it
+ * would start or stop. Two words because they read differently in the two
+ * sentences — "already running" and "would start the virtual camera" — and
+ * deriving one from the other gave "would start running".
  */
 const OUTPUTS = {
-  record: { start: "StartRecord", stop: "StopRecord", active: (s: ObsStatusDTO) => s.recording, running: "recording" },
-  stream: { start: "StartStream", stop: "StopStream", active: (s: ObsStatusDTO) => s.streaming, running: "streaming" },
+  record: {
+    start: "StartRecord",
+    stop: "StopRecord",
+    active: (s: ObsStatusDTO) => s.recording,
+    running: "recording",
+    noun: "recording",
+  },
+  stream: {
+    start: "StartStream",
+    stop: "StopStream",
+    active: (s: ObsStatusDTO) => s.streaming,
+    running: "streaming",
+    noun: "streaming",
+  },
+  virtualCam: {
+    start: "StartVirtualCam",
+    stop: "StopVirtualCam",
+    active: (s: ObsStatusDTO) => s.virtualCam,
+    running: "running",
+    noun: "the virtual camera",
+  },
 } as const;
 
 /** Which OBS output an action drives. */
@@ -435,6 +459,11 @@ export function isObsOutputKind(value: string): value is ObsOutputKind {
 
 export function isObsOutputCommand(value: string): value is ObsOutputCommand {
   return value === "start" || value === "stop";
+}
+
+/** What a simulated run calls this output — "recording", "the virtual camera". */
+export function obsOutputNoun(kind: ObsOutputKind): string {
+  return OUTPUTS[kind].noun;
 }
 
 /**

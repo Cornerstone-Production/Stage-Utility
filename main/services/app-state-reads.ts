@@ -21,6 +21,8 @@ import {
 import type { VariableResult } from "./companion-api.js";
 import { obsService } from "./obs-service.js";
 import { reaperService } from "./reaper-service.js";
+import { resiService } from "./resi-service.js";
+import { youtubeService } from "./youtube-service.js";
 
 /** A source's answer: a value, or why nobody can say. */
 export interface AppStateValue {
@@ -32,6 +34,9 @@ export interface AppStateValue {
 const REAPER = APP_STATE_SOURCES.get("reaper.recording")!;
 const OBS_RECORDING = APP_STATE_SOURCES.get("obs.recording")!;
 const OBS_STREAMING = APP_STATE_SOURCES.get("obs.streaming")!;
+const OBS_VIRTUAL_CAM = APP_STATE_SOURCES.get("obs.virtualCam")!;
+const YOUTUBE_LIVE = APP_STATE_SOURCES.get("youtube.live")!;
+const RESI_LIVE = APP_STATE_SOURCES.get("resi.live")!;
 
 const READS: Record<AppStateSourceId, () => AppStateValue> = {
   "reaper.recording": () => {
@@ -59,6 +64,27 @@ const READS: Record<AppStateSourceId, () => AppStateValue> = {
     const status = obsService.getLatest();
     if (!status.connected) return { value: null, reason: "OBS is not connected" };
     return { value: status.streaming ? OBS_STREAMING.onValue : OBS_STREAMING.offValue };
+  },
+  "obs.virtualCam": () => {
+    const status = obsService.getLatest();
+    if (!status.connected) return { value: null, reason: "OBS is not connected" };
+    return { value: status.virtualCam ? OBS_VIRTUAL_CAM.onValue : OBS_VIRTUAL_CAM.offValue };
+  },
+  // The two platforms, which no action here can start or stop. `connected` is
+  // the link to the platform's API and `live` is whether it is broadcasting —
+  // two different problems, and only one of them is anybody's to fix mid-service
+  // (see StreamStatusDTO). A YouTube we cannot reach reported as "off" would be
+  // a light saying the service is not on air during the one part of the morning
+  // somebody would act on it.
+  "youtube.live": () => {
+    const status = youtubeService.getLatest();
+    if (!status.connected) return { value: null, reason: "YouTube is not connected" };
+    return { value: status.live ? YOUTUBE_LIVE.onValue : YOUTUBE_LIVE.offValue };
+  },
+  "resi.live": () => {
+    const status = resiService.getLatest();
+    if (!status.connected) return { value: null, reason: "Resi is not connected" };
+    return { value: status.live ? RESI_LIVE.onValue : RESI_LIVE.offValue };
   },
 };
 

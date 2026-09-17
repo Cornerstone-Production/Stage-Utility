@@ -388,20 +388,38 @@ describe("demand is registered for everything automation reads", () => {
     assert.equal(channelDemandSourceCount("reaper:status"), 3);
   });
 
-  it("obs:status has exactly four demand sources", () => {
-    // Four, by three routes, the same shape as REAPER's above:
+  it("obs:status has exactly five demand sources", () => {
+    // Five, by three routes, the same shape as REAPER's above:
     //
     //  1. the trigger loop, for obs.recording-started / -stopped and the
     //     streaming and virtual-cam pairs beside them. ONE registration however
     //     many triggers name the channel.
     //  2. the obs.is-recording CONDITION, pulled at fire time.
-    //  3. TWO cue-pair sources — `app:obs.recording` and `app:obs.streaming`
-    //     (app-state-sources.ts) — one registration each, because the loop in
-    //     automation-engine.ts walks the sources rather than the channels.
+    //  3. THREE cue-pair sources — `app:obs.recording`, `app:obs.streaming` and
+    //     `app:obs.virtualCam` (app-state-sources.ts) — one registration each,
+    //     because the loop in automation-engine.ts walks the sources rather
+    //     than the channels.
     //
-    // An EXACT count: the two app sources share `obs:status` with the triggers,
-    // so dropping either registration is invisible to every other assertion in
-    // this file.
-    assert.equal(channelDemandSourceCount("obs:status"), 4);
+    // An EXACT count: the three app sources share `obs:status` with the
+    // triggers, so dropping any one registration is invisible to every other
+    // assertion in this file.
+    assert.equal(channelDemandSourceCount("obs:status"), 5);
+  });
+
+  it("youtube:status and resi:status have exactly three demand sources each", () => {
+    // Three each, by the same three routes: the trigger loop (one registration
+    // for the platform's whole streamTriggers set), the `<platform>.is-streaming`
+    // CONDITION, and ONE cue-pair source — `app:youtube.live` / `app:resi.live`.
+    //
+    // These two poll a PLATFORM API rather than a box on the LAN, so the idle
+    // cadence is the slowest in the app. A pair bound here and not registered
+    // would be a console button reporting "on air" from a reading taken minutes
+    // ago — which is the whole window in which anybody acts on it.
+    //
+    // Asserted TOGETHER and separately from obs:status because the two are built
+    // by the same factory: a registration reaching one and not the other is
+    // exactly the copy-paste this file exists to catch.
+    assert.equal(channelDemandSourceCount("youtube:status"), 3);
+    assert.equal(channelDemandSourceCount("resi:status"), 3);
   });
 });
