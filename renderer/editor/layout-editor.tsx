@@ -2005,7 +2005,7 @@ export function LayoutEditor({
   const layerRows = flattenLayers(objects);
 
   return (
-    <div className="relative flex flex-col gap-3 @container h-full min-h-0">
+    <div className="relative flex flex-col gap-3 @container/editor h-full min-h-0">
       {/* Unsaved-changes banner — a compact pill in a zero-height, right-aligned
           STICKY anchor: it stays pinned to the top as the editor scrolls (always
           visible) yet reserves no layout space, so it never shifts content down.
@@ -2059,8 +2059,9 @@ export function LayoutEditor({
             canvas row. In the row it was capped at the canvas's own height,
             which on a 1366x203 Ultritouch strip left a 160px list with a
             search box and one visible widget. Non-modal and kept open across
-            outside clicks so a drag onto the canvas, or three clicks to add
-            three widgets, does not keep reopening it; the button toggles it. */}
+            clicks on the canvas so a drag, or three clicks to add three
+            widgets, does not keep reopening it; a click anywhere else closes
+            it, and so does the button. */}
         <Popover.Root open={isEditing && paletteOpen} onOpenChange={setPaletteOpen} modal={false}>
           <Popover.Trigger asChild>
             <Button
@@ -2078,9 +2079,16 @@ export function LayoutEditor({
             <Popover.Content
               align="start"
               sideOffset={6}
-              onInteractOutside={(e) => e.preventDefault()}
+              // A click on the CANVAS keeps it open: that is where a widget is
+              // dropped or placed, and three widgets in a row should not mean
+              // three reopenings. A click anywhere else, or Escape, closes it,
+              // so it does not sit over the layers list once you are done.
+              onInteractOutside={(e) => {
+                const t = e.target as Node | null;
+                if (t && canvasCellRef.current?.contains(t)) e.preventDefault();
+              }}
               onOpenAutoFocus={(e) => e.preventDefault()}
-              className="z-50 w-64 max-h-[min(70vh,44rem)] overflow-y-auto rounded-xl border border-line-strong bg-popover shadow-md backdrop-blur-xl"
+              className="z-50 w-64 max-h-[min(70vh,44rem)] overflow-y-auto quiet-scroll rounded-xl border border-line-strong bg-popover shadow-md backdrop-blur-xl"
             >
               <Palette
                 types={paletteTypes}
@@ -2331,11 +2339,11 @@ export function LayoutEditor({
           so the InlineSlotsEditor below it stays reachable without a huge gap, and
           must be told not to shrink. See canvas-row-fit.ts for what happens when
           it is not. */}
-      <div className={`flex gap-3 @max-4xl:flex-col min-h-0 ${canvasRowFlexClass(!!inlineGrid)}`}>
+      <div className={`flex gap-3 @max-4xl/editor:flex-col min-h-0 ${canvasRowFlexClass(!!inlineGrid)}`}>
         {/* Canvas — height derived from its width + the design aspect (capped at
             the viewport), so it has a definite size, never jumps, and the inline
             slots editor sits right below it. */}
-        <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl:flex-none" style={{ height: canvasH ?? undefined }}>
+        <div ref={canvasCellRef} className="flex-1 min-w-0 @max-4xl/editor:flex-none" style={{ height: canvasH ?? undefined }}>
           {previewShape.vp ? (
             // The live edit state, not the saved view: the point is to check the
             // change you just made against another shape before saving it.
@@ -2443,7 +2451,7 @@ export function LayoutEditor({
         // width rather than the window's. Dragging it narrow used to leave the
         // rows at their full size and the panel scrolling sideways, which is
         // how a swatch row ended up half off the edge.
-        <div className="relative shrink-0 @container/insp @max-4xl:w-full" style={{ width: inspectorWidth }}>
+        <div className="relative shrink-0 @container/insp @max-4xl/editor:w-full" style={{ width: inspectorWidth }}>
           <div
             role="separator"
             aria-orientation="vertical"
@@ -2451,12 +2459,17 @@ export function LayoutEditor({
             onPointerDown={startInspectorResize}
             onDoubleClick={resetInspectorWidth}
             className={cn(
-              "absolute inset-y-0 left-0 z-10 w-[7px] cursor-col-resize @max-4xl:hidden",
+              // `/editor`, NOT the bare `@max-4xl:`. This handle sits inside the
+              // panel, and the panel is itself a container (`@container/insp`,
+              // ~320px), so an unnamed query resolved against IT, was always
+              // under 4xl, and hid the handle at every window size. The
+              // inspector read as no longer resizable; it was, blind.
+              "absolute inset-y-0 left-0 z-10 w-[7px] cursor-col-resize @max-4xl/editor:hidden",
               "after:absolute after:inset-y-0 after:left-0 after:w-px after:transition-colors",
               inspectorDragging ? "after:bg-accent" : "after:bg-transparent hover:after:bg-line-strong",
             )}
           />
-        <div className="flex h-full flex-col gap-3 min-h-0 overflow-y-auto pl-2" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
+        <div className="flex h-full flex-col gap-3 min-h-0 overflow-y-auto overflow-x-hidden quiet-scroll pl-2" style={{ maxHeight: (inlineGrid ? canvasH : availH) ?? undefined }}>
           {/* Layers */}
           <div className="flex flex-col gap-1">
             <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Layers</span>
