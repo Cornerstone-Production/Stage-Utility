@@ -590,6 +590,16 @@
 }
 
 
+/* A scroller with no visible bar. For panels that scroll but should not look
+   like a document: the layout editor's inspector and its widget palette. The
+   content still scrolls by wheel, trackpad and touch; only the bar is gone. */
+.quiet-scroll {
+  scrollbar-width: none; /* Firefox */
+}
+.quiet-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 /* Auto-hide scrollbar for the service-order object: no bar at rest, a thin subtle
    bar only while actively scrolling (the component toggles `.scrolling` and clears
    it ~0.7s after the last scroll). */

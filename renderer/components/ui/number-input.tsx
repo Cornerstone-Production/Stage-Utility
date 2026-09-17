@@ -258,7 +258,12 @@ export function NumberInput({
         // child that could have shown a square corner outside it — the
         // Increase button, which sits at the row's own top-right/bottom-right
         // — carries its own `rounded-r-md` to match.
-        "inline-flex h-7 w-full items-stretch rounded-md border border-line bg-field",
+        // `min-w-0 flex-1` beside `w-full`: in a flex row (an inspector Row with a
+        // swatch before the number, the Canvas popover's width x height) a plain
+        // w-full child cannot shrink below 100% of the row, so the second field
+        // ran 36px past the inspector's edge and the panel scrolled sideways.
+        // In a grid cell or a label the two are inert and w-full still applies.
+        "inline-flex h-7 w-full min-w-0 flex-1 items-stretch rounded-md border border-line bg-field",
         "transition-colors focus-within:border-focus focus-within:ring-1 focus-within:ring-focus",
         disabled && "cursor-not-allowed opacity-50",
         className,

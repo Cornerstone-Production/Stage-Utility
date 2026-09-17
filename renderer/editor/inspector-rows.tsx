@@ -93,12 +93,12 @@ export function MoreControls({ children }: { children: React.ReactNode }) {
  */
 export function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 @max-[248px]/insp:flex-col @max-[248px]/insp:items-stretch @max-[248px]/insp:gap-1">
-      <span className="text-caption2 text-fg-muted w-24 shrink-0 flex items-center gap-1 @max-[248px]/insp:w-auto">
+    <div className="flex items-center gap-2 @max-[288px]/insp:flex-col @max-[288px]/insp:items-stretch @max-[288px]/insp:gap-1">
+      <span className="text-caption2 text-fg-muted w-24 shrink-0 flex items-center gap-1 @max-[288px]/insp:w-auto">
         <span className="truncate">{label}</span>
         {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
       </span>
-      <div className="flex-1 min-w-0 flex items-center gap-1 @max-[248px]/insp:flex-wrap">{children}</div>
+      <div className="flex-1 min-w-0 flex items-center gap-1 @max-[288px]/insp:flex-wrap">{children}</div>
     </div>
   );
 }
