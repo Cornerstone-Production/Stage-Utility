@@ -395,10 +395,16 @@ recording answers `already on` and sends nothing. None of them involve
 Companion, and none carry the **no service is live** condition: a panel button
 has to work during a service.
 
-**The names are reserved.** A rule that tries to take one is refused with
-*"obs_record_on" is a built-in cue*. A rule saved before these existed and
-already holding one keeps working; the built-in with that name is left out
-instead, and the server log says which and why:
+**The names are reserved.** A rule that tries to take one, as its cue name or as
+a former name, is refused with *"obs_record_on" is a built-in cue*. The
+per-layer ProVideoPlayer names are the exception: they are made from your own
+layer names, so reserving `pvp_lyrics_shown_on` would refuse a rule that was
+legal until somebody renamed a layer. A rule holding one of those simply
+suppresses that layer's built-in, exactly as below.
+
+A rule saved before these existed and already holding one keeps working; the
+built-in with that name is left out instead, and the server log says which and
+why:
 
 ```
 [cues] built-in obs_record not offered: rule "REC on" owns obs_record_on

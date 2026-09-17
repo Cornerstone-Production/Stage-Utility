@@ -245,11 +245,25 @@ class AutomationEngine {
     // somebody can read, rather than resolved at call time where it would be a
     // coin toss.
     //
-    // Except for the rule that ALREADY holds it: an install that built its own
-    // OBS pair before this existed must stay editable, and its built-in is left
-    // out instead — see builtinCueRules, which logs which and why.
+    // FORMER NAMES ARE RESERVED TOO. An alias is a live URL and a live Home
+    // Assistant entity id — that is the whole reason aliases exist — so a rule
+    // claiming `obs_record_on` as a former name takes the built-in's URL exactly
+    // as claiming it as a name would, and suppresses the built-in on the way
+    // past. Checked below, against the same set.
+    //
+    // Except for what the edited rule ALREADY answers to, its own name and its
+    // own former names both: an install that built its own OBS pair before this
+    // existed must stay editable, and renaming that rule must keep working — a
+    // rename writes the old name into the alias list, so refusing it there
+    // would make a legacy pair impossible to rename out of the way. The
+    // built-in with that base is left out instead; see builtinCueRules, which
+    // logs which and why.
     const editing = this.rules.find((r) => r.id === exceptId);
-    if (name !== (editing ? this.cueNameOf(editing) : "") && reservedCueNames().has(name)) {
+    const alreadyHeld = new Set(
+      editing ? [this.cueNameOf(editing), ...this.cueAliasesOf(editing)] : [],
+    );
+    const reserved = reservedCueNames();
+    if (!alreadyHeld.has(name) && reserved.has(name)) {
       throw new Error(`"${name}" is a built-in cue`);
     }
 
@@ -281,6 +295,9 @@ class AutomationEngine {
       }
       if (alias === name) {
         throw new Error(`"${alias}" is this cue's own name, not a former one`);
+      }
+      if (!alreadyHeld.has(alias) && reserved.has(alias)) {
+        throw new Error(`"${alias}" is a built-in cue`);
       }
       const takenBy = held.get(alias);
       if (takenBy) {

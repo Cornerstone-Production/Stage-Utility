@@ -182,6 +182,55 @@ describe("the name is reserved", () => {
     );
   });
 
+  test("claiming one as a FORMER name is refused", async () => {
+    // A former name is a live URL and a live Home Assistant entity id — that is
+    // what aliases are for — so this took the built-in's URL exactly as taking
+    // its name would, and suppressed the built-in on the way past.
+    await assert.rejects(
+      () =>
+        automationEngine.addRule({
+          ...cue("rec_on"),
+          trigger: { id: CALL_TRIGGER_ID, params: { name: "rec_on", aliases: "obs_record_on" } },
+        }),
+      /^Error: "obs_record_on" is a built-in cue$/,
+    );
+  });
+
+  test("a rule renamed OUT of a built-in's name keeps it as a former name", async () => {
+    // The legacy install again: its own name goes into its own alias list on a
+    // rename, and refusing that would make a pair built before the built-ins
+    // existed impossible to rename out of the way.
+    await automationStore.saveRules([
+      {
+        id: "legacy-on",
+        name: "REC on",
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name: "obs_record_on" } },
+        conditions: [],
+        action: { id: "log.message", params: { message: "rec" } },
+        cooldownSec: 0,
+        oncePerService: false,
+      },
+    ]);
+    await automationEngine.init();
+    await automationEngine.setSettings({ simulate: false, disarmed: false });
+    try {
+      const updated = await automationEngine.updateRule("legacy-on", {
+        trigger: { id: CALL_TRIGGER_ID, params: { name: "rec_on", aliases: "obs_record_on" } },
+      });
+      assert.equal(automationEngine.cueNameOf(updated.find((r) => r.id === "legacy-on")!), "rec_on");
+      // And it stays editable AFTERWARDS, when the built-in's name is one it
+      // holds as a former name rather than as its name — every later edit of
+      // that rule, a switch toggled or a room typed, goes through this check.
+      const again = await automationEngine.updateRule("legacy-on", { enabled: false });
+      assert.equal(again.find((r) => r.id === "legacy-on")!.enabled, false);
+    } finally {
+      await automationStore.saveRules([]);
+      await automationEngine.init();
+      await automationEngine.setSettings({ simulate: false, disarmed: false });
+    }
+  });
+
   test("renaming a rule into one is refused too", async () => {
     const r = await automationEngine.addRule(cue("booth_record_on"));
     await assert.rejects(
