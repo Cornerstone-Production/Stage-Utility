@@ -100,6 +100,41 @@ whole window. The operator's copy of the launcher is `/scriptview/manage`, in th
 sidebar under Content, with the app's usual chrome; `/scriptview/presets`, which
 edits layouts, keeps the chrome too.
 
+## Polling transport
+
+Append `?transport=poll` to any Stage Utility URL — a display, a console, an
+operator page — and that page collects updates with one small request every two
+seconds instead of holding the `/api/events` stream open. It receives the same
+channels, in the same order, starting from the same connect-time snapshot, so
+nothing renders differently.
+
+Use it for an embedded browser that buffers or drops a long-lived response. The
+Ross Ultritouch's fallback browser is the case it was built for: it holds the
+event stream and releases a minute's worth of frames at once, so the panel shows
+a minute-old service and measures its clock offset a minute wrong. See
+[Ultritouch](integrations/ultritouch.md).
+
+The cost is one HTTP request per client every two seconds — about 43,000 a day
+against a stream's one connection — plus up to two seconds of latency on every
+update. A held stream is cheaper and immediate, so this is opt-in per URL and
+never sticky: drop the query string and the page is back on the stream.
+
+A failing poll backs off, doubling to a 30 second ceiling, and returns to two
+seconds on the first success. A page brought back into view polls immediately
+rather than waiting out the rest of its interval.
+
+The server names polling clients on [`/log`](ops/updates-and-logs.md):
+
+```
+[events] poll client 1cef964f-8175-4b73-bc5e-693de5785d9f started
+[events] poll client 1cef964f-8175-4b73-bc5e-693de5785d9f expired (no poll for 30s)
+```
+
+A client that has not polled for 30 seconds is treated as gone, and any producer
+that only runs while something is watching stands down with it — the same
+accounting an open stream gets. Open streams are named too, as
+`[events] stream client connected (3 streams)`.
+
 ## QR codes
 
 A QR encodes the `/<id>` address and never a slug, since a printed code outlives

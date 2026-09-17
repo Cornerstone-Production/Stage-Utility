@@ -33,12 +33,40 @@ letterboxed, so a few pixels of background at the sides is the worst case.
 1. Open an existing `.grid` for the panel, or **File → New**, and turn on
    **Edit Mode**.
 2. Choose the **Browser** tool and drag it across the whole canvas, edge to edge.
-3. In its properties set **URL** to the screen's address, including `http://`,
-   and **Type** to **CHROMIUM**.
+3. In its properties set **URL** to the screen's address, including `http://`
+   and ending in `?transport=poll` — `http://<server>/ultritouch?transport=poll`
+   — and **Type** to **CHROMIUM**. The query string is required on a panel; see
+   [The panel's browser](#the-panels-browser) below.
 4. Leave Edit Mode. The console shows in DashBoard on your computer at the
    panel's shape; that is what the panel will draw.
 5. **File → Save As**, then on the Ultritouch's device page **Manage
    CustomPanels → Upload to Folder**, and open it from **Manage Open Views**.
+
+## The panel's browser
+
+The panel never runs Chromium, whatever the Browser tool's **Type** says. Its
+Linux predates glibc 2.25, which Ross's embedded Chromium requires, so DashBoard
+logs
+
+```
+The Chromium browser could not be initialized
+```
+
+and falls back to its own built-in browser. The page still renders — but that
+browser buffers a long-lived HTTP response and releases it in batches up to a
+minute later, which is exactly what the `/api/events` stream is. The panel then
+shows a minute-old service, and because it measures its clock offset from the
+timestamp on each frame as the frame arrives, every countdown on it is a minute
+out as well.
+
+So a panel URL carries `?transport=poll`, which makes the page collect updates
+with a small request every two seconds instead. See
+[Polling transport](../display-urls.md#polling-transport). Setting **Type** to
+CHROMIUM is still worth doing — a panel with a newer OS uses it — but do not
+rely on it.
+
+To read the panel's own log, open `http://<panel-ip>/cgi-bin/syslog` in a
+browser. The Chromium line appears there at every panel start.
 
 ## If the panel shows nothing
 
@@ -50,6 +78,11 @@ letterboxed, so a few pixels of background at the sides is the worst case.
   of text and tells reachability apart from a page problem.
 - The Browser **Type**: if CHROMIUM shows blank on the panel but not on your
   computer, the panel's DashBoard lacks it; try DEFAULT.
+- A page that renders but lags, by up to a minute, is the fallback browser
+  buffering the event stream. Add `?transport=poll` to the URL —
+  [The panel's browser](#the-panels-browser). The server's
+  [`/log`](../ops/updates-and-logs.md) confirms it took:
+  `[events] poll client <id> started`.
 - The URL needs its scheme: `http://`, not `http:`.
 - The screen must be in **panel** mode. A console on a display-mode screen is
   refused by the server, and a wall layout on a panel draws buttons that do
