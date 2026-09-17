@@ -313,6 +313,61 @@ describe("calling one", () => {
   });
 });
 
+describe("a stored rule may not wear a built-in's id", () => {
+  test("addRule assigns its own id, whatever the body asked for", async () => {
+    // The write path: `builtin:` is how every reader tells a synthesised rule
+    // from a saved one, and a rules POST carrying an `id` would otherwise put
+    // the operator's own rule in the cue picker's Built in group.
+    const made = await automationEngine.addRule({
+      id: "builtin:obs_record_on",
+      name: "Mine",
+      enabled: true,
+      trigger: { id: CALL_TRIGGER_ID, params: { name: "mine" } },
+      conditions: [],
+      action: { id: "log.message", params: { message: "x" } },
+      cooldownSec: 0,
+      oncePerService: false,
+    } as unknown as Omit<Rule, "id">);
+    assert.equal(made.id.startsWith("builtin:"), false);
+    await automationEngine.removeRule(made.id);
+  });
+
+  test("a restored file carrying one is reported at boot", async () => {
+    // The only other way in: a restore writes the rules file raw, with no
+    // per-rule validation point, so the load is where it is caught. Reported,
+    // never renamed — an id is what a layout's cue button refers to.
+    await automationStore.saveRules([
+      {
+        id: "builtin:obs_record_on",
+        name: "Smuggled",
+        enabled: true,
+        trigger: { id: CALL_TRIGGER_ID, params: { name: "smuggled" } },
+        conditions: [],
+        action: { id: "log.message", params: { message: "x" } },
+        cooldownSec: 0,
+        oncePerService: false,
+      },
+    ]);
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+    try {
+      await automationEngine.init();
+      await automationEngine.setSettings({ simulate: false, disarmed: false });
+    } finally {
+      console.warn = realWarn;
+      await automationStore.saveRules([]);
+      await automationEngine.init();
+      await automationEngine.setSettings({ simulate: false, disarmed: false });
+    }
+    assert.equal(
+      warnings.some((w) => w.includes("reserved for the cues the app ships")),
+      true,
+      `nothing was said about it: ${warnings.join(" | ")}`,
+    );
+  });
+});
+
 describe("the boot line", () => {
   test("init says what is offered, without anything reading the manifest", async () => {
     // An install with no Home Assistant and no panel open never reads the

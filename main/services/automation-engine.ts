@@ -38,7 +38,12 @@ import {
   type AppStateSourceId,
 } from "./app-state-sources.js";
 import { boundCuePairs, cuePairs, stateBindingProblem } from "./cue-pairs.js";
-import { builtinCueRules, logBuiltinCues, reservedCueNames } from "./builtin-cues.js";
+import {
+  BUILTIN_ID_PREFIX,
+  builtinCueRules,
+  logBuiltinCues,
+  reservedCueNames,
+} from "./builtin-cues.js";
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
@@ -179,6 +184,24 @@ class AutomationEngine {
   private invalidLoadedCues(): { rule: string; problem: string }[] {
     const out: { rule: string; problem: string }[] = [];
     for (const rule of this.rules) {
+      // A STORED RULE MAY NOT WEAR A BUILT-IN'S ID. `builtin:` is how every
+      // reader tells a rule the app synthesised from one the operator saved —
+      // the manifest's `builtin` flag, the cue picker's two groups — so a
+      // restored archive or a hand edit carrying one would put the operator's
+      // own rule in the Built in group, under a flag saying they cannot delete
+      // something they can. Reported, never renamed: an id is what a layout's
+      // cue button refers to, and rewriting it would break the binding to fix
+      // a label.
+      //
+      // The write path cannot produce one — addRule assigns a fresh uuid and
+      // updateRule's patch type excludes the id — so this is the only way in,
+      // and a restore writes the rules file raw with no other validation point.
+      if (rule.id?.startsWith(BUILTIN_ID_PREFIX)) {
+        out.push({
+          rule: rule.name || rule.id,
+          problem: `"${rule.id}" is reserved for the cues the app ships`,
+        });
+      }
       if (rule.trigger?.id !== CALL_TRIGGER_ID) continue;
       try {
         this.assertCueValid(rule, rule.id);
