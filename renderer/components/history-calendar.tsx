@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "./ui/tooltip";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -70,10 +70,20 @@ export function HistoryCalendar({
   counts,
   selected,
   onPick,
+  onMonthChange,
 }: {
   counts: Map<string, number>;
   selected: string | null;
   onPick: (date: string) => void;
+  /**
+   * The month now on screen, as `YYYY-MM`.
+   *
+   * The list beside this calendar shows that month's services, so which month
+   * is displayed is no longer private to this component. Reported on mount as
+   * well as on every change, because the opening month is derived here — from
+   * the selected day, else today — and the list cannot guess it.
+   */
+  onMonthChange?: (ym: string) => void;
 }) {
   const today = useMemo(() => {
     const d = new Date();
@@ -105,6 +115,19 @@ export function HistoryCalendar({
     }
     return min ?? today;
   }, [counts, today]);
+
+  // Tell the page which month is up — on mount and on every change. An effect
+  // rather than a call inside `step`, so the opening month (derived above, from
+  // the selection or from today) is reported too; the list beside this
+  // calendar cannot derive it for itself.
+  const ym = `${view.y}-${String(view.m + 1).padStart(2, "0")}`;
+  useEffect(() => {
+    onMonthChange?.(ym);
+    // `onMonthChange` is a fresh closure on every render of the page above; the
+    // month is what this is about, and re-firing on each render would set state
+    // up there in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ym]);
 
   const idx = (v: { y: number; m: number }) => v.y * 12 + v.m;
   const canPrev = idx(view) > idx(earliest);

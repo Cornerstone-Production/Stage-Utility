@@ -193,16 +193,24 @@ a colour with the shade, so the accent means "the day you are looking at" and
 nothing else. One sentence under the grid says what the shade is, in place of a
 row of tinted swatches repeating the grid above it.
 
-The **list** beside it is the selected day's services. Each row carries the start
-time and service type, the plan title, the series and how many items ran, then
-four figures:
+The **list** beside it is the **whole month the calendar is showing**, grouped by
+day, newest first — paging the calendar pages the list. Clicking a day scrolls
+to that day's group and rings it; it does not hide the rest of the month.
+
+Each day group carries a column header, then a row per service: the start time
+with the service type under it, the plan title with its series and item count
+under that, and four figures. Each figure's caption sits under its value.
 
 | | |
 |---|---|
-| Peak attendance | the most people in the room at once |
+| Peak | the most people in the room at once |
 | Ran | what the service ran; **Running**, counting up, while it is still recording |
-| vs plan | its difference against the planned total — absent while recording, where most of a plan not yet run reads as a service running short |
-| Peak *metric* | the loudest reading on the primary Smaart metric |
+| vs plan | its difference against the planned total — a dash while recording, where most of a plan not yet run reads as a service running short |
+| Peak dB | the loudest reading on the primary Smaart metric, captioned with the metric it read |
+
+A figure a row has nothing for is a dash in its own column, never a closed gap:
+the header is drawn once per group, and a row that slid its columns left would
+misname every figure to the right of the missing one.
 
 They are the service page's own figures, picked out of the same derivation, so a
 row and the page it opens cannot quote different numbers for one recording. A
