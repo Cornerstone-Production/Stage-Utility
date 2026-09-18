@@ -120,6 +120,15 @@ export interface HistoryChartProps {
   /** Dated marks under the axis. See ChartMilestone. */
   milestones?: ChartMilestone[];
   /**
+   * A right-click on a legend entry, or on the plot itself.
+   *
+   * `id` is the series the entry names, or null for the plot — where a 2px line
+   * is not something a pointer reliably lands on, so the menu is offered for
+   * the chart as a whole and lists every series rather than guessing which one
+   * was aimed at.
+   */
+  onSeriesContextMenu?: (id: string | null, e: React.MouseEvent) => void;
+  /**
    * Whether an item's `peakLabel` draws its tick on the lane. Default true.
    *
    * A chart whose items carry no `peakLabel` never draws one whatever this
@@ -153,6 +162,7 @@ export function HistoryChart({
   xAxis = "clock",
   milestones,
   peakMarks = true,
+  onSeriesContextMenu,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
@@ -346,6 +356,88 @@ export function HistoryChart({
     );
   }
 
+  /**
+   * The legend, built once and rendered in BOTH branches.
+   *
+   * The empty branch used to drop it, and the legend is the only way a series
+   * comes back: switching every series off left a note saying there was
+   * nothing to draw and no control anywhere on the page that could undo it.
+   */
+  const legend = (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption2 text-fg-muted">
+      {series.map((s) => {
+        const on = s.on !== false;
+        // The swatch IS the line — a 2px rule in the series colour, dashed when
+        // the line is. A filled dot for the solid series and a rule for the
+        // dashed one were two different kinds of mark for two lines, and on the
+        // trend chart, where every series is a solid line of the same weight, a
+        // row of identical dots said nothing about which line was which.
+        const swatch = (
+          <span
+            className={cn("inline-block w-3.5 border-t-2", s.dashed && "border-dashed")}
+            style={{ borderColor: s.color }}
+          />
+        );
+        if (!onToggleSeries) {
+          return (
+            <span key={s.id} className="inline-flex items-center gap-1.5">{swatch}{s.label}</span>
+          );
+        }
+        return (
+          <button
+            key={s.id}
+            type="button"
+            data-series-toggle={s.id}
+            aria-pressed={on}
+            onClick={() => onToggleSeries(s.id)}
+            onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(s.id, e) : undefined}
+            className={cn(
+              "touch-target inline-flex items-center gap-1.5 rounded px-1 py-0.5",
+              "hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
+              // An off series stays legible — it is a control, not a disabled
+              // one — but reads as off at a glance.
+              !on && "opacity-45 line-through decoration-1",
+            )}
+          >
+            {swatch}
+            {s.label}
+          </button>
+        );
+      })}
+      {/* The lane's peak tick, NAMED. It shipped as an unlabelled coloured chip
+          on an item block, and the first thing anybody asked about the sound
+          chart was what it was. The swatch is the mark: a vertical bar in the
+          primary series' colour, the same thing drawn on the lane. */}
+      {peakMarks && items.some((it) => it.peakLabel) && (
+        <span data-legend-peak-mark className="inline-flex items-center gap-1.5">
+          <span
+            className="inline-block h-2.5 w-[3px] rounded-[1px]"
+            style={{ background: shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)" }}
+          />
+          Item peak
+        </span>
+      )}
+      {(hasPre || hasPost) && (
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="inline-block size-2.5 rounded-[2px] border border-line-strong"
+            style={{ backgroundImage: "repeating-linear-gradient(45deg, var(--color-line) 0 1px, transparent 1px 3px)" }}
+          />
+          Before / after service
+        </span>
+      )}
+      {/* What the triangles under the axis are. Each is 8px of glyph carrying
+          the only copy of a sentence; without this the chart had a row of
+          unexplained marks on it. Pushed to the right end, away from the series
+          entries, because it names a mark rather than a line. */}
+      {marks.length > 0 && (
+        <span data-legend-milestones className="ml-auto text-fg-subtle">
+          ▲ milestone · hover for the label
+        </span>
+      )}
+    </div>
+  );
+
   if (!all.length) {
     return (
       // THE REF GOES ON BOTH BRANCHES.
@@ -358,9 +450,13 @@ export function HistoryChart({
       // middle of a 1,256px card, for the rest of the page's life.
       <div className="flex flex-col gap-3" ref={hostRef}>
         <StatStrip figures={figures} hover={null} live={null} right={customize} />
-        <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted">
+        <div
+          className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted"
+          onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
+        >
           {emptyNote ?? "Nothing recorded yet — the chart fills in as the service runs."}
         </div>
+        {legend}
       </div>
     );
   }
@@ -387,6 +483,7 @@ export function HistoryChart({
           setHoverX(null);
           setHoverRow(null);
         }}
+        onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
       >
         <defs>
           {/* 45° hatch for the time outside the service window. A pattern, not a
@@ -473,7 +570,7 @@ export function HistoryChart({
                   d={linePathD(run, project)}
                   fill="none"
                   stroke={s.color}
-                  strokeWidth={s.role === "primary" ? 1.8 : 1.2}
+                  strokeWidth={s.width ?? (s.role === "primary" ? 1.8 : 1.2)}
                   strokeDasharray={s.dashed ? "4 3" : undefined}
                   strokeLinejoin="round"
                   strokeLinecap="round"
@@ -483,29 +580,6 @@ export function HistoryChart({
             </g>
           );
         })}
-
-        {/* One mark per underlying reading, where the line's own nodes are a
-            summary of several — see ChartSeries.dots. Drawn after the lines so
-            a dot is never hidden under the line it belongs to. */}
-        {shown.filter((s) => s.dots?.length).map((s) => (
-          <g key={`dots-${s.id}`} data-series-dots={s.id}>
-            {(s.dots ?? []).map((p, i) => (
-              <circle
-                key={`${p.t}-${i}`}
-                data-series-dot={s.id}
-                cx={xOf(p.t)}
-                cy={yOf(p.v)}
-                r={2.5}
-                fill={s.color}
-                // The plot's own background shows through a dot sitting on the
-                // line, so a cluster reads as several rather than as a blob.
-                stroke="var(--color-bg)"
-                strokeWidth={1}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
-          </g>
-        ))}
 
         {/* The stretch that just arrived, drawn in over 200ms on top of the line
             it is already part of.
@@ -526,7 +600,7 @@ export function HistoryChart({
               d={linePathD(tail, project)}
               fill="none"
               stroke={s.color}
-              strokeWidth={s.role === "primary" ? 1.8 : 1.2}
+              strokeWidth={s.width ?? (s.role === "primary" ? 1.8 : 1.2)}
               strokeLinecap="round"
               pathLength={1}
               vectorEffect="non-scaling-stroke"
@@ -745,68 +819,7 @@ export function HistoryChart({
         )}
       </svg>
 
-      {/* The legend IS the quick toggle. It lists every series the section
-          offers, drawn or not, and clicking one is the same action as ticking
-          it in Customize — `onToggleSeries` is wired to the same handler, so
-          the two can never disagree. Without a handler it is a plain legend. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption2 text-fg-muted">
-        {series.map((s) => {
-          const on = s.on !== false;
-          const swatch = s.dashed
-            // The swatch is the LINE: a dashed series gets a dashed rule, not
-            // the same filled dot as the solid one beside it. Two identical
-            // dots said the two lines were drawn alike when one is a dashed
-            // reference.
-            ? <span className="inline-block w-3 border-t border-dashed" style={{ borderColor: s.color }} />
-            : <span className="size-2.5 rounded-full" style={{ background: s.color }} />;
-          if (!onToggleSeries) {
-            return (
-              <span key={s.id} className="inline-flex items-center gap-1.5">{swatch}{s.label}</span>
-            );
-          }
-          return (
-            <button
-              key={s.id}
-              type="button"
-              data-series-toggle={s.id}
-              aria-pressed={on}
-              onClick={() => onToggleSeries(s.id)}
-              className={cn(
-                "touch-target inline-flex items-center gap-1.5 rounded px-1 py-0.5",
-                "hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
-                // An off series stays legible — it is a control, not a
-                // disabled one — but reads as off at a glance.
-                !on && "opacity-45 line-through decoration-1",
-              )}
-            >
-              {swatch}
-              {s.label}
-            </button>
-          );
-        })}
-        {/* The lane's peak tick, NAMED. It shipped as an unlabelled coloured
-            chip on an item block, and the first thing anybody asked about the
-            sound chart was what it was. The swatch is the mark: a vertical bar
-            in the primary series' colour, the same thing drawn on the lane. */}
-        {peakMarks && items.some((it) => it.peakLabel) && (
-          <span data-legend-peak-mark className="inline-flex items-center gap-1.5">
-            <span
-              className="inline-block h-2.5 w-[3px] rounded-[1px]"
-              style={{ background: shown.find((s) => s.role === "primary")?.color ?? "var(--color-accent)" }}
-            />
-            Item peak
-          </span>
-        )}
-        {(hasPre || hasPost) && (
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="inline-block size-2.5 rounded-[2px] border border-line-strong"
-              style={{ backgroundImage: "repeating-linear-gradient(45deg, var(--color-line) 0 1px, transparent 1px 3px)" }}
-            />
-            Before / after service
-          </span>
-        )}
-      </div>
+      {legend}
     </div>
   );
 }

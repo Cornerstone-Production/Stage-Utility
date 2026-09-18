@@ -276,6 +276,161 @@ describe("the stat strip above the plot", () => {
   });
 });
 
+describe("a service type's colour", () => {
+  /** Every colour the card drew for one type, off what it PUT in the DOM:
+   *  the tile's sparkline, the tile's change figure, the chart line and the
+   *  legend swatch. A colour decided anywhere else cannot satisfy this. */
+  const colorsFor = (view: ReturnType<typeof render>, id: string) => {
+    const tile = view.container.querySelector(`[data-trend-tile="${id}"]`);
+    const line = view.container.querySelector(`[data-series-line="${id}"]`);
+    const swatch = view.container.querySelector(`[data-series-toggle="${id}"] span`) as HTMLElement | null;
+    return {
+      sparkline: tile?.querySelector("[data-sparkline]")?.getAttribute("stroke") ?? null,
+      change: (tile?.querySelector("[data-trend-change]") as HTMLElement | null)?.style.color || null,
+      line: line?.getAttribute("stroke") ?? null,
+      swatch: swatch?.style.borderColor || null,
+    };
+  };
+
+  test("is the same on Attendance and on Sound", () => {
+    // THE BUG Henry reported. Colours were the palette indexed by the tile
+    // sort, and the sort is busiest-first, so switching measure re-sorted and
+    // The Salt Company was blue on one and green on the other.
+    return withTwoTypes(async (view) => {
+      const before = colorsFor(view, "evening");
+      assert.ok(before.line, "the evening line was not drawn, so this asserts nothing");
+      await act(async () => {
+        view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]')!.click();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      assert.deepEqual(colorsFor(view, "evening"), before, "the colour moved when the measure did");
+    });
+  });
+
+  test("is the same colour in the tile, the line and the legend", async () => {
+    // Four surfaces, one entry. A tile drawn in a colour its own line does not
+    // use is a tile that belongs to nothing. Sixteen days per type so the
+    // change figure — the fourth surface — actually has a percentage to print;
+    // with ten it reads "no prior window yet" and carries no colour at all.
+    const view = await renderCard([...longRun("weekend", 1000), ...longRun("evening", 200)]);
+    try {
+      for (const id of ["weekend", "evening"]) {
+        const c = colorsFor(view, id);
+        assert.ok(c.line, `no line for ${id}`);
+        assert.ok(c.change, `${id}'s change figure carries no colour, so this asserts nothing`);
+        assert.deepEqual(
+          [c.sparkline, c.change, c.swatch],
+          [c.line, c.line, c.line],
+          `${id} is drawn in more than one colour: ${JSON.stringify(c)}`,
+        );
+      }
+    } finally {
+      view.unmount();
+    }
+  });
+
+  test("is persisted, so a reload draws the same picture", async () => {
+    // Derived fresh each visit it would follow whatever order the history
+    // happened to be in that week.
+    const recs = twoTypes();
+    const first = await renderCard(recs);
+    const before = colorsFor(first, "evening").line;
+    assert.ok(before, "the evening line was not drawn");
+    assert.match(localStorage.getItem("history:trendColors") ?? "", /"evening"/, "nothing was persisted");
+    cleanup();
+
+    // A SECOND type list, in a different order and with a new type in front of
+    // the old ones — the shape that used to renumber everybody.
+    const second = await renderCard([...twoTypes("midweek", 500), ...recs]);
+    assert.equal(colorsFor(second, "evening").line, before, "the colour changed across a reload");
+    second.unmount();
+  });
+});
+
+describe("right-clicking to hide a service type", () => {
+  const menuLabels = () =>
+    [...document.querySelectorAll("[role='menu'] button")].map((b) => (b.textContent ?? "").trim());
+
+  const rightClick = async (el: Element) => {
+    await act(async () => {
+      el.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  };
+
+  /** Click a menu entry by its label. Returns false when there is none, so a
+   *  missing entry is an assertion rather than a throw inside `act`. */
+  const pickMenu = async (label: string) => {
+    const button = [...document.querySelectorAll("[role='menu'] button")]
+      .find((b) => b.textContent?.trim() === label);
+    if (!button) return false;
+    await act(async () => {
+      button.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    return true;
+  };
+
+  test("a tile's menu hides it from the tiles, the chart AND the strip", async () => {
+    // Hidden used to mean "off the plot". The tile stayed, so half the type was
+    // still on screen under a control that says Hide.
+    //
+    // Everything is READ, then the view is unmounted, THEN asserted. An
+    // assertion thrown while the menu is mounted leaves its window listeners
+    // behind and the file hangs instead of printing which assertion failed.
+    const view = await renderCard(twoTypes());
+    await rightClick(view.container.querySelector('[data-trend-tile="weekend"]')!);
+    const offered = menuLabels();
+    const clicked = await pickMenu("Hide weekend");
+    const after = {
+      tile: view.container.querySelector('[data-trend-tile="weekend"]') != null,
+      line: view.container.querySelector('[data-series-line="weekend"]') != null,
+      services: [...view.container.querySelectorAll("[data-history-strip] > div")]
+        .map((d) => [...d.children].map((c) => (c.textContent ?? "").trim()))[0],
+      legendPressed: view.container
+        .querySelector('[data-series-toggle="weekend"]')
+        ?.getAttribute("aria-pressed") ?? null,
+    };
+    view.unmount();
+
+    assert.ok(offered.includes("Hide weekend"), `no Hide entry: ${offered.join(", ")}`);
+    assert.ok(clicked, "the Hide entry could not be clicked");
+    assert.equal(after.tile, false, "the tile stayed after Hide");
+    assert.equal(after.line, false, "the line stayed after Hide");
+    assert.equal(after.services[1], "10", `the strip still counts the hidden type: ${after.services.join(" ")}`);
+    // The legend keeps it, dimmed, so it can come back.
+    assert.equal(after.legendPressed, "false", "the legend dropped the hidden type, so there is no way back");
+  });
+
+  test("Show all brings back EVERY hidden type, not just one of them", async () => {
+    // A loop of toggles all read the same stale list, so the last write won and
+    // the others were silently dropped.
+    const view = await renderCard(twoTypes());
+    const toggle = async (id: string) => {
+      await act(async () => {
+        view.container.querySelector<HTMLButtonElement>(`[data-series-toggle="${id}"]`)!.click();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    };
+    await toggle("weekend");
+    await toggle("evening");
+    const hiddenTiles = view.container.querySelectorAll("[data-trend-tile]").length;
+    // With every series off the plot is gone, so the LEGEND is the only surface
+    // left to right-click. It used to be gone too, which left an empty note and
+    // no control anywhere on the page that could undo it.
+    const entry = view.container.querySelector('[data-series-toggle="weekend"]');
+    if (entry) await rightClick(entry);
+    const restored = entry && (await pickMenu("Show all"))
+      ? view.container.querySelectorAll("[data-trend-tile]").length
+      : -1;
+    view.unmount();
+
+    assert.equal(hiddenTiles, 0, "both types should have been hidden");
+    assert.ok(entry, "hiding everything left no way back on the page at all");
+    assert.equal(restored, 2, "Show all brought back only some of them");
+  });
+});
+
 describe("when the milestone list will not load", () => {
   test("the card says so, and the reason is logged", async () => {
     // Swallowed, the chart drew the derived series-change marks and simply
@@ -387,24 +542,49 @@ async function withBoth<T>(
   }
 }
 
+/** Sixteen days of one service type, so a tile has a prior window and prints a
+ *  real change figure. `peak` drifts by a point a week so the two windows are
+ *  not equal and the percentage is not "0%". */
+function longRun(typeId: string, peak: number): TrendRecording[] {
+  const DAY = 24 * 60 * 60_000;
+  const start = Date.parse("2026-01-04T15:00:00Z");
+  return Array.from({ length: 16 }, (_, i) => ({
+    serviceKey: `${typeId}:${i}`,
+    serviceTypeId: typeId,
+    serviceTypeName: typeId,
+    serviceDate: new Date(start + i * 7 * DAY).toISOString().slice(0, 10),
+    t: start + i * 7 * DAY,
+    seriesTitle: null,
+    peakOccupancy: peak + i,
+    peakDb: 90 + (i % 5),
+  }));
+}
+
+/** Ten days of one service type. Defaults to the weekend/evening pair the
+ *  hide and colour tests use. */
+function twoTypes(typeId?: string, peak?: number): TrendRecording[] {
+  const DAY = 24 * 60 * 60_000;
+  const start = Date.parse("2026-01-04T15:00:00Z");
+  const of = (id: string, p: number): TrendRecording[] =>
+    Array.from({ length: 10 }, (_, i) => ({
+      serviceKey: `${id}:${i}`,
+      serviceTypeId: id,
+      serviceTypeName: id,
+      serviceDate: new Date(start + i * 7 * DAY).toISOString().slice(0, 10),
+      t: start + i * 7 * DAY,
+      seriesTitle: null,
+      peakOccupancy: p,
+      peakDb: 95,
+    }));
+  if (typeId != null) return of(typeId, peak ?? 100);
+  return [...of("weekend", 1000), ...of("evening", 200)];
+}
+
 /** Two service types, ten days each, and a way to switch one off. */
 async function withTwoTypes(
   check: (view: ReturnType<typeof render>, toggle: (id: string) => Promise<void>) => void | Promise<void>,
 ) {
-  const DAY = 24 * 60 * 60_000;
-  const start = Date.parse("2026-01-04T15:00:00Z");
-  const of = (typeId: string, peak: number): TrendRecording[] =>
-    Array.from({ length: 10 }, (_, i) => ({
-      serviceKey: `${typeId}:${i}`,
-      serviceTypeId: typeId,
-      serviceTypeName: typeId,
-      serviceDate: new Date(start + i * 7 * DAY).toISOString().slice(0, 10),
-      t: start + i * 7 * DAY,
-      seriesTitle: null,
-      peakOccupancy: peak,
-      peakDb: 95,
-    }));
-  const view = await renderCard([...of("weekend", 1000), ...of("evening", 200)]);
+  const view = await renderCard(twoTypes());
   const toggle = async (id: string) => {
     await act(async () => {
       view.container.querySelector<HTMLButtonElement>(`[data-series-toggle="${id}"]`)!.click();

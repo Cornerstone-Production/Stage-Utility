@@ -28,11 +28,19 @@ import { HistoryChart, useStoredKeys, type ChartMilestone } from "../history-cha
 import { toast } from "../../../components/ui";
 import type { ChartSeries } from "../history-chart/geometry";
 import { Sparkline } from "./sparkline";
+import { ContextMenu, type ContextMenuItem } from "../../../components/ui/context-menu";
+import {
+  assignColorIndexes,
+  colorForIndex,
+  readColorAssignment,
+  writeColorAssignment,
+} from "./series-colors";
 import {
   DEFAULT_RANGE_WEEKS,
   dailyPeaks,
   measureOf,
   RANGE_WEEKS,
+  TREND_WINDOW,
   trendMilestones,
   typeTrends,
   withinRange,
@@ -87,15 +95,11 @@ function storedRange(): RangeWeeks {
   }
 }
 
-/** Distinct, in order, for the series lines. Theme tokens only — the accent
- *  first because the busiest type leads, then the neutrals the rest of the app
- *  uses for secondary data. */
-const SERIES_COLORS = [
-  "var(--color-green-9)",
-  "var(--color-accent)",
-  "var(--color-fg-muted)",
-  "var(--color-warn-11)",
-];
+/** Every drawn line on this chart is a PEER — one service type against
+ *  another, none of them the subject — so they share a weight. 1.8/1.2 by role
+ *  said the busiest type was the measurement and the rest were reference lines
+ *  against it. */
+const TREND_LINE_WIDTH = 2;
 
 /**
  * "+12%" / "−12%", the spelling every percentage trend in this app uses.
@@ -134,7 +138,7 @@ export function TrendsCard({
    * the offering is per-history and filtering against today's would quietly
    * drop a type that had not recorded in the chosen range.
    */
-  const [hidden, toggleHidden] = useStoredKeys(SERIES_KEY, null, []);
+  const [hidden, toggleHidden, , replaceHidden] = useStoredKeys(SERIES_KEY, null, []);
   const [stored, setStored] = useState<StoredMilestone[]>([]);
   /**
    * Set when the milestone list could not be read.
@@ -180,6 +184,31 @@ export function TrendsCard({
   const tiles = useMemo(() => typeTrends(recordings, { pick }), [recordings, pick]);
   const ranged = useMemo(() => withinRange(recordings, weeks, pick), [recordings, weeks, pick]);
 
+  /**
+   * One colour per service type, stable across measure, range and sort.
+   *
+   * Assigned over EVERY type in the whole history rather than over the tiles,
+   * and in a fixed order (by id), so the assignment does not depend on which
+   * measure is selected or which types happen to have recorded in the chosen
+   * range — those are exactly the things that used to move a colour. The
+   * derivation is pure and tested in series-colors.test.ts.
+   */
+  const typeIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of recordings) ids.add(r.serviceTypeId ?? "");
+    return [...ids].sort();
+  }, [recordings]);
+  const colorIndexes = useMemo(() => assignColorIndexes(readColorAssignment(), typeIds), [typeIds]);
+  const colorOf = (key: string) => colorForIndex(colorIndexes[key] ?? 0);
+
+  // Persist it, so the assignment survives a reload and next week's chart is
+  // the same picture. A browser that refuses to write says so on a [history]
+  // line rather than silently re-deriving a different assignment every visit.
+  useEffect(() => {
+    const err = writeColorAssignment(colorIndexes);
+    if (err) logToServer("history", `could not remember the trend colours: ${err.message}`);
+  }, [colorIndexes]);
+
   const series = useMemo<ChartSeries[]>(() => {
     const byType = new Map<string, TrendRecording[]>();
     for (const r of ranged) {
@@ -187,14 +216,19 @@ export function TrendsCard({
       if (!byType.has(key)) byType.set(key, []);
       byType.get(key)!.push(r);
     }
-    // The tiles are already sorted busiest-first; the lines follow the same
-    // order so a colour means the same thing in both halves of the card.
+    // Order decides only which line draws on top; the COLOUR no longer follows
+    // it — see colorIndexes. It used to, and that is how The Salt Company was
+    // blue on Attendance and green on Sound.
     const order = tiles.map((t) => t.serviceTypeId ?? "").filter((k) => byType.has(k));
     for (const k of byType.keys()) if (!order.includes(k)) order.push(k);
     return order.map((key, i) => ({
       id: key || "all",
       label: tiles.find((t) => (t.serviceTypeId ?? "") === key)?.name ?? "Services",
-      color: SERIES_COLORS[i % SERIES_COLORS.length],
+      color: colorOf(key),
+      // Every line the same weight — see TREND_LINE_WIDTH. `role` still picks
+      // which one the gradient and the live edge would belong to; this chart
+      // has neither.
+      width: TREND_LINE_WIDTH,
       role: i === 0 ? "primary" : "secondary",
       // The legend IS the toggle — the same arrangement the attendance and
       // sound charts use. Without it a milestone scoped to one service type had
@@ -205,18 +239,75 @@ export function TrendsCard({
       // fortnight apart because a service was a fortnight apart, not because
       // anything went unmeasured. Without this every point would be its own run.
       gapMs: Infinity,
-      // The LINE runs through each day's busiest service; the DOTS are the
-      // services. Three Sunday services plotted as three points drew a sawtooth
-      // — 9am 1,400, 11am 700, 6pm 1,100 and back again, every week — in which a
-      // real week-to-week trend was invisible.
+      // The line runs through each day's BUSIEST service. Three Sunday services
+      // plotted as three points drew a sawtooth — 9am 1,400, 11am 700, 6pm
+      // 1,100 and back again, every week — in which a real week-to-week trend
+      // was invisible. The individual recordings were also drawn, as scatter
+      // dots; they read as noise nobody could name and are gone.
       points: dailyPeaks(byType.get(key) ?? [], pick).map((d) => ({ t: d.t, v: d.v })),
-      dots: (byType.get(key) ?? []).map((r) => ({ t: r.t, v: pick(r) as number })),
       format: fmtValue,
     }));
     // `fmtValue` is a fresh closure every render; what it depends on is the
-    // measure, which `pick` already carries.
+    // measure, which `pick` already carries. `colorOf` reads `colorIndexes`,
+    // which IS a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranged, tiles, hidden, pick]);
+  }, [ranged, tiles, hidden, pick, colorIndexes]);
+
+  /** The tiles that are DRAWN. `hidden` keys a type by its series id, which is
+   *  the type id or "all" for the no-type bucket — the same key the series and
+   *  the stat strip filter on, so the three cannot disagree. */
+  const shownTiles = useMemo(
+    () => tiles.filter((t) => !hidden.includes(t.serviceTypeId ?? "all")),
+    [tiles, hidden],
+  );
+
+  /** Where a right-click landed, and which series it was on (null = the plot). */
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string | null } | null>(null);
+  function openMenu(id: string | null, e: React.MouseEvent) {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, id });
+  }
+  function setHidden(id: string, hide: boolean) {
+    if (hidden.includes(id) === hide) return;
+    const err = toggleHidden(id);
+    if (err) toast.error(`Couldn't remember that: ${err.message}`);
+  }
+  function showAll() {
+    // One write, not a loop of toggles — see `replaceHidden`.
+    const err = replaceHidden([]);
+    if (err) toast.error(`Couldn't remember that: ${err.message}`);
+  }
+
+  /**
+   * The menu: hide the one that was clicked, then a tick per service type, then
+   * Show all.
+   *
+   * The whole list is offered whichever surface was right-clicked, because a
+   * 2px line is not something a pointer lands on reliably — so the plot's menu
+   * has to be able to reach every type rather than guessing which was aimed at.
+   */
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    if (!menu) return [];
+    const items: ContextMenuItem[] = [];
+    const clicked = menu.id == null ? null : tiles.find((t) => (t.serviceTypeId ?? "all") === menu.id);
+    if (clicked && !hidden.includes(menu.id as string)) {
+      items.push({ label: `Hide ${clicked.name}`, onSelect: () => setHidden(menu.id as string, true) });
+      items.push({ separator: true });
+    }
+    for (const t of tiles) {
+      const key = t.serviceTypeId ?? "all";
+      items.push({
+        label: t.name,
+        checked: !hidden.includes(key),
+        onSelect: () => setHidden(key, !hidden.includes(key)),
+      });
+    }
+    items.push({ separator: true });
+    items.push({ label: "Show all", disabled: hidden.length === 0, onSelect: showAll });
+    return items;
+    // `setHidden` closes over `hidden`, which IS a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menu, tiles, hidden]);
 
   const milestones = useMemo<ChartMilestone[]>(() => {
     if (!ranged.length) return [];
@@ -265,7 +356,9 @@ export function TrendsCard({
     <section data-testid="history-trends" className="su-card flex flex-col gap-4 px-4 py-3.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-baseline gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">Trends</span>
+          {/* A card TITLE, not a label. The mockup leads the page with it and
+              every other card on the page now titles itself the same way. */}
+          <h3 className="text-body font-semibold text-fg">Trends</h3>
           {milestonesFailed && (
             <span data-milestones-failed className="text-caption2 text-warn-11">milestones unavailable</span>
           )}
@@ -315,6 +408,16 @@ export function TrendsCard({
         </div>
       </div>
 
+      {/* What the card is, in one line. The tiles and the plot below it answer
+          two different questions and neither says which recordings it read, so
+          without this the "avg peak" on a tile is a number with no window. On
+          its own row rather than beside the title: the measure and range
+          controls take that space. */}
+      <p data-trends-subtitle className="-mt-3 text-caption2 text-fg-subtle">
+        {sound ? "Peak level" : "Peak attendance"} per service type, last {TREND_WINDOW} recordings each
+        {" · milestones from your list and series changes"}
+      </p>
+
       {tiles.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-caption1 text-fg-muted">
           {sound && soundUnavailable
@@ -325,19 +428,32 @@ export function TrendsCard({
         </p>
       ) : (
         <>
+          {/* The SHOWN types only. A hidden type disappearing from the tiles as
+              well as from the plot is the point — the tiles were the one place
+              it stayed, so "hide" hid half of it. The legend below keeps a
+              dimmed entry, which is how it comes back. */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {tiles.map((t) => (
+            {shownTiles.map((t) => (
               <div
                 key={t.serviceTypeId ?? "all"}
                 data-trend-tile={t.serviceTypeId ?? "all"}
-                className="flex flex-col gap-1.5 rounded-lg border border-line bg-fill/40 px-3 py-2.5"
+                onContextMenu={(e) => openMenu(t.serviceTypeId ?? "all", e)}
+                // Sparkline LEFT, figures RIGHT. Stacked, the tile was three
+                // rows of equal weight and the average did not lead.
+                className="flex items-center gap-3 rounded-lg border border-line bg-fill/40 px-3 py-2.5"
               >
-                <span className="truncate text-caption2 uppercase tracking-wider text-fg-subtle">{t.name}</span>
                 <Sparkline
                   values={t.recent.map((d) => d.v)}
+                  color={colorOf(t.serviceTypeId ?? "")}
+                  width={90}
+                  height={34}
                   label={`${t.name}: the ${sound ? "loudest" : "busiest"} service of each of the last ${t.recent.length} days it recorded`}
                 />
-                <div className="flex items-baseline gap-2">
+                <div className="flex min-w-0 flex-col gap-0.5">
+                <span className="truncate text-caption2 text-fg-subtle">
+                  {t.name} · avg {sound ? "peak level" : "peak"}
+                </span>
+                <div className="flex flex-wrap items-baseline gap-2">
                   <span data-trend-average className="font-mono text-[20px] font-medium leading-[24px] tabular-nums text-fg">
                     {t.average == null ? "—" : fmtValue(t.average)}
                   </span>
@@ -345,9 +461,13 @@ export function TrendsCard({
                       tile with one window of recordings says so rather than
                       printing a figure derived from nothing. */}
                   {t.change != null ? (
+                    // In the SERIES colour, not red/green. The sign already
+                    // carries the direction; what the tile has to say at a
+                    // glance is which line on the plot below it belongs to.
                     <span
                       data-trend-change
-                      className={cn("text-caption1", t.change >= 0 ? "text-ok-11" : "text-warn-11")}
+                      className="text-caption1"
+                      style={{ color: colorOf(t.serviceTypeId ?? "") }}
                     >
                       {pct(t.change)}{" "}
                       {/* The REAL count, never the window it would like to
@@ -370,11 +490,7 @@ export function TrendsCard({
                     </span>
                   )}
                 </div>
-                <span className="text-caption2 text-fg-subtle">
-                  {t.average == null
-                    ? " "
-                    : `${sound ? "loudest" : "busiest"} service, averaged over ${t.recent.length} day${t.recent.length === 1 ? "" : "s"}`}
-                </span>
+                </div>
               </div>
             ))}
           </div>
@@ -396,6 +512,7 @@ export function TrendsCard({
               const err = toggleHidden(id);
               if (err) toast.error(`Couldn't remember that: ${err.message}`);
             }}
+            onSeriesContextMenu={openMenu}
             ariaLabel={
               sound
                 ? `Peak level per recording over the last ${weeks} weeks`
@@ -409,6 +526,7 @@ export function TrendsCard({
           />
         </>
       )}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
     </section>
   );
 }

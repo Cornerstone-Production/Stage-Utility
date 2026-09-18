@@ -10,7 +10,8 @@ export interface ChartPoint {
   v: number;
 }
 
-/** A drawn line. `role` picks the weight (1.8px primary / 1.2px secondary). */
+/** A drawn line. `role` picks the weight (1.8px primary / 1.2px secondary)
+ *  unless `width` overrides it. */
 export interface ChartSeries {
   id: string;
   label: string;
@@ -51,17 +52,14 @@ export interface ChartSeries {
    */
   runs?: ChartPoint[][];
   /**
-   * Points marked individually, in the series colour, with no line through them.
+   * Stroke width in px, overriding the one `role` picks.
    *
-   * For a line whose nodes are a SUMMARY of several readings: the trend chart's
-   * line runs through each day's busiest service, and these are the services
-   * themselves. Without them a church with three Sunday services would see one
-   * point a week and no way to tell it stood for three.
-   *
-   * Not `points`, because `points` is what the line and the hover readout are
-   * built from and those must stay the summary.
+   * For a chart whose lines are PEERS. The trend chart draws one line per
+   * service type and none of them is the subject: drawing the busiest at 1.8
+   * and the rest at 1.2 said the 9:45 service was the thing being measured and
+   * the others were reference lines against it, which is not what it is.
    */
-  dots?: ChartPoint[];
+  width?: number;
   /** How a value reads in the stat strip and on hover. */
   format?: (v: number) => string;
 }

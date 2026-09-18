@@ -253,38 +253,6 @@ describe("the label rule under a pointer", () => {
     r.unmount();
   });
 });
-
-describe("one dot per underlying reading", () => {
-  test("a line whose nodes summarise several readings still marks each of them", () => {
-    // Three Sundays of three services: three line points, nine dots. Without
-    // the dots a church with three services a week sees one point a week and no
-    // way to tell it stood for three.
-    const days = [0, 7, 14].map((d) => START + d * DAY);
-    const series: ChartSeries[] = [
-      {
-        ...SERIES[0],
-        points: days.map((t, i) => ({ t, v: 1400 + i })),
-        dots: days.flatMap((t, i) => [
-          { t, v: 1400 + i },
-          { t: t + 2 * 60 * 60_000, v: 700 },
-          { t: t + 9 * 60 * 60_000, v: 1100 },
-        ]),
-      },
-    ];
-    const r = drawTrend(undefined, series);
-    const line = r.container.querySelector("[data-series-line]")!.getAttribute("d") ?? "";
-    assert.equal(line.split("L").length, 3, `the line runs through three day points: ${line}`);
-    assert.equal(r.container.querySelectorAll("[data-series-dot]").length, 9, "one dot per recording");
-    r.unmount();
-  });
-
-  test("a series with no dots draws none", () => {
-    const r = drawTrend();
-    assert.equal(r.container.querySelectorAll("[data-series-dot]").length, 0);
-    r.unmount();
-  });
-});
-
 describe("fitting a label is not one measurement per character", () => {
   test("a long label costs a handful of measurements, not sixty", () => {
     // `measure` is a canvas measureText and the chart redraws on every resize
