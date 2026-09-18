@@ -243,10 +243,13 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
   }
   /** Entries CREATED per title so far — "the Nth run of this title". */
   const runsByTitle = new Map<string, ServiceTimelineItem[]>();
-  const warnOnce = (title: string, line: string) => {
+  /** Warn about a title once, however many rows carry it. `what` is fixed
+   *  prose chosen by the caller — the title itself is scrubbed here, so no call
+   *  site can forget to. */
+  const warnOnce = (title: string, what: string) => {
     if (warned.has(title)) return;
     warned.add(title);
-    console.warn(line);
+    console.warn(`[service-timeline] rebuild: ${scrub(what)}`);
   };
 
   let skipped = 0;
@@ -297,23 +300,20 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
         if (byPosition) {
           title = byPosition.title;
           itemId = byPosition.itemId;
-          warnOnce("", `[service-timeline] rebuild: a row has no title, matched by position`);
+          warnOnce("", "a row has no title, matched by position");
         } else {
           itemId = titleSlug("", items.length);
           forceNew = true; // nothing to prove two blank rows are the same item
-          warnOnce("", `[service-timeline] rebuild: a row has no title and no stored item to match it to`);
+          warnOnce("", "a row has no title and no stored item to match it to");
         }
       } else if (openRun && isStepBackTo(openRun, atMs)) {
         itemId = openRun.itemId; // same run — whatever that run was given
       } else if (sameTitle.length > 1) {
         itemId = sameTitle[runs.length]?.itemId ?? titleSlug(title, runs.length);
-        warnOnce(
-          title,
-          `[service-timeline] rebuild: "${scrub(title)}" is not unique in this record, matched by position`,
-        );
+        warnOnce(title, `"${scrub(title)}" is not unique in this record, matched by position`);
       } else {
         itemId = sameTitle[0]?.itemId ?? titleSlug(title);
-        warnOnce(title, `[service-timeline] rebuild: no item id for "${scrub(title)}", matched by title`);
+        warnOnce(title, `no item id for "${scrub(title)}", matched by title`);
       }
     }
 

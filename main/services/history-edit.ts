@@ -479,7 +479,7 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
       landed += 1;
     } catch (err) {
       console.warn(
-        `[history] rebuild of ${scrub(serviceKey)}: could not write the ${leg.name} record: ${scrub(errorMessage(err))}`,
+        `[history] rebuild of ${scrub(serviceKey)}: could not write the ${scrub(leg.name)} record: ${scrub(errorMessage(err))}`,
       );
       outcome[leg.name].rebuilt = false;
       if (landed === 0) throw new RebuildFailedError(errorMessage(err));
@@ -487,9 +487,14 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
     }
   }
 
-  const line = `[history] rebuilt ${scrub(serviceKey)} from raw: ${summarise(outcome)}`;
-  if (outcome.failed.length) console.warn(line);
-  else console.log(line);
+  // Written out at both call sites rather than through a `line` variable: the
+  // log-injection scan reads the ARGUMENT of a console call, and a variable it
+  // cannot follow is exactly the shape that lets an unscrubbed value through.
+  if (outcome.failed.length) {
+    console.warn(`[history] rebuilt ${scrub(serviceKey)} from raw: ${scrub(summarise(outcome))}`);
+  } else {
+    console.log(`[history] rebuilt ${scrub(serviceKey)} from raw: ${scrub(summarise(outcome))}`);
+  }
   return outcome;
 }
 
@@ -622,7 +627,7 @@ async function mergeArchives(sourceKey: string, targetKey: string): Promise<bool
     .map(([base, n]) => `${n} ${base}`)
     .join(", ");
   console.log(
-    `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: moved ${summary || "no rows"} ` +
+    `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: moved ${scrub(summary || "no rows")} ` +
       `into ${scrub(targetDate)}; removed the source archive.`,
   );
   return true;
@@ -772,8 +777,9 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
 
   console.log(
     `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: ` +
-      `merged [${outcome.merged.join(", ") || "none"}], re-keyed [${outcome.moved.join(", ") || "none"}], ` +
-      `archive ${outcome.archivesMoved ? "moved" : "left in place"}.`,
+      `merged [${scrub(outcome.merged.join(", ") || "none")}], ` +
+      `re-keyed [${scrub(outcome.moved.join(", ") || "none")}], ` +
+      `archive ${scrub(outcome.archivesMoved ? "moved" : "left in place")}.`,
   );
   return outcome;
 }

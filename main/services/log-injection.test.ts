@@ -48,7 +48,11 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * The files an HTTP request's own data can reach, by basename.
+ * The files an HTTP request's own data can reach, by path under main/services.
+ *
+ * Paths, not basenames: the walk below and this list now name a file the same
+ * way, so `routes/context.ts` cannot be confused with a `context.ts` beside it
+ * and a nested file reads as nested.
  *
  * Written out rather than counted, because a count says only how many there are
  * and this list's failure mode is one going missing. A new request-facing file
@@ -56,52 +60,60 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * lines are scrubbed.
  */
 const REQUEST_FACING = [
-  "archive-routes.ts",
+  // Its title-fallback warning names a plan item TITLE read back out of the raw
+  // archive, and POST /api/history/rebuild is what runs it.
+  "archive/rebuild.ts",
   "automation-engine.ts",
-  "automation-routes.ts",
-  "branding-routes.ts",
   // Its suppression line names the STORED rule that owns a built-in's cue name
   // — both the rule's name and the cue name are typed into an HTTP body.
   "builtin-cues.ts",
-  "calendar-routes.ts",
   "checklist-ticks-store.ts",
   "companion-reconcile.ts",
   // Its lines name a cue pair's base — a rule param typed into an HTTP body —
   // and the Companion variable names and VALUES it read back off a connection
   // whose label came out of Companion's own export.
   "companion-state-probe.ts",
-  "context.ts",
   // Its read failure line carries whatever cue-states could not read, which
   // reaches Companion over HTTP with a variable name typed into a rule.
   "cue-live.ts",
   "cue-manifest.ts",
-  "cue-routes.ts",
   // Logs the Companion variable name a cue is bound to, which arrives as a rule
   // param over HTTP.
   "cue-states.ts",
   "cue-tokens.ts",
-  "display-settings-routes.ts",
-  "history-routes.ts",
+  "event-poll.ts",
+  // Its rebuild lines name a serviceKey, which arrives verbatim in an HTTP
+  // body, and rebuildTimelineRecord reaches it with plan item titles.
+  "history-edit.ts",
   // Its one warning names a cue pair's base, which comes from a cue name typed
   // into an HTTP body.
   "home-assistant-yaml.ts",
   "integration-manager.ts",
-  "integration-routes.ts",
-  "kiosk-device-routes.ts",
-  "log-paths.ts",
-  "log-routes.ts",
-  "operator-paths.ts",
   "pco-service.ts",
   "plan-export.ts",
-  "plan-routes.ts",
-  "preset-routes.ts",
-  "proxy-routes.ts",
-  // Its title-fallback warning names a plan item TITLE read back out of the raw
-  // archive, and POST /api/history/rebuild is what runs it.
-  "rebuild.ts",
-  "rosstalk-routes.ts",
-  "route-harness.ts",
-  "scriptview-routes.ts",
+  "routes/archive-routes.ts",
+  "routes/automation-routes.ts",
+  "routes/branding-routes.ts",
+  "routes/calendar-routes.ts",
+  "routes/context.ts",
+  "routes/cue-routes.ts",
+  "routes/display-settings-routes.ts",
+  "routes/history-routes.ts",
+  "routes/integration-routes.ts",
+  "routes/kiosk-device-routes.ts",
+  "routes/log-paths.ts",
+  "routes/log-routes.ts",
+  "routes/operator-paths.ts",
+  "routes/plan-routes.ts",
+  "routes/preset-routes.ts",
+  "routes/proxy-routes.ts",
+  "routes/rosstalk-routes.ts",
+  "routes/route-harness.ts",
+  "routes/scriptview-routes.ts",
+  "routes/state-routes.ts",
+  "routes/status-routes.ts",
+  "routes/system-routes.ts",
+  "routes/view-routes.ts",
   // Both recorders name a Planning Center PLAN ITEM TITLE on their re-run and
   // carry-over lines. A title is typed into Planning Center and arrives here in
   // an HTTP response body — outside data by every measure this file uses, and
@@ -109,12 +121,7 @@ const REQUEST_FACING = [
   "service-timeline-recorder.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
-  "event-poll.ts",
-  "state-routes.ts",
-  "status-routes.ts",
-  "system-routes.ts",
   "view-import.ts",
-  "view-routes.ts",
 ];
 
 /**
@@ -209,7 +216,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["config-snapshot.ts", UNAUDITED],
   ["data-store.ts", UNAUDITED],
   ["encryption.ts", UNAUDITED],
-  ["history-edit.ts", UNAUDITED],
   ["keyed-record-store.ts", UNAUDITED],
   ["layout-image-store.ts", UNAUDITED],
   ["layout-library.ts", UNAUDITED],
@@ -298,6 +304,10 @@ function requestFacingFiles(): string[] {
     // title-fallback warning names a Planning Center plan item TITLE, read back
     // out of the raw archive, and POST /api/history/rebuild is what runs it.
     path.join(HERE, "archive/rebuild.ts"),
+    // Every rebuild/merge line names a serviceKey, which arrives verbatim in an
+    // HTTP body — POST /api/history/rebuild and /api/history/merge both take it
+    // from the caller — and the rebuild it drives reaches plan item titles.
+    path.join(HERE, "history-edit.ts"),
     ...inRoutes,
   ];
 }
@@ -311,7 +321,7 @@ describe("log injection at the request boundary", () => {
     // missing the route it was written for. EXACT, not a floor: this list was
     // held to `> 8` while holding 24.
     assert.deepEqual(
-      files.map((f) => path.basename(f)).sort(),
+      files.map((f) => path.relative(HERE, f)).sort(),
       [...REQUEST_FACING].sort(),
       "the request-facing set has changed; add the new file to REQUEST_FACING deliberately, " +
         "having first checked that its log lines are scrubbed",
