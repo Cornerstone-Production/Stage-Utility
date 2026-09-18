@@ -178,14 +178,19 @@ async function finishSuccess(a: Attempt, accessToken: string, refreshToken: stri
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
+    if (!res.ok) throw new Error(`YouTube returned HTTP ${res.status}`);
     const body = (await res.json().catch(() => ({}))) as {
       items?: { snippet?: { title?: string } }[];
     };
     channelTitle = body.items?.[0]?.snippet?.title ?? null;
-  } catch {
+  } catch (err) {
     // The refresh token is the thing that matters; a channel name it could not
     // fetch just stays unknown until the next Connect, per the descriptor doc.
+    // Still a step of the flow, and the docs promise every one of them is on
+    // /log — an operator wondering why the row never learned a channel name
+    // deserves a line to read, not a silent gap.
     channelTitle = null;
+    console.warn(`[youtube] connect: channel name unavailable: ${scrub(errorMessage(err))}`);
   }
 
   if (attempt !== a) return; // cancelled or disconnected while fetching the channel title

@@ -231,6 +231,31 @@ describe("polling", () => {
     assert.equal(timers.length, 0, "nothing may poll after a terminal state");
   });
 
+  test("a channels.list failure still saves the token, but logs why the channel name is unknown", async () => {
+    installFakes();
+    await startPending();
+    handlers[TOKEN] = () => ({
+      status: 200,
+      body: { access_token: "access-1", refresh_token: "refresh-1" },
+    });
+    handlers[CHANNELS] = () => ({ status: 403, body: { error: { message: "insufficient scope" } } });
+
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+    try {
+      await advance(5000);
+    } finally {
+      console.warn = realWarn;
+    }
+
+    assert.deepEqual(saved, [{ refreshToken: "refresh-1", channelTitle: "" }]);
+    assert.ok(
+      warnings.some((w) => /\[youtube\] connect: channel name unavailable:/.test(w)),
+      `expected a 'channel name unavailable' warning, got: ${warnings.join(" | ")}`,
+    );
+  });
+
   test("an unrecognised error ends the attempt with Google's own description", async () => {
     installFakes();
     await startPending();
