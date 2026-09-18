@@ -576,11 +576,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
    * energy average. The full record is the only thing that has the peak, and a
    * day is one to four of them — not a year of them.
    *
-   * A record that fails to load lands as `null`, which `servicePeakLevel` reads
-   * as "no sound recorded" and the row prints as "—" with that note. Nothing is
-   * swallowed: the row says what it does not know.
+   * A FAILED read and a service that recorded no sound are told apart. Both
+   * used to land as `null`, which `servicePeakLevel` reads as "no sound
+   * recorded" — so a server that was down, or a request that timed out, told
+   * the operator their meter had not been recording. `"error"` is its own
+   * state, the row says "sound unavailable", and the reason is logged per key.
    */
-  const [splByKey, setSplByKey] = useState<Map<string, ServiceSplHistory | null>>(new Map());
+  type RowSpl = ServiceSplHistory | null | "error";
+  const [splByKey, setSplByKey] = useState<Map<string, RowSpl>>(new Map());
   // The key list, as a stable string: `dayServices` is a fresh array every
   // render and would refetch the day's SPL on each one.
   const dayKeys = dayServices.map((s) => s.serviceKey).join("|");
@@ -595,7 +598,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       keys.map((key) =>
         invoke<ServiceSplHistory | null>("spl:getHistory", { serviceKey: key })
           .then((rec) => [key, rec] as const)
-          .catch(() => [key, null] as const),
+          .catch((err): readonly [string, RowSpl] => {
+            // One line per key that failed, not one for the batch: a day where
+            // one of three services will not load is a different problem from a
+            // day where none of them will, and the line has to say which.
+            console.warn(`[history] could not read the sound record for ${key}: ${errorMessage(err)}`);
+            return [key, "error"] as const;
+          }),
       ),
     ).then((pairs) => {
       if (!cancelled) setSplByKey(new Map(pairs));
@@ -1400,12 +1409,21 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             // by key — a row and the page it opens cannot quote two different
             // peaks for one recording. Live rows count up: `serviceKpis` passes
             // `now` into `summarize`, which adds the in-progress item's elapsed.
+            const splRow = splByKey.get(s.serviceKey) ?? null;
             const { started, figures } = serviceRowFigures(
               s,
               row.attendance,
-              splByKey.get(s.serviceKey) ?? null,
+              splRow === "error" ? null : splRow,
               live ? nowTick : undefined,
             );
+            // A read that FAILED says so, rather than borrowing the sentence
+            // for a service that genuinely recorded no sound.
+            const shownFigures =
+              splRow === "error"
+                ? figures.map((f) =>
+                  f.key === "level" ? { ...f, value: "—", sub: "sound unavailable" } : f,
+                )
+                : figures;
             const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
             const under = [s.seriesTitle, live ? "recording\u2026" : itemCount].filter(Boolean).join(" \u00b7 ");
             return (
@@ -1440,7 +1458,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       `shrink-0` and a scroller, like the strip — a squashed
                       "1,1\u2026" is worse than one you have to scroll to. */}
                   <span className="flex shrink-0 items-start gap-0 overflow-x-auto sm:justify-end">
-                    {figures.map((f, fi) => (
+                    {shownFigures.map((f, fi) => (
                       <span
                         key={f.key}
                         data-row-figure={f.key}
@@ -1453,6 +1471,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                         >
                           {f.value}
                         </span>
+                        {/* WHY there is no number. The row stripped this, so a
+                            "—" under Peak level had no reason beside it and an
+                            operator whose own Customize had hidden every metric
+                            was told nothing at all. */}
+                        {f.sub && (
+                          <span data-row-figure-note className="whitespace-nowrap text-[10px] text-fg-subtle">
+                            {f.sub}
+                          </span>
+                        )}
                       </span>
                     ))}
                   </span>
