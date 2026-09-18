@@ -240,18 +240,21 @@ describe("the All services day list", () => {
     }
   });
 
-  test("the read-only view offers the same figures and no Delete", async () => {
-    // The other half of renderer/app/shared-history-readonly.test.ts, from this
-    // side: read-only must remove the destructive control and NOTHING ELSE. A
-    // gate written one line too wide would take the figures with it, and the
-    // shared /history link would go back to being a list of bare titles.
+  test("no row carries a Delete, open or read-only, and read-only changes nothing else", async () => {
+    // Delete lives on the service page's header, once, behind a confirm. The
+    // list matches the mockup: a row is a summary with a chevron, on either
+    // side of the read-only gate. The second half is the other half of
+    // renderer/app/shared-history-readonly.test.ts, from this side: read-only
+    // must remove destructive controls and NOTHING ELSE — a gate written one
+    // line too wide would take the figures with it, and the shared /history
+    // link would go back to being a list of bare titles.
     installFetch();
     const open = await renderList(false);
     const openFigures = figuresOf(open.container.querySelector(`[data-history-row="${NINE.serviceKey}"]`)!);
     assert.deepEqual(
-      [...open.container.querySelectorAll("button[aria-label^='Delete recording']")].length,
-      2,
-      "the operator's own list keeps a Delete per row",
+      [...open.container.querySelectorAll("button[aria-label^='Delete recording']")].map((b) => b.getAttribute("aria-label")),
+      [],
+      "a list row must not carry Delete; it lives on the service page header",
     );
     cleanup();
 

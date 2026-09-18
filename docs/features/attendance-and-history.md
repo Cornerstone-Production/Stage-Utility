@@ -238,7 +238,8 @@ The page carries no Overview card. Every figure it blended across a service type
 and level — is on the service page's own KPI row, against the service it belongs
 to, where it means something specific rather than something all-time.
 
-The shared `/history` link shows the same figures; it carries no Delete.
+A row is a summary that opens the service page; Delete lives on that page's
+header, not on the row. The shared `/history` link shows the same figures.
 
 ### The service page
 

@@ -5,7 +5,7 @@ import { cn } from "../../lib/cn";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { Trash2Icon, ClockIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
+import { ClockIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
@@ -1480,17 +1480,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     </span>
                     <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-fg-faint" />
                   </button>
-                  {!readOnly && (
-                    <Tooltip label="Delete recording">
-                      <button
-                        className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
-                        onClick={() => deleteService(row.serviceKey, row.planTitle ?? row.serviceKey)}
-                        aria-label={`Delete recording for ${row.planTitle ?? "service"}`}
-                      >
-                        <Trash2Icon className="size-4" />
-                      </button>
-                    </Tooltip>
-                  )}
                 </div>
               );
             }
@@ -1579,17 +1568,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       card was clickable and looked like a read-only summary. */}
                   <ChevronRightIcon aria-hidden className="size-4 self-center justify-self-end text-fg-faint" />
                 </button>
-                {!readOnly && (
-                  <Tooltip label="Delete recording">
-                    <button
-                      className="touch-target shrink-0 rounded-md p-2 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors"
-                      onClick={() => deleteService(s.serviceKey, s.planTitle ?? s.serviceKey)}
-                      aria-label={`Delete recording for ${s.planTitle ?? "service"}`}
-                    >
-                      <Trash2Icon className="size-4" />
-                    </button>
-                  </Tooltip>
-                )}
               </div>
             );
               })}
