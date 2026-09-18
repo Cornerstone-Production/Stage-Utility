@@ -22,6 +22,7 @@
 // everything about sampling. The base owns only the lifecycle.
 
 import type { PcoLiveDTO } from "../types/stage.js";
+import { clockOf } from "./app-timezone.js";
 import { serviceDateKey } from "./live-service-gate.js";
 import { stageController } from "./stage-controller.js";
 
@@ -30,9 +31,15 @@ import { stageController } from "./stage-controller.js";
  *
  * A service running past its planned end rolls pickServiceTime on to the next
  * occurrence, and a PCO cache miss does the same, so the key can change while one
- * service is still running — that must NOT split the recording. A longer gap is a
- * genuinely new occurrence. Services are far enough apart that ten minutes
- * separates them cleanly while bridging any within-service lull.
+ * service is still running — that must NOT split the recording. Services are far
+ * enough apart that ten minutes separates them cleanly while bridging any
+ * within-service lull.
+ *
+ * It is NOT on its own how back-to-back services are told apart: the second
+ * service's pre-service item goes live seconds after the first service's last,
+ * so the gap stays small across a real boundary. See
+ * shouldHoldThroughServiceTimeChange, which decides on the new occurrence's own
+ * start time and falls back to this gap only when there is no start to read.
  *
  * One definition: this was declared identically in all three recorders.
  *
@@ -88,6 +95,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    *  the record if it changed, so a delete cannot be undone by a tick that was
    *  already in flight when it landed. */
   private generation = 0;
+  /** The `<old>→<new>` service-time transition already logged, so the hold
+   *  decision is announced once and not on every tick for the length of an
+   *  overrun. Cleared when a record is established. */
+  private loggedServiceTimeChange: string | null = null;
 
   protected abstract readonly label: string;
   protected abstract readonly store: RecorderStore<T>;
@@ -190,6 +201,58 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   }
 
   /**
+   * The key changed while the SAME plan, on the SAME date, is still live. Is this
+   * one service whose occurrence id moved under it, or the next service starting?
+   *
+   * The gap between live ticks cannot tell them apart. Back-to-back services share
+   * a plan, and the second service's pre-service item goes live seconds after the
+   * first one's last item, so `gapSinceLive` stays at seconds across the boundary —
+   * on 18 Sep 2026 that merged two services into one record whose first item read
+   * as 1h 52m long and whose second service had no record at all.
+   *
+   * The new occurrence's own start time does tell them apart. `pickServiceTime`
+   * rolls to the NEXT occurrence when a service runs past its planned end, and a
+   * PCO cache miss does the same — in both the occurrence now selected is still in
+   * the future. So: hold only while the new occurrence starts more than
+   * SERVICE_GAP_MS from now. One that has begun, or is about to, is a new service.
+   *
+   * Two cases keep the old gap rule, because there is no occurrence start to
+   * compare: PCO reporting no serviceTimeId at all (a cache miss — the key falls
+   * back to the date), and an occurrence with no `serviceTimeStartsAt`. A record
+   * opened before PCO knew its occurrence (`serviceTimeId` null on the record) also
+   * holds: that is the same cache miss resolving, not a second service.
+   *
+   * Known residual: where the first occurrence carries an explicit `ends_at`,
+   * pickServiceTime rolls over at that end rather than at the next occurrence's
+   * start, so up to SERVICE_GAP_MS of the second service's pre-service can still
+   * land in the first record before the split. That is the same window the
+   * overrun case needs, and it is bounded — not the unbounded merge this fixes.
+   */
+  private shouldHoldThroughServiceTimeChange(
+    live: PcoLiveDTO,
+    serviceTimeId: string | null,
+    gapSinceLive: number,
+  ): boolean {
+    const from = this.current?.serviceTimeId ?? null;
+    if (serviceTimeId == null || from == null) return true; // no two occurrences to compare
+    const startsAtMs = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
+    if (!Number.isFinite(startsAtMs)) return gapSinceLive < SERVICE_GAP_MS;
+
+    const untilMs = startsAtMs - Date.now();
+    const hold = untilMs > SERVICE_GAP_MS;
+    const transition = `${from}→${serviceTimeId}`;
+    if (this.loggedServiceTimeChange !== transition) {
+      this.loggedServiceTimeChange = transition;
+      console.log(
+        hold
+          ? `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId}, holding the open record (next occurrence starts in ${Math.round(untilMs / 60_000)} min)`
+          : `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId} began at ${clockOf(startsAtMs)}, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+      );
+    }
+    return hold;
+  }
+
+  /**
    * Make sure `current` is the record for the occurrence this tick belongs to.
    *
    * Returns nothing on purpose. An earlier version returned a boolean described
@@ -226,7 +289,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       this.current.serviceTypeId === serviceTypeId &&
       this.current.planId === planId &&
       this.current.serviceDate === date &&
-      (serviceTimeId == null || gapSinceLive < SERVICE_GAP_MS)
+      this.shouldHoldThroughServiceTimeChange(live, serviceTimeId, gapSinceLive)
     ) {
       return;
     }
@@ -267,6 +330,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       );
     }
     this.currentKey = key;
+    this.loggedServiceTimeChange = null; // the next transition out of THIS record is news again
     this.onRecordEstablished();
   }
 }
