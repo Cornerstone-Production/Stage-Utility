@@ -9,7 +9,7 @@
 // Import this only from a test, and only after installDom().
 
 import { strict as assert } from "node:assert";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, notifyManager } from "@tanstack/react-query";
 import type { ReactElement, ReactNode } from "react";
 import { act } from "@testing-library/react";
 import { TooltipProvider } from "../components/ui/tooltip-provider";
@@ -159,6 +159,20 @@ export function installFakeServer(
  * Tooltip, so a render of any integration in an error state throws
  * "`Tooltip` must be used within `TooltipProvider`" without it.
  */
+/**
+ * React-query tells React about a settled query on a zero-delay timer, not in
+ * the same turn the cache changes. `idle()` below asks the cache, so on a busy
+ * machine its poll timer and that notification come due in the same tick, the
+ * poll wins by having been armed first, `act()` finds nothing to flush, and the
+ * page is still its skeleton: sixteen cards expected, none found. Beta CI on
+ * ef6458e7 lost that race in integrations-visibility after a year of winning it.
+ *
+ * Notify synchronously instead. The cache going idle and React learning of it
+ * are then one step, and `act()` after it is a guarantee. Test-only, module
+ * state, and every test file gets its own process.
+ */
+notifyManager.setScheduler((callback) => callback());
+
 export function withQueryClient(children: ReactNode): ReactElement {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
