@@ -124,6 +124,14 @@ const text = (el: HTMLElement) => (el.textContent ?? "").replace(/\s+/g, " ").tr
 const button = (root: HTMLElement, label: string) =>
   [...root.querySelectorAll("button")].find((b) => text(b as HTMLElement) === label) as HTMLElement | undefined;
 
+/** The NEWEST toast only. Toasts linger across tests in one jsdom document, so
+ *  reading document.body lets a PREVIOUS test's message satisfy an assertion
+ *  about this one — which it did, on the first run of the "left alone" case. */
+const lastToast = () => {
+  const all = [...document.querySelectorAll(".text-footnote")];
+  return all.length ? text(all[all.length - 1] as HTMLElement) : "NO TOAST";
+};
+
 /** Open the one recording and reveal the edit actions. */
 async function openEditActions(container: HTMLElement) {
   const row = [...container.querySelectorAll("button")].find((b) =>
@@ -152,7 +160,12 @@ describe("History: Rebuild from raw", () => {
     const calls: Call[] = [];
     installFetch(calls, () => ({
       ok: true,
-      body: { timelineItems: 12, splItems: 11, attendanceSamples: 143 },
+      body: {
+        timeline: { rebuilt: true, items: 12, missing: false },
+        spl: { rebuilt: true, items: 11, missing: false },
+        attendance: { rebuilt: true, items: 143, missing: false },
+        failed: [],
+      },
     }));
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
@@ -181,15 +194,83 @@ describe("History: Rebuild from raw", () => {
     assert.equal(posted[0].method, "POST");
     assert.deepEqual(posted[0].body, { serviceKey: KEY });
 
-    const shown = text(document.body as HTMLElement);
+    const shown = lastToast();
     assert.match(shown, /12 items/, `the toast does not report the timeline count: ${shown}`);
     assert.match(shown, /11 SPL items/, `the toast does not report the SPL count: ${shown}`);
     assert.match(shown, /143 attendance samples/, `the toast does not report the sample count: ${shown}`);
+    assert.doesNotMatch(shown, /left alone/, `nothing was left alone, so the toast must not say so: ${shown}`);
+  });
+
+  // The defect the per-record shape exists for: a count alone read as an
+  // achievement even for a record the raw layer held nothing for, so a rebuild
+  // that changed nothing reported "Rebuilt: 12 items".
+  test("names the records it left alone, not just the ones it derived", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: false, items: 12, missing: false },
+        spl: { rebuilt: false, items: 9, missing: false },
+        attendance: { rebuilt: true, items: 143, missing: false },
+        failed: [],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openEditActions(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    const shown = lastToast();
+    assert.match(shown, /left alone: items, SPL items/, `the toast hid what it did not touch: ${shown}`);
+    assert.doesNotMatch(shown, /Rebuilt: 12 items/, `an untouched record was reported as rebuilt: ${shown}`);
+    assert.match(shown, /Rebuilt: 143 attendance samples/, `the one derived record is missing: ${shown}`);
+  });
+
+  test("reports a record whose write failed, without claiming the rebuild succeeded", async (t) => {
+    const calls: Call[] = [];
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: true, items: 24, missing: false },
+        spl: { rebuilt: true, items: 24, missing: false },
+        attendance: { rebuilt: true, items: 571, missing: false },
+        failed: ["spl"],
+      },
+    }));
+    const view = mountSection(ServiceHistorySection);
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    await openEditActions(view.container);
+
+    fireEvent.click(button(view.container, "Rebuild from raw")!);
+    await settle();
+    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
+    await settle();
+    await settle();
+
+    const shown = lastToast();
+    assert.match(shown, /could not save: spl/, `a failed write was not reported to the operator: ${shown}`);
   });
 
   test("sends nothing when the confirm is dismissed", async (t) => {
     const calls: Call[] = [];
-    installFetch(calls, () => ({ ok: true, body: { timelineItems: 0, splItems: 0, attendanceSamples: 0 } }));
+    installFetch(calls, () => ({
+      ok: true,
+      body: {
+        timeline: { rebuilt: true, items: 0, missing: false },
+        spl: { rebuilt: false, items: 0, missing: true },
+        attendance: { rebuilt: false, items: 0, missing: true },
+        failed: [],
+      },
+    }));
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
     await settle();
@@ -229,7 +310,7 @@ describe("History: Rebuild from raw", () => {
     await settle();
     await settle();
 
-    const shown = text(document.body as HTMLElement);
+    const shown = lastToast();
     assert.match(shown, /Rebuild failed/, `no failure toast: ${shown}`);
     assert.match(shown, /recording right now/, `the reason was swallowed: ${shown}`);
   });

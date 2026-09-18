@@ -128,7 +128,12 @@ describe("POST /api/history/rebuild", () => {
     });
 
     assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
-    assert.deepEqual(out.json, { timelineItems: 3, splItems: 0, attendanceSamples: 3 });
+    assert.deepEqual(out.json, {
+      timeline: { rebuilt: true, items: 3, missing: false },
+      spl: { rebuilt: false, items: 0, missing: true },
+      attendance: { rebuilt: true, items: 3, missing: false },
+      failed: [],
+    });
 
     // On disk, not just in the answer.
     const tl = await serviceTimelineStore.get(KEY);
@@ -187,6 +192,52 @@ describe("POST /api/history/rebuild", () => {
     const tl = await serviceTimelineStore.get(KEY);
     assert.equal(tl?.items.length, 1, "a refused rebuild wrote anyway");
     assert.equal(broadcasts.length, 0, "a refused rebuild broadcast anyway");
+  });
+
+  // The defect this shape exists for: a recording whose archive directory was
+  // never written answered 200 and told the operator "Rebuilt: 12 items" about
+  // twelve items nothing had looked at.
+  it("refuses with 409 when the recording has no raw rows at all", async () => {
+    await fs.rm(serviceDirPath(KEY, DATE), { recursive: true, force: true });
+    await attendanceStore.delete(KEY); // leave only the timeline, with nothing behind it
+    broadcasts.length = 0;
+
+    let thrown: unknown;
+    try {
+      await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+    } catch (err) {
+      thrown = err;
+    }
+
+    assert.ok(thrown, "a recording with no raw rows answered as though it had rebuilt something");
+    assert.equal(handlerErrorStatus(thrown), 409);
+    assert.match((thrown as Error).message, /No raw rows exist for this recording/);
+    assert.equal(broadcasts.length, 0, "nothing was derived, so nothing may be broadcast");
+    const tl = await serviceTimelineStore.get(KEY);
+    assert.equal(tl?.items.length, 1, "the untouched record was rewritten anyway");
+  });
+
+  it("says which records it left alone when only some could be derived", async () => {
+    // events.csv gone, attendance still here: attendance re-derives from its own
+    // samples, the timing record has nothing to re-derive from.
+    await fs.rm(path.join(serviceDirPath(KEY, DATE), "events.csv"), { force: true });
+
+    const out = await callRoute(historyRoutes, "/api/history/rebuild", {
+      method: "POST",
+      body: { serviceKey: KEY },
+    });
+
+    assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+    assert.deepEqual(out.json, {
+      timeline: { rebuilt: false, items: 1, missing: false },
+      spl: { rebuilt: false, items: 0, missing: true },
+      attendance: { rebuilt: true, items: 3, missing: false },
+      failed: [],
+    });
+    // `items: 1` is the corrupted record, unchanged — and `rebuilt: false` is
+    // what stops that number reading as a repair.
+    const tl = await serviceTimelineStore.get(KEY);
+    assert.equal(tl?.items[0].actualDurationSec, 4766, "the untouched record was rewritten anyway");
   });
 
   it("rejects a body with no serviceKey", async () => {

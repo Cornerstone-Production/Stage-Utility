@@ -96,8 +96,10 @@ them again from the rows underneath, each from its own file:
 | Sound levels | `spl.csv` | The same fold the recorder does live — per-item max, Leq and sample count |
 | Attendance | the record's own samples | Peak, lowest and last re-derived, as **Recalculate** does |
 
-It reports what came back — items, SPL items, attendance samples — and refuses
-while the service is still recording.
+It reports what it **derived** and, separately, what it left alone: a record the
+raw layer holds nothing for is untouched and said to be untouched, rather than
+reported with the count it already had. A recording with no raw rows at all is
+refused, as is one whose service is still recording.
 
 What survives: the recording's identity and window, the pacing reset, and the
 per-item include/exclude overrides. What does not: hand edits to item times,

@@ -65,6 +65,43 @@ function fromTimeInput(serviceDate: string, hhmm: string): string | undefined {
 
 
 
+/** One record's share of a Rebuild from raw — mirrors RebuiltRecord in
+ *  main/services/history-edit.ts. */
+interface RebuiltRecord {
+  rebuilt: boolean;
+  items: number;
+  missing: boolean;
+}
+interface RebuildOutcome {
+  timeline: RebuiltRecord;
+  spl: RebuiltRecord;
+  attendance: RebuiltRecord;
+  failed: string[];
+}
+
+/** The three legs and the noun each one counts, in the order they are reported. */
+const REBUILD_LEGS = [
+  ["timeline", "items"],
+  ["spl", "SPL items"],
+  ["attendance", "attendance samples"],
+] as const;
+
+/**
+ * What a rebuild actually did, in a sentence.
+ *
+ * Says what was LEFT ALONE, not only what was derived. A bare count read as an
+ * achievement even for a record the raw layer had nothing for — which is how a
+ * rebuild that changed nothing once reported "Rebuilt: 12 items".
+ */
+export function describeRebuild(out: RebuildOutcome): string {
+  const done = REBUILD_LEGS.filter(([k]) => out[k].rebuilt).map(([k, noun]) => `${out[k].items} ${noun}`);
+  const left = REBUILD_LEGS.filter(([k]) => !out[k].rebuilt && !out[k].missing).map(([, noun]) => noun);
+  const parts = [done.length ? `Rebuilt: ${done.join(", ")}` : "Nothing was rebuilt"];
+  if (left.length) parts.push(`left alone: ${left.join(", ")}`);
+  if (out.failed.length) parts.push(`could not save: ${out.failed.join(", ")}`);
+  return parts.join(" · ");
+}
+
 /** Mean per-item over/under (seconds) + how many ran over, for items with both
  *  planned and actual times. */
 function overrunStats(tl: ServiceTimeline) {
@@ -609,14 +646,15 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         destructive: true,
       }))) return;
       try {
-        const out = await invoke<{ timelineItems: number; splItems: number; attendanceSamples: number }>(
-          "history:rebuild",
-          { serviceKey: det.serviceKey },
-        );
+        const out = await invoke<RebuildOutcome>("history:rebuild", { serviceKey: det.serviceKey });
         setReloadKey((k) => k + 1);
-        toast.success(
-          `Rebuilt: ${out.timelineItems} items, ${out.splItems} SPL items, ${out.attendanceSamples} attendance samples`,
-        );
+        // Names what was LEFT ALONE as well as what was derived. A count on its
+        // own read as an achievement even for a record the raw layer had
+        // nothing for, which is exactly how a rebuild that changed nothing
+        // reported "Rebuilt: 12 items".
+        const msg = describeRebuild(out);
+        if (out.failed.length) toast.error(msg);
+        else toast.success(msg);
       } catch (e) {
         // Say why. The most likely refusal — the service is still recording —
         // is one the operator can act on.

@@ -267,14 +267,51 @@ export async function recalcAttendance(serviceKey: string): Promise<void> {
   broadcast("attendance:history", att);
 }
 
-/** What a rebuild put back, per record — counts of the RESULTING records, so a
- *  store the raw layer had nothing for reports what it still holds rather than
- *  zero. Reported to the operator: this rewrites all three summaries, and "it
- *  worked" is not evidence. */
+/**
+ * One record's share of a rebuild.
+ *
+ * `rebuilt` is the whole point. Reporting a count alone made a record the raw
+ * layer had NOTHING for indistinguishable from one that had just been derived:
+ * a service whose archive directory is missing answered 200 and told the
+ * operator "Rebuilt: 12 items" about the twelve items it had left exactly as
+ * they were. A count is what the record holds; `rebuilt` is whether this run
+ * put it there.
+ */
+export interface RebuiltRecord {
+  /** True when the raw layer supplied these numbers; false = left as it was. */
+  rebuilt: boolean;
+  /** What the record holds afterwards. For attendance this counts SAMPLES —
+   *  one field name across the three so the shape is uniform. */
+  items: number;
+  /** True when this store has no record for the key at all. */
+  missing: boolean;
+}
+
+/** What a rebuild did, per record. Reported rather than summed: this rewrites
+ *  the source of truth, and "it worked" is not evidence. */
 export interface RebuildOutcome {
-  timelineItems: number;
-  splItems: number;
-  attendanceSamples: number;
+  timeline: RebuiltRecord;
+  spl: RebuiltRecord;
+  attendance: RebuiltRecord;
+  /** Records that were derived but whose write failed AFTER another record's
+   *  write had already landed — see rebuildServiceRecords. Empty is the normal
+   *  case; a non-empty list means the operator is looking at a half-rebuilt
+   *  service and needs to know which half. */
+  failed: string[];
+}
+
+const NO_RECORD: RebuiltRecord = { rebuilt: false, items: 0, missing: true };
+
+/** Nothing in the raw layer to rebuild this service from. A refusal, not a
+ *  fault: the request was well-formed and the server is fine — there is simply
+ *  no evidence to re-derive from, and pretending otherwise is the bug this
+ *  replaced. 409, like the live-service refusal. */
+export class NoRawRowsError extends Error {
+  readonly status = 409;
+  constructor() {
+    super("No raw rows exist for this recording — there is nothing to rebuild it from.");
+    this.name = "NoRawRowsError";
+  }
 }
 
 /**
@@ -291,9 +328,16 @@ export interface RebuildOutcome {
  * corrected end are all statements the raw rows know nothing about. The `counted`
  * overrides DO survive, because rebuildTimelineRecord carries them.
  *
- * Throws on failure rather than reporting a partial success. A rebuild that
- * silently wrote nothing would leave the operator looking at the same bad record
- * believing it had been repaired.
+ * Reports what it DERIVED, per record, rather than what each record holds. A
+ * service with no archive directory used to answer 200 with the counts of the
+ * records it had not touched, so the operator was told "Rebuilt: 12 items"
+ * about twelve items nothing had looked at. Now each record says whether the
+ * raw layer supplied it, nothing derivable at all is a 409, and a partial
+ * result names its halves.
+ *
+ * Throws rather than reporting a partial success where nothing landed. A
+ * rebuild that silently wrote nothing would leave the operator looking at the
+ * same bad record believing it had been repaired.
  */
 export async function rebuildServiceRecords(serviceKey: string): Promise<RebuildOutcome> {
   assertNotLive(serviceKey, "rebuilt");
@@ -301,11 +345,20 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
 
   try {
     const serviceDate = await serviceDateOf(serviceKey);
+    // Not the same refusal as "no raw rows": serviceDateOf reads all three
+    // stores, so a null date means this key names no recording at all. That is
+    // the caller naming something that does not exist, and stays a 500 — the
+    // 409 below is about a recording that DOES exist and has nothing behind it.
     if (!serviceDate) {
       throw new Error(`no record for "${serviceKey}" names a service date, so its raw rows cannot be located`);
     }
     const dir = serviceDirPath(serviceKey, serviceDate);
-    const outcome: RebuildOutcome = { timelineItems: 0, splItems: 0, attendanceSamples: 0 };
+    const outcome: RebuildOutcome = {
+      timeline: { ...NO_RECORD },
+      spl: { ...NO_RECORD },
+      attendance: { ...NO_RECORD },
+      failed: [],
+    };
 
     // ── Timeline, from events.csv ──
     const tl = await serviceTimelineStore.get(serviceKey);
@@ -315,9 +368,11 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
         const rebuilt = rebuildTimelineRecord(tl, rows);
         await serviceTimelineStore.upsert(rebuilt);
         broadcast("service-timeline:history", rebuilt);
-        outcome.timelineItems = rebuilt.items.length;
+        outcome.timeline = { rebuilt: true, items: rebuilt.items.length, missing: false };
       } else {
-        outcome.timelineItems = tl.items.length; // nothing to rebuild from — left alone
+        // Left exactly as it was. The count is what it still holds, and
+        // `rebuilt: false` is what stops that count reading as an achievement.
+        outcome.timeline = { rebuilt: false, items: tl.items.length, missing: false };
       }
     }
 
@@ -329,31 +384,56 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
         await splHistoryStore.upsert(rebuilt);
         broadcast("spl:history", rebuilt);
       }
-      outcome.splItems = (rebuilt ?? spl).items.length;
+      outcome.spl = { rebuilt: rebuilt != null, items: (rebuilt ?? spl).items.length, missing: false };
     }
 
     // ── Attendance, from its own stored samples ──
     // Not from attendance.csv: the stored samples are already the down-sampled
     // series the record is defined over, and recomputeAttendance is the same
     // pass Recalculate runs. Re-deriving the series itself is a different
-    // operation with a different answer, and is not what this offers.
+    // operation with a different answer, and is not what this offers. It always
+    // re-derives when the record exists, so it is `rebuilt` whenever it is here.
     const att = await attendanceStore.get(serviceKey);
     if (att) {
       recomputeAttendance(att);
       await attendanceStore.upsert(att);
       broadcast("attendance:history", att);
-      outcome.attendanceSamples = att.samples.length;
+      outcome.attendance = { rebuilt: true, items: att.samples.length, missing: false };
     }
 
-    console.log(
-      `[history] rebuilt ${scrub(serviceKey)} from raw: ${outcome.timelineItems} timeline items, ` +
-        `${outcome.splItems} SPL items, ${outcome.attendanceSamples} attendance samples`,
-    );
+    const derived = LEGS.filter(([name]) => outcome[name].rebuilt);
+    if (derived.length === 0) {
+      console.log(`[history] rebuild of ${scrub(serviceKey)}: no raw rows, nothing changed`);
+      throw new NoRawRowsError();
+    }
+    console.log(`[history] rebuilt ${scrub(serviceKey)} from raw: ${summarise(outcome)}`);
     return outcome;
   } catch (err) {
+    // The 409 is the answer, not a fault — it has already said its piece above.
+    if (err instanceof NoRawRowsError) throw err;
     console.warn(`[history] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
     throw err; // the operator's answer is the 500, not this line
   }
+}
+
+/** The three legs, with the noun each counts. Named once so the log line and
+ *  the outcome cannot drift into describing different things. */
+const LEGS = [
+  ["timeline", "timeline items"],
+  ["spl", "SPL items"],
+  ["attendance", "attendance samples"],
+] as const;
+
+/** "12 timeline items, 24 SPL items; left alone: attendance" — what was derived
+ *  and, explicitly, what was not. The half that was missing is the half an
+ *  operator debugging this on a Sunday needs. */
+function summarise(outcome: RebuildOutcome): string {
+  const rebuilt = LEGS.filter(([n]) => outcome[n].rebuilt).map(([n, noun]) => `${outcome[n].items} ${noun}`);
+  const left = LEGS.filter(([n]) => !outcome[n].rebuilt && !outcome[n].missing).map(([, noun]) => noun);
+  const parts = [rebuilt.join(", ") || "nothing"];
+  if (left.length) parts.push(`left alone: ${left.join(", ")}`);
+  if (outcome.failed.length) parts.push(`FAILED to write: ${outcome.failed.join(", ")}`);
+  return parts.join("; ");
 }
 
 /**
