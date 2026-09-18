@@ -325,32 +325,6 @@ export function TrendsCard({
     }));
   }, [stored, ranged]);
 
-  const figures = useMemo(() => {
-    // The SHOWN series only. It read every recording in range whatever the
-    // legend said, so switching the Weekend line off left "Services 40" and an
-    // average over a line that was no longer on the plot — a strip describing a
-    // chart nobody was looking at. `hidden` is the same list the series build
-    // from, so the two cannot disagree.
-    const drawn = ranged.filter((r) => !hidden.includes(r.serviceTypeId ?? "all"));
-    const values = drawn.map((r) => pick(r) as number);
-    const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
-    return [
-      { key: "services", label: "Services", value: drawn.length.toLocaleString() },
-      {
-        key: "average",
-        // It was the same string on both arms of a ternary. A level is not a
-        // "peak attendance" and reads as one at a glance.
-        label: sound ? "Average level" : "Average peak",
-        value: avg == null ? "—" : fmtValue(avg),
-      },
-      {
-        key: "busiest",
-        label: sound ? "Loudest" : "Busiest",
-        value: values.length ? fmtValue(Math.max(...values)) : "—",
-      },
-    ];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranged, pick, sound, hidden]);
 
   return (
     <section data-testid="history-trends" className="su-card flex flex-col gap-4 px-4 py-3.5">
@@ -507,7 +481,13 @@ export function TrendsCard({
             yScale={sound ? { kind: "db" } : { kind: "count" }}
             xAxis="date"
             milestones={milestones}
-            figures={figures}
+            // NO at-rest figures. The strip carried Services / Average peak /
+            // Busiest, which is a fourth summary of the same recordings the
+            // tiles above it already summarise per service type — and a blend
+            // across types, which is the statistic the tiles exist to avoid.
+            // The strip still answers a HOVER: what a point on a line is, and
+            // which recording it belongs to.
+            figures={[]}
             onToggleSeries={(id) => {
               const err = toggleHidden(id);
               if (err) toast.error(`Couldn't remember that: ${err.message}`);

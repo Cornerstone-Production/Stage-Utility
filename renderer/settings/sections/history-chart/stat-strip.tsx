@@ -119,7 +119,12 @@ export function StatStrip({ figures, hover, live, right, announce = true }: Stat
       // shape so it made no difference there, but the service header's KPIs
       // carry a second line on some figures and not others, and bottom-aligning
       // dropped "Peak SPL A Fast" a whole line below the five beside it.
-      className="flex items-start gap-0 overflow-x-auto"
+      // `min-h`: a strip whose at-rest figures are EMPTY — the Trends card, which
+      // shows none — is zero-high until the pointer enters the plot, and then
+      // pushes the chart down by a figure's height under the cursor. The space
+      // is reserved instead. Every other caller's content is taller than this,
+      // so it changes nothing for them.
+      className="flex min-h-[44px] items-start gap-0 overflow-x-auto"
       data-history-strip={mode}
       // The strip is the section's live summary: a pointer move must be
       // announced, or a screen reader hears only the at-rest figures forever.

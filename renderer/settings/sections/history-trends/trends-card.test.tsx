@@ -248,31 +248,22 @@ function silentType(): TrendRecording[] {
   }));
 }
 
-describe("the stat strip above the plot", () => {
-  const strip = (view: ReturnType<typeof render>) =>
-    [...view.container.querySelectorAll("[data-history-strip] > div")]
-      .map((d) => [...d.children].map((c) => (c.textContent ?? "").trim()));
 
-  test("names a level a level, not a peak attendance", () => {
-    // Both arms of a ternary read "Average peak". A level is not a peak
-    // attendance and reads as one at a glance.
-    return withBoth(async ({ attendance, sound }) => {
-      assert.deepEqual(attendance.map((f) => f[0]), ["Services", "Average peak", "Busiest"]);
-      assert.deepEqual(sound.map((f) => f[0]), ["Services", "Average level", "Loudest"]);
-    }, strip);
-  });
-
-  test("counts only the series the legend is showing", () => {
-    // It read every recording in range whatever the legend said, so switching a
-    // line off left the strip describing a chart nobody was looking at.
-    return withTwoTypes(async (view, toggle) => {
-      const before = strip(view);
-      assert.equal(before[0][1], "20", `both types are 10 days each: ${JSON.stringify(before)}`);
-      await toggle("weekend");
-      const after = strip(view);
-      assert.equal(after[0][1], "10", "the hidden series is still being counted");
-      assert.notEqual(after[1][1], before[1][1], "the average did not follow the legend either");
-    });
+describe("the strip above the trends plot", () => {
+  test("carries no at-rest figures — the tiles are the summary", async () => {
+    // It read Services / Average peak / Busiest: a fourth summary of the same
+    // recordings the tiles already summarise, and a BLEND across service types,
+    // which is the statistic the per-type tiles exist to avoid.
+    const view = await renderCard(twoTypes());
+    const strip = view.container.querySelector("[data-history-strip]") as HTMLElement;
+    assert.ok(strip, "the strip element is gone entirely — hover has nowhere to report");
+    assert.equal(strip.dataset.historyStrip, "rest");
+    assert.deepEqual(
+      [...strip.children].map((c) => (c.textContent ?? "").trim()).filter(Boolean),
+      [],
+      `the trends strip is still showing figures: ${strip.textContent}`,
+    );
+    view.unmount();
   });
 });
 
@@ -371,7 +362,7 @@ describe("right-clicking to hide a service type", () => {
     return true;
   };
 
-  test("a tile's menu hides it from the tiles, the chart AND the strip", async () => {
+  test("a tile's menu hides it from the tiles AND the chart", async () => {
     // Hidden used to mean "off the plot". The tile stayed, so half the type was
     // still on screen under a control that says Hide.
     //
@@ -385,8 +376,6 @@ describe("right-clicking to hide a service type", () => {
     const after = {
       tile: view.container.querySelector('[data-trend-tile="weekend"]') != null,
       line: view.container.querySelector('[data-series-line="weekend"]') != null,
-      services: [...view.container.querySelectorAll("[data-history-strip] > div")]
-        .map((d) => [...d.children].map((c) => (c.textContent ?? "").trim()))[0],
       legendPressed: view.container
         .querySelector('[data-series-toggle="weekend"]')
         ?.getAttribute("aria-pressed") ?? null,
@@ -397,7 +386,6 @@ describe("right-clicking to hide a service type", () => {
     assert.ok(clicked, "the Hide entry could not be clicked");
     assert.equal(after.tile, false, "the tile stayed after Hide");
     assert.equal(after.line, false, "the line stayed after Hide");
-    assert.equal(after.services[1], "10", `the strip still counts the hidden type: ${after.services.join(" ")}`);
     // The legend keeps it, dimmed, so it can come back.
     assert.equal(after.legendPressed, "false", "the legend dropped the hidden type, so there is no way back");
   });
@@ -523,24 +511,6 @@ async function withCard(check: (view: ReturnType<typeof render>) => void | Promi
   }
 }
 
-/** Renders the card twice, once per measure, and hands `read` both results. */
-async function withBoth<T>(
-  check: (both: { attendance: T; sound: T }) => void | Promise<void>,
-  read: (view: ReturnType<typeof render>) => T,
-) {
-  const view = await renderCard(alternating());
-  const attendance = read(view);
-  await act(async () => {
-    view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]')!.click();
-    await new Promise((r) => setTimeout(r, 0));
-  });
-  const sound = read(view);
-  try {
-    await check({ attendance, sound });
-  } finally {
-    view.unmount();
-  }
-}
 
 /** Sixteen days of one service type, so a tile has a prior window and prints a
  *  real change figure. `peak` drifts by a point a week so the two windows are
