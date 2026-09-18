@@ -29,7 +29,7 @@ import { installRenderDom } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, act } = await import("@testing-library/react");
+const { render, screen, cleanup, act, within } = await import("@testing-library/react");
 const React = await import("react");
 const { SplDetail } = await import("./spl-history-section.js");
 
@@ -98,9 +98,13 @@ test("two runs of one item are two rows, with no duplicate-key warning", async (
       await Promise.resolve();
     });
 
-    assert.equal(screen.queryAllByText("Doors").length, 2, "the two runs are not both on screen");
-    assert.equal(screen.queryAllByText("104 dB").length, 1, "the first run's peak is missing");
-    assert.equal(screen.queryAllByText("78 dB").length, 1, "the re-run's own peak is missing");
+    // Scoped to the TABLE. The section now draws the chart module above it, and
+    // the chart names items too — in its lane and in its stat strip — so a
+    // page-wide query counts a title three times and says nothing about rows.
+    const table = within(screen.getByRole("table"));
+    assert.equal(table.queryAllByText("Doors").length, 2, "the two runs are not both on screen");
+    assert.equal(table.queryAllByText("104 dB").length, 1, "the first run's peak is missing");
+    assert.equal(table.queryAllByText("78 dB").length, 1, "the re-run's own peak is missing");
     assert.deepEqual(
       errors.filter((e) => e.includes("same key")),
       [],
