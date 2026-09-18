@@ -269,6 +269,27 @@ describe("cancel", () => {
   });
 });
 
+describe("status", () => {
+  test("reports connected once a token is on file, even over a stale error", async () => {
+    installFakes();
+    // A failed attempt, leaving lastError set. access_denied only fires from a
+    // poll, so start with a real device code and decline it there, rather than
+    // failing at the start step.
+    handlers[DEVICE_CODE] = () => deviceCodeOk();
+    await start("client-id", "client-secret");
+    handlers[TOKEN] = () => ({ status: 400, body: { error: "access_denied" } });
+    await advance(5000);
+    assert.deepEqual(await status(), { status: "error", message: "You declined the request in Google" });
+
+    // A token then arrives some other way — the "Paste a token instead"
+    // disclosure, which writes straight through integration-manager and never
+    // touches this module at all.
+    storedConnection = { connected: true, channelTitle: "Grace Church" };
+
+    assert.deepEqual(await status(), { status: "connected", channelTitle: "Grace Church" });
+  });
+});
+
 describe("disconnect", () => {
   test("clears the stored connection through the injected clearer and stops any pending attempt", async () => {
     installFakes();

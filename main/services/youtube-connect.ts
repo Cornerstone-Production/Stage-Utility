@@ -259,9 +259,16 @@ export async function status(): Promise<ConnectStatus> {
       expiresAt: attempt.expiresAt,
     };
   }
-  if (lastError) return { status: "error", message: lastError };
+  // Storage, before the stale error. A refresh token can land without ever
+  // going through this module — the "Paste a token instead" disclosure writes
+  // straight through integration-manager's setConfig — so a failed attempt
+  // from five minutes ago must not keep reporting "error" over a token that
+  // arrived afterward. `lastError` is only ever the right answer once nothing
+  // is actually connected.
   const info = await youtubeConnectDeps.connectionInfo();
-  return info.connected ? { status: "connected", channelTitle: info.channelTitle } : { status: "idle" };
+  if (info.connected) return { status: "connected", channelTitle: info.channelTitle };
+  if (lastError) return { status: "error", message: lastError };
+  return { status: "idle" };
 }
 
 /** DELETE with no `disconnect` flag: give up on a pending attempt. A no-op
