@@ -100,7 +100,7 @@ describe("the four states", () => {
     const { container } = await mount();
     const text = container.textContent ?? "";
     assert.match(text, /GQVQ-SHNC/);
-    assert.match(text, /google\.com\/device/);
+    assert.ok(text.includes("google.com/device"), "the row must name where to enter the code");
     assert.match(text, /Cancel/);
   });
 
