@@ -536,6 +536,11 @@ export function TrendsCard({
             // The strip still answers a HOVER: what a point on a line is, and
             // which recording it belongs to.
             figures={[]}
+            // With no at-rest figures the strip must not take a row of layout:
+            // in flow it is a void the height of a figure between the tiles and
+            // the plot at rest, and a chart that jumps down under the cursor on
+            // hover. Overlaid it costs nothing and moves nothing.
+            stripOverlay
             onToggleSeries={(id) => {
               const err = toggleHidden(id);
               if (err) toast.error(`Couldn't remember that: ${err.message}`);

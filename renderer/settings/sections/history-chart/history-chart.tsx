@@ -135,6 +135,15 @@ export interface HistoryChartProps {
    * says, so only the sound chart has anything to turn off.
    */
   peakMarks?: boolean;
+  /**
+   * Draw the stat strip OVER the plot instead of above it.
+   *
+   * For a chart with no at-rest figures: in flow an empty strip is either a
+   * void the height of a figure between whatever is above the chart and the
+   * plot, or a chart that jumps down under the cursor the moment the pointer
+   * arrives. See StatStrip.overlay. Only the Trends card passes it.
+   */
+  stripOverlay?: boolean;
 }
 
 const PAD_L = 44;
@@ -163,6 +172,7 @@ export function HistoryChart({
   milestones,
   peakMarks = true,
   onSeriesContextMenu,
+  stripOverlay = false,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
@@ -469,8 +479,8 @@ export function HistoryChart({
   }
 
   return (
-    <div className="flex flex-col gap-3" ref={hostRef}>
-      <StatStrip figures={figures} hover={hoverStrip} live={liveStrip} right={customize} />
+    <div className={cn("flex flex-col gap-3", stripOverlay && "relative")} ref={hostRef}>
+      <StatStrip figures={figures} hover={hoverStrip} live={liveStrip} right={customize} overlay={stripOverlay} />
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}

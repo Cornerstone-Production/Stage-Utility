@@ -287,6 +287,29 @@ function silentType(): TrendRecording[] {
 
 
 describe("the strip above the trends plot", () => {
+  test("is OUT OF FLOW, so an empty one costs no space and a hover moves nothing", async () => {
+    // With no at-rest figures the strip is zero-high at rest. In flow that is
+    // either a void the height of a figure between the tiles and the plot — a
+    // reserved 44px, which is what shipped — or a chart that jumps down under
+    // the cursor the moment the pointer arrives.
+    //
+    // WHAT THIS CANNOT SEE: the resulting 16px. jsdom loads no stylesheet and
+    // measures every box as 0, so a geometry assertion here would pass on any
+    // layout at all. The gap was measured in Chrome at 1440 — tiles bottom 202,
+    // chart top 218 — and what is asserted here is the structure that produces
+    // it: the strip is positioned, and its parent is the positioning context.
+    const view = await renderCard(twoTypes());
+    const strip = view.container.querySelector("[data-history-strip]") as HTMLElement;
+    assert.ok(strip, "no strip at all — hover has nowhere to report");
+    assert.ok(strip.className.includes("absolute"), `the strip is still in flow: ${strip.className}`);
+    assert.ok(strip.className.includes("pointer-events-none"), "an overlaid strip must not eat the pointer");
+    assert.ok(
+      strip.parentElement?.className.includes("relative"),
+      `the strip's parent is not the positioning context: ${strip.parentElement?.className}`,
+    );
+    view.unmount();
+  });
+
   test("carries no at-rest figures — the tiles are the summary", async () => {
     // It read Services / Average peak / Busiest: a fourth summary of the same
     // recordings the tiles already summarise, and a BLEND across service types,
