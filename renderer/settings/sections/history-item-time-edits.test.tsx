@@ -309,6 +309,90 @@ describe("History: correcting one item's recorded times", () => {
     assert.equal(post!.body.endedAt, null);
   });
 
+  test("the row shows the effective time from the ROUTE's answer, with no broadcast", async (t) => {
+    // The panel used to discard the answer and wait for the SSE push. The answer
+    // IS the authority — it is the record the server stored, overlay applied —
+    // and waiting left the row on its old value for the round trip, and forever
+    // on a client whose stream had dropped. No push is delivered in this test at
+    // all; the row must still be right.
+    const state = { items: recorded(), posts: [] as Posted[] };
+    installFetch(state);
+    // The route answers the corrected record, which is what the real one does.
+    const previous = (globalThis as unknown as { fetch: (i: unknown, x?: unknown) => Promise<unknown> }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string; body?: string }) => {
+      if ((init?.method ?? "GET") === "POST") {
+        state.posts.push({ url: String(input), body: JSON.parse(init?.body ?? "{}") as Record<string, unknown> });
+        const body = timeline(corrected());
+        return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+      }
+      return previous(input, init);
+    };
+
+    const view = await openInEditMode(ServiceHistorySection);
+    t.after(() => cleanup());
+
+    const ended = view.container.querySelector<HTMLInputElement>('input[aria-label="Ended — VIDEO: Pre-roll"]')!;
+    fireEvent.change(ended, { target: { value: "20:17:00" } });
+    await settle();
+    fireEvent.click(rowButton(view, "Save times — VIDEO: Pre-roll")!);
+    await settle();
+    await settle();
+
+    assert.equal(FakeEventSource.last?.readyState, 1, "precondition: nothing was pushed over SSE in this test");
+    const txt = text(view.container);
+    assert.ok(txt.includes("edited"), `the row did not re-render from the answer: ${txt}`);
+    assert.ok(txt.includes("2:00"), `the row still shows the old duration: ${txt}`);
+    assert.ok(!txt.includes("11:22"), `the recorded duration is still on the page: ${txt}`);
+  });
+
+  test("Reset stays reachable while the row is being retyped", async (t) => {
+    // Hidden while dirty, an operator who started retyping had no way back to the
+    // recording without first undoing their own typing — and mid-edit is exactly
+    // when "put it back" is wanted.
+    const state = { items: corrected(), posts: [] as Posted[] };
+    installFetch(state);
+    const view = await openInEditMode(ServiceHistorySection);
+    t.after(() => cleanup());
+
+    assert.ok(rowButton(view, "Reset times — VIDEO: Pre-roll"), "precondition: Reset is offered on an edited row");
+    const ended = view.container.querySelector<HTMLInputElement>('input[aria-label="Ended — VIDEO: Pre-roll"]')!;
+    fireEvent.change(ended, { target: { value: "20:19:00" } });
+    await settle();
+
+    assert.ok(rowButton(view, "Save times — VIDEO: Pre-roll"), "precondition: the row is dirty");
+    assert.ok(
+      rowButton(view, "Reset times — VIDEO: Pre-roll"),
+      "Reset vanished the moment the operator started typing",
+    );
+  });
+
+  test("an OPEN item's Ended takes any typed value — there is no recorded end to match", async (t) => {
+    // Compared against the START, as this used to be, typing the item's own start
+    // time into its empty Ended field read as "unchanged" and silently cleared
+    // it. An item with no recorded end has nothing for a typed value to match.
+    const open: Item[] = [
+      { ...recorded()[0], endedAt: null, actualDurationSec: null },
+      recorded()[1],
+    ];
+    const state = { items: open, posts: [] as Posted[] };
+    installFetch(state);
+    const view = await openInEditMode(ServiceHistorySection);
+    t.after(() => cleanup());
+
+    const ended = view.container.querySelector<HTMLInputElement>('input[aria-label="Ended — VIDEO: Pre-roll"]')!;
+    assert.equal(ended.value, "", "precondition: an open item's Ended field is empty");
+    // The item's OWN start time, which the old comparison treated as a no-op.
+    fireEvent.change(ended, { target: { value: "20:15:00" } });
+    await settle();
+    fireEvent.click(rowButton(view, "Save times — VIDEO: Pre-roll")!);
+    await settle();
+    await settle();
+
+    const post = state.posts.find((p) => p.url === "/api/history/item-times");
+    assert.ok(post, "nothing was POSTed");
+    assert.equal(post!.body.endedAt, WINDOW_START, "the typed end must be SENT, not silently cleared");
+  });
+
   test("Actual, delta and the service tiles all read the effective times", async (t) => {
     const state = { items: corrected(), posts: [] as Posted[] };
     installFetch(state);

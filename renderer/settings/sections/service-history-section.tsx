@@ -796,23 +796,44 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
        * it — the row was marked edited for a field nobody touched, and Reset had
        * something to undo that had never been done. A blank field clears the
        * override too, rather than meaning midnight.
+       *
+       * `recorded` being null means the recorder never wrote that stamp — an item
+       * still on air has no end — so there is nothing for a typed value to match
+       * and ANY typed value is an edit. Comparing against the start instead, as
+       * this used to, meant typing the item's own start time into its empty Ended
+       * field silently cleared the field rather than saving it. The start is
+       * still the DATE the time is put back onto, which is all it was ever good
+       * for here.
        */
-      const field = (typed: string, recorded: string | null) =>
-        !typed || typed === toItemTimeInput(recorded)
-          ? null
-          : (fromItemTimeInput(recorded ?? it.startedAt, typed) ?? null);
+      const field = (typed: string, recorded: string | null) => {
+        if (!typed) return null;
+        if (recorded != null && typed === toItemTimeInput(recorded)) return null;
+        return fromItemTimeInput(recorded ?? it.startedAt, typed) ?? null;
+      };
       const startedAt = field(d.start, wasStart);
-      const endedAt = field(d.end, wasEnd ?? wasStart);
+      const endedAt = field(d.end, wasEnd);
       setItemTimeSaving((s) => new Set(s).add(key));
       try {
-        await invoke("history:setItemTimes", { serviceKey: det.serviceKey, itemId: it.itemId, sequence: it.sequence, startedAt, endedAt });
-        // Drop the draft so the row re-renders from the record the broadcast
-        // brings back — which is the only proof the save actually landed.
+        const saved = await invoke<ServiceTimeline>("history:setItemTimes", {
+          serviceKey: det.serviceKey,
+          itemId: it.itemId,
+          sequence: it.sequence,
+          startedAt,
+          endedAt,
+        });
+        // Drop the draft so the row re-renders from the record.
         setItemTimeDraft((prev) => {
           const next = { ...prev };
           delete next[key];
           return next;
         });
+        // Render what the ROUTE answered rather than waiting for the broadcast.
+        // The answer is the authority — it is the record the server actually
+        // stored, overlay applied — and relying on the SSE push meant the row
+        // sat on its old value for as long as the round trip took, and did not
+        // update at all on a client whose stream had dropped. The push still
+        // arrives and still agrees; this just does not need it.
+        if (saved && typeof saved === "object" && Array.isArray(saved.items)) setDetail(saved);
         toast.success("Item times updated");
       } catch (e) {
         toast.error(`Couldn't update this item: ${errorMessage(e)}`);
@@ -829,12 +850,22 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     async function resetItemTimes(it: ServiceTimelineItem) {
       const key = rowKey(it);
       try {
-        await invoke("history:setItemTimes", { serviceKey: det.serviceKey, itemId: it.itemId, sequence: it.sequence, startedAt: null, endedAt: null });
+        const saved = await invoke<ServiceTimeline>("history:setItemTimes", {
+          serviceKey: det.serviceKey,
+          itemId: it.itemId,
+          sequence: it.sequence,
+          startedAt: null,
+          endedAt: null,
+        });
+        // Reset discards what was typed as well as what was stored — that is what
+        // makes it reachable on a dirty row: "put it back" has to work while the
+        // fields are mid-edit, which is exactly when an operator wants it.
         setItemTimeDraft((prev) => {
           const next = { ...prev };
           delete next[key];
           return next;
         });
+        if (saved && typeof saved === "object" && Array.isArray(saved.items)) setDetail(saved);
         toast.success("Item times reset to the recording");
       } catch (e) {
         toast.error(`Couldn't reset this item: ${errorMessage(e)}`);
@@ -1007,7 +1038,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       {saving ? "Saving…" : "Save"}
                     </button>
                   )}
-                  {editingTimes && edited && !dirty && (
+                  {/* Offered whenever the row IS edited, dirty or not. Hidden
+                      while dirty, an operator who started retyping had no way
+                      back to the recording without first undoing their own
+                      typing — and mid-edit is exactly when "put it back" is
+                      wanted. Reset discards the draft along with the override. */}
+                  {editingTimes && edited && (
                     <button
                       className="ml-2 align-middle rounded-md border border-gray-6 px-1.5 py-px text-[10px] text-gray-11 hover:bg-gray-4 max-sm:hidden"
                       aria-label={`Reset times — ${it.title || "item"}`}
@@ -1022,10 +1058,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                 <span className={`text-right ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
                 {editingTimes ? (
                   <>
+                    {/* `placeholder` and `title` both: a time input shows no
+                        placeholder in any browser that renders it natively, so
+                        the hover text is the one an operator actually reads.
+                        Clearing ONE field is how a single override is dropped
+                        without touching the other — Reset drops both. */}
                     <input
                       type="time"
                       step="1"
                       aria-label={`Started — ${it.title || "item"}`}
+                      placeholder="clear to use the recorded start"
+                      title="Clear this field to go back to the recorded start"
                       value={draft.start}
                       onChange={(e) => setDraft(it, { start: e.target.value })}
                       className="max-sm:hidden rounded-md border border-gray-5 bg-gray-1 px-1.5 py-0.5 text-caption2 text-gray-12"
@@ -1034,6 +1077,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       type="time"
                       step="1"
                       aria-label={`Ended — ${it.title || "item"}`}
+                      placeholder="clear to use the recorded end"
+                      title="Clear this field to go back to the recorded end"
                       value={draft.end}
                       onChange={(e) => setDraft(it, { end: e.target.value })}
                       className="max-sm:hidden rounded-md border border-gray-5 bg-gray-1 px-1.5 py-0.5 text-caption2 text-gray-12"
