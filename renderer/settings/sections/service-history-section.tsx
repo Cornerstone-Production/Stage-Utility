@@ -600,6 +600,29 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         toast.error("Recalculate failed");
       }
     }
+    async function rebuildFromRaw() {
+      if (!(await confirm({
+        title: "Rebuild from raw?",
+        message:
+          "Recomputes this recording's item timings, sound levels and attendance from the raw rows in the data archive. Any hand edits to times are lost. The raw rows themselves are not touched.",
+        confirmLabel: "Rebuild",
+        destructive: true,
+      }))) return;
+      try {
+        const out = await invoke<{ timelineItems: number; splItems: number; attendanceSamples: number }>(
+          "history:rebuild",
+          { serviceKey: det.serviceKey },
+        );
+        setReloadKey((k) => k + 1);
+        toast.success(
+          `Rebuilt: ${out.timelineItems} items, ${out.splItems} SPL items, ${out.attendanceSamples} attendance samples`,
+        );
+      } catch (e) {
+        // Say why. The most likely refusal — the service is still recording —
+        // is one the operator can act on.
+        toast.error(`Rebuild failed: ${errorMessage(e)}`);
+      }
+    }
     async function doResetPacing() {
       if (!(await confirm({
         title: "Reset pacing?",
@@ -727,8 +750,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <Button variant="accent" size="small" onClick={saveTimes}>Save</Button>
             <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
             <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
+            <Button variant="transparent" size="small" onClick={rebuildFromRaw} tooltip="Recompute all three records from the raw rows in the data archive — hand edits to times are lost">Rebuild from raw</Button>
             <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
-              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service.
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. <strong className="font-medium text-gray-11">Rebuild from raw</strong> goes further: it discards the stored summaries and derives them again from the archived rows.
             </span>
           </div>
         )}

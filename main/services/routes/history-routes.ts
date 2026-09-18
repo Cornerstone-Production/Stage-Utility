@@ -22,6 +22,7 @@ import {
   deleteServiceRecords,
   editServiceWindow,
   mergeServiceRecords,
+  rebuildServiceRecords,
   recalcAttendance,
   setItemCounted,
 } from "../history-edit.js";
@@ -50,6 +51,19 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       }
       await recalcAttendance(body.serviceKey);
       json(res, { ok: true });
+      return;
+    }
+    // Recompute all three summaries from the raw rows. Throws rather than
+    // reporting a partial success, and the dispatcher maps that: 409 while the
+    // service is still recording (ServiceIsLiveError), 500 with the reason
+    // otherwise. See rebuildServiceRecords.
+    if (method === "POST" && pathname === "/api/history/rebuild") {
+      const body = await readBodyOrEmpty(req);
+      if (typeof body.serviceKey !== "string") {
+        error(res, "body.serviceKey (string) required");
+        return;
+      }
+      json(res, await rebuildServiceRecords(body.serviceKey));
       return;
     }
     if (method === "POST" && pathname === "/api/history/item-counted") {

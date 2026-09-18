@@ -7,8 +7,12 @@
 
 import type { AttendanceSample } from "../types/history.js";
 import type { ServiceAttendance, ServiceTimeline } from "../types/stage.js";
+import { serviceDirPath } from "./archive/archive-paths.js";
+import { readArchiveRows } from "./archive/archive-rows.js";
 import { mergeItemRuns } from "./archive/merge-records.js";
+import { rebuildSplRecord, rebuildTimelineRecord } from "./archive/rebuild.js";
 import { sampleArchive } from "./archive/sample-archive.js";
+import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
 import { attendanceStore } from "./attendance-store.js";
@@ -261,6 +265,95 @@ export async function recalcAttendance(serviceKey: string): Promise<void> {
   recomputeAttendance(att);
   await attendanceStore.upsert(att);
   broadcast("attendance:history", att);
+}
+
+/** What a rebuild put back, per record — counts of the RESULTING records, so a
+ *  store the raw layer had nothing for reports what it still holds rather than
+ *  zero. Reported to the operator: this rewrites all three summaries, and "it
+ *  worked" is not evidence. */
+export interface RebuildOutcome {
+  timelineItems: number;
+  splItems: number;
+  attendanceSamples: number;
+}
+
+/**
+ * Recompute all three of a service's summaries from its raw rows.
+ *
+ * The raw layer is append-only truth and every summary must be derivable from
+ * it by the app. Two of the three already were — SPL rebuilds from `spl.csv` on
+ * every restart, attendance re-derives from its own samples — but the timing
+ * record was only ever written forward, so when a recorder bug corrupted one on
+ * 18 Sep 2026 while `events.csv` stayed perfect, the repair had to be done by
+ * hand. This is that repair, in the app.
+ *
+ * Hand edits to times do not survive it: an edited window, a trimmed tail and a
+ * corrected end are all statements the raw rows know nothing about. The `counted`
+ * overrides DO survive, because rebuildTimelineRecord carries them.
+ *
+ * Throws on failure rather than reporting a partial success. A rebuild that
+ * silently wrote nothing would leave the operator looking at the same bad record
+ * believing it had been repaired.
+ */
+export async function rebuildServiceRecords(serviceKey: string): Promise<RebuildOutcome> {
+  assertNotLive(serviceKey, "rebuilt");
+  forgetAll(serviceKey); // see editServiceWindow
+
+  try {
+    const serviceDate = await serviceDateOf(serviceKey);
+    if (!serviceDate) {
+      throw new Error(`no record for "${serviceKey}" names a service date, so its raw rows cannot be located`);
+    }
+    const dir = serviceDirPath(serviceKey, serviceDate);
+    const outcome: RebuildOutcome = { timelineItems: 0, splItems: 0, attendanceSamples: 0 };
+
+    // ── Timeline, from events.csv ──
+    const tl = await serviceTimelineStore.get(serviceKey);
+    if (tl) {
+      const rows = await readArchiveRows(dir, "events");
+      if (rows && rows.length > 0) {
+        const rebuilt = rebuildTimelineRecord(tl, rows);
+        await serviceTimelineStore.upsert(rebuilt);
+        broadcast("service-timeline:history", rebuilt);
+        outcome.timelineItems = rebuilt.items.length;
+      } else {
+        outcome.timelineItems = tl.items.length; // nothing to rebuild from — left alone
+      }
+    }
+
+    // ── SPL, from spl.csv ──
+    const spl = await splHistoryStore.get(serviceKey);
+    if (spl) {
+      const rebuilt = await rebuildSplRecord(spl);
+      if (rebuilt) {
+        await splHistoryStore.upsert(rebuilt);
+        broadcast("spl:history", rebuilt);
+      }
+      outcome.splItems = (rebuilt ?? spl).items.length;
+    }
+
+    // ── Attendance, from its own stored samples ──
+    // Not from attendance.csv: the stored samples are already the down-sampled
+    // series the record is defined over, and recomputeAttendance is the same
+    // pass Recalculate runs. Re-deriving the series itself is a different
+    // operation with a different answer, and is not what this offers.
+    const att = await attendanceStore.get(serviceKey);
+    if (att) {
+      recomputeAttendance(att);
+      await attendanceStore.upsert(att);
+      broadcast("attendance:history", att);
+      outcome.attendanceSamples = att.samples.length;
+    }
+
+    console.log(
+      `[history] rebuilt ${scrub(serviceKey)} from raw: ${outcome.timelineItems} timeline items, ` +
+        `${outcome.splItems} SPL items, ${outcome.attendanceSamples} attendance samples`,
+    );
+    return outcome;
+  } catch (err) {
+    console.warn(`[history] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
+    throw err; // the operator's answer is the 500, not this line
+  }
 }
 
 /**
