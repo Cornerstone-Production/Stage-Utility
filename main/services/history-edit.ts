@@ -315,6 +315,21 @@ export class NoRawRowsError extends Error {
 }
 
 /**
+ * A rebuild that changed nothing because it could not.
+ *
+ * Deliberately carries NO detail from the underlying failure. A filesystem
+ * error names an absolute path, this message reaches a LAN-visible page, and
+ * the operator cannot act on the path anyway. The real reason is on the tagged
+ * log line the thrower writes; `cause` keeps it for a stack trace.
+ */
+export class RebuildFailedError extends Error {
+  constructor(reason: string) {
+    super("That recording could not be rebuilt, and nothing was changed. The log says why.", { cause: reason });
+    this.name = "RebuildFailedError";
+  }
+}
+
+/**
  * Recompute all three of a service's summaries from its raw rows.
  *
  * The raw layer is append-only truth and every summary must be derivable from
@@ -343,6 +358,22 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
   assertNotLive(serviceKey, "rebuilt");
   forgetAll(serviceKey); // see editServiceWindow
 
+  const outcome: RebuildOutcome = {
+    timeline: { ...NO_RECORD },
+    spl: { ...NO_RECORD },
+    attendance: { ...NO_RECORD },
+    failed: [],
+  };
+
+  // ── Derive everything FIRST, write nothing ──
+  //
+  // Interleaving the two meant a failure part-way through left the service
+  // half-rebuilt with no record of which half: the timing record derived from
+  // this evening's rows, the SPL record still the corrupted one, and a 500 that
+  // said neither. Deriving first makes the common failure — a bad row, an
+  // unreadable CSV — cost nothing at all, because it happens before the first
+  // write.
+  const pending: { name: LegName; write: () => Promise<void> }[] = [];
   try {
     const serviceDate = await serviceDateOf(serviceKey);
     // Not the same refusal as "no raw rows": serviceDateOf reads all three
@@ -353,22 +384,21 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
       throw new Error(`no record for "${serviceKey}" names a service date, so its raw rows cannot be located`);
     }
     const dir = serviceDirPath(serviceKey, serviceDate);
-    const outcome: RebuildOutcome = {
-      timeline: { ...NO_RECORD },
-      spl: { ...NO_RECORD },
-      attendance: { ...NO_RECORD },
-      failed: [],
-    };
 
-    // ── Timeline, from events.csv ──
+    // Timeline, from events.csv.
     const tl = await serviceTimelineStore.get(serviceKey);
     if (tl) {
       const rows = await readArchiveRows(dir, "events");
       if (rows && rows.length > 0) {
-        const rebuilt = rebuildTimelineRecord(tl, rows);
-        await serviceTimelineStore.upsert(rebuilt);
-        broadcast("service-timeline:history", rebuilt);
-        outcome.timeline = { rebuilt: true, items: rebuilt.items.length, missing: false };
+        const next = rebuildTimelineRecord(tl, rows);
+        outcome.timeline = { rebuilt: true, items: next.items.length, missing: false };
+        pending.push({
+          name: "timeline",
+          write: async () => {
+            await serviceTimelineStore.upsert(next);
+            broadcast("service-timeline:history", next);
+          },
+        });
       } else {
         // Left exactly as it was. The count is what it still holds, and
         // `rebuilt: false` is what stops that count reading as an achievement.
@@ -376,44 +406,84 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
       }
     }
 
-    // ── SPL, from spl.csv ──
+    // SPL, from spl.csv.
     const spl = await splHistoryStore.get(serviceKey);
     if (spl) {
-      const rebuilt = await rebuildSplRecord(spl);
-      if (rebuilt) {
-        await splHistoryStore.upsert(rebuilt);
-        broadcast("spl:history", rebuilt);
+      const next = await rebuildSplRecord(spl);
+      outcome.spl = { rebuilt: next != null, items: (next ?? spl).items.length, missing: false };
+      if (next) {
+        pending.push({
+          name: "spl",
+          write: async () => {
+            await splHistoryStore.upsert(next);
+            broadcast("spl:history", next);
+          },
+        });
       }
-      outcome.spl = { rebuilt: rebuilt != null, items: (rebuilt ?? spl).items.length, missing: false };
     }
 
-    // ── Attendance, from its own stored samples ──
-    // Not from attendance.csv: the stored samples are already the down-sampled
-    // series the record is defined over, and recomputeAttendance is the same
-    // pass Recalculate runs. Re-deriving the series itself is a different
-    // operation with a different answer, and is not what this offers. It always
-    // re-derives when the record exists, so it is `rebuilt` whenever it is here.
+    // Attendance, from its own stored samples. Not from attendance.csv: the
+    // stored samples are already the down-sampled series the record is defined
+    // over, and recomputeAttendance is the same pass Recalculate runs.
+    // Re-deriving the series itself is a different operation with a different
+    // answer, and is not what this offers. It always re-derives when the record
+    // exists, so it is `rebuilt` whenever it is here.
     const att = await attendanceStore.get(serviceKey);
     if (att) {
-      recomputeAttendance(att);
-      await attendanceStore.upsert(att);
-      broadcast("attendance:history", att);
-      outcome.attendance = { rebuilt: true, items: att.samples.length, missing: false };
+      // CLONED before recomputing. The store hands back the instance it caches,
+      // and recomputeAttendance mutates in place — so a failed write left every
+      // reader in this process looking at re-based samples that were never
+      // saved, and the next restart silently undid them.
+      const next: ServiceAttendance = structuredClone(att);
+      recomputeAttendance(next);
+      outcome.attendance = { rebuilt: true, items: next.samples.length, missing: false };
+      pending.push({
+        name: "attendance",
+        write: async () => {
+          await attendanceStore.upsert(next);
+          broadcast("attendance:history", next);
+        },
+      });
     }
-
-    const derived = LEGS.filter(([name]) => outcome[name].rebuilt);
-    if (derived.length === 0) {
-      console.log(`[history] rebuild of ${scrub(serviceKey)}: no raw rows, nothing changed`);
-      throw new NoRawRowsError();
-    }
-    console.log(`[history] rebuilt ${scrub(serviceKey)} from raw: ${summarise(outcome)}`);
-    return outcome;
   } catch (err) {
-    // The 409 is the answer, not a fault — it has already said its piece above.
-    if (err instanceof NoRawRowsError) throw err;
+    // Nothing has been written, so this costs the operator nothing but the
+    // answer. The REASON is logged, never returned: a raw filesystem error
+    // names a path, and this response reaches a LAN-visible page.
     console.warn(`[history] rebuild of ${scrub(serviceKey)} failed: ${scrub(errorMessage(err))}`);
-    throw err; // the operator's answer is the 500, not this line
+    throw new RebuildFailedError(errorMessage(err));
   }
+
+  if (pending.length === 0) {
+    console.log(`[history] rebuild of ${scrub(serviceKey)}: no raw rows, nothing changed`);
+    throw new NoRawRowsError();
+  }
+
+  // ── Now write ──
+  //
+  // A write that fails before ANY has landed is still "nothing changed", and
+  // says so with a throw. One that fails after another landed cannot be undone,
+  // so it is reported instead: the operator is looking at a half-rebuilt
+  // service and the answer has to name which half. See CLAUDE.md — a function
+  // that can partially fail returns what failed.
+  let landed = 0;
+  for (const leg of pending) {
+    try {
+      await leg.write();
+      landed += 1;
+    } catch (err) {
+      console.warn(
+        `[history] rebuild of ${scrub(serviceKey)}: could not write the ${leg.name} record: ${scrub(errorMessage(err))}`,
+      );
+      outcome[leg.name].rebuilt = false;
+      if (landed === 0) throw new RebuildFailedError(errorMessage(err));
+      outcome.failed.push(leg.name);
+    }
+  }
+
+  const line = `[history] rebuilt ${scrub(serviceKey)} from raw: ${summarise(outcome)}`;
+  if (outcome.failed.length) console.warn(line);
+  else console.log(line);
+  return outcome;
 }
 
 /** The three legs, with the noun each counts. Named once so the log line and
@@ -423,6 +493,8 @@ const LEGS = [
   ["spl", "SPL items"],
   ["attendance", "attendance samples"],
 ] as const;
+
+type LegName = (typeof LEGS)[number][0];
 
 /** "12 timeline items, 24 SPL items; left alone: attendance" — what was derived
  *  and, explicitly, what was not. The half that was missing is the half an

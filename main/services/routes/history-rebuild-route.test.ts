@@ -257,6 +257,87 @@ describe("POST /api/history/rebuild", () => {
     }
     assert.ok(thrown, "an unknown service key answered as though it had rebuilt something");
     assert.equal(handlerErrorStatus(thrown), 500);
-    assert.match((thrown as Error).message, /cannot be located/);
+    assert.match((thrown as Error).message, /could not be rebuilt, and nothing was changed/);
+    // The reason goes to the log, never to the caller: a filesystem error names
+    // an absolute path and this message reaches a LAN-visible page.
+    assert.doesNotMatch((thrown as Error).message, /\//, `a path leaked into the response: ${(thrown as Error).message}`);
+  });
+
+  // Derive everything, then write. Interleaving the two left a service
+  // half-rebuilt with no record of which half.
+  describe("a write that fails", () => {
+    it("changes nothing and reports no path when it is the FIRST write", async () => {
+      const real = serviceTimelineStore.upsert.bind(serviceTimelineStore);
+      serviceTimelineStore.upsert = async () => {
+        throw new Error("EACCES: permission denied, open '/var/data/service-timeline.json'");
+      };
+      let thrown: unknown;
+      try {
+        await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+      } catch (err) {
+        thrown = err;
+      } finally {
+        serviceTimelineStore.upsert = real;
+      }
+
+      assert.ok(thrown, "a failed write answered as though it had succeeded");
+      assert.equal(handlerErrorStatus(thrown), 500);
+      assert.doesNotMatch(
+        (thrown as Error).message,
+        /var\/data|EACCES/,
+        `the filesystem error reached the response body: ${(thrown as Error).message}`,
+      );
+      // Nothing landed: attendance comes after the timeline and must not have
+      // been written either.
+      const att = await attendanceStore.get(KEY);
+      assert.equal(att?.peakOccupancy, 0, "a later record was written after an earlier one failed");
+      assert.equal(broadcasts.length, 0, "a failed rebuild broadcast anyway");
+    });
+
+    it("answers 200 naming the failed record when an earlier write already landed", async () => {
+      const real = attendanceStore.upsert.bind(attendanceStore);
+      attendanceStore.upsert = async () => {
+        throw new Error("ENOSPC: no space left on device, write '/var/data/attendance.json'");
+      };
+      let out;
+      try {
+        out = await callRoute(historyRoutes, "/api/history/rebuild", {
+          method: "POST",
+          body: { serviceKey: KEY },
+        });
+      } finally {
+        attendanceStore.upsert = real;
+      }
+
+      // 200, not 500: the timing record WAS rebuilt and saved, and a bare 500
+      // would tell the operator nothing happened when half of it did.
+      assert.equal(out.status, 200, `expected 200, got ${out.status}: ${out.body}`);
+      const json = out.json as { attendance: { rebuilt: boolean }; timeline: { rebuilt: boolean }; failed: string[] };
+      assert.deepEqual(json.failed, ["attendance"]);
+      assert.equal(json.timeline.rebuilt, true, "the record that DID save is not reported as saved");
+      assert.equal(json.attendance.rebuilt, false, "a record that failed to save is reported as rebuilt");
+      assert.doesNotMatch(out.body, /ENOSPC|var\/data/, `a filesystem error reached the response body: ${out.body}`);
+      // The timeline really landed.
+      assert.equal((await serviceTimelineStore.get(KEY))?.items.length, 3);
+    });
+
+    it("leaves the store's cached attendance record unmutated when its write fails", async () => {
+      const real = attendanceStore.upsert.bind(attendanceStore);
+      attendanceStore.upsert = async () => {
+        throw new Error("ENOSPC: no space left on device");
+      };
+      try {
+        await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
+      } finally {
+        attendanceStore.upsert = real;
+      }
+
+      // recomputeAttendance mutates in place, and the store hands back the
+      // instance it caches — so recomputing the cached object left every reader
+      // in this process looking at numbers that were never saved.
+      const att = await attendanceStore.get(KEY);
+      assert.equal(att?.peakOccupancy, 0, "the cached record was recomputed despite the write failing");
+      assert.equal(att?.minOccupancy, null, "the cached record was recomputed despite the write failing");
+    });
   });
 });
