@@ -111,6 +111,23 @@ KEPT, below Trends — this section describes what leads, not what the page is
 allowed to contain, and removing a working view is not a decision a silence
 makes.
 
+> **Trimmed after review.** The Overview kept its own average attendance, its
+> peak, and an attendance chart, over a different window than Trends and with a
+> different average — two charts of one quantity on one screen that disagreed.
+> It is the TIMING card now (services, average length, average start, average
+> overrun) plus the sound level, which Trends does not plot. What went, and
+> where it went:
+>
+> | Dropped | Covered by |
+> |---|---|
+> | the average-attendance lead stat | a Trends tile per service type |
+> | Peak attendance | a Trends tile, and each day-list row's own peak |
+> | the attendance trend chart | the Trends chart, over a chosen range |
+> | the SPL trend LINE on that chart | nothing — the average level and its dB delta stay, the per-date line does not |
+>
+> The SPL line is the one real loss and is named rather than implied. The
+> chart component itself still serves Home's Recent services card.
+
 **Calendar.** Shade is the number of services that day in four steps. No dots,
 no counts; the shade alone carries it. The day number is centred in its cell.
 Today is outlined in the accent; the selected day carries the accent ring.
@@ -134,9 +151,15 @@ week reads at a glance and a row cannot disagree with the page it opens.
 attendance over the last eight recordings, the average, and the change against
 the eight before.
 
-> **Read literally during PR 3.** "The eight before" means a type shows no
-> change until it has recorded nine, and the tile says "no prior window yet"
-> rather than implying one. The alternative — splitting whatever is available
+> **Read literally during PR 3, per DAY.** The window is eight DAYS, not eight
+> recordings: a church with three Sunday services plots three points a week
+> within two hours of each other, and a line through them was a sawtooth in
+> which a week-to-week trend was invisible. The line runs through each day's
+> BUSIEST service and a dot marks each recording; the tile averages the same
+> per-day figure, so the two halves of the card quote the same kind of number.
+>
+> "The eight before" means a type shows no change until it has recorded sixteen
+> days, and the tile says "no prior window yet" rather than implying one. The alternative — splitting whatever is available
 > in half — makes the average and the compared window two different things,
 > and a tile whose average is over five recordings and whose change is over two
 > is harder to read than one that says it cannot tell yet. A type with fewer

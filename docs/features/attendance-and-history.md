@@ -74,17 +74,26 @@ the day's services. Open a service for its own page, described after it.
 
 ### All services
 
-**Trends** leads the page. One tile per service type, showing a sparkline of its
-peak attendance over its last eight recordings, the average across them, and the
-change against the eight before. A type that has not recorded eight and eight
-reads *no prior window yet* rather than quoting a change it cannot measure — an
-average with nothing before it is not a trend, and a percentage derived from
-nothing is worse than no percentage. The tiles sort busiest first.
+**Trends** leads the page. One tile per service type, showing a sparkline of the
+busiest service on each of the last eight **days** that type recorded, the
+average across them, and the change against the eight days before. A type that
+has not recorded eight days and eight more reads *no prior window yet* rather
+than quoting a change it cannot measure: a comparison of eight weeks against two
+is not the comparison the tile's label promises. The tiles sort busiest first.
 
-Under them, one chart of every service type across the chosen range — 8, 16 or
-52 weeks, defaulting to 16, remembered per browser. One point per recording, the
-peak people in the room; a recording with no attendance record is not plotted,
-because a service nobody counted is not a service of nobody.
+Everything is counted **per day, at the day's busiest service**. A church running
+a 9, an 11 and a 6 records three figures every Sunday, and attendance is people
+in the room — summing them double-counts the family who came to one, and
+averaging them answers "how full was a service" when a trend asks "how many
+came". The tile's average and a point on the line below it are the same kind of
+number for that reason.
+
+Under the tiles, one chart of every service type across the chosen range — 8, 16
+or 52 weeks, defaulting to 16, remembered per browser. The **line** runs through
+each day's busiest service; a **dot** marks every individual recording, so a week
+that stood for three services still looks like three. A recording with no
+attendance record is not plotted at all, because a service nobody counted is not
+a service of nobody.
 
 **Milestones** are marked under that chart: a small triangle, a dashed guide up
 the plot, a short label where there is room for one, and the full label on hover.
@@ -98,14 +107,31 @@ They come from two places, and draw alike:
   not a change, and a plan with no series title is stepped over rather than
   counted as leaving and rejoining one.
 
+A milestone scoped to **one service type** draws only while that type's line is
+on, in that line's colour. One that applies to everything stays neutral — a
+colour would claim a series it has not got. The legend under the chart is the
+switch: clicking a service type takes its line off, and its milestones with it.
+That choice is remembered per browser, like the range.
+
+Each mark is focusable as well as hoverable, and carries its full label as its
+accessible name: the triangle is a few pixels of glyph holding the only copy of
+a sentence.
+
 Milestones never appear on a single service's chart. They are statements about
 the history, and one drawn across a Sunday morning would read as something that
 happened during that service.
 
-A milestone whose date is not a real calendar day is refused when you enter it,
-with the reason. One that reached the file another way — a hand edit, a restored
-backup — is skipped rather than drawn at a date nothing happened on, and the
-server says so on a `[history]` line naming it.
+A milestone is refused, with the reason, when its date is not a real calendar
+day, when its label is blank or longer than 60 characters, or when it names a
+service type nothing has ever recorded — each of those would store a row you can
+see in Settings and a mark that never appears. One that reached the file another
+way — a hand edit, a restored backup — is skipped rather than drawn at a date
+nothing happened on, is **left in the file** rather than deleted by the next
+save, and the server names it on a `[history]` line.
+
+If the milestone list cannot be read at all, the card says *milestones
+unavailable* and the reason is logged. The derived series-change marks still
+draw.
 
 The **calendar** shades a day by how many services were recorded on it, in four
 steps, with everything at four or more on the darkest. There is no dot and no
@@ -129,6 +155,21 @@ They are the service page's own figures, picked out of the same derivation, so a
 row and the page it opens cannot quote different numbers for one recording. A
 service whose attendance recorder opened before its first plan item went live —
 the arrival ramp — is a simpler row saying how many are in the room so far.
+
+Where there is no level, the row says **why** under the dash — *no sound
+recorded*, *metric hidden in Sound*, or *sound unavailable* when the record
+could not be read at all. The last one is its own case on purpose: a server that
+was down is not a meter that was off, and the reason is logged on a `[history]`
+line naming the service.
+
+Below the list is an **Overview** of how the services themselves ran — how many,
+their average length, average start against the scheduled time, and average
+per-item overrun — plus the average sound level, which Trends does not plot.
+Right-click it (or tap and hold) to switch the sound summary off or to pick the
+Smaart metric it reports. It carries no attendance figure and no attendance
+chart: Trends, at the top of the page, plots attendance over a chosen range, and
+two charts of the same quantity over different windows disagreed with each
+other.
 
 The shared `/history` link shows the same figures; it carries no Delete.
 
