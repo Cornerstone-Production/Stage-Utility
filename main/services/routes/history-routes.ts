@@ -29,6 +29,21 @@ import {
 import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
 import { historyMilestonesStore } from "../history-milestones-store.js";
 
+/** Every service type id the recorded history holds, for validating a
+ *  milestone's scope. Read from the timeline store rather than from Planning
+ *  Center: a milestone is about what was RECORDED, and a type PCO has since
+ *  renamed or removed still has recordings the chart draws. */
+async function recordedServiceTypeIds(): Promise<string[]> {
+  const ids = new Set<string>();
+  for (const rec of await serviceTimelineStore.list()) {
+    if (rec.serviceTypeId) ids.add(rec.serviceTypeId);
+  }
+  for (const rec of await attendanceStore.list()) {
+    if (rec.serviceTypeId) ids.add(rec.serviceTypeId);
+  }
+  return [...ids];
+}
+
 export async function historyRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
     // ── Attendance history (mirrors the SPL history routes) ─────────────────
@@ -138,16 +153,23 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       try {
-        json(res, await historyMilestonesStore.save({
-          id: typeof body.id === "string" ? body.id : undefined,
-          date: body.date,
-          label: body.label,
-          serviceTypeId: typeof body.serviceTypeId === "string" ? body.serviceTypeId : null,
-        }));
+        json(res, await historyMilestonesStore.save(
+          {
+            id: typeof body.id === "string" ? body.id : undefined,
+            date: body.date,
+            label: body.label,
+            serviceTypeId: typeof body.serviceTypeId === "string" ? body.serviceTypeId : null,
+          },
+          // Every type the recorded history actually holds. A mark scoped to
+          // anything else draws on no line at all and would be invisible with
+          // no way to tell why.
+          await recordedServiceTypeIds(),
+        ));
       } catch (err) {
-        // The store REFUSES a date it cannot draw rather than storing one the
-        // operator would never see a mark for. Returned, not swallowed: the
-        // form says why.
+        // The store REFUSES a milestone it cannot draw — a date that is not a
+        // day, a blank or over-long label, a service type nothing has recorded
+        // — rather than storing one the operator would never see a mark for.
+        // Returned, not swallowed: the form says why.
         error(res, errorMessage(err));
       }
       return;
@@ -155,7 +177,15 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     {
       const msMatch = pathname.match(/^\/api\/history\/milestones\/([^/]+)$/);
       if (msMatch && method === "DELETE") {
-        json(res, await historyMilestonesStore.remove(decodeURIComponent(msMatch[1])));
+        const left = await historyMilestonesStore.remove(decodeURIComponent(msMatch[1]));
+        // 404 for an id that is not there. A 200 said the deletion happened, so
+        // a client working from a stale list — two tabs, or a restored backup —
+        // was told it had removed something that was never there.
+        if (left == null) {
+          error(res, "no milestone with that id", 404);
+          return;
+        }
+        json(res, left);
         return;
       }
     }
