@@ -6,7 +6,7 @@ import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Tooltip } from "../../components/ui/tooltip";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
-import { Trash2Icon, ClockIcon, CopyIcon, GitMergeIcon, DownloadIcon, RotateCcwIcon, EllipsisIcon } from "lucide-react";
+import { Trash2Icon, ClockIcon, DownloadIcon, EllipsisIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { confirm, EmptyState, SkeletonRows, Button, Collapsible, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
@@ -15,8 +15,9 @@ import { HistoryCalendar } from "../../components/history-calendar";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
-import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
+import { AttendanceDetail, averageOccupancy } from "./attendance-history-section";
 import { SplDetail } from "./spl-history-section";
+import { RecordingPill, ServiceHeader, overrunStats } from "./history-service-header";
 import {
   computeOverview,
   summarize,
@@ -152,19 +153,9 @@ export function describeRebuild(out: RebuildOutcome): string {
   return parts.join(" · ");
 }
 
-/** Mean per-item over/under (seconds) + how many ran over, for items with both
- *  planned and actual times. */
-function overrunStats(tl: ServiceTimeline) {
-  const deltas = tl.items
-    .filter((it) => isCountedItem(it, tl) && it.plannedLengthSec != null && it.actualDurationSec != null)
-    .map((it) => (it.actualDurationSec as number) - (it.plannedLengthSec as number));
-  if (!deltas.length) return { avg: null as number | null, over: 0, total: 0 };
-  return { avg: deltas.reduce((a, b) => a + b, 0) / deltas.length, over: deltas.filter((d) => d > 0).length, total: deltas.length };
-}
-
 /** Baptism sessions that overlap a service's recorded window. */
 /** A plain-text service report combining timing + attendance + audio + baptisms (shareable). */
-function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
+export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {
   const sum = summarize(tl);
   const o = overrunStats(tl);
   const L: string[] = [];
@@ -181,9 +172,21 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
     L.push(`${i + 1}. ${it.title || "—"}  plan ${fmtDur(it.plannedLengthSec)}  actual ${it.endedAt == null ? "(live)" : fmtDur(it.actualDurationSec)}${d != null ? `  ${fmtDelta(d)}` : ""}`);
   });
   if (att) {
-    const avgOcc = att.samples.length ? Math.round(att.samples.reduce((s, p) => s + p.occupancy, 0) / att.samples.length) : null;
+    // `averageOccupancy`, the SAME derivation the Attendance card's Average
+    // figure uses. This averaged every sample instead, which is the bug that
+    // function was written to fix — the arrival ramp and the emptying-room
+    // taper are both long and both near-empty, so the mean lands BELOW the
+    // recorded low. On the 17 Sep recording the pasted report said "Avg in-room
+    // 781" for a service whose Lowest was 933, under a card reading 1,164. The
+    // card was fixed and this copy drifted on.
+    const avgOcc = averageOccupancy(att);
     L.push("", "ATTENDANCE");
-    L.push(`Peak attendance ${servicePeakAttendance(att).toLocaleString()} · Peak in-room ${att.peakOccupancy.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
+    // Attendance is people in the room; entries is how many came in during the
+    // service. This had them swapped — a pasted report said "Peak attendance
+    // 2,061 · Peak in-room 1,196" for a service that recorded a peak of 1,196
+    // in the room and 1,727 through the doors. Both are the recorder's own
+    // stored fields, so the report and the screen cannot disagree.
+    L.push(`Peak attendance ${att.peakOccupancy.toLocaleString()} · Entries ${att.peakAttendance.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
   }
   if (spl && spl.items.length) {
     L.push("", "AUDIO — peak SPL (dB)");
@@ -641,23 +644,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
 
   // ── Detail: one service's actual rundown. ──
   if (detail) {
-    const live = detail.endedAt == null;
-    const sum = summarize(detail, live ? nowTick : undefined);
-    const totalDelta = sum.planned != null ? sum.actual - sum.planned : null;
-    const over = overrunStats(detail);
-    // Projected end = actual start + planned length; actual end = the record's
-    // finalized end (else the last item that closed). Shown as card subscripts.
-    const firstStartMs = Date.parse(sum.firstStart);
-    const projectedEnd =
-      sum.planned != null && Number.isFinite(firstStartMs)
-        ? new Date(firstStartMs + sum.planned * 1000).toISOString()
-        : null;
-    // Actual end = the last COUNTED item's end (excludes trailing buffer / pre-service).
-    const actualEnd = [...detail.items].reverse().find((it) => isCountedItem(it, detail) && it.endedAt)?.endedAt ?? detail.endedAt ?? null;
-    const actualSub = [
-      totalDelta != null ? `${fmtDelta(totalDelta)} vs plan` : null,
-      actualEnd ? `ended ${fmtTime(actualEnd)}` : null,
-    ].filter(Boolean).join(" · ") || undefined;
+    // The service-level timing figures live in the header now — `serviceKpis`
+    // derives every one of them from the record, so nothing here recomputes
+    // them. Leaving the tiles in place beside the header put Started, Planned,
+    // Actual and Avg overrun on screen twice.
     const det = detail; // narrow for the async handler
     const linkedBap = linkBaptisms(baptisms, detail);
     const bapStats = baptismStats(linkedBap);
@@ -888,50 +878,37 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     const gridCols = editingTimes
       ? "grid-cols-[1.4rem_1fr_3.5rem_3rem] sm:grid-cols-[1.4rem_1.6rem_1fr_4rem_4rem_4rem_7rem_7rem]"
       : "grid-cols-[1fr_3.5rem_3rem] sm:grid-cols-[1.6rem_1fr_4rem_4rem_4rem_4.5rem_4.5rem]";
+    // Series · service type · date · time, in one muted line. Blank parts drop
+    // out rather than leaving a dangling separator.
+    const metaLine = [
+      detail.seriesTitle,
+      detail.serviceTypeName,
+      fmtDate(detail.startedAt),
+      fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt),
+    ].filter(Boolean).join(" · ");
     return (
       <div className="flex flex-col gap-4">
-        <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
-          ← All services
-        </button>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex flex-col min-w-0">
-            <span className="text-title3 font-semibold text-gray-12">
-              {detail.planTitle ?? detail.serviceKey}
-              {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
-            </span>
-            <span className="text-caption1 text-gray-9">
-              {detail.seriesTitle ? `${detail.seriesTitle} · ` : ""}
-              {fmtDate(detail.startedAt)}
-              {fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt) ? ` · ${fmtTime(detail.serviceTimeStartsAt ?? detail.startedAt)}` : ""}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap sm:shrink-0">
-            {!readOnly && live && (
-              <Button variant="filled" size="small" onClick={doResetPacing} tooltip="Stop items before now from counting toward the pacing readout — the recording itself is untouched">
-                <RotateCcwIcon className="size-3.5 text-gray-9" /> Reset pacing
-              </Button>
-            )}
-            {!readOnly && (
-              <Button variant="filled" size="small" onClick={startEditTimes} tooltip="Fix the recorded start/end (trims samples + items outside the window)">
-                <ClockIcon className="size-3.5 text-gray-9" /> Edit times
-              </Button>
-            )}
-            <Button variant="filled" size="small" onClick={copyReport} tooltip="Copy a full text report (timing + attendance + audio)">
-              <CopyIcon className="size-3.5 text-gray-9" /> Copy report
-            </Button>
-            {!readOnly && mergeCandidates.length > 0 && (
-              <Button variant="filled" size="small" onClick={() => { setMerging((v) => !v); setEditingTimes(false); }} tooltip="Merge this recording into another service (fixes a split service), then delete this one">
-                <GitMergeIcon className="size-3.5 text-gray-9" /> Merge…
-              </Button>
-            )}
-          </div>
-        </div>
+        <ServiceHeader
+          timeline={detail}
+          attendance={attendance}
+          spl={spl}
+          now={nowTick}
+          readOnly={readOnly}
+          meta={metaLine}
+          onBack={() => setSelectedKey(null)}
+          onEditTimes={startEditTimes}
+          onCopyReport={copyReport}
+          onMerge={mergeCandidates.length > 0 ? () => { setMerging((v) => !v); setEditingTimes(false); } : undefined}
+          onRebuild={rebuildFromRaw}
+          onDelete={() => void deleteService(det.serviceKey, det.planTitle ?? det.serviceKey)}
+          onResetPacing={doResetPacing}
+        />
         {merging && (
-          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-6 bg-amber-2/40 p-3">
-            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-warn-9/40 bg-warn-9/8 p-3">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-muted">
               Merge this recording into
               <Select value={mergeTarget} onValueChange={setMergeTarget}>
-                <SelectTrigger className="h-auto rounded-md border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12">
+                <SelectTrigger className="h-auto rounded-md border-line-strong bg-field px-2 py-1 text-caption1 text-fg">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -946,42 +923,44 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             </label>
             <Button variant="accent" size="small" disabled={!mergeTarget} onClick={doMerge}>Merge + delete this</Button>
             <Button variant="transparent" size="small" onClick={() => setMerging(false)}>Cancel</Button>
-            <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
+            <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
               Moves this recording's items + attendance samples into the chosen service (matching items aren't duplicated), then deletes this record. For reuniting a service split across two records (e.g. one that overran into the next occurrence).
             </span>
           </div>
         )}
         {editingTimes && (
-          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-5 bg-gray-2 p-3">
-            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-line bg-fill/40 p-3">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-muted">
               Start
-              <input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+              <input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="rounded-md border border-line-strong bg-field px-2 py-1 font-mono tabular-nums text-caption1 text-fg" />
             </label>
-            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-muted">
               End
-              <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+              <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-line-strong bg-field px-2 py-1 font-mono tabular-nums text-caption1 text-fg" />
             </label>
             <Button variant="accent" size="small" onClick={saveTimes}>Save</Button>
             <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
             <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
-            <Button variant="transparent" size="small" onClick={rebuildFromRaw} tooltip="Recompute all three records from the raw rows in the data archive — your per-item time corrections are kept">Rebuild from raw</Button>
-            <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
-              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-gray-11">Rebuild from raw</strong> goes further: it discards the stored summaries and derives them again from the archived rows, keeping your item corrections.
+            <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored summaries and derives them again from the archived rows, keeping your item corrections.
             </span>
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat label="Started" value={fmtTime(sum.firstStart)} accent={sum.lateStartSec != null && sum.lateStartSec > 60 ? "text-amber-11" : "text-gray-12"} sub={sum.lateStartSec != null ? (sum.lateStartSec >= 0 ? `${fmtDelta(sum.lateStartSec)} late` : `${fmtDelta(sum.lateStartSec)} early`) : undefined} />
-          <Stat label="Planned" value={fmtDur(sum.planned)} accent="text-gray-12" sub={projectedEnd ? `ends ${fmtTime(projectedEnd)}` : undefined} />
-          <Stat label="Actual" value={fmtDur(sum.actual)} accent="text-accent" sub={actualSub} />
-          <Stat label="Avg overrun" value={over.avg != null ? fmtDelta(over.avg) : "—"} accent={over.avg != null && over.avg > 0 ? "text-red-11" : "text-gray-12"} sub={over.total ? `${over.over} of ${over.total} over` : undefined} />
-        </div>
-
-        <div className="flex flex-col rounded-lg border border-gray-5 overflow-hidden">
+        {/* Three cards under the header, one per nav anchor. The links are real
+            anchors and the header is sticky; what keeps a jump from landing the
+            heading UNDER the header is the scrolling pane's own scroll padding,
+            measured from this header (shell.tsx). */}
+        <SectionCard id="history-rundown" title="Rundown">
+        {/* The app's type scale, not the table's own: 10px uppercase headers
+            over 13px rows, every number mono and tabular so the columns line up
+            down the page. The marks — live, not counted, edited — and the two
+            row buttons were each on a bespoke 10px; they are on the scale's
+            11px caption now. Nothing about what the table DOES changed. */}
+        <div className="flex flex-col overflow-hidden rounded-lg border border-line">
           <div
             data-testid="rundown-header"
-            className={`grid ${gridCols} gap-2 px-3 py-1.5 bg-gray-3 text-caption2 font-medium text-gray-10`}
+            className={`grid ${gridCols} gap-2 border-b border-line bg-fill px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-subtle`}
           >
             {editingTimes && (
               <Tooltip label="Whether this item counts toward the service timers">
@@ -994,7 +973,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             const itemLive = it.endedAt == null;
             const counted = isCountedItem(it, detail); // buffer + pre-service shown but not totaled
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
-            const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
+            const deltaColor = delta == null ? "text-fg-subtle" : delta > 30 ? "text-danger-11" : delta < -30 ? "text-accent" : "text-fg-muted";
             // `editedFrom` is set by the server's overlay and only on a row that
             // actually differs from what was recorded — the marker cannot lie.
             const edited = it.editedFrom != null;
@@ -1005,7 +984,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               // Keyed by sequence too: a plan item can run twice in one record
               // (reprised, or a second service caught before the split), and a
               // duplicate React key drops the second row's state onto the first.
-              <div key={`${it.itemId}:${it.sequence}`} className={`grid ${gridCols} gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
+              <div key={`${it.itemId}:${it.sequence}`} className={`grid ${gridCols} items-center gap-2 px-3 py-1.5 text-footnote ${i % 2 ? "bg-fill/40" : ""} ${counted ? "" : "opacity-55"}`}>
                 {editingTimes && (
                   <Tooltip
                     label={counted ? "Counted in the service timers — click to exclude" : "Excluded from the service timers — click to include"}
@@ -1018,19 +997,19 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     />
                   </Tooltip>
                 )}
-                <span className="text-gray-9 max-sm:hidden">{i + 1}</span>
-                <span className="text-gray-12 truncate">
+                <span className="font-mono tabular-nums text-fg-subtle max-sm:hidden">{i + 1}</span>
+                <span className="truncate text-fg">
                   {it.title || "—"}
-                  {itemLive && <span className="ml-1.5 text-[10px] text-red-11">live</span>}
-                  {!counted && <span className="ml-1.5 text-[10px] italic text-gray-9">not counted</span>}
+                  {itemLive && <span className="ml-1.5 text-caption2 text-live-11">live</span>}
+                  {!counted && <span className="ml-1.5 text-caption2 italic text-fg-subtle">not counted</span>}
                   {edited && (
                     <Tooltip label={editedTooltip(it)}>
-                      <span className="ml-1.5 text-[10px] italic text-amber-11">edited</span>
+                      <span className="ml-1.5 text-caption2 italic text-warn-11">edited</span>
                     </Tooltip>
                   )}
                   {editingTimes && dirty && (
                     <button
-                      className="ml-2 align-middle rounded-md border border-accent px-1.5 py-px text-[10px] text-accent hover:bg-accent/10 max-sm:hidden"
+                      className="ml-2 rounded-md border border-accent px-1.5 py-px align-middle text-caption2 text-accent hover:bg-accent/10 max-sm:hidden"
                       disabled={saving}
                       aria-label={`Save times — ${it.title || "item"}`}
                       onClick={() => void saveItemTimes(it)}
@@ -1045,7 +1024,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       wanted. Reset discards the draft along with the override. */}
                   {editingTimes && edited && (
                     <button
-                      className="ml-2 align-middle rounded-md border border-gray-6 px-1.5 py-px text-[10px] text-gray-11 hover:bg-gray-4 max-sm:hidden"
+                      className="ml-2 rounded-md border border-line-strong px-1.5 py-px align-middle text-caption2 text-fg-muted hover:bg-fill max-sm:hidden"
                       aria-label={`Reset times — ${it.title || "item"}`}
                       onClick={() => void resetItemTimes(it)}
                     >
@@ -1053,9 +1032,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                     </button>
                   )}
                 </span>
-                <span className="text-right text-gray-10 max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
-                <span className="text-right text-gray-12">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
-                <span className={`text-right ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
+                <span className="text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{counted ? fmtDur(it.plannedLengthSec) : "—"}</span>
+                <span className="text-right font-mono tabular-nums text-fg">{itemLive ? "—" : fmtDur(it.actualDurationSec)}</span>
+                <span className={`text-right font-mono tabular-nums ${deltaColor}`}>{!counted || itemLive ? "" : fmtDelta(delta)}</span>
                 {editingTimes ? (
                   <>
                     {/* `placeholder` and `title` both: a time input shows no
@@ -1071,7 +1050,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       title="Clear this field to go back to the recorded start"
                       value={draft.start}
                       onChange={(e) => setDraft(it, { start: e.target.value })}
-                      className="max-sm:hidden rounded-md border border-gray-5 bg-gray-1 px-1.5 py-0.5 text-caption2 text-gray-12"
+                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
                     />
                     <input
                       type="time"
@@ -1081,51 +1060,52 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
                       title="Clear this field to go back to the recorded end"
                       value={draft.end}
                       onChange={(e) => setDraft(it, { end: e.target.value })}
-                      className="max-sm:hidden rounded-md border border-gray-5 bg-gray-1 px-1.5 py-0.5 text-caption2 text-gray-12"
+                      className="max-sm:hidden rounded-md border border-line-strong bg-field px-1.5 py-0.5 font-mono tabular-nums text-caption2 text-fg"
                     />
                   </>
                 ) : (
                   <>
-                    <span className="text-right text-gray-9 whitespace-nowrap max-sm:hidden">{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
-                    <span className="text-right text-gray-9 whitespace-nowrap max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
+                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.startedAt ? fmtTime(it.startedAt) : "—"}</span>
+                    <span className="whitespace-nowrap text-right font-mono tabular-nums text-fg-muted max-sm:hidden">{it.endedAt ? fmtTime(it.endedAt) : "—"}</span>
                   </>
                 )}
               </div>
             );
           })}
         </div>
+        </SectionCard>
 
         {/* Baptism timings sit with the rundown above rather than after the audio:
             they are timing data, and on a baptism weekend they explain the overrun
             in the table right above them. Only rendered when a session links, so a
-            normal service is unchanged. */}
+            normal service is unchanged — which is also why it is not in the
+            section nav: a nav entry that is there most weeks and gone the rest
+            reads as a bug. */}
         {linkedBap.length > 0 && (
-          <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-            <span className="text-body font-semibold text-gray-12">Baptisms</span>
+          <SectionCard title="Baptisms">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              <Stat label="Baptized" value={String(bapStats.people)} accent="text-gray-12" />
+              <Stat label="Baptized" value={String(bapStats.people)} accent="text-fg" />
               <Stat label="Total time" value={fmtDur(bapStats.totalSec)} accent="text-accent" />
-              <Stat label="Testimony total" value={fmtDur(bapStats.testimonySec)} accent="text-gray-12" />
-              <Stat label="Baptism total" value={fmtDur(bapStats.baptismSec)} accent="text-gray-12" />
-              <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-gray-12" />
-              <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-gray-12" />
+              <Stat label="Testimony total" value={fmtDur(bapStats.testimonySec)} accent="text-fg" />
+              <Stat label="Baptism total" value={fmtDur(bapStats.baptismSec)} accent="text-fg" />
+              <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-fg" />
+              <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-fg" />
             </div>
-            <span className="text-caption2 text-gray-9">Per-person splits are in the Baptisms tab.</span>
-          </div>
+            <span className="text-caption2 text-fg-subtle">Per-person splits are in the Baptisms tab.</span>
+          </SectionCard>
         )}
 
-        {/* Full attendance + audio detail for the same service occurrence — one place
-            for everything about this service (rundown above, the rest folded in here). */}
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Attendance</span>
+        {/* Full attendance + sound detail for the same service occurrence — one
+            place for everything about this service. Each is PR 1's chart module
+            with its own strip and Customize; nothing here restyles them. */}
+        <SectionCard id="history-attendance" title="Attendance">
           {attendance ? (
             <AttendanceDetail detail={attendance} timeline={detail} />
           ) : (
-            <p className="text-caption1 text-gray-9">No attendance recorded for this service.</p>
+            <p className="text-caption1 text-fg-muted">No attendance recorded for this service.</p>
           )}
-        </div>
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
+        </SectionCard>
+        <SectionCard id="history-sound" title="Sound">
           {spl ? (
             <SplDetail
               // KEYED BY THE RECORD. The section fetches the raw series on
@@ -1138,9 +1118,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               attendance={attendance}
             />
           ) : (
-            <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
+            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
           )}
-        </div>
+        </SectionCard>
       </div>
     );
   }
@@ -1161,27 +1141,30 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
           ← All services
         </button>
-        <div className="flex flex-col min-w-0">
-          <span className="text-title3 font-semibold text-gray-12">
-            {attendance.planTitle ?? attendance.serviceKey}
-            {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
+        {/* The same vocabulary as a service's own page — the green `recording`
+            pill, "Sound", and cards — rather than the red LIVE badge and
+            border-t dividers this page kept while the other one moved on. It
+            has no rundown and no KPIs to show, so it is not the ServiceHeader;
+            it is the two cards that page shares with it. */}
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="flex items-center gap-2 text-title3 font-semibold text-fg">
+            <span className="truncate">{attendance.planTitle ?? attendance.serviceKey}</span>
+            {live && <RecordingPill />}
           </span>
-          <span className="text-caption1 text-gray-9">
+          <span className="text-caption1 text-fg-muted">
             {fmtDate(attendance.startedAt)}
             {live
               ? ` · arriving · recording since ${fmtTime(attendance.startedAt)} · ${statusText}`
               : ` · recorded ${fmtTime(attendance.startedAt)}–${fmtTime(attendance.endedAt as string)} · ${statusText}`}
           </span>
         </div>
-        <p className="text-caption1 text-gray-9">
+        <p className="text-caption1 text-fg-muted">
           Item timings appear here when the first item goes live in Planning Center.
         </p>
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Attendance</span>
+        <SectionCard id="history-attendance" title="Attendance">
           <AttendanceDetail detail={attendance} timeline={null} />
-        </div>
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
+        </SectionCard>
+        <SectionCard id="history-sound" title="Sound">
           {spl ? (
             <SplDetail
               // KEYED BY THE RECORD. The section fetches the raw series on
@@ -1194,9 +1177,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               attendance={attendance}
             />
           ) : (
-            <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
+            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
           )}
-        </div>
+        </SectionCard>
       </div>
     );
   }
@@ -1634,12 +1617,38 @@ export function OverviewBlend({
   );
 }
 
+/**
+ * One card on a service's page — Rundown, Attendance, Sound (and Baptisms on
+ * the weekends it applies).
+ *
+ * `id` is the anchor the header's nav links to and the element its
+ * IntersectionObserver watches, so a card without one is simply not in the nav.
+ *
+ * No scroll margin of its own: the scrolling pane reserves the sticky header's
+ * height as scroll PADDING (shell.tsx), which covers an anchor jump to a card
+ * and also the things nobody would put a margin on — a focused time field
+ * inside this card, a find-in-page hit. Carrying both would add up and land
+ * every jump a header's height too low.
+ */
+function SectionCard({ id, title, children }: { id?: string; title: string; children: React.ReactNode }) {
+  return (
+    <section
+      id={id}
+      aria-label={title}
+      className="su-card flex flex-col gap-3 px-4 py-4 max-sm:px-3"
+    >
+      <h2 className="text-subheadline font-semibold text-fg">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
 function Stat({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
   return (
-    <div className="rounded-lg border border-gray-5 bg-gray-2 px-3 py-2">
-      <div className="text-caption2 text-gray-9">{label}</div>
-      <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value}</div>
-      {sub && <div className="text-caption2 text-gray-9">{sub}</div>}
+    <div className="rounded-lg border border-line bg-fill/40 px-3 py-2">
+      <div className="text-caption2 uppercase tracking-wider text-fg-subtle">{label}</div>
+      <div className={`font-mono text-title3 font-medium tabular-nums ${accent}`}>{value}</div>
+      {sub && <div className="text-caption2 text-fg-subtle">{sub}</div>}
     </div>
   );
 }

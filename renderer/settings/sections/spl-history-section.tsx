@@ -8,6 +8,7 @@ import {
   CustomizePopover,
   HistoryChart,
   hasStoredChoice,
+  readStoredKeys,
   seedStoredKeys,
   serviceWindowOf,
   useStoredKeys,
@@ -42,6 +43,64 @@ function defaultVisible(keys: string[]): string[] {
 function dB(v: number | null): string {
   return v == null ? "—" : `${Math.round(v)} dB`;
 }
+
+/** Every Smaart metric a record carries, sorted. One definition: the section's
+ *  columns, its legend and the service header's peak KPI all ask this. */
+function metricKeysOf(record: ServiceSplHistory): string[] {
+  const keys = new Set<string>();
+  for (const it of record.items) if (it.metrics) for (const k of Object.keys(it.metrics)) keys.add(k);
+  if (record.metricKey) keys.add(record.metricKey);
+  return Array.from(keys).sort();
+}
+
+/**
+ * The PRIMARY metric this browser surfaces and what the service peaked at on it.
+ *
+ * The primary is the first of the operator's chosen metrics that this record
+ * actually carries — the same rule `SplDetail` uses for its peak marks and its
+ * "Peak <metric>" figure, read from the same localStorage entry, so the header
+ * and the section below it can never name different metrics.
+ *
+ * The four empty cases are told apart because they are four different
+ * situations and only one of them is a fault in the recording. A single null
+ * had the header saying "no metric recorded" at a service that recorded plenty
+ * and whose operator had simply unticked every metric in Customize — which
+ * sends whoever reads it to look at the meter.
+ *
+ * Read rather than hooked: the caller needs one figure, not the whole
+ * preference machinery, and `SplDetail` — rendered on the same page — owns the
+ * seed from the server. A caller that must not go stale when the choice changes
+ * subscribes with `useStoredKeysVersion(SPL_METRICS_STORAGE_KEY)`.
+ */
+export type ServicePeakLevel =
+  | { kind: "level"; metric: string; db: number }
+  /** No SPL record at all, or one with no items: nothing was recorded. */
+  | { kind: "no-record" }
+  /** A record carrying no Smaart metric keys — an empty or legacy capture. */
+  | { kind: "no-metrics" }
+  /** The record HAS metrics; this browser's selection surfaces none of them. */
+  | { kind: "hidden"; available: string[] }
+  /** The metric is chosen and present, but no item on it recorded a peak. */
+  | { kind: "no-samples"; metric: string };
+
+export function servicePeakLevel(record: ServiceSplHistory | null): ServicePeakLevel {
+  if (!record || !record.items.length) return { kind: "no-record" };
+  const all = metricKeysOf(record);
+  if (!all.length) return { kind: "no-metrics" };
+  const chosen = readStoredKeys(SPL_METRICS_STORAGE_KEY, null, defaultVisible(all));
+  const primary = chosen.find((k) => all.includes(k));
+  if (!primary) return { kind: "hidden", available: all };
+  const maxes = record.items
+    .map((it) => metricStat(it, primary, record)?.max)
+    .filter((v): v is number => v != null);
+  return maxes.length
+    ? { kind: "level", metric: primary, db: Math.max(...maxes) }
+    : { kind: "no-samples", metric: primary };
+}
+
+/** The metric-list preference, exported so a reader outside this file can
+ *  subscribe to it rather than re-deriving the key. */
+export { SPL_METRICS_STORAGE_KEY };
 
 /** Which at-rest figures the sound strip shows. Its own localStorage entry: the
  *  metric LIST is an operator-level setting kept on the server (it decides what
@@ -189,12 +248,7 @@ export function SplDetail({
     if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
   }
 
-  const allKeys = useMemo(() => {
-    const keys = new Set<string>();
-    for (const it of detail.items) if (it.metrics) for (const k of Object.keys(it.metrics)) keys.add(k);
-    if (detail.metricKey) keys.add(detail.metricKey);
-    return Array.from(keys).sort();
-  }, [detail]);
+  const allKeys = useMemo(() => metricKeysOf(detail), [detail]);
 
 
   /**

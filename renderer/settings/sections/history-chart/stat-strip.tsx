@@ -14,6 +14,9 @@ export interface StatFigure {
   value: string;
   /** A theme colour for the value. Defaults to the foreground. */
   color?: string;
+  /** A second, quieter line under the value — "+2:14 late", "3 of 12 over".
+   *  The service page's header KPIs carry one; the chart strips do not. */
+  sub?: string;
 }
 
 /** One series' value at the hovered (or live) instant. */
@@ -43,30 +46,46 @@ export interface StatStripProps {
   live: { time: string; values: StripValue[] } | null;
   /** The Customize trigger, pinned to the right end. */
   right?: React.ReactNode;
+  /**
+   * Whether the strip is a polite live region. True for a chart strip, whose
+   * whole job is to answer "what is under the cursor" and "what is happening
+   * now". FALSE for the service header's KPI row: those change every second
+   * while a service records, and a live region there reads six figures aloud
+   * on every tick.
+   */
+  announce?: boolean;
 }
 
 /** 20px mono value over an 11px uppercase label, with a hairline before every
  *  figure but the first. */
-function Figure({ label, value, color, first }: { label: string; value: string; color?: string; first: boolean }) {
+function Figure({ label, value, color, sub, first }: { label: string; value: string; color?: string; sub?: string; first: boolean }) {
   return (
     <div
       className={cn(
-        "flex min-w-0 flex-col gap-0.5 px-3 first:pl-0",
+        // `shrink-0`: the row is a scroller, so a narrow window must push
+        // figures off the right-hand end, not squash them. Shrinking turned
+        // "20:06" into "20…" and "1:07:47" into "1:07…" on a 600px window —
+        // a truncated number is worse than one you have to scroll to.
+        "flex shrink-0 flex-col gap-0.5 px-3 first:pl-0",
         !first && "border-l border-line",
       )}
     >
-      <span className="text-caption2 uppercase tracking-wider text-fg-subtle whitespace-nowrap">{label}</span>
+      <span className="whitespace-nowrap text-caption2 uppercase tracking-wider text-fg-subtle">{label}</span>
       <span
-        className="font-mono text-[20px] leading-[24px] font-medium tabular-nums truncate"
+        // The cap is for hover mode, whose value is a plan item's TITLE: a long
+        // one would otherwise push every other figure off the visible end.
+        // No number this strip shows comes near it.
+        className="max-w-[14rem] truncate font-mono text-[20px] font-medium leading-[24px] tabular-nums"
         style={{ color: color ?? "var(--color-fg)" }}
       >
         {value}
       </span>
+      {sub && <span className="max-w-[14rem] truncate whitespace-nowrap text-caption2 text-fg-subtle">{sub}</span>}
     </div>
   );
 }
 
-export function StatStrip({ figures, hover, live, right }: StatStripProps) {
+export function StatStrip({ figures, hover, live, right, announce = true }: StatStripProps) {
   // Hover wins over live: the operator moved the pointer there to ask about that
   // instant, and a strip that kept answering "now" while the cursor sat on 9:42
   // answered a question nobody asked.
@@ -96,15 +115,20 @@ export function StatStrip({ figures, hover, live, right }: StatStripProps) {
 
   return (
     <div
-      className="flex items-end gap-0 overflow-x-auto"
+      // `items-start`, not `items-end`. A chart strip's figures are all the same
+      // shape so it made no difference there, but the service header's KPIs
+      // carry a second line on some figures and not others, and bottom-aligning
+      // dropped "Peak SPL A Fast" a whole line below the five beside it.
+      className="flex items-start gap-0 overflow-x-auto"
       data-history-strip={mode}
       // The strip is the section's live summary: a pointer move must be
       // announced, or a screen reader hears only the at-rest figures forever.
-      role="status"
-      aria-live="polite"
+      // See `announce` — the service header's KPI row opts out.
+      role={announce ? "status" : undefined}
+      aria-live={announce ? "polite" : undefined}
     >
       {shown.map((f, i) => (
-        <Figure key={f.key} label={f.label} value={f.value} color={f.color} first={i === 0} />
+        <Figure key={f.key} label={f.label} value={f.value} color={f.color} sub={f.sub} first={i === 0} />
       ))}
       {right && <div className="ml-auto shrink-0 self-center pl-3">{right}</div>}
     </div>

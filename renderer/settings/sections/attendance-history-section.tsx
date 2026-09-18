@@ -65,15 +65,25 @@ addDefaultOnce(METRICS_STORAGE_KEY, "average");
 export function perServiceAttendance(v: number, samples: AttendanceSample[]): number {
   return Math.max(0, v - (samples[0]?.attendance ?? 0));
 }
-/** Per-service PEAK attendance from a record's samples (max − first). Falls back to
- *  the stored field when there are no samples. */
-export function servicePeakAttendance(rec: ServiceAttendance): number {
-  const s = rec.samples;
-  if (!s || s.length === 0) return rec.peakAttendance;
-  let max = s[0].attendance;
-  for (const x of s) if (x.attendance > max) max = x.attendance;
-  return perServiceAttendance(max, s);
-}
+/**
+ * ENTRIES is `rec.peakAttendance` — the recorder's own in-service figure, and
+ * nothing derived.
+ *
+ * There used to be a `servicePeakAttendance(rec)` here that took the maximum
+ * across EVERY sample and subtracted the first. That runs the door count on
+ * through the post-service taper, so it answered "how many people came in at
+ * any point around this service" — which is not a figure an operator wants
+ * under any label. On the 17 Sep Salt Company recording it read 2,061 against
+ * a recorded 1,727.
+ *
+ * Every other surface in the app already reads the stored field: the
+ * `servicePeakAttendance` LAYOUT metric, on dashboards and custom layouts,
+ * resolves to `rec.peakAttendance` (use-people-count-state.ts), so History's
+ * card was the one place quoting a different number under the same word.
+ *
+ * `perServiceAttendance` above stays: baselining each SAMPLE is what the
+ * chart's entries series needs, and it is a different question.
+ */
 
 /**
  * Mean in-room occupancy while the SERVICE was running.
@@ -88,7 +98,7 @@ export function servicePeakAttendance(rec: ServiceAttendance): number {
  * Records written before the phase tags existed have no phase on any sample, so
  * every sample counts — the same answer those records gave before.
  */
-function averageOccupancy(rec: ServiceAttendance): number | null {
+export function averageOccupancy(rec: ServiceAttendance): number | null {
   const inService = rec.samples.filter((s) => !s.phase);
   // No in-service samples at all is NOT "average the ramp instead". It is a
   // record that is still arriving, or one that never went live — the real case
@@ -199,7 +209,7 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
     peak: detail.peakOccupancy, // peak people in the room = real attendance
     lowest: detail.minOccupancy ?? null,
     average: avgOccupancy,
-    entries: servicePeakAttendance(detail), // cumulative door count
+    entries: detail.peakAttendance, // people who came in during the service
     dayTotal: detail.totalAttendance ?? null,
     samples: detail.samples.length,
   };
