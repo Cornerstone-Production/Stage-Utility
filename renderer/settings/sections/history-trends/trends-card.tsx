@@ -187,17 +187,32 @@ export function TrendsCard({
   /**
    * One colour per service type, stable across measure, range and sort.
    *
-   * Assigned over EVERY type in the whole history rather than over the tiles,
-   * and in a fixed order (by id), so the assignment does not depend on which
-   * measure is selected or which types happen to have recorded in the chosen
-   * range — those are exactly the things that used to move a colour. The
-   * derivation is pure and tested in series-colors.test.ts.
+   * The ORDER a type is first seen in decides its colour, and that order is the
+   * tiles' — busiest first — so the weekend service leads in the palette's lead
+   * colour and a once-a-year type does not take the green because its id sorts
+   * early. Sorting by id gave a church its midweek service in green and its
+   * weekend in the third colour.
+   *
+   * Only the FIRST sighting uses this order; after that the assignment is
+   * frozen and persisted, so re-sorting on a measure switch, a quiet type
+   * having a loud week, or a type missing a range all leave it alone. Types
+   * with no tile under the current measure are appended, so a type that has
+   * only ever recorded sound still gets a colour.
+   *
+   * The derivation is pure and tested in series-colors.test.ts.
    */
   const typeIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const r of recordings) ids.add(r.serviceTypeId ?? "");
-    return [...ids].sort();
-  }, [recordings]);
+    const ordered = tiles.map((t) => t.serviceTypeId ?? "");
+    const seen = new Set(ordered);
+    for (const r of recordings) {
+      const key = r.serviceTypeId ?? "";
+      if (!seen.has(key)) {
+        seen.add(key);
+        ordered.push(key);
+      }
+    }
+    return ordered;
+  }, [tiles, recordings]);
   const colorIndexes = useMemo(() => assignColorIndexes(readColorAssignment(), typeIds), [typeIds]);
   const colorOf = (key: string) => colorForIndex(colorIndexes[key] ?? 0);
 

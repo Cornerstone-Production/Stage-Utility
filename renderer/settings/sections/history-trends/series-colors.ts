@@ -18,9 +18,13 @@
  * theme is on.
  */
 export const TREND_COLORS = [
+  // Green, blue, orange — the mockup's order, and the order the busiest service
+  // type down gets them. Green leads because the weekend service leads and
+  // green is what attendance is drawn in everywhere else in this tab.
   "var(--color-green-9)",
   "var(--color-accent)",
   "var(--color-warn-11)",
+  // Then the neutral, for a fourth type. Anything past that cycles.
   "var(--color-fg-muted)",
 ] as const;
 

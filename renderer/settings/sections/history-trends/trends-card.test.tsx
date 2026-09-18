@@ -283,6 +283,19 @@ describe("a service type's colour", () => {
     };
   };
 
+  test("the BUSIEST type takes the lead colour, not whichever id sorts first", async () => {
+    // Assigned over ids sorted alphabetically, a church got its midweek service
+    // in green and its weekend — the line anyone opens this tab to read — in
+    // the third colour. "evening" sorts before "weekend" and is the quieter of
+    // the two, so this fixture fails on the old rule and passes on the new one.
+    const view = await renderCard(twoTypes());
+    const lead = view.container.querySelector('[data-series-line="weekend"]')?.getAttribute("stroke");
+    const second = view.container.querySelector('[data-series-line="evening"]')?.getAttribute("stroke");
+    view.unmount();
+    assert.equal(lead, "var(--color-green-9)", "the busiest type did not get the lead colour");
+    assert.equal(second, "var(--color-accent)", "the second-busiest did not get the second colour");
+  });
+
   test("is the same on Attendance and on Sound", () => {
     // THE BUG Henry reported. Colours were the palette indexed by the tile
     // sort, and the sort is busiest-first, so switching measure re-sorted and
