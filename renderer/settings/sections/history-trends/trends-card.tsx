@@ -478,7 +478,7 @@ export function TrendsCard({
             // A dB axis is banded the way the sound chart's is — a multiple of
             // ten wide, never anchored at zero, because 0 dB is not a floor a
             // sound chart has.
-            yScale={sound ? { kind: "db" } : { kind: "count" }}
+            yScale={sound ? { kind: "db" } : { kind: "count", banded: true }}
             xAxis="date"
             milestones={milestones}
             // NO at-rest figures. The strip carried Services / Average peak /

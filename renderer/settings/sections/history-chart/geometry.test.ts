@@ -27,6 +27,39 @@ describe("niceAxis", () => {
     assert.deepEqual(niceAxis([], { kind: "count" }), { lo: 0, hi: 2, ticks: [0, 1, 2] });
   });
 
+  test("a BANDED count frames the data instead of running from zero", () => {
+    // The mockup's own trends numbers: three service types between 800 and
+    // 1,600. Anchored at zero they draw as three lines in the top fifth of the
+    // plot and a hundred-person week is invisible.
+    const a = niceAxis([800, 1196, 1388, 1502, 1600], { kind: "count", banded: true });
+    assert.deepEqual(a, { lo: 800, hi: 1600, ticks: [800, 1200, 1600] });
+  });
+
+  test("banding never starts below zero, and takes zero when the data reaches it", () => {
+    // A count has a real floor. One line per case, so two branches adding
+    // different ones merge cleanly.
+    assert.equal(niceAxis([0, 40, 90], { kind: "count", banded: true }).lo, 0);
+    assert.equal(niceAxis([3, 8, 11], { kind: "count", banded: true }).lo >= 0, true);
+    // And a spread too wide to clear zero falls back to zero rather than to a
+    // silly number of gridlines.
+    const wide = niceAxis([435, 1616], { kind: "count", banded: true });
+    assert.equal(wide.lo >= 0, true);
+    assert.equal(wide.hi >= 1616, true);
+    assert.equal(wide.ticks.length <= 7, true, `too many gridlines: ${wide.ticks.join(",")}`);
+  });
+
+  test("a flat banded series is framed, not drawn on an edge", () => {
+    const a = niceAxis([1200, 1200, 1200], { kind: "count", banded: true });
+    assert.equal(a.lo < 1200, true, `the line sits on the floor: ${JSON.stringify(a)}`);
+    assert.equal(a.hi > 1200, true, `the line sits on the ceiling: ${JSON.stringify(a)}`);
+  });
+
+  test("banding is opt-in — an unbanded count still runs from zero", () => {
+    // The attendance chart depends on it: the curve starts at an empty room and
+    // its gradient fills to a floor that means something.
+    assert.equal(niceAxis([800, 1600], { kind: "count" }).lo, 0);
+  });
+
   test("decibels do NOT floor at zero", () => {
     // The whole interesting band of a service is ~20 dB wide. Anchoring at 0
     // squeezes it into the top eighth of the plot and the line reads flat.
