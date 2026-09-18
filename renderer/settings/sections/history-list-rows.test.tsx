@@ -313,3 +313,80 @@ describe("the level figure on a row", () => {
     }
   });
 });
+
+describe("a history load that failed, rather than came back empty", () => {
+  /** Renders with `failing` URLs throwing, and collects the log lines. */
+  async function withFailures(failing: (url: string) => boolean) {
+    const warned: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(" ")); };
+    installFetch();
+    const real = (globalThis as unknown as { fetch: (i: unknown) => Promise<unknown> }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
+      if (failing(String(input))) throw new Error("socket hang up");
+      return real(input);
+    };
+    try {
+      return { view: await renderList(), warned };
+    } finally {
+      console.warn = realWarn;
+    }
+  }
+
+  test("the empty state says the history could not be READ", async () => {
+    // All three loads used to `.catch(() => set…([]))`, which is the same lie
+    // three times: a server that was down read as "No service timings recorded
+    // yet" and sent an operator to look at a recorder that was fine.
+    const { view, warned } = await withFailures((url) =>
+      url === "/api/service-timeline" || url === "/api/attendance/history");
+    const txt = (view.container.textContent ?? "").replace(/\s+/g, " ");
+    assert.ok(
+      txt.includes("could not be read"),
+      `a failed read still reads as an empty history: ${txt.slice(0, 200)}`,
+    );
+    assert.equal(
+      txt.includes("No service timings recorded yet"),
+      false,
+      "the absence copy is still being used for a failure",
+    );
+    // And both failures are named, separately — one line per load, so a day
+    // where one of them is down is distinguishable from one where both are.
+    const lines = warned.filter((l) => l.startsWith("[history] could not read"));
+    assert.deepEqual(
+      lines.map((l) => l.replace(/: .*/, "")).sort(),
+      ["[history] could not read the attendance history", "[history] could not read the service timings"],
+    );
+    assert.ok(lines.every((l) => l.includes("socket hang up")), "the lines must carry the reason");
+  });
+
+  test("a failed SOUND summary says so on Trends instead of reading as silence", async () => {
+    const { view, warned } = await withFailures((url) => url === "/api/spl/summary");
+    // The note lives on the SOUND measure, which is where the lie would be —
+    // an attendance chart is not wrong because the sound summary did not load.
+    // So this walks the path an operator walks: click Sound, then read it.
+    const { act } = await import("@testing-library/react");
+    await act(async () => {
+      view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]')!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    assert.ok(
+      view.container.querySelector("[data-sound-unavailable]"),
+      "the Trends card must say the sound summary is missing, not just be missing it",
+    );
+    // And the TILES, one level down, say the same thing: a type with no level
+    // because the summary would not load is not a type that recorded no sound.
+    const tileNotes = [...view.container.querySelectorAll("[data-trend-change]")].map((n) => n.textContent);
+    assert.ok(tileNotes.length > 0, "no tiles at all, so this asserts nothing");
+    assert.deepEqual(
+      [...new Set(tileNotes)],
+      ["sound unavailable"],
+      `a tile is still reading a failed load as silence: ${JSON.stringify(tileNotes)}`,
+    );
+    assert.ok(
+      warned.some((l) => l.startsWith("[history] could not read the sound summary")),
+      `no tagged line for the sound summary: ${warned.join(" | ")}`,
+    );
+    // The rest of the page is unaffected: the timings loaded fine.
+    assert.ok(view.container.querySelectorAll("[data-history-row]").length > 0, "the day list went too");
+  });
+});

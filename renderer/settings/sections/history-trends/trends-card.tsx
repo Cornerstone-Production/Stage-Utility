@@ -23,6 +23,7 @@ import { useEffect, useMemo, useState } from "react";
 import { cn } from "../../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../../lib/api";
+import { logToServer } from "../../../lib/client-log";
 import { HistoryChart, useStoredKeys, type ChartMilestone } from "../history-chart";
 import { toast } from "../../../components/ui";
 import type { ChartSeries } from "../history-chart/geometry";
@@ -109,7 +110,17 @@ export function pct(change: number): string {
   return `${whole > 0 ? "+" : "−"}${Math.abs(whole)}%`;
 }
 
-export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
+export function TrendsCard({
+  recordings,
+  /** The page's SPL summary load failed, so `peakDb` is null everywhere for a
+   *  reason that has nothing to do with what was recorded. Without this the
+   *  sound measure reads "No sound recorded yet" at a church that records it
+   *  every week. */
+  soundUnavailable = false,
+}: {
+  recordings: TrendRecording[];
+  soundUnavailable?: boolean;
+}) {
   const [weeks, setWeeks] = useState<RangeWeeks>(storedRange);
   /** Attendance or sound. Attendance by default: it is the question the tab is
    *  opened to answer, and sound is the one asked afterwards. */
@@ -143,7 +154,7 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
       .catch((err) => {
         if (cancelled) return;
         setMilestonesFailed(true);
-        console.warn(`[history] could not read the milestone list: ${errorMessage(err)}`);
+        logToServer("history", `could not read the milestone list: ${errorMessage(err)}`);
       });
     return () => {
       cancelled = true;
@@ -224,11 +235,23 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
   }, [stored, ranged]);
 
   const figures = useMemo(() => {
-    const values = ranged.map((r) => pick(r) as number);
+    // The SHOWN series only. It read every recording in range whatever the
+    // legend said, so switching the Weekend line off left "Services 40" and an
+    // average over a line that was no longer on the plot — a strip describing a
+    // chart nobody was looking at. `hidden` is the same list the series build
+    // from, so the two cannot disagree.
+    const drawn = ranged.filter((r) => !hidden.includes(r.serviceTypeId ?? "all"));
+    const values = drawn.map((r) => pick(r) as number);
     const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
     return [
-      { key: "services", label: "Services", value: ranged.length.toLocaleString() },
-      { key: "average", label: sound ? "Average peak" : "Average peak", value: avg == null ? "—" : fmtValue(avg) },
+      { key: "services", label: "Services", value: drawn.length.toLocaleString() },
+      {
+        key: "average",
+        // It was the same string on both arms of a ternary. A level is not a
+        // "peak attendance" and reads as one at a glance.
+        label: sound ? "Average level" : "Average peak",
+        value: avg == null ? "—" : fmtValue(avg),
+      },
       {
         key: "busiest",
         label: sound ? "Loudest" : "Busiest",
@@ -236,7 +259,7 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
       },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranged, pick, sound]);
+  }, [ranged, pick, sound, hidden]);
 
   return (
     <section data-testid="history-trends" className="su-card flex flex-col gap-4 px-4 py-3.5">
@@ -245,6 +268,9 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
           <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">Trends</span>
           {milestonesFailed && (
             <span data-milestones-failed className="text-caption2 text-warn-11">milestones unavailable</span>
+          )}
+          {sound && soundUnavailable && (
+            <span data-sound-unavailable className="text-caption2 text-warn-11">sound summary unavailable</span>
           )}
         </span>
         <div className="flex items-center gap-2">
@@ -291,9 +317,11 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
 
       {tiles.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-caption1 text-fg-muted">
-          {sound
-            ? "No sound recorded yet — a trend needs at least one service with a meter running."
-            : "No attendance recorded yet — a trend needs at least one service with a people counter running."}
+          {sound && soundUnavailable
+            ? "The sound summary could not be read — see the server log for the reason."
+            : sound
+              ? "No sound recorded yet — a trend needs at least one service with a meter running."
+              : "No attendance recorded yet — a trend needs at least one service with a people counter running."}
         </p>
       ) : (
         <>
@@ -331,9 +359,14 @@ export function TrendsCard({ recordings }: { recordings: TrendRecording[] }) {
                       {/* A type with nothing under THIS measure keeps its tile
                           and says so, rather than vanishing when you switch —
                           which reads as the service type having disappeared. */}
-                      {t.average == null
-                        ? sound ? "no sound recorded" : "no attendance recorded"
-                        : "no prior window yet"}
+                      {t.average != null
+                        ? "no prior window yet"
+                        // A tile with no level because the SUMMARY would not
+                        // load is not a service type that recorded no sound.
+                        // Same lie as the empty plot's, one level down.
+                        : sound
+                          ? soundUnavailable ? "sound unavailable" : "no sound recorded"
+                          : "no attendance recorded"}
                     </span>
                   )}
                 </div>
