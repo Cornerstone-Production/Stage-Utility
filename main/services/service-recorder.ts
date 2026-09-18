@@ -22,6 +22,7 @@
 // everything about sampling. The base owns only the lifecycle.
 
 import type { PcoLiveDTO } from "../types/stage.js";
+import { clockOf } from "./app-timezone.js";
 import { serviceDateKey } from "./live-service-gate.js";
 import { stageController } from "./stage-controller.js";
 
@@ -30,9 +31,15 @@ import { stageController } from "./stage-controller.js";
  *
  * A service running past its planned end rolls pickServiceTime on to the next
  * occurrence, and a PCO cache miss does the same, so the key can change while one
- * service is still running — that must NOT split the recording. A longer gap is a
- * genuinely new occurrence. Services are far enough apart that ten minutes
- * separates them cleanly while bridging any within-service lull.
+ * service is still running — that must NOT split the recording. Services are far
+ * enough apart that ten minutes separates them cleanly while bridging any
+ * within-service lull.
+ *
+ * It is NOT on its own how back-to-back services are told apart: the second
+ * service's pre-service item goes live seconds after the first service's last,
+ * so the gap stays small across a real boundary. See
+ * shouldHoldThroughServiceTimeChange, which decides on the new occurrence's own
+ * start time and falls back to this gap only when there is no start to read.
  *
  * One definition: this was declared identically in all three recorders.
  *
@@ -41,6 +48,46 @@ import { stageController } from "./stage-controller.js";
  * see openItem in service-timeline-recorder.ts.
  */
 export const SERVICE_GAP_MS = 10 * 60_000;
+
+/** One entry in a record's per-item list, as the lookups below need to see it. */
+export interface RecordedItem {
+  itemId: string;
+  endedAt: string | null;
+}
+
+/**
+ * The LAST entry for `itemId`, or undefined.
+ *
+ * A plan item can legitimately appear more than once in a record — a song
+ * reprised, or a second service's pre-service item landing in the record before
+ * the occurrence split catches up. Entries are pushed in the order they went
+ * live, so the last match is the current run; `items.find` returns the FIRST,
+ * which is how a re-run rewrote a run that had already finished hours earlier.
+ */
+export function lastItemEntry<T extends RecordedItem>(items: T[], itemId: string): T | undefined {
+  for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]!.itemId === itemId) return items[i];
+  return undefined;
+}
+
+/**
+ * Is an item going live again a step BACK to an entry still in play, or a
+ * genuine second run that deserves its own entry?
+ *
+ * A step back is what an operator does within a service — jump to the previous
+ * song, replay a video. It lands within seconds or minutes of the entry closing.
+ * An entry that closed more than SERVICE_GAP_MS ago is finished history: on
+ * 18 Sep 2026 a second service's items reopened the first service's, and the
+ * first item's recorded length grew to 6753 s.
+ *
+ * An entry never closed is the same run by definition — say yes, rather than
+ * pushing a duplicate alongside an entry that is still open.
+ */
+export function isStepBackTo(entry: RecordedItem, goingLiveAtMs: number): boolean {
+  if (!entry.endedAt) return true;
+  const endedMs = Date.parse(entry.endedAt);
+  if (!Number.isFinite(endedMs) || !Number.isFinite(goingLiveAtMs)) return true; // no clock to judge by
+  return goingLiveAtMs - endedMs < SERVICE_GAP_MS;
+}
 
 /** The identity every service record carries. */
 export interface ServiceRecord {
@@ -88,6 +135,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    *  the record if it changed, so a delete cannot be undone by a tick that was
    *  already in flight when it landed. */
   private generation = 0;
+  /** The `<old>→<new>` service-time transition already logged, so the hold
+   *  decision is announced once and not on every tick for the length of an
+   *  overrun. Cleared when a record is established. */
+  private loggedServiceTimeChange: string | null = null;
 
   protected abstract readonly label: string;
   protected abstract readonly store: RecorderStore<T>;
@@ -190,6 +241,58 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   }
 
   /**
+   * The key changed while the SAME plan, on the SAME date, is still live. Is this
+   * one service whose occurrence id moved under it, or the next service starting?
+   *
+   * The gap between live ticks cannot tell them apart. Back-to-back services share
+   * a plan, and the second service's pre-service item goes live seconds after the
+   * first one's last item, so `gapSinceLive` stays at seconds across the boundary —
+   * on 18 Sep 2026 that merged two services into one record whose first item read
+   * as 1h 52m long and whose second service had no record at all.
+   *
+   * The new occurrence's own start time does tell them apart. `pickServiceTime`
+   * rolls to the NEXT occurrence when a service runs past its planned end, and a
+   * PCO cache miss does the same — in both the occurrence now selected is still in
+   * the future. So: hold only while the new occurrence starts more than
+   * SERVICE_GAP_MS from now. One that has begun, or is about to, is a new service.
+   *
+   * Two cases keep the old gap rule, because there is no occurrence start to
+   * compare: PCO reporting no serviceTimeId at all (a cache miss — the key falls
+   * back to the date), and an occurrence with no `serviceTimeStartsAt`. A record
+   * opened before PCO knew its occurrence (`serviceTimeId` null on the record) also
+   * holds: that is the same cache miss resolving, not a second service.
+   *
+   * Known residual: where the first occurrence carries an explicit `ends_at`,
+   * pickServiceTime rolls over at that end rather than at the next occurrence's
+   * start, so up to SERVICE_GAP_MS of the second service's pre-service can still
+   * land in the first record before the split. That is the same window the
+   * overrun case needs, and it is bounded — not the unbounded merge this fixes.
+   */
+  private shouldHoldThroughServiceTimeChange(
+    live: PcoLiveDTO,
+    serviceTimeId: string | null,
+    gapSinceLive: number,
+  ): boolean {
+    const from = this.current?.serviceTimeId ?? null;
+    if (serviceTimeId == null || from == null) return true; // no two occurrences to compare
+    const startsAtMs = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
+    if (!Number.isFinite(startsAtMs)) return gapSinceLive < SERVICE_GAP_MS;
+
+    const untilMs = startsAtMs - Date.now();
+    const hold = untilMs > SERVICE_GAP_MS;
+    const transition = `${from}→${serviceTimeId}`;
+    if (this.loggedServiceTimeChange !== transition) {
+      this.loggedServiceTimeChange = transition;
+      console.log(
+        hold
+          ? `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId}, holding the open record (next occurrence starts in ${Math.round(untilMs / 60_000)} min)`
+          : `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId} began at ${clockOf(startsAtMs)}, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+      );
+    }
+    return hold;
+  }
+
+  /**
    * Make sure `current` is the record for the occurrence this tick belongs to.
    *
    * Returns nothing on purpose. An earlier version returned a boolean described
@@ -226,7 +329,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       this.current.serviceTypeId === serviceTypeId &&
       this.current.planId === planId &&
       this.current.serviceDate === date &&
-      (serviceTimeId == null || gapSinceLive < SERVICE_GAP_MS)
+      this.shouldHoldThroughServiceTimeChange(live, serviceTimeId, gapSinceLive)
     ) {
       return;
     }
@@ -267,6 +370,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       );
     }
     this.currentKey = key;
+    this.loggedServiceTimeChange = null; // the next transition out of THIS record is news again
     this.onRecordEstablished();
   }
 }

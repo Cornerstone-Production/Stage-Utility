@@ -26,14 +26,20 @@ const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js
 type Item = {
   itemId: string;
   title: string;
+  sequence: number;
+  plannedLengthSec: number | null;
   startedAt: string;
   endedAt: string | null;
+  actualDurationSec: number | null;
   counted?: boolean;
 };
 type Rec = { serviceKey: string; startedAt: string; endedAt: string | null; items: Item[] };
 type Held = {
   current: Rec | null;
+  lastItemId: string | null;
+  nextSequence: number;
   openItem(live: Record<string, unknown>): void;
+  finalizePrevItem(): void;
 };
 
 function baseLive(overrides: Record<string, unknown>): Record<string, unknown> {
@@ -108,5 +114,86 @@ describe("service-timeline-recorder: leftover PCO item does not backdate the rec
     assert.equal(item.startedAt, thirtySecondsEarlier, "PCO's own start should be kept");
     assert.equal(item.counted, undefined, "an ordinary item must not be forced counted=false");
     assert.equal(logs.filter((a) => String(a[0]).includes("carried over")).length, 0);
+  });
+});
+
+// A plan item running a SECOND time must not rewrite the first run.
+//
+// The incident (18 Sep 2026): with two services on one plan merged into a single
+// record (see service-recorder.test.ts), the second service's items were matched
+// by itemId and took the "operator stepped back — reopen it" path. Doors, run at
+// 23:23 and again at 00:43, ended up as ONE entry reading 23:23:46 → 01:16:19,
+// 6753 s. The occurrence split now prevents that, and this is the second line of
+// defence: even inside one record, a run that finished more than SERVICE_GAP_MS
+// ago is history, not something to reopen.
+//
+// Driven against openItem/finalizePrevItem directly, as above.
+describe("service-timeline-recorder: a re-run item gets its own entry", () => {
+  const rec = serviceTimelineRecorder as unknown as Held;
+  const RECORD_STARTED_AT = "2026-09-18T23:23:46.000Z";
+
+  function firstRun(endedAt: string | null): Item {
+    return {
+      itemId: "doors",
+      title: "Doors",
+      sequence: 0,
+      plannedLengthSec: 378,
+      startedAt: RECORD_STARTED_AT,
+      endedAt,
+      actualDurationSec: endedAt == null ? null : 497,
+    };
+  }
+
+  beforeEach(() => {
+    rec.current = { serviceKey: "st1:plan:occ-1", startedAt: RECORD_STARTED_AT, endedAt: null, items: [] };
+    rec.nextSequence = 1;
+    rec.lastItemId = null;
+  });
+
+  it("pushes a new entry when the same item goes live again long after its last run", () => {
+    rec.current!.items = [firstRun("2026-09-18T23:32:03.000Z")];
+    // The second service's Doors, 1h 11m after the first run closed.
+    rec.openItem(baseLive({ currentItemId: "doors", label: "Doors", liveStartAt: "2026-09-19T00:43:15.000Z" }));
+
+    assert.equal(rec.current!.items.length, 2, "the re-run reopened the first run instead of starting its own entry");
+    const first = rec.current!.items[0]!;
+    assert.equal(first.endedAt, "2026-09-18T23:32:03.000Z", "the first run's end was cleared");
+    assert.equal(first.actualDurationSec, 497, "the first run's duration was rewritten");
+    assert.equal(first.startedAt, RECORD_STARTED_AT);
+
+    const second = rec.current!.items[1]!;
+    assert.equal(second.itemId, "doors");
+    assert.equal(second.startedAt, "2026-09-19T00:43:15.000Z");
+    assert.equal(second.endedAt, null);
+    assert.equal(second.sequence, 1);
+  });
+
+  it("reopens on a genuine step back, within the gap", () => {
+    rec.current!.items = [firstRun("2026-09-18T23:32:03.000Z")];
+    // The operator jumps back to Doors fifty seconds after leaving it.
+    rec.openItem(baseLive({ currentItemId: "doors", label: "Doors", liveStartAt: "2026-09-18T23:32:53.000Z" }));
+
+    assert.equal(rec.current!.items.length, 1, "a step back started a duplicate entry");
+    assert.equal(rec.current!.items[0]!.endedAt, null);
+    assert.equal(rec.current!.items[0]!.actualDurationSec, null);
+    assert.equal(rec.current!.items[0]!.startedAt, RECORD_STARTED_AT, "a reopen must keep the original start");
+  });
+
+  it("reopens an entry that was never closed, rather than duplicating it", () => {
+    rec.current!.items = [firstRun(null)];
+    rec.openItem(baseLive({ currentItemId: "doors", label: "Doors", liveStartAt: "2026-09-19T02:00:00.000Z" }));
+    assert.equal(rec.current!.items.length, 1, "an open entry was duplicated");
+  });
+
+  it("finalizePrevItem closes the LAST run of an id, not the first", () => {
+    rec.current!.items = [firstRun("2026-09-18T23:32:03.000Z")];
+    rec.openItem(baseLive({ currentItemId: "doors", label: "Doors", liveStartAt: "2026-09-19T00:43:15.000Z" }));
+    rec.lastItemId = "doors";
+    rec.finalizePrevItem();
+
+    const [first, second] = rec.current!.items as [Item, Item];
+    assert.equal(first.endedAt, "2026-09-18T23:32:03.000Z", "the finished first run was re-closed");
+    assert.equal(first.actualDurationSec, 497, "the finished first run's duration was recomputed");
+    assert.ok(second.endedAt, "the live run was left open forever");
   });
 });
