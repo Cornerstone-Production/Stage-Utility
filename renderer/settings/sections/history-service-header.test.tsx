@@ -65,15 +65,36 @@ function timeline(overrides: Partial<ServiceTimeline> = {}): ServiceTimeline {
   } as ServiceTimeline;
 }
 
+/**
+ * The 17 Sep Salt Company recording's shape, scaled down: a pre-service ramp, a
+ * service, and a post-service taper, with the door count still climbing through
+ * all three.
+ *
+ * The three phases are the whole point. With in-service samples only, every
+ * derivation of "peak attendance" agrees and the fixture proves nothing. Here
+ * they diverge exactly as the real record does:
+ *
+ *   peakOccupancy (stored, in-service)     1,196  ← people in the room
+ *   peakAttendance (stored, in-service)    1,727
+ *   servicePeakAttendance (all samples)    2,061  ← cumulative door count
+ *
+ * The header showed 2,061 as "Peak attendance" with "1,196 in room" under it,
+ * while the Attendance card below it showed 1,196 as PEAK and 2,061 as ENTRIES.
+ */
 function attendance(): ServiceAttendance {
   return {
     serviceKey: "salt:plan-1:2026-09-17",
     serviceDate: DAY,
-    peakAttendance: 0,
+    peakAttendance: 1727,
     peakOccupancy: 1196,
+    minOccupancy: 933,
     samples: [
-      { t: iso("20:15:00"), attendance: 100, occupancy: 100 },
-      { t: iso("20:40:00"), attendance: 1396, occupancy: 1196 },
+      { t: iso("19:30:00"), attendance: 0, occupancy: 410, phase: "pre" },
+      { t: iso("20:10:00"), attendance: 900, occupancy: 1100, phase: "pre" },
+      { t: iso("20:20:00"), attendance: 1187, occupancy: 1150 },
+      { t: iso("20:40:00"), attendance: 1727, occupancy: 1196 },
+      { t: iso("21:20:00"), attendance: 1727, occupancy: 933 },
+      { t: iso("21:50:00"), attendance: 2061, occupancy: 210, phase: "post" },
     ],
   } as unknown as ServiceAttendance;
 }
@@ -158,9 +179,11 @@ describe("History service header", () => {
     // (+30 +60 −30) / 3 = +20s, two of three over.
     assert.equal(by("overrun").value, "+0:20");
     assert.equal(by("overrun").sub, "2 of 3 over", "the over COUNT, not the total");
-    // 1396 peak − 100 first sample.
-    assert.equal(by("attendance").value, "1,296");
-    assert.equal(by("attendance").sub, "1,196 in room");
+    // ATTENDANCE IS PEOPLE IN THE ROOM. The door count is Entries, and it is
+    // the bigger of the two on every real record — which is how the inversion
+    // survived: 2,061 looked like a plausible "peak attendance".
+    assert.equal(by("attendance").value, "1,196", "peak attendance is peak people IN THE ROOM");
+    assert.equal(by("attendance").sub, "2,061 entries", "the cumulative door count, named as entries");
     assert.equal(by("level").value, "102 dB", "the loudest item on the primary metric");
   });
 
@@ -195,6 +218,29 @@ describe("History service header", () => {
       false,
       "a finished record must NOT claim to be recording",
     );
+  });
+
+  test("every KPI's second line actually renders", () => {
+    // `serviceKpis` returning a `sub` is not the same as the strip DRAWING it.
+    // Deleting the sub line from Figure, or dropping `sub` on the way through
+    // StatStrip, left every other guard in this file green: they all read the
+    // derivation, not the DOM.
+    const view = mount();
+    const row = view.container.querySelector('[data-testid="service-kpis"]')!;
+    const shown = text(row);
+    for (const line of ["+2:14 late", "2 of 3 over", "2,061 entries", "ends 21:02", "+1:00 vs plan"]) {
+      assert.ok(shown.includes(line), `the KPI row must show "${line}"; it showed: ${shown}`);
+    }
+    // And each one is under its OWN figure, not concatenated somewhere else.
+    const subs = new Map(
+      [...row.querySelectorAll("[data-history-strip] > div")].map((d) => [
+        (d.children[0]?.textContent ?? "").trim(),
+        (d.children[2]?.textContent ?? "").trim(),
+      ]),
+    );
+    assert.equal(subs.get("Started"), "+2:14 late");
+    assert.equal(subs.get("Avg overrun"), "2 of 3 over");
+    assert.equal(subs.get("Peak attendance"), "2,061 entries");
   });
 
   test("Delete is the one destructive action in the group", () => {

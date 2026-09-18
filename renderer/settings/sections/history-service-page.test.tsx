@@ -56,6 +56,9 @@ function timeline() {
   };
 }
 
+/** Pre, in-service and post samples, so peak-in-room (1,196), the stored
+ *  in-service door count (1,727) and the all-samples door count (2,061) are
+ *  three different numbers — see the cross-check below. */
 function attendance() {
   return {
     serviceKey: KEY,
@@ -64,12 +67,15 @@ function attendance() {
     planTitle: "Evening",
     startedAt: iso("19:15:00"),
     endedAt: iso("21:45:00"),
-    peakAttendance: 1296,
+    peakAttendance: 1727,
     peakOccupancy: 1196,
-    lowestOccupancy: 933,
+    minOccupancy: 933,
     samples: [
-      { t: iso("20:16:00"), attendance: 100, occupancy: 100 },
-      { t: iso("20:40:00"), attendance: 1396, occupancy: 1196 },
+      { t: iso("19:30:00"), attendance: 0, occupancy: 410, phase: "pre" },
+      { t: iso("20:20:00"), attendance: 1187, occupancy: 1150 },
+      { t: iso("20:40:00"), attendance: 1727, occupancy: 1196 },
+      { t: iso("21:20:00"), attendance: 1727, occupancy: 933 },
+      { t: iso("21:50:00"), attendance: 2061, occupancy: 210, phase: "post" },
     ],
   };
 }
@@ -199,6 +205,54 @@ describe("the History service page", () => {
       assert.equal(hits.length, 1, `"${label}" appears ${hits.length} times outside the rundown header; it belongs in the KPI row alone`);
       assert.ok(kpiRow.contains(hits[0]), `"${label}" must be in the header's KPI row`);
     }
+  });
+
+  test("the header and the Attendance card agree about which number is which", async (t) => {
+    installFetch();
+    // Entries is off by default in the Attendance card — the one figure this
+    // test has to read off BOTH surfaces, so it is turned on the way an
+    // operator turns it on, through the card's own preference entry.
+    localStorage.setItem(
+      "attendance:visibleMetrics",
+      JSON.stringify(["occupancy", "avg", "markers", "peak", "lowest", "average", "samples", "entries"]),
+    );
+    t.after(() => localStorage.removeItem("attendance:visibleMetrics"));
+    const view = await openTheService(ServiceHistorySection);
+    t.after(() => cleanup());
+
+    // THE cross-check. Both surfaces quote peak-in-room and the cumulative door
+    // count, and they had them swapped: the header said "Peak attendance 2,061 /
+    // 1,196 in room" above a card saying "PEAK 1,196 / ENTRIES 2,061". Asserting
+    // a literal on one side alone would not have caught it — the literal was
+    // right for whichever side the author was looking at. This reads both.
+    const figures = (root: Element) =>
+      new Map(
+        [...root.querySelectorAll("[data-history-strip] > div")].map((d) => [
+          (d.children[0]?.textContent ?? "").trim().toLowerCase(),
+          (d.children[1]?.textContent ?? "").trim(),
+        ]),
+      );
+    const header = figures(view.container.querySelector('[data-testid="service-kpis"]')!);
+    const card = figures(view.container.querySelector("#history-attendance")!);
+
+    assert.equal(card.get("peak"), "1,196", "the Attendance card's own peak (fixture check)");
+    assert.equal(card.get("entries"), "2,061", "the Attendance card's own entries (fixture check)");
+    assert.equal(
+      header.get("peak attendance"),
+      card.get("peak"),
+      "the header's Peak attendance must be the same number the card calls Peak",
+    );
+    const headerSub = new Map(
+      [...view.container.querySelectorAll('[data-testid="service-kpis"] [data-history-strip] > div')].map((d) => [
+        (d.children[0]?.textContent ?? "").trim().toLowerCase(),
+        (d.children[2]?.textContent ?? "").trim(),
+      ]),
+    );
+    assert.equal(
+      headerSub.get("peak attendance"),
+      `${card.get("entries")} entries`,
+      `the header's entries line must be the card's Entries figure; header subs were ${JSON.stringify([...headerSub])}`,
+    );
   });
 
   test("the header's actions are reachable in order, and the nav links are real anchors", async (t) => {

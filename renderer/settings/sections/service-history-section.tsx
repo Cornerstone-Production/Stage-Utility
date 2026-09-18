@@ -174,7 +174,11 @@ function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: Se
   if (att) {
     const avgOcc = att.samples.length ? Math.round(att.samples.reduce((s, p) => s + p.occupancy, 0) / att.samples.length) : null;
     L.push("", "ATTENDANCE");
-    L.push(`Peak attendance ${servicePeakAttendance(att).toLocaleString()} · Peak in-room ${att.peakOccupancy.toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
+    // Attendance is people in the room; entries is the cumulative door count.
+    // This had them swapped, exactly as the header did — a pasted report said
+    // "Peak attendance 2,061 · Peak in-room 1,196" for a service the app's own
+    // Attendance card summarised as peak 1,196, entries 2,061.
+    L.push(`Peak attendance ${att.peakOccupancy.toLocaleString()} · Entries ${servicePeakAttendance(att).toLocaleString()}${avgOcc != null ? ` · Avg in-room ${avgOcc.toLocaleString()}` : ""}`);
   }
   if (spl && spl.items.length) {
     L.push("", "AUDIO — peak SPL (dB)");
