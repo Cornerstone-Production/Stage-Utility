@@ -276,6 +276,132 @@ describe("rebuildTimelineRecord: identity of the items", () => {
     ]);
   });
 
+  /** Run a rebuild with console.warn captured. */
+  function withWarnings(fn: () => ServiceTimeline): { out: ServiceTimeline; warnings: string[] } {
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
+    try {
+      return { out: fn(), warnings };
+    } finally {
+      console.warn = realWarn;
+    }
+  }
+
+  /** A stored entry, with only the fields these cases read spelled out. */
+  function storedItem(over: Partial<ServiceTimelineItem> & { itemId: string; title: string }): ServiceTimelineItem {
+    return {
+      sequence: 0,
+      plannedLengthSec: null,
+      startedAt: "2026-09-17T23:00:00.000Z",
+      endedAt: "2026-09-17T23:01:00.000Z",
+      actualDurationSec: 60,
+      preService: false,
+      ...over,
+    };
+  }
+
+  // A plan legitimately runs two different items called HOSTING. Matching every
+  // HOSTING row to the FIRST stored one gave them one id, and the step-back
+  // rule then folded the second item's run into the first item's entry — one
+  // entry spanning everything between them.
+  it("matches the Nth run of a duplicated title to the Nth stored item with it", () => {
+    const prior = record({
+      endedAt: "2026-09-18T00:00:00.000Z",
+      items: [
+        storedItem({ itemId: "pco-hosting-a", title: "HOSTING", sequence: 0, plannedLengthSec: 240 }),
+        storedItem({ itemId: "pco-message", title: "MESSAGE", sequence: 1 }),
+        storedItem({ itemId: "pco-hosting-b", title: "HOSTING", sequence: 2, plannedLengthSec: 120 }),
+      ],
+    });
+    const { out, warnings } = withWarnings(() =>
+      rebuildTimelineRecord(
+        prior,
+        oldRows([
+          ["2026-09-17T23:20:00.000Z", "HOSTING"],
+          ["2026-09-17T23:25:00.000Z", "MESSAGE"],
+          // More than SERVICE_GAP_MS after the first HOSTING closed, so this is
+          // the SECOND plan item, not a step back to the first.
+          ["2026-09-17T23:50:00.000Z", "HOSTING"],
+        ]),
+      ),
+    );
+
+    assert.equal(out.items.length, 3, "the two HOSTING items collapsed into one entry");
+    assert.deepEqual(
+      out.items.map((i) => [i.itemId, i.title, i.plannedLengthSec]),
+      [
+        ["pco-hosting-a", "HOSTING", 240],
+        ["pco-message", "MESSAGE", null],
+        ["pco-hosting-b", "HOSTING", 120],
+      ],
+    );
+    // The first HOSTING must end where MESSAGE began, not swallow it.
+    assert.equal(out.items[0].endedAt, "2026-09-17T23:25:00.000Z");
+    assert.ok(
+      warnings.includes('[service-timeline] rebuild: "HOSTING" is not unique in this record, matched by position'),
+      `the ambiguity was not reported: ${JSON.stringify(warnings)}`,
+    );
+    assert.equal(
+      warnings.filter((w) => w.includes("HOSTING")).length,
+      1,
+      `the ambiguity was reported more than once: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  it("still folds a genuine step back into the run it returned to, duplicate title or not", () => {
+    const prior = record({
+      endedAt: "2026-09-18T00:00:00.000Z",
+      items: [
+        storedItem({ itemId: "pco-hosting-a", title: "HOSTING", sequence: 0 }),
+        storedItem({ itemId: "pco-message", title: "MESSAGE", sequence: 1 }),
+        storedItem({ itemId: "pco-hosting-b", title: "HOSTING", sequence: 2 }),
+      ],
+    });
+    const { out } = withWarnings(() =>
+      rebuildTimelineRecord(
+        prior,
+        oldRows([
+          ["2026-09-17T23:20:00.000Z", "HOSTING"],
+          ["2026-09-17T23:25:00.000Z", "MESSAGE"],
+          ["2026-09-17T23:26:00.000Z", "HOSTING"], // one minute later — a step back
+        ]),
+      ),
+    );
+    assert.equal(out.items.length, 2, "a step back created a second entry");
+    assert.equal(out.items[0].itemId, "pco-hosting-a");
+    assert.equal(out.items[0].endedAt, "2026-09-18T00:00:00.000Z", "the reopened run must end at the record's end");
+  });
+
+  it("numbers the extra runs when a duplicated title outruns the stored items", () => {
+    const prior = record({
+      endedAt: "2026-09-18T00:00:00.000Z",
+      items: [
+        storedItem({ itemId: "pco-hosting-a", title: "HOSTING", sequence: 0 }),
+        storedItem({ itemId: "pco-hosting-b", title: "HOSTING", sequence: 1 }),
+      ],
+    });
+    // Separated by other items, and each gap wider than SERVICE_GAP_MS, so all
+    // three are genuine runs rather than step backs.
+    const { out } = withWarnings(() =>
+      rebuildTimelineRecord(
+        prior,
+        oldRows([
+          ["2026-09-17T23:00:00.000Z", "HOSTING"],
+          ["2026-09-17T23:05:00.000Z", "SONG"],
+          ["2026-09-17T23:20:00.000Z", "HOSTING"],
+          ["2026-09-17T23:25:00.000Z", "VIDEO"],
+          ["2026-09-17T23:40:00.000Z", "HOSTING"],
+        ]),
+      ),
+    );
+    assert.equal(out.items.length, 5, `expected five entries: ${JSON.stringify(out.items.map((i) => i.title))}`);
+    assert.deepEqual(
+      out.items.filter((i) => i.title === "HOSTING").map((i) => i.itemId),
+      ["pco-hosting-a", "pco-hosting-b", "hosting-3"],
+    );
+  });
+
   it("re-slugs to the same id on a second rebuild, so an id does not drift", () => {
     const rows = oldRows([
       ["2026-09-17T23:23:48.789Z", "MEET & GREET"],

@@ -173,12 +173,15 @@ export type EventRow = ArchiveRow;
  * title, so the next rebuild matches it by title and reuses the same id rather
  * than minting a second one.
  */
-function titleSlug(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "untitled";
+function titleSlug(title: string, run = 0): string {
+  const slug =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "untitled";
+  // The ordinal only appears past the first run, so the common case is
+  // unchanged and a second rebuild re-derives the same ids.
+  return run === 0 ? slug : `${slug}-${run + 1}`;
 }
 
 /** Chronological, leaving an unparseable stamp beside its neighbours (the sort
@@ -230,11 +233,27 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
   const warned = new Set<string>();
   let open: ServiceTimelineItem | null = null;
 
+  /** Stored entries per title, in sequence order — the table a title-only row
+   *  is matched against. */
+  const priorByTitle = new Map<string, ServiceTimelineItem[]>();
+  for (const i of prior.items) {
+    const list = priorByTitle.get(i.title);
+    if (list) list.push(i);
+    else priorByTitle.set(i.title, [i]);
+  }
+  /** Entries CREATED per title so far — "the Nth run of this title". */
+  const runsByTitle = new Map<string, ServiceTimelineItem[]>();
+  const warnOnce = (title: string, line: string) => {
+    if (warned.has(title)) return;
+    warned.add(title);
+    console.warn(line);
+  };
+
   for (const row of byTime(rows)) {
     if (row.kind !== "item") continue;
     const at = row.at ?? "";
     const atMs = Date.parse(at);
-    const title = row.detail ?? "";
+    let title = row.detail ?? "";
 
     // Close the entry that was on air BEFORE deciding what this row does, in the
     // order the live recorder does it (finalizePrevItem, then openItem): the step
@@ -242,15 +261,48 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
     // definition and a reopen must see the stamp this row just wrote.
     if (open) closeEntry(open, at);
 
-    // Old rows predate the itemId column. A title is the only handle left, so
-    // match it against the stored record; failing that, mint a stable id from
-    // the title rather than dropping the row.
+    // Old rows predate the itemId column, so a title is the only handle left.
+    //
+    // Matched by RUN rather than by first hit: a plan with two items called
+    // HOSTING gave every HOSTING row the first one's id, and the step-back rule
+    // then folded the second item's run into the first's entry — one entry
+    // spanning the items between them. The Nth run of a title is matched to the
+    // Nth stored item carrying it, which is right whenever the counts agree and
+    // degrades to a numbered id when they do not.
+    //
+    // An EMPTY title carries no identity at all, so it is never matched to
+    // another empty row: two such rows collapsed into one `untitled` entry that
+    // swallowed everything between them. It is recovered by POSITION against
+    // the stored record — the Nth entry is the Nth stored item — and numbered
+    // only when there is no stored item to recover from.
     let itemId = row.itemId ?? "";
+    let forceNew = false;
     if (!itemId) {
-      itemId = prior.items.find((i) => i.title === title)?.itemId ?? titleSlug(title);
-      if (!warned.has(title)) {
-        warned.add(title);
-        console.warn(`[service-timeline] rebuild: no item id for "${scrub(title)}", matched by title`);
+      const runs = runsByTitle.get(title) ?? [];
+      const openRun = runs[runs.length - 1];
+      const sameTitle = priorByTitle.get(title) ?? [];
+      if (!title) {
+        const byPosition = prior.items[items.length];
+        if (byPosition) {
+          title = byPosition.title;
+          itemId = byPosition.itemId;
+          warnOnce("", `[service-timeline] rebuild: a row has no title, matched by position`);
+        } else {
+          itemId = titleSlug("", items.length);
+          forceNew = true; // nothing to prove two blank rows are the same item
+          warnOnce("", `[service-timeline] rebuild: a row has no title and no stored item to match it to`);
+        }
+      } else if (openRun && isStepBackTo(openRun, atMs)) {
+        itemId = openRun.itemId; // same run — whatever that run was given
+      } else if (sameTitle.length > 1) {
+        itemId = sameTitle[runs.length]?.itemId ?? titleSlug(title, runs.length);
+        warnOnce(
+          title,
+          `[service-timeline] rebuild: "${scrub(title)}" is not unique in this record, matched by position`,
+        );
+      } else {
+        itemId = sameTitle[0]?.itemId ?? titleSlug(title);
+        warnOnce(title, `[service-timeline] rebuild: no item id for "${scrub(title)}", matched by title`);
       }
     }
 
@@ -262,7 +314,7 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
       : row.preService === "false" ? false
       : (priorEntry?.preService ?? false);
 
-    const last = lastItemEntry(items, itemId);
+    const last = forceNew ? undefined : lastItemEntry(items, itemId);
     if (last && isStepBackTo(last, atMs)) {
       if (title) last.title = title;
       if (planned != null) last.plannedLengthSec = planned;
@@ -282,6 +334,11 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
       preService,
     };
     items.push(entry);
+    // Tracked under the title the ROW carried, which is what the next
+    // title-only row will look itself up by.
+    const runs = runsByTitle.get(row.detail ?? "");
+    if (runs) runs.push(entry);
+    else runsByTitle.set(row.detail ?? "", [entry]);
     open = entry;
   }
 
