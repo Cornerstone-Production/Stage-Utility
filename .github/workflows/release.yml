@@ -213,23 +213,34 @@ jobs:
       # GITHUB_TOKEN push triggers no workflows, so the version-bump commit
       # pushed below would otherwise show only CodeQL on the release PR whose
       # head it is; it differs from this verified tree by one version string.
+      #
+      # Fatal, and deliberately before anything is pushed: if the status API is
+      # not answering, this run stops here with nothing half-done, and the
+      # re-run finds the same tree and does it all again. A green tree with no
+      # checkmark is a merge made blind, which is worse than a late release.
       - name: Mark the verified commit
         env:
           GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.verify.outputs.sha }}
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/statuses/${{ steps.verify.outputs.sha }}" \
-            -f state=success -f context=build \
-            -f description="lint, type-check, tests and build passed in the release run" \
-            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null
+          for attempt in 1 2 3; do
+            if gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+              -f state=success -f context=build \
+              -f description="lint, type-check, tests and build passed in the release run" \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
+              exit 0
+            fi
+            echo "status write failed (attempt $attempt of 3)"; sleep 10
+          done
+          echo "::error::could not write the build status to ${SHA}; stopping before the bump so nothing is half-released"
+          exit 1
 
       - name: Bump, tag and push
         id: push
         if: steps.version.outputs.skip == 'false'
         env:
           V: ${{ steps.version.outputs.version }}
-          # For the commit status written below.
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
@@ -259,14 +270,7 @@ jobs:
           if git push origin "HEAD:${GITHUB_REF_NAME}"; then
             git push origin "v$V"
             echo "pushed=true" >> "$GITHUB_OUTPUT"
-            # The bump commit differs from the verified tree by one version
-            # string. Mark it with the same status rather than running the
-            # suite a second time; a GITHUB_TOKEN push triggers no workflows.
-            gh api "repos/${GITHUB_REPOSITORY}/statuses/$(git rev-parse HEAD)" \
-              -f state=success -f context=build \
-              -f description="verified as $(git rev-parse --short HEAD~1) in the release run; this commit adds the version bump" \
-              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null \
-              || echo "::warning::could not mark v$V with a build status"
+            echo "bump=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           else
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::${GITHUB_REF_NAME} advanced during this run — skipping v$V. The run for the newer commit will release it."
@@ -295,7 +299,10 @@ jobs:
   # gets copied in. Five archives take about twenty seconds.
   artifacts:
     needs: release
-    if: needs.release.outputs.published == 'true'
+    # `!cancelled()`, not the default success(): the release job can go red
+    # AFTER the tag is pushed (a failed status write), and a tag with no
+    # archives is a deployment that cannot update.
+    if: ${{ !cancelled() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -311,6 +318,36 @@ jobs:
         with:
           node-version: 24
           cache: npm
+
+      # The bump commit differs from the verified tree by one version string.
+      # Mark it with the same status rather than running the suite again; a
+      # GITHUB_TOKEN push triggers no workflows.
+      #
+      # Its own step, after the tag is out. A failure here fails the run — a red
+      # Release naming the commit is a checkmark somebody has to go and look at,
+      # which is the point — but it must not take the archives with it: the
+      # artifacts job runs on `published`, not on this job's colour, so a
+      # deployment following the tag still gets something to install.
+      - name: Mark the version-bump commit
+        if: steps.push.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.version.outputs.version }}
+          BUMP: ${{ steps.push.outputs.bump }}
+          VERIFIED: ${{ steps.verify.outputs.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gh api "repos/${GITHUB_REPOSITORY}/statuses/${BUMP}" \
+              -f state=success -f context=build \
+              -f description="verified as ${VERIFIED:0:7} in the release run; this commit adds the version bump" \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null; then
+              exit 0
+            fi
+            echo "status write failed (attempt $attempt of 3)"; sleep 10
+          done
+          echo "::error::v$V is tagged and pushed, but ${BUMP:0:7} carries no build status. Re-run this workflow, or: gh api repos/${GITHUB_REPOSITORY}/statuses/${BUMP} -f state=success -f context=build"
+          exit 1
 
       - name: Build
         run: |
