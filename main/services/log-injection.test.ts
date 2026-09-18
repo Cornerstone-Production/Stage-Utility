@@ -97,6 +97,7 @@ const REQUEST_FACING = [
   "route-harness.ts",
   "scriptview-routes.ts",
   "stage-controller.ts",
+  "event-poll.ts",
   "state-routes.ts",
   "status-routes.ts",
   "system-routes.ts",
@@ -240,6 +241,10 @@ function requestFacingFiles(): string[] {
     // A cue token's LABEL is typed into an HTTP body ("Home Assistant") and is
     // logged when the token is minted.
     path.join(HERE, "cue-tokens.ts"),
+    // Its two lines name a poll client's `cid`, which is whatever string a
+    // caller put on the /api/events/poll query string — an attacker's value,
+    // verbatim, reaching /log.
+    path.join(HERE, "event-poll.ts"),
     // Its lines name the Companion custom variable a cue pair is bound to and
     // the pair's base — a rule param typed into an HTTP body — and the value
     // Companion sent back.

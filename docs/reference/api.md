@@ -355,6 +355,7 @@ neither is a 400.
 | POST | `/api/branding` | Update app name, accent colour, logos and their crops |
 | GET | `/api/events` | Multiplexed Server-Sent Events stream — see [Channels](#channels) |
 | POST | `/api/events/subscribe` | Set the channels a connection wants (`{cid, channels}`) |
+| GET | `/api/events/poll?cid=&since=` | The same channels, collected by polling — see [Polling](#polling) |
 
 ## Channels
 
@@ -366,6 +367,63 @@ toward the Companion integration's connected-client total.
 
 A comment heartbeat goes out every 20 seconds, and a client whose socket backs up
 past 2 MB is dropped rather than buffered.
+
+Both transports are named on [`/log`](../ops/updates-and-logs.md):
+`[events] stream client connected (3 streams)` and its `closed` counterpart, and
+`[events] poll client <cid> started` / `expired (no poll for 30s)`.
+
+### Polling
+
+`GET /api/events/poll` carries the same channels for a client that cannot hold a
+stream open. A browser page opts in with `?transport=poll` on its URL
+([Display URLs](../display-urls.md#polling-transport)); this is the endpoint
+underneath it.
+
+| Parameter | |
+|---|---|
+| `cid` | **Required.** The same client id `/api/events/subscribe` is keyed by, so one channel filter serves both transports. A request without it is a 400. |
+| `since` | The `seq` from the previous response. Omit it to ask for a snapshot. |
+
+```json
+{
+  "seq": 148,
+  "resync": false,
+  "frames": [ { "channel": "pco:live", "data": { "mode": "item" } } ]
+}
+```
+
+`frames` are in the order they were broadcast, and `data` is the same payload the
+stream would have sent on that channel. `seq` is what to send as the next
+`since`.
+
+With no `since`, the response is the connect-time snapshot — the same channels
+the stream hydrates, `server:hello` first — and `resync` is `false`, because
+nothing was missed.
+
+`resync: true` means the request's `since` is no longer covered. The frames are a
+fresh snapshot rather than a continuation, and the client should drop its
+position and ask for a snapshot again rather than resume from the returned `seq`.
+Three things cause it:
+
+- the server keeps only the last 500 broadcasts, and only for 60 seconds, so a
+  client that stopped asking has a gap it cannot fill;
+- a `since` ahead of the server's own counter — a client that outlived a server
+  restart;
+- a `cid` that had expired and come back. Nothing is buffered while no client is
+  polling, so the counter does not move while you are away and your `since` can
+  look perfectly current when it is not. The registry is what knows otherwise.
+
+Channel filtering applies to the buffered frames, so a client that reported a
+narrow set through `/api/events/subscribe` is not sent the rest of the firehose.
+It does **not** apply to the snapshot: the SSE hello burst is unfiltered too, and
+for the same reason — a client caches every hydrated channel at connect so that a
+component mounting later is served from that cache rather than waiting for the
+channel to change.
+
+A `cid` that has not polled for 30 seconds is dropped. Poll clients count as
+subscribers exactly as open streams do, so a producer that only runs while
+something is watching starts for a polling client and stands down when it
+expires.
 
 **Hydrated on connect** — these carry state rather than events, so the stream
 opens with a full snapshot of each and a display is never blank waiting for
