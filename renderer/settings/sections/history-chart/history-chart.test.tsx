@@ -257,10 +257,55 @@ describe("the plot", () => {
     assert.equal(Number(mark.getAttribute("y2")) - top, 4, "the mark reaches down into the label");
   });
 
+  test("the time axis is ticked through the service, not only at its ends", () => {
+    // The fixture is 20:00 -> 21:00 of samples, so the domain is an hour: the
+    // fine step, every ten minutes. Two labels an hour apart say nothing about
+    // where in the service a bump happened.
+    render(chart());
+    const ticks = [...document.querySelectorAll("[data-axis-tick]")];
+    assert.equal(ticks.length, 7, `${ticks.length} ticks`); // 20:00…21:00 inclusive
+    const labels = [...document.querySelectorAll("[data-axis-label]")].map((e) => e.textContent);
+    assert.ok(labels.length >= 4, `only ${labels.length} labels: ${labels.join(",")}`);
+  });
+
   test("an empty record says so instead of drawing an axis around nothing", () => {
     render(chart({ series: [series({ points: [] })] }));
     assert.equal(document.querySelectorAll("svg").length, 0);
     assert.ok(screen.getByText(/Nothing recorded yet/));
+  });
+});
+
+describe("the live x domain", () => {
+  test("nine more minutes of samples do not move the right edge", () => {
+    // The domain steps by TEN minutes while recording. Without that it tracks
+    // the newest sample, so the whole curve slides leftward once every 30
+    // seconds for an hour — the chart is never still while a service runs.
+    const points = (n: number) => Array.from({ length: n }, (_, i) => ({ t: T0 + i * MIN, v: 100 + i }));
+    const at = (n: number) => chart({
+      live: true,
+      nowMs: T0 + n * MIN,
+      series: [series({ points: points(n + 1) })],
+    });
+    // Read the DRAWN DOMAIN, not the axis labels and not the last tick.
+    //
+    // Both of those pass on the bug. A tick hard against an edge has its label
+    // dropped, so a label read returns "" on exactly the short domain this
+    // starts from; and the last TICK is the last half-hour INSIDE the domain,
+    // which does not move when the domain moves by a minute. Proved: with
+    // tenMinuteDomainEnd removed, the last-tick version of this test stayed
+    // green.
+    const rightEdge = () => (document.querySelector("svg[role=img]") as SVGSVGElement).getAttribute("data-domain-end") ?? "";
+    const view = render(at(1));
+    const before = rightEdge();
+    assert.notEqual(before, "");
+    for (const n of [3, 5, 7, 9]) {
+      view.rerender(at(n));
+      assert.equal(rightEdge(), before, `the axis moved at ${n} minutes`);
+    }
+    // And it DOES move once the next ten-minute step is crossed, or the guard
+    // would also pass on an axis that never moves at all.
+    view.rerender(at(12));
+    assert.notEqual(rightEdge(), before, "the axis never stepped");
   });
 });
 

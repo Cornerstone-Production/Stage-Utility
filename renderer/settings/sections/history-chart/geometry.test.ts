@@ -11,6 +11,7 @@ import {
   niceAxis,
   splitRuns,
   tenMinuteDomainEnd,
+  timeTicks,
 } from "./geometry.js";
 
 describe("niceAxis", () => {
@@ -129,5 +130,66 @@ describe("nearestIndex", () => {
   });
   test("-1 for an empty series rather than 0, which would index undefined", () => {
     assert.equal(nearestIndex([], 5), -1);
+  });
+});
+
+describe("timeTicks", () => {
+  const at = (hhmm: string) => Date.parse(`2026-09-17T${hhmm}:00.000Z`);
+  const hhmm = (t: number) => new Date(t).toISOString().slice(11, 16);
+
+  test("a 2h38m domain is ticked every half hour", () => {
+    // 20:00 -> 22:38. Six ticks, on the clock's own half-hours.
+    assert.deepEqual(timeTicks(at("20:00"), at("22:38")).map(hhmm), [
+      "20:00",
+      "20:30",
+      "21:00",
+      "21:30",
+      "22:00",
+      "22:30",
+    ]);
+  });
+
+  test("ticks are on the CLOCK, not on the domain's own start", () => {
+    // A service beginning at 19:47 gets 20:00 and 20:30, not 19:47 and 20:17.
+    // A chart is read against the time on the wall.
+    assert.equal(hhmm(timeTicks(at("19:47"), at("22:10"))[0]), "20:00");
+    // And on the fine step too — 19:50, not 19:47.
+    assert.equal(hhmm(timeTicks(at("19:47"), at("21:10"))[0]), "19:50");
+  });
+
+  test("a short domain is ticked every ten minutes instead", () => {
+    // Half an hour with a 30-minute step is one tick, or none, and a service
+    // that has just started is exactly when the axis matters most.
+    assert.deepEqual(timeTicks(at("20:02"), at("20:44")).map(hhmm), [
+      "20:10",
+      "20:20",
+      "20:30",
+      "20:40",
+    ]);
+  });
+
+  test("the step changes at ninety minutes, once", () => {
+    assert.equal(timeTicks(at("20:00"), at("21:29")).length, 9);
+    assert.equal(timeTicks(at("20:00"), at("21:30")).length, 4);
+  });
+
+  test("a domain too short for a tick gives none rather than a crowd", () => {
+    assert.deepEqual(timeTicks(at("20:01"), at("20:08")), []);
+  });
+
+  test("a backwards or unusable domain gives none rather than looping", () => {
+    assert.deepEqual(timeTicks(at("21:00"), at("20:00")), []);
+    assert.deepEqual(timeTicks(NaN, at("20:00")), []);
+    assert.deepEqual(timeTicks(at("20:00"), NaN), []);
+  });
+
+  test("every tick is inside the domain", () => {
+    for (const end of ["20:31", "21:00", "22:38", "23:59"]) {
+      const a = at("19:47");
+      const b = at(end);
+      for (const t of timeTicks(a, b)) {
+        assert.ok(t >= a && t <= b, `${new Date(t).toISOString()} is outside ${end}`);
+      }
+    }
   });
 });

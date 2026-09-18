@@ -105,6 +105,31 @@ export function tenMinuteDomainEnd(startMs: number, lastMs: number): number {
   return startMs + steps * TEN_MINUTES_MS;
 }
 
+/** A domain shorter than this gets a tick every ten minutes; longer, every
+ *  thirty. One rule, so the axis never carries forty labels or two. */
+export const TICK_FINE_DOMAIN_MS = 90 * 60_000;
+export const TICK_FINE_MS = 10 * 60_000;
+export const TICK_COARSE_MS = 30 * 60_000;
+
+/**
+ * Where the time axis is labelled.
+ *
+ * Anchored to the CLOCK, not to the domain: a service beginning at 19:47 gets
+ * 20:00 and 20:30, not 19:47 and 20:17. A chart is read against the time on the
+ * wall, and a tick at 20:17 is not a time anybody has in mind.
+ *
+ * Whole- and half-hour zones land on :00/:30 as intended. The one zone this is
+ * approximate in is a :45 offset (Nepal, the Chathams), where a ten-minute tick
+ * reads :05/:15/… — still evenly spaced and still legible, just not round.
+ */
+export function timeTicks(startMs: number, endMs: number): number[] {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return [];
+  const step = endMs - startMs < TICK_FINE_DOMAIN_MS ? TICK_FINE_MS : TICK_COARSE_MS;
+  const out: number[] = [];
+  for (let t = Math.ceil(startMs / step) * step; t <= endMs; t += step) out.push(t);
+  return out;
+}
+
 /**
  * Break a series wherever sampling stopped.
  *

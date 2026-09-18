@@ -32,6 +32,7 @@ import {
   niceAxis,
   splitRuns,
   tenMinuteDomainEnd,
+  timeTicks,
   type ChartPoint,
   type ChartSeries,
   type YScale,
@@ -146,6 +147,7 @@ export function HistoryChart({
   const project = (p: ChartPoint) => ({ x: xOf(p.t), y: yOf(p.v) });
 
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
+  const axisTicks = useMemo(() => timeTicks(domainStart, domainEnd), [domainStart, domainEnd]);
   const segments = useMemo(
     () =>
       Number.isFinite(domainStart)
@@ -248,6 +250,12 @@ export function HistoryChart({
         className="block select-none"
         role="img"
         aria-label={ariaLabel}
+        // The drawn x domain, so a test can assert the ten-minute stepping
+        // directly. Reading it off the axis LABELS does not work: the last tick
+        // is the last half-hour INSIDE the domain, which does not move when the
+        // domain does, and a guard over it passes on a chart that tracks every
+        // sample.
+        data-domain-end={Number.isFinite(domainEnd) ? Math.round(domainEnd) : undefined}
         onPointerMove={onMove}
         onPointerLeave={() => {
           setHoverX(null);
@@ -395,13 +403,46 @@ export function HistoryChart({
           );
         })()}
 
-        {/* Axis: the window's ends, plus the hovered instant. */}
-        <text x={plotX0} y={plotY1 + 12} className="fill-fg-subtle font-mono text-[11px] tabular-nums">
-          {formatClock(new Date(domainStart).toISOString())}
-        </text>
-        <text x={plotX1} y={plotY1 + 12} textAnchor="end" className="fill-fg-subtle font-mono text-[11px] tabular-nums">
-          {formatClock(new Date(domainEnd).toISOString())}
-        </text>
+        {/* Time axis. Ticks on the clock's own half-hours (ten minutes on a
+            short domain), not just the two ends — two labels two hours apart
+            say nothing about where in the service a bump happened. A label that
+            would hang off either edge is dropped; its tick stays. */}
+        {axisTicks.map((t) => {
+          const x = xOf(t);
+          const label = formatClock(new Date(t).toISOString());
+          const halfLabel = measure(label) / 2;
+          const fits = x - halfLabel >= plotX0 - 2 && x + halfLabel <= plotX1 + 2;
+          return (
+            <g key={t} data-axis-tick={t}>
+              <line
+                x1={x}
+                y1={plotY1}
+                x2={x}
+                y2={plotY1 + 4}
+                stroke="var(--color-line-strong)"
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
+              {fits && (
+                <text
+                  x={x}
+                  y={plotY1 + 14}
+                  textAnchor="middle"
+                  data-axis-label={t}
+                  className="fill-fg-subtle font-mono text-[11px] tabular-nums"
+                >
+                  {label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        {/* A domain too short for even one tick still says when it was. */}
+        {axisTicks.length === 0 && (
+          <text x={plotX0} y={plotY1 + 14} data-axis-label="start" className="fill-fg-subtle font-mono text-[11px] tabular-nums">
+            {formatClock(new Date(domainStart).toISOString())}
+          </text>
+        )}
 
         {/* Item lane. */}
         {segments.filter((s) => s.visible && (!narrow || s.row === "service")).map((seg, i) => {
