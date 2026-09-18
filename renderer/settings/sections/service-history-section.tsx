@@ -784,12 +784,25 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       const key = rowKey(it);
       if (itemTimeSaving.has(key)) return;
       const d = draftFor(it);
-      // The recorded stamps are the anchor for the DATE; a blank field clears the
-      // override rather than meaning "midnight".
-      const startedAt = d.start ? (fromItemTimeInput(it.editedFrom?.startedAt ?? it.startedAt, d.start) ?? null) : null;
-      const endedAt = d.end
-        ? (fromItemTimeInput(it.editedFrom?.endedAt ?? it.endedAt ?? it.editedFrom?.startedAt ?? it.startedAt, d.end) ?? null)
-        : null;
+      // The RECORDED stamps — what the fields are compared against, and the anchor
+      // for the date an HH:MM:SS is put back onto.
+      const wasStart = it.editedFrom?.startedAt ?? it.startedAt;
+      const wasEnd = it.editedFrom?.endedAt ?? it.endedAt;
+      /**
+       * null for a field that still reads what was recorded.
+       *
+       * Not merely tidy: the fields carry whole seconds and the recorder writes
+       * milliseconds, so sending an untouched Started back put a 0.9s override on
+       * it — the row was marked edited for a field nobody touched, and Reset had
+       * something to undo that had never been done. A blank field clears the
+       * override too, rather than meaning midnight.
+       */
+      const field = (typed: string, recorded: string | null) =>
+        !typed || typed === toItemTimeInput(recorded)
+          ? null
+          : (fromItemTimeInput(recorded ?? it.startedAt, typed) ?? null);
+      const startedAt = field(d.start, wasStart);
+      const endedAt = field(d.end, wasEnd ?? wasStart);
       setItemTimeSaving((s) => new Set(s).add(key));
       try {
         await invoke("history:setItemTimes", { serviceKey: det.serviceKey, itemId: it.itemId, sequence: it.sequence, startedAt, endedAt });

@@ -248,7 +248,32 @@ describe("History: correcting one item's recorded times", () => {
     assert.equal(post!.body.itemId, "vid-1");
     assert.equal(post!.body.sequence, 0, "the RUN, not just the plan item");
     assert.equal(post!.body.endedAt, PREROLL_FIXED_END);
-    assert.equal(post!.body.startedAt, WINDOW_START, "the untouched start is sent as it stands");
+    assert.equal(
+      post!.body.startedAt,
+      null,
+      "an untouched field must send null, not an override — the fields carry whole seconds and the " +
+        "recorder writes milliseconds, so sending Started back marks the row edited for a field nobody touched",
+    );
+  });
+
+  test("a field typed back to what was recorded clears that override", async (t) => {
+    const state = { items: corrected(), posts: [] as Posted[] };
+    installFetch(state);
+    const view = await openInEditMode(ServiceHistorySection);
+    t.after(() => cleanup());
+
+    const ended = view.container.querySelector<HTMLInputElement>('input[aria-label="Ended — VIDEO: Pre-roll"]')!;
+    assert.equal(ended.value, "20:17:00", "precondition: the field opens on the EFFECTIVE time");
+    fireEvent.change(ended, { target: { value: "20:26:22" } }); // back to the recorded end
+    await settle();
+    fireEvent.click(rowButton(view, "Save times — VIDEO: Pre-roll")!);
+    await settle();
+    await settle();
+
+    const post = state.posts.find((p) => p.url === "/api/history/item-times");
+    assert.ok(post, "nothing was POSTed");
+    assert.equal(post!.body.endedAt, null, "typing the recorded time back must CLEAR the override");
+    assert.equal(post!.body.startedAt, null);
   });
 
   test("an edited row shows the marker, its recorded-vs-edited tooltip, and a Reset", async (t) => {
