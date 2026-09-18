@@ -243,6 +243,31 @@ describe("History service header", () => {
     assert.equal(subs.get("Peak attendance"), "2,061 entries");
   });
 
+  test("the header publishes its height while mounted, and takes it back", () => {
+    // The mechanism the cards' scroll-margin and the scroller's scroll-padding
+    // both read. Deleting the setProperty call left the whole suite green: the
+    // card guard asserts the margin REFERENCES the variable, and a variable
+    // nobody writes still parses. jsdom reports 0 for every height, so this
+    // asserts the property is SET, not what it is set to.
+    const root = document.documentElement;
+    root.style.removeProperty("--su-history-header-h");
+    assert.equal(root.style.getPropertyValue("--su-history-header-h"), "", "not set before mounting");
+
+    const view = mount();
+    assert.notEqual(
+      root.style.getPropertyValue("--su-history-header-h"),
+      "",
+      "the header must publish its height, or every anchor jump lands under it",
+    );
+
+    view.unmount();
+    assert.equal(
+      root.style.getPropertyValue("--su-history-header-h"),
+      "",
+      "a stale height would push the NEXT page's anchors down by a header that is gone",
+    );
+  });
+
   test("Delete is the one destructive action in the group", () => {
     const view = mount({});
     const group = view.container.querySelector('[data-testid="history-actions"]')!;
