@@ -160,6 +160,16 @@ describe("a service type's trend tile", () => {
     );
   });
 
+  test("a prior average of zero is no comparison, and says so in both fields", () => {
+    // `change` already refused to divide by it. `priorCount` did not, so a tile
+    // could read "no prior window yet" beside a count of 4 — a label for a
+    // comparison that was never made. One condition, read by both.
+    const [tile] = typeTrends(weekly("weekend", [...Array(4).fill(0), ...Array(8).fill(150)]));
+    assert.equal(tile.priorAverage, 0, "the window is there and its average really is zero");
+    assert.equal(tile.change, null, "nothing is divisible by it");
+    assert.equal(tile.priorCount, 0, "so nothing was compared against, and the label must not claim otherwise");
+  });
+
   test("a thin comparison reports the count it actually used", () => {
     // The label reads "vs prior 4". It must be the REAL number, not the window
     // the tile would like to have had — a four-day comparison dressed up as

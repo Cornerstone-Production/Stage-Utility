@@ -190,17 +190,23 @@ export function typeTrends(
     const priorMean = prior.length >= MIN_PRIOR_DAYS ? mean(prior.map((d) => d.v)) : null;
     const rounded = average == null ? null : Math.round(average);
     const priorRounded = priorMean == null ? null : Math.round(priorMean);
+    /** Both windows have a number, and the prior one is something a percentage
+     *  can be taken against. Narrows for the type checker as well as reading
+     *  once. */
+    const comparable = rounded != null && priorRounded != null && priorRounded > 0;
     out.push({
       serviceTypeId: key || null,
       name: names.get(key) ?? "Services",
       recent,
       average: rounded,
       priorAverage: priorRounded,
-      change:
-        rounded != null && priorRounded != null && priorRounded > 0
-          ? (rounded - priorRounded) / priorRounded
-          : null,
-      priorCount: priorRounded == null ? 0 : prior.length,
+      // A prior average of ZERO is not something to divide by, and it is not
+      // something to claim a comparison against either. `change` already
+      // refused it; `priorCount` did not, so a tile could read "no prior window
+      // yet" beside a count of 8 — a label for a comparison that was not made.
+      // One condition, read by both.
+      change: comparable ? (rounded - priorRounded) / priorRounded : null,
+      priorCount: comparable ? prior.length : 0,
     });
   }
   // Busiest first: the weekend service leads, and a once-a-year type does not
