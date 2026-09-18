@@ -17,7 +17,7 @@ import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger"
 import { useCoarsePointer } from "../../lib/use-media-query";
 import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
 import { SplDetail } from "./spl-history-section";
-import { SECTION_SCROLL_MARGIN, ServiceHeader, overrunStats } from "./history-service-header";
+import { RecordingPill, SECTION_SCROLL_MARGIN, ServiceHeader, overrunStats } from "./history-service-header";
 import {
   computeOverview,
   summarize,
@@ -896,11 +896,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           onResetPacing={doResetPacing}
         />
         {merging && (
-          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-6 bg-amber-2/40 p-3">
-            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-warn-9/40 bg-warn-9/8 p-3">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-muted">
               Merge this recording into
               <Select value={mergeTarget} onValueChange={setMergeTarget}>
-                <SelectTrigger className="h-auto rounded-md border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12">
+                <SelectTrigger className="h-auto rounded-md border-line-strong bg-field px-2 py-1 text-caption1 text-fg">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -915,33 +915,34 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             </label>
             <Button variant="accent" size="small" disabled={!mergeTarget} onClick={doMerge}>Merge + delete this</Button>
             <Button variant="transparent" size="small" onClick={() => setMerging(false)}>Cancel</Button>
-            <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
+            <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
               Moves this recording's items + attendance samples into the chosen service (matching items aren't duplicated), then deletes this record. For reuniting a service split across two records (e.g. one that overran into the next occurrence).
             </span>
           </div>
         )}
         {editingTimes && (
-          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-5 bg-gray-2 p-3">
-            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-line bg-fill/40 p-3">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-muted">
               Start
-              <input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+              <input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="rounded-md border border-line-strong bg-field px-2 py-1 font-mono tabular-nums text-caption1 text-fg" />
             </label>
-            <label className="flex flex-col gap-1 text-caption2 text-gray-9">
+            <label className="flex flex-col gap-1 text-caption2 text-fg-muted">
               End
-              <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-gray-5 bg-gray-1 px-2 py-1 text-caption1 text-gray-12" />
+              <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-line-strong bg-field px-2 py-1 font-mono tabular-nums text-caption1 text-fg" />
             </label>
             <Button variant="accent" size="small" onClick={saveTimes}>Save</Button>
             <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
             <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
-            <span className="text-caption2 text-gray-9 flex-1 min-w-[14rem]">
-              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-gray-11">Rebuild from raw</strong>, in the header above, goes further: it discards the stored summaries and derives them again from the archived rows, keeping your item corrections.
+            <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored summaries and derives them again from the archived rows, keeping your item corrections.
             </span>
           </div>
         )}
 
-        {/* Three cards under the header, one per nav anchor. `scroll-mt-40`
-            because the links are real anchors and the header is sticky: without
-            it a jump lands the card's heading UNDER the header. */}
+        {/* Three cards under the header, one per nav anchor. Each carries a
+            scroll margin read from the header's measured height (see
+            SectionCard): the links are real anchors and the header is sticky,
+            so without it a jump lands the card's heading UNDER the header. */}
         <SectionCard id="history-rundown" title="Rundown">
         {/* The app's type scale, not the table's own: 10px uppercase headers
             over 13px rows, every number mono and tabular so the columns line up
@@ -1075,12 +1076,12 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         {linkedBap.length > 0 && (
           <SectionCard title="Baptisms">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              <Stat label="Baptized" value={String(bapStats.people)} accent="text-gray-12" />
+              <Stat label="Baptized" value={String(bapStats.people)} accent="text-fg" />
               <Stat label="Total time" value={fmtDur(bapStats.totalSec)} accent="text-accent" />
-              <Stat label="Testimony total" value={fmtDur(bapStats.testimonySec)} accent="text-gray-12" />
-              <Stat label="Baptism total" value={fmtDur(bapStats.baptismSec)} accent="text-gray-12" />
-              <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-gray-12" />
-              <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-gray-12" />
+              <Stat label="Testimony total" value={fmtDur(bapStats.testimonySec)} accent="text-fg" />
+              <Stat label="Baptism total" value={fmtDur(bapStats.baptismSec)} accent="text-fg" />
+              <Stat label="Avg testimony" value={fmtDur(bapStats.avgTestimonySec)} accent="text-fg" />
+              <Stat label="Avg baptism" value={fmtDur(bapStats.avgBaptismSec)} accent="text-fg" />
             </div>
             <span className="text-caption2 text-fg-subtle">Per-person splits are in the Baptisms tab.</span>
           </SectionCard>
@@ -1132,27 +1133,30 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         <button className="self-start text-caption1 text-accent hover:underline" onClick={() => setSelectedKey(null)}>
           ← All services
         </button>
-        <div className="flex flex-col min-w-0">
-          <span className="text-title3 font-semibold text-gray-12">
-            {attendance.planTitle ?? attendance.serviceKey}
-            {live && <span className="ml-2 align-middle rounded-full bg-red-9 px-2 py-0.5 text-[10px] font-semibold text-white">LIVE</span>}
+        {/* The same vocabulary as a service's own page — the green `recording`
+            pill, "Sound", and cards — rather than the red LIVE badge and
+            border-t dividers this page kept while the other one moved on. It
+            has no rundown and no KPIs to show, so it is not the ServiceHeader;
+            it is the two cards that page shares with it. */}
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="flex items-center gap-2 text-title3 font-semibold text-fg">
+            <span className="truncate">{attendance.planTitle ?? attendance.serviceKey}</span>
+            {live && <RecordingPill />}
           </span>
-          <span className="text-caption1 text-gray-9">
+          <span className="text-caption1 text-fg-muted">
             {fmtDate(attendance.startedAt)}
             {live
               ? ` · arriving · recording since ${fmtTime(attendance.startedAt)} · ${statusText}`
               : ` · recorded ${fmtTime(attendance.startedAt)}–${fmtTime(attendance.endedAt as string)} · ${statusText}`}
           </span>
         </div>
-        <p className="text-caption1 text-gray-9">
+        <p className="text-caption1 text-fg-muted">
           Item timings appear here when the first item goes live in Planning Center.
         </p>
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Attendance</span>
+        <SectionCard id="history-attendance" title="Attendance">
           <AttendanceDetail detail={attendance} timeline={null} />
-        </div>
-        <div className="flex flex-col gap-2 border-t border-gray-4 pt-4">
-          <span className="text-body font-semibold text-gray-12">Audio (SPL)</span>
+        </SectionCard>
+        <SectionCard id="history-sound" title="Sound">
           {spl ? (
             <SplDetail
               // KEYED BY THE RECORD. The section fetches the raw series on
@@ -1165,9 +1169,9 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               attendance={attendance}
             />
           ) : (
-            <p className="text-caption1 text-gray-9">No SPL recorded for this service.</p>
+            <p className="text-caption1 text-fg-muted">No sound recorded for this service.</p>
           )}
-        </div>
+        </SectionCard>
       </div>
     );
   }
@@ -1633,10 +1637,10 @@ function SectionCard({ id, title, children }: { id?: string; title: string; chil
 
 function Stat({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
   return (
-    <div className="rounded-lg border border-gray-5 bg-gray-2 px-3 py-2">
-      <div className="text-caption2 text-gray-9">{label}</div>
-      <div className={`text-title3 font-semibold tabular-nums ${accent}`}>{value}</div>
-      {sub && <div className="text-caption2 text-gray-9">{sub}</div>}
+    <div className="rounded-lg border border-line bg-fill/40 px-3 py-2">
+      <div className="text-caption2 uppercase tracking-wider text-fg-subtle">{label}</div>
+      <div className={`font-mono text-title3 font-medium tabular-nums ${accent}`}>{value}</div>
+      {sub && <div className="text-caption2 text-fg-subtle">{sub}</div>}
     </div>
   );
 }

@@ -93,20 +93,39 @@ function spl() {
   };
 }
 
-function installFetch() {
+/** One session inside the service window, so the Baptisms card renders. */
+function baptisms() {
+  return [
+    {
+      id: "b1",
+      startedAt: iso("20:45:00"),
+      finishedAt: iso("20:52:00"),
+      title: "Evening",
+      serviceTypeId: "salt",
+      planId: "plan-1",
+      serviceKey: KEY,
+      people: [{ id: "p1", name: "A", testifyMs: 120_000, baptizeMs: 60_000 }],
+    },
+  ];
+}
+
+function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } = {}) {
   (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: { method?: string }) => {
     const url = String(input);
     const method = init?.method ?? "GET";
     const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
     if (method !== "GET") return ok({ ok: true });
-    if (url === "/api/service-timeline") return ok([timeline()]);
+    if (url === "/api/baptism/sessions") return ok(opts.baptisms ? baptisms() : []);
+    if (url === "/api/service-timeline") return ok(opts.timelineRecords ?? [timeline()]);
     if (url === "/api/attendance/history") return ok([attendance()]);
     if (url === "/api/spl/summary") return ok([]);
     if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
-    if (url === "/api/baptism/sessions") return ok([]);
     if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
-    if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
+    // Null when the list is empty: that is the arrival-ramp state — attendance
+    // is recording and no plan item has gone live, so no timeline record
+    // exists to fetch.
+    if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(opts.timelineRecords?.length === 0 ? null : timeline());
     if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(attendance());
     if (/^\/api\/spl\/history\/[^/]+$/.test(url)) return ok(spl());
     throw new Error(`unexpected fetch: ${method} ${url}`);
@@ -154,7 +173,7 @@ describe("the History service page", () => {
     const view = await openTheService(ServiceHistorySection);
     t.after(() => cleanup());
 
-    assert.ok(view.container.querySelector('[data-testid="history-service-header"]'), "no header");
+    assert.equal(view.container.querySelector(String.raw`[data-testid="history-service-header"]`) != null, true, "no header");
 
     // The anchors and the cards are matched by walking the DOM in order, so a
     // card renamed on one side alone fails here rather than 404-ing silently on
@@ -207,6 +226,101 @@ describe("the History service page", () => {
     }
   });
 
+  test("Baptisms is a card between Rundown and Attendance, and not in the nav", async (t) => {
+    installFetch({ baptisms: true });
+    const view = await openTheService(ServiceHistorySection);
+    t.after(() => cleanup());
+
+    const cards = [...view.container.querySelectorAll("section")].map((s) => s.getAttribute("aria-label"));
+    assert.deepEqual(
+      cards,
+      ["Rundown", "Baptisms", "Attendance", "Sound"],
+      "baptism timings explain the overrun in the table right above them",
+    );
+    // Deliberately absent from the nav: it is there on a baptism weekend and
+    // gone the rest, and an entry that comes and goes reads as a fault.
+    const nav = [...view.container.querySelectorAll('[data-testid="history-service-header"] nav a')].map((a) => text(a));
+    assert.deepEqual(nav, ["Rundown", "Attendance", "Sound"]);
+    // The card is a card, not a bare block, and carries real figures.
+    const bap = [...view.container.querySelectorAll("section")].find((s) => s.getAttribute("aria-label") === "Baptisms")!;
+    assert.match(bap.className, /su-card/);
+    assert.match(text(bap), /Baptized/);
+  });
+
+  test("a baptism-free service has no Baptisms card at all", async (t) => {
+    installFetch();
+    const view = await openTheService(ServiceHistorySection);
+    t.after(() => cleanup());
+    assert.deepEqual(
+      [...view.container.querySelectorAll("section")].map((s) => s.getAttribute("aria-label")),
+      ["Rundown", "Attendance", "Sound"],
+    );
+  });
+
+  test("the arriving page speaks the same vocabulary as a service's page", async (t) => {
+    // Attendance is recording, the first plan item has not gone live, so there
+    // is no timeline record — no rundown, no KPIs, no report. This page kept a
+    // red LIVE badge, an "Audio (SPL)" heading and border-t dividers long after
+    // the service page moved to a green `recording` pill, "Sound" and cards.
+    installFetch({ timelineRecords: [] });
+    const view = render(
+      React.createElement(TooltipProvider, null, React.createElement(ServiceHistorySection), React.createElement(ConfirmHost)),
+    );
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    const row = [...view.container.querySelectorAll("button")].find((b) => text(b).includes("Evening"));
+    assert.ok(row, "the arriving row never rendered");
+    fireEvent.click(row!);
+    await settle();
+    await settle();
+    await settle();
+
+    // `!= null`, not the node: node:test renders the actual value into its
+    // diff, and a jsdom element walks the whole DOM graph until the runner is
+    // SIGKILLed — a red guard that reports nothing at all.
+    assert.equal(
+      view.container.querySelector('[data-testid="history-service-header"]') != null,
+      false,
+      "no rundown and no KPIs, so this is not the service header",
+    );
+    assert.deepEqual(
+      [...view.container.querySelectorAll("section")].map((s) => s.getAttribute("aria-label")),
+      ["Attendance", "Sound"],
+      "the two cards it shares with a service's page — and 'Sound', not 'Audio (SPL)'",
+    );
+    for (const s of view.container.querySelectorAll("section")) assert.match(s.className, /su-card/);
+  });
+
+  test("the arriving page says recording with the same pill", async (t) => {
+    const open = { ...attendance(), endedAt: null };
+    installFetch({ timelineRecords: [] });
+    const realFetch = (globalThis as unknown as { fetch: (i: unknown, x?: unknown) => Promise<unknown> }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: unknown) => {
+      const url = String(input);
+      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+      if (url === "/api/attendance/history") return ok([open]);
+      if (/^\/api\/attendance\/history\/[^/]+$/.test(url)) return ok(open);
+      return realFetch(input, init);
+    };
+    const view = render(
+      React.createElement(TooltipProvider, null, React.createElement(ServiceHistorySection), React.createElement(ConfirmHost)),
+    );
+    t.after(() => cleanup());
+    await settle();
+    await settle();
+    fireEvent.click([...view.container.querySelectorAll("button")].find((b) => text(b).includes("Evening"))!);
+    await settle();
+    await settle();
+    await settle();
+
+    const pill = view.container.querySelector('[data-testid="recording-pill"]');
+    assert.equal(pill != null, true, "an open arrival ramp must say it is recording");
+    assert.match(text(pill), /recording/);
+    // The red LIVE badge is gone, not merely joined.
+    assert.equal(/\bLIVE\b/.test(text(view.container.querySelector("section")?.parentElement ?? null)), false);
+  });
+
   test("the header and the Attendance card agree about which number is which", async (t) => {
     installFetch();
     // Entries is off by default in the Attendance card — the one figure this
@@ -253,6 +367,25 @@ describe("the History service page", () => {
       `${card.get("entries")} entries`,
       `the header's entries line must be the card's Entries figure; header subs were ${JSON.stringify([...headerSub])}`,
     );
+  });
+
+  test("the header's KPI row is not a live region; a chart strip is", async (t) => {
+    installFetch();
+    const view = await openTheService(ServiceHistorySection);
+    t.after(() => cleanup());
+
+    // `announce={false}` on the header, default on the charts. The header's
+    // figures tick every second while a service records, and a polite live
+    // region there reads all six out on every tick; a chart strip's whole job
+    // is to answer "what is under the cursor" and must be announced. Dropping
+    // the flag is silent — the page looks identical.
+    const header = view.container.querySelector('[data-testid="service-kpis"] [data-history-strip]')!;
+    assert.equal(header.getAttribute("role"), null, "the KPI row must not announce on every tick");
+    assert.equal(header.getAttribute("aria-live"), null);
+
+    const chart = view.container.querySelector('#history-attendance [data-history-strip]')!;
+    assert.equal(chart.getAttribute("role"), "status", "a chart strip is the section's live readout");
+    assert.equal(chart.getAttribute("aria-live"), "polite");
   });
 
   test("the header's actions are reachable in order, and the nav links are real anchors", async (t) => {

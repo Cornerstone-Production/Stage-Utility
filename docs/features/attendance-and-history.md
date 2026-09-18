@@ -87,8 +87,9 @@ bottom:
   beside it;
 - one action group — **Edit times**, **Copy report**, **Merge**, **Rebuild from
   raw**, **Delete**, with Delete set apart as the one that cannot be undone.
-  **Reset pacing** joins them while the service is live. The shared `/history`
-  link carries Copy report alone;
+  **Merge** appears only when there is another recording on the same day to
+  merge into, and **Reset pacing** only while the service is live. The shared
+  `/history` link carries Copy report alone;
 - six figures, read left to right:
 
   | | |
@@ -319,9 +320,12 @@ from the last.
 
 A service shows up in History as soon as its attendance recording begins — up to
 60 minutes before the scheduled start by default (the arrival-ramp window above)
-— marked "arriving" with a running count of people in the room. Its own charts
-and stats fill in once the first plan item goes live in Planning Center and the
-timeline record opens; until then there is no rundown to show.
+— marked "arriving" with a running count of people in the room, and carrying the
+same green **recording** pill a live service's page does. It shows the
+Attendance and Sound cards and nothing else: there is no rundown, no KPI row and
+no report until the first plan item goes live in Planning Center and the
+timeline record opens, at which point the page becomes the full service page
+without being reopened.
 
 ## Sound levels
 

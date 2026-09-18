@@ -52,6 +52,35 @@ export const SERVICE_SECTIONS = [
   { id: "history-sound", label: "Sound" },
 ] as const;
 
+/**
+ * "recording", in green, while a record is still open.
+ *
+ * One component, because History has TWO pages that say it: a service's own
+ * page, and the arrival-ramp page a service shows before its first plan item
+ * goes live. Those were a green pill and a red `LIVE` badge saying the same
+ * thing in two vocabularies.
+ *
+ * The pulse is the chart's live-edge beat, on opacity — `r` is an SVG geometry
+ * property and does nothing on an HTML dot. Dropped outright under reduced
+ * motion rather than left to the stylesheet's global collapse, so there is no
+ * one-frame flash of it.
+ */
+export function RecordingPill() {
+  const reduced = prefersReducedMotion();
+  return (
+    <span
+      data-testid="recording-pill"
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-live-9/45 bg-live-9/12 px-2 py-0.5 text-[10px] font-semibold text-live-11"
+    >
+      <span
+        aria-hidden="true"
+        className={cn("inline-block size-1.5 rounded-full bg-live-9", !reduced && "su-history-pulse-dot")}
+      />
+      recording
+    </span>
+  );
+}
+
 /** What the peak-level figure says when there is no level, per reason. `level`
  *  has no note: the number is the answer. */
 const LEVEL_EMPTY_NOTE: Record<ServicePeakLevel["kind"], string | undefined> = {
@@ -284,7 +313,6 @@ export function ServiceHeader({
     },
     [timeline, attendance, spl, live, now, metricsVersion],
   );
-  const reduced = prefersReducedMotion();
 
   /**
    * The header's own geometry, measured.
@@ -359,18 +387,7 @@ export function ServiceHeader({
           </span>
           <span className="flex items-center gap-2 text-caption1 text-fg-muted">
             <span className="truncate">{meta}</span>
-            {live && (
-              <span
-                data-testid="recording-pill"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-live-9/45 bg-live-9/12 px-2 py-0.5 text-[10px] font-semibold text-live-11"
-              >
-                <span
-                  aria-hidden="true"
-                  className={cn("inline-block size-1.5 rounded-full bg-live-9", !reduced && "su-history-pulse-dot")}
-                />
-                recording
-              </span>
-            )}
+            {live && <RecordingPill />}
           </span>
         </div>
 

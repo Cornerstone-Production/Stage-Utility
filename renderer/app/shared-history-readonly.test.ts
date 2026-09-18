@@ -113,19 +113,81 @@ describe("the shared /history link", () => {
     }
   });
 
-  it("the day list's Delete stays gated too", () => {
-    // The other destructive control on the page, and the one the header does
-    // not own: one Delete per day-list row, in each of the two row shapes (a
-    // normal recording and an attendance-only arrival ramp). An EXACT count,
-    // not a floor — a floor is how a gate goes missing with the suite green.
-    const section = readFileSync(
-      new URL("../settings/sections/service-history-section.tsx", import.meta.url),
-      "utf8",
-    );
-    assert.equal(
-      [...section.matchAll(/\{!readOnly &&/g)].length,
-      2,
-      "the two day-list Delete buttons must each be gated on readOnly",
-    );
+  it("the day list's Delete stays gated too", async () => {
+    // The other destructive control, and the one the header does not own: a
+    // Delete per day-list row. This counted `{!readOnly &&` in the section's
+    // source and asserted the number 2 — a bare count, which cannot tell an add
+    // plus a remove from no change, and which says nothing about what actually
+    // renders. The list is RENDERED, read-only and not, and the exact set of
+    // controls is compared.
+    const { installDom } = await import("../test-dom.js");
+    const teardown = installDom();
+    try {
+      (globalThis as unknown as { EventSource: unknown }).EventSource = class {
+        readyState = 1;
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        close(): void {}
+      };
+      const day = "2026-09-17";
+      const rec = {
+        serviceKey: "salt:plan-1:evening",
+        serviceTypeId: "salt",
+        planId: "plan-1",
+        planTitle: "Evening",
+        seriesTitle: null,
+        serviceDate: day,
+        serviceTimeId: "evening",
+        serviceTimeStartsAt: `${day}T20:15:00.000Z`,
+        startedAt: `${day}T20:15:00.000Z`,
+        endedAt: `${day}T21:45:00.000Z`,
+        items: [],
+      };
+      (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
+        const url = String(input);
+        const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
+        if (url === "/api/service-timeline") return ok([rec]);
+        if (url === "/api/attendance/history") return ok([]);
+        if (url === "/api/spl/summary") return ok([]);
+        if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
+        if (url === "/api/baptism/sessions") return ok([]);
+        return ok(null);
+      };
+      const { render, cleanup } = await import("@testing-library/react");
+      const React = (await import("react")).default;
+      const { TooltipProvider } = await import("../components/ui/index.js");
+      const { ServiceHistorySection } = await import("../settings/sections/service-history-section.js");
+
+      const rowControls = async (readOnly: boolean) => {
+        const view = render(
+          React.createElement(TooltipProvider, null, React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly })),
+        );
+        await new Promise((r) => setTimeout(r, 0));
+        await new Promise((r) => setTimeout(r, 0));
+        const labels = [...view.container.querySelectorAll("button[aria-label]")]
+          .map((b) => b.getAttribute("aria-label")!)
+          .filter((l) => /recording/i.test(l))
+          .sort();
+        cleanup();
+        return labels;
+      };
+
+      // One entry per line, sorted — a list, not a number, so two branches
+      // adding different controls conflict instead of merging silently.
+      assert.deepEqual(
+        await rowControls(false),
+        [
+          "Delete recording for Evening",
+        ],
+        "the operator's own list keeps its Delete",
+      );
+      assert.deepEqual(
+        await rowControls(true),
+        [],
+        "the shared link's list must carry nothing that deletes a recording",
+      );
+    } finally {
+      teardown();
+    }
   });
 });
