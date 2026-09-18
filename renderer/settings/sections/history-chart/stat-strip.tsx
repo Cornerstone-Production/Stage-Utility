@@ -62,18 +62,25 @@ function Figure({ label, value, color, sub, first }: { label: string; value: str
   return (
     <div
       className={cn(
-        "flex min-w-0 flex-col gap-0.5 px-3 first:pl-0",
+        // `shrink-0`: the row is a scroller, so a narrow window must push
+        // figures off the right-hand end, not squash them. Shrinking turned
+        // "20:06" into "20…" and "1:07:47" into "1:07…" on a 600px window —
+        // a truncated number is worse than one you have to scroll to.
+        "flex shrink-0 flex-col gap-0.5 px-3 first:pl-0",
         !first && "border-l border-line",
       )}
     >
-      <span className="text-caption2 uppercase tracking-wider text-fg-subtle whitespace-nowrap">{label}</span>
+      <span className="whitespace-nowrap text-caption2 uppercase tracking-wider text-fg-subtle">{label}</span>
       <span
-        className="font-mono text-[20px] leading-[24px] font-medium tabular-nums truncate"
+        // The cap is for hover mode, whose value is a plan item's TITLE: a long
+        // one would otherwise push every other figure off the visible end.
+        // No number this strip shows comes near it.
+        className="max-w-[14rem] truncate font-mono text-[20px] font-medium leading-[24px] tabular-nums"
         style={{ color: color ?? "var(--color-fg)" }}
       >
         {value}
       </span>
-      {sub && <span className="truncate whitespace-nowrap text-caption2 text-fg-subtle">{sub}</span>}
+      {sub && <span className="max-w-[14rem] truncate whitespace-nowrap text-caption2 text-fg-subtle">{sub}</span>}
     </div>
   );
 }
@@ -108,7 +115,11 @@ export function StatStrip({ figures, hover, live, right, announce = true }: Stat
 
   return (
     <div
-      className="flex items-end gap-0 overflow-x-auto"
+      // `items-start`, not `items-end`. A chart strip's figures are all the same
+      // shape so it made no difference there, but the service header's KPIs
+      // carry a second line on some figures and not others, and bottom-aligning
+      // dropped "Peak SPL A Fast" a whole line below the five beside it.
+      className="flex items-start gap-0 overflow-x-auto"
       data-history-strip={mode}
       // The strip is the section's live summary: a pointer move must be
       // announced, or a screen reader hears only the at-rest figures forever.

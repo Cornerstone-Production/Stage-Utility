@@ -160,9 +160,18 @@ describe("the History service page", () => {
     assert.deepEqual(cardIds, navTargets, "every nav link must land on a card that exists, in page order");
 
     for (const id of navTargets) {
-      const card = view.container.querySelector(`#${id}`)!;
+      const card = view.container.querySelector<HTMLElement>(`#${id}`)!;
       assert.match(card.className, /su-card/, `${id} must be a card`);
-      assert.match(card.className, /scroll-mt/, `${id} must clear the sticky header when jumped to`);
+      // The header's own MEASURED height, not a fixed guess. A fixed
+      // `scroll-mt-40` shipped here first and was 24px short at 1280 and 43px
+      // short at 600 in a real browser, so every anchor jump parked the card's
+      // heading behind the header. jsdom reports every height as 0 and cannot
+      // catch that; what it CAN catch is the margin going back to a constant.
+      assert.match(
+        card.style.scrollMarginTop,
+        /var\(--su-history-header-h/,
+        `${id} must clear the sticky header by the header's own height when jumped to`,
+      );
     }
   });
 

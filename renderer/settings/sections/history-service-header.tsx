@@ -17,7 +17,7 @@
 // (`serviceKpis`), the recording pill's condition, the destructive action, and
 // the nav highlight through a stubbed IntersectionObserver.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ClockIcon, CopyIcon, GitMergeIcon, RotateCcwIcon, Trash2Icon, WrenchIcon } from "lucide-react";
 
 import { cn } from "../../lib/cn";
@@ -147,7 +147,7 @@ export function serviceKpis(
  * unchanged in an environment with no IntersectionObserver at all — the nav
  * still navigates, it just does not follow.
  */
-export function useSectionNav(ids: readonly string[]): string {
+export function useSectionNav(ids: readonly string[], headerBottom = 150): string {
   const key = ids.join("|");
   const [active, setActive] = useState<string>(ids[0] ?? "");
   useEffect(() => {
@@ -168,9 +168,11 @@ export function useSectionNav(ids: readonly string[]): string {
         }
         if (best) setActive(best);
       },
-      // The header covers the top ~150px of the pane, so a section scrolled
-      // under it is not one you are looking at.
-      { rootMargin: "-150px 0px -30% 0px", threshold: [0, 0.05, 0.25, 0.5, 0.75, 1] },
+      // Everything above the header's own bottom edge is covered by it, so it
+      // is not what you are looking at. A fixed 150px here chose Attendance
+      // while Sound filled the screen on a 600px-wide window, where the header
+      // is 220px tall.
+      { rootMargin: `-${Math.round(headerBottom)}px 0px -30% 0px`, threshold: [0, 0.05, 0.25, 0.5, 0.75, 1] },
     );
     for (const id of list) {
       const el = document.getElementById(id);
@@ -178,9 +180,25 @@ export function useSectionNav(ids: readonly string[]): string {
     }
     return () => obs.disconnect();
     // `ids` is a fresh array on every render; `key` is its content.
-  }, [key]);
+  }, [key, headerBottom]);
   return active;
 }
+
+/**
+ * The custom property a section card's `scroll-margin-top` is read from.
+ *
+ * The nav's links are real anchors and the header is sticky, so a jump has to
+ * be pushed down by the header's OWN height. A fixed `scroll-mt-40` was wrong
+ * in a browser at both widths tested — the header is 184px at 1280 and 220px at
+ * 600, against 160px of margin — and put each card's heading behind the header
+ * it had just jumped past. jsdom reports every height as 0 and could not have
+ * caught it.
+ */
+export const HEADER_HEIGHT_VAR = "--su-history-header-h";
+
+/** `scroll-margin-top` for anything the header's nav jumps to. The fallback is
+ *  only ever used before the header has measured itself once. */
+export const SECTION_SCROLL_MARGIN = `calc(var(${HEADER_HEIGHT_VAR}, 12rem) + 0.75rem)`;
 
 export interface ServiceHeaderProps {
   timeline: ServiceTimeline;
@@ -219,10 +237,56 @@ export function ServiceHeader({
 }: ServiceHeaderProps) {
   const live = timeline.endedAt == null;
   const kpis = useMemo(() => serviceKpis(timeline, attendance, spl, live ? now : undefined), [timeline, attendance, spl, live, now]);
-  const active = useSectionNav(SERVICE_SECTIONS.map((s) => s.id));
   const reduced = prefersReducedMotion();
+
+  /**
+   * The header's own geometry, measured.
+   *
+   * Two consumers, one measurement: the cards' `scroll-margin-top` (published
+   * as a custom property, because it has to reach elements this component does
+   * not render) and the section nav's `rootMargin`. Both were fixed numbers
+   * first and both were wrong in a real browser — the header is 184px tall at
+   * 1280 and 220px at 600, against a 160px margin and a 150px root inset, so an
+   * anchor jump parked a card's heading behind the header and the nav named
+   * Attendance while Sound filled the screen. jsdom reports 0 for every height
+   * and cannot see either.
+   *
+   * A ResizeObserver rather than a one-shot measure: the action group wraps to
+   * a second line on a narrow window, and the KPI sub-lines come and go with
+   * the record, so the height the header settles at is not the one it first
+   * renders at.
+   */
+  const ref = useRef<HTMLElement | null>(null);
+  const [bottom, setBottom] = useState(150);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const write = () => {
+      const r = el.getBoundingClientRect();
+      root.style.setProperty(HEADER_HEIGHT_VAR, `${Math.round(r.height)}px`);
+      setBottom(Math.round(r.bottom));
+    };
+    write();
+    const drop = () => {
+      // Leaving a stale height behind would push the NEXT page's anchors down
+      // by the height of a header no longer on screen.
+      root.style.removeProperty(HEADER_HEIGHT_VAR);
+    };
+    if (typeof ResizeObserver === "undefined") return drop;
+    const obs = new ResizeObserver(write);
+    obs.observe(el);
+    return () => {
+      obs.disconnect();
+      drop();
+    };
+  }, []);
+
+  const active = useSectionNav(SERVICE_SECTIONS.map((s) => s.id), bottom);
+
   return (
     <header
+      ref={ref}
       data-testid="history-service-header"
       className={cn(
         // The app has exactly one scroller — the shell's <main> — and this is

@@ -17,7 +17,7 @@ import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger"
 import { useCoarsePointer } from "../../lib/use-media-query";
 import { AttendanceDetail, servicePeakAttendance } from "./attendance-history-section";
 import { SplDetail } from "./spl-history-section";
-import { ServiceHeader, overrunStats } from "./history-service-header";
+import { SECTION_SCROLL_MARGIN, ServiceHeader, overrunStats } from "./history-service-header";
 import {
   computeOverview,
   summarize,
@@ -1607,15 +1607,19 @@ export function OverviewBlend({
  *
  * `id` is the anchor the header's nav links to and the element its
  * IntersectionObserver watches, so a card without one is simply not in the nav.
- * `scroll-mt-40` is load-bearing: the links are real anchors and the header is
- * sticky, so without it a jump puts the heading underneath the header.
+ *
+ * `scrollMarginTop` is load-bearing: the links are real anchors and the header
+ * is sticky, so without it a jump puts the heading underneath the header it
+ * just scrolled past. It reads the header's OWN measured height — a fixed
+ * value was 24px short at 1280 and 43px short at 600 in a real browser.
  */
 function SectionCard({ id, title, children }: { id?: string; title: string; children: React.ReactNode }) {
   return (
     <section
       id={id}
       aria-label={title}
-      className="su-card flex scroll-mt-40 flex-col gap-3 px-4 py-4 max-sm:px-3"
+      style={{ scrollMarginTop: SECTION_SCROLL_MARGIN }}
+      className="su-card flex flex-col gap-3 px-4 py-4 max-sm:px-3"
     >
       <h2 className="text-subheadline font-semibold text-fg">{title}</h2>
       {children}
