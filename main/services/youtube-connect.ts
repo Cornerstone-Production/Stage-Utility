@@ -15,6 +15,7 @@
 // treating it as one would end the attempt the moment it started.
 
 import { scrub } from "./scrub.js";
+import { errorMessage } from "./errors.js";
 import { integrationManager } from "./integration-manager.js";
 
 const DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code";
@@ -162,7 +163,15 @@ function endWithError(message: string, logLine: string): void {
   console.warn(`[youtube] connect: ${scrub(logLine)}`);
 }
 
-async function finishSuccess(accessToken: string, refreshToken: string): Promise<void> {
+/**
+ * `a` is the attempt that was pending when this poll started. Every await
+ * below is a window where Cancel or Disconnect can run to completion — both
+ * set `attempt` to something other than `a` — and nothing here may act (save
+ * a token, log approval, or touch `attempt`/`lastError`) once that has
+ * happened: the operator already ended this attempt, and finishing it anyway
+ * would resurrect a connection they walked away from.
+ */
+async function finishSuccess(a: Attempt, accessToken: string, refreshToken: string): Promise<void> {
   let channelTitle: string | null;
   try {
     const res = await youtubeConnectDeps.fetch(CHANNELS_URL, {
@@ -179,9 +188,21 @@ async function finishSuccess(accessToken: string, refreshToken: string): Promise
     channelTitle = null;
   }
 
+  if (attempt !== a) return; // cancelled or disconnected while fetching the channel title
+
+  try {
+    await youtubeConnectDeps.saveConnection(refreshToken, channelTitle ?? "");
+  } catch (err) {
+    if (attempt !== a) return; // cancelled or disconnected while saving
+    const message = `The token could not be saved: ${errorMessage(err)}`;
+    attempt = null;
+    lastError = message;
+    console.warn(`[youtube] connect: ${scrub(message)}`);
+    return;
+  }
+
   attempt = null;
   lastError = null;
-  await youtubeConnectDeps.saveConnection(refreshToken, channelTitle ?? "");
   console.log(
     `[youtube] connect: approved, refresh token stored for ${scrub(channelTitle ?? "an unnamed channel")}`,
   );
@@ -216,6 +237,7 @@ async function doPoll(): Promise<void> {
     });
     body = (await res.json().catch(() => ({}))) as typeof body;
   } catch {
+    if (attempt !== a) return; // cancelled or disconnected while the request was in flight
     // A network blip does not end an attempt the operator's code is still
     // good for at Google — poll again at the same interval rather than
     // reporting an error over what may be a one-off DNS hiccup.
@@ -223,8 +245,12 @@ async function doPoll(): Promise<void> {
     return;
   }
 
+  // Same reason as above: Cancel or Disconnect may have run while the /token
+  // request was in flight. `a` is stale the moment `attempt` no longer is it.
+  if (attempt !== a) return;
+
   if (body.access_token && body.refresh_token) {
-    await finishSuccess(body.access_token, body.refresh_token);
+    await finishSuccess(a, body.access_token, body.refresh_token);
     return;
   }
 

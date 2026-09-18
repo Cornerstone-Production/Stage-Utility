@@ -269,6 +269,162 @@ describe("cancel", () => {
   });
 });
 
+describe("race safety", () => {
+  async function startPending(): Promise<void> {
+    handlers[DEVICE_CODE] = () => deviceCodeOk();
+    await start("client-id", "client-secret");
+  }
+
+  /** Fire the currently-scheduled poll timer without waiting for its fetch. */
+  function firePoll(): void {
+    const due = timers[0];
+    if (!due) throw new Error("no poll is scheduled");
+    timers = timers.filter((t) => t !== due);
+    due.fn();
+  }
+
+  test("a cancel mid-poll wins: a token that resolves afterward is never saved", async () => {
+    installFakes();
+    await startPending();
+
+    // A /token request that stays open until the test resolves it — the
+    // window doPoll's `attempt !== a` check exists for.
+    let resolveToken!: (value: Response) => void;
+    const held = new Promise<Response>((r) => {
+      resolveToken = r;
+    });
+    youtubeConnectDeps.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      requests.push({ url: url.pathname, body: "" });
+      if (url.pathname === TOKEN) return held;
+      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    firePoll();
+    await flush();
+
+    // The operator gives up while Google is still being asked.
+    cancel();
+    assert.deepEqual(await status(), { status: "idle" });
+
+    // The request Google was already answering finally lands — with a real
+    // token. It must change nothing: the attempt it belongs to is over.
+    resolveToken(
+      new Response(JSON.stringify({ access_token: "access-1", refresh_token: "refresh-1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await flush();
+    await flush();
+
+    assert.deepEqual(saved, [], "a token that arrived after Cancel must never be saved");
+    assert.deepEqual(await status(), { status: "idle" });
+    // doPoll's own re-check, not just finishSuccess's: a cancelled attempt
+    // must not even go on to ask Google for the channel title.
+    assert.ok(
+      !requests.some((r) => r.url === CHANNELS),
+      "a cancelled attempt must not fetch the channel title at all",
+    );
+  });
+
+  test("a disconnect mid-poll wins the same way", async () => {
+    installFakes();
+    await startPending();
+
+    let resolveToken!: (value: Response) => void;
+    const held = new Promise<Response>((r) => {
+      resolveToken = r;
+    });
+    youtubeConnectDeps.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      if (url.pathname === TOKEN) return held;
+      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    firePoll();
+    await flush();
+
+    await disconnect();
+
+    resolveToken(
+      new Response(JSON.stringify({ access_token: "access-1", refresh_token: "refresh-1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await flush();
+    await flush();
+
+    assert.deepEqual(saved, [], "a token that arrived after Disconnect must never be saved");
+  });
+
+  test("a cancel while fetching the channel title (after the token already arrived) still saves nothing", async () => {
+    installFakes();
+    await startPending();
+
+    // The /token exchange succeeds immediately — attempt is still `a` when
+    // doPoll's own check runs and calls finishSuccess. It is the CHANNELS
+    // lookup inside finishSuccess that stays open, which is the only way to
+    // exercise finishSuccess's OWN `attempt !== a` check rather than doPoll's.
+    let resolveChannels!: (value: Response) => void;
+    const held = new Promise<Response>((r) => {
+      resolveChannels = r;
+    });
+    youtubeConnectDeps.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      if (url.pathname === TOKEN) {
+        return new Response(JSON.stringify({ access_token: "access-1", refresh_token: "refresh-1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.pathname === CHANNELS) return held;
+      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    firePoll();
+    await flush();
+    // doPoll has already called finishSuccess by now — attempt is still `a`.
+    // The channel lookup inside it is the one still open.
+
+    cancel();
+    resolveChannels(
+      new Response(JSON.stringify({ items: [{ snippet: { title: "Grace Church" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await flush();
+    await flush();
+
+    assert.deepEqual(saved, [], "a cancel during the channel-title lookup must still block the save");
+    assert.deepEqual(await status(), { status: "idle" });
+  });
+
+  test("a rejecting saver surfaces a sentence instead of vanishing silently", async () => {
+    installFakes();
+    await startPending();
+    youtubeConnectDeps.saveConnection = async () => {
+      throw new Error("disk full");
+    };
+    handlers[TOKEN] = () => ({
+      status: 200,
+      body: { access_token: "access-1", refresh_token: "refresh-1" },
+    });
+    handlers[CHANNELS] = () => ({ status: 200, body: { items: [{ snippet: { title: "Grace Church" } }] } });
+
+    await advance(5000);
+
+    assert.deepEqual(saved, [], "the rejecting saver must not have appeared to succeed");
+    assert.deepEqual(await status(), {
+      status: "error",
+      message: "The token could not be saved: disk full",
+    });
+    assert.equal(timers.length, 0, "a failed save must not leave a poll running");
+  });
+});
+
 describe("status", () => {
   test("reports connected once a token is on file, even over a stale error", async () => {
     installFakes();
