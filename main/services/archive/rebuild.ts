@@ -108,9 +108,10 @@ export async function rebuildSplRecord(record: ServiceSplHistory): Promise<Servi
 
   // Carry the item type and the primary-metric fields, which the raw rows do not
   // hold: itemType comes from the plan, and maxSpl/leqSpl mirror the chosen metric.
+  //
   // Paired by RUN, not by id: an item that ran twice has two rebuilt entries and
-  // (at most) two prior ones, and pairing on the id alone would give the second
-  // run the first run's sequence — two rows with the same identity.
+  // (at most) two prior ones, and pairing on the id alone would hand the second
+  // run whatever the first run's plan row said.
   const priorRuns = new Map<string, SplItemHistory[]>();
   for (const i of record.items) {
     const list = priorRuns.get(i.itemId);
@@ -122,10 +123,7 @@ export async function rebuildSplRecord(record: ServiceSplHistory): Promise<Servi
     const n = runIndex.get(it.itemId) ?? 0;
     runIndex.set(it.itemId, n + 1);
     const prior = priorRuns.get(it.itemId)?.[n];
-    if (prior) {
-      it.itemType = prior.itemType;
-      it.sequence = prior.sequence;
-    }
+    if (prior) it.itemType = prior.itemType;
     const pk = record.metricKey;
     const m = pk ? it.metrics[pk] : undefined;
     if (m) {
@@ -134,15 +132,18 @@ export async function rebuildSplRecord(record: ServiceSplHistory): Promise<Servi
       it.sampleCount = m.count;
     }
   }
-  // Sequences must stay unique: itemId + sequence is how the History table keys a
-  // row, and a carried number colliding with a generated one would collapse two
-  // runs into one row in the UI.
-  let next = items.reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
-  const used = new Set<number>();
-  for (const it of items) {
-    if (used.has(it.sequence)) it.sequence = next++;
-    used.add(it.sequence);
-  }
-  items.sort((a, b) => a.sequence - b.sequence);
+  // `sequence` is the run's place in the service, and rebuildSplItems already
+  // produced the runs in the order their first sample arrived — so it is the
+  // index, full stop.
+  //
+  // The prior record's numbers are deliberately NOT carried. Doing that needed a
+  // uniquing pass behind it (a carried number colliding with a generated one
+  // collapses two rows in a UI that keys on itemId + sequence), and the two
+  // masked each other: reverting either alone left the whole suite green. It
+  // also put a re-run at the BOTTOM of the table rather than where it happened,
+  // because its fresh number was above every carried one. Numbering by time is
+  // one rule, unique by construction, and orders the table the way the service
+  // ran.
+  items.forEach((it, i) => (it.sequence = i));
   return { ...record, items };
 }

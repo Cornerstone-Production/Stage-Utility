@@ -153,9 +153,9 @@ test("samples inside one run stay in one entry however many there are", async ()
   assert.equal(items[0].metrics["SPL A Slow"].count, 3);
 });
 
-test("a rebuilt re-run keeps a unique sequence even when the prior record had one entry", async () => {
-  const ctx = { serviceKey: "st1:rerun:t1", serviceDate: "2026-09-18" };
-  const record = {
+/** A stored record with `items`, for the rebuildSplRecord cases below. */
+function priorRecord(ctx: { serviceKey: string; serviceDate: string }, items: unknown[]) {
+  return {
     serviceKey: ctx.serviceKey,
     serviceTypeId: "st1",
     serviceTypeName: "Sunday",
@@ -169,16 +169,74 @@ test("a rebuilt re-run keeps a unique sequence even when the prior record had on
     metricKey: "SPL A Slow",
     startedAt: "2026-09-18T23:23:00.000Z",
     endedAt: null,
-    items: [
-      { itemId: "doors", title: "Doors", itemType: "item", sequence: 0, metrics: {}, maxSpl: null, avgSpl: null, sampleCount: 0, startedAt: "", endedAt: null },
-    ],
+    items,
   };
+}
+
+function priorItem(over: Record<string, unknown>) {
+  return {
+    itemId: "doors",
+    title: "Doors",
+    itemType: "item",
+    sequence: 0,
+    metrics: {},
+    maxSpl: null,
+    avgSpl: null,
+    sampleCount: 0,
+    startedAt: "",
+    endedAt: null,
+    ...over,
+  };
+}
+
+test("a rebuilt re-run keeps a unique sequence even when the prior record had one entry", async () => {
+  const ctx = { serviceKey: "st1:rerun:t1", serviceDate: "2026-09-18" };
+  const record = priorRecord(ctx, [priorItem({ sequence: 0 })]);
   const out = (await rebuildSplRecord(record as never))!;
   assert.equal(out.items.length, 2);
   assert.equal(out.items[0].itemType, "item", "the first run pairs with the prior entry");
   assert.equal(out.items[0].sequence, 0);
   assert.equal(out.items[1].sequence, 1, "the re-run must not inherit the first run's sequence");
   assert.equal(out.items[1].maxSpl, 78, "the primary-metric mirror is the re-run's own");
+});
+
+// The prior record's fields are paired with the rebuilt runs BY RUN. Pairing on
+// the id alone hands the second run whatever the first run's plan row said, and
+// nothing in the archive can correct it: itemType comes from Planning Center,
+// not from a sample.
+test("a second run takes its own prior entry's item type, not the first run's", async () => {
+  const ctx = { serviceKey: "st1:rerun:t1", serviceDate: "2026-09-18" };
+  const record = priorRecord(ctx, [
+    priorItem({ sequence: 0, itemType: "item" }),
+    // The same id, re-run as a different kind of plan item — which is exactly
+    // what a reprise of a song inside a media block looks like.
+    priorItem({ sequence: 1, itemType: "media" }),
+  ]);
+  const out = (await rebuildSplRecord(record as never))!;
+  assert.equal(out.items.length, 2);
+  assert.equal(out.items[0].itemType, "item");
+  assert.equal(out.items[1].itemType, "media", "the second run was given the first run's item type");
+});
+
+// `sequence` is the run's place in the SERVICE. Carrying the prior record's
+// numbers instead put a re-run at the bottom of the table — its fresh number was
+// above every carried one — and needed a uniquing pass behind it that masked the
+// pairing above.
+test("runs are numbered in the order they happened, whatever the prior record numbered them", async () => {
+  const ctx = { serviceKey: "st1:rerun:t1", serviceDate: "2026-09-18" };
+  const record = priorRecord(ctx, [
+    // A prior record whose numbers do not match the archive's order at all.
+    priorItem({ sequence: 9 }),
+    priorItem({ sequence: 4 }),
+  ]);
+  const out = (await rebuildSplRecord(record as never))!;
+  assert.deepEqual(
+    out.items.map((i) => i.sequence),
+    [0, 1],
+    "sequences must be the chronological index of the run",
+  );
+  assert.equal(out.items[0].startedAt, "2026-09-18T23:23:46.000Z", "the earlier run must come first");
+  assert.equal(out.items[1].startedAt, "2026-09-19T00:43:15.000Z", "the re-run must not sort to the bottom");
 });
 
 test("a service with no archive rebuilds to null rather than an empty record", async () => {
