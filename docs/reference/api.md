@@ -261,6 +261,7 @@ thing.
 | DELETE | `/api/service-timeline/:key` \| `/api/attendance/history/:key` \| `/api/spl/history/:key` | Delete the recording. Any of the three deletes **all three**; the response is `{ deleted, records }` naming what was removed |
 | POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it |
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
+| POST | `/api/history/rebuild` | Recompute all three summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timelineItems, splItems, attendanceSamples }`; `500` with the reason if it cannot |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
 | POST | `/api/service-timeline/current/reset-pacing` | Reset the Service pacing readout on the LIVE record: items that started before now stop counting toward it. 409 if no service is recording |

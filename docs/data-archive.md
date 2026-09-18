@@ -85,6 +85,28 @@ an archive, and it treats the raw layer differently in each direction:
   recorder holds the same record, so any change races its next write. History
   refuses until the service ends.
 
+### Rebuild from raw
+
+**Edit times → Rebuild from raw** throws the stored summaries away and derives
+them again from the rows underneath, each from its own file:
+
+| Record | Derived from | How |
+|---|---|---|
+| Item timings | `events.csv` | Every `kind=item` row in time order. An item going live again within ten minutes of its last entry closing is the operator stepping back and reopens that entry; anything later is a re-run with its own. Each entry ends when the next row fires, the last at the recording's end |
+| Sound levels | `spl.csv` | The same fold the recorder does live — per-item max, Leq and sample count |
+| Attendance | the record's own samples | Peak, lowest and last re-derived, as **Recalculate** does |
+
+It reports what came back — items, SPL items, attendance samples — and refuses
+while the service is still recording.
+
+What survives: the recording's identity and window, the pacing reset, and the
+per-item include/exclude overrides. What does not: hand edits to item times,
+which the raw rows know nothing about.
+
+Rows written before the item id and planned length were archived carry only a
+title. Those are matched to the stored record by title; a title the record never
+held gets an id derived from the title, and the log says which.
+
 ## Not retroactive
 
 Services recorded before this shipped kept only their summaries. The raw layer
