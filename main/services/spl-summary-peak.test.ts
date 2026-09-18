@@ -96,3 +96,46 @@ describe("the peak in a summary", () => {
     assert.equal(m.leq, 88.1);
   });
 });
+
+describe("a legacy record", () => {
+  it("still reports a metric, from the record's own key and the item's own fields", async () => {
+    // Made before per-metric stats existed: every item's `metrics` is empty and
+    // the metric name is on the RECORD, with the numbers on the item. Listing
+    // keys from `metrics` alone gave these `metrics: {}` — so a day-list row
+    // showed the level (it reads the full record, which has this fallback)
+    // while Trends to Sound left the same service out entirely.
+    const legacy = {
+      ...record("legacy", []),
+      metricKey: "SPL A Fast",
+      items: [
+        { itemId: "a", title: "Welcome", sequence: 0, metrics: {}, maxSpl: 97.2, leqSpl: 90.5, sampleCount: 400, startedAt: "2026-09-06T14:00:00.000Z", endedAt: "2026-09-06T14:20:00.000Z" },
+        { itemId: "b", title: "Worship", sequence: 1, metrics: {}, maxSpl: 103.6, leqSpl: 95.1, sampleCount: 900, startedAt: "2026-09-06T14:20:00.000Z", endedAt: "2026-09-06T14:50:00.000Z" },
+      ],
+    } as unknown as ServiceSplHistory;
+    await splHistoryStore.upsert(legacy);
+    const metrics = (await summaryFor("legacy")).metrics;
+    const m = metrics["SPL A Fast"];
+    assert.ok(m, `the legacy metric is missing: ${Object.keys(metrics).join(", ") || "(none)"}`);
+    assert.equal(m.max, 103.6, "the loudest of the two items");
+    assert.ok(m.leq != null && m.leq > 90.5 && m.leq < 95.1, `the Leq is not an energy average: ${m.leq}`);
+    assert.equal(m.count, 1300);
+  });
+
+  it("does not hand another metric's numbers to a key the record does not own", async () => {
+    // The fallback is for the record's OWN legacy metric name only. An item with
+    // a real per-metric stat must keep it.
+    const mixed = {
+      ...record("mixed", []),
+      metricKey: "SPL A Fast",
+      items: [
+        { itemId: "a", title: "A", sequence: 0, metrics: { "LAeq 10": { max: 88, avg: 80, leq: 81, count: 100 } }, maxSpl: 999, leqSpl: 999, sampleCount: 100, startedAt: "2026-09-06T14:00:00.000Z", endedAt: "2026-09-06T14:10:00.000Z" },
+      ],
+    } as unknown as ServiceSplHistory;
+    await splHistoryStore.upsert(mixed);
+    const metrics = (await summaryFor("mixed")).metrics;
+    assert.equal(metrics["LAeq 10"].max, 88, "the real per-metric stat must win for its own key");
+    // "SPL A Fast" is the record's own key, so it is offered from the item's
+    // legacy fields — which is exactly what a legacy reader showed.
+    assert.equal(metrics["SPL A Fast"].max, 999);
+  });
+});

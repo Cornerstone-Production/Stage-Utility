@@ -230,7 +230,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | GET | `/api/spl/history` | List saved past-service SPL records |
 | GET | `/api/spl/history/:key` | One past-service record |
 | GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
-| GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
+| GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (Script / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
@@ -305,6 +305,7 @@ thing.
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
 | POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
+| POST | `/api/log/client` | `{ tag, message }` — one line onto the server log, so a browser-side failure reaches [`/log`](../ops/updates-and-logs.md). `tag` is a short lower-case word (`history`), written as `[history] …` at `warn`. Both fields are scrubbed, and a client is cut off after ten lines a minute with `429` — the cut-off writes one line of its own, so a throttled browser does not read as one that stopped failing |
 | GET | `/api/history/milestones` | The operator's dated marks for the Trends chart |
 | POST | `/api/history/milestones` | Add or replace one. `{ date, label, serviceTypeId? }`, plus `id` to replace. `400` with the reason for a `date` that is not a real `YYYY-MM-DD` day, a blank or over-60-character `label`, or a `serviceTypeId` nothing has recorded — each would store a mark nobody would ever see. Answers the whole list |
 | DELETE | `/api/history/milestones/:id` | Remove one. Answers the whole list, or `404` when there is no such id |

@@ -114,7 +114,9 @@ under the current measure is not plotted at all, because a service nobody counte
 is not a service of nobody, and one with no meter running is not a silent one.
 
 The sound measure reads each recording's peak from the **SPL summary**, which
-this page already loads — not from the per-item records. The chart plots one
+this page already loads — not from the per-item records. Recordings made before
+per-metric stats existed are included: the summary reports them under the metric
+name the record itself carries. The chart plots one
 point per recording across up to 52 weeks, and reading a full record for each
 would be hundreds of files to answer one number apiece.
 
@@ -185,11 +187,17 @@ could not be read at all. The last one is its own case on purpose: a server that
 was down is not a meter that was off, and the reason is logged on a `[history]`
 line naming the service.
 
+When any of these cannot be loaded at all, the page says so — "the recorded
+history could not be read", or *sound unavailable* on the Trends card — rather
+than showing the copy for a history that is genuinely empty. The reason is on a
+`[history]` line on the server log, one per thing that failed.
+
 Below the list is an **Overview** of how the services themselves ran — how many,
 their average length, average start against the scheduled time, and average
 per-item overrun — plus the average sound level, which Trends does not plot.
-Right-click it (or tap and hold) to switch the sound summary off or to pick the
-Smaart metric it reports. It carries no attendance figure and no attendance
+Right-click it (or tap and hold) to pick the Smaart metric it reports — only
+metrics with a level to report are offered, so a meter that recorded peaks and
+no energy average is not offered as a choice that would come back blank. It carries no attendance figure and no attendance
 chart: Trends, at the top of the page, plots attendance over a chosen range, and
 two charts of the same quantity over different windows disagreed with each
 other.
