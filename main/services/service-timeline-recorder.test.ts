@@ -185,6 +185,20 @@ describe("service-timeline-recorder: a re-run item gets its own entry", () => {
     assert.equal(rec.current!.items.length, 1, "an open entry was duplicated");
   });
 
+  // The same restart, on this recorder — the rule both now share (isStepBackTo
+  // in service-recorder.ts, judged against PCO's live_start_at). An item that
+  // never stopped in Planning Center is one run however long this box was away.
+  it("reopens an item that has been live in PCO throughout a long restart", () => {
+    const wentLiveInPco = "2026-09-18T23:23:46.000Z";
+    // The box was down for half an hour; the entry closed when it went.
+    rec.current!.items = [firstRun("2026-09-18T23:30:00.000Z")];
+    rec.openItem(baseLive({ currentItemId: "doors", label: "Doors", liveStartAt: wentLiveInPco }));
+
+    assert.equal(rec.current!.items.length, 1, "a restart split an item that never stopped in PCO");
+    assert.equal(rec.current!.items[0]!.endedAt, null, "the run must be open again");
+    assert.equal(rec.current!.items[0]!.startedAt, RECORD_STARTED_AT, "a reopen keeps the original start");
+  });
+
   it("finalizePrevItem closes the LAST run of an id, not the first", () => {
     rec.current!.items = [firstRun("2026-09-18T23:32:03.000Z")];
     rec.openItem(baseLive({ currentItemId: "doors", label: "Doors", liveStartAt: "2026-09-19T00:43:15.000Z" }));

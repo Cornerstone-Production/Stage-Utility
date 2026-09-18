@@ -19,6 +19,7 @@ import { splHistoryStore } from "./spl-history-store.js";
 import {
   ServiceRecorder,
   isStepBackTo,
+  itemLiveSinceMs,
   lastItemEntry,
   type NewRecordContext,
   type RecorderStore,
@@ -127,11 +128,14 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
           }
         }
         this.recordSample(
-        live.currentItemId,
-        live.label,
-        live.itemType ?? null,
-        pickMeter(smaartService.getLatest()),
-      );
+          live.currentItemId,
+          live.label,
+          live.itemType ?? null,
+          pickMeter(smaartService.getLatest()),
+          // When PCO says this item went live, NOT our own clock — the same
+          // reference the timeline recorder judges a step back by.
+          itemLiveSinceMs(live),
+        );
         // The record is O(n) and item max/avg move slowly — push on an item change,
         // else at most every LIVE_BROADCAST_MS instead of every tick.
         const now = Date.now();
@@ -160,14 +164,17 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
     title: string | null,
     itemType: string | null,
     sample: MeterSample | null,
+    /** When PCO says this run went live — see itemLiveSinceMs. */
+    goingLiveAtMs: number,
   ): void {
     if (!this.current) return;
     const nowIso = new Date().toISOString();
     // The LAST entry for this id, not the first: an item can run more than once,
     // and `find` folded a re-run's samples into a run that finished hours ago.
-    // Mirrors openItem in service-timeline-recorder.ts.
+    // Mirrors openItem in service-timeline-recorder.ts, down to the clock the
+    // decision is made against.
     const prior = lastItemEntry(this.current.items, itemId);
-    let item = prior && isStepBackTo(prior, Date.parse(nowIso)) ? prior : undefined;
+    let item = prior && isStepBackTo(prior, goingLiveAtMs) ? prior : undefined;
     if (item) {
       if (title && item.title !== title) item.title = title;
       // The plan may not have been loaded when the item first went live.
@@ -181,7 +188,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
       // max/Leq rather than having a second service's levels folded into it.
       if (prior) {
         console.log(
-          `[spl-recorder] "${title || itemId}" went live again ${Math.round((Date.parse(nowIso) - Date.parse(prior.endedAt!)) / 60_000)} min after its last run ended — recording it as a new entry`,
+          `[spl-recorder] "${title || itemId}" went live again ${Math.round((goingLiveAtMs - Date.parse(prior.endedAt!)) / 60_000)} min after its last run ended — recording it as a new entry`,
         );
       }
       item = {

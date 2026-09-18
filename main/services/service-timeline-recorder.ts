@@ -20,6 +20,7 @@ import {
   ServiceRecorder,
   SERVICE_GAP_MS,
   isStepBackTo,
+  itemLiveSinceMs,
   lastItemEntry,
   type NewRecordContext,
   type RecorderStore,
@@ -100,7 +101,9 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
     const title = live.label ?? live.currentItemTitle ?? "";
     const planned = typeof live.lengthSec === "number" && live.lengthSec > 0 ? live.lengthSec : null;
     const liveStartMs = live.liveStartAt ? Date.parse(live.liveStartAt) : NaN;
-    const goingLiveAtMs = Number.isFinite(liveStartMs) ? liveStartMs : Date.now();
+    // Shared with the SPL recorder, so the two cannot answer "is this the same
+    // run" differently about the same live service.
+    const goingLiveAtMs = itemLiveSinceMs(live);
     // The LAST entry for this id, not the first: an item can run more than once.
     const item = lastItemEntry(this.current.items, id);
     if (item && isStepBackTo(item, goingLiveAtMs)) {
