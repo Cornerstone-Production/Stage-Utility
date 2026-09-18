@@ -51,6 +51,10 @@ class OscManager {
   private subTimers = new Map<string, ReturnType<typeof setInterval>>();
   private dirty = false;
   private throttleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The throttled `osc:feedback` broadcast in flight, if any. See
+   *  whenBroadcastSettled(). Never rejects, same reasoning as `resolving` and
+   *  `listening` below. */
+  private broadcastSettled: Promise<void> = Promise.resolve();
   /** Resolved IP -> target id, for targets configured by hostname. Rebuilt on
    *  every reapply and refreshed on a timer. */
   private resolvedIps = new Map<string, string>();
@@ -66,6 +70,13 @@ class OscManager {
    *  reapply() so a later addTarget/updateTarget cannot silently paint back
    *  over it with a plain "connected". */
   private feedbackBindError: string | null = null;
+  /** The port the current feedback socket actually bound, once bind()'s
+   *  callback has run. Reset to null at the start of every bindFeedback() call
+   *  so a stale value from a previous socket can never be read as current.
+   *  Distinct from `feedbackPort`, which is the CONFIGURED port (0 means "let
+   *  the OS choose" — see bindEphemeralFeedbackPort()); this is what actually
+   *  ended up bound. */
+  private boundPort: number | null = null;
   /** The last set of resolve failures reported, so a standing one is said once
    *  rather than every five minutes. */
   private lastResolveFailure = "";
@@ -114,8 +125,13 @@ class OscManager {
     return { values: { ...this.feedback } };
   }
 
+  /** The port feedback actually listens on: the socket's own bound port once
+   *  bindFeedback() has settled, falling back to the configured value while a
+   *  bind is still in flight (or has failed outright). Only bindEphemeral-
+   *  FeedbackPort() ever configures 0 — production always has a concrete
+   *  configured port from settings, so the two agree there in practice. */
   getFeedbackPort(): number {
-    return this.feedbackPort;
+    return this.boundPort ?? this.feedbackPort;
   }
 
   async setFeedbackPort(port: number): Promise<{ port: number }> {
@@ -454,6 +470,7 @@ class OscManager {
 
   private bindFeedback(): void {
     this.closeRecv();
+    this.boundPort = null;
     const s = dgram.createSocket("udp4");
     let settle = (): void => {};
     this.listening = new Promise((resolve) => {
@@ -474,7 +491,8 @@ class OscManager {
     s.on("message", (msg, rinfo) => this.receive(msg, rinfo.address));
     try {
       s.bind(this.feedbackPort, () => {
-        console.log(`[osc] feedback listening on udp/${this.feedbackPort}`);
+        this.boundPort = (s.address() as { port: number }).port;
+        console.log(`[osc] feedback listening on udp/${this.boundPort}`);
         this.reportFeedbackBind(null);
         settle();
       });
@@ -484,6 +502,32 @@ class OscManager {
       this.reportFeedbackBind(errorMessage(err));
       settle();
     }
+  }
+
+  /**
+   * Test seam only: bind the feedback socket on an OS-assigned port and hand
+   * back the port actually bound, once listening.
+   *
+   * Production always binds a concrete configured port loaded from settings —
+   * nothing here ever passes 0 outside a test. Two test files used to each
+   * find a free port by binding 0, closing that probe socket, and then
+   * configuring the manager with the number it read back. That close-then-
+   * reopen has a gap: under CI's parallel `node --test` workers, another
+   * worker's OWN probe can be handed the exact same just-freed port before
+   * either side reclaims it, and one process's feedback socket steals the
+   * other's port (or a stray datagram lands on the wrong process entirely —
+   * the swallowed-BANG flake this replaced). Binding here with 0 closes the
+   * gap: there is only one bind, and the port comes back from the real socket
+   * that now owns it, never from a probe that already let it go.
+   */
+  async bindEphemeralFeedbackPort(): Promise<number> {
+    this.feedbackPort = 0;
+    this.bindFeedback();
+    await this.whenListening();
+    if (this.feedbackBindError) {
+      throw new Error(`ephemeral feedback bind failed: ${this.feedbackBindError}`);
+    }
+    return this.boundPort!;
   }
 
   /**
@@ -601,13 +645,36 @@ class OscManager {
   private scheduleBroadcast(): void {
     this.dirty = true;
     if (this.throttleTimer) return;
+    let settle = (): void => {};
+    this.broadcastSettled = new Promise((resolve) => {
+      settle = resolve;
+    });
     this.throttleTimer = setTimeout(() => {
       this.throttleTimer = null;
       if (this.dirty) {
         this.dirty = false;
         broadcast("osc:feedback", this.getFeedback());
       }
+      settle();
     }, FEEDBACK_THROTTLE_MS);
+  }
+
+  /**
+   * Resolves once the throttled `osc:feedback` broadcast this receive() burst
+   * scheduled has actually gone out (or immediately, if nothing is pending).
+   *
+   * A test that drives receive() directly — automation-osc-trigger.test.ts —
+   * still trips this SAME throttle underneath, on its own
+   * FEEDBACK_THROTTLE_MS timer, independent of whatever the test does next.
+   * Left undrained, that stray real broadcast reaches automationEngine's
+   * live subscription (started once, in init()) up to 200ms later — often
+   * during the NEXT test, after its beforeEach has already reset rules but
+   * before it has cleared `prev` — and gets evaluated as if it were that
+   * test's own first snapshot. That is what let a bang-on-a-fresh-channel
+   * case see a baseline it never sent. See the test file's beforeEach.
+   */
+  whenBroadcastSettled(): Promise<void> {
+    return this.broadcastSettled;
   }
 
   private broadcastTargets(): void {

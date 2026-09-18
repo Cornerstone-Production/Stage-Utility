@@ -13,7 +13,6 @@
 
 import assert from "node:assert/strict";
 import { describe, test, before, beforeEach, after } from "node:test";
-import * as dgram from "node:dgram";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -270,15 +269,25 @@ describe("a rule driven by real inbound OSC", () => {
     );
     // An OS-assigned port, so this never contends with a real instance on
     // udp/9000 — nothing here needs the socket, but init binds one regardless.
-    const probe = dgram.createSocket("udp4");
-    await new Promise<void>((resolve) => probe.bind(0, "127.0.0.1", resolve));
-    const { port } = probe.address();
-    await new Promise<void>((resolve) => probe.close(resolve));
-    await oscManager.setFeedbackPort(port);
+    // bindEphemeralFeedbackPort() asks the manager's own socket, not a probe
+    // that binds, closes, and hands the number back for someone else to
+    // rebind later — that gap is exactly what let two test files racing under
+    // CI's parallel workers land on the same port (see osc-manager.ts).
+    await oscManager.bindEphemeralFeedbackPort();
     await oscManager.reloadTargets();
   });
 
   beforeEach(async () => {
+    // Drain any throttled osc:feedback broadcast a PRIOR test's deliver()
+    // calls left in flight before init() clears `prev` below. Left pending,
+    // that stray real broadcast reaches automationEngine's live subscription
+    // (which every deliver() also feeds directly and synchronously, via
+    // __handleBroadcast) up to FEEDBACK_THROTTLE_MS later — often mid-test —
+    // and gets read as THIS test's first snapshot instead of the previous
+    // test's already-handled one. Draining it here, before `prev` resets,
+    // means it lands on a channel this test has not touched yet and is wiped
+    // a moment later regardless.
+    await oscManager.whenBroadcastSettled();
     await automationEngine.init();
     await automationEngine.setSettings({ simulate: true, disarmed: false });
   });
