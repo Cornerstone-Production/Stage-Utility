@@ -755,7 +755,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             const delta = it.plannedLengthSec != null && it.actualDurationSec != null ? it.actualDurationSec - it.plannedLengthSec : null;
             const deltaColor = delta == null ? "text-gray-9" : delta > 30 ? "text-red-11" : delta < -30 ? "text-blue-11" : "text-gray-11";
             return (
-              <div key={it.itemId} className={`grid ${gridCols} gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
+              // Keyed by sequence too: a plan item can run twice in one record
+              // (reprised, or a second service caught before the split), and a
+              // duplicate React key drops the second row's state onto the first.
+              <div key={`${it.itemId}:${it.sequence}`} className={`grid ${gridCols} gap-2 px-3 py-1.5 text-caption1 tabular-nums items-center ${i % 2 ? "bg-gray-2" : "bg-gray-1"} ${counted ? "" : "opacity-55"}`}>
                 {editingTimes && (
                   <Tooltip
                     label={counted ? "Counted in the service timers — click to exclude" : "Excluded from the service timers — click to include"}

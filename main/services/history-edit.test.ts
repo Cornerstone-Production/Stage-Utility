@@ -533,3 +533,44 @@ describe("editing a service window keeps the ramp and the taper", () => {
     );
   });
 });
+
+// A plan item can appear in a record more than once — reprised, or a second
+// service's run caught before the occurrence split. setItemCounted used
+// `items.find`, so the override landed on the first entry and the row the
+// operator actually clicked stayed as it was; the checkbox read as dead.
+describe("setItemCounted with an item that ran twice", () => {
+  it("sets the override on every entry for the id", async () => {
+    const { setItemCounted } = await import("./history-edit.js");
+    const key = "st1:p1:twice";
+    await serviceTimelineStore.upsert({
+      serviceKey: key,
+      serviceTypeId: "st1",
+      serviceTypeName: null,
+      planId: "p1",
+      planTitle: "Sunday",
+      seriesTitle: null,
+      serviceDate: "2026-09-18",
+      serviceTimeId: "twice",
+      serviceTimeStartsAt: new Date(T0).toISOString(),
+      startedAt: new Date(T0).toISOString(),
+      endedAt: new Date(T0 + 60 * 60_000).toISOString(),
+      items: [
+        { itemId: "doors", title: "Doors", sequence: 0, plannedLengthSec: 378, startedAt: new Date(T0).toISOString(), endedAt: new Date(T0 + 500_000).toISOString(), actualDurationSec: 500 },
+        { itemId: "song", title: "Song", sequence: 1, plannedLengthSec: 300, startedAt: new Date(T0 + 500_000).toISOString(), endedAt: new Date(T0 + 800_000).toISOString(), actualDurationSec: 300 },
+        { itemId: "doors", title: "Doors", sequence: 2, plannedLengthSec: 378, startedAt: new Date(T0 + 800_000).toISOString(), endedAt: new Date(T0 + 1_200_000).toISOString(), actualDurationSec: 400 },
+      ],
+    } as unknown as Parameters<typeof serviceTimelineStore.upsert>[0]);
+
+    await setItemCounted(key, "doors", false);
+
+    const tl = await serviceTimelineStore.get(key);
+    const doors = tl!.items.filter((i) => i.itemId === "doors");
+    assert.equal(doors.length, 2);
+    assert.deepEqual(
+      doors.map((i) => i.counted),
+      [false, false],
+      "the second run of the item kept the default — the row the operator clicked did nothing",
+    );
+    assert.equal(tl!.items.find((i) => i.itemId === "song")!.counted, undefined, "an unrelated item was overridden");
+  });
+});
