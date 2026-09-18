@@ -490,50 +490,30 @@ test("the SOUND chart hatches its ramp and taper, from the window attendance use
   }
 });
 
-test("the SOUND chart hatches its ramp and taper, from the window attendance uses", async () => {
-  // It never did. Sound passed the SPL RECORDING's start as the service start,
-  // and SPL recording begins at the first plan item — usually "Doors" — so the
-  // window began exactly where the chart began and no band could draw. The two
-  // charts sit one above the other on the same x scale; a band on one and not
-  // the other reads as a difference in the data.
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = splFetch({ series: false });
-  try {
-    render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
-        detail: SPL_TWO_ITEMS,
-        timeline: {
-          items: [
-            {
-              itemId: "doors",
-              title: "Doors",
-              sequence: 0,
-              startedAt: new Date(T0 - 25 * MIN).toISOString(),
-              endedAt: new Date(T0 + 5 * MIN).toISOString(),
-              preService: true,
-            },
-            {
-              itemId: "warning",
-              title: "10 min Warning",
-              sequence: 1,
-              startedAt: new Date(T0 - 10 * MIN).toISOString(),
-              endedAt: new Date(T0 + 1 * MIN).toISOString(),
-              preService: false,
-            },
-          ],
-        },
-        attendance: { serviceStartedAt: null, endedAt: new Date(T0 + 1 * MIN).toISOString() },
-      }),
-    );
-    await act(async () => {
-      await Promise.resolve();
-    });
+test("the chart's colours come through the app's tokens, not raw Radix vars", () => {
+  // The commit that switched these claimed a guard that did not exist.
+  //
+  // `--green-9` is Radix's own variable and it resolves — so the chart LOOKS
+  // right either way, and nothing on screen says which one was used. The app's
+  // semantic layer (`--color-green-9`, styles.css) is what a theme override
+  // reaches; a component wired straight to the Radix var silently opts out of
+  // being themed, and there is no way to see that in a screenshot.
+  //
+  // Asserted on what the component PUT in the DOM, not on the source text: the
+  // stroke is an inline style and a colour written anywhere else in the file
+  // cannot satisfy it.
+  render(attendance());
+  const colours = [
+    ...[...document.querySelectorAll("[data-series-line]")].map((e) => e.getAttribute("stroke") ?? ""),
+    ...[...document.querySelectorAll("[data-series-toggle] span")].map(
+      (e) => `${(e as HTMLElement).style.background} ${(e as HTMLElement).style.borderColor}`,
+    ),
+  ].join(" ");
 
-    assert.equal(document.querySelectorAll("[data-hatch='pre']").length, 1, "no pre-service hatch on sound");
-    assert.equal(document.querySelectorAll("[data-hatch='post']").length, 1, "no post-service hatch on sound");
-    cleanup();
-    await flushReact();
-  } finally {
-    globalThis.fetch = realFetch;
-  }
+  assert.ok(colours.includes("var(--color-green-9)"), `no themed green in: ${colours}`);
+  // Every var() the chart drew is one of the app's, never Radix's directly.
+  const raw = [...colours.matchAll(/var\(--([a-z0-9-]+)\)/g)]
+    .map((m) => m[1])
+    .filter((name) => !name.startsWith("color-"));
+  assert.deepEqual(raw, [], `raw Radix vars in the chart: ${raw.join(", ")}`);
 });
