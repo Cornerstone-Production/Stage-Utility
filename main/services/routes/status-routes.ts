@@ -8,6 +8,7 @@
 
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, error, json, readBody } from "./context.js";
+import { scrub } from "../scrub.js";
 import { stageController } from "../stage-controller.js";
 import { integrationManager } from "../integration-manager.js";
 import { obsService } from "../obs-service.js";
@@ -26,7 +27,7 @@ import { splRecorder } from "../spl-recorder.js";
 import { deleteServiceRecords } from "../history-edit.js";
 import { propresenterService, propresenterManager } from "../propresenter-service.js";
 import { serviceDirPath } from "../archive/archive-paths.js";
-import { readArchiveRows } from "../archive/archive-rows.js";
+import { readArchiveRows, rolledFiles } from "../archive/archive-rows.js";
 import { bucketSecFor, bucketSeries, clampBucketSec, metricsIn, type SplBucket } from "../spl-series.js";
 
 export async function statusRoutes(c: RouteCtx): Promise<void> {
@@ -193,7 +194,20 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
         const key = decodeURIComponent(seriesMatch[1]);
         const metric = c.url.searchParams.get("metric") ?? "";
         const bucketSec = c.url.searchParams.get("bucketSec");
-        const out = await splSeriesFor(key, metric, bucketSec == null ? 5 : Number(bucketSec));
+        let out: SplSeriesResponse | null;
+        try {
+          out = await splSeriesFor(key, metric, bucketSec == null ? 5 : Number(bucketSec));
+        } catch (err) {
+          // A real read failure, not an absence: an unreadable directory, a
+          // half-written file, a disk that went away. The chart is required to
+          // tell these apart — it draws the per-item step for an ABSENCE and
+          // says "samples unavailable" for this — so it must not come back as a
+          // 404. The reason is logged here because this is the only place that
+          // has it.
+          console.warn(`[spl-series] ${scrub(key)}: could not read the raw samples: ${scrub(errorMessage(err))}`);
+          error(res, "could not read the raw SPL samples", 500);
+          return;
+        }
         if (!out) {
           // 404, not an empty series: "this record has no raw rows" and "the
           // meter was silent all evening" are different answers, and the chart
@@ -254,8 +268,18 @@ async function splSeriesFor(
 ): Promise<SplSeriesResponse | null> {
   const record = await splHistoryStore.get(serviceKey);
   if (!record) return null;
-  const rows = await readArchiveRows(serviceDirPath(serviceKey, record.serviceDate), "spl");
-  if (!rows || rows.length === 0) return null;
+  const dir = serviceDirPath(serviceKey, record.serviceDate);
+  const rows = await readArchiveRows(dir, "spl");
+  if (!rows || rows.length === 0) {
+    // readArchiveRows swallows a per-file read error and answers null, which is
+    // the same answer it gives for "no such file". Those are different things:
+    // an archive that EXISTS and cannot be read is a failure the operator needs
+    // told about, not a record that predates the raw layer. If files are there
+    // and nothing came back, say so.
+    const present = await rolledFiles(dir, "spl");
+    if (present.length > 0) throw new Error(`${present.length} raw file(s) present but no rows could be read`);
+    return null;
+  }
 
   const metrics = metricsIn(rows);
   if (metrics.length === 0) return null;

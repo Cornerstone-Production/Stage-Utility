@@ -1,7 +1,6 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
-import { invoke } from "../../lib/api";
-import { onNotification } from "../../lib/api";
+import { invoke, onNotification, type ApiError } from "../../lib/api";
 import { toast } from "../../components/ui";
 import { errorMessage } from "@main/services/errors";
 import { combineLeq } from "@main/services/spl-leq";
@@ -91,10 +90,21 @@ const DEFAULT_SERIES = ["max", "avg"];
  */
 const SPL_METRICS_STORAGE_KEY = "spl:visibleMetrics";
 
-/** How often the chart re-reads the series while the record is still open. The
- *  recorder appends to spl.csv continuously; ten seconds is two ticks of the
- *  meter and a cheap read of one file. */
-const LIVE_POLL_MS = 10_000;
+/**
+ * The floor between two live re-reads of the series.
+ *
+ * There is no timer. The recorder broadcasts `spl:history` on every item change
+ * and otherwise at most every five seconds (LIVE_BROADCAST_MS in
+ * spl-recorder.ts), so the broadcast IS the clock — a second timer beside it
+ * only guaranteed that the whole of spl.csv was read twice per interval per
+ * open tab.
+ *
+ * An item change re-reads immediately, because that is when the shape of the
+ * chart changes. A heartbeat carrying the same item re-reads at most this
+ * often: the line does grow between items, but a five-second-old tail on a
+ * two-hour plot is a third of a pixel.
+ */
+const LIVE_REFETCH_FLOOR_MS = 10_000;
 
 /** The bucket width asked for. The server widens it for a long service. */
 const BUCKET_SEC = 5;
@@ -115,6 +125,32 @@ interface SplSeriesResponse {
   metrics: string[];
   bucketSec: number;
   buckets: SplBucket[];
+}
+
+/**
+ * What the chart knows about this record's raw samples.
+ *
+ * ONE value, because the three outcomes are mutually exclusive and a pair of
+ * booleans has a fourth combination nobody meant. `asking` is its own state and
+ * not "no series yet": without it the per-item step draws for a frame before
+ * the real line arrives, and on a record switch the PREVIOUS service's line
+ * stays up until the new fetch lands.
+ */
+type SeriesState =
+  | { kind: "asking" }
+  /** The route answered; `data.buckets` may still be empty. */
+  | { kind: "series"; data: SplSeriesResponse }
+  /** 404 — this service has no raw rows at all. The per-item step draws. */
+  | { kind: "none" }
+  /** Anything else. NOT the per-item step: that would present a partial answer
+   *  as the whole one. The strip says the samples could not be read. */
+  | { kind: "unavailable" };
+
+/** Whether a failed `invoke` was a 404 rather than a real failure. api.ts puts
+ *  the status on the Error for exactly this — telling a chosen answer apart
+ *  from a broken one — so this reads the field, never the message text. */
+function isNotFound(err: unknown): boolean {
+  return (err as ApiError | null)?.status === 404;
 }
 
 /**
@@ -234,13 +270,46 @@ export function SplDetail({
   const live = detail.endedAt == null;
 
   // ── The raw series ──
-  const [raw, setRaw] = useState<SplSeriesResponse | null>(null);
-  /** null = not asked yet; true = the route said 404, so there are no raw rows. */
-  const [noRaw, setNoRaw] = useState(false);
+  //
+  // ONE state, not a pair. A `raw` and a `noRaw` that move independently have a
+  // fourth combination nobody meant — the previous record's series with the new
+  // record's `noRaw` — and while a new record's fetch is in flight the old pair
+  // still reads "has a series", so the PREVIOUS service's sound line stayed on
+  // screen under the new service's heading.
+  const [state, setState] = useState<SeriesState>({ kind: "asking" });
+  /** The items as of this render, for the subscription below to compare against
+   *  without taking `detail` as a dependency. */
+  const itemsRef = useRef(detail.items);
+  useEffect(() => {
+    itemsRef.current = detail.items;
+  }, [detail.items]);
+
+  // Reset the moment the RECORD or the METRIC changes, during render rather
+  // than in the effect below.
+  //
+  // An effect runs after the paint, so resetting there shows one frame of the
+  // previous service's line under the new service's heading — and the lint rule
+  // that forbids a synchronous setState in an effect body is pointing at the
+  // same thing. This is React's documented adjust-state-when-props-change
+  // pattern: the re-render happens before anything is painted.
+  //
+  // The call sites ALSO key <SplDetail> on the record, so a service switch
+  // remounts and cannot carry any of this over. Both, because this component is
+  // exported and a caller that forgets the key should still be correct.
+  const askedFor = `${detail.serviceKey}|${primaryKey ?? ""}`;
+  const [asking, setAsking] = useState(askedFor);
+  if (asking !== askedFor) {
+    setAsking(askedFor);
+    setState({ kind: "asking" });
+  }
+
   useEffect(() => {
     if (!primaryKey) return;
+
     let cancelled = false;
+    let lastLoadAt = 0;
     const load = () => {
+      lastLoadAt = Date.now();
       invoke<SplSeriesResponse>("spl:series", {
         serviceKey: detail.serviceKey,
         metric: primaryKey,
@@ -248,43 +317,64 @@ export function SplDetail({
       })
         .then((r) => {
           if (cancelled) return;
-          setRaw(r);
-          setNoRaw(false);
+          // Shape-checked, not just null-checked. This route is the one thing
+          // on the page that can answer with something other than what it
+          // promises — a proxy's error page, an older server, a 200 from the
+          // wrong route — and a section that throws on `undefined.length` takes
+          // the whole History tab down with it.
+          setState(Array.isArray(r?.buckets) ? { kind: "series", data: r } : { kind: "unavailable" });
         })
-        .catch(() => {
-          // A 404 is the expected answer for an old record and is not worth a
-          // toast; it is what selects the per-item fallback below. Any other
-          // failure lands here too and takes the same path, because the outcome
-          // for the operator is identical: this service has no line, and the
-          // step is drawn instead of an empty plot.
-          if (!cancelled) setNoRaw(true);
+        .catch((err) => {
+          if (cancelled) return;
+          // A 404 is the EXPECTED answer for a record with no raw rows — one
+          // from before the raw layer, or one whose archive was pruned — and it
+          // is what selects the per-item fallback. Anything else is a failure,
+          // and drawing the fallback for it would present a per-item step as
+          // though it were the whole answer. The server logs the reason on a
+          // [spl-series] line; the operator gets told the samples are missing,
+          // not a quietly different chart.
+          setState(isNotFound(err) ? { kind: "none" } : { kind: "unavailable" });
         });
     };
     load();
-    if (!live) return () => { cancelled = true; };
-    // While the record is open the recorder keeps appending to spl.csv. Poll,
-    // and also refetch the moment the record itself is broadcast, so a new item
-    // shows up without waiting out the interval.
-    const timer = setInterval(load, LIVE_POLL_MS);
+    if (!live) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // No timer. The recorder broadcasts on every item change and otherwise at
+    // most every five seconds, so the broadcast is the clock — see
+    // LIVE_REFETCH_FLOOR_MS.
+    // Seeded from the record ON SCREEN, not from sentinels: the first broadcast
+    // after mount usually carries the same items, and starting at null made it
+    // look like a change every time — one guaranteed extra read of the whole
+    // archive per mount, and the "same item" case never exercised.
+    //
+    // Through a ref, so the record arriving on the wire does not re-run this
+    // effect: `detail` is a NEW object on every broadcast, and listing it here
+    // would tear down and rebuild the subscription — and re-read the archive —
+    // on each one, which is the thing being removed.
+    let lastItemId = itemsRef.current?.[itemsRef.current.length - 1]?.itemId ?? null;
+    let lastItemCount = itemsRef.current?.length ?? 0;
     const off = onNotification("spl:history", (p) => {
       const rec = p as ServiceSplHistory | null;
-      if (rec && rec.serviceKey === detail.serviceKey) load();
+      if (!rec || rec.serviceKey !== detail.serviceKey) return;
+      const newestItemId = rec.items?.[rec.items.length - 1]?.itemId ?? null;
+      const shapeChanged = newestItemId !== lastItemId || rec.items?.length !== lastItemCount;
+      lastItemId = newestItemId;
+      lastItemCount = rec.items?.length ?? 0;
+      if (shapeChanged || Date.now() - lastLoadAt >= LIVE_REFETCH_FLOOR_MS) load();
     });
     return () => {
       cancelled = true;
-      clearInterval(timer);
       off();
     };
   }, [detail.serviceKey, primaryKey, live]);
 
-  // Shape-checked, not just null-checked. The series route is the one thing on
-  // this page that can answer with something other than what it promises — a
-  // proxy's error page, an older server, a 200 from the wrong route — and a
-  // section that throws on `undefined.length` takes the whole History tab down
-  // with it. A malformed answer is treated exactly as no answer: the per-item
-  // fallback draws.
-  const buckets = raw && Array.isArray(raw.buckets) ? raw.buckets : null;
-  const hasRaw = !noRaw && buckets != null && buckets.length > 0;
+  const raw = state.kind === "series" ? state.data : null;
+  const buckets = raw?.buckets ?? null;
+  const hasRaw = buckets != null && buckets.length > 0;
 
   const series: ChartSeries[] = hasRaw && raw
     ? [
@@ -309,6 +399,12 @@ export function SplDetail({
         points: buckets.map((b) => ({ t: b.t, v: b.avg })),
       },
     ]
+    // The per-item fallback, and ONLY for a 404 — see SeriesState. While the
+    // fetch is in flight, or when it failed for a real reason, there is no
+    // series at all: the step would otherwise flash up for a frame before the
+    // real line, and stand in for an answer nobody got.
+    : state.kind !== "none"
+      ? []
     // EVERY metric the record carries, each saying whether it is on — not just
     // the shown ones. A pre-filtered list leaves the legend unable to name a
     // metric the operator switched off, so it can never come back, which is the
@@ -347,14 +443,26 @@ export function SplDetail({
     };
   });
 
+  /** What an empty plot MEANS here — "nothing recorded yet" is only one of four
+   *  reasons it can be empty, and it is the wrong one for the other three. */
+  const emptyNote = noneChosen
+    ? "No metric selected — pick one in the legend or in Customize."
+    : state.kind === "asking"
+      ? "Reading the recorded samples…"
+      : state.kind === "unavailable"
+        ? "Sound samples unavailable — the recorded samples could not be read. The server log says why, on a [spl-series] line."
+        : undefined;
+
   const figures = noneChosen
     ? [{ key: "none", label: "Sound", value: "No metric selected" }]
-    : SOUND_FIGURES.filter((f) => figureKeys.includes(f.key)).map((f) => ({
-      key: f.key,
-      label: f.key === "peak" && primaryKey ? `Peak ${primaryKey}` : f.label,
-      value: figureValue(f.key, items, detail, primaryKey),
-      color: f.key === "peak" ? "var(--color-accent)" : undefined,
-    }));
+    : state.kind === "unavailable"
+      ? [{ key: "unavailable", label: "Sound", value: "Samples unavailable" }]
+      : SOUND_FIGURES.filter((f) => figureKeys.includes(f.key)).map((f) => ({
+        key: f.key,
+        label: f.key === "peak" && primaryKey ? `Peak ${primaryKey}` : f.label,
+        value: figureValue(f.key, items, detail, primaryKey),
+        color: f.key === "peak" ? "var(--color-accent)" : undefined,
+      }));
 
   if (!items.length || allKeys.length === 0) {
     return <p className="text-caption1 text-fg-muted">No per-item SPL recorded for this service.</p>;
@@ -377,7 +485,7 @@ export function SplDetail({
         // because nothing was recorded, and the default sentence says the
         // second. The legend below still lists every metric, so the way out is
         // one click away.
-        emptyNote={noneChosen ? "No metric selected — pick one in the legend or in Customize." : undefined}
+        emptyNote={emptyNote}
         // The legend's meaning follows the mode, because the series do: with a
         // raw series it toggles peak and average, and on the per-item fallback
         // it toggles which Smaart metrics are drawn. Either way it is wired to

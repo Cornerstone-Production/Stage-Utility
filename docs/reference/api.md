@@ -281,6 +281,10 @@ back to the record's own, then to the first recorded — and `metrics` lists eve
 metric these rows carry, so a client can offer a switch without a second
 request.
 
+`500` means the rows are there and could not be READ — an unreadable directory,
+a half-written file. The reason is logged server-side on a `[spl-series]` line;
+the History chart says the samples are unavailable rather than falling back.
+
 `404` means the service has **no raw rows at all**: a record from before the raw
 layer existed, or one whose archive was pruned. That is not the same as a silent
 meter, and the History chart falls back to a per-item step only for the 404.

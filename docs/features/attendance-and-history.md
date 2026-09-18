@@ -109,14 +109,22 @@ the chart reads them bucketed (see
 [`/api/spl/history/:key/series`](../reference/api.md)). The solid line is each
 bucket's loudest reading, with its gradient; the dashed line is each bucket's
 energy average. Its y axis is chosen to frame the levels, never anchored at 0 dB.
-While a service is recording the series is re-read every ten seconds, and
-immediately whenever the record itself changes.
+While a service is recording the series follows the recorder's own broadcast
+rather than a timer of its own: a re-read the moment a new item goes live, and
+otherwise at most one every ten seconds. Between items the line grows by about a
+third of a pixel on a two-hour plot, which is not worth re-reading the archive
+for on every open tab.
 
 A service with **no raw rows** — recorded before the raw layer existed, or with
 its archive pruned — falls back to one step per plan item, each item's Leq held
-flat across the time it ran. Either way an item's peak mark is a tick on the top
-edge of its block rather than at the loudest instant, because the instant is not
-in the per-item record; hover the block and the strip says what it peaked at.
+flat across the time it ran. A read that FAILS is not that: the chart says
+"Sound samples unavailable" and draws nothing rather than presenting a per-item
+step as the whole answer, and the server logs the reason on a `[spl-series]`
+line.
+
+Either way an item's peak mark is a tick on the top edge of its block rather than
+at the loudest instant, because the instant is not in the per-item record; hover
+the block and the strip says what it peaked at.
 
 **The item lane** is two rows under the axis: pre-service items outlined above,
 in-service items filled below, each spanning the time it actually ran. A block is
